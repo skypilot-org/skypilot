@@ -290,6 +290,10 @@ _REQUEST_BODY_ALLOWLIST: Dict[str, Tuple[str, ...]] = {
 SYSTEM_REQUEST_IDS = [d.id for d in daemons.INTERNAL_REQUEST_DAEMONS
                      ] + [server_constants.ON_BOOT_CHECK_REQUEST_ID]
 
+# Set form of SYSTEM_REQUEST_IDS for the membership check in the request
+# dump ordering (see _dump_request_id_info).
+_SYSTEM_REQUEST_ID_SET = frozenset(SYSTEM_REQUEST_IDS)
+
 # Request names for managed job mutations (excludes read-only queue).
 # Used by both _get_requests_from_managed_jobs and
 # _get_managed_jobs_from_requests.
@@ -324,38 +328,132 @@ class DebugDumpContext(TypedDict):
     timed_out_ops: List[Dict[str, Any]]
 
 
-def _get_requests_from_clusters(debug_dump_context: DebugDumpContext) -> None:
-    """Get all request IDs associated with the given clusters."""
+# Chunk size for bulk request-metadata queries (one IN query per chunk).
+# Kept under the 999 bound-parameter limit of older SQLite builds, while
+# turning thousands of per-ID locked get_request round trips into a handful
+# of queries.
+_REQUEST_DB_CHUNK_SIZE = 500
+
+# Wall-clock cap for one bulk request-metadata query. Normally milliseconds;
+# the cap exists so a single hung DB call -- precisely the failure mode a
+# debug dump investigates -- cannot stall the dump unbounded. Clamped to the
+# remaining budget by _bounded_timeout at each call site.
+_REQUEST_DB_QUERY_TIMEOUT = 60
+
+
+def _get_requests_bulk(
+    request_ids: List[str],
+    fields: Optional[List[str]] = None,
+    *,
+    component: str,
+    resource: str,
+    deadline: Optional[float] = None,
+    errors: Optional[List[Dict[str, str]]] = None,
+    orphans: Optional[List[Dict[str, Any]]] = None,
+) -> List[requests_lib.Request]:
+    """Bulk-fetch request rows for ``request_ids`` via chunked IN queries.
+
+    Replaces one synchronous locked get_request DB round trip per ID (each
+    acquiring a per-request filelock and running its own transaction), which
+    made cross-linking and the requests section issue tens of thousands of
+    sequential per-ID calls on large populations. Each chunk is bounded by
+    _run_with_deadline; on a timeout the fetch stops and returns what it has
+    (best-effort, like the rest of the dump). Other per-chunk failures are
+    recorded and skipped, mirroring the per-ID error handling this replaces.
+
+    Note these bulk reads do not take get_request's per-request filelock, so
+    a row can be a slightly stale (but transaction-consistent) snapshot while
+    a concurrent update is in flight. That is acceptable for a diagnostic
+    dump, and precedented: _get_requests_from_clusters already used
+    get_request_tasks for the same purpose.
+    """
+    rows: List[requests_lib.Request] = []
+    for index, start in enumerate(
+            range(0, len(request_ids), _REQUEST_DB_CHUNK_SIZE)):
+        chunk = request_ids[start:start + _REQUEST_DB_CHUNK_SIZE]
+        try:
+            ok, result = _run_with_deadline(
+                functools.partial(
+                    requests_lib.get_request_tasks,
+                    requests_lib.RequestTaskFilter(request_ids=chunk,
+                                                   fields=fields)),
+                _bounded_timeout(_REQUEST_DB_QUERY_TIMEOUT, deadline),
+                component=component,
+                resource=f'{resource}/{index}',
+                errors=errors,
+                orphans=orphans)
+            if not ok:
+                # Hung query: later chunks would only pile on more abandoned
+                # workers. Keep what we have; the timeout is already recorded.
+                break
+            if result:
+                rows.extend(result)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to fetch requests ({resource}/{index}): '
+                           f'{e}')
+            if errors is not None:
+                errors.append({
+                    'component': component,
+                    'resource': f'{resource}/{index}',
+                    'error': str(e),
+                    'traceback': _full_traceback()
+                })
+    return rows
+
+
+def _get_requests_from_clusters(debug_dump_context: DebugDumpContext,
+                                deadline: Optional[float] = None) -> None:
+    """Get all request IDs associated with the given clusters.
+
+    The cluster names are queried in chunks (one cluster_names IN query per
+    chunk) instead of one DB round trip per cluster -- a server with hundreds
+    of clusters previously paid for hundreds of sequential queries here
+    before any section ran.
+    """
     if not debug_dump_context['cluster_names']:
         return
-    logger.debug(
-        f'Getting requests for {len(debug_dump_context["cluster_names"])} '
-        f'clusters')
-    for cluster_name in debug_dump_context['cluster_names']:
+    cluster_names = sorted(debug_dump_context['cluster_names'])
+    logger.debug(f'Getting requests for {len(cluster_names)} clusters')
+    new_ids: Set[str] = set()
+    for index, start in enumerate(
+            range(0, len(cluster_names), _REQUEST_DB_CHUNK_SIZE)):
+        chunk = cluster_names[start:start + _REQUEST_DB_CHUNK_SIZE]
         try:
-            requests = requests_lib.get_request_tasks(
-                requests_lib.RequestTaskFilter(cluster_names=[cluster_name],
-                                               fields=['request_id']))
-            new_ids = {request.request_id for request in requests}
-            if new_ids:
-                logger.debug(f'Cross-link: cluster {cluster_name!r} -> '
-                             f'{len(new_ids)} requests: {sorted(new_ids)}')
-            # Only tag IDs that weren't already in the context. Otherwise
-            # a user-seeded or recent-context request would inherit the
-            # via_cluster restriction and get skipped in
-            # _get_clusters_from_requests.
-            newly_added = new_ids - debug_dump_context['request_ids']
-            debug_dump_context['request_ids'] |= new_ids
-            debug_dump_context['request_ids_via_cluster'] |= newly_added
+            ok, requests = _run_with_deadline(
+                functools.partial(
+                    requests_lib.get_request_tasks,
+                    requests_lib.RequestTaskFilter(cluster_names=chunk,
+                                                   fields=['request_id'])),
+                _bounded_timeout(_REQUEST_DB_QUERY_TIMEOUT, deadline),
+                component='cross_link',
+                resource=f'requests_from_clusters/{index}',
+                errors=debug_dump_context['errors'],
+                orphans=debug_dump_context['timed_out_ops'])
+            if not ok:
+                # Hung query: later chunks would only time out too. The
+                # timeout is already recorded above.
+                break
+            if requests:
+                new_ids.update(request.request_id for request in requests)
         except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to get requests for cluster '
-                           f'{cluster_name}: {e}')
+            logger.warning(f'Failed to get requests for clusters '
+                           f'({index}): {e}')
             debug_dump_context['errors'].append({
                 'component': 'cross_link',
-                'resource': f'requests_from_cluster/{cluster_name}',
+                'resource': f'requests_from_clusters/{index}',
                 'error': str(e),
                 'traceback': _full_traceback()
             })
+    if new_ids:
+        logger.debug(f'Cross-link: {len(cluster_names)} clusters -> '
+                     f'{len(new_ids)} requests')
+    # Only tag IDs that weren't already in the context. Otherwise
+    # a user-seeded or recent-context request would inherit the
+    # via_cluster restriction and get skipped in
+    # _get_clusters_from_requests.
+    newly_added = new_ids - debug_dump_context['request_ids']
+    debug_dump_context['request_ids'] |= new_ids
+    debug_dump_context['request_ids_via_cluster'] |= newly_added
 
 
 def _get_requests_from_managed_jobs(
@@ -491,7 +589,8 @@ def _get_requests_from_managed_jobs(
         })
 
 
-def _get_clusters_from_requests(debug_dump_context: DebugDumpContext) -> None:
+def _get_clusters_from_requests(debug_dump_context: DebugDumpContext,
+                                deadline: Optional[float] = None) -> None:
     """Get cluster names from the given request IDs.
 
     Skips requests that were themselves added because they reference a
@@ -507,27 +606,25 @@ def _get_clusters_from_requests(debug_dump_context: DebugDumpContext) -> None:
     if not request_ids:
         return
     logger.debug(f'Getting clusters for {len(request_ids)} requests')
-    for request_id in request_ids:
-        try:
-            request = requests_lib.get_request(request_id,
-                                               fields=['cluster_name'])
-            if request is not None and request.cluster_name is not None:
-                logger.debug(f'Cross-link: request {request_id} -> '
-                             f'cluster {request.cluster_name!r}')
-                debug_dump_context['cluster_names'].add(request.cluster_name)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to get cluster for request '
-                           f'{request_id}: {e}')
-            debug_dump_context['errors'].append({
-                'component': 'cross_link',
-                'resource': f'clusters_from_request/{request_id}',
-                'error': str(e),
-                'traceback': _full_traceback()
-            })
+    # One bulk pass instead of a get_request round trip per ID: on a server
+    # with thousands of requests, the per-ID DB calls made this helper alone
+    # take tens of seconds before any section ran.
+    requests = _get_requests_bulk(sorted(request_ids),
+                                  fields=['request_id', 'cluster_name'],
+                                  component='cross_link',
+                                  resource='clusters_from_requests',
+                                  deadline=deadline,
+                                  errors=debug_dump_context['errors'],
+                                  orphans=debug_dump_context['timed_out_ops'])
+    for request in requests:
+        if request.cluster_name is not None:
+            logger.debug(f'Cross-link: request {request.request_id} -> '
+                         f'cluster {request.cluster_name!r}')
+            debug_dump_context['cluster_names'].add(request.cluster_name)
 
 
-def _get_managed_jobs_from_requests(
-        debug_dump_context: DebugDumpContext) -> None:
+def _get_managed_jobs_from_requests(debug_dump_context: DebugDumpContext,
+                                    deadline: Optional[float] = None) -> None:
     """Extract managed job IDs from request bodies.
 
     If any request in the context is a managed job request (launch, cancel,
@@ -554,53 +651,51 @@ def _get_managed_jobs_from_requests(
         return
     logger.debug(f'Getting managed jobs for {len(request_ids)} requests')
 
-    for request_id in request_ids:
-        try:
-            request = requests_lib.get_request(
-                request_id, fields=['name', 'request_body', 'return_value'])
-            if (request is None or
-                    request.name not in _MANAGED_JOB_REQUEST_NAMES):
-                continue
-            body = request.request_body
-            if body is not None:
-                job_id = getattr(body, 'job_id', None)
-                if job_id is not None:
-                    logger.debug(f'Cross-link: request {request_id} -> '
-                                 f'managed job {job_id} via body.job_id')
-                    debug_dump_context['managed_job_ids'].add(job_id)
-                job_ids = getattr(body, 'job_ids', None)
-                if job_ids is not None:
-                    logger.debug(f'Cross-link: request {request_id} -> '
-                                 f'managed jobs {job_ids} via body.job_ids')
-                    debug_dump_context['managed_job_ids'].update(job_ids)
-            # For jobs.launch, the job ID is in the response, not the
-            # request body.
-            jobs_launch_name = (server_constants.REQUEST_NAME_PREFIX +
-                                request_names.RequestName.JOBS_LAUNCH.value)
-            if request.name == jobs_launch_name:
-                rv = request.return_value
-                if isinstance(rv, dict):
-                    resp_job_id = rv.get('job_id')
-                    if isinstance(resp_job_id, list):
-                        debug_dump_context['managed_job_ids'].update(
-                            resp_job_id)
-                        logger.debug(f'Linked request {request_id} '
-                                     f'to managed jobs {resp_job_id} '
-                                     f'via return_value')
-                    elif resp_job_id is not None:
-                        debug_dump_context['managed_job_ids'].add(resp_job_id)
-                        logger.debug(f'Linked request {request_id} '
-                                     f'to managed job {resp_job_id} '
-                                     f'via return_value')
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to get managed job info for '
-                           f'request {request_id}: {e}')
-            debug_dump_context['errors'].append({
-                'component': 'cross_link',
-                'resource': f'managed_jobs_from_request/{request_id}',
-                'error': str(e),
-                'traceback': _full_traceback()
-            })
+    # One bulk pass instead of a get_request round trip per ID (see
+    # _get_requests_bulk).
+    requests = _get_requests_bulk(
+        sorted(request_ids),
+        fields=['request_id', 'name', 'request_body', 'return_value'],
+        component='cross_link',
+        resource='managed_jobs_from_requests',
+        deadline=deadline,
+        errors=debug_dump_context['errors'],
+        orphans=debug_dump_context['timed_out_ops'])
+
+    for request in requests:
+        if request.name not in _MANAGED_JOB_REQUEST_NAMES:
+            continue
+        request_id = request.request_id
+        body = request.request_body
+        if body is not None:
+            job_id = getattr(body, 'job_id', None)
+            if job_id is not None:
+                logger.debug(f'Cross-link: request {request_id} -> '
+                             f'managed job {job_id} via body.job_id')
+                debug_dump_context['managed_job_ids'].add(job_id)
+            job_ids = getattr(body, 'job_ids', None)
+            if job_ids is not None:
+                logger.debug(f'Cross-link: request {request_id} -> '
+                             f'managed jobs {job_ids} via body.job_ids')
+                debug_dump_context['managed_job_ids'].update(job_ids)
+        # For jobs.launch, the job ID is in the response, not the
+        # request body.
+        jobs_launch_name = (server_constants.REQUEST_NAME_PREFIX +
+                            request_names.RequestName.JOBS_LAUNCH.value)
+        if request.name == jobs_launch_name:
+            rv = request.return_value
+            if isinstance(rv, dict):
+                resp_job_id = rv.get('job_id')
+                if isinstance(resp_job_id, list):
+                    debug_dump_context['managed_job_ids'].update(resp_job_id)
+                    logger.debug(f'Linked request {request_id} '
+                                 f'to managed jobs {resp_job_id} '
+                                 f'via return_value')
+                elif resp_job_id is not None:
+                    debug_dump_context['managed_job_ids'].add(resp_job_id)
+                    logger.debug(f'Linked request {request_id} '
+                                 f'to managed job {resp_job_id} '
+                                 f'via return_value')
 
 
 def _managed_job_cluster_names_from_records(
@@ -1059,12 +1154,13 @@ def _copy_request_log_file(request_id: str, request_dir: str,
 _REQUEST_LOG_COPY_TIMEOUT = 30
 
 
-def _dump_request_id_info(
-        request_ids: Set[str],
-        dump_dir: str,
-        errors: Optional[List[Dict[str, str]]] = None,
-        deadline: Optional[float] = None,
-        orphans: Optional[List[Dict[str, Any]]] = None) -> None:
+def _dump_request_id_info(request_ids: Set[str],
+                          dump_dir: str,
+                          errors: Optional[List[Dict[str, str]]] = None,
+                          deadline: Optional[float] = None,
+                          orphans: Optional[List[Dict[str, Any]]] = None,
+                          cross_linked_request_ids: Optional[Set[str]] = None,
+                          overall_deadline: Optional[float] = None) -> None:
     """Collect request logs and metadata.
 
     ``deadline`` (absolute monotonic) bounds the section two ways: each
@@ -1072,7 +1168,24 @@ def _dump_request_id_info(
     long-running request's still-streaming log can't dominate), and once the
     budget is gone we stop starting new requests and skip the rest -- so the
     dump still zips what it gathered. Per-request wall-clock is written to
-    ``requests/_timings.json``.
+    ``requests/_timings.json``. ``overall_deadline`` is the dump-level budget
+    the section's cap was carved from: when the section cap expires while the
+    overall budget still has time, the per-request skip records blame the
+    section's share (the later sections are still running); when the overall
+    budget is gone too, they keep blaming the overall deadline.
+
+    Metadata is bulk-fetched in chunked IN queries (see _get_requests_bulk)
+    rather than one locked get_request round trip per request -- those
+    per-ID DB calls dominated the section on servers with thousands of
+    requests. Iteration order is deterministic and relevance-first:
+    always-include system daemons, then user-seeded / recent-context
+    requests, then requests added by cross-link expansion
+    (``cross_linked_request_ids``, i.e. request_ids_via_job |
+    request_ids_via_cluster), each group newest first. A deadline-truncated
+    partial therefore keeps the requests most likely to explain the incident
+    -- hash-order iteration previously spent the budget on months-old dead
+    rows while dropping requests launched seconds before the dump, and even
+    dropped some of the 'always include' system daemons.
     """
     if not request_ids:
         logger.debug('No requests to dump')
@@ -1083,133 +1196,229 @@ def _dump_request_id_info(
     requests_dir = os.path.join(dump_dir, 'requests')
     os.makedirs(requests_dir, exist_ok=True)
 
+    # Order the IDs before dumping anything: a light bulk pass over
+    # (request_id, created_at) gives every ID a recency key, so the dump
+    # order below is the deterministic relevance order from the docstring
+    # instead of Python set-hash order.
+    order_rows = _get_requests_bulk(sorted(request_ids),
+                                    fields=['request_id', 'created_at'],
+                                    component='requests',
+                                    resource='requests_order',
+                                    deadline=deadline,
+                                    errors=errors,
+                                    orphans=orphans)
+    created_at_by_id = {row.request_id: row.created_at for row in order_rows}
+    cross_linked = cross_linked_request_ids or set()
+
+    def _dump_order(request_id: str) -> Tuple[int, float, str]:
+        """Relevance sort key: tier, then newest first, then ID."""
+        if request_id in _SYSTEM_REQUEST_ID_SET:
+            tier = 0
+        elif request_id in cross_linked:
+            tier = 2
+        else:
+            tier = 1
+        # IDs without a row (not in the DB, or unfetched after a failed
+        # batch) sort last within their tier, like the oldest requests.
+        return (tier, -(created_at_by_id.get(request_id) or 0.0), request_id)
+
+    ordered_ids = sorted(request_ids, key=_dump_order)
+
     timings: List[Dict[str, Any]] = []
-    for request_id in request_ids:
-        if _deadline_exceeded(deadline):
-            if errors is not None:
-                errors.append({
-                    'component': 'requests',
-                    'resource': request_id,
-                    'error': 'Skipped: overall debug-dump deadline exceeded.',
-                })
-            continue
-        request_start = time.monotonic()
-        request_dir = os.path.join(requests_dir, request_id)
-        os.makedirs(request_dir, exist_ok=True)
+    # Full metadata is fetched one chunk at a time rather than all up front:
+    # decoded request bodies can be large, so holding every row at once
+    # would spike the dump's memory footprint (the per-request fetch this
+    # replaces kept peak memory at a single row).
+    fetch_ok = True
+    for chunk_start in range(0, len(ordered_ids), _REQUEST_DB_CHUNK_SIZE):
+        chunk = ordered_ids[chunk_start:chunk_start + _REQUEST_DB_CHUNK_SIZE]
+        request_rows: Dict[str, Any] = {}
+        # Whether this chunk's metadata query completed. Members of a chunk
+        # that timed out (or was never fetched after an earlier timeout) are
+        # 'metadata not fetched', not 'not found in DB' -- the distinction
+        # matters when diagnosing the dump itself.
+        chunk_fetched = False
+        if fetch_ok and not _deadline_exceeded(deadline):
+            try:
+                ok, rows = _run_with_deadline(
+                    functools.partial(
+                        requests_lib.get_request_tasks,
+                        requests_lib.RequestTaskFilter(request_ids=chunk)),
+                    _bounded_timeout(_REQUEST_DB_QUERY_TIMEOUT, deadline),
+                    component='requests',
+                    resource=(f'requests_metadata/'
+                              f'{chunk_start // _REQUEST_DB_CHUNK_SIZE}'),
+                    errors=errors,
+                    orphans=orphans)
+                if ok:
+                    chunk_fetched = True
+                    if rows:
+                        request_rows = {row.request_id: row for row in rows}
+                else:
+                    # Hung query -- a DB call that never returns is exactly
+                    # what a debug dump investigates. Stop fetching (later
+                    # chunks would only time out too); keep iterating so the
+                    # remaining requests still get their skip records and
+                    # log copies. The timeout is already recorded above.
+                    fetch_ok = False
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(f'Failed to fetch request metadata: {e}')
+                if errors is not None:
+                    errors.append({
+                        'component': 'requests',
+                        'resource':
+                            (f'requests_metadata/'
+                             f'{chunk_start // _REQUEST_DB_CHUNK_SIZE}'),
+                        'error': str(e),
+                        'traceback': _full_traceback()
+                    })
+        for request_id in chunk:
+            if _deadline_exceeded(deadline):
+                if errors is not None:
+                    # The section cap expired. Which budget to blame: when the
+                    # overall deadline still has time left, the later sections
+                    # are still running and this skip is the section's own
+                    # share running out; when the overall budget is gone too
+                    # (an earlier section consumed nearly everything), the
+                    # skip is the overall deadline's fault.
+                    if (overall_deadline is not None and
+                            not _deadline_exceeded(overall_deadline)):
+                        error_text = ('Skipped: request_ids section budget '
+                                      'exceeded.')
+                    else:
+                        error_text = ('Skipped: overall debug-dump deadline '
+                                      'exceeded.')
+                    errors.append({
+                        'component': 'requests',
+                        'resource': request_id,
+                        'error': error_text,
+                    })
+                continue
+            request_start = time.monotonic()
+            request_dir = os.path.join(requests_dir, request_id)
+            os.makedirs(request_dir, exist_ok=True)
 
-        # Get request metadata from DB
-        try:
-            request = requests_lib.get_request(request_id)
-            if request is not None:
-                request_info: Dict[str, Any] = {
-                    'request_id': request.request_id,
-                    'name': request.name,
-                    'status': request.status.value if request.status else None,
-                    'created_at': request.created_at,
-                    'created_at_human': debug_dump_helpers.epoch_to_human(
-                        request.created_at),
-                    'finished_at': request.finished_at,
-                    'finished_at_human': debug_dump_helpers.epoch_to_human(
-                        request.finished_at),
-                    'cluster_name': request.cluster_name,
-                    'user_id': request.user_id,
-                    'status_msg': request.status_msg,
-                    'schedule_type': (request.schedule_type.value
-                                      if request.schedule_type else None),
-                    'request_body': _sanitize_request_body(request),
-                }
+            # Request metadata, bulk-fetched per chunk above.
+            request = request_rows.get(request_id)
+            try:
+                if request is not None:
+                    request_info: Dict[str, Any] = {
+                        'request_id': request.request_id,
+                        'name': request.name,
+                        'status': request.status.value
+                                  if request.status else None,
+                        'created_at': request.created_at,
+                        'created_at_human': debug_dump_helpers.epoch_to_human(
+                            request.created_at),
+                        'finished_at': request.finished_at,
+                        'finished_at_human': debug_dump_helpers.epoch_to_human(
+                            request.finished_at),
+                        'cluster_name': request.cluster_name,
+                        'user_id': request.user_id,
+                        'status_msg': request.status_msg,
+                        'schedule_type': (request.schedule_type.value
+                                          if request.schedule_type else None),
+                        'request_body': _sanitize_request_body(request),
+                    }
 
-                # Include error info if present
-                try:
-                    error = request.get_error()
-                    if error:
-                        request_info['error'] = {
-                            'type': error.get('type'),
-                            'message': error.get('message'),
-                        }
-                except Exception:  # pylint: disable=broad-except
-                    pass
+                    # Include error info if present
+                    try:
+                        error = request.get_error()
+                        if error:
+                            request_info['error'] = {
+                                'type': error.get('type'),
+                                'message': error.get('message'),
+                            }
+                    except Exception:  # pylint: disable=broad-except
+                        pass
 
-                request_info_path = os.path.join(request_dir,
-                                                 'request_info.json')
-                with open(request_info_path, 'w', encoding='utf-8') as f:
-                    json.dump(request_info, f, indent=2, default=str)
-                logger.debug(
-                    f'Dumped request {request_id} '
-                    f'(name={request.name}, '
-                    f'status='
-                    f'{request.status.value if request.status else None})')
-            else:
-                logger.debug(f'Request {request_id} not found in DB')
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to get info for request {request_id}: {e}')
-            if errors is not None:
-                errors.append({
-                    'component': 'requests',
-                    'resource': request_id,
-                    'error': str(e),
-                    'traceback': _full_traceback()
-                })
+                    request_info_path = os.path.join(request_dir,
+                                                     'request_info.json')
+                    with open(request_info_path, 'w', encoding='utf-8') as f:
+                        json.dump(request_info, f, indent=2, default=str)
+                    logger.debug(
+                        f'Dumped request {request_id} '
+                        f'(name={request.name}, '
+                        f'status='
+                        f'{request.status.value if request.status else None})')
+                else:
+                    if chunk_fetched:
+                        logger.debug(f'Request {request_id} not found in DB')
+                    else:
+                        logger.debug(f'Request {request_id} metadata not '
+                                     'fetched (chunk fetch failed or '
+                                     'timed out)')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Failed to get info for request {request_id}: {e}')
+                if errors is not None:
+                    errors.append({
+                        'component': 'requests',
+                        'resource': request_id,
+                        'error': str(e),
+                        'traceback': _full_traceback()
+                    })
 
-        # Copy request log file. Routed through the LogProvider so that
-        # deployments whose request logs are not on the local filesystem
-        # can fetch them from wherever they live. Deadline-bounded: a
-        # streaming/active request's copy can block for tens of seconds.
-        try:
-            ok, copied = _run_with_deadline(
-                functools.partial(_copy_request_log_file, request_id,
-                                  request_dir,
-                                  log_provider.RequestLogType.REQUEST,
-                                  'request.log'),
-                _bounded_timeout(_REQUEST_LOG_COPY_TIMEOUT, deadline),
-                component='requests',
-                resource=f'{request_id}/log',
-                errors=errors,
-                orphans=orphans)
-            if ok and copied:
-                logger.debug(f'Copied request log for {request_id}')
-            elif ok:
-                logger.debug(f'Request log not found for {request_id}')
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to copy log for request {request_id}: {e}')
-            if errors is not None:
-                errors.append({
-                    'component': 'requests',
-                    'resource': f'{request_id}/log',
-                    'error': str(e),
-                    'traceback': _full_traceback()
-                })
+            # Copy request log file. Routed through the LogProvider so that
+            # deployments whose request logs are not on the local filesystem
+            # can fetch them from wherever they live. Deadline-bounded: a
+            # streaming/active request's copy can block for tens of seconds.
+            try:
+                ok, copied = _run_with_deadline(
+                    functools.partial(_copy_request_log_file, request_id,
+                                      request_dir,
+                                      log_provider.RequestLogType.REQUEST,
+                                      'request.log'),
+                    _bounded_timeout(_REQUEST_LOG_COPY_TIMEOUT, deadline),
+                    component='requests',
+                    resource=f'{request_id}/log',
+                    errors=errors,
+                    orphans=orphans)
+                if ok and copied:
+                    logger.debug(f'Copied request log for {request_id}')
+                elif ok:
+                    logger.debug(f'Request log not found for {request_id}')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Failed to copy log for request {request_id}: {e}')
+                if errors is not None:
+                    errors.append({
+                        'component': 'requests',
+                        'resource': f'{request_id}/log',
+                        'error': str(e),
+                        'traceback': _full_traceback()
+                    })
 
-        # Copy debug log file (only exists when
-        # ENABLE_REQUEST_DEBUG_LOGGING is enabled). Deadline-bounded too.
-        try:
-            ok, copied = _run_with_deadline(
-                functools.partial(_copy_request_log_file, request_id,
-                                  request_dir,
-                                  log_provider.RequestLogType.DEBUG,
-                                  'request_debug.log'),
-                _bounded_timeout(_REQUEST_LOG_COPY_TIMEOUT, deadline),
-                component='requests',
-                resource=f'{request_id}/request_debug.log',
-                errors=errors,
-                orphans=orphans)
-            if ok and copied:
-                logger.debug(f'Copied debug log for {request_id}')
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(
-                f'Failed to copy debug log for request {request_id}: {e}')
-            if errors is not None:
-                errors.append({
-                    'component': 'requests',
-                    'resource': f'{request_id}/request_debug.log',
-                    'error': str(e),
-                    'traceback': _full_traceback()
-                })
+            # Copy debug log file (only exists when
+            # ENABLE_REQUEST_DEBUG_LOGGING is enabled). Deadline-bounded too.
+            try:
+                ok, copied = _run_with_deadline(
+                    functools.partial(_copy_request_log_file, request_id,
+                                      request_dir,
+                                      log_provider.RequestLogType.DEBUG,
+                                      'request_debug.log'),
+                    _bounded_timeout(_REQUEST_LOG_COPY_TIMEOUT, deadline),
+                    component='requests',
+                    resource=f'{request_id}/request_debug.log',
+                    errors=errors,
+                    orphans=orphans)
+                if ok and copied:
+                    logger.debug(f'Copied debug log for {request_id}')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Failed to copy debug log for request {request_id}: {e}')
+                if errors is not None:
+                    errors.append({
+                        'component': 'requests',
+                        'resource': f'{request_id}/request_debug.log',
+                        'error': str(e),
+                        'traceback': _full_traceback()
+                    })
 
-        timings.append({
-            'request_id': request_id,
-            'duration_s': round(time.monotonic() - request_start, 2),
-        })
+            timings.append({
+                'request_id': request_id,
+                'duration_s': round(time.monotonic() - request_start, 2),
+            })
 
     try:
         with open(os.path.join(requests_dir, '_timings.json'),
@@ -2222,9 +2431,12 @@ def _build_debug_dump(
     ``deadline`` is an optional absolute ``time.monotonic()`` best-effort
     budget: once it passes, the remaining section calls are skipped (each with
     its own recorded skip record) instead of run, and in-flight per-operation
-    timeouts are clamped to the remaining budget. The client-info / errors /
-    summary writes below always run so the partial dump is self-describing.
-    ``None`` (the default) keeps the previous behavior exactly.
+    timeouts are clamped to the remaining budget. Each section is additionally
+    capped at an equal share of the budget still remaining, so an oversized
+    early section cannot starve the later ones (see the section loop). The
+    client-info / errors / summary writes below always run so the partial dump
+    is self-describing. ``None`` (the default) keeps the previous behavior
+    exactly.
     """
     # Populate the context and cross-link related resources. Each helper
     # runs exactly once, and the order is load-bearing:
@@ -2265,13 +2477,13 @@ def _build_debug_dump(
                                  recent_minutes,
                                  reachability,
                                  deadline=deadline)
-    _get_managed_jobs_from_requests(debug_dump_context)
+    _get_managed_jobs_from_requests(debug_dump_context, deadline=deadline)
     _get_job_clusters_from_managed_jobs(debug_dump_context)
-    _get_requests_from_clusters(debug_dump_context)
+    _get_requests_from_clusters(debug_dump_context, deadline=deadline)
     _get_requests_from_managed_jobs(debug_dump_context,
                                     reachability,
                                     deadline=deadline)
-    _get_clusters_from_requests(debug_dump_context)
+    _get_clusters_from_requests(debug_dump_context, deadline=deadline)
     _get_clusters_from_managed_jobs(debug_dump_context)
 
     # Always include system daemon requests
@@ -2301,31 +2513,48 @@ def _build_debug_dump(
     # starve the sections the caller asked for. Every section is now
     # deadline-aware (its internal calls are bounded and it's skipped once the
     # budget is gone), so the build always reaches the zip step with a coherent
-    # partial instead of being hard-killed mid-section.
-    sections: List[Tuple[str, Callable[[], None]]] = [
-        ('server_info', lambda: _dump_server_info(
-            dump_dir, errors=errors, deadline=deadline, orphans=orphans)),
-        ('request_ids',
-         lambda: _dump_request_id_info(debug_dump_context['request_ids'],
-                                       dump_dir,
-                                       errors=errors,
-                                       deadline=deadline,
-                                       orphans=orphans)),
-        ('clusters',
-         lambda: _dump_cluster_info(debug_dump_context['cluster_names'],
-                                    dump_dir,
-                                    reachability,
-                                    errors=errors,
-                                    deadline=deadline)),
-        ('managed_jobs',
-         lambda: _dump_managed_job_info(debug_dump_context['managed_job_ids'],
-                                        dump_dir,
-                                        reachability,
-                                        errors=errors,
-                                        deadline=deadline,
-                                        orphans=orphans)),
-        ('kubernetes_contexts', lambda: _dump_kube_contexts_info(
-            dump_dir, errors=errors, deadline=deadline, orphans=orphans)),
+    # partial instead of being hard-killed mid-section. On top of that
+    # ordering, each section's deadline is capped at an equal share of the
+    # budget still remaining (see the loop below), so a huge early section
+    # (e.g. request_ids on a server with thousands of requests) cannot starve
+    # the later ones to literally 0.0s.
+    sections: List[Tuple[str, Callable[[Optional[float]], None]]] = [
+        ('server_info', lambda section_deadline: _dump_server_info(
+            dump_dir, errors=errors, deadline=section_deadline, orphans=orphans)
+        ),
+        (
+            'request_ids',
+            lambda section_deadline: _dump_request_id_info(
+                debug_dump_context['request_ids'],
+                dump_dir,
+                errors=errors,
+                deadline=section_deadline,
+                orphans=orphans,
+                cross_linked_request_ids=(debug_dump_context[
+                    'request_ids_via_job'] | debug_dump_context[
+                        'request_ids_via_cluster']),
+                # The dump-level budget the section cap was carved from, so
+                # per-request skip records can blame the right budget (see
+                # _dump_request_id_info).
+                overall_deadline=deadline)),
+        ('clusters', lambda section_deadline: _dump_cluster_info(
+            debug_dump_context['cluster_names'],
+            dump_dir,
+            reachability,
+            errors=errors,
+            deadline=section_deadline)),
+        ('managed_jobs', lambda section_deadline: _dump_managed_job_info(
+            debug_dump_context['managed_job_ids'],
+            dump_dir,
+            reachability,
+            errors=errors,
+            deadline=section_deadline,
+            orphans=orphans)),
+        ('kubernetes_contexts', lambda section_deadline:
+         _dump_kube_contexts_info(dump_dir,
+                                  errors=errors,
+                                  deadline=section_deadline,
+                                  orphans=orphans)),
     ]
     budget = _remaining_budget(deadline)
     logger.info(f'debug dump: collecting {len(sections)} sections '
@@ -2337,7 +2566,7 @@ def _build_debug_dump(
     # see where the budget went (and which sections were skipped) without
     # grepping the worker log.
     section_timings: List[Dict[str, Any]] = []
-    for name, dump_section in sections:
+    for index, (name, dump_section) in enumerate(sections):
         if _deadline_exceeded(deadline):
             logger.warning(f'Skipping debug-dump section {name!r}: overall '
                            'deadline exceeded.')
@@ -2360,16 +2589,42 @@ def _build_debug_dump(
         # 'start' with no matching 'done' pins the culprit.
         section_start = time.monotonic()
         remaining = _remaining_budget(deadline)
-        logger.info(f'debug dump: section {name!r} start' + (
-            '' if remaining is None else f' ({remaining:.0f}s budget left)'))
-        dump_section()
+        # Budget sharing: cap each section at an equal share of the budget
+        # still remaining, across the sections not yet run (including this
+        # one). Without the cap, one huge section -- typically request_ids on
+        # a server with thousands of requests -- consumes the whole budget
+        # and every later section is skipped with 0.0s (a dump taken during
+        # a k8s incident then contains no cluster / controller / Kueue
+        # evidence at all). Sections that finish early return their unused
+        # share to the pool (each share is recomputed from what is actually
+        # left), and the last section always gets everything that remains.
+        # ``None`` (no overall deadline) keeps the previous uncapped
+        # behavior.
+        section_deadline = deadline
+        share: Optional[float] = None
+        if remaining is not None:
+            share = max(remaining, 0.0) / (len(sections) - index)
+            section_deadline = section_start + share
+        logger.info(f'debug dump: section {name!r} start' +
+                    ('' if remaining is None or share is None else
+                     f' ({remaining:.0f}s budget left, '
+                     f'section capped at {share:.0f}s)'))
+        dump_section(section_deadline)
         duration = time.monotonic() - section_start
         logger.info(f'debug dump: section {name!r} done in {duration:.1f}s')
-        section_timings.append({
+        section_timing: Dict[str, Any] = {
             'section': name,
             'status': 'completed',
             'duration_s': round(duration, 2),
-        })
+        }
+        if share is not None:
+            # With a deadline, duration ~= budget_share_s reads as 'capped
+            # by design' rather than 'slow population' -- without the share,
+            # a section that ran its full cap is indistinguishable from one
+            # that happened to take that long. Absent under deadline=None,
+            # where no share is computed.
+            section_timing['budget_share_s'] = round(share, 2)
+        section_timings.append(section_timing)
 
     # Write client info if provided
     if client_info:
