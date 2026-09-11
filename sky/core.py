@@ -2,6 +2,7 @@
 import concurrent.futures
 import json
 import shlex
+import time
 import typing
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
@@ -2020,8 +2021,11 @@ def create_debug_dump(request_ids: Optional[List[str]] = None,
             stop the whole collection by; when reached, collection stops early
             and a partial dump is returned. Passing an absolute deadline lets an
             out-of-process caller charge already-elapsed time (e.g. executor
-            queue wait) against the budget rather than ignoring it. None means
-            no deadline.
+            queue wait) against the budget rather than ignoring it. When None
+            (the default), the server applies its own backstop budget of
+            debug_utils._DEFAULT_DEBUG_DUMP_DEADLINE_S (1800s) so every
+            API-initiated dump is bounded; see that constant's comment for the
+            derivation. Explicit deadlines pass through verbatim.
 
     Returns:
         Path to the created zip file on the server.
@@ -2033,6 +2037,16 @@ def create_debug_dump(request_ids: Optional[List[str]] = None,
             recent_minutes is None):
         raise ValueError('At least one of request_ids, cluster_names, '
                          'managed_job_ids, or recent_minutes must be provided.')
+
+    if overall_deadline is None:
+        # Invariant: every API-initiated dump is bounded even when the caller
+        # sends no deadline -- an unbounded dump holds an API-server worker
+        # (and its executor slot) for as long as a single hung collection
+        # call persists. 1800s ~ 2x the largest observed near-feasible run
+        # (see debug_utils._DEFAULT_DEBUG_DUMP_DEADLINE_S); callers that need
+        # more can always pass an explicit overall_deadline.
+        overall_deadline = (time.time() +
+                            debug_utils._DEFAULT_DEBUG_DUMP_DEADLINE_S)  # pylint: disable=protected-access
 
     debug_dump_path = debug_utils.create_debug_dump(
         request_ids=request_ids,

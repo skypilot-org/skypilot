@@ -1,3 +1,4 @@
+import time
 from unittest import mock
 
 import pytest
@@ -13,6 +14,7 @@ from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
 from sky.skylet import job_lib
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import debug_utils
 from sky.utils import status_lib
 from sky.workspaces import constants as workspace_constants
 
@@ -1027,3 +1029,31 @@ def test_down_graceful_tolerates_missing_command_runners(monkeypatch) -> None:
     backend.teardown.assert_called_once_with(handle,
                                              terminate=True,
                                              purge=False)
+
+
+@mock.patch('sky.core.debug_utils.create_debug_dump',
+            return_value='/tmp/fake_dump.zip')
+def test_create_debug_dump_applies_default_deadline(mock_create) -> None:
+    """With no overall_deadline, the server applies its own backstop budget
+    (debug_utils._DEFAULT_DEBUG_DUMP_DEADLINE_S) so every API-initiated dump
+    is bounded."""
+    before = time.time()
+
+    core.create_debug_dump(cluster_names=['c'])
+    after = time.time()
+
+    passed_deadline = mock_create.call_args.kwargs['overall_deadline']
+    assert passed_deadline is not None
+    # Approximately now + the default backstop.
+    default_s = debug_utils._DEFAULT_DEBUG_DUMP_DEADLINE_S  # pylint: disable=protected-access
+    assert (before + default_s) <= passed_deadline <= (after + default_s)
+
+
+@mock.patch('sky.core.debug_utils.create_debug_dump',
+            return_value='/tmp/fake_dump.zip')
+def test_create_debug_dump_passes_explicit_deadline_through(
+        mock_create) -> None:
+    """An explicit caller deadline is passed through verbatim (CLI users and
+    out-of-process schedulers manage their own budget)."""
+    core.create_debug_dump(cluster_names=['c'], overall_deadline=1234567890.5)
+    assert mock_create.call_args.kwargs['overall_deadline'] == 1234567890.5

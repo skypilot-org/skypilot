@@ -195,6 +195,27 @@ class TestGetRequestsFromClusters:
 
         assert ctx['request_ids'] == {'req-dup'}
 
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_deadline_expires_mid_loop_records_one_aggregate_skip(
+            self, mock_get_tasks):
+        """An expired deadline stops the per-cluster loop with ONE aggregate
+        skip record naming how many clusters were left, instead of grinding
+        the whole budget on per-cluster DB scans."""
+        ctx = _make_context(cluster_names={'c1', 'c2', 'c3'})
+
+        debug_utils._get_requests_from_clusters(ctx,
+                                                deadline=time.monotonic() - 1)
+
+        mock_get_tasks.assert_not_called()
+        assert ctx['request_ids'] == set()
+        assert len(ctx['errors']) == 1
+        record = ctx['errors'][0]
+        assert record['component'] == 'cross_link'
+        assert record['resource'] == 'requests_from_clusters'
+        assert record['error'].startswith(
+            'Skipped: overall debug-dump deadline exceeded.')
+        assert '3 cluster(s)' in record['error']
+
 
 # ---------------------------------------------------------------------------
 # Tests for _get_requests_from_managed_jobs
@@ -519,6 +540,26 @@ class TestGetClustersFromRequests:
 
         assert ctx['cluster_names'] == {'cluster-a', 'cluster-b'}
 
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_deadline_expires_mid_loop_records_one_aggregate_skip(
+            self, mock_get_request):
+        """An expired deadline stops the per-request loop with ONE aggregate
+        skip record naming how many requests were left."""
+        ctx = _make_context(request_ids={'r1', 'r2'})
+
+        debug_utils._get_clusters_from_requests(ctx,
+                                                deadline=time.monotonic() - 1)
+
+        mock_get_request.assert_not_called()
+        assert ctx['cluster_names'] == set()
+        assert len(ctx['errors']) == 1
+        record = ctx['errors'][0]
+        assert record['component'] == 'cross_link'
+        assert record['resource'] == 'clusters_from_requests'
+        assert record['error'].startswith(
+            'Skipped: overall debug-dump deadline exceeded.')
+        assert '2 request(s)' in record['error']
+
 
 # ---------------------------------------------------------------------------
 # Tests for _get_clusters_from_managed_jobs
@@ -687,6 +728,42 @@ class TestGetManagedJobsFromClusters:
         assert len(errors) == 1
         assert errors[0]['resource'] == 'managed_jobs_from_clusters'
 
+    @mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2')
+    def test_queue_timeout_uses_tight_recent_scan_cap(self, mock_queue,
+                                                      monkeypatch):
+        """The unfiltered all_users queue_v2 here is bounded by the tight
+        _RECENT_MANAGED_JOBS_QUEUE_TIMEOUT (not the 120s targeted cap): a
+        slow controller costs at most that much budget, the dump degrades
+        to no cluster-to-job expansion, and the timeout record names the
+        user-relevant consequence."""
+        assert debug_utils._RECENT_MANAGED_JOBS_QUEUE_TIMEOUT <= 30
+        monkeypatch.setattr(debug_utils, '_RECENT_MANAGED_JOBS_QUEUE_TIMEOUT',
+                            0.2)
+        started = threading.Event()
+
+        def _slow_queue(*_args, **_kwargs):
+            started.set()
+            time.sleep(5)  # Longer than the (patched) cap.
+            return ([], 0, {}, 0, [])
+
+        mock_queue.side_effect = _slow_queue
+        errors: List[Dict[str, str]] = []
+        ctx = _make_context(cluster_names={'c1'}, errors=errors)
+        start = time.time()
+
+        debug_utils._get_managed_jobs_from_clusters(ctx, _StubReachability())
+        elapsed = time.time() - start
+
+        assert started.is_set()
+        assert elapsed < 3
+        assert ctx['managed_job_ids'] == set()
+        assert len(errors) == 1
+        record = errors[0]
+        assert record['resource'] == 'managed_jobs_from_clusters'
+        # The record names the operation and what its loss degrades.
+        assert 'operation' in record
+        assert 'cluster-to-job expansion' in record['operation']
+
 
 # ---------------------------------------------------------------------------
 # Tests for _get_job_clusters_from_managed_jobs
@@ -771,6 +848,41 @@ class TestGetJobClustersFromManagedJobs:
         assert ctx['cluster_names'] == set()
         assert len(errors) == 1
         assert errors[0]['resource'] == 'job_clusters_from_managed_jobs'
+
+    @mock.patch('sky.utils.debug_utils.managed_job_utils.is_consolidation_mode')
+    @mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2')
+    def test_queue_timeout_degrades_to_no_cluster_names(self, mock_queue,
+                                                        mock_consolidation,
+                                                        monkeypatch):
+        """queue_v2 here is routed through _run_with_deadline like its three
+        sibling call sites: a slow controller is recorded as a partial
+        failure and the helper degrades to no job-cluster names instead of
+        stalling the dump unbounded."""
+        mock_consolidation.return_value = True
+        monkeypatch.setattr(debug_utils, '_MANAGED_JOB_QUEUE_TIMEOUT', 0.2)
+        started = threading.Event()
+
+        def _slow_queue(*_args, **_kwargs):
+            started.set()
+            time.sleep(5)  # Longer than the (patched) bound.
+            return ([], 0, {}, 0, [])
+
+        mock_queue.side_effect = _slow_queue
+        errors: List[Dict[str, str]] = []
+        ctx = _make_context(managed_job_ids={5}, errors=errors)
+        start = time.time()
+
+        debug_utils._get_job_clusters_from_managed_jobs(ctx)
+        elapsed = time.time() - start
+
+        assert started.is_set()
+        assert elapsed < 3
+        assert ctx['cluster_names'] == set()
+        assert len(errors) == 1
+        record = errors[0]
+        assert record['resource'] == 'job_clusters_from_managed_jobs'
+        assert 'timed out after' in record['error']
+        assert 'operation' in record
 
 
 # ---------------------------------------------------------------------------
@@ -932,6 +1044,27 @@ class TestGetManagedJobsFromRequests:
         assert 42 in ctx['managed_job_ids']
         assert 43 in ctx['managed_job_ids']
 
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_deadline_expires_mid_loop_records_one_aggregate_skip(
+            self, mock_get_request):
+        """An expired deadline stops the per-request loop with ONE aggregate
+        skip record naming how many requests were left."""
+        ctx = _make_context(request_ids={'r1', 'r2', 'r3'})
+
+        debug_utils._get_managed_jobs_from_requests(ctx,
+                                                    deadline=time.monotonic() -
+                                                    1)
+
+        mock_get_request.assert_not_called()
+        assert ctx['managed_job_ids'] == set()
+        assert len(ctx['errors']) == 1
+        record = ctx['errors'][0]
+        assert record['component'] == 'cross_link'
+        assert record['resource'] == 'managed_jobs_from_requests'
+        assert record['error'].startswith(
+            'Skipped: overall debug-dump deadline exceeded.')
+        assert '3 request(s)' in record['error']
+
 
 # ---------------------------------------------------------------------------
 # Tests for _populate_recent_context
@@ -1077,6 +1210,46 @@ class TestPopulateRecentContext:
 
         assert 1 in ctx['managed_job_ids']
         assert 2 not in ctx['managed_job_ids']
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_recent_jobs_scan_uses_tight_cap(self, mock_get_tasks,
+                                             mock_get_clusters, mock_queue_v2,
+                                             monkeypatch):
+        """The unfiltered all_users recent-jobs scan is bounded by the tight
+        _RECENT_MANAGED_JOBS_QUEUE_TIMEOUT, not the 120s targeted cap: this
+        scan is a scope-expansion hint (the request-body scan recovers the
+        jobs independently), so a slow controller must not cost 120s of
+        budget. On timeout the dump records the error and moves on."""
+        assert debug_utils._RECENT_MANAGED_JOBS_QUEUE_TIMEOUT <= 30
+        monkeypatch.setattr(debug_utils, '_RECENT_MANAGED_JOBS_QUEUE_TIMEOUT',
+                            0.2)
+        mock_get_tasks.return_value = []
+        mock_get_clusters.return_value = []
+        started = threading.Event()
+
+        def _slow_queue(*_args, **_kwargs):
+            started.set()
+            time.sleep(5)  # Longer than the (patched) cap.
+            return ([], 0, {}, 0, [])
+
+        mock_queue_v2.side_effect = _slow_queue
+        ctx = _make_context()
+        start = time.time()
+
+        debug_utils._populate_recent_context(ctx,
+                                             minutes=60.0,
+                                             reachability=_StubReachability())
+        elapsed = time.time() - start
+
+        assert started.is_set()
+        assert elapsed < 3
+        assert ctx['managed_job_ids'] == set()
+        assert any(
+            e['component'] == 'recent_context' and
+            e['resource'] == 'managed_jobs' and 'timed out after' in e['error']
+            for e in ctx['errors'])
 
     @mock.patch('sky.jobs.server.core.queue_v2')
     @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
@@ -2365,6 +2538,32 @@ class TestSensitiveEnvVarRedaction:
 
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request',
                 return_value=None)
+    def test_dump_server_info_budget_skip_message(self, mock_req, tmp_path):
+        """When the overall deadline (not the sky-check cap) is what ran out,
+        cloud_status_error says the check was SKIPPED for budget -- it never
+        reports a clamped, possibly non-positive 'timed out after Ns'
+        duration, and never misreports a budget skip as a check stall."""
+        del mock_req  # required by mock.patch
+        errors: List[Dict[str, str]] = []
+        with mock.patch('sky.utils.debug_utils.sky_check.check') as mock_check:
+            debug_utils._dump_server_info(str(tmp_path),
+                                          errors=errors,
+                                          deadline=time.monotonic() - 1)
+
+        # The pre-submit guard fired: check was never run, no worker exists.
+        mock_check.assert_not_called()
+        with open(os.path.join(str(tmp_path), 'server_info.json')) as f:
+            info = json.load(f)
+        assert 'enabled_clouds' not in info
+        assert 'skipped: overall debug-dump deadline exceeded' in info[
+            'cloud_status_error']
+        assert 'timed out after' not in info['cloud_status_error']
+        assert any(e['resource'] == 'cloud_status' and
+                   e['error'] == 'Skipped: overall debug-dump deadline '
+                   'exceeded.' for e in errors)
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request',
+                return_value=None)
     @mock.patch('sky.utils.debug_utils.sky_check.check',
                 return_value={'default': {
                     'kubernetes': ['compute']
@@ -3150,6 +3349,75 @@ class TestDumpRequestIdInfo:
             call.args[2] for call in provider.copy_log_file.call_args_list
         ]
         assert any(p.name == 'request.log' for p in dest_paths)
+
+    @mock.patch('sky.utils.debug_utils.log_provider.get_log_provider')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request',
+                return_value=None)
+    def test_deadline_expiring_mid_request_yields_only_skip_records(
+            self, mock_get_request, mock_get_provider, tmp_path):
+        """Regression (double bogus record): a deadline that expires between
+        the loop-top guard and the log copies used to clamp the per-copy
+        timeout to a tiny/negative remainder and record two 'timed out
+        after -0.0015s'-style entries for one request. Now the pre-submit
+        guard and clamp attribution yield only truthful budget-skip records
+        -- and the second copy is never started once the budget is gone."""
+        del mock_get_request  # required by mock.patch
+        provider = mock.MagicMock()
+
+        def _slow_copy(*_args, **_kwargs):
+            time.sleep(0.3)  # Outlasts the whole remaining budget.
+            return True
+
+        provider.copy_log_file.side_effect = _slow_copy
+        mock_get_provider.return_value = provider
+        errors: List[Dict[str, str]] = []
+
+        debug_utils._dump_request_id_info({'req-1'},
+                                          str(tmp_path),
+                                          errors,
+                                          deadline=time.monotonic() + 0.15)
+
+        # First copy: budget-binding timeout -> skip record + orphan.
+        # Second copy: pre-submit guard -> skip record, fn never called.
+        assert provider.copy_log_file.call_count == 1
+        assert len(errors) == 2
+        for record in errors:
+            assert record['error'] == ('Skipped: overall debug-dump deadline '
+                                       'exceeded.')
+        assert not any('timed out after' in e['error'] for e in errors)
+
+    @mock.patch('sky.utils.debug_utils.log_provider.get_log_provider')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request',
+                return_value=None)
+    def test_measured_overrun_projection_warns_once(self, mock_get_request,
+                                                    mock_get_provider,
+                                                    tmp_path):
+        """The running-average projection inside the requests loop fires
+        exactly once when the measured per-request cost projects the
+        remaining requests past the budget (catching mid-section slowdowns
+        the static constant cannot)."""
+        del mock_get_request  # required by mock.patch
+        provider = mock.MagicMock()
+
+        def _slow_copy(*_args, **_kwargs):
+            time.sleep(0.1)  # Two copies per request -> ~0.2s/request.
+            return True
+
+        provider.copy_log_file.side_effect = _slow_copy
+        mock_get_provider.return_value = provider
+        errors: List[Dict[str, str]] = []
+
+        debug_utils._dump_request_id_info({f'req-{i}' for i in range(5)},
+                                          str(tmp_path),
+                                          errors,
+                                          deadline=time.monotonic() + 0.5)
+
+        projections = [
+            e for e in errors if e['resource'] == 'budget_projection'
+        ]
+        assert len(projections) == 1
+        assert projections[0]['component'] == 'requests'
+        assert 'projected overrun' in projections[0]['error']
 
 
 # ---------------------------------------------------------------------------
@@ -4329,6 +4597,115 @@ class TestRunWithDeadline:
         finally:
             release.set()  # let the orphaned worker exit promptly
 
+    def test_pre_submit_skip_on_expired_deadline(self):
+        """An already-passed overall deadline: fn is never submitted, the
+        standard budget-skip record is appended, and NO orphan is created
+        (no worker was ever submitted)."""
+        called: List[int] = []
+        errors: List[Dict[str, Any]] = []
+        orphans: List[Dict[str, Any]] = []
+
+        def _fn():
+            called.append(1)
+            return 42
+
+        ok, result = debug_utils._run_with_deadline(_fn,
+                                                    timeout=5,
+                                                    component='c',
+                                                    resource='r',
+                                                    errors=errors,
+                                                    orphans=orphans,
+                                                    deadline=time.monotonic() -
+                                                    1)
+
+        assert ok is False
+        assert result is None
+        assert not called
+        assert not orphans
+        assert len(errors) == 1
+        assert errors[0]['error'] == ('Skipped: overall debug-dump deadline '
+                                      'exceeded.')
+        assert 'traceback' not in errors[0]
+
+    def test_clamp_binding_timeout_records_skip_and_orphan(self, monkeypatch):
+        """A budget-binding timeout (the deadline clamp, not the fixed cap,
+        cut the wait short) records the standard skip record AND still
+        creates an orphan: a worker was submitted and abandoned, and the
+        straggler log needs the orphan to report a worker that completes
+        after timing out (pinned semantics)."""
+        release = threading.Event()
+        errors: List[Dict[str, Any]] = []
+        orphans: List[Dict[str, Any]] = []
+        try:
+            ok, result = debug_utils._run_with_deadline(
+                release.wait,
+                timeout=5,  # generous fixed cap; the deadline clamp binds
+                component='comp',
+                resource='res',
+                errors=errors,
+                orphans=orphans,
+                deadline=time.monotonic() + 0.05)
+            assert ok is False
+            assert result is None
+            assert len(errors) == 1
+            assert errors[0]['error'] == ('Skipped: overall debug-dump '
+                                          'deadline exceeded.')
+            assert len(orphans) == 1
+            assert orphans[0]['thread_id'] is not None
+        finally:
+            release.set()  # the abandoned worker now completes
+        orphans[0]['future'].result(timeout=5)
+
+        # The straggler log reports the completed-after-timeout orphan: the
+        # "data existed but was discarded" case is visible.
+        calls: List[tuple] = []
+        monkeypatch.setattr(debug_utils.logger, 'warning',
+                            lambda *a, **k: calls.append(a))
+        debug_utils._log_timed_out_stragglers(orphans)
+        assert len(calls) == 1
+        assert 'completed' in calls[0][0] and 'discarded' in calls[0][0]
+
+    def test_cap_binding_timeout_names_operation_and_stack(self):
+        """A full-cap timeout (genuine stall): the record names the
+        operation, reports the rounded fixed cap, and carries the stuck
+        WORKER's stack -- never the waiter's (which is identical for every
+        timeout and points at the helper itself)."""
+        release = threading.Event()
+
+        def _stuck():  # MARKER_STUCK_WORKER_FN
+            release.wait()  # MARKER_STUCK_WORKER_FRAME
+
+        errors: List[Dict[str, Any]] = []
+        orphans: List[Dict[str, Any]] = []
+        try:
+            ok, result = debug_utils._run_with_deadline(
+                _stuck,
+                timeout=0.1,
+                component='comp',
+                resource='res',
+                errors=errors,
+                orphans=orphans,
+                deadline=time.monotonic() + 100,
+                op_desc=('fetch that '
+                         'hung; its '
+                         'loss '
+                         'degrades '
+                         'the dump'))
+            assert ok is False
+            assert result is None
+            assert len(errors) == 1
+            record = errors[0]
+            assert record['operation'] == ('fetch that hung; its loss '
+                                           'degrades the dump')
+            assert 'timed out after 0.1s' in record['error']
+            assert 'fetch that hung' in record['error']
+            # Never the waiter's frame (future.result lives in the waiter).
+            assert 'future.result' not in record['worker_stack']
+            assert 'MARKER_STUCK_WORKER_FRAME' in record['worker_stack']
+            assert len(orphans) == 1
+        finally:
+            release.set()
+
     def test_non_timeout_exception_propagates(self):
         """A non-timeout error from fn propagates (each call site keeps its own
         handling); the finally still shuts the executor down."""
@@ -4364,9 +4741,11 @@ class TestRunWithDeadline:
         monkeypatch.setattr(debug_utils.logger, 'warning',
                             lambda *a, **k: calls.append(a))
         debug_utils._log_timed_out_stragglers(orphans)
-        # Exactly one warning, for the still-running op; the done one is skipped.
-        assert len(calls) == 1
-        assert 'still' in calls[0] and 'running' in calls[0]
+        # One warning per fate: the still-running op leaks; the done one
+        # completed after timing out and its result was discarded.
+        assert len(calls) == 2
+        assert any('still running' in a[0] for a in calls)
+        assert any('completed' in a[0] and 'discarded' in a[0] for a in calls)
 
 
 class TestOverallDeadlineHelpers:
@@ -4392,6 +4771,12 @@ class TestOverallDeadlineHelpers:
         assert debug_utils._bounded_timeout(120, time.monotonic() + 1000) == 120
         # A tight deadline clamps the fixed timeout down.
         assert debug_utils._bounded_timeout(120, time.monotonic() + 5) <= 5
+
+    def test_bounded_timeout_floors_negative_remainder(self):
+        # An already-elapsed deadline must yield 0.0, never a negative
+        # timeout (a negative value reaches errors.json as a physically
+        # impossible "timed out after -0.0015s" otherwise).
+        assert debug_utils._bounded_timeout(120, time.monotonic() - 5) == 0.0
 
 
 class TestOverallDeadlineDump:
@@ -4420,8 +4805,11 @@ class TestOverallDeadlineDump:
     def _patched_dump(self, tmp_path):
         """Patch all cross-link + section helpers; yield the section mocks."""
         with contextlib.ExitStack() as stack:
-            for fn in self._CROSSLINK_FNS:
+            crosslink_mocks = {
+                fn:
                 stack.enter_context(mock.patch(f'sky.utils.debug_utils.{fn}'))
+                for fn in self._CROSSLINK_FNS
+            }
             section_mocks = {
                 fn:
                 stack.enter_context(mock.patch(f'sky.utils.debug_utils.{fn}'))
@@ -4430,7 +4818,7 @@ class TestOverallDeadlineDump:
             stack.enter_context(
                 mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
                            str(tmp_path / 'debug_dumps')))
-            yield section_mocks
+            yield crosslink_mocks, section_mocks
 
     @staticmethod
     def _read_errors(zip_path):
@@ -4438,12 +4826,18 @@ class TestOverallDeadlineDump:
             name = next(n for n in zf.namelist() if n.endswith('errors.json'))
             return json.loads(zf.read(name))
 
+    @staticmethod
+    def _read_summary(zip_path):
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            name = next(n for n in zf.namelist() if n.endswith('summary.json'))
+            return json.loads(zf.read(name))
+
     def test_past_deadline_skips_sections_but_still_zips(self, tmp_path):
         """An already-passed overall_deadline (e.g. the caller spent the whole
         budget queueing) skips every section with its own recorded reason, yet
         still produces a real (partial) zip. Exercises the real wall-clock ->
         monotonic conversion + >=0 clamp, no internal mocking."""
-        with self._patched_dump(tmp_path) as section_mocks:
+        with self._patched_dump(tmp_path) as (_crosslink_mocks, section_mocks):
             result = debug_utils.create_debug_dump(
                 cluster_names=['c'], overall_deadline=time.time() - 1)
 
@@ -4465,10 +4859,23 @@ class TestOverallDeadlineDump:
         assert len(skip_records) == len(self._SECTION_FNS)
         assert all(e['resource'] == 'section' for e in skip_records)
 
+        # The pre-expired cross-link phase yields EXACTLY ONE aggregate
+        # context_population record (its check runs before the first step,
+        # so no helper-level records exist), and no cross-link helper ran.
+        phase_records = [
+            e for e in errors if e['component'] == 'context_population'
+        ]
+        assert len(phase_records) == 1
+        assert phase_records[0]['resource'] == 'expansions'
+        assert phase_records[0]['error'].startswith(
+            'Skipped: overall debug-dump deadline exceeded.')
+        for fn, m in _crosslink_mocks.items():
+            assert not m.called, f'{fn} should have been skipped'
+
     def test_no_deadline_runs_all_sections(self, tmp_path):
         """overall_deadline=None == unchanged behavior: every section runs and
         nothing is skipped."""
-        with self._patched_dump(tmp_path) as section_mocks:
+        with self._patched_dump(tmp_path) as (_crosslink_mocks, section_mocks):
             result = debug_utils.create_debug_dump(cluster_names=['c'],
                                                    overall_deadline=None)
 
@@ -4486,10 +4893,153 @@ class TestOverallDeadlineDump:
     def test_future_deadline_runs_all_sections(self, tmp_path):
         """A generous future overall_deadline must not spuriously skip: every
         section runs when there is budget left."""
-        with self._patched_dump(tmp_path) as section_mocks:
+        with self._patched_dump(tmp_path) as (_crosslink_mocks, section_mocks):
             result = debug_utils.create_debug_dump(
                 cluster_names=['c'], overall_deadline=time.time() + 3600)
 
         assert result.exists()
         for fn, m in section_mocks.items():
             assert m.call_count == 1, f'{fn} should have run exactly once'
+
+    def test_phase_gets_own_section_timing_entry(self, tmp_path):
+        """The pre-section cross-link phase is accountable in summary.json:
+        section_timings[0] is a context_population entry with per-step
+        sub_timings, so pre-section time no longer disappears from the
+        timings sum."""
+        with self._patched_dump(tmp_path) as (_crosslink_mocks, section_mocks):
+            result = debug_utils.create_debug_dump(
+                cluster_names=['c'], overall_deadline=time.time() + 3600)
+
+        summary = self._read_summary(result)
+        timings = summary['section_timings']
+        assert timings[0]['section'] == 'context_population'
+        assert timings[0]['status'] == 'completed'
+        assert 'duration_s' in timings[0]
+        # Every phase step that ran (recent_minutes is None here, so no
+        # recent_context step) is timed individually.
+        assert 'managed_jobs_from_clusters' in timings[0]['sub_timings']
+        assert 'clusters_from_managed_jobs' in timings[0]['sub_timings']
+        # The five sections follow the phase entry.
+        assert [t['section'] for t in timings[1:]] == [
+            'server_info', 'request_ids', 'clusters', 'managed_jobs',
+            'kubernetes_contexts'
+        ]
+
+    def test_phase_sub_budget_expiry_skips_remaining_steps(self, tmp_path):
+        """The cross-link phase runs on its own sub-budget: when it expires
+        mid-phase, the remaining steps are skipped with ONE aggregate record
+        (naming the expansions not run) while the sections still run with
+        whatever budget remains. The check fires between steps -- before the
+        first step too (see test_past_deadline above)."""
+        with self._patched_dump(tmp_path) as (crosslink_mocks, section_mocks):
+            # Shrink the phase sub-budget to ~0.1s (0.001 of the 100s
+            # remaining) and make the first step outlast it.
+            with mock.patch.object(debug_utils,
+                                   '_CONTEXT_POPULATION_BUDGET_FRACTION',
+                                   0.001):
+                crosslink_mocks[
+                    '_get_managed_jobs_from_clusters'].side_effect = (
+                        lambda *a, **kw: time.sleep(0.2))
+                result = debug_utils.create_debug_dump(
+                    cluster_names=['c'], overall_deadline=time.time() + 100)
+
+        # The sections still ran (the phase sub-budget must not eat the
+        # overall one).
+        for fn, m in section_mocks.items():
+            assert m.call_count == 1, f'{fn} should have run exactly once'
+
+        errors = self._read_errors(result)
+        phase_records = [
+            e for e in errors if e['component'] == 'context_population'
+        ]
+        assert len(phase_records) == 1
+        assert phase_records[0]['error'].startswith(
+            'Skipped: overall debug-dump deadline exceeded.')
+        # The record names the expansions that did not run...
+        for step in ('managed_jobs_from_requests', 'requests_from_clusters',
+                     'clusters_from_requests'):
+            assert step in phase_records[0]['error']
+        # ...and those skipped steps never ran (only the first step did).
+        assert crosslink_mocks['_get_managed_jobs_from_clusters'].called
+        assert not crosslink_mocks['_get_managed_jobs_from_requests'].called
+        assert not crosslink_mocks['_get_clusters_from_requests'].called
+
+        summary = self._read_summary(result)
+        assert summary['section_timings'][0]['status'] == 'partial_deadline'
+
+    def test_static_projection_warns_when_infeasible(self, tmp_path):
+        """When the request count projects past the remaining budget, the
+        dump warns at the start of the sections (log + a budget_projection
+        errors record embedded in summary.json) instead of truncating
+        silently."""
+        with self._patched_dump(tmp_path) as (_crosslink_mocks, section_mocks):
+
+            def _fake_prefix_lookup(prefix, fields=None):
+                return [mock.MagicMock(request_id=prefix)]
+
+            with mock.patch(
+                    'sky.utils.debug_utils.requests_lib.'
+                    'get_requests_with_prefix',
+                    side_effect=_fake_prefix_lookup):
+                result = debug_utils.create_debug_dump(
+                    request_ids=[f'req-{i}' for i in range(1000)],
+                    overall_deadline=time.time() + 10)
+
+        errors = self._read_errors(result)
+        projections = [
+            e for e in errors if e['resource'] == 'budget_projection'
+        ]
+        assert len(projections) == 1
+        assert projections[0]['component'] == 'requests'
+        assert 'projected overrun' in projections[0]['error']
+
+    def test_past_deadline_zip_truncates_but_stays_self_describing(
+            self, tmp_path):
+        """A deadline that expires before the zip finishes yields a VALID,
+        truncated archive: the self-describing top-level artifacts are always
+        included by name, debug_dump.log is the final walk entry (so the
+        'zipping N bytes' line and the mid-walk truncation warning are
+        deterministic in the archived copy), and zip_stats.json records the
+        truncation."""
+        with self._patched_dump(tmp_path) as (_crosslink_mocks, section_mocks):
+
+            def _slow_server_info(dump_dir, **_kwargs):
+                # Write a non-exempt collected file, then outlast the
+                # budget so the zip walk starts with the deadline gone.
+                requests_dir = os.path.join(dump_dir, 'requests')
+                os.makedirs(requests_dir, exist_ok=True)
+                with open(os.path.join(requests_dir, 'req-1.log'),
+                          'w',
+                          encoding='utf-8') as f:
+                    f.write('x' * 128)
+                time.sleep(0.3)
+
+            section_mocks['_dump_server_info'].side_effect = (_slow_server_info)
+            result = debug_utils.create_debug_dump(
+                cluster_names=['c'],
+                client_info={'client_version': '0.10.0'},
+                overall_deadline=time.time() + 0.1)
+
+        assert result.exists()
+        assert zipfile.is_zipfile(result)
+        with zipfile.ZipFile(result, 'r') as zf:
+            names = zf.namelist()
+            # The self-describing artifacts are always present, by name.
+            for artifact in ('summary.json', 'errors.json', 'client_info.json',
+                             'debug_dump.log', 'zip_stats.json'):
+                assert any(n.endswith(artifact) for n in names), artifact
+            # The non-exempt collected file was skipped by the deadline.
+            assert not any(n.endswith('req-1.log') for n in names)
+            # debug_dump.log is the final WALK entry (zip_stats.json is
+            # appended after the zip closes, so it is the very last name).
+            assert names[-1].endswith('zip_stats.json')
+            assert names[-2].endswith('debug_dump.log')
+            # The archived log deterministically contains both the
+            # pre-walk 'zipping' line and the mid-walk truncation warning.
+            archived_log = zf.read(names[-2]).decode()
+            assert 'zipping' in archived_log
+            assert 'truncating the archive' in archived_log
+            stats = json.loads(
+                zf.read(next(n for n in names if n.endswith('zip_stats.json'))))
+        assert stats['status'] == 'truncated_deadline'
+        assert stats['skipped_deadline_files'] >= 1
