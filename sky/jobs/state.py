@@ -3891,12 +3891,15 @@ def set_job_info(job_id: int,
 
 def get_jobs_launched_from(
         job_ids: List[int]) -> List[Tuple[int, Optional[int]]]:
-    """(job_id, parent_job_id) for every job under the trees of ``job_ids``.
+    """(job_id, parent_job_id) for every job in the trees ``job_ids`` live in.
 
-    One query: the rows whose ``root_job_id`` is the root of any of the given
-    ids (a top-level id is its own root). Callers pick out the subtree they
-    want in memory from the parent edges; the roots themselves are not
-    included. Used by cancel to take a job's launched jobs down with it.
+    Each given id is first resolved to the top-level job of its tree: its
+    ``root_job_id``, or itself when that is NULL (``COALESCE``). The result is
+    then every row under those roots, so passing a descendant returns the
+    whole tree it belongs to, not just the jobs under it. Callers walk the
+    parent edges in memory to pick out the subtree they want (see
+    ``utils._jobs_launched_from``); the roots themselves are not included.
+    One query regardless of depth.
     """
     if not job_ids:
         return []

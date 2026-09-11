@@ -1511,6 +1511,18 @@ _JOB_FIELDS_BY_MIN_CONTROLLER_VERSION = {
 }
 
 
+def queue_fields_need_controller_version(fields: Optional[List[str]]) -> bool:
+    """Whether ``fields`` names any queue field some controller versions lack,
+    so the caller has to ask the controller's version before requesting them.
+    ``None`` (all fields) is interpreted by the controller itself and needs no
+    check."""
+    if fields is None:
+        return False
+    return any(f in versioned
+               for versioned in _JOB_FIELDS_BY_MIN_CONTROLLER_VERSION.values()
+               for f in fields)
+
+
 def fields_for_controller(
         fields: Optional[List[str]],
         controller_version: Optional[str]) -> Optional[List[str]]:
