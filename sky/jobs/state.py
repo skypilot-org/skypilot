@@ -1653,9 +1653,22 @@ def get_managed_jobs_highest_priority() -> int:
             0] is not None else constants.MIN_PRIORITY
 
 
+def _tree_root_expr() -> 'sqlalchemy.ColumnElement':
+    """The top-level job of a row's tree: its root_job_id, else itself.
+
+    A job launched from inside another managed job (a dynamic job group
+    member) has its own spot_job_id but belongs, for listing purposes, to
+    the tree of its root. The queue pages and counts by this expression so
+    a group and everything launched under it stay on one page.
+    """
+    return sqlalchemy.func.coalesce(job_info_table.c.root_job_id,
+                                    spot_table.c.spot_job_id)
+
+
 def build_managed_jobs_with_filters_no_status_query(
     fields: Optional[List[str]] = None,
     job_ids: Optional[List[int]] = None,
+    tree_root_ids: Optional[List[int]] = None,
     accessible_workspaces: Optional[List[str]] = None,
     workspace_match: Optional[str] = None,
     name_match: Optional[str] = None,
@@ -1695,10 +1708,12 @@ def build_managed_jobs_with_filters_no_status_query(
     # global_user_state.get_user() on it. This runs on the controller, which may
     # not have the user info. Prefer to do it on the API server side.
     if count_unique_jobs:
-        # Count unique jobs (by spot_job_id), not tasks
+        # Count unique top-level jobs (tree roots), not tasks and not the
+        # jobs launched from inside another job: those are listed under
+        # their root and must not take a page slot of their own.
         query = sqlalchemy.select(
             sqlalchemy.func.count(  # pylint: disable=not-callable
-                sqlalchemy.distinct(spot_table.c.spot_job_id)).label('count'))
+                sqlalchemy.distinct(_tree_root_expr())).label('count'))
     elif count_only:
         query = sqlalchemy.select(sqlalchemy.func.count().label('count'))  # pylint: disable=not-callable
     elif status_count:
@@ -1746,6 +1761,10 @@ def build_managed_jobs_with_filters_no_status_query(
         query = query.with_only_columns(*selected_columns)
     if job_ids is not None:
         query = query.where(spot_table.c.spot_job_id.in_(job_ids))
+    if tree_root_ids is not None:
+        # Every row in these trees: the roots' own tasks and the jobs
+        # launched under them, at any depth.
+        query = query.where(_tree_root_expr().in_(tree_root_ids))
     if accessible_workspaces is not None:
         query = query.where(
             job_info_table.c.workspace.in_(accessible_workspaces))
@@ -1810,6 +1829,7 @@ def build_managed_jobs_with_filters_no_status_query(
 def build_managed_jobs_with_filters_query(
     fields: Optional[List[str]] = None,
     job_ids: Optional[List[int]] = None,
+    tree_root_ids: Optional[List[int]] = None,
     accessible_workspaces: Optional[List[str]] = None,
     workspace_match: Optional[str] = None,
     name_match: Optional[str] = None,
@@ -1833,6 +1853,7 @@ def build_managed_jobs_with_filters_query(
     query = build_managed_jobs_with_filters_no_status_query(
         fields=fields,
         job_ids=job_ids,
+        tree_root_ids=tree_root_ids,
         accessible_workspaces=accessible_workspaces,
         workspace_match=workspace_match,
         name_match=name_match,
@@ -2134,8 +2155,10 @@ def get_managed_jobs_with_filters(
     rows still carry the raw ``status``; callers that want the refined value in
     the result should surface it separately.
 
-    Pagination is by unique jobs (spot_job_id), not by tasks. This means
-    if you request page 1 with limit 10, you get all tasks for 10 unique jobs.
+    Pagination is by top-level job (tree root), not by tasks and not by the
+    jobs launched from inside another job: page 1 with limit 10 is every
+    task of 10 top-level jobs plus every job launched under them, at any
+    depth, so a job group and its members are always on the same page.
 
     Args:
         sort_by: Field to sort by. Valid values: 'job_id', 'id', 'job_name',
@@ -2173,7 +2196,7 @@ def get_managed_jobs_with_filters(
 
     engine = _db_manager.get_engine()
 
-    # Count unique jobs (by spot_job_id), not tasks
+    # Count unique top-level jobs (tree roots), not tasks
     count_query = build_managed_jobs_with_filters_query(
         fields=None,
         job_ids=job_ids,
@@ -2193,13 +2216,15 @@ def get_managed_jobs_with_filters(
     with orm.Session(engine) as session:
         total = session.execute(count_query).fetchone()[0]
 
-    # For pagination, first get the unique job_ids for the current page,
-    # then fetch all tasks for those jobs
+    # For pagination, first get the tree roots for the current page, then
+    # fetch every row in those trees (the roots' tasks and the jobs launched
+    # under them).
     if page is not None and limit is not None:
-        # Get paginated unique job IDs with ordering
+        # Get paginated unique root ids with ordering
         # Use GROUP BY instead of DISTINCT to allow ORDER BY on different
         # columns (PostgreSQL requires ORDER BY columns to be in SELECT list
         # when using DISTINCT).
+        tree_root = _tree_root_expr()
         job_ids_subquery = build_managed_jobs_with_filters_query(
             fields=None,
             job_ids=job_ids,
@@ -2214,41 +2239,44 @@ def get_managed_jobs_with_filters(
             submitted_after=submitted_after,
             submitted_before=submitted_before,
             status_expr=status_expr,
-        ).with_only_columns(spot_table.c.spot_job_id).group_by(
-            spot_table.c.spot_job_id)
+        ).with_only_columns(tree_root.label('tree_root')).group_by(tree_root)
 
-        # Apply sorting to pagination query - this determines which jobs appear
-        # on each page. Use MAX aggregate for columns not in GROUP BY to ensure
-        # PostgreSQL compatibility.
+        # Apply sorting to pagination query - this determines which trees
+        # appear on each page. Use MAX aggregate for columns not in GROUP BY
+        # to ensure PostgreSQL compatibility; a tree sorts by its newest or
+        # largest value.
         if sort_by and sort_by in sort_field_map:
             sort_column = sort_field_map[sort_by]
-            # Use MAX aggregate for columns that aren't the grouped column
-            if sort_column != spot_table.c.spot_job_id:
+            # A tree's id is its root's id; every other column is aggregated
+            # over the tree's rows.
+            if sort_column == spot_table.c.spot_job_id:
+                sort_column = tree_root
+            else:
                 sort_column = sqlalchemy.func.max(sort_column)
             if sort_order == 'asc':
                 job_ids_subquery = job_ids_subquery.order_by(sort_column.asc())
             else:
                 job_ids_subquery = job_ids_subquery.order_by(sort_column.desc())
         else:
-            # Default sort: job_id desc (newest first)
-            job_ids_subquery = job_ids_subquery.order_by(
-                spot_table.c.spot_job_id.desc())
+            # Default sort: root id desc (newest top-level job first)
+            job_ids_subquery = job_ids_subquery.order_by(tree_root.desc())
 
         job_ids_subquery = job_ids_subquery.offset(
             (page - 1) * limit).limit(limit)
 
         with orm.Session(engine) as session:
-            paginated_job_ids = [
+            paginated_root_ids = [
                 row[0] for row in session.execute(job_ids_subquery).fetchall()
             ]
 
-        if not paginated_job_ids:
+        if not paginated_root_ids:
             return [], total
 
-        # Now get all tasks for those job IDs
+        # Now get every row in those trees
         query = build_managed_jobs_with_filters_query(
             fields=fields,
-            job_ids=paginated_job_ids,  # Filter to only paginated jobs
+            job_ids=job_ids,
+            tree_root_ids=paginated_root_ids,  # Only the paginated trees
             accessible_workspaces=accessible_workspaces,
             workspace_match=workspace_match,
             name_match=name_match,

@@ -1886,6 +1886,49 @@ class TestInfraFilterCodegenCompatibility:
             self._run_branch(code, one_older)
 
 
+class TestPaginationByTreeRoot:
+    """The queue pages and counts by top-level job: a job launched from inside
+    another job rides along with its root instead of taking a page slot."""
+
+    def test_members_stay_on_their_roots_page(self, _mock_managed_jobs_db_conn):
+        new_job = TestParentJobLinks._new_job
+        root = new_job('group')
+        state.set_pending(root,
+                          task_id=1,
+                          task_name='watcher',
+                          resources_str='{}',
+                          metadata='{}')
+        plain = new_job('plain')
+        eval1 = new_job('eval-1', parent_job_id=root, parent_task_id=1)
+        eval1a = new_job('eval-1a', parent_job_id=eval1, root_job_id=root)
+        newest = new_job('newest')
+
+        # Three top-level jobs, however many members and tasks.
+        page1, total = state.get_managed_jobs_with_filters(page=1, limit=2)
+        assert total == 3
+        # Newest root first; the members (higher ids than their root) do not
+        # push the root off the page or claim slots of their own.
+        assert [j['job_id'] for j in page1] == [newest, plain]
+
+        page2, total = state.get_managed_jobs_with_filters(page=2, limit=2)
+        assert total == 3
+        # The root's two tasks and both members, on the root's page.
+        assert sorted((j['job_id'], j['task_id']) for j in page2) == [
+            (root, 0), (root, 1), (eval1, 0), (eval1a, 0)
+        ]
+
+        page3, _ = state.get_managed_jobs_with_filters(page=3, limit=2)
+        assert page3 == []
+
+    def test_unpaginated_listing_is_unchanged(self, _mock_managed_jobs_db_conn):
+        new_job = TestParentJobLinks._new_job
+        root = new_job('group')
+        eval1 = new_job('eval-1', parent_job_id=root)
+        jobs, total = state.get_managed_jobs_with_filters()
+        assert total == 1
+        assert sorted(j['job_id'] for j in jobs) == [root, eval1]
+
+
 class TestParentJobLinks:
     """root/parent/parent_task persistence and the cancel tree fetch."""
 
