@@ -337,6 +337,34 @@ class TestGpusList:
 
         assert 'Slurm is not enabled' in result.output
 
+    def test_gpus_list_all_with_only_slurm_enabled_skips_cloud_catalogs(self):
+        """Test that allowed_clouds=[slurm] does not query cloud catalogs."""
+        self.cloud_registry_mock.return_value = None
+        self.sdk_get_mock.return_value = ['slurm']
+        gpu_availability = [
+            ('cluster1', [('A100', [1, 2, 4, 8], 24, 12)]),
+        ]
+        self.stream_and_get_mock.side_effect = [
+            gpu_availability,
+            [],
+        ]
+
+        with mock.patch.object(sdk,
+                               'realtime_slurm_gpu_availability',
+                               return_value=mock.MagicMock()), \
+             mock.patch.object(sdk,
+                               'slurm_node_info',
+                               return_value=mock.MagicMock()), \
+             mock.patch.object(sdk,
+                               'list_accelerator_counts',
+                               return_value=mock.MagicMock()) as mock_list:
+            result = self.runner.invoke(command.gpus_list, ['--all'])
+
+        assert result.exit_code == 0
+        assert 'Slurm GPUs' in result.output
+        assert 'A100' in result.output
+        mock_list.assert_not_called()
+
     def _invoke_slurm_gpus_list(self,
                                 gpu_availability,
                                 node_info,
