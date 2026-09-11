@@ -182,6 +182,36 @@ def _log_timed_out_stragglers(orphans: List[Dict[str, Any]]) -> None:
         logger.exception('_log_timed_out_stragglers failed')
 
 
+def _count_item_dirs_with_files(
+        parent_dir: str,
+        name_filter: Optional[Callable[[str], bool]] = None) -> int:
+    """Count subdirectories of ``parent_dir`` that contain at least one file.
+
+    Sections create a directory per item up front, but an item that produced
+    no data (e.g. a request ID that is no longer in the DB) leaves an empty
+    directory -- which the os.walk-based zipping silently drops. Counting
+    only directories with content therefore yields the number that matches
+    what actually lands in the dump zip. ``name_filter`` restricts which
+    subdirectory names count as items (e.g. the managed-jobs section skips
+    its non-per-job ``controller_*`` directories). Best-effort: an
+    unreadable directory counts as empty.
+    """
+    try:
+        entries = list(pathlib.Path(parent_dir).iterdir())
+    except OSError:
+        return 0
+    count = 0
+    for entry in entries:
+        if name_filter is not None and not name_filter(entry.name):
+            continue
+        try:
+            if entry.is_dir() and any(entry.iterdir()):
+                count += 1
+        except OSError:
+            continue
+    return count
+
+
 # Persistent location for debug dumps
 DEBUG_DUMP_DIR = '~/.sky/debug_dumps'
 
@@ -774,6 +804,16 @@ def _populate_recent_context(
         f'Populating context with resources from last {minutes} minutes')
     cutoff_time = time.time() - (minutes * 60)
 
+    # The dump's own request is RUNNING while this scan runs, so without an
+    # explicit exclusion it would include itself -- and copying its
+    # request.log / request_debug.log would ship the dump's own output
+    # stream a second time inside the artifact. Only this accidental
+    # self-inclusion is excluded: explicitly requesting the dump's own
+    # request ID still dumps it. Outside a server-side request execution
+    # (e.g. tests, in-process callers) there is no own request to exclude.
+    own_request_id = (common_utils.get_current_request_id()
+                      if common_utils.is_in_request_context() else None)
+
     # Get recent requests (cluster names are handled by
     # _get_clusters_from_requests during cross-linking)
     try:
@@ -782,6 +822,12 @@ def _populate_recent_context(
                                            fields=['request_id',
                                                    'finished_at']))
         for request in requests:
+            if own_request_id is not None and (request.request_id
+                                               == own_request_id):
+                logger.debug('Recent: excluding the debug dump\'s own '
+                             f'request {request.request_id} (its logs are '
+                             'the dump itself)')
+                continue
             logger.debug(f'Recent: including request {request.request_id} '
                          f'(finished_at={request.finished_at},'
                          f' cutoff={cutoff_time:.0f})')
@@ -1064,7 +1110,8 @@ def _dump_request_id_info(
         dump_dir: str,
         errors: Optional[List[Dict[str, str]]] = None,
         deadline: Optional[float] = None,
-        orphans: Optional[List[Dict[str, Any]]] = None) -> None:
+        orphans: Optional[List[Dict[str,
+                                    Any]]] = None) -> Optional[Dict[str, int]]:
     """Collect request logs and metadata.
 
     ``deadline`` (absolute monotonic) bounds the section two ways: each
@@ -1073,19 +1120,31 @@ def _dump_request_id_info(
     budget is gone we stop starting new requests and skip the rest -- so the
     dump still zips what it gathered. Per-request wall-clock is written to
     ``requests/_timings.json``.
+
+    Returns per-item stats for summary.json -- ``dumped`` (request info
+    written), ``not_found`` (request ID no longer in the DB) and
+    ``skipped_deadline`` (never attempted, budget gone) -- which together
+    account for every request in the section's scope. ``None`` when there
+    are no requests to dump.
     """
     if not request_ids:
         logger.debug('No requests to dump')
-        return
+        return None
     logger.debug(f'Entering _dump_request_id_info for '
                  f'{len(request_ids)} requests')
 
     requests_dir = os.path.join(dump_dir, 'requests')
     os.makedirs(requests_dir, exist_ok=True)
 
+    stats: Dict[str, int] = {
+        'dumped': 0,
+        'not_found': 0,
+        'skipped_deadline': 0,
+    }
     timings: List[Dict[str, Any]] = []
     for request_id in request_ids:
         if _deadline_exceeded(deadline):
+            stats['skipped_deadline'] += 1
             if errors is not None:
                 errors.append({
                     'component': 'requests',
@@ -1139,7 +1198,9 @@ def _dump_request_id_info(
                     f'(name={request.name}, '
                     f'status='
                     f'{request.status.value if request.status else None})')
+                stats['dumped'] += 1
             else:
+                stats['not_found'] += 1
                 logger.debug(f'Request {request_id} not found in DB')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get info for request {request_id}: {e}')
@@ -1219,6 +1280,7 @@ def _dump_request_id_info(
     except OSError as e:
         logger.debug(f'Failed to write request timings: {e}')
     logger.debug('Exiting _dump_request_id_info')
+    return stats
 
 
 # Short connection timeout for the skylet-log-path resolution command. The
@@ -1529,7 +1591,8 @@ def _dump_kube_contexts_info(
         dump_dir: str,
         errors: Optional[List[Dict[str, str]]] = None,
         deadline: Optional[float] = None,
-        orphans: Optional[List[Dict[str, Any]]] = None) -> None:
+        orphans: Optional[List[Dict[str,
+                                    Any]]] = None) -> Optional[Dict[str, int]]:
     """Dump cluster-WIDE k8s objects once per allowed kube context.
 
     The GPU-metrics pods (Prometheus server, DCGM exporter) and the non-Workload
@@ -1562,6 +1625,10 @@ def _dump_kube_contexts_info(
     the fixed cap. On timeout the batch is abandoned (its worker recorded in
     ``orphans``) and whatever landed on disk is kept. Best-effort throughout:
     errors are recorded, never aborts the dump.
+
+    Returns per-item stats for summary.json (``dumped``: context directories
+    with at least one file -- whatever landed on disk, including a partial
+    batch cut off by the timeout), or ``None`` when there is nothing to dump.
     """
     try:
         contexts = clouds.Kubernetes.existing_allowed_contexts(silent=True)
@@ -1574,7 +1641,7 @@ def _dump_kube_contexts_info(
                 'error': str(e),
                 'traceback': _full_traceback(),
             })
-        return
+        return None
 
     # Always dump the API server's own in-cluster context, even when it's been
     # excluded as a compute target (explicit allowed_contexts list, or
@@ -1586,7 +1653,7 @@ def _dump_kube_contexts_info(
     # Dedupe defensively while preserving order (None = in-cluster is allowed).
     unique_contexts = list(dict.fromkeys(contexts))
     if not unique_contexts:
-        return
+        return None
 
     contexts_root = os.path.join(dump_dir, 'kubernetes_contexts')
     os.makedirs(contexts_root, exist_ok=True)
@@ -1622,7 +1689,7 @@ def _dump_kube_contexts_info(
     if not ok or results is None:
         # Timed out: _run_with_deadline recorded the skip + orphan; per-context
         # dirs written before the cutoff remain on disk as a partial.
-        return
+        return {'dumped': _count_item_dirs_with_files(contexts_root)}
 
     timings: List[Dict[str, Any]] = []
     for context, (ctx_errors, duration_s) in zip(unique_contexts, results):
@@ -1647,6 +1714,7 @@ def _dump_kube_contexts_info(
             json.dump(timings, f, indent=2)
     except OSError as e:
         logger.debug(f'Failed to write kube-context timings: {e}')
+    return {'dumped': _count_item_dirs_with_files(contexts_root)}
 
 
 _KubeContextReachabilityChecker = Callable[[Optional[str]], bool]
@@ -1891,11 +1959,12 @@ def _dump_one_cluster(cluster_name: str,
     return errors
 
 
-def _dump_cluster_info(cluster_names: Set[str],
-                       dump_dir: str,
-                       reachability: '_KubeContextReachabilityChecker',
-                       errors: Optional[List[Dict[str, str]]] = None,
-                       deadline: Optional[float] = None) -> None:
+def _dump_cluster_info(
+        cluster_names: Set[str],
+        dump_dir: str,
+        reachability: '_KubeContextReachabilityChecker',
+        errors: Optional[List[Dict[str, str]]] = None,
+        deadline: Optional[float] = None) -> Optional[Dict[str, int]]:
     """Collect cluster state and events.
 
     Clusters are dumped in parallel: each cluster's collection can make slow
@@ -1903,10 +1972,14 @@ def _dump_cluster_info(cluster_names: Set[str],
     a single unreachable cluster stack its timeout in front of every other
     cluster. run_in_parallel keeps per-cluster best-effort isolation -- each
     worker returns its own error records, merged here after all finish.
+
+    Returns per-item stats for summary.json (``dumped``: cluster directories
+    with at least one file, i.e. what actually lands in the dump zip), or
+    ``None`` when there are no clusters to dump.
     """
     if not cluster_names:
         logger.debug('No clusters to dump')
-        return
+        return None
     logger.debug(f'Entering _dump_cluster_info for '
                  f'{len(cluster_names)} clusters')
 
@@ -1924,7 +1997,11 @@ def _dump_cluster_info(cluster_names: Set[str],
         for cluster_errors in results:
             errors.extend(cluster_errors)
 
+    stats: Dict[str, int] = {
+        'dumped': _count_item_dirs_with_files(clusters_dir),
+    }
     logger.debug('Exiting _dump_cluster_info')
+    return stats
 
 
 def _dump_managed_job_info(
@@ -1933,17 +2010,22 @@ def _dump_managed_job_info(
         reachability: '_KubeContextReachabilityChecker',
         errors: Optional[List[Dict[str, str]]] = None,
         deadline: Optional[float] = None,
-        orphans: Optional[List[Dict[str, Any]]] = None) -> None:
+        orphans: Optional[List[Dict[str,
+                                    Any]]] = None) -> Optional[Dict[str, int]]:
     """Collect managed job state and logs.
 
     Both phases exec into the jobs controller outside consolidation mode,
     so both are gated on the controller context's reachability -- one
     memoized probe covers the whole section (and, via the shared cache,
     reuses the clusters section's probe of the same context).
+
+    Returns per-item stats for summary.json (``dumped``: managed-job
+    directories with at least one file, i.e. what actually lands in the
+    dump zip), or ``None`` when there are no managed jobs to dump.
     """
     if not managed_job_ids:
         logger.debug('No managed jobs to dump')
-        return
+        return None
     logger.debug(f'Entering _dump_managed_job_info for '
                  f'{len(managed_job_ids)} managed jobs')
 
@@ -1959,7 +2041,7 @@ def _dump_managed_job_info(
                 _controller_skip_error('managed_jobs', 'controller_access',
                                        dead_context))
         logger.debug('Exiting _dump_managed_job_info')
-        return
+        return {'dumped': 0}
 
     # Phase 1: Queue info from queue_v2 (works in both consolidation and
     # non-consolidation modes via existing gRPC/SSH plumbing)
@@ -1971,7 +2053,15 @@ def _dump_managed_job_info(
     _collect_controller_debug_data(list(managed_job_ids), dump_dir, errors,
                                    deadline)
 
+    stats: Dict[str, int] = {
+        # Per-job directories only: the controller-side phase also writes
+        # non-per-job directories (controller_system/, controller_submit_logs/
+        # ) under managed_jobs/, which are not scoped jobs.
+        'dumped': _count_item_dirs_with_files(jobs_dir,
+                                              name_filter=str.isdigit),
+    }
     logger.debug('Exiting _dump_managed_job_info')
+    return stats
 
 
 def _dump_managed_job_queue_info(
@@ -2205,6 +2295,34 @@ def _collect_controller_debug_data(job_ids: List[int],
         f'and {len(file_path_entries)} rsynced files from controller')
 
 
+# Maps a dump section to the summary.json 'collected' count key it feeds
+# (sections not listed here contribute no top-level collected count).
+_SECTION_COLLECTED_KEYS = {
+    'request_ids': 'request_count',
+    'clusters': 'cluster_count',
+    'managed_jobs': 'managed_job_count',
+}
+
+# Maps a dump section to the dump-root paths it writes, so summary.json can
+# attribute bytes per section after collection finishes. Paths are matched
+# against the first path component of each collected file, so a directory
+# entry covers everything written beneath it. 'context_population' writes no
+# files. Controller-side managed-job data also lands under managed_jobs/ (see
+# _collect_controller_debug_data), so it is attributed to managed_jobs.
+_SECTION_OUTPUT_PATHS = {
+    'server_info': ('server_info.json',),
+    'request_ids': ('requests',),
+    'clusters': ('clusters',),
+    'managed_jobs': ('managed_jobs',),
+    'kubernetes_contexts': ('kubernetes_contexts',),
+}
+
+# How many of the largest collected files to list (largest first) in
+# summary.json and manifest.json, so a multi-GB dump can be navigated without
+# running du over the extracted tree.
+_LARGEST_FILES_LISTED = 10
+
+
 def _build_debug_dump(
     dump_dir: str,
     debug_dump_context: DebugDumpContext,
@@ -2216,16 +2334,24 @@ def _build_debug_dump(
     """Build the debug dump contents in dump_dir.
 
     Populates context via cross-linking, then dumps all sections
-    (server info, requests, clusters, managed jobs, client info,
-    errors, summary).
+    (server info, requests, clusters, managed jobs, kubernetes contexts),
+    then writes errors.json, summary.json and a manifest.json file
+    inventory.
 
     ``deadline`` is an optional absolute ``time.monotonic()`` best-effort
     budget: once it passes, the remaining section calls are skipped (each with
     its own recorded skip record) instead of run, and in-flight per-operation
     timeouts are clamped to the remaining budget. The client-info / errors /
-    summary writes below always run so the partial dump is self-describing.
-    ``None`` (the default) keeps the previous behavior exactly.
+    summary / manifest writes below always run so the partial dump is
+    self-describing. ``None`` (the default) keeps the previous behavior
+    exactly.
     """
+    build_start_mono = time.monotonic()
+    build_start_wall = time.time()
+    # Per-section wall-clock + status, surfaced in summary.json so a reader can
+    # see where the budget went (and which sections were skipped) without
+    # grepping the worker log.
+    section_timings: List[Dict[str, Any]] = []
     # Populate the context and cross-link related resources. Each helper
     # runs exactly once, and the order is load-bearing:
     # 1. Expand clusters -> jobs BEFORE anything else adds cluster names
@@ -2256,6 +2382,11 @@ def _build_debug_dump(
     _kube_context_reachable.cache_clear()
     reachability = _kube_context_reachable
 
+    # Time the population phase like a section (it has no section_timings
+    # entry otherwise): on a large deployment the cross-link scans can take
+    # minutes, and without this entry the section timings sum to far less
+    # than the dump's total duration, hiding where the time went.
+    context_start = time.monotonic()
     logger.debug('Cross-linking related resources')
     _get_managed_jobs_from_clusters(debug_dump_context,
                                     reachability,
@@ -2276,6 +2407,12 @@ def _build_debug_dump(
 
     # Always include system daemon requests
     debug_dump_context['request_ids'].update(SYSTEM_REQUEST_IDS)
+
+    section_timings.append({
+        'section': 'context_population',
+        'status': 'completed',
+        'duration_s': round(time.monotonic() - context_start, 2),
+    })
 
     logger.debug(f'After cross-linking: '
                  f'{len(debug_dump_context["request_ids"])} requests, '
@@ -2302,7 +2439,7 @@ def _build_debug_dump(
     # deadline-aware (its internal calls are bounded and it's skipped once the
     # budget is gone), so the build always reaches the zip step with a coherent
     # partial instead of being hard-killed mid-section.
-    sections: List[Tuple[str, Callable[[], None]]] = [
+    sections: List[Tuple[str, Callable[[], Optional[Dict[str, int]]]]] = [
         ('server_info', lambda: _dump_server_info(
             dump_dir, errors=errors, deadline=deadline, orphans=orphans)),
         ('request_ids',
@@ -2333,10 +2470,16 @@ def _build_debug_dump(
                 f'{len(debug_dump_context["cluster_names"])} clusters, '
                 f'{len(debug_dump_context["managed_job_ids"])} managed jobs); '
                 f'budget={"unbounded" if budget is None else f"{budget:.0f}s"}')
-    # Per-section wall-clock + status, surfaced in summary.json so a reader can
-    # see where the budget went (and which sections were skipped) without
-    # grepping the worker log.
-    section_timings: List[Dict[str, Any]] = []
+    # Actual per-resource counts, taken from what the sections report they
+    # wrote -- NOT from the planned scope above -- so summary.json's
+    # 'collected' reflects what is really in the dump (e.g. 0 clusters when
+    # the clusters section was skipped by the deadline). Sections that did
+    # not run leave their count at 0.
+    collected_counts: Dict[str, int] = {
+        'request_count': 0,
+        'cluster_count': 0,
+        'managed_job_count': 0,
+    }
     for name, dump_section in sections:
         if _deadline_exceeded(deadline):
             logger.warning(f'Skipping debug-dump section {name!r}: overall '
@@ -2362,14 +2505,27 @@ def _build_debug_dump(
         remaining = _remaining_budget(deadline)
         logger.info(f'debug dump: section {name!r} start' + (
             '' if remaining is None else f' ({remaining:.0f}s budget left)'))
-        dump_section()
+        stats = dump_section()
         duration = time.monotonic() - section_start
         logger.info(f'debug dump: section {name!r} done in {duration:.1f}s')
-        section_timings.append({
+        timing_entry: Dict[str, Any] = {
             'section': name,
             'status': 'completed',
             'duration_s': round(duration, 2),
-        })
+        }
+        # Sections report what they actually collected by returning a stats
+        # dict (``None`` when there is nothing to itemize, e.g. server_info);
+        # anything else is ignored. A section that deadline-skipped some of
+        # its scoped items is marked partial, so a reader of summary.json
+        # alone sees the truncation without grepping errors.json.
+        if isinstance(stats, dict):
+            timing_entry.update(stats)
+            if stats.get('skipped_deadline', 0):
+                timing_entry['status'] = 'completed_partial'
+            count_key = _SECTION_COLLECTED_KEYS.get(name)
+            if count_key is not None and 'dumped' in stats:
+                collected_counts[count_key] = stats['dumped']
+        section_timings.append(timing_entry)
 
     # Write client info if provided
     if client_info:
@@ -2385,10 +2541,53 @@ def _build_debug_dump(
     with open(errors_path, 'w', encoding='utf-8') as f:
         json.dump(errors, f, indent=2, default=str)
 
-    # Write summary file
+    # Account for the dump's own contents: a file inventory (manifest.json)
+    # and size / count roll-ups (summary.json), so a multi-GB dump can be
+    # navigated from summary.json alone and verified against manifest.json.
+    # Measured here -- after all sections ran, before summary.json and
+    # manifest.json themselves are written, and while debug_dump.log is still
+    # growing -- so sizes are point-in-time (noted in the manifest), close
+    # enough to navigate by.
+    inventory: List[Tuple[str, int]] = []
+    for root, _, files in os.walk(dump_dir):
+        for file_name in files:
+            file_path = os.path.join(root, file_name)
+            try:
+                inventory.append(
+                    (os.path.relpath(file_path,
+                                     dump_dir), os.path.getsize(file_path)))
+            except OSError:
+                continue
+    section_size_bytes = {
+        section:
+        sum(size for path, size in inventory if path.split(os.sep)[0] in paths)
+        for section, paths in _SECTION_OUTPUT_PATHS.items()
+    }
+    for timing in section_timings:
+        if timing['section'] in section_size_bytes:
+            timing['size_bytes'] = section_size_bytes[timing['section']]
+    largest_files = [{
+        'path': path,
+        'size_bytes': size,
+    } for path, size in sorted(inventory, key=lambda item: -item[1])
+                     [:_LARGEST_FILES_LISTED]]
+    total_size_bytes = sum(size for _, size in inventory)
+
+    collection_end_wall = time.time()
+    total_duration_s = time.monotonic() - build_start_mono
+    # Reconstruct the caller's wall-clock deadline (create_debug_dump
+    # re-anchors it onto our monotonic clock; see there) so summary.json can
+    # state the budget without threading the wall-clock value through.
+    deadline_wall = (build_start_wall + (deadline - build_start_mono)
+                     if deadline is not None else None)
+
+    # Write summary file. 'scope' is the planned, cross-linked context;
+    # 'collected' is what the sections actually wrote -- the two differ
+    # whenever the deadline truncates the dump, and a reader of summary.json
+    # alone must be able to see that.
     summary: Dict[str, Any] = {
         'requested': requested,
-        'collected': {
+        'scope': {
             'request_count': len(debug_dump_context['request_ids']),
             'cluster_count': len(debug_dump_context['cluster_names']),
             'managed_job_count': len(debug_dump_context['managed_job_ids']),
@@ -2396,12 +2595,59 @@ def _build_debug_dump(
             'cluster_names': sorted(debug_dump_context['cluster_names']),
             'managed_job_ids': sorted(debug_dump_context['managed_job_ids']),
         },
+        'collected': collected_counts,
+        'truncated': any(t['status'] in ('skipped_deadline',
+                                         'completed_partial')
+                         for t in section_timings),
+        'collection_start_time': build_start_wall,
+        'collection_start_time_human':
+            debug_dump_helpers.epoch_to_human(build_start_wall),
+        'collection_end_time': collection_end_wall,
+        'collection_end_time_human':
+            debug_dump_helpers.epoch_to_human(collection_end_wall),
+        'total_duration_s': round(total_duration_s, 2),
+        'overall_deadline': deadline_wall,
+        'overall_deadline_human':
+            debug_dump_helpers.epoch_to_human(deadline_wall),
+        'budget_remaining_at_start_s':
+            (None if deadline is None else round(deadline - build_start_mono, 2)
+            ),
+        'total_size_bytes': total_size_bytes,
+        'file_count': len(inventory),
+        'largest_files': largest_files,
         'section_timings': section_timings,
         'errors': errors,
     }
     summary_path = os.path.join(dump_dir, 'summary.json')
     with open(summary_path, 'w', encoding='utf-8') as f:
         json.dump(summary, f, indent=2)
+
+    # Write the manifest last, after everything above is known. Not indented:
+    # on a large dump the file list runs to tens of thousands of entries, and
+    # this is a machine index (jq/grep) rather than prose.
+    manifest: Dict[str, Any] = {
+        'collection_start_time': build_start_wall,
+        'collection_start_time_human':
+            debug_dump_helpers.epoch_to_human(build_start_wall),
+        'collection_end_time': collection_end_wall,
+        'collection_end_time_human':
+            debug_dump_helpers.epoch_to_human(collection_end_wall),
+        'total_duration_s': round(total_duration_s, 2),
+        'file_count': len(inventory),
+        'total_size_bytes': total_size_bytes,
+        'section_size_bytes': section_size_bytes,
+        'largest_files': largest_files,
+        'files': [{
+            'path': path,
+            'size_bytes': size,
+        } for path, size in sorted(inventory)],
+        'note': ('Point-in-time inventory taken after collection finished, '
+                 'before summary.json / manifest.json were written; '
+                 'debug_dump.log keeps growing until the zip step completes.'),
+    }
+    manifest_path = os.path.join(dump_dir, 'manifest.json')
+    with open(manifest_path, 'w', encoding='utf-8') as f:
+        json.dump(manifest, f)
 
 
 def create_debug_dump(
@@ -2506,15 +2752,20 @@ def create_debug_dump(
         os.makedirs(dump_dir)
         logger.debug(f'Building dump in temp directory: {dump_dir}')
 
-        # Attach a file handler to capture debug-level logs into the dump
-        # itself. We attach to the root 'sky' logger so that logs from all sky.*
-        # modules are captured, not just sky.utils.debug_utils.  Also attach to
-        # sky.provision which has propagate=False.  This mirrors
-        # sky_logging.add_debug_log_handler().
-        debug_handler = logging.FileHandler(
-            os.path.join(dump_dir, 'debug_dump.log'))
+        # Attach a file handler to capture the dump's operational trail
+        # (section start/done, skips, timeouts, warnings) into the dump
+        # itself. INFO, not DEBUG: at DEBUG the artifact is dominated by
+        # per-item noise from unrelated subsystems -- one line per scanned
+        # request, per deserialized request body, per managed-job record --
+        # which on a large deployment is tens of MB dwarfing the handful of
+        # lines that describe the dump itself. We attach to the root 'sky'
+        # logger so that logs from all sky.* modules are captured, not just
+        # sky.utils.debug_utils.  Also attach to sky.provision which has
+        # propagate=False.  This mirrors sky_logging.add_debug_log_handler().
+        debug_log_path = os.path.join(dump_dir, 'debug_dump.log')
+        debug_handler = logging.FileHandler(debug_log_path)
         debug_handler.setFormatter(sky_logging.FORMATTER)
-        debug_handler.setLevel(logging.DEBUG)
+        debug_handler.setLevel(logging.INFO)
         sky_root_logger = logging.getLogger('sky')
         provision_logger = logging.getLogger('sky.provision')
         try:
@@ -2534,41 +2785,58 @@ def create_debug_dump(
                               client_info,
                               requested=original_requested,
                               deadline=deadline)
-            # Report any op whose worker thread is still running (before we
-            # detach the handler, so it lands in debug_dump.log too).
+            # Report any op whose worker thread is still running (while the
+            # handler is still attached, so it lands in debug_dump.log too).
             _log_timed_out_stragglers(debug_dump_context['timed_out_ops'])
+
+            # Log total dump size before zipping
+            total_dump_size = sum(f.stat().st_size
+                                  for f in pathlib.Path(dump_dir).rglob('*')
+                                  if f.is_file())
+
+            # Create zip file in PERSISTENT location (outside temp dir).
+            # debug_dump.log is deliberately excluded from this walk and
+            # written into the zip after the handler is closed below, so the
+            # archived copy includes the zip-stats lines -- detaching the
+            # handler first (the old behavior) meant the artifact's log ended
+            # at the straggler warnings, and the zip stats reached no
+            # artifact at all.
+            zip_filename = f'debug_dump_{timestamp}.zip'
+            zip_file_path = dump_base_dir / zip_filename
+            # INFO so the zip step is visible in the worker log: it is the last
+            # thing that runs before the dump is durable, and slow zips eat
+            # into any outer deadline's buffer (see the per-section logging
+            # note above).
+            logger.info(f'debug dump: collection done, zipping '
+                        f'{total_dump_size} bytes to {zip_filename}')
+
+            zip_start = time.monotonic()
+            file_count = 0
+            with zipfile.ZipFile(zip_file_path, 'w',
+                                 zipfile.ZIP_DEFLATED) as zipf:
+                for root, _, files in os.walk(dump_dir):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        if file_path == debug_log_path:
+                            continue
+                        arcname = os.path.relpath(file_path, temp_dir)
+                        zipf.write(file_path, arcname)
+                        file_count += 1
+
+            logger.info(f'debug dump: created {zip_filename} '
+                        f'({file_count} files) '
+                        f'in {time.monotonic() - zip_start:.1f}s')
         finally:
             sky_root_logger.removeHandler(debug_handler)
             provision_logger.removeHandler(debug_handler)
             debug_handler.flush()
             debug_handler.close()
 
-        # Log total dump size before zipping
-        total_dump_size = sum(f.stat().st_size
-                              for f in pathlib.Path(dump_dir).rglob('*')
-                              if f.is_file())
-
-        # Create zip file in PERSISTENT location (outside temp dir)
-        zip_filename = f'debug_dump_{timestamp}.zip'
-        zip_file_path = dump_base_dir / zip_filename
-        # INFO so the zip step is visible in the worker log: it is the last
-        # thing that runs before the dump is durable, and slow zips eat into
-        # any outer deadline's buffer (see the per-section logging note above).
-        logger.info(f'debug dump: collection done, zipping {total_dump_size} '
-                    f'bytes to {zip_filename}')
-
-        zip_start = time.monotonic()
-        file_count = 0
-        with zipfile.ZipFile(zip_file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for root, _, files in os.walk(dump_dir):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    arcname = os.path.relpath(file_path, temp_dir)
-                    zipf.write(file_path, arcname)
-                    file_count += 1
-
-        logger.info(f'debug dump: created {zip_filename} ({file_count} files) '
-                    f'in {time.monotonic() - zip_start:.1f}s')
+        # The handler is closed, so debug_dump.log is complete; add it to the
+        # zip as the last entry.
+        with zipfile.ZipFile(zip_file_path, 'a', zipfile.ZIP_DEFLATED) as zipf:
+            zipf.write(debug_log_path, os.path.relpath(debug_log_path,
+                                                       temp_dir))
 
     logger.info(f'debug dump: finished in {time.monotonic() - dump_start:.1f}s '
                 f'-> {zip_file_path}')
