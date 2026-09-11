@@ -1,7 +1,6 @@
 """Helper functions for object store mounting in Sky Storage"""
 import hashlib
 import os
-import random
 import shlex
 import textwrap
 import typing
@@ -11,6 +10,7 @@ from sky import exceptions
 from sky import skypilot_config
 from sky.skylet import constants
 from sky.utils import command_runner
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.data import storage
@@ -974,6 +974,79 @@ def get_mounting_script(
     return script
 
 
+def resolve_mount_commands(
+    storage_mounts: Optional[typing.Dict[str, 'storage.Storage']],
+    cluster_name: Optional[str] = None,
+) -> typing.List[typing.Tuple[str, str, str, Optional[str]]]:
+    """Builds the mount command for each MOUNT / MOUNT_CACHED storage.
+
+    For each mountable storage, this constructs the store (which validates /
+    materializes the bucket) and generates its mount command, returning a list
+    of ``(dst, mount_cmd, action_message, src_print)`` tuples. COPY-mode
+    storages are skipped: they are handled as regular file mounts in
+    ``_execute_file_mounts``.
+
+    NOTE: ``storage_obj.construct()`` has cloud-side effects (bucket existence
+    checks / creation), so call this on the API server, never inside a remote
+    subprocess. Shared by every cloud's runtime mount path so they stay in
+    sync.
+
+    Raises:
+        exceptions.StorageExternalDeletionError: if a bucket no longer exists.
+    """
+    # pylint: disable=import-outside-toplevel
+    # Imported in-function as a last resort: sky.data.storage imports
+    # mounting_utils at module scope, so a top-level import here is a cycle.
+    from sky.data import storage as storage_lib
+
+    specs: typing.List[typing.Tuple[str, str, str, Optional[str]]] = []
+    if not storage_mounts:
+        return specs
+    for dst, storage_obj in storage_mounts.items():
+        if storage_obj.mode not in storage_lib.MOUNTABLE_STORAGE_MODES:
+            continue
+        storage_obj.construct()
+        if not os.path.isabs(dst) and not dst.startswith('~/'):
+            dst = f'{constants.SKY_REMOTE_WORKDIR}/{dst}'
+        # Raised when the bucket is externally removed before re-mounting
+        # with sky start.
+        if not storage_obj.stores:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageExternalDeletionError(
+                    f'The bucket, {storage_obj.name!r}, could not be '
+                    f'mounted on cluster {cluster_name!r}. Please '
+                    'verify that the bucket exists. The cluster started '
+                    'successfully without mounting the bucket.')
+        # Get the first store and use it to mount
+        store = list(storage_obj.stores.values())[0]
+        assert store is not None, storage_obj
+        if storage_obj.mode == storage_lib.StorageMode.MOUNT:
+            read_only = bool(storage_obj.mount_config and
+                             storage_obj.mount_config.read_only)
+            if isinstance(store, storage_lib.HuggingFaceStore):
+                # getattr guards against MountConfig instances serialized
+                # before hf_mount_args existed (and against a None config).
+                hf_mount_args = getattr(storage_obj.mount_config,
+                                        'hf_mount_args', None)
+                mount_cmd = store.mount_command(dst,
+                                                read_only=read_only,
+                                                hf_mount_args=hf_mount_args)
+            else:
+                mount_cmd = store.mount_command(dst, read_only=read_only)
+            action_message = 'Mounting'
+        else:
+            assert storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED
+            mount_cmd = store.mount_cached_command(
+                dst, config=storage_obj.resolve_mount_cached_config())
+            action_message = 'Mounting cached mode'
+        src_print = (storage_obj.source
+                     if storage_obj.source else storage_obj.name)
+        if isinstance(src_print, list):
+            src_print = ', '.join(src_print)
+        specs.append((dst, mount_cmd, action_message, src_print))
+    return specs
+
+
 def get_mounting_command(
     mount_path: str,
     install_cmd: str,
@@ -982,9 +1055,9 @@ def get_mounting_command(
 ) -> str:
     """Generates the mounting command for a given bucket.
 
-    The generated mounting script is written to a temporary file, which is then
-    executed and subsequently deleted, ensuring that these operations are
-    encapsulated within a single, executable command sequence.
+    The generated mounting script is written to a unique temporary file
+    (mktemp), executed, and removed on exit, ensuring that these operations
+    are encapsulated within a single, executable command sequence.
 
     Args:
         mount_path: Path to mount the bucket at.
@@ -1000,11 +1073,23 @@ def get_mounting_command(
     script = get_mounting_script(mount_path, mount_cmd, install_cmd,
                                  version_check_cmd)
 
-    # While these commands are run sequentially for each storage object,
-    # we add random int to be on the safer side and avoid collisions.
-    script_path = f'~/.sky/mount_{random.randint(0, 1000000)}.sh'
-    command = (f'echo {shlex.quote(script)} > {script_path} && '
-               f'chmod +x {script_path} && '
-               f'bash {script_path} && '
-               f'rm {script_path}')
+    # mktemp -- rather than a Python-baked random name -- keeps the path
+    # unique per process, which matters when the SAME generated command runs
+    # concurrently on multiple nodes that share a filesystem (e.g. one Slurm
+    # srun --nodes=N step mounting on every node, where ~ is the shared
+    # cluster home). A baked name collides across those nodes: they race on
+    # the same file, and the trailing removal fails on all but one node.
+    # The EXIT trap removes the file even when the mount fails; command
+    # runners wrap commands as "... && (cmd)", so the command must not
+    # START with "(" or the two parens fuse into bash's arithmetic
+    # compound "((" (the trap is scoped by that wrapper subshell anyway).
+    # The template must end in the X's: BusyBox mktemp (e.g. Alpine images,
+    # which have no coreutils) rejects a suffix after them. Falls back to
+    # TMPDIR if ~/.sky is unavailable.
+    command = ('mount_script=$(mktemp ~/.sky/mount_XXXXXX 2>/dev/null '
+               '|| mktemp -t sky_mount_XXXXXX) && '
+               'trap \'rm -f "$mount_script"\' EXIT && '
+               f'echo {shlex.quote(script)} > "$mount_script" && '
+               'chmod +x "$mount_script" && '
+               'bash "$mount_script"')
     return command

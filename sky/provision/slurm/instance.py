@@ -21,6 +21,7 @@ from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.provision import common
 from sky.provision import constants
+from sky.provision.slurm import storage_mount as slurm_storage_mount
 from sky.provision.slurm import utils as slurm_utils
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
@@ -43,6 +44,7 @@ SNAPSHOT_GENERATIONS_DIRECTORY_NAME = 'generations'
 SNAPSHOT_MANIFEST_VERSION = 1
 _CONTAINER_KEEPER_STEP_NAME = 'sky-container-keeper'
 _SKYLET_KEEPER_STEP_NAME = 'sky-skylet-keeper'
+_STORAGE_MOUNT_KEEPER_STEP_NAME = 'sky-storage-mount-keeper'
 
 
 def _sbatch_log_path(base_dir: str, job_id: str) -> str:
@@ -68,6 +70,7 @@ _WORKLOAD_STEP_DRAIN_TIMEOUT_SECONDS = 120
 _WORKLOAD_KEEPER_STEP_NAMES = frozenset({
     _CONTAINER_KEEPER_STEP_NAME,
     _SKYLET_KEEPER_STEP_NAME,
+    _STORAGE_MOUNT_KEEPER_STEP_NAME,
 })
 
 # Terminal states where scancel is not needed or will fail.
@@ -819,6 +822,60 @@ def _wait_for_job_ready(
         time.sleep(poll_interval_seconds)
 
 
+def _storage_unmount_script(mount_dir: str) -> str:
+    """Script that lazily unmounts every path recorded by the mount keeper."""
+    paths_file = f'{mount_dir}/{slurm_storage_mount.PATHS_FILE_NAME}'
+    return (
+        'while read -r mount_path; do\n'
+        '    [ -n "$mount_path" ] || continue\n'
+        # Strip a trailing slash: fusermount matches the mountpoint
+        # path, and file_mounts keys are commonly slash-terminated.
+        '    mount_path="${mount_path%/}"\n'
+        '    fusermount -uz "$mount_path" 2>/dev/null || '
+        'fusermount3 -uz "$mount_path" 2>/dev/null || true\n'
+        f'done < {shlex.quote(paths_file)}\n')
+
+
+def _unmount_storage_mounts(login_node_runner: command_runner.CommandRunner,
+                            job_id: str, nodes: List[str], sky_base_dir: str,
+                            provider_config: Dict[str, Any],
+                            cluster_name_on_cloud: str) -> None:
+    """Unmounts recorded storage-mount paths while the allocation is up.
+
+    Best-effort: a failure is logged and the stop proceeds, since the
+    snapshot export will surface an unusable container anyway. Runs through
+    the container for container clusters so the unmount happens in the
+    namespace the mounts live in.
+    """
+    sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
+                                                 cluster_name_on_cloud)
+    mount_dir = slurm_storage_mount.storage_mounts_dir(sky_cluster_home_dir)
+    paths_file = f'{mount_dir}/{slurm_storage_mount.PATHS_FILE_NAME}'
+    rc, _ = _run_on_login_node(
+        login_node_runner,
+        f'test -f {shlex.quote(paths_file)}',
+        'Failed to check for recorded Slurm storage mounts.',
+        tolerate_returncodes=(1,))
+    if rc == 1:
+        # No storage was ever mounted through the keeper.
+        return
+    container_image = provider_config.get('container_image')
+    pyxis_args = (f'{_build_pyxis_args(cluster_name_on_cloud)} '
+                  if container_image is not None else '')
+    unmount_cmd = (f'srun --unbuffered --overlap --jobid={shlex.quote(job_id)} '
+                   f'--nodes={len(nodes)} --ntasks-per-node=1 {pyxis_args}'
+                   f'bash -c {shlex.quote(_storage_unmount_script(mount_dir))}')
+    try:
+        _run_on_login_node(login_node_runner, unmount_cmd,
+                           'Failed to unmount the Slurm storage mounts.')
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(
+            'Failed to unmount the Slurm cluster\'s storage mounts before '
+            'stopping it; proceeding with the stop. Details: '
+            f'{common_utils.format_exception(e, use_bracket=True)}')
+        logger.debug('Full exception details:', exc_info=True)
+
+
 @timeline.event
 def _create_virtual_instance(
         region: str, cluster_name: str, cluster_name_on_cloud: str,
@@ -1226,6 +1283,70 @@ exit 1
         f'bash -c {shlex.quote(keeper_loop)}; '
         f'sleep 5; done ) &')
 
+    # Storage-mount keeper: the runtime (CloudVmRayBackend's storage mount
+    # path) writes mount specs into the shared cluster home; this loop
+    # launches each one as a persistent step owned by the allocation. An
+    # ephemeral srun step's exit lets proctrack/cgroup kill everything its
+    # cgroup contains -- including a just-spawned FUSE daemon, which leaves
+    # a disconnected mount point behind.
+    mount_dir = slurm_storage_mount.storage_mounts_dir(sky_cluster_home_dir)
+    # The step's host shape mirrors SlurmCommandRunner._run_via_srun
+    # (in_container=False): HOME is the shared cluster home so ~-relative
+    # credential and config paths resolve as they do for runtime commands.
+    # The container shape mirrors in_container=True: no HOME override, so
+    # the daemon lives in the container's mount namespace, where the
+    # runtime mount runs today.
+    mount_step = ('spec=$1\n'
+                  'gen=${spec##*/spec-}\n'
+                  'gen=${gen%.sh}\n')
+    if container_image is None:
+        mount_step += (f'cd {sky_cluster_home_dir} && export HOME="$PWD"\n'
+                       f'export '
+                       f'{skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
+                       f'"{skypilot_runtime_dir}"\n'
+                       '([ -f ~/.bashrc ] && source ~/.bashrc || true)\n')
+    else:
+        mount_step += (f'export '
+                       f'{skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
+                       f'"{skypilot_runtime_dir}"\n')
+    mount_step += (f'mkdir -p {mount_dir}/{slurm_storage_mount.LOGS_DIR_NAME}\n'
+                   f'if bash "$spec" > {mount_dir}/'
+                   f'{slurm_storage_mount.LOGS_DIR_NAME}/'
+                   'storage_mounts-$SLURMD_NODENAME-$gen.log 2>&1; then\n'
+                   f'  touch {mount_dir}/done-$gen/$SLURMD_NODENAME\n'
+                   '  exec sleep infinity\n'
+                   'else\n'
+                   f'  echo $? > {mount_dir}/failed-$gen/$SLURMD_NODENAME\n'
+                   '  exit 1\n'
+                   'fi\n')
+    pyxis_mount_args = (f'{_build_pyxis_args(cluster_name_on_cloud)} '
+                        if container_image is not None else '')
+    storage_mount_keeper_block = (
+        f'( while true; do\n'
+        f'    for spec in {mount_dir}/spec-*.sh; do\n'
+        f'      [ -e "$spec" ] || continue\n'
+        f'      gen=${{spec##*/spec-}}; gen=${{gen%.sh}}\n'
+        f'      [ -e {mount_dir}/started-$gen ] && continue\n'
+        # srun runs in the foreground of the backgrounded subshell so its
+        # exit code is observable (a sibling shell cannot wait on it); the
+        # recorded PID is the subshell's, which lives exactly as long as
+        # the srun client does.
+        f'      ( srun --overlap '
+        f'--job-name={_STORAGE_MOUNT_KEEPER_STEP_NAME} '
+        f'--unbuffered --nodes={num_nodes} --ntasks-per-node=1 '
+        f'--kill-on-bad-exit=0 {pyxis_mount_args}'
+        f'bash -c {shlex.quote(mount_step)} bash "$spec"\n'
+        f'        mount_srun_rc=$?\n'
+        f'        if [ "$mount_srun_rc" -ne 0 ]; then\n'
+        f'          mkdir -p {mount_dir}/failed-$gen\n'
+        f'          echo "$mount_srun_rc" > {mount_dir}/failed-$gen/'
+        f'{slurm_storage_mount.STEP_FAILED_MARKER}\n'
+        f'        fi ) &\n'
+        f'      echo $! > {mount_dir}/started-$gen\n'
+        f'    done\n'
+        f'    sleep 2\n'
+        f'  done ) &')
+
     # By default stdout and stderr will be written to $HOME/slurm-%j.out
     # (because we invoke sbatch from $HOME). Redirect elsewhere to not pollute
     # the home directory.
@@ -1261,6 +1382,18 @@ cleanup() {{
         kill $(cat "{skypilot_runtime_dir}/.sky/skylet_pid") 2>/dev/null || true
     fi
     echo "Cleaning up sky directories..."
+    # Unmount the storage MOUNT paths recorded by the mount keeper, so the
+    # FUSE daemons killed with this allocation do not leave disconnected
+    # mount points on the nodes. Runs through the container for container
+    # clusters: that is the namespace the mounts live in. The primary
+    # unmount happens in _cleanup_slurm_allocation while the allocation is
+    # still quiet; this is the backstop for paths that skip it, so it runs
+    # before the slower enroot cleanup.
+    if [ -f {mount_dir}/{slurm_storage_mount.PATHS_FILE_NAME} ]; then
+        echo "Unmounting storage mounts..."
+        srun --overlap --nodes={num_nodes} --ntasks-per-node=1 {pyxis_mount_args}bash -c {shlex.quote(_storage_unmount_script(mount_dir))} || true
+        echo "Unmounted storage mounts."
+    fi
     # Remove the per-node enroot container, if it exists.
     # This is only needed when container_scope=global.
     # When container_scope=job, named containers are removed automatically
@@ -1299,10 +1432,18 @@ srun --nodes={num_nodes} touch {skypilot_runtime_dir}/.sky/{slurm_utils.SLURM_MA
 echo '{proctrack_type or "unknown"}' > {sky_cluster_home_dir}/{skylet_constants.SLURM_PROCTRACK_TYPE_FILE}
 # Suppress login messages.
 touch {sky_cluster_home_dir}/.hushlogin
+# Storage-mount keeper readiness: published BEFORE the ready signal above
+# so the runtime never observes a ready cluster whose mount keeper is not
+# up -- the pre-keeper fallback is the ephemeral-step mount this change
+# removes. Only genuinely old batch scripts lack the marker.
+mkdir -p {mount_dir}
+touch {mount_dir}/{slurm_storage_mount.KEEPER_READY_MARKER}
 {container_block}
 {f'touch {ready_signal}' if container_image is None else ''}
 # Host-side keeper step that starts skylet and restarts it if it dies.
 {skylet_keeper_block}
+# Storage-mount keeper: launches mount specs as persistent steps.
+{storage_mount_keeper_block}
 {'sleep infinity' if container_image is None else 'wait -n "${CONTAINER_PIDS[@]}"'}
 """
     # fmt: on
@@ -1713,6 +1854,8 @@ def stop_instances(
             'Failed to cancel jobs before snapshotting the Slurm container.',
             stderr=f'{stdout}\n{stderr}',
             stream_logs=False)
+    _unmount_storage_mounts(login_node_runner, job_id, nodes, sky_base_dir,
+                            provider_config, cluster_name_on_cloud)
     _drain_slurm_workload_steps(client, job_id)
 
     if not inside_slurm_cluster:
@@ -1988,6 +2131,12 @@ def _cleanup_slurm_allocation(
     sky_base_dir = _resolve_sky_base_dir(client, provider_config)
     sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
                                                  cluster_name_on_cloud)
+    # Unmount before anything else: the batch script's EXIT-trap unmount
+    # races the termination grace period (a TERM'd step can hold its srun
+    # for Slurm's KillWait, and the escalated cancellation then kills the
+    # trap mid-run), while here the allocation is still quiet.
+    _unmount_storage_mounts(login_node_runner, job_id, nodes, sky_base_dir,
+                            provider_config, cluster_name_on_cloud)
     global_enroot_name = _enroot_container_name_global_scope(
         cluster_name_on_cloud)
     job_enroot_name = _enroot_container_name_job_scope(cluster_name_on_cloud,
