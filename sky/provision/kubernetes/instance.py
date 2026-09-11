@@ -188,8 +188,7 @@ _POD_RUN_PARK_POLL_INTERVAL_SECONDS = 20
 # Deliberately far more generous than the same-reason stall deadline above:
 # this one fires on work that is legitimately slow (a large image pull, a
 # network volume's first attach), so it is the backstop for a pod that never
-# starts at all, not a latency budget. Override per context with
-# kubernetes.pod_startup_timeout; -1 waits indefinitely.
+# starts at all, not a latency budget.
 _POD_STARTUP_TIMEOUT_SECONDS = 60 * 60
 
 # How long to wait before first probing the volumes of a pod that is not up
@@ -1390,16 +1389,6 @@ def _stall_timeout_seconds(reason: Optional[str]) -> int:
     return _POD_RUN_STALL_TIMEOUT_SECONDS
 
 
-def _pod_startup_timeout_seconds(context: Optional[str]) -> int:
-    """How long a scheduled pod may take to start running, for this context."""
-    is_ssh_node_pool = context.startswith('ssh-') if context else False
-    return skypilot_config.get_effective_region_config(
-        cloud='ssh' if is_ssh_node_pool else 'kubernetes',
-        region=context,
-        keys=('pod_startup_timeout',),
-        default_value=_POD_STARTUP_TIMEOUT_SECONDS)
-
-
 def _pod_scheduled_at(pod) -> Optional[datetime.datetime]:
     """When the scheduler bound this pod to a node, per the pod itself.
 
@@ -1811,9 +1800,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
         raise config_lib.KubernetesError(
             f'Pod {pod.metadata.name} was scheduled onto a node but has not '
             f'started running after {minutes} minutes{detail}. Run '
-            f'`sky logs --provision {cluster_name}` for more details, or '
-            'raise kubernetes.pod_startup_timeout if this is expected (e.g. a '
-            'very large image over a slow registry).')
+            f'`sky logs --provision {cluster_name}` for more details.')
 
     def _maybe_park(pending_reasons_count: Dict[str, int]) -> None:
         """Release the executor worker while the pods finish starting.
@@ -1867,7 +1854,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
     # None when at least one is not. Reset on any lapse so the grace window
     # always measures an unbroken stretch.
     exempt_since: Optional[float] = None
-    startup_timeout = _pod_startup_timeout_seconds(context)
+    startup_timeout = _POD_STARTUP_TIMEOUT_SECONDS
     while True:
         # Get all pods in a single API call
         try:

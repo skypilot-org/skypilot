@@ -1605,15 +1605,6 @@ _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
     'provision_timeout': {
         'type': 'integer',
     },
-    'pod_startup_timeout': {
-        # Seconds a pod already bound to a node may take to start running
-        # before the launch fails and fails over. Bounds the phase
-        # provision_timeout does not cover: provision_timeout runs until the
-        # scheduler places the pod, this one from there until its containers
-        # are up (image pull, volume attach, init containers). -1 waits
-        # indefinitely.
-        'type': 'integer',
-    },
     'max_inline_command_length': {
         # Largest command, in bytes of request URL, that SkyPilot will inline
         # into a `kubectl exec` instead of uploading as a file. Lower this if a

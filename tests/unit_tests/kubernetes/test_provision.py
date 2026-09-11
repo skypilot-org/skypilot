@@ -5092,8 +5092,8 @@ class TestSlowPodStartupPark:
 
         monkeypatch.setattr(instance, '_get_pod_pending_reason',
                             _pending_reason)
-        monkeypatch.setattr(instance, '_pod_startup_timeout_seconds',
-                            lambda context: startup_timeout)
+        monkeypatch.setattr(instance, '_POD_STARTUP_TIMEOUT_SECONDS',
+                            startup_timeout)
         monkeypatch.setattr(instance.common_utils, 'is_in_request_context',
                             lambda: in_request_context)
 
@@ -5137,7 +5137,7 @@ class TestSlowPodStartupPark:
         assert (condition.startup_timeout_seconds ==
                 instance._POD_STARTUP_TIMEOUT_SECONDS)
 
-    def test_park_carries_the_configured_startup_timeout(self, monkeypatch):
+    def test_park_carries_the_startup_deadline_in_force(self, monkeypatch):
         with pytest.raises(sky_exceptions.ExecutionPausedError) as exc_info:
             self._run_wait(monkeypatch,
                            pending_reasons=['Pulling'],
@@ -5246,7 +5246,6 @@ class TestPodStartupDeadline:
                                                startup_timeout=3600)
         msg = str(exc_info.value)
         assert 'pod-0' in msg
-        assert 'pod_startup_timeout' in msg
         assert 'Pulling' in msg
 
     def test_deadline_beats_the_park_on_the_same_iteration(self, monkeypatch):
@@ -5259,33 +5258,6 @@ class TestPodStartupDeadline:
                                                pod=pod,
                                                startup_timeout=3600,
                                                clock_step=61.0)
-
-    def test_timeout_is_read_from_the_context_config(self, monkeypatch):
-        captured = {}
-
-        def _get(cloud, region, keys, default_value):
-            captured.update(cloud=cloud, region=region, keys=keys)
-            return 900 if region == 'ctx' else default_value
-
-        monkeypatch.setattr(instance.skypilot_config,
-                            'get_effective_region_config', _get)
-        assert instance._pod_startup_timeout_seconds('ctx') == 900
-        assert captured['cloud'] == 'kubernetes'
-        assert captured['keys'] == ('pod_startup_timeout',)
-        assert (instance._pod_startup_timeout_seconds('other') ==
-                instance._POD_STARTUP_TIMEOUT_SECONDS)
-
-    def test_ssh_node_pools_read_their_own_config(self, monkeypatch):
-        captured = {}
-
-        def _get(cloud, region, keys, default_value):
-            captured.update(cloud=cloud)
-            return default_value
-
-        monkeypatch.setattr(instance.skypilot_config,
-                            'get_effective_region_config', _get)
-        instance._pod_startup_timeout_seconds('ssh-my-pool')
-        assert captured['cloud'] == 'ssh'
 
 
 class TestPodsRunningCondition:
@@ -5438,28 +5410,23 @@ class TestPodsRunningCondition:
         assert (condition.startup_timeout_seconds ==
                 instance._POD_STARTUP_TIMEOUT_SECONDS)
 
-    def test_startup_deadline_uses_the_timeout_resolved_at_park_time(
+    def test_the_deadline_in_force_is_the_one_carried_not_the_default(
             self, monkeypatch):
-        """The launch resolved the timeout under the request's own config
-        overrides; the scheduler thread running wait() has no such context, so
-        re-reading it there would silently fall back to the server-global
-        value. Carry it instead."""
-
-        def _fail(context):
-            del context  # unused
-            raise AssertionError(
-                'the parked condition must not re-read request-scoped config')
-
-        monkeypatch.setattr(instance, '_pod_startup_timeout_seconds', _fail)
+        """The condition judges against the deadline it was handed at park
+        time, not one it resolves for itself. Paired with the test below:
+        a carried value on either side of the module default changes the
+        outcome, which a condition ignoring it could not produce."""
+        # 1000s scheduled vs a carried 900s: past the deadline, so resume.
         condition = self._condition(
             monkeypatch, [_make_startup_pod(scheduled_seconds_ago=1000)],
             startup_timeout=900)
-        # 1000s scheduled vs the 900s carried on the condition: past it.
         assert condition._should_resume() is True
 
-    def test_carried_timeout_is_what_the_park_resolved(self, monkeypatch):
-        """A pod younger than the carried deadline stays parked, proving the
-        carried value -- not the 1h default -- is the one in force."""
+    def test_a_carried_deadline_longer_than_the_default_also_holds(
+            self, monkeypatch):
+        """The same pod, with a carried deadline it has not reached, stays
+        parked -- so the earlier resume came from the carried 900s and not
+        from the pod simply looking finished."""
         condition = self._condition(
             monkeypatch, [_make_startup_pod(scheduled_seconds_ago=1000)],
             startup_timeout=7200)
