@@ -295,7 +295,7 @@ class Slurm(clouds.Cloud):
                     partitions = [p for p in partitions if p == zone]
                 zones = [clouds.Zone(p) for p in partitions]
             except Exception as e:  # pylint: disable=broad-except
-                logger.debug(f'Failed to get partitions for {cluster}: {e}')
+                logger.warning(f'Failed to get partitions for {cluster}: {e}')
                 zones = []
 
             r = clouds.Region(cluster)
@@ -609,6 +609,27 @@ class Slurm(clouds.Cloud):
             keys=('sbatch_options',))
         if task_sbatch is not None:
             sbatch_options.update(task_sbatch)
+        # `quota.queue` / `quota.account` name the QOS and account with
+        # workspace > global and partition > cluster > cloud precedence
+        # (task `config:` overrides apply at every scope). Set at any scope,
+        # they take precedence over the `sbatch_options` spelling.
+        queue_name = skypilot_config.get_effective_queue_name(
+            cloud='slurm',
+            region=cluster,
+            partition=partition,
+            override_configs=resources.cluster_config_overrides)
+        if queue_name is not None:
+            # sbatch accepts the short form too; drop it so the job does not
+            # carry two directives for the same option.
+            sbatch_options.pop('q', None)
+            sbatch_options['qos'] = queue_name
+        account = skypilot_config.get_effective_slurm_account(
+            cluster=cluster,
+            partition=partition,
+            override_configs=resources.cluster_config_overrides)
+        if account is not None:
+            sbatch_options.pop('A', None)
+            sbatch_options['account'] = account
 
         # Read admin-declared container mounts with two-level merge:
         # global < cluster. Each entry maps a container path to either a

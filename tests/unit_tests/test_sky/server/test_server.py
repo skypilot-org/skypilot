@@ -406,6 +406,76 @@ async def test_prepare_request_passes_auth_user():
 
 
 @pytest.mark.asyncio
+async def test_hook_logs_keeps_its_request_log(tmp_path, monkeypatch):
+    """`/hook_logs` must not discard the request log it streams.
+
+    Its client, ``sky.client.sdk.tail_hook_logs``, does not read the body
+    this endpoint streams -- it re-reads the same log through
+    ``/api/stream``. So a log discarded when the first response ends leaves
+    that second read with nothing, and the hook output never reaches the
+    user.
+
+    ``stream_response_for_long_request`` is deliberately not mocked here: the
+    default it applies is the whole point of the test, so the real streaming
+    and log-discard path has to run. The log is placed where
+    ``log_provider.discard_log`` would look for it (it resolves the path from
+    the request id, not from ``log_path``), otherwise a discard would delete
+    some other file and the assertion below could not fail.
+    """
+    from sky.server.requests import log_provider
+    from sky.server.requests import payloads
+
+    request_id = 'hook-logs-request-id'
+    monkeypatch.setattr(server_constants, 'REQUEST_LOG_PATH_PREFIX',
+                        str(tmp_path))
+    log_path = log_provider.local_log_path(request_id,
+                                           log_provider.RequestLogType.REQUEST)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text('hook-marker\nEVENT=stop\n')
+
+    request = mock.MagicMock()
+    request.state = mock.MagicMock()
+    request.state.request_id = request_id
+    request.state.auth_user = None
+
+    request_task = mock.MagicMock()
+    request_task.request_id = request_id
+    request_task.log_path = log_path
+
+    hook_logs_body = payloads.HookLogsBody(cluster_name='test-cluster',
+                                           event='stop')
+    background_tasks = fastapi.BackgroundTasks()
+
+    async def _already_started(*args, **kwargs):
+        """The request has left PENDING; yield nothing and return."""
+        return
+        yield ''  # pragma: no cover -- makes this an async generator
+
+    with mock.patch('sky.server.requests.executor.prepare_request_async',
+                    new_callable=mock.AsyncMock,
+                    return_value=request_task), \
+         mock.patch('sky.server.requests.executor.execute_request_in_coroutine'
+                   ) as mock_execute, \
+         mock.patch('sky.server.stream_utils.wait_for_request_to_start',
+                    _already_started), \
+         mock.patch('sky.server.requests.requests.get_request_status_async',
+                    new_callable=mock.AsyncMock, return_value=None):
+        mock_execute.return_value = executor.CoroutineTask(
+            asyncio.create_task(asyncio.sleep(0)))
+
+        response = await server.hook_logs(request, hook_logs_body,
+                                          background_tasks)
+        streamed = ''.join([chunk async for chunk in response.body_iterator])
+
+    # The stream really ran -- without this the check below is vacuous.
+    assert 'hook-marker' in streamed, streamed
+    assert log_path.exists(), (
+        'the /hook_logs request log was discarded when its response ended; '
+        'sky.client.sdk.tail_hook_logs re-reads that log through /api/stream '
+        'and would show the user nothing')
+
+
+@pytest.mark.asyncio
 async def test_launch_endpoint_passes_auth_user():
     """Test that launch endpoint passes auth_user to schedule_request_async."""
     from sky.server.requests import payloads

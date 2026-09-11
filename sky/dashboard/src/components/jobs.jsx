@@ -1400,12 +1400,22 @@ export function ManagedJobsTable({
           0
         );
 
+        // Compute total duration across all tasks, matching the CLI's
+        // aggregated row in format_job_table. A task that has not started
+        // yet contributes 0; one that has started keeps accruing, so a
+        // group with work still in flight ticks up.
+        const totalDuration = tasks.reduce(
+          (sum, t) => sum + (t.job_duration || 0),
+          0
+        );
+
         aggregates.set(jobId, {
           aggregatedStatus,
           statusTooltip,
           resourcesDisplay,
           resourcesTooltip,
           totalRecoveries,
+          totalDuration,
         });
       }
     });
@@ -1804,9 +1814,17 @@ export function ManagedJobsTable({
             Duration{getSortDirection('job_duration')}
           </TableHead>
         ),
-        renderCell: (item) => (
-          <TableCell>{formatDuration(item.job_duration)}</TableCell>
-        ),
+        renderCell: (item, ctx) => {
+          const { renderMode, aggregates } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return (
+              <TableCell>{formatDuration(aggregates?.totalDuration)}</TableCell>
+            );
+          }
+
+          return <TableCell>{formatDuration(item.job_duration)}</TableCell>;
+        },
       },
       {
         id: 'status',
@@ -3343,9 +3361,9 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
     return <SharedInfraBadges replicaInfo={replicaInfo} />;
   };
 
-  // Number of columns in the pools table header (Pool, Jobs, Workers,
+  // Number of columns in the pools table header (Pool, User, Jobs, Workers,
   // Worker Details, Worker Resources) — used for the empty-state colSpan.
-  const poolColumnCount = 5;
+  const poolColumnCount = 6;
 
   return (
     <Card>
@@ -3358,6 +3376,12 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                 onClick={() => requestSort('name')}
               >
                 Pool{getSortDirection('name')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap w-32"
+                onClick={() => requestSort('user')}
+              >
+                User{getSortDirection('user')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap w-40"
@@ -3384,7 +3408,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
             {loading && isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={5}
+                  colSpan={poolColumnCount}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -3403,6 +3427,16 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                     >
                       {pool.name}
                     </Link>
+                  </TableCell>
+                  <TableCell>
+                    {pool.user ? (
+                      <UserDisplay
+                        username={pool.user}
+                        userHash={pool.user_hash}
+                      />
+                    ) : (
+                      '-'
+                    )}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2 flex-wrap">

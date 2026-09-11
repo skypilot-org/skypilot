@@ -159,6 +159,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`cpu_partition <config-yaml-slurm-cpu-partition>`: cpu-batch
     :ref:`container_mounts <config-yaml-slurm-container-mounts>`:
       /datasets: /shared/datasets
+    :ref:`quota <config-yaml-slurm-quota>`:
+      queue: normal          # sbatch --qos
+      account: pre-training  # sbatch --account
     :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`:
       mycluster1:
         submit_as_user: true
@@ -2433,6 +2436,44 @@ Example:
 :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`. The per-cluster
 value overrides the global value.
 
+.. _config-yaml-slurm-service-account-user-mapping:
+
+``slurm.username_map``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Map full SkyPilot usernames or service-account names to Unix users when
+``slurm.submit_as_user`` is enabled. Use the name shown in the dashboard.
+
+.. code-block:: yaml
+
+  slurm:
+    submit_as_user: true
+    username_map:
+      jane.doe@example.com: jdoe
+      inference-prod: inference-svc
+    cluster_configs:
+      training:
+        username_map:
+          inference-prod: inference-training
+
+A cluster-specific mapping overrides the tenant mapping for the same name.
+A service account without an entry uses its creator's Unix identity: the
+creator's cluster mapping, then tenant mapping, then email local part. If the
+creator is another service account, the same resolution applies to that account.
+Human users without an entry use their email local part. If the creator cannot
+be found, configure an explicit mapping for the service account.
+
+This changes the Unix submit identity only; it does not grant SkyPilot roles
+or workspace access.
+All mapped accounts need the same login-node impersonation permissions as
+human submit users. Account existence and impersonation are checked before
+allocation creation, with a 15-second timeout.
+
+These are API-server settings and cannot be overridden by clients or tasks.
+They only apply when ``submit_as_user`` is enabled. SkyPilot ownership remains
+the authenticated service account; Slurm ownership uses the mapped Unix user.
+Existing allocation lifecycle operations use the stored submit identity.
+
 .. _config-yaml-slurm-provision-timeout:
 
 ``slurm.provision_timeout``
@@ -2613,6 +2654,53 @@ Example:
 :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`. Entries are merged
 per container path, with per-cluster values overriding global values.
 
+.. _config-yaml-slurm-quota:
+
+``slurm.quota``
+~~~~~~~~~~~~~~~
+
+The queue and account a Slurm job is submitted with (optional).
+
+- ``queue``: The QOS the job requests, submitted as ``sbatch --qos``.
+- ``account``: The account the job is charged to, submitted as
+  ``sbatch --account``. Set it when the QOS is only allowed on some
+  accounts' associations, or when the submitting user belongs to several
+  accounts and the job must be charged to a specific one.
+
+Both can be set at the cloud level, per cluster and per partition under
+:ref:`cluster_configs <config-yaml-slurm-cluster-configs>`, per workspace,
+and per task in the task YAML's ``config`` block. The most specific scope
+wins: a workspace value outranks any global value, and within a workspace or
+the global config, partition outranks cluster, which outranks cloud. A task
+``config`` value applies at the scope it is written at; to override a
+per-partition server value, write it under the same
+``cluster_configs.<cluster>.partition_configs.<partition>`` path.
+
+When set at any scope, ``quota.queue`` and ``quota.account`` take precedence
+over ``sbatch_options.qos`` and ``sbatch_options.account``.
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    quota:
+      queue: normal
+    cluster_configs:
+      mycluster:
+        partition_configs:
+          h100:
+            quota:
+              queue: high
+              account: pre-training
+
+  workspaces:
+    pre-training:
+      slurm:
+        quota:
+          queue: high
+          account: pre-training
+
 .. _config-yaml-slurm-cluster-configs:
 
 ``slurm.cluster_configs``
@@ -2654,6 +2742,9 @@ Supported fields:
   :ref:`Container mounts <config-yaml-slurm-container-mounts>` overrides at
   the cluster level. Entries are merged per container path, with per-cluster
   values overriding global values.
+
+- ``quota``: :ref:`Queue and account <config-yaml-slurm-quota>` overrides at
+  both the cluster and partition level. The most specific level wins.
 
 - ``prometheus``: Opts the cluster into GPU metrics federation, surfacing its
   DCGM and node-exporter metrics in the SkyPilot dashboard. Sub-fields:

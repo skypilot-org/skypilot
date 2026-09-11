@@ -1544,10 +1544,14 @@ class CancelRequestInfo:
         who = self.user_name or self.user_hash
         if who is None and self.request_id is None:
             return None
+        # The queue finds this event by its prefix to surface the requester
+        # in the job's `details` (see
+        # managed_job_state.get_cancel_request_reasons).
+        prefix = managed_job_state.CANCEL_REQUESTED_EVENT_REASON_PREFIX
         if who is not None:
-            reason = f'Cancellation requested by user {who}'
+            reason = f'{prefix} by user {who}'
         else:
-            reason = 'Cancellation requested'
+            reason = prefix
         if self.request_id is not None:
             reason += f' (request ID: {self.request_id})'
         return reason
@@ -2888,6 +2892,20 @@ def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
             new_fields.append('priority')
         if 'failure_reason' not in new_fields:
             new_fields.append('failure_reason')
+        # Needed to derive the cluster name of STARTING jobs for the
+        # launch-progress reason lookup, key it per task, and ignore events
+        # left by an earlier attempt. Selected even when the caller (e.g. the
+        # dashboard) did not ask for them.
+        if 'task_name' not in new_fields:
+            new_fields.append('task_name')
+        if 'pool' not in new_fields:
+            new_fields.append('pool')
+        if 'task_id' not in new_fields:
+            new_fields.append('task_id')
+        if 'last_recovered_at' not in new_fields:
+            new_fields.append('last_recovered_at')
+        if 'submitted_at' not in new_fields:
+            new_fields.append('submitted_at')
     if 'user_yaml' in new_fields:
         if 'original_user_yaml_path' not in new_fields:
             new_fields.append('original_user_yaml_path')
@@ -2936,12 +2954,79 @@ def _cluster_handle_not_required(fields: List[str]) -> bool:
     return not any(field in fields for field in _CLUSTER_HANDLE_FIELDS)
 
 
+def _get_launch_reasons_by_task(
+        jobs: List[Dict[str, Any]]) -> Dict[Tuple[int, Optional[int]], str]:
+    """{(job_id, task_id): latest LAUNCH_PROGRESS reason} for STARTING tasks.
+
+    Keyed per task: in a job group each task launches its own cluster, and a
+    RUNNING sibling must not inherit a STARTING task's reason. The cluster
+    name is derived from the task name and job id the way the controller
+    names it; pool tasks share a cluster and are skipped, as in the
+    job-events merge.
+
+    A managed job's cluster name is reused across recovery attempts, and
+    launch-progress events are retained for days, so an event older than the
+    current attempt is dropped rather than shown as the current reason (e.g.
+    a stale image-pull reason after failover to a cloud that records no
+    launch progress). Best-effort: never raises.
+    """
+    cluster_name_by_task: Dict[Tuple[int, Optional[int]], str] = {}
+    attempt_start_by_task: Dict[Tuple[int, Optional[int]], float] = {}
+    for job in jobs:
+        if (job.get('status') !=
+                managed_job_state.ManagedJobStatus.STARTING.value or
+                job.get('pool') is not None or not job.get('task_name')):
+            continue
+        key = (job['job_id'], job.get('task_id'))
+        cluster_name_by_task[key] = generate_managed_job_cluster_name(
+            job['task_name'], job['job_id'])
+        # last_recovered_at is 0/None before the first recovery; fall back to
+        # submission time, and to 0 (no filtering) when neither is known.
+        attempt_start = job.get('last_recovered_at') or job.get('submitted_at')
+        attempt_start_by_task[key] = attempt_start or 0
+    if not cluster_name_by_task:
+        return {}
+    try:
+        events = global_user_state.get_latest_cluster_events(
+            list(dict.fromkeys(cluster_name_by_task.values())),
+            [global_user_state.ClusterEventType.LAUNCH_PROGRESS])
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to read launch-progress reasons: {e}')
+        return {}
+    reasons: Dict[Tuple[int, Optional[int]], str] = {}
+    for key, name in cluster_name_by_task.items():
+        event = events.get(name)
+        if event is None:
+            continue
+        reason, transitioned_at = event
+        if transitioned_at < attempt_start_by_task[key]:
+            continue
+        reasons[key] = reason
+    return reasons
+
+
 def _format_job_details(*,
                         job: Dict[str, Any],
                         highest_blocking_priority: int,
                         recovery_reason: Optional[str] = None,
-                        pending_reason: Optional[str] = None) -> None:
-    """Add details about schedule state / backoff / recovery / pending."""
+                        pending_reason: Optional[str] = None,
+                        cancel_reason: Optional[str] = None,
+                        launch_reason: Optional[str] = None) -> None:
+    """Add details about schedule state / backoff / recovery / pending /
+    who requested a cancellation / what a launch is waiting on."""
+    if cancel_reason:
+        # Surface who asked for the cancellation, and under which API
+        # request, e.g. 'Cancellation requested by user alice (request ID:
+        # ...)', so a CANCELLING/CANCELLED job's row and detail page answer
+        # "who cancelled this?" without opening the event table. Checked
+        # first: a job cancelled while in launch backoff or waiting to launch
+        # keeps that schedule state until the controller finishes cleaning
+        # up, and a job cancelled while recovering keeps the failure_reason
+        # of the preemption it was recovering from. Neither is why the job
+        # is ending; the cancel is.
+        job['details'] = cancel_reason
+        return
+
     state_details = None
     if job['schedule_state'] == 'ALIVE_BACKOFF':
         state_details = 'In backoff, waiting for resources'
@@ -2959,7 +3044,8 @@ def _format_job_details(*,
         job['details'] = state_details
     elif job['failure_reason']:
         job['details'] = f'Failure: {job["failure_reason"]}'
-    elif recovery_reason:
+    elif recovery_reason and job['status'] == (
+            managed_job_state.ManagedJobStatus.RECOVERING.value):
         # Surface why a job is recovering (e.g. an OOMKilled pod) so the
         # transient recovery cause is visible in the CLI and dashboard, not
         # just the controller logs. The reason (e.g. from
@@ -2978,13 +3064,19 @@ def _format_job_details(*,
             if hint is not None:
                 detail += f' ({hint})'
         job['details'] = detail
-    elif pending_reason:
+    elif pending_reason and job['status'] == (
+            managed_job_state.ManagedJobStatus.PENDING.value):
         # Surface why a job is still PENDING (e.g. it was submitted to the
         # controller queue or is in launch backoff) so the reason is visible
         # in the job details view, not just the event table. Collapse
         # whitespace so a multi-line reason renders on a single line in the
         # details column.
         job['details'] = ' '.join(pending_reason.split())
+    elif launch_reason:
+        # Surface what the job's cluster is waiting on while STARTING (e.g. a
+        # Slurm squeue pending reason or a Kubernetes image pull), taken from
+        # the cluster's latest LAUNCH_PROGRESS event.
+        job['details'] = ' '.join(launch_reason.split())
     else:
         job['details'] = None
 
@@ -3237,6 +3329,8 @@ def get_managed_job_queue(
     # an extra DB round trip. `job['status']` is already stringified above.
     recovery_reasons: Dict[int, str] = {}
     pending_reasons: Dict[int, str] = {}
+    cancel_reasons: Dict[int, str] = {}
+    launch_reasons: Dict[Tuple[int, Optional[int]], str] = {}
     if not fields or 'details' in fields:
         recovering_job_ids = [
             job['job_id'] for job in jobs if job['status'] ==
@@ -3247,9 +3341,32 @@ def get_managed_job_queue(
             for job in jobs
             if job['status'] == managed_job_state.ManagedJobStatus.PENDING.value
         ]
+        # Keyed by job id, not by task: in a job group every task shares the
+        # id, so a RECOVERING task's reason reaches its STARTING sibling's row
+        # too. `_format_job_details` therefore applies these two only to a row
+        # that is itself in that status -- the maps are built from rows in that
+        # status, so nothing else could have been meant by them. The
+        # cancellation below is deliberately not guarded that way: cancelling
+        # a job cancels every task in it, so it is the right answer on a
+        # sibling's row as well, and it is checked first for that reason.
         recovery_reasons, pending_reasons = (
             managed_job_state.get_latest_recovery_and_pending_reasons(
                 recovering_job_ids, pending_job_ids))
+        # Who requested the cancellation of each cancelled job (the
+        # attributed CANCELLING event written when the cancel request was
+        # handled), so the requester and request ID are visible in `details`
+        # rather than only in the event table.
+        cancelled_job_ids = list({
+            job['job_id'] for job in jobs if job['status'] in (
+                managed_job_state.ManagedJobStatus.CANCELLING.value,
+                managed_job_state.ManagedJobStatus.CANCELLED.value)
+        })
+        cancel_reasons = managed_job_state.get_cancel_request_reasons(
+            cancelled_job_ids)
+        # STARTING jobs: the latest launch-progress event of the cluster being
+        # provisioned (e.g. 'Launching (pending: QOSGrpGRES)' on Slurm), so
+        # `details` answers why the job has not started yet.
+        launch_reasons = _get_launch_reasons_by_task(jobs)
 
     for job in jobs:
         if not fields or 'details' in fields:
@@ -3257,7 +3374,10 @@ def get_managed_job_queue(
                 job=job,
                 highest_blocking_priority=highest_blocking_priority,
                 recovery_reason=recovery_reasons.get(job['job_id']),
-                pending_reason=pending_reasons.get(job['job_id']))
+                pending_reason=pending_reasons.get(job['job_id']),
+                cancel_reason=cancel_reasons.get(job['job_id']),
+                launch_reason=launch_reasons.get(
+                    (job['job_id'], job.get('task_id'))))
 
         # Derive is_job_group from execution column
         job['is_job_group'] = (

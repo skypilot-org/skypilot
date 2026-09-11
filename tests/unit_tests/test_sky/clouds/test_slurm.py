@@ -10,6 +10,7 @@ import unittest.mock as mock
 import pytest
 
 from sky import clouds
+from sky import models
 from sky import resources as resources_lib
 from sky import skypilot_config
 from sky.adaptors import slurm
@@ -65,13 +66,12 @@ class TestGetSubmitUser:
         ('alice', 'alice'),
         ('alice.ml@example.com', 'alice.ml'),
     ])
-    @patch('sky.provision.slurm.utils.common_utils.get_current_user_name')
+    @patch('sky.provision.slurm.utils.common_utils.get_current_user')
     @patch('sky.provision.slurm.utils.skypilot_config.'
            'get_effective_region_config')
-    def test_enabled(self, mock_get_config, mock_get_user_name, user_name,
-                     expected):
+    def test_enabled(self, mock_get_config, mock_get_user, user_name, expected):
         mock_get_config.return_value = True
-        mock_get_user_name.return_value = user_name
+        mock_get_user.return_value = models.User(id='human', name=user_name)
 
         assert slurm_utils.get_submit_user('my-cluster') == expected
         mock_get_config.assert_called_once_with(cloud='slurm',
@@ -79,14 +79,14 @@ class TestGetSubmitUser:
                                                 keys=('submit_as_user',),
                                                 default_value=False)
 
-    @patch('sky.provision.slurm.utils.common_utils.get_current_user_name')
+    @patch('sky.provision.slurm.utils.common_utils.get_current_user')
     @patch('sky.provision.slurm.utils.skypilot_config.'
            'get_effective_region_config')
-    def test_disabled(self, mock_get_config, mock_get_user_name):
+    def test_disabled(self, mock_get_config, mock_get_user):
         mock_get_config.return_value = False
 
         assert slurm_utils.get_submit_user('my-cluster') is None
-        mock_get_user_name.assert_not_called()
+        mock_get_user.assert_not_called()
 
     @pytest.mark.parametrize('user_name', [
         '@example.com',
@@ -94,13 +94,13 @@ class TestGetSubmitUser:
         'alice+ml@example.com',
         '-alice@example.com',
     ])
-    @patch('sky.provision.slurm.utils.common_utils.get_current_user_name')
+    @patch('sky.provision.slurm.utils.common_utils.get_current_user')
     @patch('sky.provision.slurm.utils.skypilot_config.'
            'get_effective_region_config',
            return_value=True)
-    def test_invalid_unix_user_rejected(self, _mock_get_config,
-                                        mock_get_user_name, user_name):
-        mock_get_user_name.return_value = user_name
+    def test_invalid_unix_user_rejected(self, _mock_get_config, mock_get_user,
+                                        user_name):
+        mock_get_user.return_value = models.User(id='human', name=user_name)
 
         with pytest.raises(ValueError, match='valid Unix user'):
             slurm_utils.get_submit_user('my-cluster')
@@ -2336,3 +2336,172 @@ class TestResolveSkyBaseDir:
         assert result == '/home/alice'
         mock_get_config.assert_called_once()
         client.get_env.assert_not_called()
+
+
+class TestSlurmQuotaConfig:
+    """`slurm.quota.{queue,account}` land in sbatch_options as qos/account."""
+
+    def _sbatch_options(self, tmp_path, config, overrides=None):
+        # pylint: disable=protected-access
+        return TestSbatchOptionsPrecedence(
+        )._load_config_and_get_sbatch_options(
+            tmp_path, config, cluster_config_overrides=overrides)
+
+    def test_queue_sets_qos(self, tmp_path):
+        result = self._sbatch_options(tmp_path, {
+            'slurm': {
+                'quota': {
+                    'queue': 'normal'
+                },
+            },
+        })
+        assert result == {'qos': 'normal'}
+
+    def test_account_sets_account(self, tmp_path):
+        result = self._sbatch_options(tmp_path, {
+            'slurm': {
+                'quota': {
+                    'queue': 'high',
+                    'account': 'pre-training'
+                },
+            },
+        })
+        assert result == {'qos': 'high', 'account': 'pre-training'}
+
+    def test_quota_wins_over_sbatch_options_at_any_scope(self, tmp_path):
+        """A cloud-level `quota.queue` beats a partition-level sbatch qos.
+
+        Short-form spellings are dropped so the job never carries two
+        directives for the same option.
+        """
+        result = self._sbatch_options(
+            tmp_path, {
+                'slurm': {
+                    'quota': {
+                        'queue': 'quota-qos',
+                        'account': 'quota-account',
+                    },
+                    'sbatch_options': {
+                        'A': 'short-account',
+                        'constraint': 'skylake',
+                    },
+                    'cluster_configs': {
+                        'mycluster': {
+                            'partition_configs': {
+                                'gpu': {
+                                    'sbatch_options': {
+                                        'qos': 'partition-qos',
+                                        'q': 'short-qos',
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            })
+        assert result == {
+            'qos': 'quota-qos',
+            'account': 'quota-account',
+            'constraint': 'skylake',
+        }
+
+    def test_sbatch_options_kept_without_quota(self, tmp_path):
+        result = self._sbatch_options(
+            tmp_path, {
+                'slurm': {
+                    'sbatch_options': {
+                        'qos': 'sbatch-qos',
+                        'account': 'sbatch-account',
+                    },
+                },
+            })
+        assert result == {'qos': 'sbatch-qos', 'account': 'sbatch-account'}
+
+    def test_workspace_routes_to_its_queue(self, tmp_path):
+        """A workspace pin outranks every global scope, partition included."""
+        config = {
+            'slurm': {
+                'quota': {
+                    'queue': 'global-qos'
+                },
+                'cluster_configs': {
+                    'mycluster': {
+                        'partition_configs': {
+                            'gpu': {
+                                'quota': {
+                                    'queue': 'global-partition-qos',
+                                    'account': 'global-partition-account',
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            'workspaces': {
+                'pre-training': {
+                    'slurm': {
+                        'quota': {
+                            'queue': 'pretraining-qos',
+                            'account': 'pre-training',
+                        },
+                    },
+                },
+                'other': {},
+            },
+        }
+        with skypilot_config.local_active_workspace_ctx('pre-training'):
+            result = self._sbatch_options(tmp_path, config)
+        assert result == {'qos': 'pretraining-qos', 'account': 'pre-training'}
+
+        with skypilot_config.local_active_workspace_ctx('other'):
+            result = self._sbatch_options(tmp_path, config)
+        assert result == {
+            'qos': 'global-partition-qos',
+            'account': 'global-partition-account',
+        }
+
+    def test_task_override_at_partition_scope(self, tmp_path):
+        result = self._sbatch_options(
+            tmp_path, {
+                'slurm': {
+                    'cluster_configs': {
+                        'mycluster': {
+                            'partition_configs': {
+                                'gpu': {
+                                    'quota': {
+                                        'queue': 'server-qos'
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            overrides={
+                'slurm': {
+                    'cluster_configs': {
+                        'mycluster': {
+                            'partition_configs': {
+                                'gpu': {
+                                    'quota': {
+                                        'queue': 'task-qos'
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            })
+        assert result == {'qos': 'task-qos'}
+
+    def test_task_override_at_cloud_scope(self, tmp_path):
+        result = self._sbatch_options(tmp_path, {'slurm': {}},
+                                      overrides={
+                                          'slurm': {
+                                              'quota': {
+                                                  'queue': 'task-qos',
+                                                  'account': 'task-account',
+                                              },
+                                          },
+                                      })
+        assert result == {'qos': 'task-qos', 'account': 'task-account'}
