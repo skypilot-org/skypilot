@@ -244,15 +244,22 @@ def test_only_charged_roots_count_against_the_budget(roots, monkeypatch):
     assert snapshot.used_bytes == snapshot.roots['present'].used_bytes
     assert snapshot.used_bytes < 8 * 1024 * 1024
     assert snapshot.headroom_bytes == 1024**3 - snapshot.used_bytes
-    # Both roots still report their own size; only the aggregate is scoped.
-    assert snapshot.roots['other'].used_bytes >= 8 * 1024 * 1024
+    # 'other' is listed with its filesystem but never walked, so its zero
+    # is not a measurement.
+    assert snapshot.roots['other'].walked is False
+    assert snapshot.roots['present'].walked is True
 
+    families = _families(metrics.LocalDiskUsageCollector())
     charged = {
-        s.labels['root']: s.value
-        for s in _families(metrics.LocalDiskUsageCollector())
-        ['sky_apiserver_local_disk_root_charged_to_ephemeral'].samples
+        s.labels['root']: s.value for s in
+        families['sky_apiserver_local_disk_root_charged_to_ephemeral'].samples
     }
     assert charged == {'present': 1.0, 'other': 0.0}
+    reported = {
+        s.labels['root']
+        for s in families['sky_apiserver_local_disk_used_bytes'].samples
+    }
+    assert reported == {'present'}
 
 
 def test_charging_follows_the_device_then_the_mount_source(tmp_path):
@@ -501,3 +508,55 @@ def test_availability_resolves_a_path_that_does_not_exist_yet(tmp_path):
 
     assert local_disk.available_for_path(str(missing)) == \
         local_disk.available_for_path(str(tmp_path))
+
+
+def test_an_unwalked_root_is_not_walked_at_all(roots, monkeypatch):
+    """The point of skipping it is to not touch the filesystem.
+
+    A volume mounted into the tree sits on a network filesystem, where a
+    walk of many small files takes minutes.
+    """
+    present, other = roots
+    _write(str(other / 'b.log'), 4096)
+    visited = []
+    real_scandir = os.scandir
+
+    def tracking_scandir(path):
+        visited.append(str(path))
+        return real_scandir(path)
+
+    monkeypatch.setattr(local_disk, '_mountpoint', lambda path: path)
+    monkeypatch.setattr(
+        local_disk, '_charged_to_ephemeral',
+        lambda mountpoint, sources, device: mountpoint == str(present))
+    monkeypatch.setattr(local_disk.os, 'scandir', tracking_scandir)
+
+    local_disk.scan()
+
+    assert not any(str(other) in path for path in visited)
+
+
+def test_a_truncated_walk_reports_no_budget_bound(roots, monkeypatch):
+    """A partial walk under-reports usage, so it cannot bound the budget."""
+    present, _ = roots
+    for i in range(20):
+        _write(str(present / f'{i}.log'), 1024)
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, str(1024**3))
+
+    assert local_disk.scan(max_entries=5).truncated is True
+
+    monkeypatch.setattr(local_disk, 'scan',
+                        lambda *a, **k: _truncated_snapshot())
+    assert local_disk.available_bytes(max_age_seconds=-1.0) is None
+
+
+def _truncated_snapshot():
+    usage = local_disk.RootUsage(path='/x',
+                                 used_bytes=1024,
+                                 files=1,
+                                 truncated=True,
+                                 mountpoint='/x')
+    return local_disk.Snapshot(roots={'x': usage},
+                               filesystems={},
+                               budget=local_disk.budget(),
+                               duration_seconds=0.0)

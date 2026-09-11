@@ -25,8 +25,10 @@ Three notes on matching what the platform sees:
 * Not every root is charged to the container. A deployment can mount a
   persistent volume partway into the tree -- the same directory is local in
   one layout and shared in another -- and those bytes belong to the volume's
-  budget, not this container's. Each filesystem is classified, and only the
-  charged roots are compared against the budget.
+  budget, not this container's. Each filesystem is classified, and a root
+  that is not charged is left unwalked: its bytes do not count either way,
+  and it is where a network filesystem turns up, on which walking many
+  small files takes minutes rather than milliseconds.
 """
 import dataclasses
 import errno
@@ -71,7 +73,7 @@ DEFAULT_SCAN_MAX_ENTRIES = 2_000_000
 DEFAULT_USED_BYTES_TTL_SECONDS = 10.0
 
 _used_bytes_lock = threading.Lock()
-_used_bytes_cache: Optional[Tuple[float, int]] = None
+_used_bytes_cache: Optional[Tuple[float, int, bool]] = None
 # Bytes callers have admitted but that no walk has counted yet. Cleared by
 # the next walk, which sees them on disk.
 _admitted_bytes = 0
@@ -98,6 +100,9 @@ class RootUsage:
     # having gone away. Those bytes are missing from used_bytes, so a
     # non-zero count means the size is a lower bound.
     unreadable: int = 0
+    # False when the root was skipped rather than measured, so a zero here
+    # is not a measurement.
+    walked: bool = True
     # Mount point of the filesystem holding this root, so a root can be
     # joined to its entry in Snapshot.filesystems. None if it could not
     # be determined.
@@ -158,6 +163,11 @@ class Snapshot:
         return filesystem is not None and filesystem.charged_to_ephemeral
 
     @property
+    def truncated(self) -> bool:
+        """Whether any walk stopped early, making ``used_bytes`` partial."""
+        return any(usage.truncated for usage in self.roots.values())
+
+    @property
     def headroom_bytes(self) -> Optional[int]:
         """Room left before the budget stops the server writing.
 
@@ -182,10 +192,11 @@ def local_roots() -> Dict[str, str]:
     HOME are honored the way the owning modules resolve their own paths,
     and so a blob storage backend installed after import is included.
 
-    Deliberately excludes ``~/sky_logs``: in multi-replica deployments it
-    is on shared storage, where it does not count against this container's
-    local disk and where a directory walk is prohibitively slow. Its
+    Excludes ``~/sky_logs`` outright: it does not count against this
+    container's local disk in any layout that persists it, and its
     filesystem is already reported by the sky_logs retention instruments.
+    Roots that turn out to be on a volume are dropped later, by ``scan``,
+    which is what knows their filesystem.
     """
     roots = {
         'request_logs': runtime_utils.expanduser(
@@ -284,7 +295,12 @@ def available_bytes(
     declared = budget()
     if declared is None:
         return None
-    return max(declared.total_bytes - _used_bytes(max_age_seconds), 0)
+    used, truncated = _used_bytes(max_age_seconds)
+    if truncated:
+        # A partial walk under-reports usage, which would overstate what is
+        # left. Report no budget bound rather than a generous one.
+        return None
+    return max(declared.total_bytes - used, 0)
 
 
 def debit(num_bytes: int) -> None:
@@ -302,8 +318,8 @@ def debit(num_bytes: int) -> None:
         _admitted_bytes += num_bytes
 
 
-def _used_bytes(max_age_seconds: float) -> int:
-    """Returns the used-bytes total, walking if the cache has aged out.
+def _used_bytes(max_age_seconds: float) -> Tuple[int, bool]:
+    """Returns (used bytes, whether the walk behind it was partial).
 
     The lock spans the walk so a burst of callers arriving on a cold
     cache produces one walk rather than one each.
@@ -313,11 +329,12 @@ def _used_bytes(max_age_seconds: float) -> int:
         cached = _used_bytes_cache
         if (cached is not None and
                 time.monotonic() - cached[0] <= max_age_seconds):
-            return cached[1] + _admitted_bytes
-        used = scan().used_bytes
-        _used_bytes_cache = (time.monotonic(), used)
+            return cached[1] + _admitted_bytes, cached[2]
+        snapshot = scan()
+        _used_bytes_cache = (time.monotonic(), snapshot.used_bytes,
+                             snapshot.truncated)
         _admitted_bytes = 0
-        return used
+        return snapshot.used_bytes, snapshot.truncated
 
 
 def _nearest_existing(path: str) -> str:
@@ -552,22 +569,39 @@ def scan(
     timeout_seconds: float = DEFAULT_SCAN_TIMEOUT_SECONDS,
     max_entries: int = DEFAULT_SCAN_MAX_ENTRIES,
 ) -> Snapshot:
-    """Measures every local root, sharing one deadline across all of them."""
+    """Measures the roots that count, sharing one deadline across them.
+
+    A root on a filesystem the platform does not charge to this container
+    is not walked. Its bytes are excluded from the total either way, and
+    such a root is where a persistent volume gets mounted -- on a network
+    filesystem, where a walk of many small files takes minutes. The
+    filesystem behind it is still reported; for a volume shared between
+    replicas its free space is the meaningful number anyway.
+    """
     started = time.monotonic()
     deadline = started + timeout_seconds
+    # Not in use in this deployment; emitting a 0 would read as a measured
+    # emptiness.
+    present = [(name, path)
+               for name, path in local_roots().items()
+               if os.path.isdir(path)]
+    filesystems = _filesystem_usage([path for _, path in present])
     roots: Dict[str, RootUsage] = {}
-    measured: List[Tuple[str, str]] = []
-    for name, path in local_roots().items():
-        if not os.path.isdir(path):
-            # Not in use in this deployment; emitting a 0 would read as a
-            # measured emptiness.
+    for name, path in present:
+        mountpoint = _mountpoint(path)
+        filesystem = filesystems.get(mountpoint) if mountpoint else None
+        if filesystem is None or not filesystem.charged_to_ephemeral:
+            roots[name] = RootUsage(path=path,
+                                    used_bytes=0,
+                                    files=0,
+                                    truncated=False,
+                                    walked=False,
+                                    mountpoint=mountpoint)
             continue
-        measured.append((name, path))
         usage = _scan_root(path, deadline, max_entries)
-        usage.mountpoint = _mountpoint(path)
+        usage.mountpoint = mountpoint
         roots[name] = usage
     return Snapshot(roots=roots,
-                    filesystems=_filesystem_usage(
-                        [path for _, path in measured]),
+                    filesystems=filesystems,
                     budget=budget(),
                     duration_seconds=time.monotonic() - started)
