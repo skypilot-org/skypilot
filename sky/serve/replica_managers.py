@@ -981,10 +981,15 @@ class SkyPilotReplicaManager(ReplicaManager):
                            purge: bool = False) -> None:
         left_in_record = not (is_scale_down or purge)
         if left_in_record:
-            assert sync_down_logs, (
-                'For the replica left in the record, '
-                'the logs should always be synced down. '
-                'So that the user can see the logs to debug.')
+            info = serve_state.get_replica_info_from_id(self._service_name,
+                                                        replica_id)
+            assert info is not None
+            # Recovery resumes teardown after log collection was attempted.
+            assert (sync_down_logs or
+                    info.status_property.sky_down_status is not None), (
+                        'For the replica left in the record, '
+                        'the logs should always be synced down. '
+                        'So that the user can see the logs to debug.')
 
         if replica_id in self._launch_thread_pool:
             info = serve_state.get_replica_info_from_id(self._service_name,
