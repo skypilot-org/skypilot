@@ -317,6 +317,12 @@ class DebugDumpContext(TypedDict):
     # into the dump.
     request_ids_via_job: Set[str]
     request_ids_via_cluster: Set[str]
+    # Composition of the recent-activity request scan (see
+    # _populate_recent_context), recorded at scan time and surfaced in
+    # summary.json's provenance block so a scope explosion is explainable
+    # from the dump's structured output alone. Empty when the scan does
+    # not run.
+    recent_request_scan: Dict[str, int]
     errors: List[Dict[str, str]]
     # Per-dump accumulator (sibling of ``errors``) of deadline-timed-out ops
     # whose worker thread was abandoned; see _run_with_deadline /
@@ -777,15 +783,46 @@ def _populate_recent_context(
     # Get recent requests (cluster names are handled by
     # _get_clusters_from_requests during cross-linking)
     try:
+        # The DB-level finished_after filter has listing semantics
+        # ('finished_at >= ? OR finished_at IS NULL'), so it also returns
+        # every never-finished request regardless of age -- including
+        # terminal rows (e.g. CANCELLED) whose finished_at was never
+        # written. The created_at backstop below is what bounds the scan:
+        # an unfinished request only counts as recent when it was created
+        # within the window. Without it, stale rows match any cutoff and
+        # explode the dump's context via cross-linking.
         requests = requests_lib.get_request_tasks(
-            requests_lib.RequestTaskFilter(finished_after=cutoff_time,
-                                           fields=['request_id',
-                                                   'finished_at']))
+            requests_lib.RequestTaskFilter(
+                finished_after=cutoff_time,
+                fields=['request_id', 'created_at', 'finished_at', 'status']))
+        scan = debug_dump_context['recent_request_scan']
+        scan['scanned'] = len(requests)
+        scan['included'] = 0
+        scan['included_unfinished'] = 0
+        scan['skipped_stale_unfinished'] = 0
+        now = time.time()
         for request in requests:
+            created_at = request.created_at or 0
+            if request.finished_at is None:
+                if created_at < cutoff_time:
+                    scan['skipped_stale_unfinished'] += 1
+                    continue
+                scan['included_unfinished'] += 1
+            scan['included'] += 1
             logger.debug(f'Recent: including request {request.request_id} '
-                         f'(finished_at={request.finished_at},'
+                         f'(status={request.status.value}, '
+                         f'created_at={created_at:.0f}, '
+                         f'age={now - created_at:.0f}s, '
+                         f'finished_at={request.finished_at},'
                          f' cutoff={cutoff_time:.0f})')
             debug_dump_context['request_ids'].add(request.request_id)
+        logger.debug(
+            f'Recent requests scan: {scan["scanned"]} rows matched the '
+            f'finished_after filter; included {scan["included"]} '
+            f'({scan["included_unfinished"]} unfinished, created within '
+            f'the window); skipped {scan["skipped_stale_unfinished"]} '
+            f'stale unfinished rows (finished_at=None, created before '
+            f'the cutoff)')
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get recent requests: {e}')
         debug_dump_context['errors'].append({
@@ -2250,6 +2287,9 @@ def _build_debug_dump(
     # _get_requests_from_clusters. Combined with the via_cluster skip in
     # _get_clusters_from_requests, a cluster shared by many requests
     # (e.g. the controller) cannot drag unrelated jobs or clusters in.
+    # Snapshot the user-seeded request IDs before cross-linking mutates
+    # the context; used for the provenance breakdown in summary.json.
+    user_request_ids = set(debug_dump_context['request_ids'])
     # One reachability cache for the whole dump: the cross-link scans, the
     # clusters section, and the managed-jobs section share per-context
     # probe results, so a defunct context is probed exactly once per dump.
@@ -2396,6 +2436,19 @@ def _build_debug_dump(
             'cluster_names': sorted(debug_dump_context['cluster_names']),
             'managed_job_ids': sorted(debug_dump_context['managed_job_ids']),
         },
+        # Where the collected requests came from, so a scope explosion is
+        # explainable from summary.json alone. Buckets may overlap
+        # slightly (e.g. a system daemon request also matched by the
+        # recent scan); recent_scan holds the request-scan composition
+        # recorded by _populate_recent_context ({} when it did not run).
+        'provenance': {
+            'user_requested': len(user_request_ids),
+            'recent_scan': dict(debug_dump_context['recent_request_scan']),
+            'via_cluster': len(debug_dump_context['request_ids_via_cluster']),
+            'via_job': len(debug_dump_context['request_ids_via_job']),
+            'system': len(
+                set(SYSTEM_REQUEST_IDS) & debug_dump_context['request_ids']),
+        },
         'section_timings': section_timings,
         'errors': errors,
     }
@@ -2481,6 +2534,7 @@ def create_debug_dump(
         # populate these sidecars (see DebugDumpContext docstring).
         request_ids_via_job=set(),
         request_ids_via_cluster=set(),
+        recent_request_scan={},
         errors=[],
         timed_out_ops=[],
     )
