@@ -5132,6 +5132,17 @@ class TestSlowPodStartupPark:
         assert isinstance(condition, instance.PodsRunningCondition)
         assert condition.pod_names == ['pod-0']
         assert condition.cluster_name_on_cloud == 'cn-on-cloud'
+        # The deadline the launch resolved travels with the condition, so the
+        # scheduler thread never has to re-read request-scoped config.
+        assert (condition.startup_timeout_seconds ==
+                instance._POD_STARTUP_TIMEOUT_SECONDS)
+
+    def test_park_carries_the_configured_startup_timeout(self, monkeypatch):
+        with pytest.raises(sky_exceptions.ExecutionPausedError) as exc_info:
+            self._run_wait(monkeypatch,
+                           pending_reasons=['Pulling'],
+                           startup_timeout=1800)
+        assert exc_info.value.continue_condition.startup_timeout_seconds == 1800
 
     def test_does_not_park_before_grace_window(self, monkeypatch):
         """A pod that starts quickly must not pay a park/resume round trip."""
@@ -5294,14 +5305,13 @@ class TestPodsRunningCondition:
         monkeypatch.setattr(
             instance, '_get_pod_pending_reason', lambda *a, **kw: None
             if reason is None else (reason, ''))
-        monkeypatch.setattr(instance, '_pod_startup_timeout_seconds',
-                            lambda context: startup_timeout)
         return instance.PodsRunningCondition(
             context='ctx',
             namespace='ns',
             cluster_name='cn',
             cluster_name_on_cloud='cn-on-cloud',
-            pod_names=list(pod_names))
+            pod_names=list(pod_names),
+            startup_timeout_seconds=startup_timeout)
 
     def test_stays_parked_while_the_pods_are_still_starting(self, monkeypatch):
         condition = self._condition(monkeypatch, [_make_startup_pod()])
@@ -5405,7 +5415,8 @@ class TestPodsRunningCondition:
             namespace='ns',
             cluster_name='cn',
             cluster_name_on_cloud='cn-on-cloud',
-            pod_names=['pod-0', 'pod-1'])
+            pod_names=['pod-0', 'pod-1'],
+            startup_timeout_seconds=1800)
         restored = pickle.loads(pickle.dumps(condition))
         assert restored.pod_names == ['pod-0', 'pod-1']
         assert restored.namespace == 'ns'
@@ -5424,3 +5435,32 @@ class TestPodsRunningCondition:
         })
         assert (condition.poll_interval_seconds ==
                 instance._POD_RUN_PARK_POLL_INTERVAL_SECONDS)
+        assert (condition.startup_timeout_seconds ==
+                instance._POD_STARTUP_TIMEOUT_SECONDS)
+
+    def test_startup_deadline_uses_the_timeout_resolved_at_park_time(
+            self, monkeypatch):
+        """The launch resolved the timeout under the request's own config
+        overrides; the scheduler thread running wait() has no such context, so
+        re-reading it there would silently fall back to the server-global
+        value. Carry it instead."""
+
+        def _fail(context):
+            del context  # unused
+            raise AssertionError(
+                'the parked condition must not re-read request-scoped config')
+
+        monkeypatch.setattr(instance, '_pod_startup_timeout_seconds', _fail)
+        condition = self._condition(
+            monkeypatch, [_make_startup_pod(scheduled_seconds_ago=1000)],
+            startup_timeout=900)
+        # 1000s scheduled vs the 900s carried on the condition: past it.
+        assert condition._should_resume() is True
+
+    def test_carried_timeout_is_what_the_park_resolved(self, monkeypatch):
+        """A pod younger than the carried deadline stays parked, proving the
+        carried value -- not the 1h default -- is the one in force."""
+        condition = self._condition(
+            monkeypatch, [_make_startup_pod(scheduled_seconds_ago=1000)],
+            startup_timeout=7200)
+        assert condition._should_resume() is False

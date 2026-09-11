@@ -38,6 +38,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import execution_pause
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -296,7 +297,15 @@ def up(
                     # Serve controller is not placed in kueue, as the controller
                     # pod is considered a "system" pod and is not subject to
                     # queue limits or preemption.
-                    skypilot_config.remove_queue_name_from_config()):
+                    skypilot_config.remove_queue_name_from_config()
+            ), (
+                    # Nor may it pause: a pause re-queues the whole
+                    # enclosing serve.up request, and being outside Kueue
+                    # this is the one launch a slow-starting pod could
+                    # otherwise park. A controller starts once and from an
+                    # image the API server itself already runs, so there is
+                    # little to release a worker for.
+                    execution_pause.disallow_pause()):
                 controller_job_id, controller_handle = execution.launch(
                     task=controller_task,
                     cluster_name=controller_name,

@@ -1637,9 +1637,11 @@ class PodsRunningCondition:
     that error's ``continue_condition`` field, like
     ``locks.LockAcquirableCondition``, so the provision layer does not import
     the server layer). Instances are pickled onto the exception, so state is
-    plain identifiers only; ``__setstate__`` defaults anything a pickle from
-    an older server is missing, since a rolling restart can leave a request
-    parked by one version to be resumed by the next.
+    plain identifiers and already-resolved values only -- nothing here re-reads
+    request-scoped configuration, which the scheduler thread does not have.
+    ``__setstate__`` defaults anything a pickle from an older server is
+    missing, since a rolling restart can leave a request parked by one version
+    to be resumed by the next.
 
     Resumes on anything the parked launch cannot judge from here: all pods
     running, a pod failed or gone, a pending reason that is no longer
@@ -1656,15 +1658,21 @@ class PodsRunningCondition:
         cluster_name: str,
         cluster_name_on_cloud: str,
         pod_names: List[str],
+        startup_timeout_seconds: int,
         poll_interval_seconds: float = (_POD_RUN_PARK_POLL_INTERVAL_SECONDS)):
         self.context = context
         self.namespace = namespace
         self.cluster_name = cluster_name
         self.cluster_name_on_cloud = cluster_name_on_cloud
         self.pod_names = list(pod_names)
+        # Resolved by the launch, not read back here: the launch resolved it
+        # under the request's own config overrides, which the scheduler thread
+        # that runs wait() does not have.
+        self.startup_timeout_seconds = startup_timeout_seconds
         self.poll_interval_seconds = poll_interval_seconds
 
     def __setstate__(self, state):
+        self.startup_timeout_seconds = _POD_STARTUP_TIMEOUT_SECONDS
         self.poll_interval_seconds = _POD_RUN_PARK_POLL_INTERVAL_SECONDS
         self.__dict__.update(state)
 
@@ -1681,7 +1689,7 @@ class PodsRunningCondition:
             # Gone, evicted, or deleted by another controller. Only the re-run
             # can say which, and it already knows how.
             return True
-        timeout_seconds = _pod_startup_timeout_seconds(self.context)
+        timeout_seconds = self.startup_timeout_seconds
         now = datetime.datetime.now(datetime.timezone.utc)
         all_running = True
         for pod_name in self.pod_names:
@@ -1849,7 +1857,8 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                 namespace=namespace,
                 cluster_name=cluster_name,
                 cluster_name_on_cloud=cluster_name_on_cloud,
-                pod_names=sorted(expected_pod_names)))
+                pod_names=sorted(expected_pod_names),
+                startup_timeout_seconds=startup_timeout))
 
     missing_pods_retry = 0
     transport_error_since: Optional[float] = None
