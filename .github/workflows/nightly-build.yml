@@ -471,79 +471,91 @@ jobs:
   notify-slack-failure:
     runs-on: ubuntu-latest
     needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable, publish-and-validate-both, trigger-docker-and-helm-release, tag-nightly-release]
-    # Only run this job if any of the previous jobs failed
-    if: failure()
+    # Fire when any upstream job failed OR the run was cancelled. A cancelled
+    # run (e.g. someone stopping it while Buildkite lanes are still waiting)
+    # publishes no nightly and dispatches nothing downstream, exactly like a
+    # failure -- but `failure()` alone is false for it, so 2026-09-10's nightly
+    # was skipped with no Slack message at all.
+    if: failure() || cancelled()
     steps:
       - name: Prepare failure message
         id: message_content
         run: |
-          TITLE_TEXT="Workflow ${{ github.workflow }} failed."
+          # A run that was stopped (only cancelled results, no failures) reads
+          # differently from one that broke; word the message accordingly.
+          OUTCOME="failed"
+          CANCEL_HINT=""
+          if [[ "${{ contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            OUTCOME="was cancelled"
+            CANCEL_HINT=" No nightly was published and nothing was dispatched downstream; re-run the workflow to retry tonight's nightly (the Buildkite builds may still be running)."
+          fi
+          TITLE_TEXT="Workflow ${{ github.workflow }} ${OUTCOME}."
           COMMIT_SHA="${{ github.sha }}"
           COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${COMMIT_SHA}"
           SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
           EMOJI="🚨"
           BUILDKITE_MSG=""
-          if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-no-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result }}" == "failure" || "${{ needs.smoke-tests-remote-server-kubernetes.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-jobs-consolidation.result }}" == "failure" || "${{ needs.smoke-tests-slurm-minimal.result }}" == "failure" || "${{ needs.backward-compat-test-nightly.result }}" == "failure" || "${{ needs.backward-compat-test-stable.result }}" == "failure" ]]; then
-            if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" ]]; then
+          if [[ "${{ needs.smoke-tests-aws.result }}" =~ ^(failure|cancelled)$ || "${{ needs.smoke-tests-kubernetes-resource-heavy.result }}" =~ ^(failure|cancelled)$ || "${{ needs.smoke-tests-kubernetes-no-resource-heavy.result }}" =~ ^(failure|cancelled)$ || "${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result }}" =~ ^(failure|cancelled)$ || "${{ needs.smoke-tests-remote-server-kubernetes.result }}" =~ ^(failure|cancelled)$ || "${{ needs.smoke-tests-kubernetes-jobs-consolidation.result }}" =~ ^(failure|cancelled)$ || "${{ needs.smoke-tests-slurm-minimal.result }}" =~ ^(failure|cancelled)$ || "${{ needs.backward-compat-test-nightly.result }}" =~ ^(failure|cancelled)$ || "${{ needs.backward-compat-test-stable.result }}" =~ ^(failure|cancelled)$ ]]; then
+            if [[ "${{ needs.smoke-tests-aws.result }}" =~ ^(failure|cancelled)$ ]]; then
               BUILDKITE_MSG="<https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-aws.outputs.build_number }}|Buildkite Log(--aws)>"
             fi
-            if [[ "${{ needs.smoke-tests-kubernetes-resource-heavy.result }}" == "failure" ]]; then
+            if [[ "${{ needs.smoke-tests-kubernetes-resource-heavy.result }}" =~ ^(failure|cancelled)$ ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
               BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-resource-heavy.outputs.build_number }}|Buildkite Log(--kubernetes --resource-heavy)>"
             fi
-            if [[ "${{ needs.smoke-tests-kubernetes-no-resource-heavy.result }}" == "failure" ]]; then
+            if [[ "${{ needs.smoke-tests-kubernetes-no-resource-heavy.result }}" =~ ^(failure|cancelled)$ ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
               BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-no-resource-heavy.outputs.build_number }}|Buildkite Log(--kubernetes --no-resource-heavy)>"
             fi
-            if [[ "${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result }}" == "failure" ]]; then
+            if [[ "${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result }}" =~ ^(failure|cancelled)$ ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
               BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.outputs.build_number }}|Buildkite Log(--kubernetes --no-resource-heavy --dependency kubernetes)>"
             fi
-            if [[ "${{ needs.smoke-tests-remote-server-kubernetes.result }}" == "failure" ]]; then
+            if [[ "${{ needs.smoke-tests-remote-server-kubernetes.result }}" =~ ^(failure|cancelled)$ ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
               BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}|Buildkite Log(--remote-server --kubernetes)>"
             fi
-            if [[ "${{ needs.smoke-tests-kubernetes-jobs-consolidation.result }}" == "failure" ]]; then
+            if [[ "${{ needs.smoke-tests-kubernetes-jobs-consolidation.result }}" =~ ^(failure|cancelled)$ ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
               BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-jobs-consolidation.outputs.build_number }}|Buildkite Log(--kubernetes --jobs-consolidation --no-resource-heavy)>"
             fi
-            if [[ "${{ needs.smoke-tests-slurm-minimal.result }}" == "failure" ]]; then
+            if [[ "${{ needs.smoke-tests-slurm-minimal.result }}" =~ ^(failure|cancelled)$ ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
               BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-slurm-minimal.outputs.build_number }}|Buildkite Log(test_minimal --slurm)>"
             fi
-            # if [[ "${{ needs.smoke-tests-runpod-minimal.result }}" == "failure" ]]; then
+            # if [[ "${{ needs.smoke-tests-runpod-minimal.result }}" =~ ^(failure|cancelled)$ ]]; then
             #   if [[ ! -z "$BUILDKITE_MSG" ]]; then
             #     BUILDKITE_MSG="${BUILDKITE_MSG} and"
             #   fi
             #   BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-runpod-minimal.outputs.build_number }}|Buildkite Log(test_minimal --runpod)>"
             # fi
-            if [[ "${{ needs.backward-compat-test-nightly.result }}" == "failure" ]]; then
+            if [[ "${{ needs.backward-compat-test-nightly.result }}" =~ ^(failure|cancelled)$ ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
               BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.backward-compat-test-nightly.outputs.build_number }}|Buildkite Log(backward-compat-nightly)>"
             fi
-            if [[ "${{ needs.backward-compat-test-stable.result }}" == "failure" ]]; then
+            if [[ "${{ needs.backward-compat-test-stable.result }}" =~ ^(failure|cancelled)$ ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
               BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.backward-compat-test-stable.outputs.build_number }}|Buildkite Log(backward-compat-stable)>"
             fi
-            MARKDOWN_TEXT="${EMOJI} ${PRECHECK_TAG}Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed at Buildkite step for commit <${COMMIT_URL}|${SHORT_SHA}>. ${BUILDKITE_MSG}"
+            MARKDOWN_TEXT="${EMOJI} ${PRECHECK_TAG}Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> ${OUTCOME} at Buildkite step for commit <${COMMIT_URL}|${SHORT_SHA}>. ${BUILDKITE_MSG}${CANCEL_HINT}"
           else
-            MARKDOWN_TEXT="${EMOJI} ${PRECHECK_TAG}Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed for commit <${COMMIT_URL}|${SHORT_SHA}>."
+            MARKDOWN_TEXT="${EMOJI} ${PRECHECK_TAG}Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> ${OUTCOME} for commit <${COMMIT_URL}|${SHORT_SHA}>.${CANCEL_HINT}"
           fi
           echo "message_text=${TITLE_TEXT}" >> $GITHUB_OUTPUT
           echo "message_block=${MARKDOWN_TEXT}" >> $GITHUB_OUTPUT
