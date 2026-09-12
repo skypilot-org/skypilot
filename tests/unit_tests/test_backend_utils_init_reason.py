@@ -10,9 +10,13 @@ unexpected (non-UP, non-STOPPED) states and report them distinctly.
 import time
 from unittest import mock
 
+import pytest
+
 from sky import backends
 from sky import clouds
+from sky import exceptions
 from sky.backends import backend_utils
+from sky.utils import command_runner
 from sky.utils import status_lib
 
 
@@ -43,6 +47,86 @@ def _make_record(handle, status=status_lib.ClusterStatus.UP):
         'to_down': False,
         'launched_at': time.time() - 3600,  # old enough to skip recheck
     }
+
+
+@pytest.fixture
+def ssh_runtime_probe(monkeypatch):
+    handle = _make_handle()
+    handle.launched_resources.cloud = clouds.Azure()
+    runner = mock.Mock(spec=command_runner.SSHCommandRunner)
+    handle.get_command_runners.return_value = [runner]
+    record = _make_record(handle)
+    monkeypatch.setattr(
+        backend_utils, '_query_cluster_status_via_cloud_api',
+        mock.Mock(return_value={'head': (status_lib.ClusterStatus.UP, None)}))
+    monkeypatch.setattr(backend_utils.ExternalFailureSource, 'get',
+                        mock.Mock(return_value=None))
+    monkeypatch.setattr(backend_utils.global_user_state, 'add_cluster_event',
+                        mock.Mock())
+    monkeypatch.setattr(backend_utils.global_user_state,
+                        'add_or_update_cluster', mock.Mock())
+    monkeypatch.setattr(backend_utils.global_user_state,
+                        'get_cluster_from_name', mock.Mock(return_value=record))
+    return runner, record
+
+
+@pytest.mark.parametrize('detail', [
+    'nc: connection failed, SOCKSv5 error: General SOCKS server failure',
+    'Connection timed out during banner exchange',
+    'ssh: connect to host 10.0.0.1 port 22: Connection refused',
+])
+def test_ssh_transport_failure_preserves_running_cluster(
+        ssh_runtime_probe, detail):
+    runner, record = ssh_runtime_probe
+    runner.run.return_value = (255, '', detail)
+    with pytest.raises(exceptions.ClusterStatusFetchingError, match='SSH'):
+        backend_utils._update_cluster_status('test-cluster',
+                                             record,
+                                             retry_if_missing=False)
+    assert record['status'] == status_lib.ClusterStatus.UP
+    backend_utils.global_user_state.add_cluster_event.assert_not_called()
+    backend_utils.global_user_state.add_or_update_cluster.assert_not_called()
+
+
+@pytest.mark.parametrize('returncode', [1, 127])
+def test_runtime_command_failure_still_marks_cluster_init(
+        ssh_runtime_probe, returncode):
+    runner, record = ssh_runtime_probe
+    runner.run.return_value = (returncode, '', 'runtime unavailable')
+    backend_utils._update_cluster_status('test-cluster',
+                                         record,
+                                         retry_if_missing=False)
+    backend_utils.global_user_state.add_or_update_cluster.assert_called_once()
+    assert not backend_utils.global_user_state.add_or_update_cluster.call_args.kwargs[
+        'ready']
+    assert backend_utils.global_user_state.add_cluster_event.call_args.args[
+        1] == status_lib.ClusterStatus.INIT
+
+
+def test_external_failure_is_not_hidden_by_ssh_error(ssh_runtime_probe):
+    runner, record = ssh_runtime_probe
+    runner.run.return_value = (255, '', 'connection refused')
+    record['status'] = status_lib.ClusterStatus.INIT
+    backend_utils.ExternalFailureSource.get.return_value = {'head': 'failure'}
+    result = backend_utils._update_cluster_status('test-cluster',
+                                                  record,
+                                                  retry_if_missing=False)
+    assert result is record
+    assert result['status'] == status_lib.ClusterStatus.INIT
+
+
+def test_non_ssh_command_failure_is_not_a_transport_error(ssh_runtime_probe):
+    _, record = ssh_runtime_probe
+    runner = mock.Mock(spec=command_runner.CommandRunner)
+    runner.run.return_value = (255, '', 'runtime unavailable')
+    record['handle'].get_command_runners.return_value = [runner]
+    backend_utils._update_cluster_status('test-cluster',
+                                         record,
+                                         retry_if_missing=False)
+    assert not backend_utils.global_user_state.add_or_update_cluster.call_args.kwargs[
+        'ready']
+    assert backend_utils.global_user_state.add_cluster_event.call_args.args[
+        1] == status_lib.ClusterStatus.INIT
 
 
 def _capture_init_log_message(node_statuses,
