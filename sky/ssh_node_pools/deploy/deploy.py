@@ -8,7 +8,7 @@ import shlex
 import shutil
 import tempfile
 import textwrap
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import colorama
 import yaml
@@ -42,6 +42,20 @@ def success_message(message):
 def force_update_status(message):
     """Force update rich spinner status."""
     rich_utils.force_update_status(ux_utils.spinner_message(message))
+
+
+def _sudo_env_assignment(name: str, value: str) -> str:
+    """Return a sudo command environment assignment."""
+    if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name) is None:
+        raise ValueError(f'Invalid environment variable name: {name}')
+    return f'{name}={shlex.quote(value)}'
+
+
+def _sudo_k3s_install_cmd(env_vars: List[Tuple[str, str]]) -> str:
+    """Build a sudo command that preserves k3s installer environment."""
+    env = ' '.join(
+        _sudo_env_assignment(name, value) for name, value in env_vars)
+    return f'sudo -A {env} sh -'
 
 
 def run(cleanup: bool = False,
@@ -490,7 +504,11 @@ def deploy_single_cluster(cluster_name,
             agent_history_workers_info = None
         tls_sans = ' '.join(
             f'--tls-san={n}' for n in [head_node] + ha_server_nodes)
-        k3s_ha_exec = (f'INSTALL_K3S_EXEC=\'server --cluster-init {tls_sans}\'')
+        k3s_head_install_env = [
+            ('K3S_TOKEN', k3s_token),
+            ('K3S_NODE_NAME', head_node),
+            ('INSTALL_K3S_EXEC', f'server --cluster-init {tls_sans}'),
+        ]
         progress_message(
             f'HA mode enabled: 3 servers + {len(agent_worker_nodes)} agents')
     else:
@@ -502,7 +520,11 @@ def deploy_single_cluster(cluster_name,
         agent_worker_use_ssh_config = worker_use_ssh_config
         agent_history_workers_info = history_workers_info
         tls_sans = ''
-        k3s_ha_exec = ''
+        k3s_head_install_env = [
+            ('K3S_TOKEN', k3s_token),
+            ('K3S_NODE_NAME', head_node),
+        ]
+    k3s_head_install_cmd = _sudo_k3s_install_cmd(k3s_head_install_env)
 
     # Check if head node has a GPU
     install_gpu = False
@@ -510,7 +532,7 @@ def deploy_single_cluster(cluster_name,
         f'Deploying SkyPilot runtime on head node ({head_node}).')
     cmd = f"""
         {askpass_block}
-        curl -sfL https://get.k3s.io | K3S_TOKEN={k3s_token} K3S_NODE_NAME={head_node} {k3s_ha_exec} sudo -E -A sh - &&
+        curl -sfL https://get.k3s.io | {k3s_head_install_cmd} &&
         mkdir -p ~/.kube &&
         sudo -A cp /etc/rancher/k3s/k3s.yaml ~/.kube/config &&
         sudo -A chown $(id -u):$(id -g) ~/.kube/config &&
@@ -1205,12 +1227,16 @@ def start_server_node(node,
 
     Returns: (node, success, has_gpu) tuple."""
     logger.info(f'Joining HA server node ({node}).')
+    k3s_install_cmd = _sudo_k3s_install_cmd([
+        ('K3S_NODE_NAME', node),
+        ('INSTALL_K3S_EXEC',
+         f'server {tls_sans} --node-label skypilot-ip={node}'),
+        ('K3S_URL', f'https://{master_addr}:6443'),
+        ('K3S_TOKEN', k3s_token),
+    ])
     cmd = f"""
             {askpass_block}
-            curl -sfL https://get.k3s.io | K3S_NODE_NAME={node} \
-                INSTALL_K3S_EXEC='server {tls_sans} --node-label skypilot-ip={node}' \
-                K3S_URL=https://{master_addr}:6443 \
-                K3S_TOKEN={k3s_token} sudo -E -A sh -
+            curl -sfL https://get.k3s.io | {k3s_install_cmd}
         """
     result = deploy_utils.run_remote(node,
                                      cmd,
@@ -1243,10 +1269,15 @@ def start_agent_node(node,
     """Start a k3s agent node.
     Returns: if the start is successful, and whether the node has a GPU."""
     logger.info(f'Deploying worker node ({node}).')
+    k3s_install_cmd = _sudo_k3s_install_cmd([
+        ('K3S_NODE_NAME', node),
+        ('INSTALL_K3S_EXEC', f'agent --node-label skypilot-ip={node}'),
+        ('K3S_URL', f'https://{master_addr}:6443'),
+        ('K3S_TOKEN', k3s_token),
+    ])
     cmd = f"""
             {askpass_block}
-            curl -sfL https://get.k3s.io | K3S_NODE_NAME={node} INSTALL_K3S_EXEC='agent --node-label skypilot-ip={node}' \
-                K3S_URL=https://{master_addr}:6443 K3S_TOKEN={k3s_token} sudo -E -A sh -
+            curl -sfL https://get.k3s.io | {k3s_install_cmd}
         """
     result = deploy_utils.run_remote(node,
                                      cmd,
