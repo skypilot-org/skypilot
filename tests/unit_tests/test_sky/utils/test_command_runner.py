@@ -1243,3 +1243,54 @@ class TestInlineCommandLimit:
         assert limit('ssh-other') == 20480
         # A real Kubernetes context still reads the kubernetes block.
         assert limit('gke-x') == 8192
+
+
+class TestTimeoutDisablesControlMaster:
+    """A `timeout` that does not bound the caller is not a timeout.
+
+    `ControlMaster=auto` makes the first ssh fork a master that outlives it
+    (`ControlPersist`) and inherits its stdout/stderr. On expiry the client is
+    killed and the master keeps those pipes open, so
+    `log_lib.process_subprocess_stream` blocks reading them until the remote
+    command ends by itself and `TimeoutExpired` is raised after the fact.
+
+    Measured against a live login node before this: `sleep 60` with
+    `timeout=15` raised at 60.1s and `sleep 600` at 600.1s; 15.1s with the
+    master disabled.
+    """
+
+    def _ssh_command_for(self, **run_kwargs):
+        runner = command_runner.SSHCommandRunner(('host', 22), 'user', None)
+        seen = {}
+
+        def _capture(cmd, *_a, **_k):
+            seen['cmd'] = cmd
+            return 0, '', ''
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=_capture):
+            runner.run('echo hi', require_outputs=True, **run_kwargs)
+        return seen['cmd']
+
+    def test_a_timeout_drops_the_control_master(self):
+        cmd = self._ssh_command_for(timeout=15)
+        assert 'ControlMaster' not in cmd, cmd
+        assert 'ControlPath' not in cmd, cmd
+
+    def test_without_a_timeout_the_connection_is_still_shared(self):
+        """The fix costs one handshake per call, so it is not paid by the
+        calls that have nothing to bound."""
+        cmd = self._ssh_command_for()
+        assert 'ControlMaster=auto' in cmd, cmd
+
+    def test_zero_counts_as_a_timeout_here_because_it_does_there(self):
+        """The two predicates have to agree on what a timeout is.
+
+        `run_with_log` arms its timer on `timeout is not None`, and
+        `threading.Timer(0, ...)` fires immediately -- so 0 is a bound that
+        has already expired, not the absence of one. Deciding it differently
+        here would give that call a master it must not have.
+        """
+        cmd = self._ssh_command_for(timeout=0)
+        assert 'ControlMaster' not in cmd, cmd
