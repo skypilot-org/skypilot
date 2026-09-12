@@ -4168,11 +4168,19 @@ def _queue_shows_member(group_name: str, member_name: str) -> str:
 
 
 def _dynamic_members_teardown(name: str, children: List[str]) -> str:
-    # Cancelling the group takes its attached children with it; the rest
-    # covers a child that opted out or a test that failed midway.
+    # The watcher's task log first: it carries the output of the launches
+    # the test is about, which the harness's failed-job dump (queue only)
+    # does not. Then cancel the group, which takes its attached children
+    # with it; the rest covers a child that opted out or a test that
+    # failed midway.
+    watcher_log = (
+        f'gid=$(sky jobs queue | grep -v "↳" | grep " {name} " | '
+        f'awk \'{{print $1}}\' | head -1); '
+        f'echo "=== watcher log of group $gid ==="; '
+        f'sky jobs logs $gid {_WATCHER_TASK} --no-follow --tail 200 || true')
     cancels = ' ; '.join(
         f'sky jobs cancel -y -n {name}-{child} || true' for child in children)
-    return f'sky jobs cancel -y -n {name} || true ; {cancels}'
+    return f'{watcher_log} ; sky jobs cancel -y -n {name} || true ; {cancels}'
 
 
 def _skip_unless_remote_server() -> None:
@@ -4622,9 +4630,14 @@ def test_dynamic_job_group_parallel_appends(generic_cloud: str):
     evals = [f'{name}-eval-{i}' for i in range(1, 6)]
     # Each launch logs to its own file and the watcher prints them all after
     # `wait`, so a launch that failed shows why in the watcher's task log.
+    # A launch is retried a few times: the five fire at once against the
+    # smoke API server, which is small, and a transient refusal there is not
+    # what this test is about (the index counter is; every attempt of every
+    # launch still races the others for it).
     watcher_run = '\n'.join(
-        f'( {_launch_from_task(e, generic_cloud, _FOREVER)} ) '
-        f'> launch-{i}.log 2>&1 &' for i, e in enumerate(evals, 1))
+        f'( for a in 1 2 3; do {_launch_from_task(e, generic_cloud, _FOREVER)}'
+        f' && break; echo "launch-{i} attempt $a failed (exit $?)"; sleep 10; '
+        f'done ) > launch-{i}.log 2>&1 &' for i, e in enumerate(evals, 1))
     watcher_run += (
         '\nwait\n'
         'for i in 1 2 3 4 5; do echo "=== launch-$i ==="; cat launch-$i.log; '
