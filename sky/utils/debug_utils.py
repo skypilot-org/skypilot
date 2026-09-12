@@ -185,19 +185,6 @@ def _log_timed_out_stragglers(orphans: List[Dict[str, Any]]) -> None:
 # Persistent location for debug dumps
 DEBUG_DUMP_DIR = '~/.sky/debug_dumps'
 
-# Env var names whose values should be redacted (show bool presence only).
-# Used for both server_info environment and request body sanitization.
-_SENSITIVE_ENV_VARS = {
-    'SKYPILOT_DB_CONNECTION_URI',
-    'SKYPILOT_INITIAL_BASIC_AUTH',
-    'SKYPILOT_SERVICE_ACCOUNT_TOKEN',
-    'SKYPILOT_DOCKER_PASSWORD',
-    'AWS_SECRET_ACCESS_KEY',
-    'AWS_SESSION_TOKEN',
-    'AWS_ACCESS_KEY_ID',
-    'AZURE_CLIENT_SECRET',
-}
-
 # Maps request name → field names containing task/dag YAML to redact.
 # Empty tuple means include body verbatim (no YAML fields).
 # Requests not in this dict have their body excluded entirely.
@@ -958,12 +945,14 @@ def _dump_server_info(dump_dir: str,
                 'traceback': _full_traceback()
             })
 
-    # Add all SKYPILOT_*/SKY_* environment variables, redacting sensitive ones
-    env = {}
-    for k, v in sorted(os.environ.items()):
-        if k.startswith(('SKYPILOT_', 'SKY_')):
-            env[k] = bool(v) if k in _SENSITIVE_ENV_VARS else v
-    server_info['environment'] = env
+    # Add all SKYPILOT_*/SKY_* environment variables. Names are kept (which
+    # vars are set is diagnostic signal), but credential-shaped values are
+    # redacted -- see debug_dump_helpers.redact_env_vars.
+    server_info['environment'] = debug_dump_helpers.redact_env_vars({
+        k: v
+        for k, v in sorted(os.environ.items())
+        if k.startswith(('SKYPILOT_', 'SKY_'))
+    })
 
     # Add cloud status (keyed by workspace name, each mapping cloud names
     # to a list of capability strings — already JSON-serializable).
@@ -1013,7 +1002,9 @@ def _sanitize_request_body(request) -> Optional[Dict[str, Any]]:
     """Sanitize a request body for inclusion in a debug dump.
 
     Returns None if the request type is not in the allowlist or has no body.
-    For allowed requests, redacts sensitive env vars and task/dag YAML fields.
+    For allowed requests, redacts sensitive env var values, drops k8s
+    service-discovery env vars, redacts credentials in entrypoint_command,
+    and redacts task/dag YAML fields.
     """
     task_fields = _REQUEST_BODY_ALLOWLIST.get(request.name)
     if task_fields is None:
@@ -1025,12 +1016,21 @@ def _sanitize_request_body(request) -> Optional[Dict[str, Any]]:
         data = body.model_dump()
     except Exception:  # pylint: disable=broad-except
         return None
-    # Redact sensitive env var values
+    # Redact sensitive env var values, after first dropping the k8s
+    # service-discovery entries (identical machine-generated noise in every
+    # request created inside this pod; 72MB across a large production
+    # dump) -- see debug_dump_helpers for both.
     env_vars = data.get('env_vars')
     if isinstance(env_vars, dict):
-        for k in env_vars:
-            if k in _SENSITIVE_ENV_VARS:
-                env_vars[k] = '<redacted>'
+        data['env_vars'] = debug_dump_helpers.redact_env_vars(
+            debug_dump_helpers.drop_service_discovery_env_vars(env_vars))
+    # Redact credentials passed on the command line (--env/--secret
+    # KEY=VALUE); the persisted entrypoint_command is otherwise copied
+    # verbatim into the dump.
+    entrypoint_command = data.get('entrypoint_command')
+    if isinstance(entrypoint_command, str) and entrypoint_command:
+        data['entrypoint_command'] = (
+            debug_dump_helpers.redact_command_secrets(entrypoint_command))
     # Redact task/dag YAML fields
     for field in task_fields:
         if field in data and isinstance(data[field], str):

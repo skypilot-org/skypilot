@@ -7,6 +7,7 @@ Extracted to avoid a circular import:
 """
 import copy
 import datetime
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import global_user_state
@@ -14,12 +15,154 @@ from sky import task as task_lib
 from sky.utils import config_utils
 from sky.utils import yaml_utils
 
+REDACTED_VALUE = '<redacted>'
+
 # Sensitive config paths to redact in debug dumps, following the same
 # pattern as provision/common.py:ProvisionConfig.get_redacted_config().
 _SENSITIVE_CONFIG_KEYS: List[Tuple[str, ...]] = [
     ('api_server', 'endpoint'),
     ('api_server', 'service_account_token'),
 ]
+
+# Env var names whose values are always redacted in debug dumps. Kept as an
+# explicit list for names that do not match _SENSITIVE_ENV_VAR_NAME_RE (e.g.
+# AUTH-suffixed names); the pattern below covers the rest.
+_SENSITIVE_ENV_VAR_NAMES = frozenset({
+    'SKYPILOT_DB_CONNECTION_URI',
+    'SKYPILOT_INITIAL_BASIC_AUTH',
+    'SKYPILOT_SERVICE_ACCOUNT_TOKEN',
+    'SKYPILOT_DOCKER_PASSWORD',
+    'AWS_SECRET_ACCESS_KEY',
+    'AWS_SESSION_TOKEN',
+    'AWS_ACCESS_KEY_ID',
+    'AZURE_CLIENT_SECRET',
+})
+
+# Any env var whose NAME matches this pattern has its value redacted in debug
+# dumps. Dumps are meant to be shared (attached to issues, sent to support),
+# so this deliberately over-matches: a false positive (redacting a non-secret
+# value whose name merely contains e.g. 'KEY') only costs a little diagnostic
+# signal, while a false negative leaks a credential. This is what makes the
+# redaction robust to deployments injecting new secret-bearing env vars the
+# explicit list above never anticipated.
+_SENSITIVE_ENV_VAR_NAME_RE = re.compile(
+    r'TOKEN|SECRET|KEY|PASSWORD|PASSWD|CREDENTIAL|URI', re.IGNORECASE)
+
+
+def is_sensitive_env_var(name: str) -> bool:
+    """Whether an env var's value must be redacted in debug dumps."""
+    return (name in _SENSITIVE_ENV_VAR_NAMES or
+            _SENSITIVE_ENV_VAR_NAME_RE.search(name) is not None)
+
+
+def redact_env_vars(env_vars: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a copy of env_vars safe to include in a debug dump.
+
+    Names are kept (which vars are set is diagnostic signal); values of
+    sensitive names are replaced with '<redacted>'. Set-but-empty values stay
+    empty -- there is nothing to leak, and the emptiness itself is signal.
+    The input is not mutated.
+    """
+    redacted: Dict[str, Any] = {}
+    for name, value in env_vars.items():
+        if is_sensitive_env_var(name):
+            redacted[name] = REDACTED_VALUE if value else value
+        else:
+            redacted[name] = value
+    return redacted
+
+
+# Kubernetes injects service-discovery env vars for every Service visible to
+# a pod (see "Environment variables" in the Kubernetes Services docs): for a
+# service `foo`, kubelet sets FOO_SERVICE_HOST, FOO_SERVICE_PORT,
+# FOO_SERVICE_PORT_<NAME>, FOO_PORT (a tcp://host:port URL) and the
+# FOO_PORT_<PORT>_TCP{,_ADDR,_PORT,_PROTO} family. On an in-cluster API
+# server the chart's services are named skypilot-*, so all of these start
+# with SKYPILOT_ and land in every request body (request_body_env_vars keeps
+# all SKYPILOT_* vars) -- ~60 identical entries per request, 72MB across a
+# large production dump. Matching the shapes kubelet generates (rather
+# than enumerating today's services) means any newly added chart service is
+# filtered automatically. This only affects what debug dumps write, never
+# what the server persists or executes.
+_K8S_SERVICE_DISCOVERY_NAME_RE = re.compile(
+    r'(?:^|_)SERVICE_HOST$|'
+    r'(?:^|_)SERVICE_PORT(?:_.+)?$|'
+    r'_PORT_\d+_TCP(?:_(?:ADDR|PORT|PROTO))?$')
+# Value shape of the bare {SVC}_PORT injection; checked only for names ending
+# in _PORT, which alone is too generic to drop (e.g. a real config var).
+_K8S_TCP_URL_VALUE_RE = re.compile(r'^tcp://[^\s:]+:\d+$')
+
+
+def is_service_discovery_env_var(name: str, value: Any) -> bool:
+    """Whether an env var is a Kubernetes-injected service-discovery var."""
+    if _K8S_SERVICE_DISCOVERY_NAME_RE.search(name) is not None:
+        return True
+    return (name.endswith('_PORT') and isinstance(value, str) and
+            _K8S_TCP_URL_VALUE_RE.match(value) is not None)
+
+
+def drop_service_discovery_env_vars(env_vars: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a copy of env_vars without k8s service-discovery entries.
+
+    The dropped entries are machine-generated noise: identical in every
+    request created inside the same pod and useless for debugging client
+    requests. The input is not mutated.
+    """
+    return {
+        name: value
+        for name, value in env_vars.items()
+        if not is_service_discovery_env_var(name, value)
+    }
+
+
+# KEY=VALUE assignments to --env/--secret in a shell command string
+# (e.g. the persisted entrypoint_command). Commands are shlex.join output,
+# which produces three shapes (\x27/\x22 are the quote characters, escaped to
+# keep this file's single-quote style):
+#   --env KEY=VALUE / --env=KEY=VALUE        (value ends at whitespace)
+#   --env 'KEY=VALUE MIGHT HAVE SPACES'      (value ends at the closing quote)
+#   '--env=KEY=VALUE MIGHT HAVE SPACES'      (whole token quoted by shlex)
+_CMD_ENV_FLAG_QUOTED_RE = re.compile(
+    r'(?P<prefix>--(?:env|secret)(?:=|\s+))(?P<quote>[\x27\x22])'
+    r'(?P<key>[^=\s\x27\x22]+)=(?P<value>.*?)(?P=quote)')
+_CMD_ENV_FLAG_ATTACHED_QUOTED_RE = re.compile(
+    r'(?P<quote>[\x27\x22])(?P<prefix>--(?:env|secret)=)'
+    r'(?P<key>[^=\s\x27\x22]+)=(?P<value>.*?)(?P=quote)')
+_CMD_ENV_FLAG_BARE_RE = re.compile(
+    r'(?P<prefix>--(?:env|secret)(?:=|\s+))'
+    r'(?P<key>[^=\s\x27\x22]+)=(?P<value>[^\s\x27\x22]*)')
+
+
+def redact_command_secrets(command: str) -> str:
+    """Redact credential-bearing --env/--secret values in a command string.
+
+    Any `--env KEY=VALUE` / `--secret KEY=VALUE` (or `--env=KEY=VALUE`) whose
+    KEY matches the sensitive-env-var pattern has VALUE replaced with
+    '<redacted>'. Users do pass credentials via --env, and the persisted
+    entrypoint_command is copied verbatim into debug dumps (log-tail requests
+    even duplicate the outer command into many request records). Keys without
+    a value (`--env KEY`, whose value lives in the client's environment) and
+    empty values are left alone -- there is nothing to leak.
+    """
+
+    def _redact(match: 're.Match[str]') -> str:
+        key = match.group('key')
+        value = match.group('value')
+        if not value or not is_sensitive_env_var(key):
+            return match.group(0)
+        # Preserve the command's shape, swapping only the value. The
+        # attached-quoted form puts its opening quote before the flag, the
+        # split-quoted form between the flag and the key, and the bare form
+        # has no quote at all.
+        prefix = match.group('prefix')
+        quote = match.groupdict().get('quote') or ''
+        if match.re is _CMD_ENV_FLAG_ATTACHED_QUOTED_RE:
+            return f'{quote}{prefix}{key}={REDACTED_VALUE}{quote}'
+        return f'{prefix}{quote}{key}={REDACTED_VALUE}{quote}'
+
+    command = _CMD_ENV_FLAG_QUOTED_RE.sub(_redact, command)
+    command = _CMD_ENV_FLAG_ATTACHED_QUOTED_RE.sub(_redact, command)
+    return _CMD_ENV_FLAG_BARE_RE.sub(_redact, command)
 
 
 def redact_config(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,7 +175,7 @@ def redact_config(config: Dict[str, Any]) -> Dict[str, Any]:
     for field_path in _SENSITIVE_CONFIG_KEYS:
         val = config_copy.get_nested(field_path, default_value=None)
         if val is not None:
-            config_copy.set_nested(field_path, '<redacted>')
+            config_copy.set_nested(field_path, REDACTED_VALUE)
     return dict(**config_copy)
 
 
@@ -107,7 +250,9 @@ def serialize_cluster_record(cluster_record: Dict[str, Any]) -> Dict[str, Any]:
         'last_use': cluster_record.get('last_use'),
         'owner': cluster_record.get('owner'),
         'metadata': cluster_record.get('metadata'),
-        'last_creation_command': cluster_record.get('last_creation_command'),
+        'last_creation_command':
+            (redact_command_secrets(cluster_record['last_creation_command']) if
+             cluster_record.get('last_creation_command') is not None else None),
         'last_creation_yaml':
             (redact_task_yaml(cluster_record['last_creation_yaml'])
              if cluster_record.get('last_creation_yaml') is not None else None),
@@ -141,7 +286,9 @@ def serialize_cluster_history_record(
         'workspace': history_record.get('workspace'),
         'last_event': history_record.get('last_event'),
         'node_names': history_record.get('node_names'),
-        'last_creation_command': history_record.get('last_creation_command'),
+        'last_creation_command':
+            (redact_command_secrets(history_record['last_creation_command']) if
+             history_record.get('last_creation_command') is not None else None),
         'last_creation_yaml':
             (redact_task_yaml(history_record['last_creation_yaml'])
              if history_record.get('last_creation_yaml') is not None else None),

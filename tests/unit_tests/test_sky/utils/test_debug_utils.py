@@ -18,6 +18,7 @@ import pytest
 from sky import clouds
 from sky import exceptions
 from sky.adaptors import kubernetes as adaptors_kubernetes
+from sky.client import sdk
 from sky.jobs import utils as managed_job_utils
 from sky.server import constants as server_constants
 from sky.server.requests import log_provider as log_provider_lib
@@ -2297,15 +2298,38 @@ class TestManifestPathTraversal:
 
 
 # ---------------------------------------------------------------------------
-# Tests for _SENSITIVE_ENV_VARS redaction
+# Tests for sensitive env var redaction
 # ---------------------------------------------------------------------------
 class TestSensitiveEnvVarRedaction:
     """Tests for sensitive environment variable redaction."""
 
-    def test_sensitive_env_vars_redacted(self):
-        """Sensitive env vars should have their values replaced with bool."""
-        assert 'SKYPILOT_DB_CONNECTION_URI' in debug_utils._SENSITIVE_ENV_VARS
-        assert 'SKYPILOT_INITIAL_BASIC_AUTH' in debug_utils._SENSITIVE_ENV_VARS
+    @pytest.mark.parametrize('name', [
+        'SKYPILOT_DEPLOY_TOKEN',
+        'SKYPILOT_CREDS_MASTER_KEY',
+        'SKYPILOT_SOME_TOKEN',
+        'SKY_API_KEY',
+        'SKYPILOT_ADMIN_PASSWORD',
+        'SKYPILOT_CLOUD_CREDENTIALS',
+        'SKYPILOT_DB_CONNECTION_URI',
+        'skypilot_lowercase_token',
+    ])
+    def test_credential_shaped_names_are_sensitive(self, name):
+        """Names containing TOKEN/KEY/SECRET/... match case-insensitively."""
+        assert debug_dump_helpers.is_sensitive_env_var(name)
+
+    @pytest.mark.parametrize('name', [
+        'SKYPILOT_DEBUG',
+        'SKY_NORMAL_VAR',
+        'SKYPILOT_CONFIG',
+        'SKYPILOT_USER_ID',
+    ])
+    def test_ordinary_names_are_not_sensitive(self, name):
+        assert not debug_dump_helpers.is_sensitive_env_var(name)
+
+    def test_exact_sensitive_names_still_covered(self):
+        """AUTH-suffixed names that miss the pattern stay redacted."""
+        assert debug_dump_helpers.is_sensitive_env_var(
+            'SKYPILOT_INITIAL_BASIC_AUTH')
 
     @mock.patch('sky.utils.debug_utils.sky_check.check', return_value={})
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request',
@@ -2317,19 +2341,28 @@ class TestSensitiveEnvVarRedaction:
         env_patch = {
             'SKYPILOT_DEBUG': '1',
             'SKYPILOT_DB_CONNECTION_URI': 'postgresql://secret@host/db',
+            'SKYPILOT_DEPLOY_TOKEN': 'sky_live_token',
+            'SKYPILOT_CREDS_MASTER_KEY': 'master_key_value',
             'SKY_NORMAL_VAR': 'visible',
         }
         with mock.patch.dict(os.environ, env_patch, clear=False):
             debug_utils._dump_server_info(str(tmp_path))
 
         with open(os.path.join(str(tmp_path), 'server_info.json')) as f:
-            info = json.load(f)
+            raw = f.read()
+            info = json.loads(raw)
 
         env = info['environment']
         assert env['SKYPILOT_DEBUG'] == '1'
         assert env['SKY_NORMAL_VAR'] == 'visible'
-        # Sensitive var should be redacted to bool
-        assert env['SKYPILOT_DB_CONNECTION_URI'] is True
+        # Exact-name and credential-shaped names are redacted (names kept).
+        assert env['SKYPILOT_DB_CONNECTION_URI'] == '<redacted>'
+        assert env['SKYPILOT_DEPLOY_TOKEN'] == '<redacted>'
+        assert env['SKYPILOT_CREDS_MASTER_KEY'] == '<redacted>'
+        # No secret value ships anywhere in the file.
+        assert 'sky_live_token' not in raw
+        assert 'master_key_value' not in raw
+        assert 'postgresql://secret' not in raw
 
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request',
                 return_value=None)
@@ -2384,6 +2417,31 @@ class TestSensitiveEnvVarRedaction:
             }
         }
         assert 'cloud_status_error' not in info
+
+
+# ---------------------------------------------------------------------------
+# Tests for the client-side client_info construction
+# ---------------------------------------------------------------------------
+class TestBuildClientInfo:
+    """The client_info sent with create_debug_dump redacts its environment.
+
+    The 'sky.create_debug_dump' request body is persisted verbatim in the
+    dump (the server-side sanitizer does not recurse into client_info), so
+    the redaction must happen client-side.
+    """
+
+    def test_environment_redacts_credential_shaped_values(self):
+        """Credential-shaped SKYPILOT_*/SKY_* values are redacted client-side;
+        benign values pass through unchanged."""
+        env_patch = {
+            'SKYPILOT_SOME_TOKEN': 'client_side_token',
+            'SKYPILOT_DEBUG': '1',
+        }
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            environment = sdk._build_client_info()['environment']
+        assert environment['SKYPILOT_SOME_TOKEN'] == '<redacted>'
+        assert environment['SKYPILOT_DEBUG'] == '1'
+        assert 'client_side_token' not in json.dumps(environment)
 
 
 # ---------------------------------------------------------------------------
@@ -2476,6 +2534,17 @@ class TestSerializeClusterRecord:
         assert result['last_creation_command'] is None
         assert result['last_creation_yaml'] is None
         assert result['last_event'] is None
+
+    def test_last_creation_command_secrets_redacted(self):
+        """Credential-bearing --env values in the creation command are
+        redacted."""
+        record = self._make_full_cluster_record(
+            last_creation_command=('sky launch --env MY_TOKEN=tok123 '
+                                   '--env NCCL_TIMEOUT=1800 test.yaml'))
+        result = debug_dump_helpers.serialize_cluster_record(record)
+        assert result['last_creation_command'] == (
+            'sky launch --env MY_TOKEN=<redacted> '
+            '--env NCCL_TIMEOUT=1800 test.yaml')
 
     def test_handle_fields_extracted(self):
         """Handle sub-fields should be correctly extracted."""
@@ -2876,6 +2945,91 @@ class TestRedactConfig:
 
 
 # ---------------------------------------------------------------------------
+# Tests for redact_command_secrets
+# ---------------------------------------------------------------------------
+class TestRedactCommandSecrets:
+    """Tests for credential redaction in command strings."""
+
+    @pytest.mark.parametrize(
+        'command,expected',
+        [
+            # Bare, =-attached and quoted sensitive pairs are redacted.
+            ('sky launch --env TOKEN=t1', 'sky launch --env TOKEN=<redacted>'),
+            ('sky launch --env=API_KEY=k1',
+             'sky launch --env=API_KEY=<redacted>'),
+            ('sky launch --secret \'MY_SECRET=s 1\'',
+             'sky launch --secret \'MY_SECRET=<redacted>\''),
+            ('sky launch --secret "API_KEY=k 2"',
+             'sky launch --secret "API_KEY=<redacted>"'),
+            # Whole attached token quoted by shlex (value has spaces).
+            ('sky launch \'--env=API_KEY=k 3\'',
+             'sky launch \'--env=API_KEY=<redacted>\''),
+            # Non-sensitive pairs and quoted values with spaces are kept.
+            ('sky launch --env NCCL_TIMEOUT=1800',
+             'sky launch --env NCCL_TIMEOUT=1800'),
+            ('sky launch --env \'ENTRYPOINT=a b c\'',
+             'sky launch --env \'ENTRYPOINT=a b c\''),
+            # Nothing to leak: empty value, bare key.
+            ('sky launch --env HF_TOKEN=', 'sky launch --env HF_TOKEN='),
+            ('sky launch --env HF_TOKEN', 'sky launch --env HF_TOKEN'),
+            # Later flags are not corrupted by an earlier redaction.
+            ('--env TOKEN=t1 --gpus L4:8 --dryrun',
+             '--env TOKEN=<redacted> --gpus L4:8 --dryrun'),
+        ])
+    def test_redaction_shapes(self, command, expected):
+        assert debug_dump_helpers.redact_command_secrets(command) == expected
+
+
+# ---------------------------------------------------------------------------
+# Tests for drop_service_discovery_env_vars
+# ---------------------------------------------------------------------------
+class TestDropServiceDiscoveryEnvVars:
+    """Kubernetes injects these for every Service visible to the pod."""
+
+    @pytest.mark.parametrize('name', [
+        'SKYPILOT_PROMETHEUS_SERVER_SERVICE_HOST',
+        'SKYPILOT_API_SERVICE_PORT',
+        'SKYPILOT_API_SERVICE_PORT_HTTP',
+        'SKYPILOT_KUBE_STATE_METRICS_PORT_8080_TCP',
+        'SKYPILOT_KUBE_STATE_METRICS_PORT_8080_TCP_ADDR',
+        'SKYPILOT_KUBE_STATE_METRICS_PORT_8080_TCP_PORT',
+        'SKYPILOT_KUBE_STATE_METRICS_PORT_8080_TCP_PROTO',
+        'NEW_CHART_SERVICE_SERVICE_HOST',
+    ])
+    def test_service_discovery_names_dropped(self, name):
+        env = {name: 'value'}
+        assert debug_dump_helpers.drop_service_discovery_env_vars(env) == {}
+
+    @pytest.mark.parametrize(
+        'name,value,kept',
+        [
+            # Bare {SVC}_PORT is dropped only with the k8s tcp:// URL value.
+            ('SKYPILOT_API_PORT', 'tcp://172.20.95.240:80', False),
+            # A _PORT name with a non-k8s value is kept.
+            ('SKYPILOT_SOME_PORT', '1234', True),
+        ])
+    def test_bare_port_value_gated(self, name, value, kept):
+        result = debug_dump_helpers.drop_service_discovery_env_vars(
+            {name: value})
+        assert result == ({name: value} if kept else {})
+
+    def test_meaningful_vars_kept(self):
+        env = {
+            'KUBECONFIG': '/root/.kube/config',
+            'SKYPILOT_USER_ID': 'e2e000e0',
+            'SKYPILOT_DB_POOL_HOSTPORT': '127.0.0.1:6432',
+            'SKYPILOT_RELEASE_NAME': 'skypilot',
+        }
+        result = debug_dump_helpers.drop_service_discovery_env_vars(env)
+        assert result == env
+
+    def test_does_not_mutate_original(self):
+        env = {'SKYPILOT_API_SERVICE_PORT': 'tcp://1.2.3.4:80'}
+        debug_dump_helpers.drop_service_discovery_env_vars(env)
+        assert env == {'SKYPILOT_API_SERVICE_PORT': 'tcp://1.2.3.4:80'}
+
+
+# ---------------------------------------------------------------------------
 # Tests for _REQUEST_BODY_ALLOWLIST coverage
 # ---------------------------------------------------------------------------
 class TestRequestBodyAllowlistCoverage:
@@ -2981,6 +3135,96 @@ class TestSanitizeRequestBody:
         assert result['env_vars']['NORMAL_VAR'] == 'visible'
         assert result['env_vars']['AWS_SECRET_ACCESS_KEY'] == '<redacted>'
         assert result['env_vars']['SKYPILOT_DB_CONNECTION_URI'] == '<redacted>'
+
+    def test_credential_shaped_env_vars_redacted(self):
+        """Env vars with credential-shaped names are redacted by pattern."""
+
+        class FakeBody:
+
+            def model_dump(self):
+                return {
+                    'cluster_name': 'test',
+                    'env_vars': {
+                        'ROBOT_DATA_AUTH_TOKEN': 'd458189e',
+                        'WANDB_API_KEY': 'local-78b7',
+                        'SKYPILOT_DEBUG': '1',
+                    }
+                }
+
+        request = _make_request(name='sky.stop', request_body=FakeBody())
+        result = debug_utils._sanitize_request_body(request)
+        assert result is not None
+        assert result['env_vars']['ROBOT_DATA_AUTH_TOKEN'] == '<redacted>'
+        assert result['env_vars']['WANDB_API_KEY'] == '<redacted>'
+        assert result['env_vars']['SKYPILOT_DEBUG'] == '1'
+
+    def test_service_discovery_env_vars_dropped(self):
+        """Kubernetes service-discovery env vars are dropped from the body."""
+        service_discovery = {
+            'SKYPILOT_PROMETHEUS_SERVER_SERVICE_HOST': '172.20.234.74',
+            'SKYPILOT_API_SERVICE_PORT': 'tcp://172.20.230.146:80',
+            'SKYPILOT_API_PORT': 'tcp://172.20.95.240:80',
+            'SKYPILOT_KUBE_STATE_METRICS_PORT_8080_TCP_PORT': '8080',
+        }
+        meaningful = {
+            'KUBECONFIG': '/root/.kube/config',
+            'SKYPILOT_USER_ID': 'e2e000e0',
+            # A _PORT name with a non-service value is kept.
+            'SKYPILOT_SOME_PORT': '1234',
+        }
+
+        class FakeBody:
+
+            def model_dump(self):
+                return {
+                    'cluster_name': 'test',
+                    'env_vars': {
+                        **service_discovery,
+                        **meaningful
+                    }
+                }
+
+        request = _make_request(name='sky.status', request_body=FakeBody())
+        result = debug_utils._sanitize_request_body(request)
+        assert result is not None
+        assert result['env_vars'] == meaningful
+
+    def test_entrypoint_command_secrets_redacted(self):
+        """Credential-bearing --env/--secret values are redacted."""
+
+        class FakeBody:
+
+            def model_dump(self):
+                return {
+                    'cluster_name': 'test',
+                    'entrypoint_command':
+                        ('sky exec --num-nodes 4 --gpus L4:8 '
+                         '--env ROBOT_DATA_AUTH_TOKEN=d458189e '
+                         '--env NCCL_TIMEOUT=1800 '
+                         '--secret \'WANDB_API_KEY=local-78b7\' '
+                         '--secret=HF_TOKEN=hf_value '
+                         '--env \'ENTRYPOINT=run.sh --seed 0\' '
+                         '--env SLACK_API_TOKEN= '
+                         '--env MY_TOKEN'),
+                }
+
+        request = _make_request(name='sky.exec', request_body=FakeBody())
+        result = debug_utils._sanitize_request_body(request)
+        assert result is not None
+        cmd = result['entrypoint_command']
+        assert '--env ROBOT_DATA_AUTH_TOKEN=<redacted>' in cmd
+        assert '--env NCCL_TIMEOUT=1800' in cmd
+        assert '--secret \'WANDB_API_KEY=<redacted>\'' in cmd
+        assert '--secret=HF_TOKEN=<redacted>' in cmd
+        # Non-secret quoted value and its structure are preserved.
+        assert '--env \'ENTRYPOINT=run.sh --seed 0\'' in cmd
+        # Empty values and bare keys (value lives in the client env) have
+        # nothing to leak and stay as-is.
+        assert '--env SLACK_API_TOKEN=' in cmd
+        assert '--env MY_TOKEN' in cmd
+        assert 'd458189e' not in cmd
+        assert 'local-78b7' not in cmd
+        assert 'hf_value' not in cmd
 
     def test_task_yaml_field_redacted(self):
         """Task YAML fields should have secrets redacted."""
