@@ -150,6 +150,33 @@ def test_get_last_event_of_type_multiple(tmp_path, monkeypatch):
     assert result == {h1: 'a-new', h2: 'b-only'}
 
 
+def test_get_last_event_of_type_multiple_chunks_large_sets(
+        tmp_path, monkeypatch):
+    """More hashes than one IN clause may hold are queried in chunks and
+    merged, so a large pool's status does not exceed SQLite's bind limit."""
+    _fresh_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(global_user_state, '_CLUSTER_IN_QUERY_CHUNK_SIZE', 2)
+    expected = {}
+    for i in range(5):
+        name = f'c{i}'
+        cluster_hash = _add_cluster(name)
+        for t, reason in ((1, f'{name}-old'), (2, f'{name}-new')):
+            global_user_state.add_cluster_event(
+                name,
+                new_status=None,
+                reason=reason,
+                event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+                transitioned_at=t,
+            )
+        expected[cluster_hash] = f'{name}-new'
+
+    result = global_user_state.get_last_cluster_event_of_type_multiple(
+        set(expected),
+        event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+    )
+    assert result == expected
+
+
 def test_get_clusters_marks_launching_init(tmp_path, monkeypatch):
     _fresh_db(tmp_path, monkeypatch)
     _add_cluster('init-cluster')
@@ -336,3 +363,95 @@ def test_get_cluster_events_multiple_types_merged_and_ordered(
     assert global_user_state.get_cluster_events(
         cluster_name=None, cluster_hash=cluster_hash, event_type=both,
         limit=2) == ['Launching (pulling)', 'Cluster provisioned']
+
+
+def test_latest_cluster_events_batched(tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    for name in ('c-a', 'c-b', 'c-c'):
+        _add_cluster(name)
+    progress = global_user_state.ClusterEventType.LAUNCH_PROGRESS
+    # Explicit transitioned_at: no sleeping for the 1s timestamp resolution.
+    global_user_state.add_cluster_event('c-a',
+                                        None,
+                                        'Launching (pending: Resources)',
+                                        progress,
+                                        transitioned_at=1000)
+    global_user_state.add_cluster_event('c-a',
+                                        None,
+                                        'Launching (pending: QOSGrpGRES)',
+                                        progress,
+                                        transitioned_at=2000)
+    # A different type on c-b must not be picked up by a progress-only query.
+    global_user_state.add_cluster_event(
+        'c-b',
+        status_lib.ClusterStatus.INIT,
+        'init',
+        global_user_state.ClusterEventType.STATUS_CHANGE,
+        transitioned_at=1500)
+
+    events = global_user_state.get_latest_cluster_events(
+        ['c-a', 'c-b', 'c-c', 'missing'], [progress])
+    assert events == {'c-a': ('Launching (pending: QOSGrpGRES)', 2000)}
+    # Both types requested: c-b's status change is returned with its stamp.
+    both = global_user_state.get_latest_cluster_events(
+        ['c-a', 'c-b'],
+        [progress, global_user_state.ClusterEventType.STATUS_CHANGE])
+    assert both == {
+        'c-a': ('Launching (pending: QOSGrpGRES)', 2000),
+        'c-b': ('init', 1500),
+    }
+    assert not global_user_state.get_latest_cluster_events([], [progress])
+    assert not global_user_state.get_latest_cluster_events(['c-a'], [])
+
+
+def test_latest_cluster_events_ties_are_stable(tmp_path, monkeypatch):
+    """transitioned_at is whole seconds and the table has no insertion order,
+    so two events written inside one second need a second sort key for the
+    answer to be stable at all. *Which* of the two wins is the database's
+    collation, so it is deliberately not asserted -- see the ordering comment
+    in get_latest_cluster_events.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+    _add_cluster('c-a')
+    progress = global_user_state.ClusterEventType.LAUNCH_PROGRESS
+    reasons = {'Launching (one thing)', 'Launching (another thing)'}
+    for reason in reasons:
+        global_user_state.add_cluster_event('c-a',
+                                            None,
+                                            reason,
+                                            progress,
+                                            transitioned_at=1000)
+    seen = {
+        global_user_state.get_latest_cluster_events(['c-a'], [progress])['c-a']
+        for _ in range(5)
+    }
+    assert len(seen) == 1
+    reason, transitioned_at = seen.pop()
+    assert reason in reasons
+    assert transitioned_at == 1000
+
+
+def test_latest_cluster_events_chunks_the_name_list(tmp_path, monkeypatch):
+    """SQLite caps a statement at 999 bound parameters. Unchunked, a
+    deployment with that many clusters provisioning at once raised -- and the
+    caller swallows the error, so *every* cluster lost its launch reason
+    rather than the excess.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(global_user_state, '_CLUSTER_IN_QUERY_CHUNK_SIZE', 2)
+    progress = global_user_state.ClusterEventType.LAUNCH_PROGRESS
+    names = []
+    for i in range(5):
+        name = f'chunk-{i}'
+        _add_cluster(name)
+        names.append(name)
+        global_user_state.add_cluster_event(name,
+                                            None,
+                                            f'Launching (pending: r{i})',
+                                            progress,
+                                            transitioned_at=1000 + i)
+    events = global_user_state.get_latest_cluster_events(names, [progress])
+    # Every cluster answered, across three batches of at most two names.
+    assert events == {
+        f'chunk-{i}': (f'Launching (pending: r{i})', 1000 + i) for i in range(5)
+    }

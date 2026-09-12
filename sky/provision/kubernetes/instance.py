@@ -1019,9 +1019,13 @@ def _count_transport_error(e: Exception, first_error_time: Optional[float],
     return first_error_time
 
 
-def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
+def _wait_for_pods_to_schedule(namespace,
+                               context,
+                               new_nodes,
+                               timeout: int,
                                cluster_name: str,
-                               create_pods_start: datetime.datetime):
+                               create_pods_start: datetime.datetime,
+                               admission_timeout: Optional[int] = None):
     """Wait for all pods to be scheduled.
 
     Wait for all pods including jump pod to be scheduled, and if it
@@ -1080,12 +1084,16 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
     # provisioning clock is paused: provision_timeout starts counting from
     # the moment all expected pods are ungated (admitted). The gated wait
     # itself is bounded by kubernetes.kueue.admission_timeout (default
-    # _QUEUE_ADMISSION_TIMEOUT_SECONDS; -1 waits indefinitely).
-    admission_timeout = skypilot_config.get_effective_region_config(
-        cloud='ssh' if is_ssh_node_pool else 'kubernetes',
-        region=context,
-        keys=('kueue', 'admission_timeout'),
-        default_value=_QUEUE_ADMISSION_TIMEOUT_SECONDS)
+    # _QUEUE_ADMISSION_TIMEOUT_SECONDS; -1 waits indefinitely). The cluster
+    # YAML carries the value resolved at launch time (task config overrides
+    # and workspace scope included); fall back to the request config for
+    # cluster YAMLs written before that field existed.
+    if admission_timeout is None:
+        admission_timeout = skypilot_config.get_effective_region_config(
+            cloud='ssh' if is_ssh_node_pool else 'kubernetes',
+            region=context,
+            keys=('kueue', 'admission_timeout'),
+            default_value=_QUEUE_ADMISSION_TIMEOUT_SECONDS)
     pods_are_gated = False
     last_gated_pod_names: List[str] = []
     # Start of the provisioning clock; slides to the admission moment when
@@ -1206,6 +1214,17 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
             provision_clock_start = time.time()
             logger.info('All pods admitted (scheduling gates removed); '
                         f'waiting up to {timeout}s for scheduling.')
+            # Record the transition: the latest LAUNCH_PROGRESS event is
+            # surfaced as the status detail of a provisioning SkyServe
+            # replica / pool worker, so it must stop reading as a queue
+            # wait once the pods are admitted.
+            global_user_state.add_cluster_event(
+                cluster_name,
+                new_status=None,
+                reason='Launching (admitted by queue, waiting for scheduling)',
+                event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+                nop_if_duplicate=True,
+            )
 
         # A pod is considered scheduled once the kube-scheduler has bound it
         # to a node (capacity found). We deliberately do not wait for the
@@ -2555,8 +2574,14 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     # Wait until the pods are scheduled and surface cause for error
     # if there is one
-    _wait_for_pods_to_schedule(namespace, context, pods, provision_timeout,
-                               cluster_name, create_pods_start)
+    _wait_for_pods_to_schedule(
+        namespace,
+        context,
+        pods,
+        provision_timeout,
+        cluster_name,
+        create_pods_start,
+        admission_timeout=provider_config.get('queue_admission_timeout'))
     # Reset spinner message here because it might have hinted autoscaling
     # while waiting for pods to schedule.
     rich_utils.force_update_status(

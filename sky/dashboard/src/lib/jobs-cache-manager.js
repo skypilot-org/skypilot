@@ -48,6 +48,7 @@ class JobsCacheManager {
       userMatch,
       workspaceMatch,
       poolMatch,
+      infraMatch,
       pluginFilters,
       statuses,
     } = options;
@@ -64,6 +65,7 @@ class JobsCacheManager {
       userMatch: userMatch || null,
       workspaceMatch: workspaceMatch || null,
       poolMatch: poolMatch || null,
+      infraMatch: infraMatch || null,
       pluginFilters: this._normalizePluginFilters(pluginFilters),
       statuses: statuses && statuses.length > 0 ? [...statuses].sort() : null,
     };
@@ -83,6 +85,7 @@ class JobsCacheManager {
       userMatch,
       workspaceMatch,
       poolMatch,
+      infraMatch,
       pluginFilters,
       statuses,
     } = options;
@@ -94,6 +97,7 @@ class JobsCacheManager {
       userMatch: userMatch || null,
       workspaceMatch: workspaceMatch || null,
       poolMatch: poolMatch || null,
+      infraMatch: infraMatch || null,
       pluginFilters: this._normalizePluginFilters(pluginFilters),
       statuses: statuses && statuses.length > 0 ? [...statuses].sort() : null,
     };
@@ -168,6 +172,7 @@ class JobsCacheManager {
         hasPrev: false,
         controllerStopped: true,
         statusCounts: {},
+        infraOptions: [],
       };
     }
 
@@ -179,6 +184,7 @@ class JobsCacheManager {
     const hasNext = page < totalPages;
     const hasPrev = page > 1;
     const statusCounts = pageResponse.statusCounts || {};
+    const infraOptions = pageResponse.infraOptions || [];
 
     // Cache this single page
     this.pageCache.set(cacheKey, {
@@ -190,6 +196,7 @@ class JobsCacheManager {
       hasPrev,
       controllerStopped: false,
       statusCounts,
+      infraOptions,
       timestamp: Date.now(),
     });
 
@@ -202,6 +209,7 @@ class JobsCacheManager {
       hasPrev,
       controllerStopped: false,
       statusCounts,
+      infraOptions,
       fromCache: false,
       cacheStatus: 'default_path_single_page',
     };
@@ -244,6 +252,7 @@ class JobsCacheManager {
       totalJobs,
       totalNoFilter: fullDataResponse.totalNoFilter || totalJobs,
       statusCounts: fullDataResponse.statusCounts || {},
+      infraOptions: fullDataResponse.infraOptions || [],
       timestamp: Date.now(),
     });
 
@@ -275,6 +284,7 @@ class JobsCacheManager {
         hasPrev: p > 1,
         controllerStopped: false,
         statusCounts: fullDataResponse.statusCounts || {},
+        infraOptions: fullDataResponse.infraOptions || [],
         timestamp: Date.now(),
       });
     }
@@ -325,6 +335,7 @@ class JobsCacheManager {
         hasPrev: false,
         controllerStopped: true,
         statusCounts: {},
+        infraOptions: [],
         fromCache: false,
         cacheStatus: 'plugin_path_controller_stopped',
       };
@@ -338,6 +349,7 @@ class JobsCacheManager {
     const hasNext = result.hasNext || result.has_next || page < totalPages;
     const hasPrev = result.hasPrev || result.has_prev || page > 1;
     const statusCounts = result.statusCounts || {};
+    const infraOptions = result.infraOptions || [];
     const externalFetchErrors = result.externalFetchErrors || [];
 
     // Cache this specific page
@@ -350,6 +362,7 @@ class JobsCacheManager {
       hasPrev,
       controllerStopped: false,
       statusCounts,
+      infraOptions,
       externalFetchErrors,
       timestamp: Date.now(),
     });
@@ -363,6 +376,7 @@ class JobsCacheManager {
       hasPrev,
       controllerStopped: false,
       statusCounts,
+      infraOptions,
       externalFetchErrors,
       fromCache: false,
       cacheStatus: 'plugin_path_fetched',
@@ -392,6 +406,9 @@ class JobsCacheManager {
     }
     if (filterOptions.poolMatch) {
       filters.push({ property: 'pool', value: filterOptions.poolMatch });
+    }
+    if (filterOptions.infraMatch) {
+      filters.push({ property: 'infra', value: filterOptions.infraMatch });
     }
     // Plugin-registered filter properties pass through verbatim — the
     // plugin's fetch function is the one that interprets them.
@@ -452,6 +469,7 @@ class JobsCacheManager {
           hasPrev: cachedPage.hasPrev,
           controllerStopped: cachedPage.controllerStopped,
           statusCounts: cachedPage.statusCounts,
+          infraOptions: cachedPage.infraOptions,
           externalFetchErrors: cachedPage.externalFetchErrors || [],
           fromCache: true,
           cacheStatus: 'cache_hit',
@@ -626,6 +644,7 @@ class JobsCacheManager {
           userMatch: keyObj.userMatch,
           workspaceMatch: keyObj.workspaceMatch,
           poolMatch: keyObj.poolMatch,
+          infraMatch: keyObj.infraMatch,
           statuses: keyObj.statuses,
         };
         if (JSON.stringify(keyFilterObj) === filterKey) {

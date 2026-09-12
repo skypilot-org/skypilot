@@ -1465,7 +1465,20 @@ function JobDetailsContent({
       <div>
         <div className="text-gray-600 font-medium text-base">Duration</div>
         <div className="text-base mt-1">
-          {formatDuration(jobData.job_duration)}
+          {(() => {
+            if (allTasks.length <= 1) {
+              return formatDuration(jobData.job_duration);
+            }
+            // For a job group, sum the durations of all tasks instead of
+            // showing only the first task's duration, matching the CLI's
+            // aggregated row. A task that has not started yet contributes
+            // 0; one that has started keeps accruing.
+            const totalDuration = allTasks.reduce(
+              (sum, t) => sum + (t.job_duration || 0),
+              0
+            );
+            return formatDuration(totalDuration);
+          })()}
         </div>
       </div>
       <div>

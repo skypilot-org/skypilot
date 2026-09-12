@@ -12,6 +12,7 @@ import asyncio
 import copy
 import runpy
 import sys
+import threading
 from typing import Dict, List, Optional, Tuple
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
@@ -793,6 +794,25 @@ class TestTaskCleanup:
 
         assert not mount_0.exists(), 'mount_0 should be cleaned up'
         assert not mount_1.exists(), 'mount_1 should be cleaned up'
+
+    @pytest.mark.asyncio
+    async def test_dag_lookup_leaves_the_loop(self, cleanup_patches):
+        """_get_dag reads the DB; _cleanup must call it off the loop."""
+        loop_thread = threading.get_ident()
+        dag = MagicMock()
+        dag.tasks = []
+        seen_threads = []
+
+        def get_dag(job_id):
+            del job_id
+            seen_threads.append(threading.get_ident())
+            return dag
+
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag', side_effect=get_dag):
+            await manager._cleanup(job_id=1)
+
+        assert seen_threads and loop_thread not in seen_threads
 
 
 class TestDownloadLogsForCancelledJob:

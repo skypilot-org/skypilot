@@ -6,13 +6,13 @@ import fastapi
 
 from sky import sky_logging
 from sky.serve.server import core
+from sky.server import download_utils
 from sky.server import stream_utils
 from sky.server.blob import blob_storage as bs
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
-from sky.skylet import constants
 from sky.utils import common
 
 logger = sky_logging.init_logger(__name__)
@@ -130,7 +130,7 @@ async def download_logs(
     request: fastapi.Request,
     download_logs_body: payloads.ServeDownloadLogsBody,
 ) -> None:
-    user_hash = download_logs_body.env_vars[constants.USER_ID_ENV_VAR]
+    user_hash = download_utils.download_user_id(request, download_logs_body)
     timestamp = sky_logging.get_run_timestamp()
     logs_dir_on_api_server = (
         pathlib.Path(bs.get_blob_storage().download_tmp_dir(user_hash)) /

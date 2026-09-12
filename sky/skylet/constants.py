@@ -172,7 +172,7 @@ MANAGED_JOB_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}MANAGED_JOB_ID'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '39'  # add external-link log-scan skylet event.
+SKYLET_VERSION = '40'  # managed job table supports infra_match.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -619,6 +619,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('vast', 'datacenter_only'),
     ('vast', 'create_instance_kwargs'),
     ('slurm', 'sbatch_options'),
+    ('slurm', 'quota'),
     ('slurm', 'cpu_partition'),
     ('active_workspace',),
 ]
@@ -648,6 +649,7 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     # Slurm submit identity and cluster settings are managed server-side.
     ('slurm', 'cluster_configs'),
     ('slurm', 'submit_as_user'),
+    ('slurm', 'username_map'),
 ]
 
 # Constants for Azure blob storage
@@ -727,6 +729,18 @@ ENV_VAR_DB_POOL_CONNECTION_URI = (
     f'{SKYPILOT_ENV_VAR_PREFIX}DB_POOL_CONNECTION_URI')
 ENV_VAR_DB_POOL_HOSTPORT = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_POOL_HOSTPORT')
 
+# Total deadline, in seconds, on each DB lookup the API server's
+# authentication middlewares make (`sky.server.auth.db_lookup`). The users
+# upsert derives the server-side timeouts it sets on its own transaction
+# from the same value (`sky.global_user_state.add_or_update_user`), so read
+# it through `sky.utils.db.db_utils.get_auth_db_timeout_seconds()` rather
+# than from the environment directly: that keeps the two from drifting
+# apart. Server-side only: it is stripped from client request payloads and
+# from the per-request environment overlay on the server.
+ENV_VAR_AUTH_DB_TIMEOUT_SECONDS = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_DB_TIMEOUT_SECONDS')
+DEFAULT_AUTH_DB_TIMEOUT_SECONDS = 5.0
+
 # Environment variable that is set to 'true' if basic
 # authentication is enabled in the API server.
 ENV_VAR_ENABLE_BASIC_AUTH = 'ENABLE_BASIC_AUTH'
@@ -739,6 +753,12 @@ ENV_VAR_ENABLE_SERVICE_ACCOUNTS = 'ENABLE_SERVICE_ACCOUNTS'
 # Enable debug logging for requests.
 ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING = (
     f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}ENABLE_REQUEST_DEBUG_LOGGING')
+
+# When set to a truthy value, each API server worker binds its own listening
+# socket with SO_REUSEPORT so the kernel load-balances new connections across
+# workers, instead of all workers sharing a single inherited socket. Only takes
+# effect on Linux and with more than one worker.
+ENV_VAR_SERVER_REUSE_PORT = (f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}REUSE_PORT')
 
 SKYPILOT_DEFAULT_WORKSPACE = 'default'
 

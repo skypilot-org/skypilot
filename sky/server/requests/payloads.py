@@ -103,6 +103,10 @@ def request_body_env_vars() -> dict:
     # Any new environment variables that are server-specific should
     # use SKYPILOT_SERVER_ENV_VAR_PREFIX.
     env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
+    # The auth DB deadline is a server-side setting: the server derives the
+    # timeouts it puts on its own users upsert from it, so a client must not
+    # be able to supply it.
+    env_vars.pop(constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS, None)
     # Remove the in-cluster context name - this is only meaningful for the
     # local Kubernetes environment and should not be forwarded to the server,
     # which has its own cluster context configuration.
@@ -653,6 +657,10 @@ class JobsQueueV2Body(RequestBody):
     workspace_match: Optional[str] = None
     name_match: Optional[str] = None
     pool_match: Optional[str] = None
+    # `--infra` spec to filter on. Servers older than
+    # MIN_JOBS_INFRA_FILTER_API_VERSION drop this field silently, so the
+    # client checks the server version before sending it.
+    infra_match: Optional[str] = None
     page: Optional[int] = None
     limit: Optional[int] = None
     statuses: Optional[List[str]] = None
@@ -1077,6 +1085,9 @@ class GetJobEventsBody(RequestBody):
     """The request body for the get job task events endpoint."""
     job_id: int
     task_id: Optional[int] = None
+    # Task name or id, resolved server-side. Mirrors the `task` argument of
+    # `sky jobs logs`; `task_id` stays for callers that already have the id.
+    task: Optional[Union[str, int]] = None
     limit: Optional[int] = 10  # Default to 10 most recent task events
     # When True, merge in launch-progress events from the job's underlying
     # cluster (e.g. image pulling) so the timeline shows provisioning
