@@ -361,6 +361,31 @@ SKY_APISERVER_THREADS_MAX = prom.Gauge(
     multiprocess_mode='liveall',
 )
 
+# Threads whose task has run longer than the executor's stuck threshold, per
+# process. A pool that only runs short lookups should read 0 here; a value
+# that climbs while sky_apiserver_threads_active climbs with it is a pool
+# being consumed by tasks that never return, long before it is exhausted.
+# 'liveall' for the same reason as sky_apiserver_threads_active.
+SKY_APISERVER_THREADS_STUCK = prom.Gauge(
+    'sky_apiserver_threads_stuck',
+    'Threads in on-demand thread executors running longer than the '
+    'executor\'s stuck threshold, per process',
+    ['pid', 'name'],
+    multiprocess_mode='liveall',
+)
+
+# Age of the longest-running task in each executor, per process. Unlike the
+# stuck count this needs no threshold, so it also serves pools whose tasks
+# may legitimately run for hours: a monotonically growing age on a pool that
+# should turn over in milliseconds is the earliest signal of a pinned thread.
+SKY_APISERVER_THREADS_OLDEST_AGE_SECONDS = prom.Gauge(
+    'sky_apiserver_threads_oldest_age_seconds',
+    'Age of the longest-running task in each on-demand thread executor, per '
+    'process',
+    ['pid', 'name'],
+    multiprocess_mode='liveall',
+)
+
 # A gauge scraped every N seconds can miss short bursts that hit the limit;
 # this counter is the reliable signal that exhaustion actually happened.
 SKY_APISERVER_THREADS_EXHAUSTED_TOTAL = prom.Counter(

@@ -104,6 +104,12 @@ _REQUEST_THREADS_LIMIT = 128
 # point where the sheer number of threads in one process starts slowing its
 # request handling down.
 _AUTH_THREADS_LIMIT = 32
+# An auth lookup still running after this long is reported as stuck (see
+# OnDemandThreadExecutor.stuck_after_seconds). The callers give up on a
+# lookup after a few seconds (db_lookup.AUTH_DB_TIMEOUT_SECONDS, 5 s by
+# default), so a thread still running well past that is holding a slot for
+# work nobody is waiting for any more.
+_AUTH_THREAD_STUCK_SECONDS = 30.0
 
 # Max length of the retry reason in a request's backoff status message; the
 # reason comes from the exception message, so truncate to keep it readable.
@@ -157,7 +163,9 @@ def get_auth_thread_executor() -> threads.OnDemandThreadExecutor:
     with _AUTH_THREAD_EXECUTOR_LOCK:
         if _AUTH_THREAD_EXECUTOR is None:
             _AUTH_THREAD_EXECUTOR = threads.OnDemandThreadExecutor(
-                name='auth_thread_executor', max_workers=_AUTH_THREADS_LIMIT)
+                name='auth_thread_executor',
+                max_workers=_AUTH_THREADS_LIMIT,
+                stuck_after_seconds=_AUTH_THREAD_STUCK_SECONDS)
         return _AUTH_THREAD_EXECUTOR
 
 
