@@ -3954,8 +3954,9 @@ def test_managed_jobs_api_access(generic_cloud: str):
 #   /smoke-test --kubernetes --remote-server -k dynamic_job_group
 
 _JOB_TREE_FIELDS = [
-    'job_id', 'job_name', 'status', 'details', 'root_job_id', 'parent_job_id',
-    'parent_task_id', 'dynamic_task_index'
+    'job_id', 'job_name', 'task_id', 'status', 'details',
+    'is_primary_in_job_group', 'root_job_id', 'parent_job_id', 'parent_task_id',
+    'dynamic_task_index'
 ]
 # Task indices in smoke_dynamic_members.yaml.
 _TRAINER_TASK = 0
@@ -4038,12 +4039,45 @@ def _job_tree(root_job_id: int) -> Dict[str, dict]:
     return tree
 
 
+def _group_status(rows: List[dict]) -> sky.ManagedJobStatus:
+    """A job group's status from its task rows, the way the CLI shows it.
+
+    A group has one queue row per task, all with the group's job id and
+    name; a task finishing does not finish the group. Only the primary
+    tasks count (an auxiliary task is CANCELLED when the group SUCCEEDS),
+    and the first non-SUCCEEDED primary decides, as in
+    ``sky.jobs.utils._get_job_status_from_tasks``.
+    """
+    primaries = [
+        r for r in rows if r.get('is_primary_in_job_group') in (None, True)
+    ] or rows
+    for row in sorted(primaries, key=lambda r: r.get('task_id') or 0):
+        if _status(row) != sky.ManagedJobStatus.SUCCEEDED:
+            return _status(row)
+    return sky.ManagedJobStatus.SUCCEEDED
+
+
 def _wait_group(name: str, statuses: List[sky.ManagedJobStatus],
                 timeout: int) -> int:
-    """Wait for the group named `name` to reach a status; returns its id."""
-    job = smoke_tests_utils.wait_for_managed_job_status_sdk(
-        job_name=name, target_statuses=statuses, timeout=timeout)
-    return job['job_id']
+    """Wait for the group named `name` to reach a status; returns its id.
+
+    Not the shared single-row waiter: that one picks one of the group's
+    task rows, so it reports SUCCEEDED as soon as the first task (the
+    trainer) finishes while the watcher is still running.
+    """
+    start = time.time()
+    while time.time() - start < timeout:
+        rows = [j for j in _queue_jobs() if j['job_name'] == name]
+        if rows:
+            job_id = max(j['job_id'] for j in rows)
+            rows = [j for j in rows if j['job_id'] == job_id]
+            status = _group_status(rows)
+            if status in statuses:
+                return job_id
+            print(f'Group {name} ({job_id}) status: {status.value}; tasks '
+                  f'{[(r.get("task_id"), _status(r).value) for r in rows]}')
+        time.sleep(5)
+    raise TimeoutError(f'Timeout waiting for group {name} to reach {statuses}')
 
 
 def _wait_job(job_id: int, statuses: List[sky.ManagedJobStatus],
@@ -4586,9 +4620,18 @@ def test_dynamic_job_group_parallel_appends(generic_cloud: str):
     _skip_unless_remote_server()
     name = smoke_tests_utils.get_cluster_name()
     evals = [f'{name}-eval-{i}' for i in range(1, 6)]
+    # Each launch logs to its own file and the watcher prints them all after
+    # `wait`, so a launch that failed shows why in the watcher's task log.
     watcher_run = '\n'.join(
-        _launch_from_task(e, generic_cloud, _FOREVER) + ' &' for e in evals)
-    watcher_run += '\nwait\n' + _FOREVER
+        f'( {_launch_from_task(e, generic_cloud, _FOREVER)} ) '
+        f'> launch-{i}.log 2>&1 &' for i, e in enumerate(evals, 1))
+    watcher_run += (
+        '\nwait\n'
+        'for i in 1 2 3 4 5; do echo "=== launch-$i ==="; cat launch-$i.log; '
+        'done\n'
+        'grep -l "Job ID" launch-*.log | wc -l | grep -q "^5$" || '
+        '{ echo "FAIL: not every launch printed a Job ID"; exit 1; }\n' +
+        _FOREVER)
     yaml_path = _dynamic_members_yaml(name,
                                       generic_cloud,
                                       primary_tasks='trainer',
