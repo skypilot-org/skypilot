@@ -2723,6 +2723,17 @@ def _update_cluster_status(
                 except exceptions.CommandError as e:
                     logger.debug(f'Refreshing status ({cluster_name!r}) attempt'
                                  f' {i}: {common_utils.format_exception(e)}')
+                    if (isinstance(head_runner, command_runner.SSHCommandRunner)
+                            and e.returncode == 255 and
+                            not external_cluster_failures):
+                        # The cloud reports all nodes UP, but SSH could not
+                        # reach the runtime. A failed route is not evidence
+                        # that Ray failed; let managed jobs retry the refresh
+                        # instead of relaunching a potentially running job.
+                        raise exceptions.ClusterStatusFetchingError(
+                            f'Cannot check runtime over SSH for '
+                            f'{cluster_name!r}: {_summarize_probe_failure(e)}'
+                        ) from e
                     if cloud_name != 'kubernetes':
                         # Non-k8s clusters can be manually restarted and:
                         # 1. Get new IP addresses, or
@@ -2781,6 +2792,8 @@ def _update_cluster_status(
                 f'all nodes ({ready_head + ready_workers}/'
                 f'{total_nodes});\noutput:\n{output}\nstderr:\n{stderr}')
 
+        except exceptions.ClusterStatusFetchingError:
+            raise
         except exceptions.FetchClusterInfoError:
             ray_status_details = 'failed to get IPs'
             logger.debug(
