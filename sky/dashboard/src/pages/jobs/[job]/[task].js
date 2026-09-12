@@ -46,7 +46,10 @@ function TaskDetails() {
   // Dynamic tasks (jobs launched from inside this job) are addressed as
   // /jobs/<root>/<index> too; resolved below when the index is not one of
   // the job's own tasks.
-  const treeMembers = useJobTreeMembers(jobId, refreshTrigger);
+  const { members: treeMembers, loaded: treeLoaded } = useJobTreeMembers(
+    jobId,
+    refreshTrigger
+  );
   const [poolsData, setPoolsData] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -219,7 +222,7 @@ function TaskDetails() {
           </div>
         </div>
 
-        {loading && isInitialLoad ? (
+        {(loading && isInitialLoad) || (taskData === null && !treeLoaded) ? (
           <div className="flex items-center justify-center py-32">
             <CircularProgress size={20} className="mr-2" />
             <span>Loading...</span>
