@@ -1815,9 +1815,13 @@ export function ManagedJobsTable({
           if (renderMode === 'groupChild' && isMember) {
             // A job launched from this group: its own name, linking to its
             // own detail page (to the task's page if it has several).
-            const href = memberIsMultiTask
-              ? `/jobs/${item.id}/${taskIndex}`
-              : `/jobs/${item.id}`;
+            // A dynamic task is addressed as task <index> of its group.
+            const href =
+              item.dynamic_task_index != null
+                ? `/jobs/${jobId}/${item.dynamic_task_index}`
+                : memberIsMultiTask
+                  ? `/jobs/${item.id}/${taskIndex}`
+                  : `/jobs/${item.id}`;
             return (
               <TableCell className="whitespace-nowrap">
                 <Link href={href} className="text-blue-600 hover:underline">

@@ -680,6 +680,13 @@ const JOB_TREE_MEMBER_FIELDS = [
   'job_duration',
   'submitted_at',
   'user_name',
+  'resources',
+  'cloud',
+  'region',
+  'accelerators',
+  'cluster_resources',
+  'cluster_resources_full',
+  'recovery_count',
   // A launched job can itself be a job group: its status is aggregated
   // over its primary tasks, like its own detail page does.
   'is_primary_in_job_group',
