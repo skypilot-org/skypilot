@@ -68,6 +68,7 @@ from sky.server import constants as server_constants
 from sky.server import csp_utils
 from sky.server import daemons
 from sky.server import download_utils
+from sky.server import local_disk
 from sky.server import loop_stall
 from sky.server import metrics
 from sky.server import middleware_utils
@@ -1831,6 +1832,66 @@ def _publish_chunk(zip_file_path: pathlib.Path, final_path: pathlib.Path,
     return set(f'part{i}' for i in range(total_chunks)) - existing
 
 
+# Filesystem allocation unit assumed when sizing an extraction. Every
+# mainstream filesystem the server runs on uses 4 KiB.
+_EXTRACT_BLOCK_BYTES = 4096
+
+
+def _gb(num_bytes: int) -> str:
+    return f'{num_bytes / 1000 ** 3:.1f} GB'
+
+
+def _upload_too_large(num_bytes: int) -> fastapi.HTTPException:
+    return fastapi.HTTPException(
+        status_code=413,
+        detail=(f'Upload of {_gb(num_bytes)} exceeds the '
+                f'{_gb(server_constants.MAX_UPLOAD_TOTAL_BYTES)} limit on a '
+                'single upload. Upload fewer or smaller files.'))
+
+
+def _stored_bytes(directory: Optional[pathlib.Path]) -> int:
+    """Bytes the chunks already received for one upload occupy."""
+    if directory is None:
+        return 0
+    total = 0
+    try:
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if entry.is_file(follow_symlinks=False):
+                    total += entry.stat(follow_symlinks=False).st_size
+    except OSError:
+        return 0
+    return total
+
+
+def _on_disk_bytes(members: List[zipfile.ZipInfo]) -> int:
+    """Disk the extracted *members* occupy, in whole filesystem blocks.
+
+    An archive of many tiny files costs far more on disk than the sum of
+    its apparent sizes, and the same rounding is what the accounting side
+    measures.
+    """
+    return sum(
+        max(-(-member.file_size // _EXTRACT_BLOCK_BYTES), 1) *
+        _EXTRACT_BLOCK_BYTES for member in members)
+
+
+def _check_extraction_fits(members: List[zipfile.ZipInfo],
+                           target_dir: pathlib.Path) -> None:
+    """Raises if extracting *members* into *target_dir* would not fit."""
+    available = local_disk.available_for_path(str(target_dir))
+    if available is None:
+        return
+    needed = _on_disk_bytes(members)
+    if needed > available:
+        raise fastapi.HTTPException(
+            status_code=507,
+            detail=(f'Extracting this upload needs {_gb(needed)} of disk '
+                    f'under {target_dir}, but only {_gb(available)} is '
+                    'available there. Upload fewer or smaller files.'))
+    local_disk.debit(needed)
+
+
 async def _receive_and_assemble_chunks(
     base_dir: pathlib.Path,
     zip_name: str,
@@ -1867,6 +1928,9 @@ async def _receive_and_assemble_chunks(
         raise ValueError(
             f'Invalid total_chunks: {total_chunks}. Please use a valid integer.'
         )
+    declared_bytes = total_chunks * server_constants.UPLOAD_CHUNK_BYTES
+    if declared_bytes > server_constants.MAX_UPLOAD_TOTAL_BYTES:
+        raise _upload_too_large(declared_bytes)
     # Write chunk to a unique private path first, so concurrent uploads for
     # a same blob does not interleave with each other.
     if total_chunks == 1:
@@ -1881,9 +1945,19 @@ async def _receive_and_assemble_chunks(
         final_path = chunk_dir / f'part{chunk_index}'
         zip_file_path = chunk_dir / f'part{chunk_index}.tmp.{uuid.uuid4().hex}'
 
+    # The declared chunk count bounds nothing on its own: a client is free
+    # to stream a chunk of any size. Bound what this upload has actually
+    # put on disk, across its chunks.
+    stored = await asyncio.to_thread(_stored_bytes,
+                                     chunk_dir if total_chunks > 1 else None)
+    allowance = server_constants.MAX_UPLOAD_TOTAL_BYTES - stored
     try:
+        written = 0
         async with aiofiles.open(zip_file_path, 'wb') as f:
             async for chunk in request.stream():
+                written += len(chunk)
+                if written > allowance:
+                    raise _upload_too_large(stored + written)
                 await f.write(chunk)
     except starlette.requests.ClientDisconnect as e:
         # Client disconnected, remove the zip file.
@@ -1891,6 +1965,9 @@ async def _receive_and_assemble_chunks(
         raise fastapi.HTTPException(
             status_code=400,
             detail='Client disconnected, please try again.') from e
+    except fastapi.HTTPException:
+        await asyncio.to_thread(zip_file_path.unlink, missing_ok=True)
+        raise
     except Exception as e:
         logger.error(f'Error uploading zip file: {zip_file_path}')
         # Client disconnected, remove the zip file.
@@ -2102,7 +2179,9 @@ async def unzip_file(zip_file_path: pathlib.Path,
     def _do_unzip() -> None:
         try:
             with zipfile.ZipFile(zip_file_path, 'r') as zipf:
-                for member in zipf.infolist():
+                members = zipf.infolist()
+                _check_extraction_fits(members, client_file_mounts_dir)
+                for member in members:
                     # Determine the new path
                     original_path = os.path.normpath(member.filename)
                     new_path = client_file_mounts_dir / original_path.lstrip(
@@ -2156,6 +2235,10 @@ async def unzip_file(zip_file_path: pathlib.Path,
             raise fastapi.HTTPException(
                 status_code=400,
                 detail=f'Invalid zip file: {common_utils.format_exception(e)}')
+        except fastapi.HTTPException:
+            # Keep a deliberate status code; the handler below would
+            # rewrite it to a 500.
+            raise
         except Exception as e:
             logger.error(f'Error unzipping file: {zip_file_path}')
             raise fastapi.HTTPException(

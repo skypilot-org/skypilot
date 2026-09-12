@@ -178,6 +178,21 @@ DEFAULT_LOGS_RETENTION_HOURS = 720  # 30 days
 # to Loki (e.g., GPU inventory from billing plugin).
 SERVER_HEARTBEAT_INTERVAL_SECONDS = 600  # 10 minutes
 
+# The chunk size for the zip file to be uploaded to the API server. We split
+# the zip file into chunks to avoid network issues for large request body that
+# can be caused by NGINX's client_max_body_size or Cloudflare's upload limit.
+# As of 09/25/2025, the upload limit for Cloudflare's free plan is 100MB
+# (not 100MiB; 100MB = 100,000,000 bytes):
+# https://developers.cloudflare.com/support/troubleshooting/http-status-codes/4xx-client-error/error-413/
+# We use 95MB to leave headroom for HTTP headers and request overhead.
+UPLOAD_CHUNK_BYTES = 95 * 1000 * 1000
+
+# Largest total upload the server accepts, as declared by the chunk count.
+# Checked before any chunk is written, and independently of how much local
+# disk is free: an upload is extracted later, so the space available at
+# extraction time cannot be known here.
+MAX_UPLOAD_TOTAL_BYTES = 100 * 1000 * 1000 * 1000  # 100 GB
+
 # Interval for the daemon that sweeps expired managed-job API access tokens
 # from the service_account_tokens table. These tokens are normally revoked
 # by the jobs controller on completion, but the daemon ensures any tokens
