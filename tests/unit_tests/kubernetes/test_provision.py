@@ -1,6 +1,7 @@
 """Tests for Kubernetes provision."""
 
 import datetime
+import pickle
 import re
 from typing import Optional
 from unittest import mock
@@ -19,6 +20,7 @@ from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import instance
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.instance import logger
+from sky.utils import execution_pause
 from sky.utils import subprocess_utils
 from sky.utils import volume as volume_utils
 
@@ -5067,3 +5069,434 @@ def test_command_runners_fall_back_to_the_submitting_context():
             'namespace': 'ns',
         }))
     assert [r.context for r in runners] == ['ctx-a']
+
+
+def _make_startup_pod(*,
+                      phase='Pending',
+                      running=False,
+                      name='pod-0',
+                      scheduled_seconds_ago=None,
+                      cluster_name_on_cloud='cn-on-cloud'):
+    """A pod for the park / startup-deadline tests.
+
+    ``scheduled_seconds_ago`` writes a ``PodScheduled`` condition that far in
+    the past; leaving it None gives a pod with no conditions at all, which is
+    what the startup deadline treats as "not in that phase yet".
+    """
+    from sky.provision import constants as prov_constants
+    pod = mock.MagicMock()
+    pod.metadata.name = name
+    pod.metadata.deletion_timestamp = None
+    pod.metadata.labels = {
+        prov_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
+    }
+    pod.status.phase = phase
+    cs = mock.MagicMock()
+    cs.ready = running
+    cs.state.waiting = (None if running else mock.MagicMock(
+        reason='ContainerCreating', message=None))
+    cs.state.terminated = None
+    cs.state.running = mock.MagicMock() if running else None
+    cs.last_state.terminated = None
+    pod.status.container_statuses = [cs]
+    if scheduled_seconds_ago is None:
+        pod.status.conditions = []
+    else:
+        condition = mock.MagicMock()
+        condition.type = 'PodScheduled'
+        condition.status = 'True'
+        condition.last_transition_time = (
+            datetime.datetime.now(datetime.timezone.utc) -
+            datetime.timedelta(seconds=scheduled_seconds_ago))
+        pod.status.conditions = [condition]
+    return pod
+
+
+class TestSlowPodStartupPark:
+    """The WAITING park for pods that are scheduled but still starting.
+
+    A pod bound to a node and pulling a large image can take 30+ minutes.
+    Blocking in _wait_for_pods_to_run for that whole time holds an executor
+    worker, which caps the server's launch throughput at
+    (long workers / provisioning time) no matter how much cluster capacity is
+    free. Parking releases the worker and lets the scheduler resume the launch
+    once the pods are up.
+    """
+
+    def _run_wait(self,
+                  monkeypatch,
+                  *,
+                  pending_reasons,
+                  clock_step=61.0,
+                  healthy_after=None,
+                  in_request_context=True,
+                  pod=None,
+                  startup_timeout=instance._POD_STARTUP_TIMEOUT_SECONDS):
+        """Drive _wait_for_pods_to_run with a scripted pending reason per
+        iteration (the last entry repeats), on a fake clock that advances by
+        `clock_step` at every sleep. If `healthy_after` is set, that iteration
+        (0-based) lists an all-Running pod so the loop exits cleanly.
+        """
+        pending_pod = pod if pod is not None else _make_startup_pod()
+        healthy_pod = _make_startup_pod(phase='Running', running=True)
+        iteration = {'n': -1}
+
+        core_api = mock.MagicMock()
+
+        def _list_pods(*args, **kwargs):
+            iteration['n'] += 1
+            if healthy_after is not None and iteration['n'] >= healthy_after:
+                return mock.MagicMock(items=[healthy_pod])
+            return mock.MagicMock(items=[pending_pod])
+
+        core_api.list_namespaced_pod.side_effect = _list_pods
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+
+        def _pending_reason(context, namespace, pod_name, warnings_only=False):
+            del context, namespace, pod_name, warnings_only  # unused
+            idx = min(max(iteration['n'], 0), len(pending_reasons) - 1)
+            reason = pending_reasons[idx]
+            return None if reason is None else (reason, '')
+
+        monkeypatch.setattr(instance, '_get_pod_pending_reason',
+                            _pending_reason)
+        monkeypatch.setattr(instance, '_POD_STARTUP_TIMEOUT_SECONDS',
+                            startup_timeout)
+        monkeypatch.setattr(instance.common_utils, 'is_in_request_context',
+                            lambda: in_request_context)
+
+        clock = {'t': 1000.0}
+        monkeypatch.setattr(instance.time, 'time', lambda: clock['t'])
+
+        def _sleep(seconds):
+            del seconds  # unused
+            clock['t'] += clock_step
+
+        monkeypatch.setattr(instance.time, 'sleep', _sleep)
+        monkeypatch.setattr('sky.utils.subprocess_utils.run_in_parallel',
+                            lambda fn, items, n: [fn(p) for p in items])
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+        monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
+                            mock.MagicMock())
+
+        instance._wait_for_pods_to_run(namespace='ns',
+                                       context='ctx',
+                                       cluster_name='cn',
+                                       new_pods=[pending_pod])
+
+    @pytest.mark.parametrize('reason', [
+        'Pulling', 'container creation', 'Provisioning', 'WaitForFirstConsumer'
+    ])
+    def test_parks_after_grace_window_on_stall_exempt_reason(
+            self, monkeypatch, reason):
+        """A stall-exempt reason held past the grace window releases the
+        worker, with a condition that knows how to resume."""
+        with pytest.raises(sky_exceptions.ExecutionPausedError) as exc_info:
+            self._run_wait(monkeypatch, pending_reasons=[reason])
+        err = exc_info.value
+        assert reason in str(err)
+        condition = err.continue_condition
+        assert isinstance(condition, instance.PodsRunningCondition)
+        assert condition.pod_names == ['pod-0']
+        assert condition.cluster_name_on_cloud == 'cn-on-cloud'
+        # The deadline the launch resolved travels with the condition, so the
+        # scheduler thread never has to re-read request-scoped config.
+        assert (condition.startup_timeout_seconds ==
+                instance._POD_STARTUP_TIMEOUT_SECONDS)
+
+    def test_park_carries_the_startup_deadline_in_force(self, monkeypatch):
+        with pytest.raises(sky_exceptions.ExecutionPausedError) as exc_info:
+            self._run_wait(monkeypatch,
+                           pending_reasons=['Pulling'],
+                           startup_timeout=1800)
+        assert exc_info.value.continue_condition.startup_timeout_seconds == 1800
+
+    def test_does_not_park_before_grace_window(self, monkeypatch):
+        """A pod that starts quickly must not pay a park/resume round trip."""
+        self._run_wait(monkeypatch,
+                       pending_reasons=['Pulling'],
+                       clock_step=5.0,
+                       healthy_after=3)
+
+    def test_grace_window_resets_when_a_pod_stops_being_exempt(
+            self, monkeypatch):
+        """The window measures an unbroken stretch: a reason that lapses out
+        of the exempt set and back restarts it, so no park fires here."""
+        self._run_wait(
+            monkeypatch,
+            pending_reasons=['Pulling', 'PodInitializing', 'Pulling', None],
+            clock_step=40.0,
+            healthy_after=4)
+
+    def test_non_exempt_reason_never_parks_and_still_hits_stall_deadline(
+            self, monkeypatch):
+        """Parking on a non-exempt reason would reset the in-memory stall
+        clock on every re-run, so those stay in-process and fail instead."""
+        with pytest.raises(config_lib.KubernetesError) as exc_info:
+            self._run_wait(monkeypatch,
+                           pending_reasons=['FailedMount'],
+                           clock_step=301.0)
+        assert 'FailedMount' in str(exc_info.value)
+
+    def test_does_not_park_without_a_request_context(self, monkeypatch):
+        """No scheduler to hand the pause to (a client, or an in-process
+        launch): blocking is the only option."""
+        self._run_wait(monkeypatch,
+                       pending_reasons=['Pulling'],
+                       in_request_context=False,
+                       healthy_after=5)
+
+    def test_does_not_park_when_the_request_opted_out(self, monkeypatch):
+        """A wrapper request that cannot survive being re-run keeps the worker
+        rather than being re-queued under it."""
+        with execution_pause.disallow_pause():
+            self._run_wait(monkeypatch,
+                           pending_reasons=['Pulling'],
+                           healthy_after=5)
+
+
+class TestPodStartupDeadline:
+    """The durable scheduled-but-not-running deadline.
+
+    The same-reason stall deadline cannot bound a stall-exempt reason, and is
+    in-memory so it restarts on every park/resume re-run. This one is read off
+    the pod's own PodScheduled condition, so neither hole applies.
+    """
+
+    def _passed(self, pod, timeout_seconds=3600):
+        return instance._pod_startup_deadline_passed(
+            pod, timeout_seconds, datetime.datetime.now(datetime.timezone.utc))
+
+    def test_fires_once_the_pod_has_been_scheduled_too_long(self):
+        assert self._passed(_make_startup_pod(scheduled_seconds_ago=7200))
+
+    def test_does_not_fire_within_the_window(self):
+        assert not self._passed(_make_startup_pod(scheduled_seconds_ago=60))
+
+    def test_negative_timeout_waits_indefinitely(self):
+        assert not self._passed(_make_startup_pod(scheduled_seconds_ago=7200),
+                                timeout_seconds=-1)
+
+    def test_not_applied_without_a_podscheduled_condition(self):
+        """No condition means the pod never entered the phase this measures."""
+        assert not self._passed(_make_startup_pod(scheduled_seconds_ago=None))
+
+    def test_not_applied_to_a_pod_past_the_pending_phase(self):
+        """_create_pods hands back pods that are already up, whose PodScheduled
+        timestamp can be arbitrarily old. A container of one of those dropping
+        out of Running is the stall deadline's business."""
+        assert not self._passed(
+            _make_startup_pod(phase='Running', scheduled_seconds_ago=7200))
+
+    def test_reads_the_podscheduled_transition_time(self):
+        pod = _make_startup_pod(scheduled_seconds_ago=120)
+        scheduled_at = instance._pod_scheduled_at(pod)
+        assert scheduled_at is not None
+        age = (datetime.datetime.now(datetime.timezone.utc) -
+               scheduled_at).total_seconds()
+        assert 119 <= age <= 180
+
+    def test_ignores_a_podscheduled_condition_that_is_still_false(self):
+        pod = _make_startup_pod(scheduled_seconds_ago=7200)
+        pod.status.conditions[0].status = 'False'
+        assert instance._pod_scheduled_at(pod) is None
+
+    def test_launch_fails_past_the_deadline_naming_the_override(
+            self, monkeypatch):
+        """Past the deadline the launch raises, so the normal teardown and
+        failover path runs instead of waiting forever."""
+        pod = _make_startup_pod(scheduled_seconds_ago=7200)
+        with pytest.raises(config_lib.KubernetesError) as exc_info:
+            TestSlowPodStartupPark()._run_wait(monkeypatch,
+                                               pending_reasons=['Pulling'],
+                                               pod=pod,
+                                               startup_timeout=3600)
+        msg = str(exc_info.value)
+        assert 'pod-0' in msg
+        assert 'Pulling' in msg
+
+    def test_deadline_beats_the_park_on_the_same_iteration(self, monkeypatch):
+        """A pod that is both exempt and past the deadline must fail, not park
+        -- parking it would hide the failure behind another wait."""
+        pod = _make_startup_pod(scheduled_seconds_ago=7200)
+        with pytest.raises(config_lib.KubernetesError):
+            TestSlowPodStartupPark()._run_wait(monkeypatch,
+                                               pending_reasons=['Pulling'],
+                                               pod=pod,
+                                               startup_timeout=3600,
+                                               clock_step=61.0)
+
+
+class TestPodsRunningCondition:
+    """What wakes a parked launch back up."""
+
+    def _condition(self,
+                   monkeypatch,
+                   pods,
+                   *,
+                   reason='Pulling',
+                   startup_timeout=instance._POD_STARTUP_TIMEOUT_SECONDS,
+                   pod_names=('pod-0',)):
+        core_api = mock.MagicMock()
+        core_api.list_namespaced_pod.return_value = mock.MagicMock(items=pods)
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+        monkeypatch.setattr(
+            instance, '_get_pod_pending_reason', lambda *a, **kw: None
+            if reason is None else (reason, ''))
+        return instance.PodsRunningCondition(
+            context='ctx',
+            namespace='ns',
+            cluster_name='cn',
+            cluster_name_on_cloud='cn-on-cloud',
+            pod_names=list(pod_names),
+            startup_timeout_seconds=startup_timeout)
+
+    def test_stays_parked_while_the_pods_are_still_starting(self, monkeypatch):
+        condition = self._condition(monkeypatch, [_make_startup_pod()])
+        assert condition._should_resume() is False
+
+    def test_resumes_once_every_pod_is_running(self, monkeypatch):
+        condition = self._condition(
+            monkeypatch, [_make_startup_pod(phase='Running', running=True)])
+        assert condition._should_resume() is True
+
+    def test_stays_parked_while_any_pod_is_still_starting(self, monkeypatch):
+        condition = self._condition(monkeypatch, [
+            _make_startup_pod(name='pod-0', phase='Running', running=True),
+            _make_startup_pod(name='pod-1'),
+        ],
+                                    pod_names=('pod-0', 'pod-1'))
+        assert condition._should_resume() is False
+
+    def test_resumes_when_a_pod_is_missing(self, monkeypatch):
+        """Evicted, deleted, or never observed: only the re-run can say."""
+        condition = self._condition(monkeypatch, [])
+        assert condition._should_resume() is True
+
+    def test_resumes_when_a_pod_has_failed(self, monkeypatch):
+        failed = _make_startup_pod(phase='Failed')
+        condition = self._condition(monkeypatch, [failed])
+        monkeypatch.setattr(instance, '_get_pod_termination_reason',
+                            lambda pod, cluster_name: 'OOMKilled')
+        monkeypatch.setattr(instance, '_condensed_pod_reason',
+                            lambda pod: 'OOMKilled')
+        assert condition._should_resume() is True
+
+    def test_resumes_when_the_reason_stops_being_stall_exempt(
+            self, monkeypatch):
+        """The same-reason stall deadline cannot run while parked, so the pod
+        has to go back in-process for it to apply."""
+        condition = self._condition(monkeypatch, [_make_startup_pod()],
+                                    reason='FailedMount')
+        assert condition._should_resume() is True
+
+    def test_resumes_once_the_startup_deadline_has_passed(self, monkeypatch):
+        """The deadline is raised by the re-run, not from the monitor thread,
+        so the condition's job is just to stop waiting."""
+        condition = self._condition(
+            monkeypatch, [_make_startup_pod(scheduled_seconds_ago=7200)],
+            startup_timeout=3600)
+        assert condition._should_resume() is True
+
+    def test_drops_a_request_cancelled_while_parked(self, monkeypatch):
+        condition = self._condition(monkeypatch, [_make_startup_pod()])
+        assert condition.wait(is_cancelled=lambda: True,
+                              fallback_wait_seconds=1) is False
+
+    def test_wait_returns_once_the_pods_are_up(self, monkeypatch):
+        condition = self._condition(
+            monkeypatch, [_make_startup_pod(phase='Running', running=True)])
+        assert condition.wait(is_cancelled=lambda: False,
+                              fallback_wait_seconds=1) is True
+
+    def test_a_transport_blip_does_not_end_the_park(self, monkeypatch):
+        """Re-running the launch on every API hiccup would defeat the park; a
+        sustained outage still has to surface, via the re-run."""
+        condition = self._condition(monkeypatch, [_make_startup_pod()])
+        calls = {'n': 0}
+        err = urllib3.exceptions.ReadTimeoutError(None, '/api', 'timed out')
+
+        def _flaky():
+            calls['n'] += 1
+            if calls['n'] <= 3:
+                raise err
+            return True
+
+        monkeypatch.setattr(condition, '_should_resume', _flaky)
+        monkeypatch.setattr(instance.time, 'sleep', lambda *a, **kw: None)
+        assert condition.wait(is_cancelled=lambda: False,
+                              fallback_wait_seconds=1) is True
+        assert calls['n'] == 4
+
+    def test_a_sustained_outage_hands_the_launch_back(self, monkeypatch):
+        condition = self._condition(monkeypatch, [_make_startup_pod()])
+        err = urllib3.exceptions.ReadTimeoutError(None, '/api', 'timed out')
+
+        def _always_failing():
+            raise err
+
+        monkeypatch.setattr(condition, '_should_resume', _always_failing)
+        clock = {'t': 0.0}
+        monkeypatch.setattr(instance.time, 'time', lambda: clock['t'])
+        monkeypatch.setattr(
+            instance.time, 'sleep',
+            lambda seconds: clock.__setitem__('t', clock['t'] + seconds))
+        assert condition.wait(is_cancelled=lambda: False,
+                              fallback_wait_seconds=1) is True
+        assert clock['t'] >= instance._POD_POLL_TRANSPORT_ERROR_GRACE_SECONDS
+
+    def test_survives_a_pickle_round_trip(self):
+        """The condition crosses the worker/scheduler process boundary on the
+        pausing exception."""
+        condition = instance.PodsRunningCondition(
+            context='ctx',
+            namespace='ns',
+            cluster_name='cn',
+            cluster_name_on_cloud='cn-on-cloud',
+            pod_names=['pod-0', 'pod-1'],
+            startup_timeout_seconds=1800)
+        restored = pickle.loads(pickle.dumps(condition))
+        assert restored.pod_names == ['pod-0', 'pod-1']
+        assert restored.namespace == 'ns'
+
+    def test_an_older_pickle_gets_defaults_for_newer_attributes(self):
+        """A rolling restart can leave a request parked by one version to be
+        resumed by the next."""
+        condition = instance.PodsRunningCondition.__new__(
+            instance.PodsRunningCondition)
+        condition.__setstate__({
+            'context': 'ctx',
+            'namespace': 'ns',
+            'cluster_name': 'cn',
+            'cluster_name_on_cloud': 'cn-on-cloud',
+            'pod_names': ['pod-0'],
+        })
+        assert (condition.poll_interval_seconds ==
+                instance._POD_RUN_PARK_POLL_INTERVAL_SECONDS)
+        assert (condition.startup_timeout_seconds ==
+                instance._POD_STARTUP_TIMEOUT_SECONDS)
+
+    def test_the_deadline_in_force_is_the_one_carried_not_the_default(
+            self, monkeypatch):
+        """The condition judges against the deadline it was handed at park
+        time, not one it resolves for itself. Paired with the test below:
+        a carried value on either side of the module default changes the
+        outcome, which a condition ignoring it could not produce."""
+        # 1000s scheduled vs a carried 900s: past the deadline, so resume.
+        condition = self._condition(
+            monkeypatch, [_make_startup_pod(scheduled_seconds_ago=1000)],
+            startup_timeout=900)
+        assert condition._should_resume() is True
+
+    def test_a_carried_deadline_longer_than_the_default_also_holds(
+            self, monkeypatch):
+        """The same pod, with a carried deadline it has not reached, stays
+        parked -- so the earlier resume came from the carried 900s and not
+        from the pod simply looking finished."""
+        condition = self._condition(
+            monkeypatch, [_make_startup_pod(scheduled_seconds_ago=1000)],
+            startup_timeout=7200)
+        assert condition._should_resume() is False
