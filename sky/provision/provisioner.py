@@ -516,6 +516,13 @@ def _post_provision_setup(
     ssh_credentials = backend_utils.ssh_credential_from_yaml(
         handle_cluster_yaml, ssh_user=cluster_info.ssh_user)
     docker_config = config_from_yaml.get('docker', {})
+    if docker_config and cloud_name.lower() == 'azure':
+        # Pass the VM's managed identity through so a private ACR pull can
+        # authenticate as that exact identity on the host, before the task
+        # container exists. See DockerInitializer.initialize.
+        msi = (cluster_info.provider_config or {}).get('msi', None)
+        if msi is not None:
+            docker_config['azure_managed_identity'] = msi
 
     with rich_utils.safe_status(
             ux_utils.spinner_message('Launching - Waiting for SSH access',
