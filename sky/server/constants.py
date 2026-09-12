@@ -174,8 +174,9 @@ DEFAULT_DAEMON_LOG_MAX_BYTES = 128 * 1024 * 1024  # 128 MB
 # server. Configurable via api_server.logs_retention_hours; negative disables.
 DEFAULT_LOGS_RETENTION_HOURS = 720  # 30 days
 
-# Interval for the server-side heartbeat daemon that sends plugin metrics
-# to Loki (e.g., GPU inventory from billing plugin).
+# Interval for the server-side heartbeat daemon that sends fleet-wide GPU
+# counts to Loki, plus plugin metrics when a plugin registered a provider
+# (e.g., GPU inventory from billing plugin).
 SERVER_HEARTBEAT_INTERVAL_SECONDS = 600  # 10 minutes
 
 # Interval for the daemon that sweeps expired managed-job API access tokens
