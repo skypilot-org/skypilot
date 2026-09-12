@@ -1638,11 +1638,30 @@ function JobDetailsContent({
             </span>
           )}
         </div>
+        {taskContext && taskContext.parentTask && (
+          <div className="text-sm text-gray-500 mt-1">
+            Launched by Task:{' '}
+            <Link
+              href={taskContext.parentTask.href}
+              className="text-sky-blue hover:text-sky-blue-bright hover:underline"
+            >
+              {taskContext.parentTask.label}
+            </Link>
+          </div>
+        )}
       </div>
       {taskContext && (
         <div>
-          <div className="text-gray-600 font-medium text-base">Job ID</div>
-          <div className="text-base mt-1 text-gray-500">{jobData.id}</div>
+          <div className="text-gray-600 font-medium text-base">Job</div>
+          <div className="text-base mt-1">
+            <Link
+              href={`/jobs/${taskContext.rootId}`}
+              className="text-sky-blue hover:text-sky-blue-bright hover:underline"
+            >
+              {taskContext.rootId}
+              {taskContext.rootName ? ` (${taskContext.rootName})` : ''}
+            </Link>
+          </div>
         </div>
       )}
       <div>
