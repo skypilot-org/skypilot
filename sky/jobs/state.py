@@ -4040,6 +4040,8 @@ def add_job_event(job_id: int,
                   task_id: Optional[int],
                   new_status: ManagedJobStatus,
                   reason: str,
+                  *,
+                  code: Optional[str] = None,
                   timestamp: Optional[datetime.datetime] = None) -> None:
     """Add a job event record to the audit log.
 
@@ -4050,6 +4052,9 @@ def add_job_event(job_id: int,
         new_status: The new status being transitioned to. Can be a
             ManagedJobStatus enum.
         reason: A description of why the event occurred.
+        code: Optional error category code for failures. Keyword-only, so
+            that inserting it ahead of timestamp cannot shift a positional
+            argument of an out-of-tree caller.
         timestamp: The timestamp of the event. If None, uses current time.
     """
     if timestamp is None:
@@ -4063,6 +4068,7 @@ def add_job_event(job_id: int,
             spot_job_id=job_id,
             task_id=task_id,  # Can be None for job-level events
             new_status=status_value,
+            code=code,
             reason=reason,
             timestamp=timestamp,
         ))

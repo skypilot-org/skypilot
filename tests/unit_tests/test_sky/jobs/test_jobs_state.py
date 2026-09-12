@@ -1882,3 +1882,50 @@ class TestInfraFilterCodegenCompatibility:
         with pytest.raises(RuntimeError,
                            match=jobs_utils.INFRA_FILTER_UNSUPPORTED_MARKER):
             self._run_branch(code, one_older)
+
+
+class TestAddJobEventCode:
+    """The sync add_job_event writes `code`, like the async variant."""
+
+    def test_code_is_persisted(self, _mock_managed_jobs_db_conn):
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.FAILED,
+                            'boom',
+                            code=state.USER_JOB_FAILURE_EVENT_CODE)
+        assert [(e['reason'], e['code']) for e in state.get_job_events(1)
+               ] == [('boom', state.USER_JOB_FAILURE_EVENT_CODE)]
+
+    def test_code_is_keyword_only(self, _mock_managed_jobs_db_conn):
+        """`code` is inserted ahead of `timestamp`, so it must be
+        keyword-only: an out-of-tree caller passing `timestamp` as the fifth
+        positional argument would otherwise write a datetime into `code`."""
+        with pytest.raises(TypeError):
+            state.add_job_event(1, 0, state.ManagedJobStatus.RUNNING, 'running',
+                                datetime.datetime(2026, 1, 1, 0, 0, 0))
+
+    def test_code_defaults_to_none(self, _mock_managed_jobs_db_conn):
+        state.add_job_event(1, 0, state.ManagedJobStatus.RUNNING, 'running')
+        assert [e['code'] for e in state.get_job_events(1)] == [None]
+
+    @pytest.mark.asyncio
+    async def test_matches_async_variant(self, _mock_managed_jobs_db_conn):
+        early = datetime.datetime(2026, 1, 1, 0, 0, 0)
+        late = datetime.datetime(2026, 1, 1, 0, 5, 0)
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.FAILED,
+                            'sync',
+                            code=state.USER_JOB_FAILURE_EVENT_CODE,
+                            timestamp=early)
+        await state.add_job_event_async(1,
+                                        0,
+                                        state.ManagedJobStatus.FAILED,
+                                        'async',
+                                        code=state.USER_JOB_FAILURE_EVENT_CODE,
+                                        timestamp=late)
+        codes = {e['reason']: e['code'] for e in state.get_job_events(1)}
+        assert codes == {
+            'sync': state.USER_JOB_FAILURE_EVENT_CODE,
+            'async': state.USER_JOB_FAILURE_EVENT_CODE,
+        }
