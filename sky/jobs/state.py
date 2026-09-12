@@ -1441,7 +1441,7 @@ def next_dynamic_task_index(root_job_id: int) -> int:
             job_info_table.c.spot_job_id == root_job_id).values(
                 dynamic_task_count=sqlalchemy.func.coalesce(
                     job_info_table.c.dynamic_task_count, 0) + 1)
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
             count = session.execute(
                 bump.returning(job_info_table.c.dynamic_task_count)).scalar()
         else:
