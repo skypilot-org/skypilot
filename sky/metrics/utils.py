@@ -155,6 +155,23 @@ _anchor_read_failed = False
 _LATENCY_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30,
                     60, 120, 300, 600, 1000, float('inf'))
 
+# Interactive-SSH scale, for the round trips a keystroke takes. _LATENCY_BUCKETS
+# starts at 5ms and runs to 1000s because it is sized for request durations; a
+# healthy API-server-to-pod round trip inside one cluster is sub-millisecond to
+# a few ms, so every good value would land in that ladder's first bucket.
+#
+# The ladder stops at 2s because that is the largest value the sampler can
+# produce: _BackendTurnaroundSampler discards a reply that takes longer than
+# _MAX_PENDING_SECONDS, since past that it is far more likely to be unrelated
+# output than a very slow echo. Buckets above the cap would be structurally
+# empty and would advertise a reach the measurement does not have. Keep the two
+# numbers in step -- raising one without the other is what made 2.5/5/10 dead
+# boundaries. A reply that never arrives inside the cap is not silently lost:
+# it increments SKY_APISERVER_SSH_BACKEND_TURNAROUND_DROPPED_TOTAL, which is
+# how a backend too slow to measure stays visible.
+_SSH_ROUND_TRIP_BUCKETS = (0.001, 0.002, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25,
+                           0.5, 1, 2, float('inf'))
+
 # Time spent processing a piece of code, refer to time_it().
 SKY_APISERVER_CODE_DURATION_SECONDS = prom.Histogram(
     'sky_apiserver_code_duration_seconds',
@@ -316,11 +333,82 @@ SKY_APISERVER_REQUEST_RSS_INCR_BYTES = prom.Histogram(
 
 SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
     'sky_apiserver_websocket_ssh_latency_seconds',
-    ('Time taken for ssh message to go from client to API server and back'
-     'to the client. This does not include: latency to reach the pod, '
-     'overhead from sending through the k8s port-forward tunnel, or '
-     'ssh server lag on the destination pod.'),
+    # NOT keystroke latency. Read the whole string before alerting on it.
+    ('SSH websocket heartbeat round trip, client to API server and back. '
+     'This is a synthetic PING the client sends every 10s while a session is '
+     'open -- NOT keystroke latency, and not tied to any user input. The '
+     'server echoes the PING without forwarding it, so the k8s port-forward '
+     'tunnel and the destination pod sshd are excluded by construction; see '
+     'sky_apiserver_ssh_backend_turnaround_seconds for those. Because the '
+     'PONG cannot be sent until the websocket read loop is free, this is '
+     'also an indirect event-loop responsiveness probe. Empty -- not zero -- '
+     'when clients are older than API version 21, when '
+     'SKYPILOT_SSH_DISABLE_LATENCY_MEASUREMENT=1, or when a plugin redirected '
+     'the session away from this API server.'),
     buckets=_LATENCY_BUCKETS,
+)
+
+# The leg the heartbeat above cannot see: API server -> (k8s API server ->
+# kubelet -> pod sshd, or a plugin's direct in-cluster connection) -> shell
+# echo -> back. Measured by pairing a small write to the backend with the next
+# read from it, so it costs two clock reads on a path that already inspects
+# every frame -- no injected bytes, no added latency, and no client support
+# needed. See sky.server.websocket_utils._BackendTurnaroundSampler for the
+# pairing rules and what makes a sample get dropped.
+#
+# `path` distinguishes how the session reached the pod: 'portforward' for this
+# server's kubectl port-forward, or a plugin-supplied value when a hook routes
+# the connection elsewhere. Two or three values in practice, so no cardinality
+# concern.
+#
+# A redirect hook that hands the session off labels it SSH_PATH_REDIRECTED here
+# and records no turnaround -- this server never touches the stream, so it has
+# nothing to time. A plugin that terminates the stream itself instead calls
+# run_websocket_proxy() with its own `path`, and that sample lands in whichever
+# process runs the proxy. So an empty histogram alongside redirected sessions is
+# expected rather than a fault, which is what SKY_APISERVER_SSH_SESSIONS_TOTAL
+# below exists to make legible.
+SKY_APISERVER_SSH_BACKEND_TURNAROUND_SECONDS = prom.Histogram(
+    'sky_apiserver_ssh_backend_turnaround_seconds',
+    ('Round trip from the API server to the SSH backend and back, measured by '
+     'pairing a keystroke-sized write with the next read. Covers everything '
+     'the websocket heartbeat excludes: the port-forward tunnel, both sshd '
+     'hops and the shell echo. A distribution, not a per-keystroke truth -- '
+     'unpaired backend traffic can attach a read to the wrong write.'),
+    ['path'],
+    buckets=_SSH_ROUND_TRIP_BUCKETS,
+)
+
+# The histogram's blind spot, made visible. A keystroke-sized write whose reply
+# does not arrive within _MAX_PENDING_SECONDS is dropped rather than observed,
+# because at that age a reply is far more likely to be unrelated output than a
+# very slow echo -- admitting it would put a multi-second sample in a
+# distribution whose real values are single-digit milliseconds, and one such
+# sample moves p99 by four orders of magnitude.
+#
+# Dropping is right for the distribution and wrong as the whole story: a
+# backend that genuinely echoes slower than the cap would go quiet rather than
+# look slow. So count the drops. A rising ratio of dropped to observed is the
+# signal for "too slow to measure", which the distribution cannot express and
+# the session counter cannot either.
+SKY_APISERVER_SSH_BACKEND_TURNAROUND_DROPPED_TOTAL = prom.Counter(
+    'sky_apiserver_ssh_backend_turnaround_dropped_total',
+    ('Keystroke-sized writes whose backend reply did not arrive within the '
+     'pairing window, so no turnaround sample was taken. Read against '
+     'sky_apiserver_ssh_backend_turnaround_seconds_count: a rising share of '
+     'drops means the backend is slower than the measurement can express, '
+     'not that SSH went idle.'),
+    ['path'],
+)
+
+# Denominator for the histograms above. Without it an empty
+# sky_apiserver_ssh_backend_turnaround_seconds is ambiguous: nobody is SSHing,
+# or every session was redirected away, or the pairing never fires. An alert on
+# the histogram alone is a rule that can go silently dead.
+SKY_APISERVER_SSH_SESSIONS_TOTAL = prom.Counter(
+    'sky_apiserver_ssh_sessions_total',
+    'SSH proxy sessions accepted, by how the session was served',
+    ['path'],
 )
 
 SKY_APISERVER_LONG_EXECUTORS = prom.Gauge(
