@@ -1189,7 +1189,6 @@ function ControllerLogsSection({
         {isExpanded && (
           <div className="p-4">
             <JobDetailsContent
-              taskContext={taskContext}
               jobData={detailJobData}
               activeTab="controllerlogs"
               setIsLoadingLogs={setIsLoadingLogs}
