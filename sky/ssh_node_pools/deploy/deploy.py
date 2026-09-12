@@ -447,14 +447,7 @@ def deploy_single_cluster(cluster_name,
         return []
 
     logger.debug('Checking TCP Forwarding Options...')
-    cmd = (
-        'if [ "$(sudo sshd -T | grep allowtcpforwarding)" = "allowtcpforwarding yes" ]; then '
-        f'echo "TCP Forwarding already enabled on head node ({head_node})."; '
-        'else '
-        'sudo sed -i \'s/^#\\?\\s*AllowTcpForwarding.*/AllowTcpForwarding yes/\' '
-        '/etc/ssh/sshd_config && sudo systemctl restart sshd && '
-        f'echo "Successfully enabled TCP Forwarding on head node ({head_node})."; '
-        'fi')
+    cmd = _tcp_forwarding_cmd(askpass_block, head_node)
     result = deploy_utils.run_remote(head_node,
                                      shlex.quote(cmd),
                                      ssh_user,
@@ -1086,6 +1079,26 @@ cat <<'DCGM_SVC' | kubectl --kubeconfig ~/.kube/config apply -f -
 {svc_yaml}
 DCGM_SVC
 """
+
+
+def _tcp_forwarding_cmd(askpass_block: str, head_node: str) -> str:
+    """Build the shell command that ensures sshd allows TCP forwarding.
+
+    Reading `sshd -T` and rewriting `/etc/ssh/sshd_config` both need root,
+    so the sudo calls run under `-A` with the askpass block prepended --
+    the same contract every other privileged block here uses. Without it a
+    host that was not set up for passwordless sudo fails with `sudo: a
+    terminal is required to read the password`.
+    """
+    return (
+        f'{askpass_block}\n'
+        'if [ "$(sudo -A sshd -T | grep allowtcpforwarding)" = "allowtcpforwarding yes" ]; then '
+        f'echo "TCP Forwarding already enabled on head node ({head_node})."; '
+        'else '
+        'sudo -A sed -i \'s/^#\\?\\s*AllowTcpForwarding.*/AllowTcpForwarding yes/\' '
+        '/etc/ssh/sshd_config && sudo -A systemctl restart sshd && '
+        f'echo "Successfully enabled TCP Forwarding on head node ({head_node})."; '
+        'fi')
 
 
 def _prometheus_install_cmd(askpass_block: str) -> str:
