@@ -396,23 +396,23 @@ Launching jobs from inside a job group
 
 A task in a job group can launch further managed jobs with ``sky jobs launch``
 or :func:`sky.jobs.launch` (see :ref:`nested-skypilot-managed-jobs`). A job
-launched this way is a member of the group:
+launched this way becomes a *dynamic task* of the group:
 
-- It is listed under the group in ``sky jobs queue`` and the dashboard as a
-  *dynamic task*, numbered on from the group's own tasks (a group with tasks
-  0 and 1 shows its first launched job as task 2). ``<group id>-<task index>``
-  names it: ``sky jobs cancel 39-2`` cancels it on its own and
-  ``sky jobs logs 39-2`` tails it. It is a managed job of its own underneath.
-- ``sky jobs cancel <group>`` cancels it together with the group. Cancelling a
-  member cancels the jobs it launched in turn, and nothing else.
-- When the group finishes, members still running are cancelled. A group
+- It is listed under the group in ``sky jobs queue`` and the dashboard,
+  numbered on from the group's current tasks (a group with tasks 0 and 1
+  shows its first launched job as task 2). It can be referenced by
+  ``sky jobs logs`` and ``sky jobs cancel`` directly as
+  ``<group id>-<task index>``, e.g. ``sky jobs logs 39-2``. Underneath, it is
+  a managed job of its own.
+- ``sky jobs cancel <group>`` cancels it together with the group.
+- When the group finishes, dynamic tasks still running are cancelled. A group
   finishes once all its primary tasks have finished and its auxiliary tasks
-  have been terminated (after their ``termination_delay``), so a member
+  have been terminated (after their ``termination_delay``), so a dynamic task
   launched by an auxiliary task keeps running through that delay.
-- Its status is its own. A failed member does not fail the group, and a member
-  finishing does not affect the group or the jobs it launched.
+- Its status is its own. A failed dynamic task does not fail the group, and a
+  dynamic task finishing does not affect the group.
 
-This is how an evaluation watcher works: a task that watches for new
+One use case for dynamic tasks is an eval watcher: one task watches for new
 checkpoints and launches one evaluation job per checkpoint, each on its own
 resources, while the trainer keeps training.
 
@@ -435,7 +435,7 @@ resources, while the trainer keeps training.
     setup: |
       pip install "skypilot-nightly[remote]"
     run: |
-      # One eval job per new checkpoint. Each is a member of this group:
+      # One eval job per new checkpoint. Each is a dynamic task of this group:
       # listed under it in `sky jobs queue`, cancelled with it.
       for ckpt in $(python watch_checkpoints.py /checkpoints); do
         sky jobs launch -y -d -n "eval-$ckpt" eval.yaml --env CKPT=$ckpt
@@ -450,7 +450,7 @@ terminated once the trainer finished, after the group's ``termination_delay``,
 and its evaluations would be cancelled with it. A runnable version is in the
 `Job Group SDK examples <https://github.com/skypilot-org/skypilot/tree/master/examples/job-group-sdk>`_.
 
-The queue shows the members under the group as tasks 2 and 3:
+The queue shows the dynamic tasks under the group as tasks 2 and 3:
 
 .. code-block:: console
 
