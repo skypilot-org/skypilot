@@ -6,15 +6,18 @@ import pytest
 from sky.server.requests import requests
 
 
+@pytest.mark.parametrize('shared', [False, True])
 @pytest.mark.parametrize('upgrade', [False, True])
 @pytest.mark.parametrize('cluster_name', ['target', 'missing'])
 @pytest.mark.parametrize('user_id', [None, 'owner'])
-def test_cluster_history_query_work_is_bounded(upgrade, cluster_name, user_id):
+def test_cluster_history_query_work_is_bounded(shared, upgrade, cluster_name,
+                                               user_id):
     with sqlite3.connect(':memory:') as conn:
         requests.create_table(conn.cursor(), conn)
         if upgrade:
             # Simulate the old schema, including its active-only cluster index.
             conn.execute('DROP INDEX IF EXISTS cluster_created_at_idx')
+            conn.execute('DROP INDEX IF EXISTS cluster_user_created_at_idx')
         conn.executemany(
             'INSERT INTO requests '
             '(request_id, name, status, created_at, cluster_name, user_id) '
@@ -28,6 +31,13 @@ def test_cluster_history_query_work_is_bounded(upgrade, cluster_name, user_id):
                 ('hidden', 'sky.status', 'SUCCEEDED', 10002, 'target', 'owner'),
                 ('peer', 'sky.launch', 'SUCCEEDED', 10003, 'target', 'peer'),
             ])
+        if shared:
+            conn.executemany(
+                'INSERT INTO requests '
+                '(request_id, name, status, created_at, cluster_name, user_id) '
+                'VALUES (?, ?, ?, ?, ?, ?)',
+                [(f'bulk-{i}', 'sky.launch', 'SUCCEEDED', i, 'target', 'peer')
+                 for i in range(10000)])
         conn.commit()
         # Startup upgrades an existing populated database and is idempotent.
         requests.create_table(conn.cursor(), conn)
@@ -57,4 +67,8 @@ def test_cluster_history_query_work_is_bounded(upgrade, cluster_name, user_id):
             expected = [('active',), ('new',), ('old',)]
             if user_id is None:
                 expected.insert(0, ('peer',))
+                if shared:
+                    expected = [('peer',), ('active',)] + [
+                        (f'bulk-{i}',) for i in range(9999, 9901, -1)
+                    ]
         assert rows == expected

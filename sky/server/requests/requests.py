@@ -624,6 +624,10 @@ def create_table(cursor, conn):
     cursor.execute(f"""\
         CREATE INDEX IF NOT EXISTS cluster_created_at_idx ON {REQUEST_TABLE} ({COL_CLUSTER_NAME}, created_at);
     """)
+    # Owner-scoped reads must also skip peers' history on a shared cluster.
+    cursor.execute(f"""\
+        CREATE INDEX IF NOT EXISTS cluster_user_created_at_idx ON {REQUEST_TABLE} ({COL_CLUSTER_NAME}, {COL_USER_ID}, created_at);
+    """)
 
 
 _DB = None
