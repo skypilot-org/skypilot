@@ -1973,6 +1973,7 @@ def pool_sync_down_logs(
 
 def _get_job_clusters(
         job_id: int,
+        tasks: List[Dict[str, Any]],
         task_id: Optional[int] = None) -> List[Tuple[str, Optional[int]]]:
     """Reconstruct the underlying cluster name(s) for a managed job.
 
@@ -1985,12 +1986,21 @@ def _get_job_clusters(
     skipped, since their cluster is shared across jobs and its events are not
     attributable to a single job.
 
-    Returns de-duplicated ``(cluster_name, task_id)`` pairs (a multi-task
-    pipeline uses one cluster per task), so a caller merging the clusters'
-    events can attribute each one to the task that owns it.
+    Args:
+        job_id: The managed job id whose cluster name(s) to reconstruct.
+        tasks: The job's rows as returned by
+            ``managed_job_state.get_managed_job_tasks``, passed in so the
+            caller's single read of them is reused here as well as for the
+            per-task event cutoffs it computes from the same rows.
+        task_id: If given, only the cluster of that task is returned.
+
+    Returns:
+        De-duplicated ``(cluster_name, task_id)`` pairs (a multi-task pipeline
+        uses one cluster per task), so a caller merging the clusters' events
+        can attribute each one to the task that owns it.
     """
     clusters: List[Tuple[str, Optional[int]]] = []
-    for task in managed_job_state.get_managed_job_tasks(job_id):
+    for task in tasks:
         if task_id is not None and task.get('task_id') != task_id:
             continue
         if task.get('pool') is not None:
@@ -2005,6 +2015,36 @@ def _get_job_clusters(
             task_name, job_id), task.get('task_id')))
     # De-duplicate while preserving order.
     return list(dict.fromkeys(clusters))
+
+
+def _task_end_timestamps(
+        tasks: List[Dict[str, Any]]) -> Dict[Optional[int], float]:
+    """{task_id: end time} for the tasks of a managed job that have finished.
+
+    The cutoff is per task, not per job: each task of a pipeline launches its
+    own cluster, and that cluster is torn down when its task ends, so task 0
+    of a pipeline whose task 1 is still running already has post-completion
+    cluster events to leave out.
+
+    A task that is not terminal, or that is terminal with no end_at (an old
+    row), is left out of the mapping and so gets no cutoff -- a missing
+    timestamp never cuts anything out.
+
+    Args:
+        tasks: The job's rows as returned by
+            ``managed_job_state.get_managed_job_tasks``.
+
+    Returns:
+        A mapping from task id to the task's end time, as a unix timestamp.
+    """
+    end_at_by_task: Dict[Optional[int], float] = {}
+    for task in tasks:
+        status = task.get('status')
+        task_end_at = task.get('end_at')
+        if status is None or not status.is_terminal() or task_end_at is None:
+            continue
+        end_at_by_task[task.get('task_id')] = task_end_at
+    return end_at_by_task
 
 
 def _resolve_task_id(job_id: int, task: Union[str, int]) -> int:
@@ -2089,7 +2129,10 @@ def _job_events(
         include_cluster_events: When True, merge launch-progress events from
             the job's underlying cluster (e.g. image pulling) into the
             timeline so provisioning milestones between STARTING and RUNNING
-            are visible.
+            are visible. A cluster event later than the end time of the task
+            that owns the cluster is left out, since a finished task's cluster
+            is only being cleaned up by then; a task that has not finished, or
+            that has no recorded end time, cuts off nothing.
 
     Returns:
         List of task event records, ordered newest first.
@@ -2103,12 +2146,21 @@ def _job_events(
         return events
 
     try:
-        clusters = _get_job_clusters(job_id, task_id)
+        tasks = managed_job_state.get_managed_job_tasks(job_id)
+        clusters = _get_job_clusters(job_id, tasks, task_id)
     except Exception as e:  # pylint: disable=broad-except
         # The merge is best-effort: never fail the job-events request because
         # the cluster name(s) could not be reconstructed.
         logger.debug(f'Failed to resolve cluster name(s) for job {job_id}: {e}')
         return events
+
+    # Anything a task's cluster recorded after that task finished did not
+    # happen to the job: it is the cluster being cleaned up (teardown of
+    # leftover resources, a final status refresh). Merging it would append a
+    # fabricated STARTING row after the task's terminal row. The cutoff is per
+    # task, since each task has its own cluster and its own end time; a task
+    # that has not finished has no cutoff.
+    end_at_by_task = _task_end_timestamps(tasks)
 
     # STATUS_CHANGE carries the launch/setup milestone sequence (provisioning,
     # runtime setup, file-mount syncing, ...); LAUNCH_PROGRESS carries the
@@ -2124,7 +2176,10 @@ def _job_events(
             cluster_events.extend(
                 (event, cluster_task_id)
                 for event in global_user_state.get_cluster_events_by_name(
-                    cluster_name, event_types, limit=limit))
+                    cluster_name,
+                    event_types,
+                    limit=limit,
+                    until=end_at_by_task.get(cluster_task_id)))
         except Exception as e:  # pylint: disable=broad-except
             # Best-effort: skip a cluster whose events cannot be read.
             logger.debug(f'Failed to read cluster events for job {job_id} '

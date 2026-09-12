@@ -27,16 +27,25 @@ def _job_event(reason, status, ts):
     }
 
 
-def _task(task_name='my-task', pool=None, task_id=0, job_name='my-pipeline'):
+def _task(task_name='my-task',
+          pool=None,
+          task_id=0,
+          job_name='my-pipeline',
+          status=managed_job_state.ManagedJobStatus.RUNNING,
+          end_at=None):
     # 'task_name' is the per-task name the controller uses to build the
     # cluster name; 'job_name' is the job-level/DAG name (shared across a
     # pipeline's tasks). They are deliberately different so a test fails if
     # the wrong field is used to reconstruct the cluster name.
+    # 'status'/'end_at' default to a task that is still running, i.e. no
+    # cutoff on the cluster events that get merged in.
     return {
         'task_name': task_name,
         'job_name': job_name,
         'pool': pool,
         'task_id': task_id,
+        'status': status,
+        'end_at': end_at,
     }
 
 
@@ -85,7 +94,7 @@ def test_merge_orders_newest_first_and_truncates(monkeypatch):
     ]
     captured = {}
 
-    def _fake_cluster_events(name, event_types, limit=None):
+    def _fake_cluster_events(name, event_types, limit=None, until=None):
         captured['name'] = name
         captured['event_types'] = event_types
         captured['limit'] = limit
@@ -235,7 +244,7 @@ def test_pipeline_uses_per_task_cluster_name(monkeypatch):
 
     queried_names = []
 
-    def _fake_cluster_events(name, event_types, limit=None):
+    def _fake_cluster_events(name, event_types, limit=None, until=None):
         queried_names.append(name)
         return [{'reason': f'Provisioning {name}', 'transitioned_at': 100}]
 
@@ -277,10 +286,10 @@ def test_merged_cluster_events_carry_their_task_id(monkeypatch):
             'transitioned_at': 120
         }],
     }
-    monkeypatch.setattr(
-        global_user_state,
-        'get_cluster_events_by_name',
-        lambda name, event_types, limit=None: by_cluster.get(name, []))
+    monkeypatch.setattr(global_user_state,
+                        'get_cluster_events_by_name',
+                        lambda name, event_types, limit=None, until=None:
+                        by_cluster.get(name, []))
 
     events = core.get_job_events(job_id=1,
                                  limit=None,
@@ -346,7 +355,7 @@ def test_the_newest_row_wins_when_the_job_is_chatty(monkeypatch):
                         lambda name, job_id: f'{name}-{job_id}')
     monkeypatch.setattr(global_user_state,
                         'get_cluster_events_by_name',
-                        lambda name, event_types, limit=None: [{
+                        lambda name, event_types, limit=None, until=None: [{
                             'reason': 'Launching (pending: Resources)',
                             'transitioned_at': 500
                         }])
@@ -378,7 +387,7 @@ def test_the_window_is_exactly_the_most_recent_rows(monkeypatch):
                         lambda job_id: [_task()])
     monkeypatch.setattr(global_user_state,
                         'get_cluster_events_by_name',
-                        lambda name, event_types, limit=None: [{
+                        lambda name, event_types, limit=None, until=None: [{
                             'reason': f'Launching (step {i})',
                             'transitioned_at': 100 + i
                         } for i in range(4)])
@@ -404,7 +413,7 @@ def test_limit_one_returns_the_newest_event_of_either_source(monkeypatch):
                         lambda name, job_id: f'{name}-{job_id}')
     monkeypatch.setattr(global_user_state,
                         'get_cluster_events_by_name',
-                        lambda name, event_types, limit=None: [{
+                        lambda name, event_types, limit=None, until=None: [{
                             'reason': 'Launching (pending: Resources)',
                             'transitioned_at': 500
                         }])
@@ -470,7 +479,7 @@ def test_limit_one_prefers_the_newest_even_when_it_is_the_job_s_own(
                         lambda job_id: [_task()])
     monkeypatch.setattr(global_user_state,
                         'get_cluster_events_by_name',
-                        lambda name, event_types, limit=None: [{
+                        lambda name, event_types, limit=None, until=None: [{
                             'reason': 'Launching (pending: Resources)',
                             'transitioned_at': 100
                         }])
@@ -506,3 +515,280 @@ def test_a_runner_without_events_falls_back_to_the_default(monkeypatch):
     monkeypatch.setattr(managed_job_runner, '_current', _OldRunner())
     assert core.get_job_events(job_id=1,
                                include_cluster_events=False) == job_events
+
+
+def _cluster_events_reader(events):
+    """A stand-in for get_cluster_events_by_name that honors `until`.
+
+    The real one does the cutoff in SQL, before the limit; this mirrors that
+    so a test can tell the difference between "filtered in the query" and
+    "filtered after the window was already spent".
+    """
+
+    def _read(name, event_types, limit=None, until=None):
+        del name, event_types  # Unused.
+        rows = [
+            event for event in events
+            if until is None or event['transitioned_at'] <= until
+        ]
+        rows.sort(key=lambda event: event['transitioned_at'], reverse=True)
+        return rows if limit is None else rows[:limit]
+
+    return _read
+
+
+def _per_cluster_events_reader(events_by_cluster):
+    """Like _cluster_events_reader, but each cluster has its own events.
+
+    The cutoff is per task, and a pipeline's tasks each have their own
+    cluster, so a test can only tell the cutoffs apart if the clusters return
+    different rows.
+    """
+
+    def _read(name, event_types, limit=None, until=None):
+        del event_types  # Unused.
+        rows = [
+            event for event in events_by_cluster.get(name, [])
+            if until is None or event['transitioned_at'] <= until
+        ]
+        rows.sort(key=lambda event: event['transitioned_at'], reverse=True)
+        return rows if limit is None else rows[:limit]
+
+    return _read
+
+
+def _cluster(task_name):
+    """The cluster name the controller gives task `task_name` of job 1."""
+    return managed_job_utils.generate_managed_job_cluster_name(task_name, 1)
+
+
+def _merge_pipeline(monkeypatch, tasks, events_by_cluster, task_id=None):
+    """Merge a pipeline's cluster events; returns the merged reasons."""
+    job_events = [
+        _job_event('Job is starting',
+                   managed_job_state.ManagedJobStatus.STARTING, 100)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                        lambda job_id: list(tasks))
+    monkeypatch.setattr(global_user_state, 'get_cluster_events_by_name',
+                        _per_cluster_events_reader(events_by_cluster))
+    events = core.get_job_events(job_id=1,
+                                 task_id=task_id,
+                                 limit=None,
+                                 include_cluster_events=True)
+    return [event['reason'] for event in events]
+
+
+def _finished_job(monkeypatch,
+                  cluster_events,
+                  end_at,
+                  job_events=None,
+                  tasks=None,
+                  limit=None):
+    """Set up a job whose only task finished at `end_at`, and merge."""
+    job_events = job_events or [
+        _job_event('Job finished', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                   end_at)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+    monkeypatch.setattr(
+        managed_job_state, 'get_managed_job_tasks', lambda job_id: tasks or [
+            _task(status=managed_job_state.ManagedJobStatus.SUCCEEDED,
+                  end_at=end_at)
+        ])
+    monkeypatch.setattr(global_user_state, 'get_cluster_events_by_name',
+                        _cluster_events_reader(cluster_events))
+    return core.get_job_events(job_id=1,
+                               limit=limit,
+                               include_cluster_events=True)
+
+
+def test_cluster_events_after_the_job_ended_are_excluded(monkeypatch):
+    """A cluster event written after the job reached a terminal status did not
+    happen to the job -- it is the cluster being cleaned up. Merging it would
+    show a fabricated 'starting' row after the job ended.
+    """
+    result = _finished_job(monkeypatch,
+                           cluster_events=[{
+                               'reason': 'Terminating leftover resources',
+                               'transitioned_at': 400
+                           }],
+                           end_at=300)
+    assert [event['reason'] for event in result] == ['Job finished']
+
+
+def test_cluster_events_before_the_job_ended_are_included(monkeypatch):
+    """The cutoff must not throw away the provisioning milestones, which are
+    the reason the merge exists."""
+    result = _finished_job(monkeypatch,
+                           cluster_events=[{
+                               'reason': 'Launching (Pulling image)',
+                               'transitioned_at': 200
+                           }, {
+                               'reason': 'Terminating leftover resources',
+                               'transitioned_at': 400
+                           }],
+                           end_at=300)
+    assert [event['reason'] for event in result] == [
+        'Job finished',
+        'Launching (Pulling image)',
+    ]
+
+
+def test_an_event_exactly_at_the_end_time_is_kept(monkeypatch):
+    """The cutoff is inclusive: the last thing that happened to a cluster
+    often shares the second the job ended in."""
+    result = _finished_job(monkeypatch,
+                           cluster_events=[{
+                               'reason': 'Launching (Pulling image)',
+                               'transitioned_at': 300
+                           }],
+                           end_at=300)
+    assert 'Launching (Pulling image)' in [event['reason'] for event in result]
+
+
+def test_a_running_job_keeps_every_cluster_event(monkeypatch):
+    """A job that has not finished has no cutoff: the newest cluster event is
+    exactly what a user asks the timeline about."""
+    job_events = [
+        _job_event('Job is starting',
+                   managed_job_state.ManagedJobStatus.STARTING, 100)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                        lambda job_id: [_task()])
+    captured = {}
+
+    def _read(name, event_types, limit=None, until=None):
+        del name, event_types, limit  # Unused.
+        captured['until'] = until
+        return [{
+            'reason': 'Launching (pending: Resources)',
+            'transitioned_at': 900
+        }]
+
+    monkeypatch.setattr(global_user_state, 'get_cluster_events_by_name', _read)
+    result = core.get_job_events(job_id=1, include_cluster_events=True)
+    assert captured['until'] is None
+    assert [event['reason'] for event in result] == [
+        'Launching (pending: Resources)',
+        'Job is starting',
+    ]
+
+
+def test_a_finished_task_of_a_running_pipeline_is_cut_off(monkeypatch):
+    """Task 0's cluster is torn down when task 0 ends, even though task 1 is
+    still running, so task 0's post-completion rows must still be left out --
+    while task 1, which has not finished, keeps everything."""
+    reasons = _merge_pipeline(
+        monkeypatch,
+        tasks=[
+            _task(task_name='pipe-0',
+                  task_id=0,
+                  status=managed_job_state.ManagedJobStatus.SUCCEEDED,
+                  end_at=300),
+            _task(task_name='pipe-1', task_id=1),
+        ],
+        events_by_cluster={
+            _cluster('pipe-0'): [{
+                'reason': 'Terminating leftover resources',
+                'transitioned_at': 900
+            }],
+            _cluster('pipe-1'): [{
+                'reason': 'Launching (pending: Resources)',
+                'transitioned_at': 900
+            }],
+        })
+    assert 'Terminating leftover resources' not in reasons
+    assert 'Launching (pending: Resources)' in reasons
+
+
+def test_each_task_is_cut_off_at_its_own_end_time(monkeypatch):
+    """With every task finished, an earlier task's end must not cut the later
+    task's events off, and the later task's end must not keep the earlier
+    task's post-completion rows in."""
+    reasons = _merge_pipeline(
+        monkeypatch,
+        tasks=[
+            _task(task_name='pipe-0',
+                  task_id=0,
+                  status=managed_job_state.ManagedJobStatus.SUCCEEDED,
+                  end_at=300),
+            _task(task_name='pipe-1',
+                  task_id=1,
+                  status=managed_job_state.ManagedJobStatus.CANCELLED,
+                  end_at=500),
+        ],
+        events_by_cluster={
+            _cluster('pipe-0'): [{
+                'reason': 'Task 0 launching',
+                'transitioned_at': 200
+            }, {
+                'reason': 'Task 0 cleanup',
+                'transitioned_at': 400
+            }],
+            _cluster('pipe-1'): [{
+                'reason': 'Task 1 launching',
+                'transitioned_at': 450
+            }, {
+                'reason': 'Task 1 cleanup',
+                'transitioned_at': 600
+            }],
+        })
+    assert 'Task 0 launching' in reasons
+    assert 'Task 1 launching' in reasons
+    assert 'Task 0 cleanup' not in reasons
+    assert 'Task 1 cleanup' not in reasons
+
+
+def test_a_task_scoped_request_uses_that_task_s_cutoff(monkeypatch):
+    """Asking for one task of a still-running pipeline must still cut that
+    task's cluster off at the task's own end time."""
+    reasons = _merge_pipeline(
+        monkeypatch,
+        tasks=[
+            _task(task_name='pipe-0',
+                  task_id=0,
+                  status=managed_job_state.ManagedJobStatus.SUCCEEDED,
+                  end_at=300),
+            _task(task_name='pipe-1', task_id=1),
+        ],
+        events_by_cluster={
+            _cluster('pipe-0'): [{
+                'reason': 'Task 0 launching',
+                'transitioned_at': 200
+            }, {
+                'reason': 'Terminating leftover resources',
+                'transitioned_at': 900
+            }],
+            _cluster('pipe-1'): [{
+                'reason': 'Launching (pending: Resources)',
+                'transitioned_at': 900
+            }],
+        },
+        task_id=0)
+    assert 'Task 0 launching' in reasons
+    assert 'Terminating leftover resources' not in reasons
+    # Only task 0's cluster is in scope.
+    assert 'Launching (pending: Resources)' not in reasons
+
+
+def test_a_terminal_task_without_an_end_time_keeps_everything(monkeypatch):
+    """A missing end_at (an old row) must never shorten the window: without a
+    time to cut at, the old behavior is the safe one."""
+    result = _finished_job(
+        monkeypatch,
+        cluster_events=[{
+            'reason': 'Launching (pending: Resources)',
+            'transitioned_at': 900
+        }],
+        end_at=300,
+        tasks=[
+            _task(status=managed_job_state.ManagedJobStatus.SUCCEEDED,
+                  end_at=None)
+        ])
+    assert 'Launching (pending: Resources)' in [e['reason'] for e in result]

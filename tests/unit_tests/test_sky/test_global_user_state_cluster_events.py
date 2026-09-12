@@ -455,3 +455,41 @@ def test_latest_cluster_events_chunks_the_name_list(tmp_path, monkeypatch):
     assert events == {
         f'chunk-{i}': (f'Launching (pending: r{i})', 1000 + i) for i in range(5)
     }
+
+
+def test_get_cluster_events_by_name_until_cuts_before_the_limit(
+        tmp_path, monkeypatch):
+    """`until` drops events newer than the cutoff, and does so in the query:
+    a caller asking for the most recent N events within the window gets N of
+    them, not N minus however many newer rows exist."""
+    _fresh_db(tmp_path, monkeypatch)
+    _add_cluster('c-until')
+
+    for reason, ts in [('e100', 100), ('e200', 200), ('e300', 300),
+                       ('e400', 400), ('e500', 500)]:
+        global_user_state.add_cluster_event(
+            'c-until',
+            new_status=None,
+            reason=reason,
+            event_type=global_user_state.ClusterEventType.STATUS_CHANGE,
+            transitioned_at=ts)
+
+    types = [global_user_state.ClusterEventType.STATUS_CHANGE]
+    # No cutoff: newest first, as before.
+    assert [
+        event['reason']
+        for event in global_user_state.get_cluster_events_by_name(
+            'c-until', types)
+    ] == ['e500', 'e400', 'e300', 'e200', 'e100']
+    # With a cutoff, the two newer rows are gone; the boundary is inclusive.
+    assert [
+        event['reason']
+        for event in global_user_state.get_cluster_events_by_name(
+            'c-until', types, until=300)
+    ] == ['e300', 'e200', 'e100']
+    # The limit is spent on rows inside the window, not on the excluded ones.
+    assert [
+        event['reason']
+        for event in global_user_state.get_cluster_events_by_name(
+            'c-until', types, limit=2, until=300)
+    ] == ['e300', 'e200']
