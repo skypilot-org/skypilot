@@ -14,8 +14,7 @@ from sky import global_user_state
 from sky import task as task_lib
 from sky.utils import config_utils
 from sky.utils import yaml_utils
-
-REDACTED_VALUE = '<redacted>'
+from sky.utils.config_utils import REDACTED_VALUE
 
 # Sensitive config paths to redact in debug dumps, following the same
 # pattern as provision/common.py:ProvisionConfig.get_redacted_config().
@@ -61,11 +60,12 @@ def redact_env_vars(env_vars: Dict[str, Any]) -> Dict[str, Any]:
     Names are kept (which vars are set is diagnostic signal); values of
     sensitive names are replaced with '<redacted>'. Set-but-empty values stay
     empty -- there is nothing to leak, and the emptiness itself is signal.
-    The input is not mutated.
+    The input is not mutated. Non-string keys (possible in yaml-parsed docs)
+    pass through unredacted rather than raising.
     """
     redacted: Dict[str, Any] = {}
     for name, value in env_vars.items():
-        if is_sensitive_env_var(name):
+        if isinstance(name, str) and is_sensitive_env_var(name):
             redacted[name] = REDACTED_VALUE if value else value
         else:
             redacted[name] = value
@@ -122,33 +122,49 @@ def drop_service_discovery_env_vars(env_vars: Dict[str, Any]) -> Dict[str, Any]:
 #   --env KEY=VALUE / --env=KEY=VALUE        (value ends at whitespace)
 #   --env 'KEY=VALUE MIGHT HAVE SPACES'      (value ends at the closing quote)
 #   '--env=KEY=VALUE MIGHT HAVE SPACES'      (whole token quoted by shlex)
+# The flag name is captured so the callback can treat --env and --secret
+# differently.
 _CMD_ENV_FLAG_QUOTED_RE = re.compile(
-    r'(?P<prefix>--(?:env|secret)(?:=|\s+))(?P<quote>[\x27\x22])'
+    r'(?P<prefix>--(?P<flag>env|secret)(?:=|\s+))(?P<quote>[\x27\x22])'
     r'(?P<key>[^=\s\x27\x22]+)=(?P<value>.*?)(?P=quote)')
 _CMD_ENV_FLAG_ATTACHED_QUOTED_RE = re.compile(
-    r'(?P<quote>[\x27\x22])(?P<prefix>--(?:env|secret)=)'
+    r'(?P<quote>[\x27\x22])(?P<prefix>--(?P<flag>env|secret)=)'
     r'(?P<key>[^=\s\x27\x22]+)=(?P<value>.*?)(?P=quote)')
 _CMD_ENV_FLAG_BARE_RE = re.compile(
-    r'(?P<prefix>--(?:env|secret)(?:=|\s+))'
+    r'(?P<prefix>--(?P<flag>env|secret)(?:=|\s+))'
     r'(?P<key>[^=\s\x27\x22]+)=(?P<value>[^\s\x27\x22]*)')
 
 
 def redact_command_secrets(command: str) -> str:
     """Redact credential-bearing --env/--secret values in a command string.
 
-    Any `--env KEY=VALUE` / `--secret KEY=VALUE` (or `--env=KEY=VALUE`) whose
-    KEY matches the sensitive-env-var pattern has VALUE replaced with
-    '<redacted>'. Users do pass credentials via --env, and the persisted
-    entrypoint_command is copied verbatim into debug dumps (log-tail requests
-    even duplicate the outer command into many request records). Keys without
-    a value (`--env KEY`, whose value lives in the client's environment) and
-    empty values are left alone -- there is nothing to leak.
+    `--env KEY=VALUE` / `--env=KEY=VALUE` (any shlex quoting shape) whose KEY
+    matches the sensitive-env-var pattern has VALUE replaced with
+    '<redacted>'. Any non-empty `--secret KEY=VALUE` redacts regardless of
+    key name: the user already marked the value as a secret on the command
+    line, and key-gating that flag would repeat exactly the allowlist failure
+    this redaction exists to fix (a secret under an unforeseen name shipping
+    verbatim). This mirrors the client-side construction-time precedent
+    common_utils._redact_secrets_values, which also redacts every non-empty
+    --secret value; it diverges on empty values -- the client rewrites
+    `--secret KEY=` to '<redacted>' while we keep it empty, matching
+    redact_env_vars' empty-preserving convention (nothing to leak).
+
+    Keys without a value (`--env KEY`, whose value lives in the client's
+    environment) and empty values are left alone -- there is nothing to leak.
+
+    Limitation: values containing embedded single quotes (shlex `'\''`
+    escapes) are only partially redacted -- the regex stops at the first
+    closing quote, so a fragment after the escape can survive. A full
+    shlex-escape-consuming regex would be needed to cover that; not
+    evidenced in practice, so out of scope here.
     """
 
     def _redact(match: 're.Match[str]') -> str:
         key = match.group('key')
         value = match.group('value')
-        if not value or not is_sensitive_env_var(key):
+        if not value or (match.group('flag') == 'env' and
+                         not is_sensitive_env_var(key)):
             return match.group(0)
         # Preserve the command's shape, swapping only the value. The
         # attached-quoted form puts its opening quote before the flag, the
@@ -189,11 +205,57 @@ def epoch_to_human(epoch: Optional[float]) -> Optional[str]:
         return None
 
 
+def _redact_task_yaml_doc(doc: Dict[str, Any], depth: int = 0) -> None:
+    """Redact secrets, credentials and envs in a parsed task/dag doc in place.
+
+    Extends task_lib.redact_task_yaml_dict (the `secrets:` block and docker
+    password) with two dump-only steps: redacting envs values with sensitive
+    names, and recursing into the embedded '_user_specified_yaml' string (a
+    yaml-file task carries the user's original yaml verbatim, which re-embeds
+    the same envs). The envs redaction deliberately lives here and NOT in
+    task_lib.redact_task_yaml_dict: that function is on the functional
+    managed-job relaunch path (task.to_yaml_config(use_user_specified_yaml=
+    True) output is stored as the relaunch snapshot), where env values must
+    survive so relaunched jobs keep their environment.
+
+    The _user_specified_yaml recursion is gated at depth 0 so a hand-crafted
+    nested _user_specified_yaml cannot recurse infinitely. The embedded
+    string is replaced only when redaction changed its content, so a user
+    yaml without sensitive envs stays byte-identical; if it fails to parse it
+    is replaced with '<parse error, redacted>'.
+    """
+    task_lib.redact_task_yaml_dict(doc)
+    envs = doc.get('envs')
+    if isinstance(envs, dict):
+        doc['envs'] = redact_env_vars(envs)
+    if depth == 0:
+        user_yaml = doc.get('_user_specified_yaml')
+        if isinstance(user_yaml, str) and user_yaml:
+            try:
+                inner_docs = list(yaml_utils.safe_load_all(user_yaml))
+            except Exception:  # pylint: disable=broad-except
+                doc['_user_specified_yaml'] = '<parse error, redacted>'
+            else:
+                before = yaml_utils.dump_yaml_str(inner_docs)
+                for inner_doc in inner_docs:
+                    if isinstance(inner_doc, dict):
+                        _redact_task_yaml_doc(inner_doc, depth + 1)
+                after = yaml_utils.dump_yaml_str(inner_docs)
+                if after != before:
+                    doc['_user_specified_yaml'] = after
+
+
 def redact_task_yaml(yaml_str: str) -> str:
     """Parse a task/dag YAML string and redact secrets and credentials.
 
     Shared by the API server dump (debug_utils.py) and the controller
-    manifest (jobs/utils.py).
+    manifest (jobs/utils.py) -- both dump-side consumers. Redacts the
+    `secrets:` block and docker password (task_lib.redact_task_yaml_dict),
+    plus envs values with sensitive names and the same inside the embedded
+    _user_specified_yaml string (see _redact_task_yaml_doc). Note that
+    despite what the field routing suggests, task YAML envs were never
+    redacted before -- envs values shipped verbatim in dumps; this closes
+    that gap on the dump side only.
     """
     try:
         docs = list(yaml_utils.safe_load_all(yaml_str))
@@ -201,7 +263,7 @@ def redact_task_yaml(yaml_str: str) -> str:
         return '<parse error, redacted>'
     for doc in docs:
         if isinstance(doc, dict):
-            task_lib.redact_task_yaml_dict(doc)
+            _redact_task_yaml_doc(doc)
     return yaml_utils.dump_yaml_str(docs)
 
 

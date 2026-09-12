@@ -1019,14 +1019,23 @@ def _sanitize_request_body(request) -> Optional[Dict[str, Any]]:
     # Redact sensitive env var values, after first dropping the k8s
     # service-discovery entries (identical machine-generated noise in every
     # request created inside this pod; 72MB across a large production
-    # dump) -- see debug_dump_helpers for both.
+    # dump) -- see debug_dump_helpers for both. When entries were dropped,
+    # note it next to the trimmed env_vars so the omission is self-describing.
     env_vars = data.get('env_vars')
     if isinstance(env_vars, dict):
-        data['env_vars'] = debug_dump_helpers.redact_env_vars(
-            debug_dump_helpers.drop_service_discovery_env_vars(env_vars))
+        kept_env_vars = debug_dump_helpers.drop_service_discovery_env_vars(
+            env_vars)
+        if len(kept_env_vars) != len(env_vars):
+            data['env_vars_omitted'] = (
+                f'{len(env_vars) - len(kept_env_vars)} Kubernetes '
+                'service-discovery env vars omitted (injected into the '
+                'client pod, not set by the client)')
+        data['env_vars'] = debug_dump_helpers.redact_env_vars(kept_env_vars)
     # Redact credentials passed on the command line (--env/--secret
     # KEY=VALUE); the persisted entrypoint_command is otherwise copied
-    # verbatim into the dump.
+    # verbatim into the dump. The separate 'entrypoint' string field (the
+    # usage-lib entrypoint, e.g. the CLI module name) was scanned in a
+    # large production dump and carries no credential-shaped values.
     entrypoint_command = data.get('entrypoint_command')
     if isinstance(entrypoint_command, str) and entrypoint_command:
         data['entrypoint_command'] = (

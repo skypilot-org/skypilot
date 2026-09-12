@@ -14,6 +14,7 @@ from unittest import mock
 import zipfile
 
 import pytest
+import yaml
 
 from sky import clouds
 from sky import exceptions
@@ -2964,7 +2965,8 @@ class TestRedactCommandSecrets:
             # Whole attached token quoted by shlex (value has spaces).
             ('sky launch \'--env=API_KEY=k 3\'',
              'sky launch \'--env=API_KEY=<redacted>\''),
-            # Non-sensitive pairs and quoted values with spaces are kept.
+            # Non-sensitive --env pairs and quoted values with spaces are
+            # kept.
             ('sky launch --env NCCL_TIMEOUT=1800',
              'sky launch --env NCCL_TIMEOUT=1800'),
             ('sky launch --env \'ENTRYPOINT=a b c\'',
@@ -2975,9 +2977,65 @@ class TestRedactCommandSecrets:
             # Later flags are not corrupted by an earlier redaction.
             ('--env TOKEN=t1 --gpus L4:8 --dryrun',
              '--env TOKEN=<redacted> --gpus L4:8 --dryrun'),
+            # A non-empty --secret redacts regardless of key name: the user
+            # marked the value as a secret on the command line, and key-gating
+            # that flag would repeat the allowlist failure this redaction
+            # fixes.
+            ('sky launch --secret MY_PAT=abc123',
+             'sky launch --secret MY_PAT=<redacted>'),
+            ('sky launch --secret=MY_PAT=abc123',
+             'sky launch --secret=MY_PAT=<redacted>'),
+            ('sky launch --secret \'MY_PAT=abc 1\'',
+             'sky launch --secret \'MY_PAT=<redacted>\''),
+            ('sky launch \'--secret=MY_PAT=abc 2\'',
+             'sky launch \'--secret=MY_PAT=<redacted>\''),
+            # Empty --secret values stay empty (nothing to leak; the
+            # client-side _redact_secrets_values rewrites them to
+            # '<redacted>' -- a deliberate divergence documented in
+            # redact_command_secrets).
+            ('sky launch --secret MY_PAT=', 'sky launch --secret MY_PAT='),
+            ('sky launch --secret MY_PAT', 'sky launch --secret MY_PAT'),
+            # '=' inside a value is part of the value.
+            ('sky launch --env TOKEN=abc=def',
+             'sky launch --env TOKEN=<redacted>'),
+            # Lookalike flags do not match: the regex requires '=' or
+            # whitespace right after --env/--secret.
+            ('sky launch --environment TOKEN=foo',
+             'sky launch --environment TOKEN=foo'),
+            ('sky launch --envy KEY=v', 'sky launch --envy KEY=v'),
+            # Flag at end of string: no KEY=VALUE follows.
+            ('sky launch --env', 'sky launch --env'),
+            # Unbalanced quote: no closing quote to bound the value, so the
+            # pair is left as-is rather than mangled.
+            ('sky launch --env \'MY_TOKEN=abc',
+             'sky launch --env \'MY_TOKEN=abc'),
+            # --env-file/--secret-file take paths, not KEY=VALUE pairs.
+            ('sky launch --env-file /path/to/env',
+             'sky launch --env-file /path/to/env'),
+            ('sky launch --secret-file /path/to/secret',
+             'sky launch --secret-file /path/to/secret'),
         ])
     def test_redaction_shapes(self, command, expected):
         assert debug_dump_helpers.redact_command_secrets(command) == expected
+
+    def test_embedded_quote_partially_redacted(self):
+        """A value containing an embedded single quote (shlex `'\''` escape)
+        is only partially redacted: the first quoted segment is redacted and a
+        fragment after the escape survives. Pins the documented limitation."""
+        command = 'sky launch --env \'MY_TOKEN=abc\'\\\'\'def\''
+        result = debug_dump_helpers.redact_command_secrets(command)
+        assert result == 'sky launch --env \'MY_TOKEN=<redacted>\'\\\'\'def\''
+
+    def test_oversized_command_redacts_quickly(self):
+        """A very large command (~100KB) redacts without pathological
+        backtracking."""
+        pairs = ' '.join(f'--env VAR_{i}=value_{i}' for i in range(2500))
+        command = f'sky launch {pairs} --env TOKEN=secret {pairs}'
+        assert len(command) > 100_000
+        result = debug_dump_helpers.redact_command_secrets(command)
+        assert '--env TOKEN=<redacted>' in result
+        assert 'secret' not in result
+        assert '--env VAR_0=value_0' in result
 
 
 # ---------------------------------------------------------------------------
@@ -3145,8 +3203,8 @@ class TestSanitizeRequestBody:
                 return {
                     'cluster_name': 'test',
                     'env_vars': {
-                        'ROBOT_DATA_AUTH_TOKEN': 'd458189e',
-                        'WANDB_API_KEY': 'local-78b7',
+                        'DATASET_AUTH_TOKEN': 'synthtoken123',
+                        'WANDB_API_KEY': 'synthkey456',
                         'SKYPILOT_DEBUG': '1',
                     }
                 }
@@ -3154,7 +3212,7 @@ class TestSanitizeRequestBody:
         request = _make_request(name='sky.stop', request_body=FakeBody())
         result = debug_utils._sanitize_request_body(request)
         assert result is not None
-        assert result['env_vars']['ROBOT_DATA_AUTH_TOKEN'] == '<redacted>'
+        assert result['env_vars']['DATASET_AUTH_TOKEN'] == '<redacted>'
         assert result['env_vars']['WANDB_API_KEY'] == '<redacted>'
         assert result['env_vars']['SKYPILOT_DEBUG'] == '1'
 
@@ -3188,9 +3246,39 @@ class TestSanitizeRequestBody:
         result = debug_utils._sanitize_request_body(request)
         assert result is not None
         assert result['env_vars'] == meaningful
+        # The omission is self-describing: the drop count is noted next to
+        # the trimmed env_vars.
+        assert result['env_vars_omitted'] == (
+            '4 Kubernetes service-discovery env vars omitted (injected into '
+            'the client pod, not set by the client)')
+
+    def test_no_env_vars_omitted_when_nothing_dropped(self):
+        """env_vars_omitted is absent when no service-discovery vars were
+        dropped."""
+
+        class FakeBody:
+
+            def model_dump(self):
+                return {
+                    'cluster_name': 'test',
+                    'env_vars': {
+                        'KUBECONFIG': '/root/.kube/config',
+                        'SKYPILOT_DEBUG': '1',
+                    }
+                }
+
+        request = _make_request(name='sky.status', request_body=FakeBody())
+        result = debug_utils._sanitize_request_body(request)
+        assert result is not None
+        assert 'env_vars_omitted' not in result
 
     def test_entrypoint_command_secrets_redacted(self):
-        """Credential-bearing --env/--secret values are redacted."""
+        """Credential-bearing --env/--secret values are redacted.
+
+        Shaped like a real production launch command that leaked: a quoted
+        multi-word ENTRYPOINT, bare sensitive and insensitive --env pairs, an
+        empty value, and --secret forms. All values are synthetic.
+        """
 
         class FakeBody:
 
@@ -3199,32 +3287,54 @@ class TestSanitizeRequestBody:
                     'cluster_name': 'test',
                     'entrypoint_command':
                         ('sky exec --num-nodes 4 --gpus L4:8 '
-                         '--env ROBOT_DATA_AUTH_TOKEN=d458189e '
+                         '--env DATASET_AUTH_TOKEN=synthtoken123 '
                          '--env NCCL_TIMEOUT=1800 '
-                         '--secret \'WANDB_API_KEY=local-78b7\' '
-                         '--secret=HF_TOKEN=hf_value '
-                         '--env \'ENTRYPOINT=run.sh --seed 0\' '
-                         '--env SLACK_API_TOKEN= '
-                         '--env MY_TOKEN'),
+                         '--env COMMIT_TAG= '
+                         '--secret MY_PAT=synthpat789 '
+                         '--secret \'WANDB_API_KEY=synthkey456\' '
+                         '--secret=MY_PAT= '
+                         '--env \'ENTRYPOINT=python train.py --epochs 10\' '
+                         '--env MY_TOKEN '
+                         's3://synth-bucket/synth-data'),
                 }
 
         request = _make_request(name='sky.exec', request_body=FakeBody())
         result = debug_utils._sanitize_request_body(request)
         assert result is not None
         cmd = result['entrypoint_command']
-        assert '--env ROBOT_DATA_AUTH_TOKEN=<redacted>' in cmd
+        assert '--env DATASET_AUTH_TOKEN=<redacted>' in cmd
         assert '--env NCCL_TIMEOUT=1800' in cmd
+        # --secret redacts any non-empty value, regardless of key name.
+        assert '--secret MY_PAT=<redacted>' in cmd
         assert '--secret \'WANDB_API_KEY=<redacted>\'' in cmd
-        assert '--secret=HF_TOKEN=<redacted>' in cmd
         # Non-secret quoted value and its structure are preserved.
-        assert '--env \'ENTRYPOINT=run.sh --seed 0\'' in cmd
+        assert '--env \'ENTRYPOINT=python train.py --epochs 10\'' in cmd
         # Empty values and bare keys (value lives in the client env) have
         # nothing to leak and stay as-is.
-        assert '--env SLACK_API_TOKEN=' in cmd
+        assert '--env COMMIT_TAG=' in cmd
+        assert '--secret=MY_PAT=' in cmd
         assert '--env MY_TOKEN' in cmd
-        assert 'd458189e' not in cmd
-        assert 'local-78b7' not in cmd
-        assert 'hf_value' not in cmd
+        assert 'synthtoken123' not in cmd
+        assert 'synthkey456' not in cmd
+        assert 'synthpat789' not in cmd
+
+    def test_verbatim_request_entrypoint_command_redacted(self):
+        """Category-1 verbatim requests also get entrypoint_command redacted
+        (log-tail requests inherit the outer command's entrypoint_command)."""
+
+        class FakeBody:
+
+            def model_dump(self):
+                return {
+                    'cluster_name': 'test',
+                    'entrypoint_command': 'sky logs --env MY_TOKEN=tok123',
+                }
+
+        request = _make_request(name='sky.logs', request_body=FakeBody())
+        result = debug_utils._sanitize_request_body(request)
+        assert result is not None
+        assert result['entrypoint_command'] == (
+            'sky logs --env MY_TOKEN=<redacted>')
 
     def test_task_yaml_field_redacted(self):
         """Task YAML fields should have secrets redacted."""
@@ -3307,6 +3417,134 @@ class TestRedactTaskYaml:
         result = debug_dump_helpers.redact_task_yaml(yaml_str)
         assert 'val1' not in result
         assert 'val2' not in result
+
+    def test_redacts_envs(self):
+        """Envs with sensitive names are redacted; benign and empty values
+        are kept (names are always kept)."""
+        yaml_str = ('name: my-task\n'
+                    'envs:\n'
+                    '  MY_TOKEN: real_token\n'
+                    '  WANDB_API_KEY: real_key\n'
+                    '  NCCL_TIMEOUT: "1800"\n'
+                    '  EMPTY_TOKEN: ""\n')
+        result = debug_dump_helpers.redact_task_yaml(yaml_str)
+        assert 'real_token' not in result
+        assert 'real_key' not in result
+        docs = list(yaml.safe_load_all(result))
+        assert docs[0]['envs']['MY_TOKEN'] == '<redacted>'
+        assert docs[0]['envs']['WANDB_API_KEY'] == '<redacted>'
+        assert docs[0]['envs']['NCCL_TIMEOUT'] == '1800'
+        assert docs[0]['envs']['EMPTY_TOKEN'] == ''
+
+    def test_multi_doc_dag_envs_redacted(self):
+        """Multi-document YAML (dag) redacts each document's envs."""
+        yaml_str = ('name: task1\n'
+                    'envs:\n'
+                    '  MY_TOKEN: tok1\n'
+                    '---\n'
+                    'name: task2\n'
+                    'envs:\n'
+                    '  API_KEY: tok2\n')
+        result = debug_dump_helpers.redact_task_yaml(yaml_str)
+        assert 'tok1' not in result
+        assert 'tok2' not in result
+        docs = list(yaml.safe_load_all(result))
+        assert docs[0]['envs']['MY_TOKEN'] == '<redacted>'
+        assert docs[1]['envs']['API_KEY'] == '<redacted>'
+
+    def test_non_dict_or_missing_envs_do_not_crash(self):
+        """Non-dict envs, missing envs and non-string env keys pass through
+        instead of raising."""
+        yaml_str = ('name: t1\n'
+                    'envs:\n'
+                    '  - a\n'
+                    '  - b\n'
+                    '---\n'
+                    'name: t2\n'
+                    '---\n'
+                    'name: t3\n'
+                    'envs:\n'
+                    '  123: value\n')
+        result = debug_dump_helpers.redact_task_yaml(yaml_str)
+        docs = list(yaml.safe_load_all(result))
+        assert docs[0]['envs'] == ['a', 'b']
+        assert 'envs' not in docs[1]
+        assert docs[2]['envs'] == {123: 'value'}
+
+    def test_redacts_envs_in_embedded_user_yaml(self):
+        """A yaml-file task carries the secret twice: in the envs dict AND
+        verbatim inside the embedded _user_specified_yaml string (the user's
+        original yaml). Both are redacted."""
+        yaml_str = ('name: my-task\n'
+                    'envs:\n'
+                    '  MY_TOKEN: real_token\n'
+                    '  NCCL_TIMEOUT: "1800"\n'
+                    '_user_specified_yaml: |\n'
+                    '  name: my-task\n'
+                    '  envs:\n'
+                    '    MY_TOKEN: real_token\n'
+                    '    NCCL_TIMEOUT: "1800"\n')
+        result = debug_dump_helpers.redact_task_yaml(yaml_str)
+        assert 'real_token' not in result
+        docs = list(yaml.safe_load_all(result))
+        assert docs[0]['envs']['MY_TOKEN'] == '<redacted>'
+        assert docs[0]['envs']['NCCL_TIMEOUT'] == '1800'
+        inner = list(yaml.safe_load_all(docs[0]['_user_specified_yaml']))
+        assert inner[0]['envs']['MY_TOKEN'] == '<redacted>'
+        assert inner[0]['envs']['NCCL_TIMEOUT'] == '1800'
+
+    def test_embedded_user_yaml_without_secrets_stays_identical(self):
+        """An embedded user yaml with nothing to redact stays byte-identical
+        (the string is replaced only when redaction changed its content)."""
+        embedded = 'name: my-task\nenvs:\n  NORMAL: value\n'
+        yaml_str = ('name: my-task\n'
+                    'envs:\n'
+                    '  NORMAL: value\n'
+                    '_user_specified_yaml: |\n'
+                    '  name: my-task\n'
+                    '  envs:\n'
+                    '    NORMAL: value\n')
+        result = debug_dump_helpers.redact_task_yaml(yaml_str)
+        docs = list(yaml.safe_load_all(result))
+        assert docs[0]['_user_specified_yaml'] == embedded
+
+    def test_embedded_user_yaml_parse_error_redacted(self):
+        """An embedded _user_specified_yaml that fails to parse is replaced
+        with a redacted marker."""
+        yaml_str = ('name: my-task\n'
+                    'envs:\n'
+                    '  MY_TOKEN: real_token\n'
+                    '_user_specified_yaml: "key: [unclosed"\n')
+        result = debug_dump_helpers.redact_task_yaml(yaml_str)
+        docs = list(yaml.safe_load_all(result))
+        assert docs[0]['_user_specified_yaml'] == '<parse error, redacted>'
+
+    def test_nested_user_specified_yaml_depth_capped(self):
+        """A hand-crafted _user_specified_yaml nested inside an embedded user
+        yaml is not recursed into (depth cap at the first embedding level), so
+        a maliciously nested doc cannot recurse infinitely."""
+        innermost = 'name: deepest\nenvs:\n  MY_TOKEN: real_token\n'
+        user_yaml = ('name: user\n'
+                     'envs:\n'
+                     '  MY_TOKEN: real_token\n'
+                     '_user_specified_yaml: |\n'
+                     '  name: deepest\n'
+                     '  envs:\n'
+                     '    MY_TOKEN: real_token\n')
+        indented = ''.join(
+            '  ' + line for line in user_yaml.splitlines(keepends=True))
+        yaml_str = ('name: task\n'
+                    'envs:\n'
+                    '  MY_TOKEN: real_token\n'
+                    '_user_specified_yaml: |\n' + indented)
+        result = debug_dump_helpers.redact_task_yaml(yaml_str)
+        docs = list(yaml.safe_load_all(result))
+        assert docs[0]['envs']['MY_TOKEN'] == '<redacted>'
+        user_doc = list(yaml.safe_load_all(docs[0]['_user_specified_yaml']))[0]
+        assert user_doc['envs']['MY_TOKEN'] == '<redacted>'
+        # The second-level embedding is past the depth cap and stays
+        # verbatim (still carries its value) -- pinned depth-cap behavior.
+        assert user_doc['_user_specified_yaml'] == innermost
 
 
 # ---------------------------------------------------------------------------
