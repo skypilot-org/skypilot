@@ -241,6 +241,13 @@ cluster_history_table = sqlalchemy.Table(
     # point the clusters table row is gone and the join can no longer supply
     # the flag.
     sqlalchemy.Column('is_managed', sqlalchemy.Integer, server_default='0'),
+    # The table is keyed on cluster_hash, but readers that have to survive a
+    # cluster's teardown look history up by `name` instead -- see
+    # get_clusters_from_history(cluster_names=...) and
+    # get_cluster_history_provision_log_path. cluster_history is never
+    # pruned, so without this those lookups scan every row this server has
+    # ever written.
+    sqlalchemy.Index('ix_cluster_history_name', 'name'),
 )
 
 
