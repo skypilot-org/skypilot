@@ -1594,6 +1594,7 @@ def get_cluster_events_by_name(
     cluster_name: str,
     event_types: List[ClusterEventType],
     limit: Optional[int] = None,
+    until: Optional[float] = None,
 ) -> List[Dict[str, Union[str, int]]]:
     """Returns cluster events looked up by the persisted cluster name.
 
@@ -1608,6 +1609,10 @@ def get_cluster_events_by_name(
         event_types: Event types to include.
         limit: If specified, returns at most this many events (most recent),
             across all the requested event types.
+        until: If specified, only events that happened at or before this unix
+            timestamp are returned. Applied before ``limit``, so a caller
+            asking for the most recent N events within a window still gets N
+            of them.
 
     Returns:
         List of dicts with 'reason' and 'transitioned_at' (unix timestamp)
@@ -1622,8 +1627,10 @@ def get_cluster_events_by_name(
             cluster_event_table.c.reason,
             cluster_event_table.c.transitioned_at,
         ).filter(cluster_event_table.c.name == cluster_name,
-                 cluster_event_table.c.type.in_(type_values)).order_by(
-                     cluster_event_table.c.transitioned_at.desc())
+                 cluster_event_table.c.type.in_(type_values))
+        if until is not None:
+            query = query.filter(cluster_event_table.c.transitioned_at <= until)
+        query = query.order_by(cluster_event_table.c.transitioned_at.desc())
         if limit is not None:
             query = query.limit(limit)
         rows = query.all()
