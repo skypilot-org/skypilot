@@ -705,6 +705,8 @@ const JOB_TREE_MEMBER_FIELDS = [
  */
 export function useJobTreeMembers(jobId, refreshTrigger = 0) {
   const [members, setMembers] = useState([]);
+  // `loaded` lets a page tell "no members" apart from "not fetched yet".
+  const [loaded, setLoaded] = useState(false);
   const prevRefreshTriggerRef = useRef(refreshTrigger);
 
   useEffect(() => {
@@ -730,6 +732,8 @@ export function useJobTreeMembers(jobId, refreshTrigger = 0) {
       } catch (error) {
         console.error('Error fetching jobs launched from job:', error);
         if (!cancelled) setMembers([]);
+      } finally {
+        if (!cancelled) setLoaded(true);
       }
     }
     fetchMembers();
@@ -738,7 +742,7 @@ export function useJobTreeMembers(jobId, refreshTrigger = 0) {
     };
   }, [jobId, refreshTrigger]);
 
-  return members;
+  return { members, loaded };
 }
 
 export async function streamManagedJobLogs({

@@ -99,7 +99,7 @@ function JobDetails({ overrideJobId = null, taskContext = null } = {}) {
   }, [jobData, jobId, taskContext, overrideJobId, router, tab]);
   // Jobs launched from inside this job (dynamic job group members), one
   // entry per job with its rows, in submission order.
-  const treeMemberRows = useJobTreeMembers(jobId, refreshTrigger);
+  const { members: treeMemberRows } = useJobTreeMembers(jobId, refreshTrigger);
   const launchedJobs = useMemo(() => {
     const byJob = new Map();
     treeMemberRows.forEach((row) => {
