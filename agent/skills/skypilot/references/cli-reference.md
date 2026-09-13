@@ -354,6 +354,8 @@ Launch a managed job from a YAML or a command.
 - `--detach-run`, `-d` — If True, as soon as a job is submitted, return from this call and do not stream execution logs.
 - `--pool`, `-p` — (Experimental; optional) Pool to use for jobs submission.
 - `--num-jobs` — Number of jobs to submit.
+- `--job-group` — Attach to an existing job group, by job id or unique running job name. The job is shown under it and cancelled with it. Defaults to the surrounding job group when launched from inside one.
+- `--no-job-group` — Launch a top-level job even when running inside a job group (do not attach to it).
 - `--git-url` — Git repository URL.
 - `--git-ref` — Git reference (branch, tag, or commit hash) to use.
 - `--workspace`, `-w` — Workspace to submit the managed job into. Shorthand for `--config active_workspace=<name>`.

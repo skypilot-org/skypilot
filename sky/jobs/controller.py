@@ -308,12 +308,33 @@ class JobController:
                 is_managed_job=True)
             job_id_env_vars.append(job_id_env_var)
 
+        # SKYPILOT_ROOT_JOB_ID marks a task as part of a job tree and names
+        # the tree's top-level job: a job group's tasks get the group's own
+        # id, a dynamic member's tasks get the member's root. A plain
+        # top-level job gets none, so its nested launches stay top-level as
+        # they always have. The SDK attaches a launch to the tree exactly
+        # when the variable is present, so this is the one place that
+        # decides which jobs' children join a group.
+        own_row = managed_job_state.get_job_info_row(self._job_id)
+        # The row exists: _get_dag above read the DAG out of it.
+        assert own_row is not None, self._job_id
+        in_job_tree = (self._dag.is_job_group() or
+                       own_row.root_job_id is not None)
+        root_job_id = own_row.tree_root_job_id if in_job_tree else None
+
         for i, task in enumerate(self._dag.tasks):
             task_envs = task.envs or {}
             task_envs[constants.TASK_ID_ENV_VAR] = job_id_env_vars[i]
             task_envs[constants.TASK_ID_LIST_ENV_VAR] = '\n'.join(
                 job_id_env_vars)
             task_envs[constants.MANAGED_JOB_ID_ENV_VAR] = str(self._job_id)
+            if root_job_id is not None:
+                task_envs[constants.ROOT_JOB_ID_ENV_VAR] = str(root_job_id)
+            else:
+                # The controller owns this marker both ways: a value the
+                # user put in the task YAML must not make a plain job's
+                # nested launches attach to some other job.
+                task_envs.pop(constants.ROOT_JOB_ID_ENV_VAR, None)
             # Add SKYPILOT_JOB_RANK if it's set in the context or os.environ
             # (os.environ may be hijacked to use ContextualEnviron which includes context overrides)
             if self._rank is not None:

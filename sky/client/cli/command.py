@@ -5842,6 +5842,20 @@ def jobs():
               type=int,
               required=False,
               help='Number of jobs to submit.')
+@click.option('--job-group',
+              default=None,
+              type=str,
+              required=False,
+              help=('Attach to an existing job group, by job id or unique '
+                    'running job name. The job is shown under it and '
+                    'cancelled with it. Defaults to the surrounding job '
+                    'group when launched from inside one.'))
+@click.option('--no-job-group',
+              is_flag=True,
+              default=False,
+              required=False,
+              help=('Launch a top-level job even when running inside a job '
+                    'group (do not attach to it).'))
 @click.option('--git-url', type=str, help='Git repository URL.')
 @click.option('--git-ref',
               type=str,
@@ -5892,6 +5906,8 @@ def jobs_launch(
     config_override: Optional[Dict[str, Any]] = None,
     git_url: Optional[str] = None,
     git_ref: Optional[str] = None,
+    job_group: Optional[str] = None,
+    no_job_group: bool = False,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -5997,10 +6013,20 @@ def jobs_launch(
             f'Managed job {dag.name!r} will be launched on (estimated):',
             fg='yellow')
 
+    if job_group is not None and no_job_group:
+        raise click.UsageError(
+            '--job-group and --no-job-group are mutually exclusive.')
+    job_group_arg: Union[int, str, None, Any] = managed_jobs.AUTO_JOB_GROUP
+    if no_job_group:
+        job_group_arg = None
+    elif job_group is not None:
+        job_group_arg = int(job_group) if job_group.isdigit() else job_group
+
     request_id = managed_jobs.launch(dag,
                                      name,
                                      pool,
                                      num_jobs,
+                                     job_group=job_group_arg,
                                      _need_confirmation=not yes)
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')

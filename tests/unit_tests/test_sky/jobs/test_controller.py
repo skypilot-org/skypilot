@@ -29,6 +29,7 @@ from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.jobs.controller import ControllerManager
 from sky.jobs.controller import JobController
+from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import common
 from sky.utils import status_lib
@@ -1278,6 +1279,51 @@ class TestJobGroupResumeDoesNotReissueStarting:
                                                     task,
                                                     set_starting=True)
         set_starting_async.assert_awaited_once()
+
+
+class TestRootJobIdEnvMarker:
+    """SKYPILOT_ROOT_JOB_ID is set on every task of a job tree and on
+    nothing else; the controller decides, not the task YAML."""
+
+    def _load(self, job_id, is_job_group, root_job_id, user_envs=None):
+        controller = MagicMock(spec=JobController)
+        controller._job_id = job_id
+        controller._backend = MagicMock()
+        controller._backend.run_timestamp = 'sky-2026-09-11-00-00-00-000000'
+        controller._rank = None
+        task = MagicMock()
+        task.name = 'task-a'
+        task.envs = dict(user_envs or {})
+        dag = MagicMock()
+        dag.name = 'my-job'
+        dag.tasks = [task]
+        dag.is_job_group = MagicMock(return_value=is_job_group)
+        own_row = MagicMock()
+        own_row.root_job_id = root_job_id
+        own_row.tree_root_job_id = (root_job_id
+                                    if root_job_id is not None else job_id)
+        with patch('sky.jobs.controller._get_dag', return_value=dag), \
+             patch('sky.jobs.controller.managed_job_state') as state:
+            state.get_job_info_row.return_value = own_row
+            JobController._load_dag(controller)
+        return task.update_envs.call_args[0][0]
+
+    def test_job_group_tasks_get_the_group_as_root(self):
+        envs = self._load(job_id=42, is_job_group=True, root_job_id=None)
+        assert envs[constants.ROOT_JOB_ID_ENV_VAR] == '42'
+        assert envs[constants.MANAGED_JOB_ID_ENV_VAR] == '42'
+
+    def test_dynamic_member_tasks_keep_the_tree_root(self):
+        envs = self._load(job_id=57, is_job_group=False, root_job_id=42)
+        assert envs[constants.ROOT_JOB_ID_ENV_VAR] == '42'
+
+    def test_plain_job_gets_no_marker_even_if_the_yaml_set_one(self):
+        envs = self._load(job_id=7,
+                          is_job_group=False,
+                          root_job_id=None,
+                          user_envs={constants.ROOT_JOB_ID_ENV_VAR: '42'})
+        assert constants.ROOT_JOB_ID_ENV_VAR not in envs
+        assert envs[constants.MANAGED_JOB_ID_ENV_VAR] == '7'
 
 
 class TestJobGroupNetworkingInjectionGate:
