@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/select';
 import {
   useSingleManagedJob,
+  useJobTreeMembers,
   getPoolStatus,
   computeJobGroupStatus,
 } from '@/data/connectors/jobs';
@@ -79,6 +80,28 @@ function JobDetails() {
   const { job: jobId, tab } = router.query;
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { jobData, loading } = useSingleManagedJob(jobId, refreshTrigger);
+  // Jobs launched from inside this job (dynamic job group members), one
+  // entry per job with its rows, in submission order.
+  const treeMemberRows = useJobTreeMembers(jobId, refreshTrigger);
+  const launchedJobs = useMemo(() => {
+    const byJob = new Map();
+    treeMemberRows.forEach((row) => {
+      if (!byJob.has(row.id)) {
+        byJob.set(row.id, []);
+      }
+      byJob.get(row.id).push(row);
+    });
+    return Array.from(byJob.entries()).map(([id, rows]) => ({
+      id,
+      rows,
+      name: rows[0].name,
+      user: rows[0].user,
+      parent_job_id: rows[0].parent_job_id,
+      parent_task_id: rows[0].parent_task_id,
+      status: rows.length > 1 ? computeJobGroupStatus(rows) : rows[0].status,
+      job_duration: rows.reduce((sum, r) => sum + (r.job_duration || 0), 0),
+    }));
+  }, [treeMemberRows]);
   const [poolsData, setPoolsData] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -549,6 +572,111 @@ function JobDetails() {
                                     <Download className="w-4 h-4" />
                                   </button>
                                 </Tooltip>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                </Card>
+              </div>
+            )}
+
+            {/* Jobs launched from inside this job (dynamic job group
+                 members). They are cancelled with it and swept when it
+                 finishes, but each is a managed job of its own. */}
+            {launchedJobs.length > 0 && (
+              <div id="launched-jobs-section" className="mt-6">
+                <Card>
+                  <div className="flex items-center justify-between px-4 pt-4">
+                    <h3 className="text-lg font-semibold flex items-center">
+                      Launched from this job
+                      <span className="ml-2 text-sm font-normal text-gray-500">
+                        ({launchedJobs.length}{' '}
+                        {launchedJobs.length === 1 ? 'job' : 'jobs'})
+                      </span>
+                    </h3>
+                  </div>
+                  <div className="p-4">
+                    <div className="overflow-x-auto rounded-lg border">
+                      <Table className="min-w-full">
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="whitespace-nowrap">
+                              ID
+                            </TableHead>
+                            <TableHead className="whitespace-nowrap">
+                              Name
+                            </TableHead>
+                            <TableHead className="whitespace-nowrap">
+                              Launched by
+                            </TableHead>
+                            <TableHead className="whitespace-nowrap">
+                              User
+                            </TableHead>
+                            <TableHead className="whitespace-nowrap">
+                              Status
+                            </TableHead>
+                            <TableHead className="whitespace-nowrap">
+                              Duration
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {launchedJobs.map((job) => (
+                            <TableRow key={job.id} className="hover:bg-gray-50">
+                              <TableCell>
+                                <Link
+                                  href={`/jobs/${job.id}`}
+                                  className="text-blue-600 hover:underline"
+                                >
+                                  {job.id}
+                                </Link>
+                              </TableCell>
+                              <TableCell>
+                                <Link
+                                  href={`/jobs/${job.id}`}
+                                  className="text-blue-600 hover:underline"
+                                >
+                                  {job.name || '-'}
+                                </Link>
+                                {job.rows.length > 1 && (
+                                  <span className="ml-2 text-xs font-medium bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded">
+                                    {job.rows.length} tasks
+                                  </span>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                {job.parent_job_id == null ? (
+                                  '-'
+                                ) : String(job.parent_job_id) ===
+                                  String(jobId) ? (
+                                  <span>
+                                    this job
+                                    {job.parent_task_id != null &&
+                                      `, task ${job.parent_task_id}`}
+                                  </span>
+                                ) : (
+                                  <span>
+                                    job{' '}
+                                    <Link
+                                      href={`/jobs/${job.parent_job_id}`}
+                                      className="text-blue-600 hover:underline"
+                                    >
+                                      {job.parent_job_id}
+                                    </Link>
+                                    {job.parent_task_id != null &&
+                                      `, task ${job.parent_task_id}`}
+                                  </span>
+                                )}
+                              </TableCell>
+                              <TableCell>{job.user || '-'}</TableCell>
+                              <TableCell>
+                                <StatusBadge status={job.status} />
+                              </TableCell>
+                              <TableCell>
+                                {formatDuration(job.job_duration)}
                               </TableCell>
                             </TableRow>
                           ))}
@@ -1380,6 +1508,41 @@ function JobDetailsContent({
           )}
         </div>
       </div>
+      {/* A job launched from inside another managed job: the job (and
+          task) that launched it, and the top-level job of its tree when
+          that is a different job. */}
+      {jobData.parent_job_id != null && (
+        <div>
+          <div className="text-gray-600 font-medium text-base">
+            Launched from
+          </div>
+          <div className="text-base mt-1">
+            job{' '}
+            <Link
+              href={`/jobs/${jobData.parent_job_id}`}
+              className="text-blue-600 hover:underline"
+            >
+              {jobData.parent_job_id}
+            </Link>
+            {jobData.parent_task_id != null &&
+              `, task ${jobData.parent_task_id}`}
+            {jobData.root_job_id != null &&
+              jobData.root_job_id !== jobData.parent_job_id && (
+                <span>
+                  {' '}
+                  (in job group{' '}
+                  <Link
+                    href={`/jobs/${jobData.root_job_id}`}
+                    className="text-blue-600 hover:underline"
+                  >
+                    {jobData.root_job_id}
+                  </Link>
+                  )
+                </span>
+              )}
+          </div>
+        </div>
+      )}
       <div>
         <div className="text-gray-600 font-medium text-base">Status</div>
         <div className="text-base mt-1">
