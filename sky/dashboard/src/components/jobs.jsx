@@ -1706,7 +1706,7 @@ export function ManagedJobsTable({
                   // the name link.
                   <span
                     className="text-gray-500 pl-6"
-                    title={`Dynamic task ${jobId}-${item.dynamic_task_index} (job ${item.id}): sky jobs cancel ${jobId}-${item.dynamic_task_index}`}
+                    title={`Dynamic task ${item.dynamic_task_index} of job ${jobId} (job ${item.id}): sky jobs cancel ${jobId} --task ${item.dynamic_task_index}`}
                   >
                     {item.dynamic_task_index}
                     {memberIsMultiTask ? `.${taskIndex}` : ''}
