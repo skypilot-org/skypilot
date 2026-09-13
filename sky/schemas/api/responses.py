@@ -254,6 +254,19 @@ class ManagedJobRecord(ResponseBaseModel):
     # within a job group. NULL for non-job-group jobs (single jobs and
     # pipelines).
     is_primary_in_job_group: Optional[bool] = None
+    # Where this job came from, when launched from inside another managed
+    # job. All None for top-level jobs. root_job_id is the top-level job of
+    # the tree (the group it is shown under and shares a lifecycle with);
+    # parent_job_id/parent_task_id is the job and task that launched it.
+    root_job_id: Optional[int] = None
+    parent_job_id: Optional[int] = None
+    parent_task_id: Optional[int] = None
+
+    @property
+    def group_job_id(self) -> Optional[int]:
+        """The job this record is grouped under: its root, else itself."""
+        return self.root_job_id if self.root_job_id is not None else self.job_id
+
     # Whether this job is a batch coordinator (ds.map())
     is_batch: Optional[bool] = None
     # Batch progress fields (NULL for non-batch jobs)

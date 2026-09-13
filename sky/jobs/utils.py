@@ -1501,6 +1501,50 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
     return f'{cluster_name}-{job_id}'
 
 
+# Managed-job queue fields by the controller SKYLET_VERSION that introduced
+# them. A remote controller older than that version has no such column and
+# rejects a request naming it, so the server strips them before asking over
+# gRPC (the legacy codegen path does the same on the controller itself, keyed
+# on MANAGED_JOBS_VERSION).
+_JOB_FIELDS_BY_MIN_CONTROLLER_VERSION = {
+    41: frozenset({'root_job_id', 'parent_job_id', 'parent_task_id'}),
+}
+
+
+def queue_fields_need_controller_version(fields: Optional[List[str]]) -> bool:
+    """Whether ``fields`` names any queue field some controller versions lack,
+    so the caller has to ask the controller's version before requesting them.
+    ``None`` (all fields) is interpreted by the controller itself and needs no
+    check."""
+    if fields is None:
+        return False
+    return any(f in versioned
+               for versioned in _JOB_FIELDS_BY_MIN_CONTROLLER_VERSION.values()
+               for f in fields)
+
+
+def fields_for_controller(
+        fields: Optional[List[str]],
+        controller_version: Optional[str]) -> Optional[List[str]]:
+    """Drop queue fields a remote controller of ``controller_version`` (its
+    SKYLET_VERSION string) does not know. Unknown/unparsable versions strip
+    nothing, so a newer controller is never under-asked."""
+    if fields is None or controller_version is None:
+        return fields
+    try:
+        version = int(controller_version)
+    except (TypeError, ValueError):
+        return fields
+    unsupported: set = set()
+    for min_version, new_fields in _JOB_FIELDS_BY_MIN_CONTROLLER_VERSION.items(
+    ):
+        if version < min_version:
+            unsupported |= new_fields
+    if not unsupported:
+        return fields
+    return [f for f in fields if f not in unsupported]
+
+
 @dataclasses.dataclass
 class CancelRequestInfo:
     """Who asked for a cancellation, and under which API request.
@@ -4168,6 +4212,10 @@ class ManagedJobCodeGen:
         _BATCH_FIELDS = {{'is_batch', 'batch_total_batches', 'batch_completed_batches'}}
         if managed_job_version < 18 and _fields is not None:
             _fields = [f for f in _fields if f not in _BATCH_FIELDS]
+        # Filter out parent-link fields for older controllers (< 25)
+        _PARENT_FIELDS = {{'root_job_id', 'parent_job_id', 'parent_task_id'}}
+        if managed_job_version < 25 and _fields is not None:
+            _fields = [f for f in _fields if f not in _PARENT_FIELDS]
         if managed_job_version < 9:
             # For backward compatibility, since filtering is not supported
             # before #6652.

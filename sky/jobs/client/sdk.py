@@ -251,6 +251,7 @@ def queue_v2(
     version_to_fields = {
         31: {'is_primary_in_job_group'},
         49: {'batch_total_batches', 'batch_completed_batches'},
+        60: {'root_job_id', 'parent_job_id', 'parent_task_id'},
     }
     if fields is not None:
         remote_api_version = versions.get_remote_api_version()

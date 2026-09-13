@@ -664,15 +664,13 @@ class TestGetManagedJobQueue:
         monkeypatch.setattr(jobs_utils.backends, 'CloudVmRayResourceHandle',
                             type(mock_handle))
 
-        # Mock InfraInfo
-        class MockInfraInfo:
+        # Mock InfraInfo. Subclass the real one: the patch replaces the
+        # shared infra_utils attribute, so the state layer's
+        # InfraInfo(...).to_str() (infra filter options) sees it too and
+        # must keep working; only the display string is pinned here.
+        class MockInfraInfo(jobs_utils.infra_utils.InfraInfo):
 
-            def __init__(self, cloud, region, zone):
-                self.cloud = cloud
-                self.region = region
-                self.zone = zone
-
-            def formatted_str(self):
+            def formatted_str(self, truncate: bool = True):
                 return f'{self.cloud}/{self.region}/{self.zone}'
 
         monkeypatch.setattr(jobs_utils.infra_utils, 'InfraInfo', MockInfraInfo)
@@ -1849,3 +1847,33 @@ class TestWaitingLineFallback:
     def test_nothing_to_show(self):
         """Neither available renders the plain waiting line."""
         assert jobs_utils._waiting_line_detail(None, None) is None
+
+
+class TestFieldsForController:
+    """Queue fields are trimmed to what a remote controller's skylet knows."""
+
+    _NEW = ['root_job_id', 'parent_job_id', 'parent_task_id']
+
+    def test_new_controller_keeps_everything(self):
+        fields = ['job_id', 'status'] + self._NEW
+        assert jobs_utils.fields_for_controller(fields, '41') == fields
+        assert jobs_utils.fields_for_controller(fields, '57') == fields
+
+    def test_old_controller_loses_the_parent_link_fields(self):
+        fields = ['job_id', 'status'] + self._NEW
+        assert jobs_utils.fields_for_controller(fields,
+                                                '40') == ['job_id', 'status']
+
+    def test_none_fields_and_unknown_versions_pass_through(self):
+        assert jobs_utils.fields_for_controller(None, '40') is None
+        fields = ['job_id'] + self._NEW
+        assert jobs_utils.fields_for_controller(fields, None) == fields
+        assert jobs_utils.fields_for_controller(fields, 'dev') == fields
+
+    def test_version_is_only_asked_for_when_a_gated_field_is_requested(self):
+        # The gRPC queue path pays the version round trip only when it must.
+        assert not jobs_utils.queue_fields_need_controller_version(None)
+        assert not jobs_utils.queue_fields_need_controller_version(
+            ['job_id', 'status'])
+        assert jobs_utils.queue_fields_need_controller_version(
+            ['job_id', 'root_job_id'])
