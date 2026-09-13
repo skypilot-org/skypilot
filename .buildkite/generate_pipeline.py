@@ -279,7 +279,7 @@ def _extract_marked_tests(
             f'STDERR:\n{output.stderr}',
             file=sys.stderr)
         sys.exit(output.returncode)
-    matches = re.findall('Collected .+?\.py::(.+?) with marks: \[(.*?)\]',
+    matches = re.findall('Collected .+?\\.py::(.+?) with marks: \\[(.*?)\\]',
                          output.stdout)
 
     function_name_marks_map = collections.defaultdict(set)
@@ -311,7 +311,7 @@ def _extract_marked_tests(
             # We separate different params to different steps for parallel execution,
             # and separate different param's log to different steps for better visualization.
             # Exclude the test_mount_and_storage, because these tests are fast and have fewer logs.
-            param = re.search('\[(.+?)\]', function_name).group(1)
+            param = re.search('\\[(.+?)\\]', function_name).group(1)
         if param:
             function_name_param_map[clean_function_name].append(param)
 

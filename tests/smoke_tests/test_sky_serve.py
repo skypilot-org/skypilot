@@ -190,7 +190,7 @@ _WAIT_NO_NOT_READY = (
 def _get_replica_ip(name: str, replica_id: int) -> str:
     return (f'ip{replica_id}=$(echo "$s" | '
             f'awk "{_AWK_ALL_LINES_BELOW_REPLICAS}" | '
-            f'grep -E "{name}\s+{replica_id}" | '
+            f'grep -E "{name}\\s+{replica_id}" | '
             f'grep -Eo "{_IP_REGEX}")')
 
 
@@ -470,7 +470,7 @@ def test_skyserve_dynamic_ondemand_fallback():
             # Wait for the provisioning starts
             'sleep 40',
             _check_replica_in_status(name, [
-                (2, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
+                (2, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\\|READY'),
             ]),
 
             # a) The instance may still be in READY state when we check the
@@ -478,7 +478,7 @@ def test_skyserve_dynamic_ondemand_fallback():
             # b) And in SHUTTING_DOWN state, it may actually SHUTDOWN and
             # disappear. So we check 1 instance instead of 2. Because it
             # can be 1 or 2.
-            f'count=$(sky serve status {name} | grep "x(cpus=2, " | grep "{_SERVICE_LAUNCHING_STATUS_REGEX}\|SHUTTING_DOWN\|READY" | wc -l); '
+            f'count=$(sky serve status {name} | grep "x(cpus=2, " | grep "{_SERVICE_LAUNCHING_STATUS_REGEX}\\|SHUTTING_DOWN\\|READY" | wc -l); '
             f'[ "$count" -eq 1 ] || [ "$count" -eq 2 ] || {{ echo "Expected 1 or 2 instances, got $count"; exit 1; }}',
 
             # Wait until 2 spot instances are ready.
@@ -497,8 +497,8 @@ def test_skyserve_dynamic_ondemand_fallback():
                     # The newly launched instance may transition to READY status
                     # quickly, so when checking status it could be either READY or
                     # LAUNCHING.
-                    (2, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
-                    (1, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY')
+                    (2, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\\|READY'),
+                    (1, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\\|READY')
                 ]),
 
             # Wait until 2 spot instances are ready.
@@ -1023,7 +1023,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             'sky status',
             wait_until_no_pending,
             _check_replica_in_status(name, [
-                (4, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
+                (4, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\\|READY'),
                 (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
                 (2, False, TWO_OLD_ON_DEMAND_INSTANCES_STATUS_AFTER_AUTOSCALE)
             ]),
@@ -1094,7 +1094,7 @@ def test_skyserve_failures(generic_cloud: str):
                 f's=$(sky serve status {name}); echo "$s"; done; ' +
                 _check_replica_in_status(name, [
                     (1, False, 'FAILED_PROBING'),
-                    (1, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY')
+                    (1, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\\|READY')
                 ]),
                 # TODO(zhwu): add test for FAILED_PROVISION
             ],
