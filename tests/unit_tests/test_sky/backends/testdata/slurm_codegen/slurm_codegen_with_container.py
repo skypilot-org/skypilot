@@ -529,10 +529,11 @@ if script or False:
         else:
             runner_args += f' --script={shlex.quote(user_script)}'
 
-        # Use /usr/bin/env explicitly to work around a Slurm quirk where
-        # srun's execvp() doesn't check execute permissions, failing when
-        # $HOME/.local/bin/env (non-executable, from uv installation)
-        # shadows /usr/bin/env.
+        # SKY_SLURM_PYTHON_CMD runs `env` via `command` so that
+        # shell functions re-imported by `srun --export=ALL` (e.g.
+        # exported `which`/`env` functions) are bypassed; see the
+        # comment on SKY_SLURM_UNSET_PYTHONPATH in
+        # sky/skylet/constants.py.
         job_suffix = '-setup' if is_setup else ''
         # Unset SLURM_* environment variables before running srun.
         # When this srun runs inside another srun (from
