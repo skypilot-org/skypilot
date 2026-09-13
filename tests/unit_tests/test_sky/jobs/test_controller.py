@@ -2463,3 +2463,152 @@ class TestJobGroupPhase2FailurePropagation:
                 await JobController._run_job_group(controller)
 
         controller._cleanup_job_group_clusters.assert_not_awaited()
+
+
+class TestCancelDynamicMembers:
+    """Only a tree root sweeps the jobs launched under it, and only once."""
+
+    @staticmethod
+    def _make_controller(is_root: bool) -> JobController:
+        controller = JobController.__new__(JobController)
+        controller._job_id = 42
+        controller._is_tree_root = is_root
+        return controller
+
+    def test_root_sweeps_once(self):
+        controller = self._make_controller(is_root=True)
+        with patch.object(managed_job_utils,
+                          'cancel_descendant_jobs',
+                          return_value='Jobs with IDs 57, 58 are scheduled to '
+                          'be cancelled.') as sweep:
+            asyncio.run(controller._cancel_dynamic_members('primaries done'))
+            # The backstop in run() reaches here again: no second signal.
+            asyncio.run(controller._cancel_dynamic_members('finished'))
+        sweep.assert_called_once_with(42, 'primaries done')
+
+    def test_dynamic_member_does_not_sweep(self):
+        # An eval attached to a group finishing leaves the jobs it launched
+        # to the root's lifecycle.
+        controller = self._make_controller(is_root=False)
+        with patch.object(managed_job_utils, 'cancel_descendant_jobs') as sweep:
+            asyncio.run(controller._cancel_dynamic_members('finished'))
+        sweep.assert_not_called()
+        assert controller._dynamic_members_swept is False
+
+    def test_cancelled_job_takes_its_subtree_root_or_not(self):
+        # A user cancel of any node takes that node's subtree. The request
+        # already expanded it server-side; this pass, right after the
+        # controller writes CANCELLING, catches a child whose row landed
+        # after that expansion (the insert refuses any later one).
+        controller = self._make_controller(is_root=False)
+        with patch.object(managed_job_utils,
+                          'cancel_descendant_jobs',
+                          return_value='No job to cancel.') as sweep:
+            asyncio.run(
+                controller._cancel_dynamic_members('cancelled', on_cancel=True))
+        sweep.assert_called_once_with(42, 'cancelled')
+        # And still once per controller.
+        with patch.object(managed_job_utils, 'cancel_descendant_jobs') as sweep:
+            asyncio.run(
+                controller._cancel_dynamic_members('cancelled', on_cancel=True))
+        sweep.assert_not_called()
+
+    def test_sweep_failure_is_swallowed(self):
+        controller = self._make_controller(is_root=True)
+        with patch.object(managed_job_utils,
+                          'cancel_descendant_jobs',
+                          side_effect=RuntimeError('db down')):
+            asyncio.run(controller._cancel_dynamic_members('finished'))
+        # Marked swept regardless: the job's own completion must not retry
+        # or fail on account of the sweep.
+        assert controller._dynamic_members_swept is True
+
+
+class TestJobGroupResumeWithFinishedPrimaries:
+    """A controller that (re)starts after every primary task has finished.
+
+    The primaries-done work (sweep dynamic members, terminate auxiliaries)
+    normally runs when a live primary's monitor completes. On such a resume
+    no primary monitor exists, so it must run before the monitor loop, or
+    the controller waits on the auxiliaries forever.
+    """
+
+    @staticmethod
+    def _make_tasks():
+        tasks = []
+        for name in ('trainer', 'watcher'):
+            task = MagicMock()
+            task.name = name
+            task.envs = {}
+            tasks.append(task)
+        return tasks
+
+    @pytest.mark.asyncio
+    async def test_finished_primaries_are_handled_before_monitoring(self):
+        tasks = self._make_tasks()
+        controller = MagicMock(spec=JobController)
+        controller._job_id = 42
+        controller._pool = None
+        controller._dag = MagicMock()
+        controller._dag.name = 'group'
+        controller._dag.tasks = tasks
+        controller._dag.primary_tasks = ['trainer']
+        controller._dag.inter_connection_enabled.return_value = False
+        executor = MagicMock()
+        # Only the watcher is non-terminal, so it is the only task prepared.
+        controller._prepare_job_group_task_for_launch = AsyncMock(
+            return_value=('cluster-watcher', executor))
+        controller._cleanup_job_group_clusters = AsyncMock()
+        controller._cancel_dynamic_members = AsyncMock()
+        controller._terminate_auxiliary_jobs = AsyncMock()
+
+        async def never_finishes(*args, **kwargs):
+            del args, kwargs
+            await asyncio.sleep(3600)
+
+        controller._monitor_job_group_task = AsyncMock(
+            side_effect=never_finishes)
+
+        statuses = {
+            0: managed_job_state.ManagedJobStatus.SUCCEEDED,  # trainer
+            1: managed_job_state.ManagedJobStatus.RUNNING,  # watcher
+        }
+
+        async def status_of(job_id, task_id):
+            del job_id
+            return statuses[task_id]
+
+        with patch('sky.jobs.controller.managed_job_runtime') as runtime, \
+             patch('sky.jobs.controller.managed_job_state') as state, \
+             patch('sky.jobs.controller.managed_job_utils'), \
+             patch('sky.jobs.controller.global_user_state'), \
+             patch('sky.jobs.controller.job_group_networking') as networking, \
+             patch('sky.jobs.controller.context') as ctx:
+            runtime.is_registered.return_value = False
+            state.ManagedJobStatus = managed_job_state.ManagedJobStatus
+            state.get_job_status_with_task_id_async = AsyncMock(
+                side_effect=status_of)
+            networking.dns_addresses_for_task.return_value = None
+            ctx.contextual_async = lambda f: f
+
+            # Would hang for an hour on the watcher's monitor if the
+            # primaries-done work only ran from inside the loop.
+            await asyncio.wait_for(JobController._run_job_group(controller),
+                                   timeout=5)
+
+        controller._cancel_dynamic_members.assert_awaited_once()
+        note = controller._cancel_dynamic_members.await_args.args[0]
+        assert 'all primary tasks finished' in note
+        controller._terminate_auxiliary_jobs.assert_awaited_once()
+        # all_primary_succeeded: the trainer's stored status is SUCCEEDED.
+        assert controller._terminate_auxiliary_jobs.await_args.args[3] is True
+        # Auxiliaries first, then the sweep: once no member of the group is
+        # alive to launch anything, one pass catches every launched job.
+        names = [c[0] for c in controller.mock_calls]
+        assert names.index('_terminate_auxiliary_jobs') < names.index(
+            '_cancel_dynamic_members')
+
+        # Tidy the never-finishing monitor so it does not leak past the test.
+        for task in asyncio.all_tasks():
+            if task is not asyncio.current_task():
+                task.cancel()
