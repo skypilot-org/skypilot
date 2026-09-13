@@ -440,7 +440,7 @@ function JobDetails({ overrideJobId = null, taskContext = null } = {}) {
                   <BatchBadge className="ml-2" />
                 )}
                 {(isMultiTask || launchedJobs.length > 0) && (
-                  // Same count as the jobs table's badge: own tasks plus
+                  // Same count as the jobs table's badge: declared tasks plus
                   // the dynamic tasks launched from inside the group.
                   <span className="ml-2 text-xs text-gray-500 bg-gray-200 px-1.5 py-0.5 rounded">
                     {allTasks.length + launchedJobs.length} tasks
@@ -508,9 +508,9 @@ function JobDetails({ overrideJobId = null, taskContext = null } = {}) {
               </Card>
             </div>
 
-            {/* Tasks: the job's own tasks, then the dynamic tasks launched
+            {/* Tasks: the job's declared tasks, then the dynamic tasks launched
                  from inside it (each a managed job of its own), numbered on
-                 from the own tasks exactly as the jobs table shows them. */}
+                 from the declared tasks exactly as the jobs table shows them. */}
             {(isMultiTask || launchedJobs.length > 0) && (
               <div id="tasks-section" className="mt-6">
                 <Card>
@@ -1610,7 +1610,7 @@ function JobDetailsContent({
         </div>
         <div className="text-base mt-1 flex items-center gap-2">
           {taskContext ? (
-            // Same shape as an own task's page; the handle
+            // Same shape as a declared task's page; the handle
             // `<root>-<index>` is what `sky jobs cancel` / `logs` take.
             <span
               title={`sky jobs cancel ${taskContext.rootId} --task ${taskContext.index}`}

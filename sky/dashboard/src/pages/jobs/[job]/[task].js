@@ -45,7 +45,7 @@ function TaskDetails() {
   const { jobData, loading } = useSingleManagedJob(jobId, refreshTrigger);
   // Dynamic tasks (jobs launched from inside this job) are addressed as
   // /jobs/<root>/<index> too; resolved below when the index is not one of
-  // the job's own tasks.
+  // the job's declared tasks.
   const { members: treeMembers, loaded: treeLoaded } = useJobTreeMembers(
     jobId,
     refreshTrigger
@@ -123,7 +123,7 @@ function TaskDetails() {
   const taskData = allTasks[taskIndexNum] || null;
   const jobName = allTasks.length > 0 ? allTasks[0].name : '';
   if (taskData === null) {
-    // Not one of the job's own tasks: a dynamic task with this index? Its
+    // Not one of the job's declared tasks: a dynamic task with this index? Its
     // page is the member job's page, headed as task <index> of this job.
     const member = treeMembers.find(
       (m) => String(m.dynamic_task_index) === String(taskIndexNum)
@@ -136,7 +136,7 @@ function TaskDetails() {
           ? `task ${member.parent_task_id} of job ${member.parent_job_id}`
           : null;
       // The launching task, addressed the way the rest of the page
-      // addresses tasks: an own task by its task id, a dynamic task by
+      // addresses tasks: a declared task by its task id, a dynamic task by
       // its dynamic index. The member's own job id stays out of view.
       let parentTask = null;
       if (String(member.parent_job_id) === String(jobId)) {
