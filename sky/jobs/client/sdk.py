@@ -5,7 +5,7 @@ import os
 import pathlib
 import threading
 import typing
-from typing import (Any, Dict, Iterator, List, Literal, Optional, Sequence,
+from typing import (Any, Dict, Iterator, List, Literal, Optional, Sequence, Set,
                     Tuple, Union)
 import zlib
 
@@ -67,7 +67,6 @@ class _JobGroupAttachment:
     """
     parent_job_id: Optional[int] = None
     parent_task_id: Optional[int] = None
-    root_job_id: Optional[int] = None
     auto: bool = False
 
     @property
@@ -88,14 +87,13 @@ def _resolve_job_group(
       a tree, which the controller marks by setting ``SKYPILOT_ROOT_JOB_ID``
       on the task (a job group's tasks, and a dynamic member's tasks; never a
       plain top-level job, whose nested launches keep today's behavior). The
-      parent is ``SKYPILOT_MANAGED_JOB_ID``, the root ``SKYPILOT_ROOT_JOB_ID``
-      (so a job launched by an attached eval lands under the same top-level
-      job), and the launching task index the ``-<task_id>`` suffix of
-      ``SKYPILOT_TASK_ID``.
+      parent is ``SKYPILOT_MANAGED_JOB_ID`` and the launching task index the
+      ``-<task_id>`` suffix of ``SKYPILOT_TASK_ID``. The tree's root is the
+      server's to work out from the parent's row.
     - ``None``: never attach.
-    - ``int``: attach to that managed job; its root is read from its record.
-    - ``str``: a managed job name, resolved to exactly one running job (or a
-      decimal job id).
+    - ``int``: attach to that managed job (the server validates it).
+    - ``str``: a managed job name, resolved to exactly one running job in the
+      workspace (or a decimal job id).
     """
     if requested_job_group is None:
         return _JobGroupAttachment()
@@ -107,7 +105,6 @@ def _resolve_job_group(
             # tree (no root marker): launch top-level.
             return _JobGroupAttachment(auto=True)
         parent_job_id = int(parent_str)
-        root_job_id = int(root_str)
         parent_task_id: Optional[int] = None
         task_id_str = os.environ.get(constants.TASK_ID_ENV_VAR, '')
         # Format: <timestamp>_<name>_<job_id>-<task_id>; the task suffix is
@@ -117,39 +114,31 @@ def _resolve_job_group(
             parent_task_id = int(suffix)
         return _JobGroupAttachment(parent_job_id=parent_job_id,
                                    parent_task_id=parent_task_id,
-                                   root_job_id=root_job_id,
                                    auto=True)
     if isinstance(requested_job_group, bool):
         raise ValueError('job_group must be a job id, a job name, None or '
                          'AUTO_JOB_GROUP.')
     if isinstance(requested_job_group, int) or requested_job_group.isdigit():
-        # A job id (int, or a decimal string from the CLI): fetch just that
-        # job's record for its root. Exact match on the id.
-        parent_job_id = int(requested_job_group)
-        request_id = queue_v2(refresh=False,
-                              job_ids=[parent_job_id],
-                              fields=['job_id', 'root_job_id'])
-        jobs, _, _, _ = sdk.get(request_id)
-        if not jobs:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'No managed job {parent_job_id} to attach to.')
-        return _JobGroupAttachment(parent_job_id=parent_job_id,
-                                   root_job_id=_root_of(jobs[0]))
+        # A job id (int, or a decimal string from the CLI). Nothing to look
+        # up: the server validates the job and works out its tree.
+        return _JobGroupAttachment(parent_job_id=int(requested_job_group))
     if isinstance(requested_job_group, str):
         # A job name. Ask the server for running jobs whose name contains it
         # (the only name filter the queue has), then require exactly one
-        # exact match: names are not unique across a job's lifetime.
+        # exact match: names are not unique across a job's lifetime. Every
+        # user's jobs count: the server's rule for attaching is the
+        # workspace, not the user, and a teammate's group is a valid target.
         request_id = queue_v2(refresh=False,
                               skip_finished=True,
+                              all_users=True,
                               name_match=requested_job_group,
-                              fields=['job_id', 'job_name', 'root_job_id'])
+                              fields=['job_id', 'job_name'])
         jobs, _, _, _ = sdk.get(request_id)
-        matching: Dict[int, Optional[int]] = {}
+        matching: Set[int] = set()
         for record in jobs:
             if (record.job_name == requested_job_group and
                     record.job_id is not None):
-                matching[record.job_id] = _root_of(record)
+                matching.add(record.job_id)
         if not matching:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'No running managed job named '
@@ -161,19 +150,9 @@ def _resolve_job_group(
                                  f'named {requested_job_group!r} '
                                  f'({sorted(matching)}). Pass the job id '
                                  'instead.')
-        (matched_job_id, matched_root_job_id), = matching.items()
-        return _JobGroupAttachment(parent_job_id=matched_job_id,
-                                   root_job_id=matched_root_job_id)
+        (matched_job_id,) = matching
+        return _JobGroupAttachment(parent_job_id=matched_job_id)
     raise ValueError(f'Unsupported job_group value: {requested_job_group!r}')
-
-
-def _root_of(record: responses.ManagedJobRecord) -> Optional[int]:
-    """The top-level job of ``record``'s tree: its ``root_job_id`` if it was
-    itself launched from another job, else its own id. A job attaching to
-    ``record`` joins that tree."""
-    if record.root_job_id is not None:
-        return record.root_job_id
-    return record.job_id
 
 
 @context.contextual
@@ -320,7 +299,6 @@ def launch(
             file_mounts_blob_id=file_mounts_blob_id,
             parent_job_id=attachment.parent_job_id,
             parent_task_id=attachment.parent_task_id,
-            root_job_id=attachment.root_job_id,
             job_group_explicit=attachment.attaches and not attachment.auto,
         )
         response = server_common.make_authenticated_request(

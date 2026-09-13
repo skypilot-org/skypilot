@@ -628,10 +628,6 @@ class JobsLaunchBody(RequestBody):
     # should join that job as a dynamic member. None for top-level jobs.
     parent_job_id: Optional[int] = None
     parent_task_id: Optional[int] = None
-    # The top-level job of the parent's tree (the parent itself when it is
-    # top-level). Sent by the client, which has it from the parent task's env
-    # or from the parent's record.
-    root_job_id: Optional[int] = None
     # True when the caller asked for the attachment (an explicit job_group);
     # False when it came from the in-job-group default. Decides whether a
     # server that cannot record attachments errors or launches top-level.

@@ -154,7 +154,7 @@ class TestResolveJobGroup:
         self._set_env(monkeypatch)
         assert jobs_sdk._resolve_job_group(
             jobs_sdk.AUTO_JOB_GROUP) == (jobs_sdk._JobGroupAttachment(
-                42, 1, 42, auto=True))
+                42, 1, auto=True))
 
     def test_auto_inside_dynamic_member_keeps_the_top_level_root(
             self, monkeypatch):
@@ -168,7 +168,7 @@ class TestResolveJobGroup:
                       SKYPILOT_TASK_ID='sky-managed-2026_eval_57-0')
         assert jobs_sdk._resolve_job_group(
             jobs_sdk.AUTO_JOB_GROUP) == (jobs_sdk._JobGroupAttachment(
-                57, 0, 42, auto=True))
+                57, 0, auto=True))
 
     def test_auto_without_root_marker_does_not_attach(self, monkeypatch):
         # No SKYPILOT_ROOT_JOB_ID means the controller did not put this job in
@@ -200,7 +200,7 @@ class TestResolveJobGroup:
         self._set_env(monkeypatch, SKYPILOT_TASK_ID='sky-2026-09-09_rl-run_42')
         assert jobs_sdk._resolve_job_group(
             jobs_sdk.AUTO_JOB_GROUP) == (jobs_sdk._JobGroupAttachment(
-                42, None, 42, auto=True))
+                42, None, auto=True))
 
     def test_none_opts_out_even_inside_group(self, monkeypatch):
         self._set_env(monkeypatch)
@@ -212,10 +212,8 @@ class TestResolveJobGroup:
             jobs_sdk._resolve_job_group(True)
 
     @staticmethod
-    def _record(job_id, job_name='j', root_job_id=None):
-        return responses.ManagedJobRecord(job_id=job_id,
-                                          job_name=job_name,
-                                          root_job_id=root_job_id)
+    def _record(job_id, job_name='j'):
+        return responses.ManagedJobRecord(job_id=job_id, job_name=job_name)
 
     def _resolve_with(self, value, records):
         with mock.patch.object(jobs_sdk, 'queue_v2',
@@ -226,28 +224,30 @@ class TestResolveJobGroup:
         mock_queue.assert_called_once()
         return result, mock_queue.call_args.kwargs
 
-    def test_explicit_id_reads_root_from_record(self):
-        # Attaching to a top-level job: it is its own root.
-        result, kwargs = self._resolve_with(7, [self._record(7)])
-        assert result == jobs_sdk._JobGroupAttachment(7, None, 7)
-        assert kwargs['job_ids'] == [7]
-        # Attaching to a dynamic member: root is the member's root.
-        result, _ = self._resolve_with('57', [self._record(57, root_job_id=42)])
-        assert result == jobs_sdk._JobGroupAttachment(57, None, 42)
-
-    def test_explicit_unknown_id_raises(self):
-        with pytest.raises(ValueError, match='No managed job 9'):
-            self._resolve_with(9, [])
+    def test_explicit_id_needs_no_lookup(self):
+        # An id goes to the server as-is: it validates the job (exists, is a
+        # job group, is running, same workspace) and works out the tree
+        # itself, so no queue round trip here. A decimal string from the
+        # CLI is an id too.
+        with mock.patch.object(jobs_sdk, 'queue_v2') as mock_queue:
+            assert jobs_sdk._resolve_job_group(
+                7) == jobs_sdk._JobGroupAttachment(7)
+            assert jobs_sdk._resolve_job_group(
+                '57') == jobs_sdk._JobGroupAttachment(57)
+        mock_queue.assert_not_called()
 
     def test_name_resolves_unique_running_job(self):
         # 'trainer-v2' also contains 'trainer', so the server returns it too;
         # only the exact name counts.
         records = [self._record(5, 'trainer'), self._record(6, 'trainer-v2')]
         result, kwargs = self._resolve_with('trainer', records)
-        assert result == jobs_sdk._JobGroupAttachment(5, None, 5)
-        # Server narrows by substring; the exact match happens here.
+        assert result == jobs_sdk._JobGroupAttachment(5)
+        # Server narrows by substring; the exact match happens here. Every
+        # user's jobs are searched: workspace, not user, is the boundary,
+        # so a teammate's group is a valid target.
         assert kwargs['skip_finished'] is True
         assert kwargs['name_match'] == 'trainer'
+        assert kwargs['all_users'] is True
 
     def test_name_dedupes_task_records_of_one_job(self):
         # The queue returns one record per task, so a two-task job group named
@@ -255,7 +255,7 @@ class TestResolveJobGroup:
         # not an ambiguous name.
         records = [self._record(5, 'trainer'), self._record(5, 'trainer')]
         result, _ = self._resolve_with('trainer', records)
-        assert result == jobs_sdk._JobGroupAttachment(5, None, 5)
+        assert result == jobs_sdk._JobGroupAttachment(5)
 
     def test_name_missing_or_ambiguous_raises(self):
         with pytest.raises(ValueError, match='No running managed job'):
