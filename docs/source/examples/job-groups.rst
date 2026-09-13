@@ -433,9 +433,10 @@ resources, while the trainer keeps training.
     resources:
       cpus: 2
     run: |
-      # The SkyPilot client installed on every node; the task's credentials
-      # point it at the API server.
-      source ~/skypilot-runtime/bin/activate
+      # The SkyPilot client installed on every node (under $HOME on
+      # Kubernetes, $SKY_RUNTIME_DIR on Slurm); the task's credentials point
+      # it at the API server.
+      source "${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime/bin/activate"
       # One eval job per new checkpoint. Each is a dynamic task of this group:
       # listed under it in `sky jobs queue`, cancelled with it.
       for ckpt in $(python watch_checkpoints.py /checkpoints); do

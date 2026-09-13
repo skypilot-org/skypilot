@@ -36,8 +36,9 @@ resources:
   infra: kubernetes
 run: |
   # The SkyPilot client installed on every node, the same version as the
-  # API server; the task's credentials point it at the server.
-  source ~/skypilot-runtime/bin/activate
+  # API server; the task's credentials point it at the server. The runtime
+  # lives under $HOME on Kubernetes and under $SKY_RUNTIME_DIR on Slurm.
+  source "${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime/bin/activate"
 
   # In a real watcher, this loop would poll the checkpoint directory. Here it
   # follows the trainer's schedule: one evaluation per checkpoint.
