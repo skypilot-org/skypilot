@@ -4130,7 +4130,7 @@ def _assert_attached(job: dict,
                      dynamic_task_index: Optional[int] = None) -> None:
     """The job hangs under root, launched by (parent, task); with
     `dynamic_task_index`, it also got that ordinal in the group (the group's
-    own tasks are 0 and 1 in the template, so the first launched job is 2).
+    declared tasks are 0 and 1 in the template, so the first launched job is 2).
     """
     got = (job.get('root_job_id'), job.get('parent_job_id'),
            job.get('parent_task_id'))
@@ -4241,8 +4241,8 @@ def test_dynamic_job_group_watcher_primary(generic_cloud: str):
             f'sky jobs launch {yaml_path} -y -d',
             check,
             _queue_shows_member(name, eval1),
-            # The dynamic task is addressed like an own task: task 2 of the
-            # group (its own tasks are 0 and 1) is eval-1's log.
+            # The dynamic task is addressed like a declared task: task 2 of the
+            # group (its declared tasks are 0 and 1) is eval-1's log.
             f'gid=$(sky jobs queue | grep -v "↳" | grep " {name} " | '
             f'awk \'{{print $1}}\' | head -1); '
             f's=$(sky jobs logs $gid 2 --no-follow); echo "$s"; '
@@ -4629,7 +4629,7 @@ def test_dynamic_job_group_parallel_appends(generic_cloud: str):
     distinct, consecutive dynamic task indices.
 
     The index comes from an atomic counter on the root's row; this is the
-    case that counter exists for. The group's own tasks are 0 and 1, so the
+    case that counter exists for. The group's declared tasks are 0 and 1, so the
     five evals must be exactly 2..6, in some order, with no gap and no
     duplicate.
     """
