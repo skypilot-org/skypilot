@@ -2634,33 +2634,34 @@ class JobController:
                         msg)
                     attempt_done = True
         finally:
-            if not cancelled:
-                # Jobs launched from this job go down with it when it
-                # finishes on its own.
-                await self._cancel_dynamic_members(
-                    f'with job {self._job_id}: it finished')
             callback_func = managed_job_utils.event_callback_func(
                 job_id=self._job_id,
                 task_id=task_id,
                 task=self._dag.tasks[task_id])
+            # 1. This job's tasks that have not ended go CANCELLING: on a
+            #    natural finish that is the tasks that never ran; on a user
+            #    cancel it includes the running one. From this write on, the
+            #    insert guard (state._check_parent_accepts_attachment)
+            #    refuses to attach a new job under this one.
             await managed_job_state.set_cancelling_async(
                 job_id=self._job_id, callback_func=callback_func)
+            # 2. Then the jobs launched under this one. After the write, so
+            #    that a child which committed before it is found here and a
+            #    child arriving after it is refused there; nothing lands in
+            #    between. A natural finish sweeps only from a tree root (the
+            #    group's lifecycle owns its dynamic tasks; a dynamic task
+            #    finishing leaves its children to the root); a user cancel
+            #    takes the subtree of whatever node was cancelled.
             if cancelled:
-                # A user cancel took this job's subtree server-side when the
-                # request came in (cancel_jobs_by_id expands to descendants),
-                # but a launch whose row landed after that expansion was
-                # missed, and it may keep landing until the CANCELLING just
-                # written above: the insert re-checks the parent and refuses
-                # from here on. So expand once more, now, and the two
-                # together leave nothing behind.
-                await self._cancel_dynamic_members(
-                    f'with job {self._job_id}: it was cancelled',
-                    on_cancel=True)
+                note = f'with job {self._job_id}: it was cancelled'
+            else:
+                note = f'with job {self._job_id}: it finished'
+            await self._cancel_dynamic_members(note, on_cancel=cancelled)
+            # 3. On a natural finish the not-yet-run tasks can go CANCELLED
+            #    right away (nothing to clean up). On a user cancel the
+            #    running task's resources are torn down first, and
+            #    run_job_loop writes CANCELLED after that.
             if not cancelled:
-                # the others haven't been run yet so we can set them to
-                # cancelled immediately (no resources to clean up).
-                # if we are running and get cancelled, we need to clean up
-                # the resources first so this will be done later.
                 await managed_job_state.set_cancelled_async(
                     job_id=self._job_id, callback_func=callback_func)
 
