@@ -3951,11 +3951,18 @@ class JobInfoRow:
     root_job_id: Optional[int]
     parent_job_id: Optional[int]
     parent_task_id: Optional[int]
+    # The job's ``execution`` mode; 'parallel' marks a job group (the same
+    # derivation the queue uses for ``is_job_group``).
+    execution: Optional[str] = None
 
     @property
     def tree_root_job_id(self) -> int:
         """The top-level job of this job's tree: its root, else itself."""
         return self.root_job_id if self.root_job_id is not None else self.job_id
+
+    @property
+    def is_job_group(self) -> bool:
+        return self.execution == 'parallel'
 
 
 def get_job_info_row(job_id: int) -> Optional[JobInfoRow]:
@@ -3971,7 +3978,8 @@ def get_job_info_row(job_id: int) -> Optional[JobInfoRow]:
                 job_info_table.c.spot_job_id, job_info_table.c.name,
                 job_info_table.c.workspace, job_info_table.c.user_hash,
                 job_info_table.c.root_job_id, job_info_table.c.parent_job_id,
-                job_info_table.c.parent_task_id).where(
+                job_info_table.c.parent_task_id,
+                job_info_table.c.execution).where(
                     job_info_table.c.spot_job_id == job_id)).fetchone()
     if row is None:
         return None
@@ -3984,7 +3992,8 @@ def get_job_info_row(job_id: int) -> Optional[JobInfoRow]:
                       user_hash=row[3],
                       root_job_id=row[4],
                       parent_job_id=row[5],
-                      parent_task_id=row[6])
+                      parent_task_id=row[6],
+                      execution=row[7])
 
 
 def get_jobs_launched_from(
