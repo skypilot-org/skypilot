@@ -2691,8 +2691,17 @@ def _delete_cluster_services(cluster_name: str, namespace: str,
 def _pod_has_resource_claims(pod: Any) -> bool:
     """Whether the pod requests devices via dynamic resource allocation (DRA).
 
-    ``spec.resourceClaims`` is only modelled by kubernetes client versions that
-    know about DRA, so a missing attribute means the pod has no claims.
+    ``spec.resourceClaims`` is only modelled by kubernetes client 26.1.0 and
+    later, so on an older client the attribute is missing and every pod reads
+    as claim-free, keeping the force-delete path below. That is acceptable:
+    ``dependencies.py`` floors the client at 20.0.0, but the range is unpinned
+    and has no lock file, so an install resolves to the newest allowed version
+    (published images are many major versions past 26.1.0), and a client old
+    enough to lack the field predates DRA anyway.
+
+    Deliberately not the other way around: reading an unmodellable field as
+    "may have claims" would put *every* pod on the graceful path for those
+    clients, which is the teardown slowdown this check exists to avoid.
     """
     pod_spec = getattr(pod, 'spec', None)
     return bool(getattr(pod_spec, 'resource_claims', None))
