@@ -29,6 +29,7 @@ import subprocess
 import tempfile
 import textwrap
 import time
+from typing import Dict, List, Optional
 
 import jinja2
 import pytest
@@ -3938,6 +3939,735 @@ def test_managed_jobs_api_access(generic_cloud: str):
         f'sky jobs cancel -y -n {name}; sky jobs cancel -y -n nested-job',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing dynamic JobGroup members ----------
+# A job launched with `sky jobs launch` from inside a job group's task attaches
+# to that group: it is listed under the group, cancelled with it, and swept
+# once the group finishes (its primaries done and its auxiliaries torn down).
+# The launching task needs to reach the API server, which only the
+# remote-server configuration gives a pod (see test_managed_jobs_api_access);
+# that configuration also runs in consolidation mode, which the feature
+# requires. Run with:
+#   /smoke-test --kubernetes --remote-server -k dynamic_job_group
+
+_JOB_TREE_FIELDS = [
+    'job_id', 'job_name', 'task_id', 'status', 'details',
+    'is_primary_in_job_group', 'root_job_id', 'parent_job_id', 'parent_task_id',
+    'dynamic_task_index'
+]
+# Task indices in smoke_dynamic_members.yaml.
+_TRAINER_TASK = 0
+_WATCHER_TASK = 1
+# Long enough to outlive any test here; the jobs are cancelled, not awaited.
+_FOREVER = 'sleep 3600'
+
+
+def _dynamic_members_yaml(name: str, cloud: str, primary_tasks: str,
+                          trainer_run: str, watcher_run: str) -> str:
+    return _render_job_group_yaml(
+        'tests/test_job_groups/smoke_dynamic_members.yaml',
+        name,
+        cloud,
+        primary_tasks=primary_tasks,
+        trainer_run=trainer_run,
+        watcher_run=watcher_run)
+
+
+def _launch_from_task(name: str,
+                      cloud: str,
+                      cmd: str,
+                      extra_args: str = '',
+                      nested: bool = False) -> str:
+    """Shell for a task to launch a managed job named `name` running `cmd`.
+
+    Uses the SkyPilot runtime on the pod, which is the code under test. A
+    `nested` launch is one embedded in another launch's command (a child
+    launching a grandchild): it quotes with double quotes so the enclosing
+    single-quoted command stays intact. Two levels are all these tests need.
+    """
+    q = '"' if nested else "'"
+    return (f'source ~/skypilot-runtime/bin/activate && sky jobs launch -y -d '
+            f'-n {name} --cpus 1+ --memory 2+ --infra {cloud} {extra_args} '
+            f'{q}{cmd}{q}')
+
+
+def _wait_from_task(name: str, timeout: int = 600) -> str:
+    """Shell for a task to wait until the managed job `name` is terminal."""
+    return (f'for i in $(seq 1 {timeout // 10}); do '
+            f's=$(sky jobs queue 2>/dev/null | sed "s/\\x1b\\[[0-9;]*m//g" | '
+            f'grep " {name} " | grep -oE "SUCCEEDED|FAILED[A-Z_]*|CANCELLED" | '
+            f'head -1); echo "poll $i: {name} $s"; '
+            f'if [ -n "$s" ]; then break; fi; sleep 10; done; '
+            f'test -n "$s" || {{ echo "FAIL: {name} not terminal"; exit 1; }}')
+
+
+def _status(job: dict) -> sky.ManagedJobStatus:
+    status = job['status']
+    if isinstance(status, sky.ManagedJobStatus):
+        return status
+    return sky.ManagedJobStatus(status)
+
+
+def _queue_jobs() -> list:
+    return sky.get(
+        sky.jobs.queue_v2(refresh=False,
+                          all_users=True,
+                          fields=_JOB_TREE_FIELDS))[0]
+
+
+def _job_named(name: str) -> Optional[dict]:
+    """The newest job with exactly this name (names are not unique)."""
+    matches = [j for j in _queue_jobs() if j['job_name'] == name]
+    return max(matches, key=lambda j: j['job_id']) if matches else None
+
+
+def _existing_job_named(name: str) -> dict:
+    job = _job_named(name)
+    assert job is not None, f'No job named {name}'
+    return job
+
+
+def _job_tree(root_job_id: int) -> Dict[str, dict]:
+    """The jobs launched under `root_job_id`, by name; one row per job."""
+    tree: Dict[str, dict] = {}
+    for job in _queue_jobs():
+        if job.get('root_job_id') == root_job_id:
+            tree[job['job_name']] = job
+    return tree
+
+
+def _group_status(rows: List[dict]) -> sky.ManagedJobStatus:
+    """A job group's status from its task rows, the way the CLI shows it.
+
+    A group has one queue row per task, all with the group's job id and
+    name; a task finishing does not finish the group. Only the primary
+    tasks count (an auxiliary task is CANCELLED when the group SUCCEEDS),
+    and the first non-SUCCEEDED primary decides, as in
+    ``sky.jobs.utils._get_job_status_from_tasks``.
+    """
+    primaries = [
+        r for r in rows if r.get('is_primary_in_job_group') in (None, True)
+    ] or rows
+    for row in sorted(primaries, key=lambda r: r.get('task_id') or 0):
+        if _status(row) != sky.ManagedJobStatus.SUCCEEDED:
+            return _status(row)
+    return sky.ManagedJobStatus.SUCCEEDED
+
+
+def _wait_group(name: str, statuses: List[sky.ManagedJobStatus],
+                timeout: int) -> int:
+    """Wait for the group named `name` to reach a status; returns its id.
+
+    Not the shared single-row waiter: that one picks one of the group's
+    task rows, so it reports SUCCEEDED as soon as the first task (the
+    trainer) finishes while the watcher is still running.
+    """
+    start = time.time()
+    while time.time() - start < timeout:
+        rows = [j for j in _queue_jobs() if j['job_name'] == name]
+        if rows:
+            job_id = max(j['job_id'] for j in rows)
+            rows = [j for j in rows if j['job_id'] == job_id]
+            status = _group_status(rows)
+            if status in statuses:
+                return job_id
+            print(f'Group {name} ({job_id}) status: {status.value}; tasks '
+                  f'{[(r.get("task_id"), _status(r).value) for r in rows]}')
+        time.sleep(5)
+    raise TimeoutError(f'Timeout waiting for group {name} to reach {statuses}')
+
+
+def _wait_job(job_id: int, statuses: List[sky.ManagedJobStatus],
+              timeout: int) -> dict:
+    """Wait for the job to reach a status; returns its full queue row.
+
+    The waiter itself fetches only id, name and status, so the row is
+    re-read with _JOB_TREE_FIELDS afterwards: the assertions below need
+    `details` (the cancel reason) and the tree fields.
+    """
+    smoke_tests_utils.wait_for_managed_job_status_sdk(job_id=job_id,
+                                                      target_statuses=statuses,
+                                                      timeout=timeout)
+    rows = [j for j in _queue_jobs() if j['job_id'] == job_id]
+    assert rows, f'Job {job_id} vanished from the queue'
+    return rows[0]
+
+
+def _wait_tree(
+        root_job_id: int,
+        names: List[str],
+        timeout: int = 600,
+        statuses: Optional[List[sky.ManagedJobStatus]] = None
+) -> Dict[str, dict]:
+    """Wait until every job in `names` is under the root.
+
+    With `statuses`, also until each has reached one of them. Polls the
+    queue rather than sleeping: the launches happen inside a task whose
+    pod provisioning time is not known in advance.
+    """
+    start = time.time()
+    while time.time() - start < timeout:
+        tree = _job_tree(root_job_id)
+        missing = [n for n in names if n not in tree]
+        if not missing and (statuses is None or
+                            all(_status(tree[n]) in statuses for n in names)):
+            return tree
+        print(f'Waiting for jobs under {root_job_id}: missing {missing}, '
+              f'have {[(n, _status(j).value) for n, j in tree.items()]}')
+        time.sleep(10)
+    raise TimeoutError(f'Jobs {names} did not appear under job {root_job_id} '
+                       f'within {timeout}s')
+
+
+def _assert_attached(job: dict,
+                     root_job_id: int,
+                     parent_job_id: int,
+                     parent_task_id: int,
+                     dynamic_task_index: Optional[int] = None) -> None:
+    """The job hangs under root, launched by (parent, task); with
+    `dynamic_task_index`, it also got that ordinal in the group (the group's
+    own tasks are 0 and 1 in the template, so the first launched job is 2).
+    """
+    got = (job.get('root_job_id'), job.get('parent_job_id'),
+           job.get('parent_task_id'))
+    assert got == (root_job_id, parent_job_id, parent_task_id), (
+        f'{job["job_name"]}: (root, parent, task) = {got}, expected '
+        f'{(root_job_id, parent_job_id, parent_task_id)}')
+    if dynamic_task_index is not None:
+        assert job.get('dynamic_task_index') == dynamic_task_index, (
+            f'{job["job_name"]}: dynamic_task_index = '
+            f'{job.get("dynamic_task_index")}, expected {dynamic_task_index}')
+
+
+def _assert_cancelled_because(job: dict, text: str) -> None:
+    """The job's queue row must explain its cancellation with `text`."""
+    assert _status(job) == sky.ManagedJobStatus.CANCELLED, (
+        f'{job["job_name"]}: {_status(job).value}, expected CANCELLED')
+    details = job.get('details') or ''
+    assert text in details, (
+        f'{job["job_name"]}: details {details!r} lack {text!r}')
+
+
+def _assert_not_terminal(job: dict) -> None:
+    assert not _status(job).is_terminal(), (
+        f'{job["job_name"]}: unexpectedly terminal ({_status(job).value})')
+
+
+def _queue_shows_member(group_name: str, member_name: str) -> str:
+    """Shell asserting the CLI lists `member_name` under its group.
+
+    A member row prints its own job id after the group marker, and the
+    group row (which has no marker) comes first.
+    """
+    return (f's=$(sky jobs queue); echo "$s"; '
+            f'echo "$s" | grep "↳" | grep " {member_name} " && '
+            f'echo "$s" | grep -v "↳" | grep " {group_name} "')
+
+
+def _dynamic_members_teardown(name: str, children: List[str]) -> str:
+    # The watcher's task log first: it carries the output of the launches
+    # the test is about, which the harness's failed-job dump (queue only)
+    # does not. Then cancel the group, which takes its attached children
+    # with it; the rest covers a child that opted out or a test that
+    # failed midway.
+    watcher_log = (
+        f'gid=$(sky jobs queue | grep -v "↳" | grep " {name} " | '
+        f'awk \'{{print $1}}\' | head -1); '
+        f'echo "=== watcher log of group $gid ==="; '
+        f'sky jobs logs $gid {_WATCHER_TASK} --no-follow --tail 200 || true')
+    cancels = ' ; '.join(
+        f'sky jobs cancel -y -n {name}-{child} || true' for child in children)
+    return f'{watcher_log} ; sky jobs cancel -y -n {name} || true ; {cancels}'
+
+
+def _skip_unless_remote_server() -> None:
+    if not smoke_tests_utils.is_remote_server_test():
+        pytest.skip('A task can only reach the API server in the '
+                    'remote-server configuration (--remote-server).')
+
+
+@pytest.mark.kubernetes
+@pytest.mark.remote_server
+@pytest.mark.managed_jobs
+def test_dynamic_job_group_watcher_primary(generic_cloud: str):
+    """The headline pattern: an eval watcher that is itself a primary.
+
+    The trainer finishes quickly; the watcher launches an eval, waits for it
+    to finish and exits. Because the watcher is a primary, the group is not
+    done until it exits, so the eval it launched is never swept: it
+    SUCCEEDS on its own, attached to the group (root and parent = the group,
+    parent task = the watcher), and the group SUCCEEDS.
+    """
+    _skip_unless_remote_server()
+    name = smoke_tests_utils.get_cluster_name()
+    eval1 = f'{name}-eval-1'
+    yaml_path = _dynamic_members_yaml(
+        name,
+        generic_cloud,
+        primary_tasks='trainer, watcher',
+        trainer_run='sleep 20',
+        watcher_run=(
+            _launch_from_task(eval1, generic_cloud, 'echo eval-1; sleep 30') +
+            '\n' + _wait_from_task(eval1)))
+
+    def check():
+        root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
+        tree = _wait_tree(root, [eval1])
+        _assert_attached(tree[eval1], root, root, _WATCHER_TASK, 2)
+        _wait_group(name, [sky.ManagedJobStatus.SUCCEEDED], timeout=900)
+        job = _wait_job(tree[eval1]['job_id'], [sky.ManagedJobStatus.SUCCEEDED],
+                        timeout=120)
+        assert _status(job) == sky.ManagedJobStatus.SUCCEEDED
+        # Only a running job group accepts new tasks: an explicit attach to
+        # the finished group is refused by the server, and nothing launches.
+        late = sky.Task(name=f'{name}-late', run='echo late')
+        late.set_resources(sky.Resources(cpus='1+', infra=generic_cloud))
+        try:
+            sky.get(sky.jobs.launch(late, name=f'{name}-late', job_group=root))
+        except Exception as e:  # pylint: disable=broad-except
+            assert 'only a running job group' in str(e), str(e)
+        else:
+            raise AssertionError(
+                f'attach to finished group {root} was accepted')
+        assert _job_named(f'{name}-late') is None
+
+    test = smoke_tests_utils.Test(
+        'dynamic_job_group_watcher_primary',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            check,
+            _queue_shows_member(name, eval1),
+        ],
+        _dynamic_members_teardown(name, ['eval-1', 'late']),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=25 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.remote_server
+@pytest.mark.managed_jobs
+def test_dynamic_job_group_basic_terminate(generic_cloud: str):
+    """An auxiliary watcher's launches are swept when the group finishes.
+
+    Only the trainer is primary. The watcher launches a long-running eval
+    and keeps running. When the trainer succeeds, the watcher is terminated
+    as an auxiliary and then the eval is swept, its row explaining why. The
+    group SUCCEEDS: a swept member never changes the group's status.
+    """
+    _skip_unless_remote_server()
+    name = smoke_tests_utils.get_cluster_name()
+    eval1 = f'{name}-eval-1'
+    yaml_path = _dynamic_members_yaml(
+        name,
+        generic_cloud,
+        primary_tasks='trainer',
+        trainer_run='sleep 120',
+        watcher_run=(_launch_from_task(eval1, generic_cloud, _FOREVER) + '\n' +
+                     _FOREVER))
+
+    def check():
+        root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
+        tree = _wait_tree(root, [eval1],
+                          statuses=[sky.ManagedJobStatus.RUNNING])
+        _assert_attached(tree[eval1], root, root, _WATCHER_TASK, 2)
+        _wait_group(name, [sky.ManagedJobStatus.SUCCEEDED], timeout=900)
+        job = _wait_job(tree[eval1]['job_id'], [sky.ManagedJobStatus.CANCELLED],
+                        timeout=300)
+        _assert_cancelled_because(
+            job, f'with job group {root}: all primary tasks finished')
+
+    test = smoke_tests_utils.Test(
+        'dynamic_job_group_basic_terminate',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            check,
+            _queue_shows_member(name, eval1),
+        ],
+        _dynamic_members_teardown(name, ['eval-1']),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=25 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.remote_server
+@pytest.mark.managed_jobs
+def test_dynamic_job_group_basic_primary_fails(generic_cloud: str):
+    """A failing primary ends the group and sweeps its launched jobs.
+
+    Same shape as basic_terminate, but the trainer exits non-zero: the group
+    FAILS, and the eval is swept with the failure named as the reason.
+    """
+    _skip_unless_remote_server()
+    name = smoke_tests_utils.get_cluster_name()
+    eval1 = f'{name}-eval-1'
+    yaml_path = _dynamic_members_yaml(
+        name,
+        generic_cloud,
+        primary_tasks='trainer',
+        trainer_run='sleep 120; echo "trainer failing"; exit 1',
+        watcher_run=(_launch_from_task(eval1, generic_cloud, _FOREVER) + '\n' +
+                     _FOREVER))
+
+    def check():
+        root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
+        tree = _wait_tree(root, [eval1],
+                          statuses=[sky.ManagedJobStatus.RUNNING])
+        _wait_group(name, [sky.ManagedJobStatus.FAILED], timeout=900)
+        job = _wait_job(tree[eval1]['job_id'], [sky.ManagedJobStatus.CANCELLED],
+                        timeout=300)
+        _assert_cancelled_because(
+            job, f'with job group {root}: all primary tasks ended '
+            f'(a primary task failed)')
+
+    test = smoke_tests_utils.Test(
+        'dynamic_job_group_basic_primary_fails',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            check,
+        ],
+        _dynamic_members_teardown(name, ['eval-1']),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=25 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.remote_server
+@pytest.mark.managed_jobs
+def test_dynamic_job_group_cancel_and_opt_out(generic_cloud: str):
+    """Cancelling the group cancels what it launched; --no-job-group opts out.
+
+    The watcher launches one eval that attaches and one with --no-job-group.
+    `sky jobs cancel <group>` cancels the group and the attached eval, whose
+    row says which job it went down with; the opted-out eval is a plain job
+    (no root) and keeps running.
+    """
+    _skip_unless_remote_server()
+    name = smoke_tests_utils.get_cluster_name()
+    eval1 = f'{name}-eval-1'
+    loner = f'{name}-eval-2'
+    yaml_path = _dynamic_members_yaml(
+        name,
+        generic_cloud,
+        primary_tasks='trainer',
+        trainer_run=_FOREVER,
+        watcher_run=(
+            _launch_from_task(eval1, generic_cloud, _FOREVER) + '\n' +
+            _launch_from_task(
+                loner, generic_cloud, _FOREVER, extra_args='--no-job-group') +
+            '\n' + _FOREVER))
+
+    def check_before_cancel():
+        root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
+        tree = _wait_tree(root, [eval1],
+                          statuses=[sky.ManagedJobStatus.RUNNING])
+        _assert_attached(tree[eval1], root, root, _WATCHER_TASK, 2)
+        start = time.time()
+        while _job_named(loner) is None:
+            assert time.time() - start < 600, f'{loner} never launched'
+            time.sleep(10)
+        assert loner not in tree, f'{loner} attached despite --no-job-group'
+        assert _existing_job_named(loner).get('root_job_id') is None
+        # Let the opted-out job get going before cancelling around it.
+        _wait_job(_existing_job_named(loner)['job_id'],
+                  [sky.ManagedJobStatus.RUNNING],
+                  timeout=600)
+
+    def check_after_cancel():
+        root = _wait_group(name, [sky.ManagedJobStatus.CANCELLED], timeout=300)
+        tree = _job_tree(root)
+        job = _wait_job(tree[eval1]['job_id'], [sky.ManagedJobStatus.CANCELLED],
+                        timeout=300)
+        _assert_cancelled_because(job, f'(cancelled with job {root})')
+        _assert_not_terminal(_existing_job_named(loner))
+
+    test = smoke_tests_utils.Test(
+        'dynamic_job_group_cancel_and_opt_out',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            check_before_cancel,
+            _queue_shows_member(name, eval1),
+            f'sky jobs cancel -y -n {name}',
+            check_after_cancel,
+        ],
+        _dynamic_members_teardown(name, ['eval-1', 'eval-2']),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=25 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.remote_server
+@pytest.mark.managed_jobs
+def test_dynamic_job_group_nested_cancel_root(generic_cloud: str):
+    """A job launched from a launched job is still under the root.
+
+    The watcher launches eval-1, whose task launches eval-1a. eval-1a has
+    the group as root and eval-1 as parent. Cancelling the group cancels
+    all three, and eval-1a's row names both the cancelled job and its
+    launcher.
+    """
+    _skip_unless_remote_server()
+    name = smoke_tests_utils.get_cluster_name()
+    eval1 = f'{name}-eval-1'
+    eval1a = f'{name}-eval-1a'
+    eval1_cmd = (
+        _launch_from_task(eval1a, generic_cloud, _FOREVER, nested=True) +
+        f' && {_FOREVER}')
+    yaml_path = _dynamic_members_yaml(
+        name,
+        generic_cloud,
+        primary_tasks='trainer',
+        trainer_run=_FOREVER,
+        watcher_run=(_launch_from_task(eval1, generic_cloud, eval1_cmd) + '\n' +
+                     _FOREVER))
+
+    def check_before_cancel():
+        root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
+        tree = _wait_tree(root, [eval1, eval1a],
+                          timeout=900,
+                          statuses=[sky.ManagedJobStatus.RUNNING])
+        _assert_attached(tree[eval1], root, root, _WATCHER_TASK, 2)
+        # Nested launches number flat under the root, like they render.
+        _assert_attached(tree[eval1a], root, tree[eval1]['job_id'], 0, 3)
+
+    def check_after_cancel():
+        root = _wait_group(name, [sky.ManagedJobStatus.CANCELLED], timeout=300)
+        tree = _job_tree(root)
+        child_id = tree[eval1]['job_id']
+        child = _wait_job(child_id, [sky.ManagedJobStatus.CANCELLED],
+                          timeout=300)
+        _assert_cancelled_because(child, f'(cancelled with job {root})')
+        grandchild = _wait_job(tree[eval1a]['job_id'],
+                               [sky.ManagedJobStatus.CANCELLED],
+                               timeout=300)
+        _assert_cancelled_because(
+            grandchild,
+            f'(cancelled with job {root}, launched from job {child_id})')
+
+    test = smoke_tests_utils.Test(
+        'dynamic_job_group_nested_cancel_root',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            check_before_cancel,
+            _queue_shows_member(name, eval1a),
+            f'sky jobs cancel -y -n {name}',
+            check_after_cancel,
+        ],
+        _dynamic_members_teardown(name, ['eval-1', 'eval-1a']),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.remote_server
+@pytest.mark.managed_jobs
+def test_dynamic_job_group_nested_first_level_finishes(generic_cloud: str):
+    """Only the root sweeps: a launched job finishing leaves its own launches.
+
+    eval-1 launches eval-1a and exits right away. eval-1a keeps running
+    (its launcher finishing is not a lifecycle event for the group) until
+    the trainer finishes, at which point the root sweeps it.
+    """
+    _skip_unless_remote_server()
+    name = smoke_tests_utils.get_cluster_name()
+    eval1 = f'{name}-eval-1'
+    eval1a = f'{name}-eval-1a'
+    eval1_cmd = (
+        _launch_from_task(eval1a, generic_cloud, _FOREVER, nested=True) +
+        ' && sleep 5')
+    yaml_path = _dynamic_members_yaml(
+        name,
+        generic_cloud,
+        primary_tasks='trainer',
+        # Long enough for eval-1 to finish and eval-1a to be observed
+        # running afterwards, before the group finishes.
+        trainer_run='sleep 480',
+        watcher_run=(_launch_from_task(eval1, generic_cloud, eval1_cmd) + '\n' +
+                     _FOREVER))
+
+    def check():
+        root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
+        tree = _wait_tree(root, [eval1, eval1a], timeout=900)
+        _wait_job(tree[eval1]['job_id'], [sky.ManagedJobStatus.SUCCEEDED],
+                  timeout=600)
+        # eval-1 is done; eval-1a must be untouched, now and a little later.
+        grandchild = _wait_job(tree[eval1a]['job_id'],
+                               [sky.ManagedJobStatus.RUNNING],
+                               timeout=600)
+        time.sleep(30)
+        _assert_not_terminal(_job_tree(root)[eval1a])
+        _wait_group(name, [sky.ManagedJobStatus.SUCCEEDED], timeout=900)
+        grandchild = _wait_job(grandchild['job_id'],
+                               [sky.ManagedJobStatus.CANCELLED],
+                               timeout=300)
+        _assert_cancelled_because(
+            grandchild, f'with job group {root}: all primary tasks finished')
+
+    test = smoke_tests_utils.Test(
+        'dynamic_job_group_nested_first_level_finishes',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            check,
+        ],
+        _dynamic_members_teardown(name, ['eval-1', 'eval-1a']),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.remote_server
+@pytest.mark.managed_jobs
+def test_dynamic_job_group_nested_cancel_subtree(generic_cloud: str):
+    """Cancelling a launched job takes only its own launches.
+
+    The watcher launches eval-1 and eval-2, each of which launches a child.
+    `sky jobs cancel <eval-1>` cancels eval-1 and eval-1a (attributed to
+    eval-1) and nothing else: eval-2, eval-2a and the group keep running.
+    """
+    _skip_unless_remote_server()
+    name = smoke_tests_utils.get_cluster_name()
+    evals = {
+        f'{name}-eval-1': f'{name}-eval-1a',
+        f'{name}-eval-2': f'{name}-eval-2a',
+    }
+    eval1, eval2 = list(evals)
+    eval1a, eval2a = evals[eval1], evals[eval2]
+    watcher_lines = [
+        _launch_from_task(
+            child, generic_cloud,
+            _launch_from_task(grandchild, generic_cloud, _FOREVER, nested=True)
+            + f' && {_FOREVER}') for child, grandchild in evals.items()
+    ]
+    yaml_path = _dynamic_members_yaml(name,
+                                      generic_cloud,
+                                      primary_tasks='trainer',
+                                      trainer_run=_FOREVER,
+                                      watcher_run='\n'.join(watcher_lines +
+                                                            [_FOREVER]))
+    child_id_file = tempfile.NamedTemporaryFile(prefix='eval1-id-',
+                                                delete=False).name
+
+    def check_before_cancel():
+        root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
+        tree = _wait_tree(root, [eval1, eval1a, eval2, eval2a],
+                          timeout=900,
+                          statuses=[sky.ManagedJobStatus.RUNNING])
+        _assert_attached(tree[eval1a], root, tree[eval1]['job_id'], 0)
+        _assert_attached(tree[eval2a], root, tree[eval2]['job_id'], 0)
+        # The two evals are tasks 2 and 3 of the group in launch order; their
+        # children take 4 and 5 in whichever order they attached.
+        assert tree[eval1]['dynamic_task_index'] == 2
+        assert tree[eval2]['dynamic_task_index'] == 3
+        assert {
+            tree[eval1a]['dynamic_task_index'],
+            tree[eval2a]['dynamic_task_index']
+        } == {4, 5}
+        # Hand the shell step the CLI handle, not the job id: `sky jobs
+        # cancel <group>-2` has to resolve to eval-1.
+        pathlib.Path(child_id_file).write_text(f'{root}-2', encoding='utf-8')
+
+    def check_after_cancel():
+        pathlib.Path(child_id_file).unlink(missing_ok=True)
+        root = _existing_job_named(name)['job_id']
+        tree = _job_tree(root)
+        child_id = tree[eval1]['job_id']
+        _assert_cancelled_because(
+            _wait_job(child_id, [sky.ManagedJobStatus.CANCELLED], timeout=300),
+            'Cancellation requested')
+        _assert_cancelled_because(
+            _wait_job(tree[eval1a]['job_id'], [sky.ManagedJobStatus.CANCELLED],
+                      timeout=300), f'(cancelled with job {child_id})')
+        tree = _job_tree(root)
+        _assert_not_terminal(tree[eval2])
+        _assert_not_terminal(tree[eval2a])
+        _assert_not_terminal(_existing_job_named(name))
+
+    test = smoke_tests_utils.Test(
+        'dynamic_job_group_nested_cancel_subtree',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            check_before_cancel,
+            f'sky jobs cancel -y $(cat {child_id_file})',
+            check_after_cancel,
+        ],
+        _dynamic_members_teardown(name,
+                                  ['eval-1', 'eval-1a', 'eval-2', 'eval-2a']) +
+        f' ; rm -f {child_id_file}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.remote_server
+@pytest.mark.managed_jobs
+def test_dynamic_job_group_parallel_appends(generic_cloud: str):
+    """Five jobs launched from the watcher at the same instant get five
+    distinct, consecutive dynamic task indices.
+
+    The index comes from an atomic counter on the root's row; this is the
+    case that counter exists for. The group's own tasks are 0 and 1, so the
+    five evals must be exactly 2..6, in some order, with no gap and no
+    duplicate.
+    """
+    _skip_unless_remote_server()
+    name = smoke_tests_utils.get_cluster_name()
+    evals = [f'{name}-eval-{i}' for i in range(1, 6)]
+    # Each launch logs to its own file and the watcher prints them all after
+    # `wait`, so a launch that failed shows why in the watcher's task log.
+    # A launch is retried a few times: the five fire at once against the
+    # smoke API server, which is small, and a transient refusal there is not
+    # what this test is about (the index counter is; every attempt of every
+    # launch still races the others for it).
+    watcher_run = '\n'.join(
+        f'( for a in 1 2 3; do {_launch_from_task(e, generic_cloud, _FOREVER)}'
+        f' && break; echo "launch-{i} attempt $a failed (exit $?)"; sleep 10; '
+        f'done ) > launch-{i}.log 2>&1 &' for i, e in enumerate(evals, 1))
+    watcher_run += (
+        '\nwait\n'
+        'for i in 1 2 3 4 5; do echo "=== launch-$i ==="; cat launch-$i.log; '
+        'done\n'
+        'grep -l "Job ID" launch-*.log | wc -l | grep -q "^5$" || '
+        '{ echo "FAIL: not every launch printed a Job ID"; exit 1; }\n' +
+        _FOREVER)
+    yaml_path = _dynamic_members_yaml(name,
+                                      generic_cloud,
+                                      primary_tasks='trainer',
+                                      trainer_run=_FOREVER,
+                                      watcher_run=watcher_run)
+
+    def check():
+        root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
+        tree = _wait_tree(root, evals, timeout=900)
+        indices = sorted(tree[e]['dynamic_task_index'] for e in evals)
+        assert indices == [2, 3, 4, 5, 6], indices
+        for e in evals:
+            _assert_attached(tree[e], root, root, _WATCHER_TASK)
+
+    test = smoke_tests_utils.Test(
+        'dynamic_job_group_parallel_appends',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            check,
+        ],
+        _dynamic_members_teardown(name, [f'eval-{i}' for i in range(1, 6)]),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
