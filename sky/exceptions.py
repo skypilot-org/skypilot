@@ -474,6 +474,10 @@ class ManagedJobUserCancelledError(Exception):
     pass
 
 
+class ClusterNameCollisionError(ValueError):
+    """Another live cluster owns the resolved cloud resource name."""
+
+
 class InvalidClusterNameError(Exception):
     """Raised when the cluster name is invalid."""
     pass
