@@ -400,10 +400,9 @@ launched this way becomes a *dynamic task* of the group:
 
 - It is listed under the group in ``sky jobs queue`` and the dashboard,
   numbered on from the group's current tasks (a group with tasks 0 and 1
-  shows its first launched job as task 2). It can be referenced by
-  ``sky jobs logs`` and ``sky jobs cancel`` directly as
-  ``<group id>-<task index>``, e.g. ``sky jobs logs 39-2``. Underneath, it is
-  a managed job of its own.
+  shows its first launched job as task 2). It is addressed like the group's
+  own tasks: ``sky jobs logs 39 2`` tails it and ``sky jobs cancel 39 --task 2``
+  cancels it on its own. Underneath, it is a managed job of its own.
 - ``sky jobs cancel <group>`` cancels it together with the group.
 - When the group finishes, dynamic tasks still running are cancelled. A group
   finishes once all its primary tasks have finished and its auxiliary tasks
@@ -464,7 +463,7 @@ The queue shows the dynamic tasks under the group as tasks 2 and 3:
      ↳    2     eval-step-1000    ...  SUCCEEDED
      ↳    3     eval-step-2000    ...  RUNNING
 
-    $ sky jobs cancel 42-3   # the second evaluation, on its own
+    $ sky jobs cancel 42 --task 3   # the second evaluation, on its own
 
 **Choosing the group.** A job launched from inside a job group attaches to that
 group by default. ``--job-group <job id or name>`` attaches to a running job
