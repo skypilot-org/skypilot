@@ -23,6 +23,7 @@ Overview
 - **Heterogeneous resources**: Different resource requirements per task (e.g., GPUs for training, CPUs for data serving)
 - **Automatic service discovery**: Tasks discover each other and communicate via hostnames
 - **Independent recovery**: Each task recovers from preemptions without affecting other tasks
+- **Launching jobs from inside the group**: A task can launch further managed jobs, which are listed under the group and cancelled with it
 
 **When to Use Job Groups:**
 
@@ -128,6 +129,8 @@ Each task document after the header follows the standard :ref:`SkyPilot task YAM
     Every task in a Job Group **must have a unique name**. The name is used for
     service discovery and log viewing.
 
+
+.. _job-groups-service-discovery:
 
 Service discovery
 -----------------
@@ -385,6 +388,103 @@ complete:
 When the trainer task finishes, the data-server (auxiliary) task will receive a
 termination signal after the 30-second delay, allowing it to flush pending data
 or perform cleanup.
+
+.. _job-groups-dynamic-members:
+
+Launching jobs from inside a job group
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A task in a job group can launch further managed jobs with ``sky jobs launch``
+or :func:`sky.jobs.launch` (see :ref:`nested-skypilot-managed-jobs`). A job
+launched this way becomes a *dynamic task* of the group:
+
+- It is listed under the group in ``sky jobs queue`` and the dashboard,
+  numbered on from the group's current tasks (a group with tasks 0 and 1
+  shows its first launched job as task 2). It can be referenced by
+  ``sky jobs logs`` and ``sky jobs cancel`` directly as
+  ``<group id>-<task index>``, e.g. ``sky jobs logs 39-2``. Underneath, it is
+  a managed job of its own.
+- ``sky jobs cancel <group>`` cancels it together with the group.
+- When the group finishes, dynamic tasks still running are cancelled. A group
+  finishes once all its primary tasks have finished and its auxiliary tasks
+  have been terminated (after their ``termination_delay``), so a dynamic task
+  launched by an auxiliary task keeps running through that delay.
+- Its status is its own. A failed dynamic task does not fail the group, and a
+  dynamic task finishing does not affect the group.
+
+One use case for dynamic tasks is an eval watcher: one task watches for new
+checkpoints and launches one evaluation job per checkpoint, each on its own
+resources, while the trainer keeps training.
+
+.. code-block:: yaml
+
+    ---
+    name: train-and-eval
+    execution: parallel
+    primary_tasks: [trainer, eval-watcher]
+    ---
+    name: trainer
+    resources:
+      accelerators: H100:8
+    run: |
+      python train.py --checkpoint-dir /checkpoints
+    ---
+    name: eval-watcher
+    resources:
+      cpus: 2
+    run: |
+      # The SkyPilot client installed on every node; the task's credentials
+      # point it at the API server.
+      source ~/skypilot-runtime/bin/activate
+      # One eval job per new checkpoint. Each is a dynamic task of this group:
+      # listed under it in `sky jobs queue`, cancelled with it.
+      for ckpt in $(python watch_checkpoints.py /checkpoints); do
+        sky jobs launch -y -d -n "eval-$ckpt" eval.yaml --env CKPT=$ckpt
+      done
+      # Wait for the evals before exiting: the group finishes when both
+      # primaries have, and an eval still running then would be cancelled.
+      python wait_for_evals.py
+
+The watcher is a primary task so that the group stays alive until the last
+evaluation it launched has finished. As an auxiliary task it would instead be
+terminated once the trainer finished, after the group's ``termination_delay``,
+and its evaluations would be cancelled with it. A runnable version is in the
+`Job Group SDK examples <https://github.com/skypilot-org/skypilot/tree/master/examples/job-group-sdk>`_.
+
+The queue shows the dynamic tasks under the group as tasks 2 and 3:
+
+.. code-block:: console
+
+    $ sky jobs queue
+    ID    TASK  NAME              ...  STATUS
+    42    -     train-and-eval    ...  RUNNING
+     ↳    0     trainer [P]       ...  RUNNING
+     ↳    1     eval-watcher [P]  ...  RUNNING
+     ↳    2     eval-step-1000    ...  SUCCEEDED
+     ↳    3     eval-step-2000    ...  RUNNING
+
+    $ sky jobs cancel 42-3   # the second evaluation, on its own
+
+**Choosing the group.** A job launched from inside a job group attaches to that
+group by default. ``--job-group <job id or name>`` attaches to a running job
+group explicitly, from anywhere; ``--no-job-group`` launches a top-level job
+even from inside a group. In the SDK, :func:`sky.jobs.launch` takes
+``job_group``: ``sky.jobs.AUTO_JOB_GROUP`` (the default), a job id or unique
+running job name, or ``None`` for a top-level job.
+
+.. note::
+
+   Attaching to a job group requires a :ref:`remote SkyPilot API server
+   <sky-api-server>` running managed jobs in :ref:`consolidation mode
+   <jobs-consolidation-mode>`, and :ref:`API server access from within the
+   job <nested-skypilot-managed-jobs>` for the launching task. Elsewhere,
+   ``--job-group`` is rejected and a launch from inside a group runs as a
+   top-level job.
+
+Members do not take part in the group's :ref:`service discovery
+<job-groups-service-discovery>` (they are not reachable by group hostname and
+do not get one), are scheduled independently of the group, and have no
+``termination_delay`` of their own.
 
 Using the Python SDK
 ~~~~~~~~~~~~~~~~~~~~
