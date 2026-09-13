@@ -758,6 +758,14 @@ def _check_job_group_attachment(
                     f'Cannot attach to job {parent_job_id}: it is in '
                     f'workspace {parent.workspace!r}, not the requested '
                     f'workspace {active_workspace!r}.')
+        # The executor authorized the caller for the workspace the request
+        # resolved to, not for this one. Switching workspaces is a launch
+        # there, so it needs the same write access a `--workspace` launch
+        # would; a group id is not a capability.
+        workspaces_core.check_workspace_permission(
+            common_utils.get_current_user(),
+            parent.workspace,
+            action=workspace_constants.WORKSPACE_ACTION_WRITE)
         workspace = parent.workspace
     return parent_job_id, parent_task_id, parent.tree_root_job_id, workspace
 

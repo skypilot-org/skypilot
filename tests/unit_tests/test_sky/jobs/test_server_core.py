@@ -63,7 +63,8 @@ class TestCheckJobGroupAttachment:
              parent_root=None,
              parent_execution='parallel',
              active_workspace='default',
-             client_set_workspace=False):
+             client_set_workspace=False,
+             check_workspace_permission=None):
         status_enum = (None if status is None else
                        jobs_core.managed_job_state.ManagedJobStatus(status))
         parent_row = (None if status is None else
@@ -88,9 +89,18 @@ class TestCheckJobGroupAttachment:
                                'get_active_workspace',
                                return_value=active_workspace), \
              mock.patch.object(jobs_core, '_client_set_workspace',
-                               return_value=client_set_workspace):
-            return jobs_core._check_job_group_attachment(
+                               return_value=client_set_workspace), \
+             mock.patch.object(jobs_core.workspaces_core,
+                               'check_workspace_permission',
+                               side_effect=check_workspace_permission) \
+                 as permission_check:
+            result = jobs_core._check_job_group_attachment(
                 parent_job_id, parent_task_id, explicit)
+        TestCheckJobGroupAttachment.last_permission_calls = [
+            (c.args[1], c.kwargs.get('action'))
+            for c in permission_check.call_args_list
+        ]
+        return result
 
     def test_no_parent_records_nothing(self):
         assert self._run(None) == (None, None, None, None)
@@ -161,6 +171,37 @@ class TestCheckJobGroupAttachment:
                          parent_workspace='team-a',
                          active_workspace='team-a',
                          client_set_workspace=True) == (42, None, 42, None)
+
+    def test_inheriting_a_workspace_requires_write_access_to_it(self):
+        # The executor authorized the caller for the workspace the request
+        # resolved to ('default'), not for the group's. Switching is a
+        # launch in the group's workspace, so it needs write access there;
+        # knowing a group id must not open a workspace the caller cannot
+        # write to.
+        assert self._run(42,
+                         status='RUNNING',
+                         parent_workspace='team-a',
+                         active_workspace='default') == (42, None, 42, 'team-a')
+        assert self.last_permission_calls == [('team-a', 'write')]
+
+        def deny(user, workspace, action):  # pylint: disable=unused-argument
+            raise jobs_core.exceptions.PermissionDeniedError(
+                f'no access to {workspace}')
+
+        with pytest.raises(jobs_core.exceptions.PermissionDeniedError,
+                           match='team-a'):
+            self._run(42,
+                      status='RUNNING',
+                      parent_workspace='team-a',
+                      active_workspace='default',
+                      check_workspace_permission=deny)
+        # Already in the group's workspace: the executor's own check stands,
+        # nothing extra is asked.
+        self._run(42,
+                  status='RUNNING',
+                  parent_workspace='default',
+                  active_workspace='default')
+        assert self.last_permission_calls == []
 
     def test_explicit_other_workspace_rejected(self):
         # The request named a workspace and it is not the group's: an error,
