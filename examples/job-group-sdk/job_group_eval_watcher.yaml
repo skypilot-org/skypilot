@@ -53,11 +53,14 @@ run: |
   # primary tasks have; an evaluation still running then would be cancelled.
   # Only this group's evaluations count: the queue lists them under the
   # group (the rows after our root job's row), so another job that happens
-  # to be named eval-step-* is not mistaken for ours. A failed queue call is
-  # retried, not read as "nothing running".
+  # to be named eval-step-* is not mistaken for ours. `--all` keeps the
+  # group in the listing however many newer jobs there are. A failed queue
+  # call is retried, not read as "nothing running". There is no deadline:
+  # an evaluation can wait for capacity or recover for longer than any
+  # fixed timeout, and giving up here would get it cancelled.
   echo "Waiting for evaluations to finish..."
-  for i in $(seq 1 60); do
-    if ! queue=$(sky jobs queue 2>&1); then
+  while true; do
+    if ! queue=$(sky jobs queue --all 2>&1); then
       echo "sky jobs queue failed, retrying: $queue"
       sleep 10
       continue
@@ -74,4 +77,3 @@ run: |
     echo "$running evaluation(s) still running"
     sleep 10
   done
-  echo "Timed out waiting for evaluations" && exit 1
