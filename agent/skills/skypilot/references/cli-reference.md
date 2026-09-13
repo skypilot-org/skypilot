@@ -303,6 +303,7 @@ Cancel managed jobs.
 - `--name`, `-n` — Managed job name to cancel.
 - `--pool`, `-p` — Pool name to cancel.
 - `JOB_IDS` — integer
+- `--task` — Cancel one dynamic task of the job (a job launched from inside it), by the index shown in `sky jobs queue` or by name. A declared task cannot be cancelled alone.
 - `--graceful` — Wait for MOUNT_CACHED uploads to complete before stopping/terminating. Will cancel current jobs first.
 - `--graceful-timeout` — Timeout in seconds for `--graceful` flag. When not set, will wait for MOUNT_CACHED uploads until they are finished.
 - `--all`, `-a` — Cancel all managed jobs for the current user.

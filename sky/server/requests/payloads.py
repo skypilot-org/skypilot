@@ -692,6 +692,9 @@ class JobsCancelBody(RequestBody):
     pool: Optional[str] = None
     graceful: bool = False
     graceful_timeout: Optional[int] = None
+    # With exactly one job id: cancel only this dynamic task of it (index as
+    # shown in the queue, or name). int for the index, str for the name.
+    task: Optional[Union[str, int]] = None
 
 
 class JobsLogsBody(RequestBody):

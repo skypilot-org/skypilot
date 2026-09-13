@@ -6466,6 +6466,14 @@ def jobs_queue(verbose: bool,
               type=str,
               help='Pool name to cancel.')
 @click.argument('job_ids', default=None, type=int, required=False, nargs=-1)
+@click.option('--task',
+              'task',
+              default=None,
+              type=str,
+              required=False,
+              help=('Cancel one dynamic task of the job (a job launched from '
+                    'inside it), by the index shown in `sky jobs queue` or '
+                    'by name. A declared task cannot be cancelled alone.'))
 @_add_click_options(flags.GRACEFUL_OPTIONS)
 @flags.all_option('Cancel all managed jobs for the current user.')
 @flags.yes_option()
@@ -6475,7 +6483,8 @@ def jobs_queue(verbose: bool,
 def jobs_cancel(
     name: Optional[str],
     pool: Optional[str],  # pylint: disable=redefined-outer-name
-    job_ids: Tuple[int],
+    job_ids: Tuple[int, ...],
+    task: Optional[str],
     graceful: bool,
     graceful_timeout: Optional[int],
     all: bool,
@@ -6499,8 +6508,19 @@ def jobs_cancel(
       \b
       # Cancel all managed jobs in pool 'my-pool'
       $ sky jobs cancel -p my-pool
+      \b
+      # Cancel only task 2 of job group 39 (a job launched from inside it)
+      $ sky jobs cancel 39 --task 2
     """
     job_id_str = ','.join(map(str, job_ids))
+    task_arg: Optional[Union[str, int]] = None
+    if task is not None:
+        if len(job_ids) != 1 or name is not None or pool is not None or (
+                all or all_users):
+            raise click.UsageError(
+                '--task takes exactly one JOB_ID and no --name, --pool, '
+                '--all or --all-users.')
+        task_arg = int(task) if task.isdigit() else task
     if sum([
             bool(job_ids), name is not None, pool is not None, all or all_users
     ]) != 1:
@@ -6519,6 +6539,8 @@ def jobs_cancel(
         job_identity_str = (f'managed job{plural} with ID{plural} {job_id_str}'
                             if job_ids else f'{name!r}' if name is not None else
                             f'managed jobs in pool {pool!r}')
+        if task_arg is not None:
+            job_identity_str = f'task {task_arg} of managed job {job_id_str}'
         if all_users:
             job_identity_str = 'all managed jobs FOR ALL USERS'
         elif all:
@@ -6534,6 +6556,7 @@ def jobs_cancel(
                             pool=pool,
                             graceful=graceful,
                             graceful_timeout=graceful_timeout,
+                            task=task_arg,
                             all=all,
                             all_users=all_users))
 
@@ -6581,7 +6604,9 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     """Tail or sync down the log of a managed job.
 
     TASK can be a task ID (integer) or task name. Numeric values are treated
-    as task IDs. If not specified, logs for all tasks are shown.
+    as task IDs. If not specified, logs for all tasks are shown. A job
+    launched from inside a job group (a dynamic task) is addressed like the
+    group's declared tasks, by the index shown in `sky jobs queue` or by name.
 
 
     Examples:
@@ -6597,6 +6622,10 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     \b
     # View logs for job named 'my-job', task 'eval'
     sky jobs logs -n my-job eval
+
+    \b
+    # View logs for the job launched from inside job group 39 shown as task 2
+    sky jobs logs 39 2
     """
     # tail == -1: user didn't pass --tail. With --sync-down that
     # means "fetch the whole file" (preserves pre-default-flip

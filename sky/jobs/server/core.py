@@ -480,6 +480,11 @@ def _maybe_submit_job_locally(
         # would drop back to the literal 'default' for users who never set
         # `active_workspace` server-side, which breaks users without
         # access to the 'default' workspace.
+        # A dynamic task gets its ordinal within the root's tree here, from
+        # the counter on the root's row (race-free without a lock of ours).
+        dynamic_task_index = (
+            managed_job_state.next_dynamic_task_index(root_job_id)
+            if root_job_id is not None else None)
         consolidation_mode_job_id = (
             managed_job_state.set_job_info_without_job_id(
                 dag.name,
@@ -493,7 +498,8 @@ def _maybe_submit_job_locally(
                 file_mounts_blob_id=file_mounts_blob_id,
                 parent_job_id=parent_job_id,
                 parent_task_id=parent_task_id,
-                root_job_id=root_job_id))
+                root_job_id=root_job_id,
+                dynamic_task_index=dynamic_task_index))
         for task_id, task in enumerate(dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
@@ -1768,16 +1774,38 @@ def cancel(name: Optional[str] = None,
            all_users: bool = False,
            pool: Optional[str] = None,
            graceful: bool = False,
-           graceful_timeout: Optional[int] = None) -> None:
+           graceful_timeout: Optional[int] = None,
+           task: Optional[Union[str, int]] = None) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancels managed jobs.
 
     Please refer to sky.cli.job_cancel for documentation.
 
+    Args:
+        task: With exactly one job id, cancel only this dynamic task of it
+            (a job launched from inside it, by the index shown in the queue
+            or by name), and the jobs launched from that task in turn. One
+            of the job's a task declared in the job\'s YAML cannot be cancelled
+            alone; it goes with the job.
+
     Raises:
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
         RuntimeError: failed to cancel the job.
+        ValueError: invalid arguments, or ``task`` names a declared task.
     """
+    if task is not None:
+        if (not job_ids or len(job_ids) != 1 or name is not None or
+                pool is not None or all or all_users):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('task requires exactly one job id and no '
+                                 'name, pool, all or all_users.')
+        if not managed_job_utils.is_consolidation_mode():
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    'Cancelling one task of a job requires the API server '
+                    'to run managed jobs in consolidation mode.')
+        member_job_id, _ = _resolve_job_task(job_ids[0], task, for_cancel=True)
+        job_ids = [member_job_id]
     with rich_utils.safe_status(
             ux_utils.spinner_message('Cancelling managed jobs')):
         job_ids = [] if job_ids is None else job_ids
@@ -1892,6 +1920,13 @@ def tail_logs(name: Optional[str],
     if name is not None and job_id is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot specify both name and job_id.')
+    # `sky jobs logs 39 2`: task 2 may be a dynamic task (a job launched
+    # from inside job 39, numbered on from its declared tasks); then it is that
+    # job's log. Declared tasks resolve as before. Dynamic tasks exist in
+    # consolidation mode only, where the state is on this server.
+    if (task is not None and job_id is not None and
+            managed_job_utils.is_consolidation_mode()):
+        job_id, task = _resolve_job_task(job_id, task, for_cancel=False)
 
     jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
     job_name_or_id_str = ''
@@ -2181,6 +2216,57 @@ def _get_job_clusters(
             task_name, job_id), task.get('task_id')))
     # De-duplicate while preserving order.
     return list(dict.fromkeys(clusters))
+
+
+def _resolve_job_task(
+        job_id: int, task: Union[str, int], *,
+        for_cancel: bool) -> Tuple[int, Optional[Union[str, int]]]:
+    """Resolve ``<job> <task>`` to the job to act on.
+
+    A dynamic task (a job launched from inside ``job_id``, shown under it
+    with an index that continues from its declared tasks) is addressed the same
+    way as a declared task: ``sky jobs logs 39 2`` / ``sky jobs logs 39 eval-3``
+    / ``sky jobs cancel 39 --task 2``. Declared tasks take precedence: an int
+    below the declared task count or a str naming a declared task is that task.
+    Anything else is looked up among the jobs launched under the root by
+    index or name.
+
+    Returns ``(job_id, task)`` to pass on: for a declared task, unchanged; for
+    a dynamic task, its own job id and ``None`` (the whole member job).
+
+    Raises:
+        ValueError: nothing matches; or, for cancel, a declared task (it shares
+            the job's lifecycle and cannot be cancelled alone).
+    """
+    if isinstance(task, str) and task.isdigit():
+        task = int(task)
+    declared_tasks = managed_job_state.get_managed_job_tasks(job_id)
+    if not declared_tasks:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'No managed job with ID {job_id}.')
+    is_declared = (any(t.get('task_id') == task for t in declared_tasks)
+                   if isinstance(task, int) else any(
+                       t.get('task_name') == task for t in declared_tasks))
+    if is_declared:
+        if for_cancel:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Task {task!r} of job {job_id} is not a dynamic task; '
+                    f'it can only be cancelled together with the job '
+                    f'(sky jobs cancel {job_id}).')
+        return job_id, task
+    member_job_id = managed_job_state.get_dynamic_task_job_id(job_id, task)
+    if member_job_id is None:
+        names = ', '.join(
+            repr(t.get('task_name'))
+            for t in declared_tasks
+            if t.get('task_name'))
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Job {job_id} has no task {task!r}: it is not one of its '
+                f'declared tasks ({names}), and no dynamic task launched from '
+                'inside it has that index or name.')
+    return member_job_id, None
 
 
 def _resolve_task_id(job_id: int, task: Union[str, int]) -> int:
