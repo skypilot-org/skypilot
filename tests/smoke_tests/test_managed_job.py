@@ -3156,6 +3156,7 @@ def test_job_group_networking_custom_image(generic_cloud: str, image_id: str):
             f'sky jobs logs $({get_job_id_cmd}) --no-follow | '
             f'grep "SUCCESS: Connected to server on custom image without sudo"',
         ],
+        f'sky jobs logs --controller -n {name} --no-follow --tail 200 || true; '
         f'sky jobs cancel -y -n {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=15 * 60,
@@ -4240,6 +4241,12 @@ def test_dynamic_job_group_watcher_primary(generic_cloud: str):
             f'sky jobs launch {yaml_path} -y -d',
             check,
             _queue_shows_member(name, eval1),
+            # The dynamic task is addressed like an own task: task 2 of the
+            # group (its own tasks are 0 and 1) is eval-1's log.
+            f'gid=$(sky jobs queue | grep -v "↳" | grep " {name} " | '
+            f'awk \'{{print $1}}\' | head -1); '
+            f's=$(sky jobs logs $gid 2 --no-follow); echo "$s"; '
+            f'echo "$s" | grep "eval-1"',
         ],
         _dynamic_members_teardown(name, ['eval-1', 'late']),
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
@@ -4535,8 +4542,9 @@ def test_dynamic_job_group_nested_cancel_subtree(generic_cloud: str):
     """Cancelling a launched job takes only its own launches.
 
     The watcher launches eval-1 and eval-2, each of which launches a child.
-    `sky jobs cancel <eval-1>` cancels eval-1 and eval-1a (attributed to
-    eval-1) and nothing else: eval-2, eval-2a and the group keep running.
+    `sky jobs cancel <group> --task 2` (task 2 is eval-1) cancels eval-1 and
+    eval-1a (attributed to eval-1) and nothing else: eval-2, eval-2a and
+    the group keep running.
     """
     _skip_unless_remote_server()
     name = smoke_tests_utils.get_cluster_name()
@@ -4576,9 +4584,9 @@ def test_dynamic_job_group_nested_cancel_subtree(generic_cloud: str):
             tree[eval1a]['dynamic_task_index'],
             tree[eval2a]['dynamic_task_index']
         } == {4, 5}
-        # Hand the shell step the CLI handle, not the job id: `sky jobs
-        # cancel <group>-2` has to resolve to eval-1.
-        pathlib.Path(child_id_file).write_text(f'{root}-2', encoding='utf-8')
+        # Hand the shell step the group id, not eval-1's job id: `sky jobs
+        # cancel <group> --task 2` has to resolve task 2 to eval-1 itself.
+        pathlib.Path(child_id_file).write_text(str(root), encoding='utf-8')
 
     def check_after_cancel():
         pathlib.Path(child_id_file).unlink(missing_ok=True)
@@ -4601,7 +4609,7 @@ def test_dynamic_job_group_nested_cancel_subtree(generic_cloud: str):
         [
             f'sky jobs launch {yaml_path} -y -d',
             check_before_cancel,
-            f'sky jobs cancel -y $(cat {child_id_file})',
+            f'sky jobs cancel -y $(cat {child_id_file}) --task 2',
             check_after_cancel,
         ],
         _dynamic_members_teardown(name,
