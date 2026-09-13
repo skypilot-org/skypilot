@@ -696,7 +696,7 @@ function JobDetails({ overrideJobId = null, taskContext = null } = {}) {
                                     launchedFrom={
                                       job.parent_task_id != null
                                         ? `task ${job.parent_task_id} of job ${job.parent_job_id}`
-                                        : `job ${job.parent_job_id}`
+                                        : null
                                     }
                                   />
                                 </span>
