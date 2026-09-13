@@ -15,6 +15,7 @@ import sys
 import threading
 from typing import Dict, List, Optional, Tuple
 from unittest.mock import AsyncMock
+from unittest.mock import call
 from unittest.mock import MagicMock
 from unittest.mock import patch
 import warnings
@@ -861,6 +862,9 @@ class TestDownloadLogsForCancelledJob:
         with patch('sky.jobs.controller.managed_job_utils'
                    '.generate_managed_job_cluster_name',
                    return_value='sky-managed-1-test-job') as mock_gen_name, \
+             patch('sky.jobs.controller.managed_job_state'
+                   '.get_pool_submit_info_async',
+                   return_value=(None, 7)) as mock_submit_info, \
              patch('sky.jobs.controller.backend_utils.get_clusters',
                    return_value=[{'handle': mock_handle}]) as mock_get_cl:
 
@@ -878,8 +882,51 @@ class TestDownloadLogsForCancelledJob:
                 refresh=common.StatusRefreshMode.NONE,
                 all_users=True,
                 _include_is_managed=True)
+            # The submitted job's id is used, not the latest job on the
+            # cluster (a later `sky exec` must not replace the logs).
+            mock_submit_info.assert_awaited_once_with(job_id)
             controller.download_log_and_stream.assert_called_once_with(
-                task_id, mock_handle, None)
+                task_id, mock_handle, 7)
+
+    @pytest.mark.asyncio
+    async def test_non_pool_job_group_downloads_latest_job_per_cluster(self):
+        """JobGroup tasks share one persisted job id field, so their logs
+        fall back to the latest job on each task's cluster."""
+        manager = self._make_manager()
+        controller = MagicMock()
+        job_id = 1
+
+        mock_dag = MagicMock()
+        mock_dag.tasks = []
+        for name in ('worker-a', 'worker-b'):
+            mock_task = MagicMock()
+            mock_task.name = name
+            mock_dag.tasks.append(mock_task)
+
+        mock_handle = MagicMock()
+
+        with patch('sky.jobs.controller.managed_job_utils'
+                   '.generate_managed_job_cluster_name',
+                   side_effect=lambda name, _: f'sky-managed-1-{name}'), \
+             patch('sky.jobs.controller.managed_job_state'
+                   '.get_pool_submit_info_async',
+                   return_value=(None, 7)) as mock_submit_info, \
+             patch('sky.jobs.controller.backend_utils.get_clusters',
+                   return_value=[{'handle': mock_handle}]):
+
+            await ControllerManager._download_logs_for_cancelled_job(
+                manager,
+                controller,
+                job_id,
+                task_ids=[0, 1],
+                dag=mock_dag,
+                pool=None)
+
+            mock_submit_info.assert_not_awaited()
+            assert controller.download_log_and_stream.call_args_list == [
+                call(0, mock_handle, None),
+                call(1, mock_handle, None),
+            ]
 
     @pytest.mark.asyncio
     async def test_pool_job_cluster_found(self):

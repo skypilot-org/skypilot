@@ -66,7 +66,8 @@ async def test_await_launch_request_returns_on_stream_completion(monkeypatch):
     api_status = mock.MagicMock()
     monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
 
-    assert await executor._await_launch_request('req-1', stream_task) is None
+    assert (await executor._await_launch_request('req-1',
+                                                 stream_task) == 'result')
     api_status.assert_not_called()
 
 
@@ -122,7 +123,8 @@ async def test_await_launch_request_tolerates_poll_failures(monkeypatch):
                         '_LAUNCH_REQUEST_STATUS_POLL_SECONDS', 0.01)
 
     # Should not raise despite the status poll failing.
-    assert await executor._await_launch_request('req-1', stream_task) is None
+    assert (await executor._await_launch_request('req-1',
+                                                 stream_task) == 'result')
     assert api_status.call_count >= 1
 
 
@@ -140,7 +142,8 @@ async def test_await_launch_request_tolerates_unknown_request(monkeypatch):
     monkeypatch.setattr(recovery_strategy,
                         '_LAUNCH_REQUEST_STATUS_POLL_SECONDS', 0.01)
 
-    assert await executor._await_launch_request('req-1', stream_task) is None
+    assert (await executor._await_launch_request('req-1',
+                                                 stream_task) == 'result')
 
 
 @pytest.mark.asyncio
@@ -406,6 +409,50 @@ async def test_launch_cancel_while_parked_cancels_request(monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await task
     executor._cancel_launch_request.assert_awaited_once_with('req-123')
+
+
+@pytest.mark.asyncio
+async def test_launch_records_job_id_submitted_on_cluster(monkeypatch):
+    """A non-pool launch remembers the job id sky.launch submitted, so the
+    controller checks that job instead of the latest job on the cluster."""
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    set_job_id = mock.AsyncMock()
+    monkeypatch.setattr(recovery_strategy.state,
+                        'set_job_id_on_pool_cluster_async', set_job_id)
+    executor._await_launch_request = mock.AsyncMock(
+        return_value=(7, mock.MagicMock()))
+
+    result = await executor._launch(max_retry=1, raise_on_failure=True)
+
+    assert result == 123.45
+    assert executor.job_id_on_pool_cluster == 7
+    set_job_id.assert_awaited_once_with(executor.job_id, 7)
+
+
+@pytest.mark.asyncio
+async def test_launch_without_job_id_falls_back_to_latest_job(monkeypatch):
+    """An unknown job id is recorded as None (latest job on the cluster)."""
+    executor = _make_launch_executor()
+    executor.job_id_on_pool_cluster = 3  # stale, from a previous cluster
+    _patch_launch_environment(monkeypatch)
+    set_job_id = mock.AsyncMock()
+    monkeypatch.setattr(recovery_strategy.state,
+                        'set_job_id_on_pool_cluster_async', set_job_id)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+
+    await executor._launch(max_retry=1, raise_on_failure=True)
+
+    assert executor.job_id_on_pool_cluster is None
+    set_job_id.assert_awaited_once_with(executor.job_id, None)
+
+
+def test_job_id_from_launch_result():
+    assert recovery_strategy._job_id_from_launch_result((5, object())) == 5
+    assert recovery_strategy._job_id_from_launch_result(
+        (None, object())) is None
+    assert recovery_strategy._job_id_from_launch_result(None) is None
+    assert recovery_strategy._job_id_from_launch_result('result') is None
 
 
 def test_start_stream_task_uses_context_preserving_executor(monkeypatch):
