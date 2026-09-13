@@ -1999,6 +1999,41 @@ class TestParentJobLinks:
         with pytest.raises(ValueError, match='no such managed job'):
             self._new_job('orphan', parent_job_id=12345)
 
+    def test_insert_checks_the_root_too(self, _mock_managed_jobs_db_conn):
+        # A grandchild attaches under a RUNNING eval while the group (root)
+        # is being cancelled: the root owns the lifecycle, so the insert is
+        # refused on the root's status even though the direct parent is fine.
+        root = self._new_job('group')
+        self._set_task_status(root, state.ManagedJobStatus.RUNNING)
+        eval1 = self._new_job('eval-1', parent_job_id=root)
+        self._set_task_status(eval1, state.ManagedJobStatus.RUNNING)
+        self._set_task_status(root, state.ManagedJobStatus.CANCELLING)
+        with pytest.raises(ValueError, match=f'job {root}: it is CANCELLING'):
+            self._new_job('eval-1a', parent_job_id=eval1, root_job_id=root)
+        # And the other way round: root fine, direct parent cancelling.
+        self._set_task_status(root, state.ManagedJobStatus.RUNNING)
+        self._set_task_status(eval1, state.ManagedJobStatus.CANCELLING)
+        with pytest.raises(ValueError, match=f'job {eval1}: it is CANCELLING'):
+            self._new_job('eval-1b', parent_job_id=eval1, root_job_id=root)
+
+    def test_codegen_insert_path_has_the_same_guard(self,
+                                                    _mock_managed_jobs_db_conn):
+        # set_job_info is the helper the controller-side codegen emits; it
+        # must refuse a cancelling parent exactly like the other path.
+        root = self._new_job('group')
+        self._set_task_status(root, state.ManagedJobStatus.CANCELLING)
+        with pytest.raises(ValueError, match='CANCELLING'):
+            state.set_job_info(9999,
+                               name='late',
+                               workspace='ws',
+                               entrypoint='ep',
+                               pool=None,
+                               pool_hash=None,
+                               user_hash='u',
+                               parent_job_id=root,
+                               root_job_id=root)
+        assert state.get_jobs_launched_from([root]) == []
+
     def test_tree_fetch_from_any_node(self, _mock_managed_jobs_db_conn):
         root = self._new_job('root')
         c1 = self._new_job('c1', parent_job_id=root, parent_task_id=1)
