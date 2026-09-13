@@ -673,7 +673,7 @@ function JobDetails({ overrideJobId = null, taskContext = null } = {}) {
                                   className="text-blue-600 hover:underline"
                                   title={
                                     job.dynamic_task_index != null
-                                      ? `sky jobs cancel ${jobId}-${job.dynamic_task_index}`
+                                      ? `sky jobs cancel ${jobId} --task ${job.dynamic_task_index}`
                                       : `Dynamic task, job ${job.id}`
                                   }
                                 >
@@ -1613,7 +1613,7 @@ function JobDetailsContent({
             // Same shape as an own task's page; the handle
             // `<root>-<index>` is what `sky jobs cancel` / `logs` take.
             <span
-              title={`sky jobs cancel ${taskContext.rootId}-${taskContext.index}`}
+              title={`sky jobs cancel ${taskContext.rootId} --task ${taskContext.index}`}
             >
               {taskContext.index}
               {jobData.name && (
