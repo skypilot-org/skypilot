@@ -879,27 +879,89 @@ available_node_types:
                   set -e
                   return 1
                 }
+                # Called after a failed install attempt with that attempt's
+                # captured output. If apt could not FETCH the packages, prefer
+                # the release's base suite for every later apt run on this node.
+                #
+                # A companion suite (<codename>-security, <codename>-updates)
+                # can outlive its pool: once a release leaves support, the
+                # distro may prune the pool while still serving, or even
+                # re-signing, the suite's index. apt-get update then succeeds,
+                # apt resolves to the companion suite's higher versions, and
+                # every one of those files is a 404 -- so the install fails on
+                # fetch even though the base suite still serves working builds
+                # of the same packages. Retrying identically cannot recover,
+                # and neither can a mirror rotation that keeps the same suites.
+                #
+                # APT::Default-Release gives the base suite priority 990 over
+                # the companions' 500 (the config-file form of `apt-get -t`), so
+                # the next attempt here, and the storage-mount, docker and user
+                # setup commands that run apt on this node later, all prefer
+                # the base suite without editing any sources file. Guarded
+                # three ways, so a healthy release never loses its security
+                # suite: the failure must be a 404 from a companion suite of
+                # this release's codename (a timeout, DNS or proxy failure is
+                # not a 404; a 404 from the base suite or a third-party repo
+                # is not a companion), apt must have an index for that
+                # codename (a derived distro falls through), and the
+                # preference is only reported once it has been written.
+                apt_prefer_base_suite_on_fetch_failure() {
+                  local attempt_log="$1"
+                  [ -f /etc/apt/apt.conf.d/99-skypilot-default-release ] && return 0
+                  grep -q '404  Not Found' "$attempt_log" || return 0
+                  local base
+                  base=$( . /etc/os-release 2>/dev/null && echo "${VERSION_CODENAME:-}" )
+                  if [ -z "$base" ]; then
+                    echo "install got a 404 fetching packages and /etc/os-release names no VERSION_CODENAME; retrying as is" >> /tmp/apt-update.log
+                    return 0
+                  fi
+                  # apt reports each failed download as an "Err:N <uri> <suite>/<component> ..."
+                  # line followed by the status line. Require the 404 to come from a
+                  # companion suite of this release (<codename>-security, -updates, ...).
+                  if ! awk -v base="$base" '/^Err:/ { err = $0; next } /404  Not Found/ { if (err ~ (" " base "-[a-z]+/")) hit = 1 } END { exit hit ? 0 : 1 }' "$attempt_log"; then
+                    echo "install got a 404 fetching packages, but not from a companion suite of '$base'; retrying as is" >> /tmp/apt-update.log
+                    return 0
+                  fi
+                  if ! $(prefix_cmd) apt-cache policy 2>/dev/null | grep -q "n=${base},"; then
+                    echo "a companion suite of '$base' returned 404, but apt has no index for release '$base' itself; retrying as is" >> /tmp/apt-update.log
+                    return 0
+                  fi
+                  if printf 'APT::Default-Release "%s";\n' "$base" | $(prefix_cmd) tee /etc/apt/apt.conf.d/99-skypilot-default-release >/dev/null 2>&1; then
+                    echo "a companion suite of '$base' returned 404 for packages to install (its pool may be gone); preferring the base suite '$base' for this and later apt runs" >> /tmp/apt-update.log
+                  else
+                    echo "a companion suite of '$base' returned 404 for packages to install, but the apt preference could not be written; retrying as is" >> /tmp/apt-update.log
+                  fi
+                }
                 apt_install_with_retries() {
                   local packages="$@"
                   [ -z "$packages" ] && return 0
                   set +e
                   local log=/tmp/apt-update.log
+                  local attempt_log=/tmp/apt-install-attempt.log
                   local tries=3
                   local delay=1
                   local i
                   for i in $(seq 1 $tries); do
+                    # Captured per attempt so a fetch failure can be told apart
+                    # from other errors; replayed below so the step log is
+                    # unchanged. LC_ALL=C keeps apt's diagnostics in English
+                    # for the detector regardless of the image's locale.
+                    {
                     timeout $APT_INSTALL_CMD_TIMEOUT \
-                      $(prefix_cmd) env DEBIAN_FRONTEND=noninteractive \
+                      $(prefix_cmd) env LC_ALL=C DEBIAN_FRONTEND=noninteractive \
                       apt-get install $APT_OPTS -y \
                       -o Dpkg::Options::="--force-confdef" \
                       -o Dpkg::Options::="--force-confold" $packages
+                    } > "$attempt_log" 2>&1
                     local rc=$?
+                    cat "$attempt_log"
                     if [ $rc -eq 0 ]; then
                       set -e; return 0
                     elif [ $rc -eq 124 ]; then
                       echo "apt-get install timed out after ${APT_INSTALL_CMD_TIMEOUT}s for: $packages (attempt $i/$tries)" >> "$log"
                     else
                       echo "apt-get install failed for: $packages (attempt $i/$tries, rc=$rc). Running -f install and retrying..." >> "$log"
+                      apt_prefer_base_suite_on_fetch_failure "$attempt_log"
                     fi
                     DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get -f install -y >> "$log" 2>&1 || true
                     DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get clean >> "$log" 2>&1 || true
