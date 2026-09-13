@@ -3,8 +3,10 @@
 import asyncio
 import contextlib
 import datetime
+import random
 import shlex
 import textwrap
+import threading
 import time
 from unittest import mock
 
@@ -2036,6 +2038,54 @@ class TestParentJobLinks:
                                                   user_hash='u',
                                                   parent_job_id=eval1,
                                                   root_job_id=claimed_root)
+
+    def test_concurrent_attaches_never_land_after_the_cancel(
+            self, _mock_managed_jobs_db_conn):
+        # Five attaches race a CANCELLING write on the root. The guard's lock
+        # serializes them with the write, so every attach that succeeded
+        # committed before the CANCELLING commit, and every attach that
+        # started after it was refused. Run several rounds with jittered
+        # starts so the interleavings differ.
+        for _ in range(4):
+            root = self._new_job('group')
+            self._set_task_status(root, state.ManagedJobStatus.RUNNING)
+            lock = threading.Lock()
+            events: List[Tuple[float, str]] = []
+
+            def attach(i, root=root):
+                time.sleep(random.uniform(0, 0.02))
+                try:
+                    self._new_job(f'eval-{i}', parent_job_id=root)
+                    with lock:
+                        events.append((time.monotonic(), 'inserted'))
+                except ValueError as e:
+                    assert 'CANCELLING' in str(e), str(e)
+                    with lock:
+                        events.append((time.monotonic(), 'refused'))
+
+            def cancel(root=root):
+                time.sleep(random.uniform(0, 0.02))
+                self._set_task_status(root, state.ManagedJobStatus.CANCELLING)
+                with lock:
+                    events.append((time.monotonic(), 'cancelled'))
+
+            threads = [
+                threading.Thread(target=attach, args=(i,)) for i in range(5)
+            ] + [threading.Thread(target=cancel)]
+            for th in threads:
+                th.start()
+            for th in threads:
+                th.join()
+            events.sort()
+            kinds = [k for _, k in events]
+            assert kinds.count('cancelled') == 1
+            cancel_at = kinds.index('cancelled')
+            # No insert after the CANCELLING commit; no refusal before it.
+            assert all(k == 'inserted' for k in kinds[:cancel_at]), kinds
+            assert all(k == 'refused' for k in kinds[cancel_at + 1:]), kinds
+            # And the tree walk sees exactly the ones that landed.
+            inserted = kinds.count('inserted')
+            assert len(state.get_jobs_launched_from([root])) == inserted
 
     def test_codegen_insert_path_has_the_same_guard(self,
                                                     _mock_managed_jobs_db_conn):
