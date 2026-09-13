@@ -1929,6 +1929,52 @@ class TestPaginationByTreeRoot:
         assert sorted(j['job_id'] for j in jobs) == [root, eval1]
 
 
+class TestDynamicTaskIndex:
+    """Dynamic tasks number on from the root's own tasks, in attach order,
+    from an atomic counter on the root's row."""
+
+    def test_indices_continue_the_root_s_tasks(self,
+                                               _mock_managed_jobs_db_conn):
+        root = TestParentJobLinks._new_job('group')
+        state.set_pending(root,
+                          task_id=1,
+                          task_name='watcher',
+                          resources_str='{}',
+                          metadata='{}')
+        # Two own tasks (0, 1): the dynamic tasks are 2, 3, 4.
+        assert state.next_dynamic_task_index(root) == 2
+        assert state.next_dynamic_task_index(root) == 3
+        assert state.next_dynamic_task_index(root) == 4
+
+    def test_index_is_stored_on_the_member(self, _mock_managed_jobs_db_conn):
+        root = TestParentJobLinks._new_job('group')
+        index = state.next_dynamic_task_index(root)
+        member = state.set_job_info_without_job_id(name='eval',
+                                                   workspace='ws',
+                                                   entrypoint='ep',
+                                                   pool=None,
+                                                   pool_hash=None,
+                                                   user_hash='user1',
+                                                   root_job_id=root,
+                                                   parent_job_id=root,
+                                                   parent_task_id=0,
+                                                   dynamic_task_index=index)
+        state.set_pending(member,
+                          task_id=0,
+                          task_name='eval',
+                          resources_str='{}',
+                          metadata='{}')
+        jobs, _ = state.get_managed_jobs_with_filters(
+            fields=['job_id', 'root_job_id', 'dynamic_task_index'],
+            job_ids=[member])
+        assert jobs[0]['dynamic_task_index'] == 1  # one own task: 0
+        assert jobs[0]['root_job_id'] == root
+
+    def test_unknown_root_raises(self, _mock_managed_jobs_db_conn):
+        with pytest.raises(ValueError):
+            state.next_dynamic_task_index(999999)
+
+
 class TestParentJobLinks:
     """root/parent/parent_task persistence and the cancel tree fetch."""
 

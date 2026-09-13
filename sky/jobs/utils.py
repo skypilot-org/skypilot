@@ -1508,6 +1508,7 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
 # on MANAGED_JOBS_VERSION).
 _JOB_FIELDS_BY_MIN_CONTROLLER_VERSION = {
     41: frozenset({'root_job_id', 'parent_job_id', 'parent_task_id'}),
+    42: frozenset({'dynamic_task_index'}),
 }
 
 
@@ -4123,13 +4124,22 @@ def format_job_table(
                 task_name = f'{task_name} [P]'
 
             if is_member:
-                # A job launched from this group: indented under it, but with
-                # its own job id (it has its own logs and can be cancelled on
-                # its own), and its task id only if it has several tasks.
-                id_cell: Any = f' \u21B3 {task["job_id"]}'
-                task_cell: Any = (task['task_id']
-                                  if member_row_counts[task['job_id']] > 1 else
-                                  '-')
+                # A dynamic task (a job launched from this group) reads like
+                # one of the group's tasks: its index numbers on from the
+                # own tasks, and `<group id>-<index>` addresses it on the
+                # CLI. A multi-task member shows `<index>.<task id>`. Rows
+                # from before the index existed fall back to the job id.
+                dynamic_index = task.get('dynamic_task_index')
+                if dynamic_index is None:
+                    id_cell: Any = f' \u21B3 {task["job_id"]}'
+                    task_cell: Any = (task['task_id']
+                                      if member_row_counts[task['job_id']] > 1
+                                      else '-')
+                else:
+                    id_cell = ' \u21B3'
+                    task_cell = (f'{dynamic_index}.{task["task_id"]}'
+                                 if member_row_counts[task['job_id']] > 1 else
+                                 dynamic_index)
             else:
                 id_cell = task['job_id'] if len(job_tasks) == 1 else ' \u21B3'
                 task_cell = task['task_id'] if len(job_tasks) > 1 else '-'
@@ -4402,6 +4412,9 @@ class ManagedJobCodeGen:
         _PARENT_FIELDS = {{'root_job_id', 'parent_job_id', 'parent_task_id'}}
         if managed_job_version < 25 and _fields is not None:
             _fields = [f for f in _fields if f not in _PARENT_FIELDS]
+        # Filter out the dynamic task index for older controllers (< 26)
+        if managed_job_version < 26 and _fields is not None:
+            _fields = [f for f in _fields if f != 'dynamic_task_index']
         if managed_job_version < 9:
             # For backward compatibility, since filtering is not supported
             # before #6652.
