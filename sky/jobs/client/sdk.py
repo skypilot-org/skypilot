@@ -563,7 +563,7 @@ def cancel(
         job_ids: IDs of the managed jobs to cancel.
         task: With exactly one job id, cancel only this dynamic task of it
             (a job launched from inside it), by the index shown in the queue
-            (int) or by name (str). One of the job's own tasks cannot be
+            (int) or by name (str). One of the job's declared tasks cannot be
             cancelled alone.
         all: Whether to cancel all managed jobs.
         all_users: Whether to cancel all managed jobs from all users.

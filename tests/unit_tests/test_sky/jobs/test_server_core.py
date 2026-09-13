@@ -241,7 +241,7 @@ class TestCheckJobGroupAttachment:
 
 class TestResolveJobTask:
     """`sky jobs logs 39 2` / `sky jobs cancel 39 --task 2`: a dynamic task
-    is addressed like the group's own tasks."""
+    is addressed like the group's declared tasks."""
 
     _OWN = [{
         'task_id': 0,
@@ -263,7 +263,7 @@ class TestResolveJobTask:
                                                  for_cancel=for_cancel)
         return result, lookup
 
-    def test_own_task_by_index_or_name_is_unchanged(self):
+    def test_declared_task_by_index_or_name_is_unchanged(self):
         assert self._run(1)[0] == (39, 1)
         assert self._run('1')[0] == (39, 1)  # numeric strings are indices
         assert self._run('watcher')[0] == (39, 'watcher')
@@ -271,7 +271,7 @@ class TestResolveJobTask:
         lookup.assert_not_called()
 
     def test_dynamic_task_by_index_or_name_is_its_own_job(self):
-        # Index 2 continues the own tasks 0 and 1; the whole member job is
+        # Index 2 continues the declared tasks 0 and 1; the whole member job is
         # tailed (task None).
         result, lookup = self._run(2)
         assert result == (57, None)
@@ -287,14 +287,14 @@ class TestResolveJobTask:
             self._run('nope', member=None)
 
     def test_missing_job_raises(self):
-        with pytest.raises(ValueError, match='not found'):
+        with pytest.raises(ValueError, match='No managed job with ID 39'):
             self._run(2, own=[])
 
-    def test_cancel_refuses_an_own_task(self):
+    def test_cancel_refuses_a_declared_task(self):
         # Declared tasks share the group's lifecycle.
-        with pytest.raises(ValueError, match='shares the job'):
+        with pytest.raises(ValueError, match='not a dynamic task'):
             self._run(1, for_cancel=True)
-        with pytest.raises(ValueError, match='shares the job'):
+        with pytest.raises(ValueError, match='not a dynamic task'):
             self._run('trainer', for_cancel=True)
         assert self._run(2, for_cancel=True)[0] == (57, None)
 

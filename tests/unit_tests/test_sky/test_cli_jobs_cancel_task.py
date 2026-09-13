@@ -1,5 +1,5 @@
 """`sky jobs cancel <job> --task <n|name>`: one dynamic task of a job group is
-cancelled the way one of its own tasks is addressed, by index or name."""
+cancelled the way one of its declared tasks is addressed, by index or name."""
 from unittest import mock
 
 from click.testing import CliRunner

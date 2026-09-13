@@ -1932,7 +1932,7 @@ class TestPaginationByTreeRoot:
 
 
 class TestTreeRowOrder:
-    """Every surface reads a tree the same way: the root's own tasks, then
+    """Every surface reads a tree the same way: the root's declared tasks, then
     the launched jobs by dynamic task index."""
 
     def test_rows_come_out_in_display_order(self, _mock_managed_jobs_db_conn):
@@ -1972,7 +1972,7 @@ class TestTreeRowOrder:
             rows, _ = state.get_managed_jobs_with_filters(**kwargs)
             return [(r['job_id'], r['task_id']) for r in rows]
 
-        # Newest tree first; within the tree own tasks 0, 1 then the
+        # Newest tree first; within the tree declared tasks 0, 1 then the
         # members by index (2 before 3 although 3 attached first).
         expected = [(newer, 0), (root, 0), (root, 1), (eval2, 0), (eval3, 0)]
         assert order() == expected
@@ -1983,7 +1983,7 @@ class TestTreeRowOrder:
 
 
 class TestDynamicTaskIndex:
-    """Dynamic tasks number on from the root's own tasks, in attach order,
+    """Dynamic tasks number on from the root's declared tasks, in attach order,
     from an atomic counter on the root's row."""
 
     def test_indices_continue_the_root_s_tasks(self,
@@ -1994,7 +1994,7 @@ class TestDynamicTaskIndex:
                           task_name='watcher',
                           resources_str='{}',
                           metadata='{}')
-        # Two own tasks (0, 1): the dynamic tasks are 2, 3, 4.
+        # Two declared tasks (0, 1): the dynamic tasks are 2, 3, 4.
         assert state.next_dynamic_task_index(root) == 2
         assert state.next_dynamic_task_index(root) == 3
         assert state.next_dynamic_task_index(root) == 4
@@ -2020,7 +2020,7 @@ class TestDynamicTaskIndex:
         jobs, _ = state.get_managed_jobs_with_filters(
             fields=['job_id', 'root_job_id', 'dynamic_task_index'],
             job_ids=[member])
-        assert jobs[0]['dynamic_task_index'] == 1  # one own task: 0
+        assert jobs[0]['dynamic_task_index'] == 1  # one declared task: 0
         assert jobs[0]['root_job_id'] == root
 
     def test_unknown_root_raises(self, _mock_managed_jobs_db_conn):

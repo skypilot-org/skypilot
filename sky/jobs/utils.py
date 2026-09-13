@@ -4139,7 +4139,8 @@ def format_job_table(
             if is_member:
                 # A dynamic task (a job launched from this group) reads like
                 # one of the group's tasks: its index numbers on from the
-                # own tasks, and `sky jobs logs <group> <index>` / `sky jobs
+                # declared tasks, and `sky jobs logs <group> <index>` / `sky
+                # jobs
                 # cancel <group> --task <index>` address it. A multi-task
                 # member shows `<index>.<task id>`. The member's own job id
                 # is shown with -v; rows from before the index existed

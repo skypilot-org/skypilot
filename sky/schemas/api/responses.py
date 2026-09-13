@@ -261,7 +261,7 @@ class ManagedJobRecord(ResponseBaseModel):
     root_job_id: Optional[int] = None
     parent_job_id: Optional[int] = None
     parent_task_id: Optional[int] = None
-    # A dynamic task's ordinal within its root's tree: the root's own tasks
+    # A dynamic task's ordinal within its root's tree: the root's declared tasks
     # are 0..n-1, dynamic tasks number on from n in attach order. None for
     # top-level jobs.
     dynamic_task_index: Optional[int] = None

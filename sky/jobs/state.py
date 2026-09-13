@@ -240,7 +240,7 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('parent_task_id', sqlalchemy.Integer,
                       server_default=None),
     #   dynamic_task_index: a dynamic task's ordinal within its root's tree
-    #     (the root's own tasks are 0..n-1, dynamic tasks number on from n in
+    # (the root's declared tasks are 0..n-1, dynamic tasks number on from n in
     #     attach order); `<root>-<index>` names it on the CLI. NULL for
     #     top-level jobs.
     #   dynamic_task_count: on the root's row, how many dynamic tasks have
@@ -1448,7 +1448,7 @@ def get_num_tasks(job_id: int) -> int:
 def next_dynamic_task_index(root_job_id: int) -> int:
     """Reserve the next dynamic task index under ``root_job_id``.
 
-    The root's own tasks are 0..n-1; the k-th dynamic task to attach gets
+    The root's declared tasks are 0..n-1; the k-th dynamic task to attach gets
     n + k - 1. The counter lives on the root's row and is bumped with one
     UPDATE, which the database serializes (row lock on PostgreSQL, the
     single writer on SQLite), so concurrent attaches never get the same
@@ -1486,7 +1486,7 @@ def get_dynamic_task_job_id(root_job_id: int,
     """The job id of the dynamic task shown as ``task`` under ``root_job_id``.
 
     An int is a dynamic task index (the numbering that continues from the
-    root's own tasks); a str is the launched job's name. Grandchildren
+    root's declared tasks); a str is the launched job's name. Grandchildren
     carry the same root and draw from the same counter, so both lookups
     cover the whole tree. Names are not unique; the newest match wins.
     Returns None when nothing matches.
@@ -2416,7 +2416,7 @@ def get_managed_jobs_with_filters(
         )
 
     # Apply sorting. Within a tree the rows always read the way the table
-    # shows them: the root's own tasks first, then the jobs launched under
+    # shows them: the root's declared tasks first, then the jobs launched under
     # it by dynamic task index (rows from before the index existed last),
     # then task id. Every surface (CLI, dashboard, API) gets this order.
     within_tree = [

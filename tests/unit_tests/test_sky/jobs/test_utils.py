@@ -2054,7 +2054,7 @@ class TestFormatJobTableDynamicMembers:
         ]
 
     def test_members_with_an_index_read_like_tasks(self):
-        # Rows as the query returns them: own tasks first, then the members
+        # Rows as the query returns them: declared tasks first, then the members
         # by dynamic task index; the table keeps that order.
         rows = [
             self._row(42, task_id=0, task_name='trainer', job_name='rl'),
@@ -2068,10 +2068,10 @@ class TestFormatJobTableDynamicMembers:
                                             show_user=False,
                                             return_rows=True)
         cells = [c for c in self._id_task_status(table) if c != ('', '', '')]
-        # The group's own tasks are 0 and 1; the dynamic tasks number on as
+        # The group's declared tasks are 0 and 1; the dynamic tasks number on as
         # 2 and 3, the multi-task one as <index>.<task id>. No job id shown
         # by default: `sky jobs logs 42 2` / `sky jobs cancel 42 --task 2`
-        # address them like the own tasks.
+        # address them like the declared tasks.
         assert cells == [
             ('42', '', 'RUNNING'),
             (' ↳', '0', 'RUNNING'),

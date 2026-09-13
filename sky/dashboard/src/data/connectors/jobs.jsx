@@ -377,7 +377,7 @@ export async function getManagedJobs(options = {}) {
         root_job_id: job.root_job_id ?? null,
         parent_job_id: job.parent_job_id ?? null,
         parent_task_id: job.parent_task_id ?? null,
-        // A dynamic task's ordinal within its root's tree (own tasks are
+        // A dynamic task's ordinal within its root's tree (declared tasks are
         // 0..n-1, dynamic tasks number on); `<root>-<index>` names it.
         dynamic_task_index: job.dynamic_task_index ?? null,
         // Batch progress

@@ -6471,11 +6471,9 @@ def jobs_queue(verbose: bool,
               default=None,
               type=str,
               required=False,
-              help=('With one job ID: cancel only this task of the job, a '
-                    'job launched from inside it (a dynamic task), by the '
-                    'index shown in `sky jobs queue` or by name. The jobs '
-                    'launched from that task go with it. One of the job\'s '
-                    'own tasks cannot be cancelled alone.'))
+              help=('Cancel one dynamic task of the job (a job launched from '
+                    'inside it), by the index shown in `sky jobs queue` or '
+                    'by name. A declared task cannot be cancelled alone.'))
 @_add_click_options(flags.GRACEFUL_OPTIONS)
 @flags.all_option('Cancel all managed jobs for the current user.')
 @flags.yes_option()
@@ -6608,7 +6606,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     TASK can be a task ID (integer) or task name. Numeric values are treated
     as task IDs. If not specified, logs for all tasks are shown. A job
     launched from inside a job group (a dynamic task) is addressed like the
-    group's own tasks, by the index shown in `sky jobs queue` or by name.
+    group's declared tasks, by the index shown in `sky jobs queue` or by name.
 
 
     Examples:
