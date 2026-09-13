@@ -36,6 +36,13 @@ export function sortData(data, accessor, direction) {
 export async function getErrorMessageFromResponse(fetchedData) {
   let errorMessage = fetchedData.statusText;
 
+  // Guard against rendering a raw HTML error page (e.g. a gateway error from a
+  // proxy/CDN) verbatim. Fall back to the status line instead.
+  const contentType = fetchedData.headers?.get?.('content-type') || '';
+  if (contentType.includes('text/html')) {
+    return `${fetchedData.status} ${fetchedData.statusText}`;
+  }
+
   if (fetchedData.status === 500) {
     try {
       const data = await fetchedData.json();
