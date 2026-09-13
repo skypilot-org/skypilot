@@ -2495,6 +2495,24 @@ class TestCancelDynamicMembers:
         sweep.assert_not_called()
         assert controller._dynamic_members_swept is False
 
+    def test_cancelled_job_takes_its_subtree_root_or_not(self):
+        # A user cancel of any node takes that node's subtree. The request
+        # already expanded it server-side; this pass, right after the
+        # controller writes CANCELLING, catches a child whose row landed
+        # after that expansion (the insert refuses any later one).
+        controller = self._make_controller(is_root=False)
+        with patch.object(managed_job_utils,
+                          'cancel_descendant_jobs',
+                          return_value='No job to cancel.') as sweep:
+            asyncio.run(
+                controller._cancel_dynamic_members('cancelled', on_cancel=True))
+        sweep.assert_called_once_with(42, 'cancelled')
+        # And still once per controller.
+        with patch.object(managed_job_utils, 'cancel_descendant_jobs') as sweep:
+            asyncio.run(
+                controller._cancel_dynamic_members('cancelled', on_cancel=True))
+        sweep.assert_not_called()
+
     def test_sweep_failure_is_swallowed(self):
         controller = self._make_controller(is_root=True)
         with patch.object(managed_job_utils,
