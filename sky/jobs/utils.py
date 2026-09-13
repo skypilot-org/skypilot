@@ -3792,7 +3792,9 @@ def format_job_table(
     Args:
         jobs: A list of managed jobs.
         show_all: Whether to show all columns.
-        max_jobs: The maximum number of jobs to show in the table.
+        max_jobs: The maximum number of jobs to show in the table. A job
+          counts once with all of its rows (its tasks, and the jobs launched
+          under it), so the table never shows part of a job.
         return_rows: If True, return the rows as a list of strings instead of
           all rows concatenated into a single string.
         pool_status: List of pool status dictionaries with replica_info.
@@ -3808,10 +3810,22 @@ def format_job_table(
     if max_jobs and tasks_have_k8s_user:
         raise ValueError('max_jobs is not supported when tasks have user info.')
 
+    # A job launched from inside another managed job (a dynamic job group
+    # member) is shown under the top-level job of its tree, like that job's
+    # own tasks. Only when the root is in this listing, though: a member
+    # whose root was filtered out (or is gone) is shown as its own job.
+    listed_job_ids = {task['job_id'] for task in tasks}
+
+    def group_job_id(task) -> int:
+        root_job_id = task.get('root_job_id')
+        if root_job_id is not None and root_job_id in listed_job_ids:
+            return root_job_id
+        return task['job_id']
+
     def get_hash(task):
         if tasks_have_k8s_user:
-            return (task['user'], task['job_id'])
-        return task['job_id']
+            return (task['user'], group_job_id(task))
+        return group_job_id(task)
 
     def _get_job_id_to_worker_map(
             pool_status: Optional[List[Dict[str, Any]]]) -> Dict[int, int]:
@@ -3926,7 +3940,21 @@ def format_job_table(
 
     all_tasks = tasks
     if max_jobs is not None:
-        all_tasks = tasks[:max_jobs]
+        # Keep the first `max_jobs` jobs (trees), with every row of each.
+        # Cutting rows instead would drop the tail of a job: since a job's
+        # dynamic members (newer, higher ids) come before its own rows, a
+        # group with more members than the budget would lose its own rows
+        # and be rendered from the members alone, under a member's name and
+        # status.
+        kept_hashes: Dict[Any, None] = {}
+        all_tasks = []
+        for task in tasks:
+            task_hash = get_hash(task)
+            if task_hash not in kept_hashes:
+                if len(kept_hashes) >= max_jobs:
+                    continue
+                kept_hashes[task_hash] = None
+            all_tasks.append(task)
     jobs = collections.defaultdict(list)
     for task in all_tasks:
         # The tasks within the same job_id are already sorted
@@ -3962,7 +3990,18 @@ def format_job_table(
 
         return user_values
 
-    for job_hash, job_tasks in jobs.items():
+    for job_hash, group_tasks in jobs.items():
+        group_id = job_hash[1] if tasks_have_k8s_user else job_hash
+        # The top-level job's own tasks, and the jobs launched under it
+        # (dynamic members, each with its own job id). The group row
+        # aggregates the former only: a dynamic member never changes the
+        # group's status, duration or recovery count.
+        job_tasks = [t for t in group_tasks if t['job_id'] == group_id]
+        member_tasks = [t for t in group_tasks if t['job_id'] != group_id]
+        if not job_tasks:
+            # Should not happen (the root is listed by construction of
+            # group_job_id); render the members as their own jobs.
+            job_tasks, member_tasks = member_tasks, []
         if show_all:
             schedule_state = job_tasks[0]['schedule_state']
         workspace = job_tasks[0].get('workspace',
@@ -4052,14 +4091,22 @@ def format_job_table(
         has_auxiliary_tasks = any(
             t.get('is_primary_in_job_group') is False for t in job_tasks)
 
-        for task in job_tasks:
+        # How many rows each dynamic member has, so a multi-task member
+        # shows its task ids and a single-task one shows '-', like top-level
+        # jobs do.
+        member_row_counts = collections.Counter(
+            t['job_id'] for t in member_tasks)
+
+        for task in job_tasks + member_tasks:
+            is_member = task['job_id'] != group_id
             # The job['job_duration'] is already calculated in
             # dump_managed_job_queue().
             job_duration = log_utils.readable_time_duration(
                 0, task['job_duration'], absolute=True)
             submitted = log_utils.readable_time_duration(task['submitted_at'])
             user_values = get_user_column_values(task)
-            task_workspace = '-' if len(job_tasks) > 1 else workspace
+            task_workspace = ('-'
+                              if len(job_tasks) > 1 or is_member else workspace)
             pool = task.get('pool')
             if pool is None:
                 pool = '-'
@@ -4071,12 +4118,25 @@ def format_job_table(
 
             # Add [P] marker for primary tasks in job groups with auxiliaries
             task_name = task['task_name']
-            if has_auxiliary_tasks and task.get('is_primary_in_job_group'):
+            if (not is_member and has_auxiliary_tasks and
+                    task.get('is_primary_in_job_group')):
                 task_name = f'{task_name} [P]'
 
+            if is_member:
+                # A job launched from this group: indented under it, but with
+                # its own job id (it has its own logs and can be cancelled on
+                # its own), and its task id only if it has several tasks.
+                id_cell: Any = f' \u21B3 {task["job_id"]}'
+                task_cell: Any = (task['task_id']
+                                  if member_row_counts[task['job_id']] > 1 else
+                                  '-')
+            else:
+                id_cell = task['job_id'] if len(job_tasks) == 1 else ' \u21B3'
+                task_cell = task['task_id'] if len(job_tasks) > 1 else '-'
+
             values = [
-                task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
-                task['task_id'] if len(job_tasks) > 1 else '-',
+                id_cell,
+                task_cell,
                 *([task_workspace] if show_workspace else []),
                 task_name,
                 *user_values,
@@ -4097,7 +4157,8 @@ def format_job_table(
                 # schedule_state is only set at the job level, so if we have
                 # more than one task, only display on the aggregated row.
                 schedule_state = (task['schedule_state']
-                                  if len(job_tasks) == 1 else '-')
+                                  if len(job_tasks) == 1 and not is_member else
+                                  '-')
                 infra_str = task.get('infra')
                 if infra_str is None:
                     cloud = task.get('cloud')

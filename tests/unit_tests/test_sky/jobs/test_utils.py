@@ -1,4 +1,5 @@
 """Unit tests for sky.jobs.utils functions."""
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 from unittest.mock import MagicMock
@@ -1877,3 +1878,176 @@ class TestFieldsForController:
             ['job_id', 'status'])
         assert jobs_utils.queue_fields_need_controller_version(
             ['job_id', 'root_job_id'])
+
+
+class TestFormatJobTableDynamicMembers:
+    """`sky jobs queue` shows jobs launched from a group under that group."""
+
+    @staticmethod
+    def _row(job_id,
+             task_id=0,
+             task_name=None,
+             root_job_id=None,
+             status='RUNNING',
+             is_primary=None,
+             job_name=None):
+        return {
+            'job_id': job_id,
+            'task_id': task_id,
+            'task_name': task_name or f'task-{job_id}-{task_id}',
+            'job_name': job_name or f'job-{job_id}',
+            'workspace': 'default',
+            'resources': '1x[CPU:1]',
+            'submitted_at': 1_700_000_000.0,
+            'end_at': None,
+            'job_duration': 10,
+            'recovery_count': 0,
+            'status': managed_job_state.ManagedJobStatus(status),
+            'schedule_state': 'ALIVE',
+            'failure_reason': None,
+            'details': None,
+            'pool': None,
+            'is_primary_in_job_group': is_primary,
+            'root_job_id': root_job_id,
+            'parent_job_id': root_job_id,
+            'parent_task_id': None if root_job_id is None else 1,
+        }
+
+    @staticmethod
+    def _id_task_status(rows):
+        # Columns (show_all=False, no user column): ID, TASK, NAME, RESOURCES,
+        # SUBMITTED, TOT. DURATION, JOB DURATION, #RECOVERIES, STATUS, ...
+        ansi = re.compile(r'\x1b\[[0-9;]*m')
+        return [(str(r[0]), str(r[1]), ansi.sub('', str(r[8])).split(' ')[0])
+                for r in rows]
+
+    def test_members_render_under_their_group(self):
+        rows = [
+            # Newest first, as the queue returns them: the members precede
+            # their group.
+            self._row(58, task_id=1, root_job_id=42),
+            self._row(58, task_id=0, root_job_id=42),
+            self._row(57, root_job_id=42),
+            self._row(42,
+                      task_id=1,
+                      task_name='watcher',
+                      is_primary=False,
+                      job_name='rl'),
+            self._row(42,
+                      task_id=0,
+                      task_name='trainer',
+                      is_primary=True,
+                      job_name='rl'),
+            self._row(60),
+        ]
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True)
+        cells = self._id_task_status(table)
+        # Group row, its own tasks, then the members with their own ids
+        # (a multi-task member shows task ids, a single-task one '-'), then
+        # the unrelated job on its own.
+        assert cells == [
+            ('42', '', 'RUNNING'),
+            (' ↳', '1', 'RUNNING'),
+            (' ↳', '0', 'RUNNING'),
+            (' ↳ 58', '1', 'RUNNING'),
+            (' ↳ 58', '0', 'RUNNING'),
+            (' ↳ 57', '-', 'RUNNING'),
+            # The table separates a multi-row job from the next with a blank
+            # row.
+            ('', '', ''),
+            ('60', '-', 'RUNNING'),
+        ]
+
+    def test_max_jobs_keeps_whole_trees(self):
+        # `sky status` asks for a handful of jobs and `sky jobs queue` for
+        # 50, by job; the server page is N trees with every row of each.
+        # Group 42 has two tasks and six evals (43-48), all newer than the
+        # group so listed first, and 49 is an unrelated newer job. A cut by
+        # rows would keep five evals and drop the group's own rows, so the
+        # group would render under an eval's name with an eval's status.
+        rows = [self._row(49, status='SUCCEEDED')]
+        rows += [
+            self._row(eval_id, root_job_id=42, job_name=f'eval-{eval_id}')
+            for eval_id in range(48, 42, -1)
+        ]
+        rows += [
+            self._row(42,
+                      task_id=0,
+                      task_name='trainer',
+                      is_primary=True,
+                      job_name='rl',
+                      status='FAILED'),
+            self._row(42,
+                      task_id=1,
+                      task_name='watcher',
+                      is_primary=True,
+                      job_name='rl'),
+        ]
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True,
+                                            max_jobs=2)
+        # Blank separator rows aside: two jobs, 49, then the whole tree of
+        # 42 (own tasks first, then the members), with the group's status
+        # the trainer's.
+        cells = [c for c in self._id_task_status(table) if c != ('', '', '')]
+        assert cells == [
+            ('49', '-', 'SUCCEEDED'),
+            ('42', '', 'FAILED'),
+            (' ↳', '0', 'FAILED'),
+            (' ↳', '1', 'RUNNING'),
+        ] + [(f' ↳ {eval_id}', '-', 'RUNNING') for eval_id in range(48, 42, -1)]
+        # A budget of one job is just 49; the group is not partially shown.
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True,
+                                            max_jobs=1)
+        assert self._id_task_status(table) == [('49', '-', 'SUCCEEDED')]
+
+    def test_members_do_not_change_group_status(self):
+        rows = [
+            self._row(57, root_job_id=42, status='FAILED'),
+            self._row(42, task_id=1, task_name='watcher', is_primary=False),
+            self._row(42,
+                      task_id=0,
+                      task_name='trainer',
+                      is_primary=True,
+                      status='SUCCEEDED'),
+        ]
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True)
+        group_row = self._id_task_status(table)[0]
+        # Primary-driven: the failed member leaves the group SUCCEEDED.
+        assert group_row == ('42', '', 'SUCCEEDED')
+
+    def test_single_task_root_keeps_its_row_and_lists_members(self):
+        rows = [
+            self._row(57, root_job_id=42),
+            self._row(42),
+        ]
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True)
+        # A plain job with a member: its own row as usual, member indented.
+        cells = [c for c in self._id_task_status(table) if c != ('', '', '')]
+        assert cells == [
+            ('42', '-', 'RUNNING'),
+            (' ↳ 57', '-', 'RUNNING'),
+        ]
+
+    def test_member_with_unlisted_root_is_its_own_job(self):
+        # Root 99 filtered out of this listing (or gone): no dangling group.
+        rows = [self._row(70, root_job_id=99)]
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True)
+        assert self._id_task_status(table) == [('70', '-', 'RUNNING')]
