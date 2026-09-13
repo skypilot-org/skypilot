@@ -1,11 +1,16 @@
 """Unit tests for the per-context behavior of sky.usage.usage_lib.messages."""
 import asyncio
 import contextvars
+import json
+import time
+import types
 
 import pytest
 
+from sky import clouds as sky_clouds
 from sky.usage import usage_lib
 from sky.utils import context
+from sky.utils import env_options
 
 
 def _reset_module_state():
@@ -185,3 +190,279 @@ async def test_install_fresh_messages_isolates_concurrent_tasks(monkeypatch):
 
     assert a == 'task-a', a
     assert b == 'task-b', b
+
+
+def _enable_usage_collection(monkeypatch):
+    """Undo the suite-wide SKYPILOT_DISABLE_USAGE_COLLECTION=1.
+
+    pyproject.toml sets it for every test, and the capacity recorders honour
+    it by recording nothing — so these tests have to opt back in.
+    """
+    monkeypatch.delenv('SKYPILOT_DISABLE_USAGE_COLLECTION', raising=False)
+
+
+class _FakeKvCache:
+    """Dict-backed stand-in for sky.utils.db.kv_cache honouring expires_at."""
+
+    def __init__(self):
+        self.rows = {}
+        self.writes = []
+
+    def get_cache_entry(self, key):
+        row = self.rows.get(key)
+        if row is None or row[1] <= time.time():
+            return None
+        return row[0]
+
+    def add_or_update_cache_entry(self, key, value, expires_at):
+        self.writes.append(key)
+        self.rows[key] = (value, expires_at)
+
+    def get_cache_entries_by_prefix(self, prefix):
+        return {
+            k: v
+            for k, (v, exp) in self.rows.items()
+            if k.startswith(prefix) and exp > time.time()
+        }
+
+    def expire(self, key):
+        value, _ = self.rows[key]
+        self.rows[key] = (value, time.time() - 1)
+
+
+@pytest.fixture
+def capacity_store(monkeypatch):
+    """A heartbeat process with an empty capacity cache and telemetry on."""
+    _reset_module_state()
+    _enable_usage_collection(monkeypatch)
+    fake = _FakeKvCache()
+    monkeypatch.setattr('sky.utils.db.kv_cache.get_cache_entry',
+                        fake.get_cache_entry)
+    monkeypatch.setattr('sky.utils.db.kv_cache.add_or_update_cache_entry',
+                        fake.add_or_update_cache_entry)
+    monkeypatch.setattr('sky.utils.db.kv_cache.get_cache_entries_by_prefix',
+                        fake.get_cache_entries_by_prefix)
+    return fake
+
+
+def _fake_node(acc_type, count):
+    return types.SimpleNamespace(accelerator_type=acc_type,
+                                 total={'accelerator_count': count})
+
+
+def _fake_nodes_info(*nodes):
+    return types.SimpleNamespace(node_info_dict={
+        f'n{i}': n for i, n in enumerate(nodes)
+    })
+
+
+def _fake_slurm_node(node, gres, partition='batch'):
+    return types.SimpleNamespace(node=node, gres=gres, partition=partition)
+
+
+def _k8s_key(context):
+    return (usage_lib.constants.NODE_INFO_CACHE_KEY_PREFIX +
+            usage_lib._k8s_capacity_id(context))
+
+
+def _slurm_key(cluster):
+    return (usage_lib.constants.NODE_INFO_CACHE_KEY_PREFIX +
+            usage_lib._slurm_capacity_id(cluster))
+
+
+def test_collect_gpu_fleet(monkeypatch, capacity_store):
+    """Capacity is summed over Kubernetes, SSH and Slurm node inventory."""
+    per_context = {
+        'ctx-a': _fake_nodes_info(_fake_node('H100', 8), _fake_node('H100', 8),
+                                  _fake_node(None, 0)),
+        # Unreachable context — drops out, does not fail the heartbeat.
+        'ctx-b': None,
+        'ssh-pool': _fake_nodes_info(_fake_node('A100:80GB', 4),
+                                     _fake_node('tpu-v5e-8', 8)),
+    }
+
+    def fake_node_info(context=None):
+        info = per_context[context]
+        if info is None:
+            raise RuntimeError('context unreachable')
+        return info
+
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils._get_kubernetes_node_info',
+        fake_node_info)
+    monkeypatch.setattr(
+        'sky.provision.slurm.utils.get_slurm_nodes_info', lambda cluster: [
+            _fake_slurm_node('s1', 'gpu:h100:4'),
+            _fake_slurm_node('s2', 'gpu:2'),
+        ])
+
+    counts = usage_lib._collect_gpu_fleet(['ctx-a', 'ctx-b', 'ssh-pool'],
+                                          ['slurm-a'])
+    assert counts == {'H100': 16, 'A100:80GB': 4, 'h100': 4, 'gpu': 2}
+
+    # Every reachable infra was recorded for the next tick.
+    assert _k8s_key('ctx-a') in capacity_store.rows
+    assert _k8s_key('ssh-pool') in capacity_store.rows
+    assert _slurm_key('slurm-a') in capacity_store.rows
+    assert _k8s_key('ctx-b') not in capacity_store.rows
+
+
+def test_slurm_nodes_are_deduped_across_partitions():
+    """sinfo --Node repeats a node per partition; count it once."""
+    counts = usage_lib._gpu_capacity_from_slurm_nodes([
+        _fake_slurm_node('s1', 'gpu:h100:8', partition='batch'),
+        _fake_slurm_node('s1', 'gpu:h100:8', partition='debug'),
+        _fake_slurm_node('s2', '(null)'),
+    ])
+    assert counts == {'h100': 8}
+
+
+def test_recorded_rows_skip_the_fetch(monkeypatch, capacity_store):
+    """Fresh rows are read in one query and their infras are not fetched."""
+    fetched = []
+
+    def fake_node_info(context=None):
+        fetched.append(context)
+        return _fake_nodes_info(_fake_node('H100', 8))
+
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils._get_kubernetes_node_info',
+        fake_node_info)
+
+    # Something else — a dashboard request, say — already recorded ctx-a.
+    usage_lib.record_node_info('ctx-a', _fake_nodes_info(_fake_node('H100', 8)))
+
+    counts = usage_lib._collect_gpu_fleet(['ctx-a', 'ctx-b'], [])
+    assert counts == {'H100': 16}
+    assert fetched == ['ctx-b']
+
+    # Once the row expires the context is fetched again.
+    capacity_store.expire(_k8s_key('ctx-a'))
+    usage_lib._collect_gpu_fleet(['ctx-a'], [])
+    assert fetched == ['ctx-b', 'ctx-a']
+
+
+def test_record_gpu_capacity_leaves_fresh_rows_alone(capacity_store):
+    """A busy node-info reader must not upsert on every call."""
+    counts = {'H100': 8}
+    for _ in range(20):
+        usage_lib.record_gpu_capacity('kubernetes/ctx', counts)
+    assert len(capacity_store.writes) == 1
+
+    capacity_store.expire(_k8s_key('ctx'))
+    usage_lib.record_gpu_capacity('kubernetes/ctx', counts)
+    assert len(capacity_store.writes) == 2
+
+    # Only the derived counts are stored, never the inventory.
+    value, _ = capacity_store.rows[_k8s_key('ctx')]
+    assert json.loads(value) == counts
+
+
+def test_node_info_not_recorded_when_usage_collection_disabled(
+        monkeypatch, capacity_store):
+    """An opted-out server accumulates no capacity state."""
+    monkeypatch.setenv('SKYPILOT_DISABLE_USAGE_COLLECTION', '1')
+    usage_lib.record_node_info('ctx', _fake_nodes_info(_fake_node('H100', 8)))
+    assert not capacity_store.rows
+
+
+def test_enforced_usage_collection_overrides_the_env_var(monkeypatch):
+    """A deployment that pins usage collection on must keep recording.
+
+    An enterprise plugin enforces collection by patching
+    ``env_options.Options.get`` so ``DISABLE_LOGGING`` reads False whatever
+    the environment says. Every opt-out check on the heartbeat path must go
+    through that accessor, never the environment directly, or the plugin's
+    override silently stops applying to the new fields.
+    """
+    _reset_module_state()
+    fake = _FakeKvCache()
+    monkeypatch.setattr('sky.utils.db.kv_cache.get_cache_entry',
+                        fake.get_cache_entry)
+    monkeypatch.setattr('sky.utils.db.kv_cache.add_or_update_cache_entry',
+                        fake.add_or_update_cache_entry)
+
+    # The user opted out...
+    monkeypatch.setenv('SKYPILOT_DISABLE_USAGE_COLLECTION', '1')
+    # ...but the deployment pins collection on, the way the plugin does.
+    original_get = env_options.Options.get
+
+    def _enforced_get(self):
+        if self == env_options.Options.DISABLE_LOGGING:
+            return False
+        return original_get(self)
+
+    monkeypatch.setattr(env_options.Options, 'get', _enforced_get)
+
+    usage_lib.record_node_info('ctx', _fake_nodes_info(_fake_node('H100', 8)))
+    assert _k8s_key('ctx') in fake.rows, 'enforcement must reach recording'
+
+    # And the message itself is still sent.
+    sent = []
+    monkeypatch.setattr(
+        usage_lib.requests, 'post',
+        lambda *a, **k: sent.append(k) or types.SimpleNamespace(status_code=204,
+                                                                text=''))
+    usage_lib._send_to_loki(usage_lib.MessageType.SERVER_HEARTBEAT)
+    assert len(sent) == 1, 'enforcement must reach the Loki send'
+
+
+def test_collect_infra_count(monkeypatch):
+    """Each infra kind is counted; 'clouds' excludes the separate keys."""
+    monkeypatch.setattr('sky.skypilot_config.get_nested',
+                        lambda keys, default_value=None, **kw: {'team-a': {}}
+                        if keys == ('workspaces',) else default_value)
+    # 'kubernetes' and 'slurm' are already counted under their own keys, so
+    # they must not also land in the 'clouds' total.
+    monkeypatch.setattr(
+        'sky.global_user_state.get_cached_enabled_clouds',
+        lambda capability, workspace: [
+            sky_clouds.AWS(),
+            sky_clouds.GCP(),
+            sky_clouds.Kubernetes(),
+            sky_clouds.Slurm(),
+        ])
+
+    infra_count = usage_lib._collect_infra_count(['ctx-a', 'ctx-b', 'ctx-c'],
+                                                 ['ssh-pool'], [])
+    assert infra_count == {
+        'kubernetes': 3,
+        'ssh_node_pools': 1,
+        'slurm': 0,
+        'clouds': 2,
+    }
+
+
+def test_collect_infra_count_omits_failed_lookups(monkeypatch):
+    """A failed lookup (None) drops its key; an empty one reports zero."""
+    monkeypatch.setattr('sky.skypilot_config.get_nested',
+                        lambda keys, default_value=None, **kw: default_value)
+    monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',
+                        lambda capability, workspace: [sky_clouds.AWS()])
+
+    infra_count = usage_lib._collect_infra_count(None, ['ssh-pool'],
+                                                 ['slurm-a'])
+    assert 'kubernetes' not in infra_count
+    assert infra_count == {'ssh_node_pools': 1, 'slurm': 1, 'clouds': 1}
+
+
+def test_plugins_field_is_provider_gated():
+    """'plugins' appears only with a provider; the counts always send."""
+    _reset_module_state()
+    original = dict(usage_lib.ServerHeartbeatMessage._data_providers)
+    usage_lib.ServerHeartbeatMessage._data_providers.clear()
+    try:
+        properties = usage_lib.messages.server_heartbeat.get_properties()
+        assert 'plugins' not in properties
+        # The GPU and infra fields are present regardless.
+        assert properties['total_gpus'] == 0
+        assert properties['gpus_by_type'] == {}
+        assert properties['infra_count'] == {}
+
+        usage_lib.ServerHeartbeatMessage.register_provider(
+            'billing', lambda: {'gpu_inventory': 8})
+        properties = usage_lib.messages.server_heartbeat.get_properties()
+        assert properties['plugins'] == {'billing': {'gpu_inventory': 8}}
+    finally:
+        usage_lib.ServerHeartbeatMessage._data_providers.clear()
+        usage_lib.ServerHeartbeatMessage._data_providers.update(original)

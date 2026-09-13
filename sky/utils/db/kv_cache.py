@@ -1,6 +1,6 @@
 """Persistent KV cache, backed by a sqlite or postgres database."""
 import time
-from typing import Optional
+from typing import Dict, Optional
 
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
@@ -113,6 +113,32 @@ def _escape_like(value: str) -> str:
     """Escape SQL LIKE wildcard characters (%, _) in a literal value."""
     return (value.replace(_LIKE_ESCAPE_CHAR, _LIKE_ESCAPE_CHAR * 2).replace(
         '%', f'{_LIKE_ESCAPE_CHAR}%').replace('_', f'{_LIKE_ESCAPE_CHAR}_'))
+
+
+@metrics_lib.time_me
+def get_cache_entries_by_prefix(prefix: str) -> Dict[str, str]:
+    """Get all unexpired cache entries whose key starts with the given prefix.
+
+    One query for a whole key namespace, for callers that would otherwise
+    issue one ``get_cache_entry`` per key. Any SQL LIKE wildcards (%, _) in
+    *prefix* are escaped so they are matched literally.
+
+    Args:
+        prefix: The literal prefix to match against cache keys.
+
+    Returns:
+        Mapping from full key to value for every matching, unexpired entry.
+    """
+    escaped = _escape_like(prefix)
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(
+                kv_cache_table.c.key, kv_cache_table.c.value).where(
+                    kv_cache_table.c.key.like(
+                        f'{escaped}%', escape=_LIKE_ESCAPE_CHAR)).where(
+                            kv_cache_table.c.expires_at > time.time()))
+        return {key: value for key, value in rows}
 
 
 @metrics_lib.time_me

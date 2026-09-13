@@ -4536,6 +4536,29 @@ def get_kubernetes_node_info(
         context: Optional[str] = None) -> models.KubernetesNodesInfo:
     """Gets the resource information for all the nodes in the cluster.
 
+    Results are also recorded as fleet GPU capacity for the usage heartbeat
+    (see usage_lib.record_node_info), so that daemon can reuse inventory any
+    caller already fetched instead of querying again. Recording is one
+    indexed DB read when a fresh row exists, one write when it does not, and
+    never affects what this function returns.
+    """
+    nodes_info = _get_kubernetes_node_info(context)
+    try:
+        # pylint: disable=import-outside-toplevel
+        from sky.usage import usage_lib
+        resolved_context = (context if context is not None else
+                            get_current_kube_config_context_name())
+        usage_lib.record_node_info(resolved_context, nodes_info)
+    except Exception as e:  # pylint: disable=broad-except
+        # Telemetry bookkeeping must never break a node info query.
+        logger.debug(f'Failed to record node info for telemetry: {e}')
+    return nodes_info
+
+
+def _get_kubernetes_node_info(
+        context: Optional[str] = None) -> models.KubernetesNodesInfo:
+    """Gets the resource information for all the nodes in the cluster.
+
     This function returns a model with node info map as a nested field. This
     allows future extensions while keeping the client-server compatibility,
     e.g. when adding a new field to the model, the legacy clients will not be
