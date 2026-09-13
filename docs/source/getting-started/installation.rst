@@ -58,7 +58,7 @@ SkyPilot supports installation with ``uv`` or ``pip``.
     .. code-block:: shell
 
       # Recommended: use a new conda env to avoid package conflicts.
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       conda create -y -n sky python=3.10
       conda activate sky
 
@@ -81,7 +81,7 @@ SkyPilot supports installation with ``uv`` or ``pip``.
         .. code-block:: shell
 
           # Create a virtual environment with pip pre-installed (required for SkyPilot)
-          # SkyPilot requires 3.7 <= python <= 3.13.
+          # SkyPilot requires 3.9 <= python <= 3.13.
           uv venv --seed --python 3.10
           source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
@@ -97,7 +97,7 @@ SkyPilot supports installation with ``uv`` or ``pip``.
         .. code-block:: shell
 
           # Install as a globally available tool with pip included
-          # SkyPilot requires 3.7 <= python <= 3.13.
+          # SkyPilot requires 3.9 <= python <= 3.13.
           uv tool install --with pip skypilot-nightly
 
           # Build the dashboard (requires Node.js and npm)
@@ -110,7 +110,7 @@ SkyPilot supports installation with ``uv`` or ``pip``.
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.13.
+          # SkyPilot requires 3.9 <= python <= 3.13.
           conda create -y -n sky python=3.10
           conda activate sky
 
@@ -125,7 +125,7 @@ SkyPilot supports installation with ``uv`` or ``pip``.
     .. code-block:: shell
 
       # Recommended: use a new conda env to avoid package conflicts.
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       conda create -y -n sky python=3.10
       conda activate sky
 
@@ -325,7 +325,7 @@ Install the necessary dependencies for Kubernetes.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[kubernetes]"
       # From nightly build
@@ -336,7 +336,7 @@ Install the necessary dependencies for Kubernetes.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[kubernetes]"
       # From nightly build
@@ -347,7 +347,7 @@ Install the necessary dependencies for Kubernetes.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[kubernetes]"
       # From nightly build
@@ -412,7 +412,7 @@ Install the necessary dependencies for AWS.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[aws]"
       # From nightly build
@@ -423,7 +423,7 @@ Install the necessary dependencies for AWS.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[aws]"
       # From nightly build
@@ -434,7 +434,7 @@ Install the necessary dependencies for AWS.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[aws]"
       # From nightly build
@@ -472,7 +472,7 @@ Install the necessary dependencies for GCP.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[gcp]"
       # From nightly build
@@ -483,7 +483,7 @@ Install the necessary dependencies for GCP.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[gcp]"
       # From nightly build
@@ -494,7 +494,7 @@ Install the necessary dependencies for GCP.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[gcp]"
       # From nightly build
@@ -563,7 +563,7 @@ Install the necessary dependencies for Azure.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       # Azure CLI has an issue with uv, and requires '--prerelease allow'.
       uv pip install --prerelease allow "azure-cli<2.87.0"
@@ -578,7 +578,7 @@ Install the necessary dependencies for Azure.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[azure]"
       # From nightly build
@@ -589,7 +589,7 @@ Install the necessary dependencies for Azure.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[azure]"
       # From nightly build
@@ -625,7 +625,7 @@ Kubernetes (CKS)
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[coreweave]"
       # From nightly build
@@ -636,7 +636,7 @@ Kubernetes (CKS)
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[coreweave]"
       # From nightly build
@@ -647,7 +647,7 @@ Kubernetes (CKS)
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[coreweave]"
       # From nightly build
@@ -675,7 +675,7 @@ Slurm (SUNK)
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[slurm]"
       # From nightly build
@@ -686,7 +686,7 @@ Slurm (SUNK)
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[slurm]"
       # From nightly build
@@ -697,7 +697,7 @@ Slurm (SUNK)
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[slurm]"
       # From nightly build
@@ -865,7 +865,7 @@ Together AI
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[kubernetes]"
       # From nightly build
@@ -876,7 +876,7 @@ Together AI
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[kubernetes]"
       # From nightly build
@@ -887,7 +887,7 @@ Together AI
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[kubernetes]"
       # From nightly build
@@ -917,7 +917,7 @@ Install the necessary dependencies for RunPod
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[runpod]"
       # From nightly build
@@ -928,7 +928,7 @@ Install the necessary dependencies for RunPod
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[runpod]"
       # From nightly build
@@ -939,7 +939,7 @@ Install the necessary dependencies for RunPod
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[runpod]"
       # From nightly build
@@ -967,7 +967,7 @@ Install the necessary dependencies for OCI.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[oci]"
       # From nightly build
@@ -978,7 +978,7 @@ Install the necessary dependencies for OCI.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[oci]"
       # From nightly build
@@ -989,7 +989,7 @@ Install the necessary dependencies for OCI.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[oci]"
       # From nightly build
@@ -1068,7 +1068,7 @@ Install the necessary dependencies for Lambda Cloud.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[lambda]"
       # From nightly build
@@ -1079,7 +1079,7 @@ Install the necessary dependencies for Lambda Cloud.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[lambda]"
       # From nightly build
@@ -1090,7 +1090,7 @@ Install the necessary dependencies for Lambda Cloud.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[lambda]"
       # From nightly build
@@ -1118,7 +1118,7 @@ Install the necessary dependencies for Paperspace.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[paperspace]"
       # From nightly build
@@ -1129,7 +1129,7 @@ Install the necessary dependencies for Paperspace.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[paperspace]"
       # From nightly build
@@ -1140,7 +1140,7 @@ Install the necessary dependencies for Paperspace.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[paperspace]"
       # From nightly build
@@ -1168,7 +1168,7 @@ Install the necessary dependencies for Vast.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[vast]"
       # From nightly build
@@ -1179,7 +1179,7 @@ Install the necessary dependencies for Vast.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[vast]"
       # From nightly build
@@ -1190,7 +1190,7 @@ Install the necessary dependencies for Vast.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[vast]"
       # From nightly build
@@ -1219,7 +1219,7 @@ Install the necessary dependencies for Fluidstack.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[fluidstack]"
       # From nightly build
@@ -1230,7 +1230,7 @@ Install the necessary dependencies for Fluidstack.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[fluidstack]"
       # From nightly build
@@ -1241,7 +1241,7 @@ Install the necessary dependencies for Fluidstack.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[fluidstack]"
       # From nightly build
@@ -1269,7 +1269,7 @@ Cudo Compute |community-badge|
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[cudo]"
       # From nightly build
@@ -1280,7 +1280,7 @@ Cudo Compute |community-badge|
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[cudo]"
       # From nightly build
@@ -1291,7 +1291,7 @@ Cudo Compute |community-badge|
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[cudo]"
       # From nightly build
@@ -1331,7 +1331,7 @@ Install the necessary dependencies for Shadeform.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[shadeform]"
       # From nightly build
@@ -1342,7 +1342,7 @@ Install the necessary dependencies for Shadeform.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[shadeform]"
       # From nightly build
@@ -1353,7 +1353,7 @@ Install the necessary dependencies for Shadeform.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[shadeform]"
       # From nightly build
@@ -1522,7 +1522,7 @@ Install the necessary dependencies for VMware vSphere.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[vsphere]"
       # From nightly build
@@ -1533,7 +1533,7 @@ Install the necessary dependencies for VMware vSphere.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[vsphere]"
       # From nightly build
@@ -1544,7 +1544,7 @@ Install the necessary dependencies for VMware vSphere.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[vsphere]"
       # From nightly build
@@ -1600,7 +1600,7 @@ Install the necessary dependencies for Cloudflare R2.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[cloudflare]"
       # From nightly build
@@ -1611,7 +1611,7 @@ Install the necessary dependencies for Cloudflare R2.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[cloudflare]"
       # From nightly build
@@ -1622,7 +1622,7 @@ Install the necessary dependencies for Cloudflare R2.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[cloudflare]"
       # From nightly build
@@ -1678,7 +1678,7 @@ Install the necessary dependencies for VastData:
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[vastdata]"
       # From nightly build
@@ -1689,7 +1689,7 @@ Install the necessary dependencies for VastData:
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[vastdata]"
       # From nightly build
@@ -1700,7 +1700,7 @@ Install the necessary dependencies for VastData:
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[vastdata]"
       # From nightly build
@@ -1750,7 +1750,7 @@ Install the necessary dependencies for Hugging Face:
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[huggingface]"
       # From nightly build
@@ -1761,7 +1761,7 @@ Install the necessary dependencies for Hugging Face:
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[huggingface]"
       # From nightly build
@@ -1772,7 +1772,7 @@ Install the necessary dependencies for Hugging Face:
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[huggingface]"
       # From nightly build
@@ -1810,7 +1810,7 @@ Install the necessary dependencies for Prime Intellect.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[primeintellect]"
       # From nightly build
@@ -1821,7 +1821,7 @@ Install the necessary dependencies for Prime Intellect.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[primeintellect]"
       # From nightly build
@@ -1832,7 +1832,7 @@ Install the necessary dependencies for Prime Intellect.
 
     .. code-block:: shell
 
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       # From stable release
       pip install "skypilot[primeintellect]"
       # From nightly build
