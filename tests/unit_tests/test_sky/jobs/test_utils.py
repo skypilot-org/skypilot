@@ -1961,6 +1961,54 @@ class TestFormatJobTableDynamicMembers:
             ('60', '-', 'RUNNING'),
         ]
 
+    def test_max_jobs_keeps_whole_trees(self):
+        # `sky status` asks for a handful of jobs and `sky jobs queue` for
+        # 50, by job; the server page is N trees with every row of each.
+        # Group 42 has two tasks and six evals (43-48), all newer than the
+        # group so listed first, and 49 is an unrelated newer job. A cut by
+        # rows would keep five evals and drop the group's own rows, so the
+        # group would render under an eval's name with an eval's status.
+        rows = [self._row(49, status='SUCCEEDED')]
+        rows += [
+            self._row(eval_id, root_job_id=42, job_name=f'eval-{eval_id}')
+            for eval_id in range(48, 42, -1)
+        ]
+        rows += [
+            self._row(42,
+                      task_id=0,
+                      task_name='trainer',
+                      is_primary=True,
+                      job_name='rl',
+                      status='FAILED'),
+            self._row(42,
+                      task_id=1,
+                      task_name='watcher',
+                      is_primary=True,
+                      job_name='rl'),
+        ]
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True,
+                                            max_jobs=2)
+        # Blank separator rows aside: two jobs, 49, then the whole tree of
+        # 42 (own tasks first, then the members), with the group's status
+        # the trainer's.
+        cells = [c for c in self._id_task_status(table) if c != ('', '', '')]
+        assert cells == [
+            ('49', '-', 'SUCCEEDED'),
+            ('42', '', 'FAILED'),
+            (' ↳', '0', 'FAILED'),
+            (' ↳', '1', 'RUNNING'),
+        ] + [(f' ↳ {eval_id}', '-', 'RUNNING') for eval_id in range(48, 42, -1)]
+        # A budget of one job is just 49; the group is not partially shown.
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True,
+                                            max_jobs=1)
+        assert self._id_task_status(table) == [('49', '-', 'SUCCEEDED')]
+
     def test_members_do_not_change_group_status(self):
         rows = [
             self._row(57, root_job_id=42, status='FAILED'),
