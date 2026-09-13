@@ -2320,8 +2320,8 @@ class JobController:
                             'this controller started; terminating auxiliary '
                             'jobs')
                 await on_all_primaries_done()
-                # Mirror the live path, which breaks out of the loop without
-                # recording results for the terminated auxiliaries.
+                # The terminated auxiliaries' monitors are already done, so
+                # there is nothing left to wait on; the loop below is skipped.
                 monitor_async_tasks.clear()
 
             # Monitor with primary/auxiliary termination logic
@@ -2636,9 +2636,7 @@ class JobController:
         finally:
             if not cancelled:
                 # Jobs launched from this job go down with it when it
-                # finishes on its own. A user cancel already took the whole
-                # subtree server-side (cancel_jobs_by_id expands to
-                # descendants), so nothing to do in that case.
+                # finishes on its own.
                 await self._cancel_dynamic_members(
                     f'with job {self._job_id}: it finished')
             callback_func = managed_job_utils.event_callback_func(
@@ -2647,6 +2645,17 @@ class JobController:
                 task=self._dag.tasks[task_id])
             await managed_job_state.set_cancelling_async(
                 job_id=self._job_id, callback_func=callback_func)
+            if cancelled:
+                # A user cancel took this job's subtree server-side when the
+                # request came in (cancel_jobs_by_id expands to descendants),
+                # but a launch whose row landed after that expansion was
+                # missed, and it may keep landing until the CANCELLING just
+                # written above: the insert re-checks the parent and refuses
+                # from here on. So expand once more, now, and the two
+                # together leave nothing behind.
+                await self._cancel_dynamic_members(
+                    f'with job {self._job_id}: it was cancelled',
+                    on_cancel=True)
             if not cancelled:
                 # the others haven't been run yet so we can set them to
                 # cancelled immediately (no resources to clean up).
@@ -2655,21 +2664,30 @@ class JobController:
                 await managed_job_state.set_cancelled_async(
                     job_id=self._job_id, callback_func=callback_func)
 
-    async def _cancel_dynamic_members(self, note: str) -> None:
-        """Cancel the jobs launched under this job, if it is a tree root.
+    async def _cancel_dynamic_members(self,
+                                      note: str,
+                                      *,
+                                      on_cancel: bool = False) -> None:
+        """Cancel the jobs launched under this job.
 
-        Lifetime is owned by the root: when the top-level job finishes (its
-        primaries for a job group, the job itself otherwise) everything
-        launched under it, at any depth, is swept. A dynamic member finishing
-        sweeps nothing; its children stay under the root. (Explicit cancel of
-        any node still takes that node's subtree; that is the cancel path,
-        not this one.)
+        On its own completion only a tree root sweeps. Lifetime is owned by
+        the root: when the top-level job finishes (its primaries for a job
+        group, the job itself otherwise) everything launched under it, at
+        any depth, is swept. A dynamic member finishing sweeps nothing; its
+        children stay under the root.
+
+        On a user cancel (``on_cancel``) any node takes its own subtree,
+        root or not: that is what cancelling a job means, and this is the
+        pass that catches a child whose row landed after the request-time
+        expansion (see run()).
 
         Idempotent per controller: the job-group primaries-done sweep and
         run()'s completion backstop may both reach here. Best-effort: a
         failure to sweep must never change this job's own final state.
         """
-        if not self._is_tree_root or self._dynamic_members_swept:
+        if not on_cancel and not self._is_tree_root:
+            return
+        if self._dynamic_members_swept:
             return
         self._dynamic_members_swept = True
         try:
