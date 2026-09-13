@@ -2016,6 +2016,27 @@ class TestParentJobLinks:
         with pytest.raises(ValueError, match=f'job {eval1}: it is CANCELLING'):
             self._new_job('eval-1b', parent_job_id=eval1, root_job_id=root)
 
+    def test_root_is_read_from_the_parent_row_not_the_caller(
+            self, _mock_managed_jobs_db_conn):
+        # The guard finds the root through the parent's own row, so a caller
+        # that names no root (or the wrong one) cannot weaken it.
+        root = self._new_job('group')
+        self._set_task_status(root, state.ManagedJobStatus.RUNNING)
+        eval1 = self._new_job('eval-1', parent_job_id=root)
+        self._set_task_status(eval1, state.ManagedJobStatus.RUNNING)
+        self._set_task_status(root, state.ManagedJobStatus.CANCELLING)
+        for claimed_root in (None, eval1):
+            with pytest.raises(ValueError,
+                               match=f'job {root}: it is CANCELLING'):
+                state.set_job_info_without_job_id(name='eval-1a',
+                                                  workspace='ws',
+                                                  entrypoint='ep',
+                                                  pool=None,
+                                                  pool_hash=None,
+                                                  user_hash='u',
+                                                  parent_job_id=eval1,
+                                                  root_job_id=claimed_root)
+
     def test_codegen_insert_path_has_the_same_guard(self,
                                                     _mock_managed_jobs_db_conn):
         # set_job_info is the helper the controller-side codegen emits; it
