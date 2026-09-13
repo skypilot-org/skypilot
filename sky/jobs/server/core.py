@@ -1,4 +1,5 @@
 """SDK functions for managed jobs."""
+import contextlib
 import datetime
 import ipaddress
 import os
@@ -436,7 +437,10 @@ def _maybe_submit_job_locally(
         prefix: str,
         dag: 'sky.Dag',
         num_jobs: int,
-        file_mounts_blob_id: Optional[str] = None) -> Optional[List[int]]:
+        file_mounts_blob_id: Optional[str] = None,
+        parent_job_id: Optional[int] = None,
+        parent_task_id: Optional[int] = None,
+        root_job_id: Optional[int] = None) -> Optional[List[int]]:
     """Submit the managed job locally if in consolidation mode.
 
     In normal mode the managed job submission is done in the ray job submission.
@@ -486,7 +490,10 @@ def _maybe_submit_job_locally(
                 user_hash=common_utils.get_user_hash(),
                 execution=execution_mode,
                 is_batch=is_batch,
-                file_mounts_blob_id=file_mounts_blob_id))
+                file_mounts_blob_id=file_mounts_blob_id,
+                parent_job_id=parent_job_id,
+                parent_task_id=parent_task_id,
+                root_job_id=root_job_id))
         for task_id, task in enumerate(dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
@@ -654,6 +661,107 @@ def _submit_remotely(controller: controller_utils.Controllers,
     return job_ids
 
 
+def _client_set_workspace() -> bool:
+    """Whether the request named a workspace itself.
+
+    The executor resolves an unset workspace to the user's preferred one and
+    sets it as the thread-local context before the handler runs, so the
+    context alone cannot tell "the client said default" from "nothing was
+    said". The merged config still can: the client's override only carries
+    ``active_workspace`` when it was set.
+    """
+    return skypilot_config.get_nested(keys=('active_workspace',),
+                                      default_value=None) is not None
+
+
+def _check_job_group_attachment(
+    parent_job_id: Optional[int], parent_task_id: Optional[int],
+    job_group_explicit: bool
+) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[str]]:
+    """Validate, and possibly drop, a dynamic job group attachment.
+
+    Attachments are recorded in consolidation mode only, where the
+    managed-jobs state lives on the API server and the parent can be checked.
+    With a remote jobs controller (OSS local API server) dynamic job groups
+    are not supported: an explicit request errors, the in-job-group default
+    is dropped with a log so a watcher's nested launch keeps working as a
+    top-level job, as it did before.
+
+    Returns ``(parent_job_id, parent_task_id, root_job_id, workspace)``: the
+    ids to record (all None when nothing is to be recorded; the root comes
+    from the parent's row, which is authoritative for the tree) and the
+    workspace the launch must run in when it did not name one itself, i.e.
+    the parent's (None when the request already runs in it).
+
+    Raises:
+        ValueError: parent_task_id without parent_job_id; or the parent does
+            not exist, is not a job group or part of one, is no longer
+            running (finished, or being cancelled), or is in a different
+            workspace than the one the request named.
+        exceptions.NotSupportedError: explicit attachment with a remote jobs
+            controller.
+    """
+    if parent_job_id is None:
+        if parent_task_id is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('parent_task_id requires parent_job_id.')
+        return None, None, None, None
+    if not managed_job_utils.is_consolidation_mode():
+        if job_group_explicit:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    'Attaching a job to a job group requires the API server '
+                    'to run managed jobs in consolidation mode (a remote API '
+                    'server). This server uses a separate jobs controller.')
+        logger.info(f'Not attaching to job group {parent_job_id}: dynamic '
+                    'job groups are not supported with a separate jobs '
+                    'controller (non-consolidation mode). Launching as a '
+                    'top-level job.')
+        return None, None, None, None
+    parent = managed_job_state.get_job_info_row(parent_job_id)
+    status = managed_job_state.get_status(parent_job_id)
+    if parent is None or status is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Cannot attach to job {parent_job_id}: no such '
+                             'managed job.')
+    # The target is a job group, or a job already inside one (a dynamic task
+    # launching its own). A plain job's own nested launches stay top-level
+    # (the controller gives its tasks no tree marker), so letting an outside
+    # launch root a tree at it would leave that tree inconsistent: cancel it
+    # and one child goes, the other does not.
+    if not parent.is_job_group and parent.root_job_id is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Cannot attach to job {parent_job_id}: it is not '
+                             'a job group. Pass a job group\'s id or name.')
+    # Only a job that is still running accepts new tasks. A finished one
+    # has nothing left to sweep them, and a cancel in flight would orphan
+    # them, so both are refused rather than special-cased.
+    if (status.is_terminal() or
+            status == managed_job_state.ManagedJobStatus.CANCELLING):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Cannot attach to job {parent_job_id}: it is '
+                             f'{status.value}; only a running job group '
+                             'accepts new tasks.')
+    # A nested launch carries no workspace of its own: the controller sets
+    # the job and root ids on the task, not the workspace, so the request
+    # arrives unset and resolves to the user's preferred workspace. It must
+    # run where its group runs, so the parent's workspace is adopted unless
+    # the request named one, in which case a mismatch is an error (same
+    # rule as cancel; a row from before workspaces existed counts as the
+    # default workspace, which JobInfoRow resolves).
+    workspace: Optional[str] = None
+    active_workspace = skypilot_config.get_active_workspace()
+    if parent.workspace != active_workspace:
+        if _client_set_workspace():
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot attach to job {parent_job_id}: it is in '
+                    f'workspace {parent.workspace!r}, not the requested '
+                    f'workspace {active_workspace!r}.')
+        workspace = parent.workspace
+    return parent_job_id, parent_task_id, parent.tree_root_job_id, workspace
+
+
 def _create_job_api_token(creator_user_id: str, job_name: Optional[str],
                           dag_uuid: str) -> Tuple[str, str]:
     """Create a service account token for a managed job with api_server_access.
@@ -697,6 +805,9 @@ def launch(
     num_jobs: Optional[int] = None,
     stream_logs: bool = True,
     file_mounts_blob_id: Optional[str] = None,
+    parent_job_id: Optional[int] = None,
+    parent_task_id: Optional[int] = None,
+    job_group_explicit: bool = False,
 ) -> Tuple[Optional[Union[int, List[int]]], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launches a managed job.
@@ -707,6 +818,15 @@ def launch(
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
           managed job.
         name: Name of the managed job.
+        parent_job_id: Managed job to attach this job to as a dynamic member
+          (it is shown under that job and cancelled with it). None for a
+          top-level job.
+        parent_task_id: Task within the parent that launched this job, when
+          known. Recorded for display only.
+        job_group_explicit: Whether the caller asked for the attachment (as
+          opposed to the in-job-group default). Only matters where
+          attachments are unsupported (non-consolidation mode): explicit
+          errors, automatic launches top-level.
 
     Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
@@ -722,6 +842,38 @@ def launch(
       handle: Optional[backends.ResourceHandle]; handle to the controller VM.
         None if dryrun.
     """
+    parent_job_id, parent_task_id, root_job_id, workspace = (
+        _check_job_group_attachment(parent_job_id, parent_task_id,
+                                    job_group_explicit))
+    # A launch attaching to a group runs in the group's workspace when it
+    # did not name one (see _check_job_group_attachment): the row it writes,
+    # the policies and the credentials it launches with all follow.
+    workspace_ctx = (skypilot_config.local_active_workspace_ctx(workspace)
+                     if workspace is not None else contextlib.nullcontext())
+    with workspace_ctx:
+        return _launch(task,
+                       name=name,
+                       pool=pool,
+                       num_jobs=num_jobs,
+                       stream_logs=stream_logs,
+                       file_mounts_blob_id=file_mounts_blob_id,
+                       parent_job_id=parent_job_id,
+                       parent_task_id=parent_task_id,
+                       root_job_id=root_job_id)
+
+
+def _launch(
+    task: Union['sky.Task', 'sky.Dag'],
+    name: Optional[str],
+    pool: Optional[str],
+    num_jobs: Optional[int],
+    stream_logs: bool,
+    file_mounts_blob_id: Optional[str],
+    parent_job_id: Optional[int],
+    parent_task_id: Optional[int],
+    root_job_id: Optional[int],
+) -> Tuple[Optional[Union[int, List[int]]], Optional[backends.ResourceHandle]]:
+    """``launch`` after the attachment is resolved; ids are recorded as-is."""
     entrypoint = task
     # using hasattr instead of isinstance to avoid importing sky
     if hasattr(task, 'metadata'):
@@ -936,7 +1088,10 @@ def launch(
     job_ids = _maybe_submit_job_locally(prefix,
                                         dag,
                                         num_jobs,
-                                        file_mounts_blob_id=file_mounts_blob_id)
+                                        file_mounts_blob_id=file_mounts_blob_id,
+                                        parent_job_id=parent_job_id,
+                                        parent_task_id=parent_task_id,
+                                        root_job_id=root_job_id)
     is_consolidation_mode = job_ids is not None
     if not is_consolidation_mode:
         job_ids = _submit_remotely(controller, dag, pool, num_jobs)

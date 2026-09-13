@@ -164,6 +164,10 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 
 # The integer managed job ID assigned by the jobs controller.
 MANAGED_JOB_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}MANAGED_JOB_ID'
+# Set only on tasks that are part of a job tree: a job group's tasks (the
+# group's own id) and a dynamic member's tasks (the member's root). A job
+# launched from such a task joins that tree. Absent on plain top-level jobs.
+ROOT_JOB_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}ROOT_JOB_ID'
 
 # The version of skylet. MUST bump this version whenever we need the skylet to
 # be restarted on existing clusters updated with the new version of SkyPilot,
