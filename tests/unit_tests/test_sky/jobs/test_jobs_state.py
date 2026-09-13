@@ -10,7 +10,9 @@ from unittest import mock
 
 import filelock
 import pytest
+import sqlalchemy
 from sqlalchemy import create_engine
+from sqlalchemy import orm
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from sky.jobs import state
@@ -1882,3 +1884,144 @@ class TestInfraFilterCodegenCompatibility:
         with pytest.raises(RuntimeError,
                            match=jobs_utils.INFRA_FILTER_UNSUPPORTED_MARKER):
             self._run_branch(code, one_older)
+
+
+class TestParentJobLinks:
+    """root/parent/parent_task persistence and the cancel tree fetch."""
+
+    @staticmethod
+    def _new_job(name: str,
+                 parent_job_id=None,
+                 parent_task_id=None,
+                 root_job_id=None,
+                 with_task: bool = True) -> int:
+        # The launch path passes the root explicitly (it travels in the
+        # parent task's env); for a direct member it is the parent itself.
+        if parent_job_id is not None and root_job_id is None:
+            root_job_id = parent_job_id
+        job_id = state.set_job_info_without_job_id(
+            name=name,
+            workspace='ws',
+            entrypoint='ep',
+            pool=None,
+            pool_hash=None,
+            user_hash='user1',
+            root_job_id=root_job_id,
+            parent_job_id=parent_job_id,
+            parent_task_id=parent_task_id)
+        if with_task:
+            state.set_pending(job_id,
+                              task_id=0,
+                              task_name=name,
+                              resources_str='{}',
+                              metadata='{}')
+        return job_id
+
+    @staticmethod
+    def _links(job_ids):
+        jobs, _ = state.get_managed_jobs_with_filters(
+            fields=['job_id', 'root_job_id', 'parent_job_id', 'parent_task_id'],
+            job_ids=job_ids)
+        return {
+            j['job_id']:
+            (j['root_job_id'], j['parent_job_id'], j['parent_task_id'])
+            for j in jobs
+        }
+
+    def test_top_level_job_has_no_links(self, _mock_managed_jobs_db_conn):
+        job_id = self._new_job('root')
+        assert self._links([job_id]) == {job_id: (None, None, None)}
+        assert not state.get_jobs_launched_from([job_id])
+        assert not state.get_jobs_launched_from([])
+
+    def test_direct_member_links_round_trip(self, _mock_managed_jobs_db_conn):
+        root = self._new_job('root')
+        child = self._new_job('child', parent_job_id=root, parent_task_id=1)
+        assert self._links([child]) == {child: (root, root, 1)}
+        assert state.get_jobs_launched_from([root]) == [(child, root)]
+
+    def test_codegen_set_job_info_persists_links(self,
+                                                 _mock_managed_jobs_db_conn):
+        root = self._new_job('root')
+        # The remote-controller (codegen) path supplies the job id itself.
+        state.set_job_info(job_id=900,
+                           name='child',
+                           workspace='ws',
+                           entrypoint='ep',
+                           pool=None,
+                           pool_hash=None,
+                           user_hash='user1',
+                           root_job_id=root,
+                           parent_job_id=root,
+                           parent_task_id=0)
+        state.set_pending(900,
+                          task_id=0,
+                          task_name='child',
+                          resources_str='{}',
+                          metadata='{}')
+        assert self._links([900]) == {900: (root, root, 0)}
+        assert state.get_jobs_launched_from([root]) == [(900, root)]
+
+    @staticmethod
+    def _set_task_status(job_id: int, status: state.ManagedJobStatus) -> None:
+        engine = state._db_manager.get_engine()
+        with orm.Session(engine) as session:
+            session.execute(
+                sqlalchemy.update(state.spot_table).where(
+                    state.spot_table.c.spot_job_id == job_id).values(
+                        status=status.value))
+            session.commit()
+
+    def test_insert_checks_the_parent_in_its_own_transaction(
+            self, _mock_managed_jobs_db_conn):
+        # The launch path checks the parent up front, but the row lands much
+        # later; the insert re-checks so a cancel in between cannot orphan
+        # the child under a CANCELLING root. Anything not finished accepts.
+        root = self._new_job('group')
+        for status in (state.ManagedJobStatus.PENDING,
+                       state.ManagedJobStatus.STARTING,
+                       state.ManagedJobStatus.RUNNING,
+                       state.ManagedJobStatus.RECOVERING):
+            self._set_task_status(root, status)
+            self._new_job(f'eval-{status.value}', parent_job_id=root)
+        for status in (state.ManagedJobStatus.CANCELLING,
+                       state.ManagedJobStatus.CANCELLED,
+                       state.ManagedJobStatus.SUCCEEDED,
+                       state.ManagedJobStatus.FAILED):
+            self._set_task_status(root, status)
+            with pytest.raises(ValueError, match=status.value):
+                self._new_job(f'late-{status.value}', parent_job_id=root)
+        # Nothing was written for the refused ones.
+        assert [j for j, _ in state.get_jobs_launched_from([root])
+               ] == [root + 1, root + 2, root + 3, root + 4]
+
+    def test_insert_refuses_a_missing_parent(self, _mock_managed_jobs_db_conn):
+        with pytest.raises(ValueError, match='no such managed job'):
+            self._new_job('orphan', parent_job_id=12345)
+
+    def test_tree_fetch_from_any_node(self, _mock_managed_jobs_db_conn):
+        root = self._new_job('root')
+        c1 = self._new_job('c1', parent_job_id=root, parent_task_id=1)
+        c2 = self._new_job('c2', parent_job_id=root, parent_task_id=1)
+        g1 = self._new_job('g1', parent_job_id=c1, root_job_id=root)
+        gg1 = self._new_job('gg1', parent_job_id=g1, root_job_id=root)
+        unrelated = self._new_job('other')
+        unrelated_child = self._new_job('other-child', parent_job_id=unrelated)
+
+        tree = [(c1, root), (c2, root), (g1, c1), (gg1, g1)]
+        # From the root, from a middle node, from a leaf: the same tree comes
+        # back (the caller picks its subtree from the parent edges), and the
+        # roots themselves are never in it.
+        assert state.get_jobs_launched_from([root]) == tree
+        assert state.get_jobs_launched_from([c1]) == tree
+        assert state.get_jobs_launched_from([gg1]) == tree
+        # Several trees at once; an unknown id contributes nothing.
+        assert state.get_jobs_launched_from(
+            [root, unrelated, 12345]) == (tree + [(unrelated_child, unrelated)])
+
+    def test_queue_returns_link_fields(self, _mock_managed_jobs_db_conn):
+        root = self._new_job('root')
+        child = self._new_job('child', parent_job_id=root, parent_task_id=1)
+        by_id = self._links([root, child])
+        assert by_id[root] == (None, None, None)
+        assert by_id[child] == (root, root, 1)

@@ -217,6 +217,27 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('last_emergency_recovery_at',
                       sqlalchemy.Float,
                       server_default=None),
+    # Where a job launched from inside another managed job came from (e.g.
+    # an eval job launched by a job group's watcher task). All NULL for
+    # top-level jobs. Written once on the child's row; parent rows are never
+    # mutated.
+    #   root_job_id: the top-level job of the tree. Load-bearing: the group
+    #     the job is shown under and the lifecycle it shares (cancelled with
+    #     the root, swept when the root's primary tasks finish).
+    #   parent_job_id: the job that launched this one (== root for a direct
+    #     member).
+    #   parent_task_id: the task within the parent that launched this one.
+    #     Display only.
+    sqlalchemy.Column('root_job_id',
+                      sqlalchemy.Integer,
+                      server_default=None,
+                      index=True),
+    sqlalchemy.Column('parent_job_id',
+                      sqlalchemy.Integer,
+                      server_default=None,
+                      index=True),
+    sqlalchemy.Column('parent_task_id', sqlalchemy.Integer,
+                      server_default=None),
 )
 
 # Separate table for API access token IDs associated with managed jobs.
@@ -503,6 +524,11 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'batch_total_batches': r.get('batch_total_batches'),
         'batch_completed_batches': r.get('batch_completed_batches'),
         'node_names': common_utils.get_display_node_names(r.get('node_names')),
+        # The job/task that launched this job, when launched from inside
+        # another managed job. NULL for top-level jobs.
+        'root_job_id': r.get('root_job_id'),
+        'parent_job_id': r.get('parent_job_id'),
+        'parent_task_id': r.get('parent_task_id'),
     }
 
 
@@ -892,16 +918,58 @@ ControllerPidRecord = collections.namedtuple('ControllerPidRecord', [
 
 
 # === Status transition functions ===
-def set_job_info_without_job_id(
-        name: str,
-        workspace: str,
-        entrypoint: str,
-        pool: Optional[str],
-        pool_hash: Optional[str],
-        user_hash: Optional[str],
-        execution: Optional[str] = None,
-        is_batch: bool = False,
-        file_mounts_blob_id: Optional[str] = None) -> int:
+def _check_parent_accepts_attachment(session: orm.Session,
+                                     parent_job_id: int) -> None:
+    """Refuse to attach a job under a parent that is not running, atomically.
+
+    The launch path checks the parent up front, but the row is written much
+    later (after file mounts are uploaded). A cancel of the parent in
+    between would expand the parent's tree before this row exists and never
+    see it: an orphan under a CANCELLING root. So the parent's task rows are
+    locked and re-read here, inside the transaction that inserts the child.
+    The lock is a no-op UPDATE of the parent's task rows: it takes SQLite's
+    write lock and PostgreSQL's row locks, both of which a concurrent
+    CANCELLING write must wait for. Either the cancel committed first and
+    this raises, or this row commits first and the cancel, which expands
+    descendants only after marking the parent, finds it.
+
+    Raises:
+        ValueError: the parent does not exist, or is finished or being
+            cancelled (the wording matches the launch path's own check).
+    """
+    session.execute(
+        sqlalchemy.update(spot_table).where(
+            spot_table.c.spot_job_id == parent_job_id).values(
+                spot_job_id=spot_table.c.spot_job_id))
+    rows = session.execute(
+        sqlalchemy.select(spot_table.c.task_id, spot_table.c.status).where(
+            spot_table.c.spot_job_id == parent_job_id).order_by(
+                spot_table.c.task_id.asc())).fetchall()
+    if not rows:
+        raise ValueError(f'Cannot attach to job {parent_job_id}: no such '
+                         'managed job.')
+    _, status = get_latest_task_id_from_statuses([
+        (task_id, ManagedJobStatus(status)) for task_id, status in rows
+    ])
+    assert status is not None, rows
+    if status.is_terminal() or status == ManagedJobStatus.CANCELLING:
+        raise ValueError(f'Cannot attach to job {parent_job_id}: it is '
+                         f'{status.value}; only a running job group accepts '
+                         'new tasks.')
+
+
+def set_job_info_without_job_id(name: str,
+                                workspace: str,
+                                entrypoint: str,
+                                pool: Optional[str],
+                                pool_hash: Optional[str],
+                                user_hash: Optional[str],
+                                execution: Optional[str] = None,
+                                is_batch: bool = False,
+                                file_mounts_blob_id: Optional[str] = None,
+                                parent_job_id: Optional[int] = None,
+                                parent_task_id: Optional[int] = None,
+                                root_job_id: Optional[int] = None) -> int:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -911,6 +979,11 @@ def set_job_info_without_job_id(
             insert_func = postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
+
+        if parent_job_id is not None:
+            # Same transaction as the insert below, so a cancel of the parent
+            # cannot slip between this check and the row landing.
+            _check_parent_accepts_attachment(session, parent_job_id)
 
         insert_stmt = insert_func(job_info_table).values(
             name=name,
@@ -923,6 +996,9 @@ def set_job_info_without_job_id(
             execution=execution,
             is_batch=is_batch,
             file_mounts_blob_id=file_mounts_blob_id,
+            root_job_id=root_job_id,
+            parent_job_id=parent_job_id,
+            parent_task_id=parent_task_id,
         )
 
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -3826,7 +3902,10 @@ def set_job_info(job_id: int,
                  pool_hash: Optional[str],
                  user_hash: Optional[str] = None,
                  execution: Optional[str] = None,
-                 is_batch: bool = False):
+                 is_batch: bool = False,
+                 parent_job_id: Optional[int] = None,
+                 parent_task_id: Optional[int] = None,
+                 root_job_id: Optional[int] = None):
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -3847,9 +3926,41 @@ def set_job_info(job_id: int,
             user_hash=user_hash,
             execution=execution,
             is_batch=is_batch,
+            root_job_id=root_job_id,
+            parent_job_id=parent_job_id,
+            parent_task_id=parent_task_id,
         )
         session.execute(insert_stmt)
         session.commit()
+
+
+def get_jobs_launched_from(
+        job_ids: List[int]) -> List[Tuple[int, Optional[int]]]:
+    """(job_id, parent_job_id) for every job in the trees ``job_ids`` live in.
+
+    Each given id is first resolved to the top-level job of its tree: its
+    ``root_job_id``, or itself when that is NULL (``COALESCE``). The result is
+    then every row under those roots, so passing a descendant returns the
+    whole tree it belongs to, not just the jobs under it. Callers walk the
+    parent edges in memory to pick out the subtree they want (see
+    ``utils._jobs_launched_from``); the roots themselves are not included.
+    One query regardless of depth.
+    """
+    if not job_ids:
+        return []
+    engine = _db_manager.get_engine()
+    roots = sqlalchemy.select(
+        sqlalchemy.func.coalesce(job_info_table.c.root_job_id,
+                                 job_info_table.c.spot_job_id)).where(
+                                     job_info_table.c.spot_job_id.in_(job_ids))
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.spot_job_id,
+                job_info_table.c.parent_job_id).where(
+                    job_info_table.c.root_job_id.in_(roots)).order_by(
+                        job_info_table.c.spot_job_id.asc())).fetchall()
+    return [(row[0], row[1]) for row in rows]
 
 
 def reset_jobs_for_recovery() -> None:

@@ -1457,6 +1457,19 @@ def queue_v2(
 
     if handle.is_grpc_enabled_with_flag:
         try:
+            # The controller may be older than this server (it only picks up
+            # new skylet code on the next launch). When the request names a
+            # field some controller versions lack, ask its version first and
+            # drop the fields it does not know, or it rejects the whole
+            # request. Skipped otherwise: one round trip, not two.
+            if managed_job_utils.queue_fields_need_controller_version(fields):
+                version_response = backend_utils.invoke_skylet_with_retries(
+                    lambda: cloud_vm_ray_backend.SkyletClient(
+                        handle.get_grpc_channel(
+                        )).get_managed_job_controller_version(
+                            managed_jobsv1_pb2.GetVersionRequest()))
+                fields = managed_job_utils.fields_for_controller(
+                    fields, version_response.controller_version)
             request = managed_jobsv1_pb2.GetJobTableRequest(
                 skip_finished=skip_finished,
                 accessible_workspaces=(managed_jobsv1_pb2.Workspaces(
