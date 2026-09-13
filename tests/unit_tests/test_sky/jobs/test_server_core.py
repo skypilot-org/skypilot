@@ -237,3 +237,89 @@ class TestCheckJobGroupAttachment:
         with pytest.raises(jobs_core.exceptions.NotSupportedError,
                            match='consolidation mode'):
             self._run(42, consolidation=False, explicit=True)
+
+
+class TestResolveJobTask:
+    """`sky jobs logs 39 2` / `sky jobs cancel 39 --task 2`: a dynamic task
+    is addressed like the group's own tasks."""
+
+    _OWN = [{
+        'task_id': 0,
+        'task_name': 'trainer'
+    }, {
+        'task_id': 1,
+        'task_name': 'watcher'
+    }]
+
+    def _run(self, task, *, for_cancel=False, own=None, member=57):
+        with mock.patch.object(jobs_core.managed_job_state,
+                               'get_managed_job_tasks',
+                               return_value=self._OWN if own is None else own), \
+             mock.patch.object(jobs_core.managed_job_state,
+                               'get_dynamic_task_job_id',
+                               return_value=member) as lookup:
+            result = jobs_core._resolve_job_task(39,
+                                                 task,
+                                                 for_cancel=for_cancel)
+        return result, lookup
+
+    def test_own_task_by_index_or_name_is_unchanged(self):
+        assert self._run(1)[0] == (39, 1)
+        assert self._run('1')[0] == (39, 1)  # numeric strings are indices
+        assert self._run('watcher')[0] == (39, 'watcher')
+        _, lookup = self._run(0)
+        lookup.assert_not_called()
+
+    def test_dynamic_task_by_index_or_name_is_its_own_job(self):
+        # Index 2 continues the own tasks 0 and 1; the whole member job is
+        # tailed (task None).
+        result, lookup = self._run(2)
+        assert result == (57, None)
+        lookup.assert_called_once_with(39, 2)
+        result, lookup = self._run('eval-3')
+        assert result == (57, None)
+        lookup.assert_called_once_with(39, 'eval-3')
+
+    def test_unknown_task_raises(self):
+        with pytest.raises(ValueError, match='no task 9'):
+            self._run(9, member=None)
+        with pytest.raises(ValueError, match="no task 'nope'"):
+            self._run('nope', member=None)
+
+    def test_missing_job_raises(self):
+        with pytest.raises(ValueError, match='not found'):
+            self._run(2, own=[])
+
+    def test_cancel_refuses_an_own_task(self):
+        # Declared tasks share the group's lifecycle.
+        with pytest.raises(ValueError, match='shares the job'):
+            self._run(1, for_cancel=True)
+        with pytest.raises(ValueError, match='shares the job'):
+            self._run('trainer', for_cancel=True)
+        assert self._run(2, for_cancel=True)[0] == (57, None)
+
+
+class TestCancelTaskArgument:
+
+    def test_task_needs_exactly_one_job_id(self):
+        for kwargs in ({
+                'job_ids': [1, 2]
+        }, {
+                'job_ids': []
+        }, {
+                'job_ids': [1],
+                'name': 'x'
+        }, {
+                'job_ids': [1],
+                'all': True
+        }):
+            with pytest.raises(ValueError, match='exactly one job id'):
+                jobs_core.cancel(task=2, **kwargs)
+
+    def test_task_needs_consolidation_mode(self):
+        with mock.patch.object(jobs_core.managed_job_utils,
+                               'is_consolidation_mode',
+                               return_value=False):
+            with pytest.raises(jobs_core.exceptions.NotSupportedError,
+                               match='consolidation mode'):
+                jobs_core.cancel(job_ids=[39], task=2)

@@ -5797,62 +5797,6 @@ def volumes_delete(
                          f'{str(e)}{colorama.Style.RESET_ALL}')
 
 
-class _ManagedJobRef(click.ParamType):
-    """A managed job id, or a dynamic task as ``<group id>-<index>``.
-
-    ``39-2`` is the third task shown under job group 39: its own tasks are
-    0..n-1, and the jobs launched from inside it number on from n. The
-    reference is resolved to the dynamic task's own job id before the
-    command runs (``_resolve_managed_job_refs``).
-    """
-    name = 'JOB_ID'
-
-    def convert(self, value, param, ctx):
-        if isinstance(value, int):
-            return value
-        text = str(value).strip()
-        if text.isdigit():
-            return int(text)
-        match = re.fullmatch(r'(\d+)-(\d+)', text)
-        if match:
-            return (int(match.group(1)), int(match.group(2)))
-        self.fail(
-            f'{value!r} is not a managed job id or a dynamic task '
-            f'reference (<group id>-<task index>, e.g. 39-2).', param, ctx)
-
-
-def _resolve_managed_job_refs(refs) -> List[int]:
-    """Turn `_ManagedJobRef` values into job ids.
-
-    Plain ids pass through. A ``(root, index)`` pair is looked up in the
-    queue (one request for all pairs) and replaced with the dynamic task's
-    own job id; an unknown pair is a usage error.
-    """
-    pairs = [r for r in refs if isinstance(r, tuple)]
-    if not pairs:
-        return [int(r) for r in refs]
-    records = sdk.get(
-        managed_jobs.queue_v2(
-            refresh=False,
-            all_users=True,
-            fields=['job_id', 'root_job_id', 'dynamic_task_index']))[0]
-    by_handle = {(rec['root_job_id'], rec['dynamic_task_index']): rec['job_id']
-                 for rec in records
-                 if rec.get('root_job_id') is not None and
-                 rec.get('dynamic_task_index') is not None}
-    resolved: List[int] = []
-    for ref in refs:
-        if isinstance(ref, tuple):
-            if ref not in by_handle:
-                raise click.UsageError(
-                    f'No dynamic task {ref[0]}-{ref[1]}: job {ref[0]} has no '
-                    f'task {ref[1]} launched from inside it.')
-            resolved.append(by_handle[ref])
-        else:
-            resolved.append(int(ref))
-    return resolved
-
-
 @cli.group(cls=_NaturalOrderGroup)
 def jobs():
     """Managed Jobs CLI (jobs with auto-recovery)."""
@@ -6521,11 +6465,17 @@ def jobs_queue(verbose: bool,
               required=False,
               type=str,
               help='Pool name to cancel.')
-@click.argument('job_ids',
-                default=None,
-                type=_ManagedJobRef(),
-                required=False,
-                nargs=-1)
+@click.argument('job_ids', default=None, type=int, required=False, nargs=-1)
+@click.option('--task',
+              'task',
+              default=None,
+              type=str,
+              required=False,
+              help=('With one job ID: cancel only this task of the job, a '
+                    'job launched from inside it (a dynamic task), by the '
+                    'index shown in `sky jobs queue` or by name. The jobs '
+                    'launched from that task go with it. One of the job\'s '
+                    'own tasks cannot be cancelled alone.'))
 @_add_click_options(flags.GRACEFUL_OPTIONS)
 @flags.all_option('Cancel all managed jobs for the current user.')
 @flags.yes_option()
@@ -6535,7 +6485,8 @@ def jobs_queue(verbose: bool,
 def jobs_cancel(
     name: Optional[str],
     pool: Optional[str],  # pylint: disable=redefined-outer-name
-    job_ids: Tuple[Any, ...],
+    job_ids: Tuple[int, ...],
+    task: Optional[str],
     graceful: bool,
     graceful_timeout: Optional[int],
     all: bool,
@@ -6560,11 +6511,18 @@ def jobs_cancel(
       # Cancel all managed jobs in pool 'my-pool'
       $ sky jobs cancel -p my-pool
       \b
-      # Cancel the dynamic task shown as task 2 under job group 39
-      $ sky jobs cancel 39-2
+      # Cancel only task 2 of job group 39 (a job launched from inside it)
+      $ sky jobs cancel 39 --task 2
     """
-    job_ids = tuple(_resolve_managed_job_refs(job_ids))
     job_id_str = ','.join(map(str, job_ids))
+    task_arg: Optional[Union[str, int]] = None
+    if task is not None:
+        if len(job_ids) != 1 or name is not None or pool is not None or (
+                all or all_users):
+            raise click.UsageError(
+                '--task takes exactly one JOB_ID and no --name, --pool, '
+                '--all or --all-users.')
+        task_arg = int(task) if task.isdigit() else task
     if sum([
             bool(job_ids), name is not None, pool is not None, all or all_users
     ]) != 1:
@@ -6583,6 +6541,8 @@ def jobs_cancel(
         job_identity_str = (f'managed job{plural} with ID{plural} {job_id_str}'
                             if job_ids else f'{name!r}' if name is not None else
                             f'managed jobs in pool {pool!r}')
+        if task_arg is not None:
+            job_identity_str = f'task {task_arg} of managed job {job_id_str}'
         if all_users:
             job_identity_str = 'all managed jobs FOR ALL USERS'
         elif all:
@@ -6598,6 +6558,7 @@ def jobs_cancel(
                             pool=pool,
                             graceful=graceful,
                             graceful_timeout=graceful_timeout,
+                            task=task_arg,
                             all=all,
                             all_users=all_users))
 
@@ -6636,19 +6597,18 @@ def jobs_cancel(
               required=False,
               help='Download logs for all jobs shown in the queue.')
 @_TAIL_OPTION
-@click.argument('job_id', required=False, type=_ManagedJobRef())
+@click.argument('job_id', required=False, type=int)
 @click.argument('task', required=False, type=str, default=None)
 @usage_lib.entrypoint
-def jobs_logs(name: Optional[str], job_id: Optional[Any], follow: bool,
+def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
               controller: bool, refresh: bool, sync_down: bool, tail: int,
               task: Optional[str]):
     """Tail or sync down the log of a managed job.
 
-    JOB_ID may also name a dynamic task of a job group as
-    ``<group id>-<task index>`` (e.g. ``39-2``).
-
     TASK can be a task ID (integer) or task name. Numeric values are treated
-    as task IDs. If not specified, logs for all tasks are shown.
+    as task IDs. If not specified, logs for all tasks are shown. A job
+    launched from inside a job group (a dynamic task) is addressed like the
+    group's own tasks, by the index shown in `sky jobs queue` or by name.
 
 
     Examples:
@@ -6664,9 +6624,11 @@ def jobs_logs(name: Optional[str], job_id: Optional[Any], follow: bool,
     \b
     # View logs for job named 'my-job', task 'eval'
     sky jobs logs -n my-job eval
+
+    \b
+    # View logs for the job launched from inside job group 39 shown as task 2
+    sky jobs logs 39 2
     """
-    if job_id is not None:
-        job_id = _resolve_managed_job_refs([job_id])[0]
     # tail == -1: user didn't pass --tail. With --sync-down that
     # means "fetch the whole file" (preserves pre-default-flip
     # behavior). Otherwise apply the implicit default and print a

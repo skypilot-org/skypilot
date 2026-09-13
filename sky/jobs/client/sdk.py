@@ -552,6 +552,7 @@ def cancel(
     pool: Optional[str] = None,
     graceful: bool = False,
     graceful_timeout: Optional[int] = None,
+    task: Optional[Union[str, int]] = None,
 ) -> server_common.RequestId[None]:
     """Cancels managed jobs.
 
@@ -560,6 +561,10 @@ def cancel(
     Args:
         name: Name of the managed job to cancel.
         job_ids: IDs of the managed jobs to cancel.
+        task: With exactly one job id, cancel only this dynamic task of it
+            (a job launched from inside it), by the index shown in the queue
+            (int) or by name (str). One of the job's own tasks cannot be
+            cancelled alone.
         all: Whether to cancel all managed jobs.
         all_users: Whether to cancel all managed jobs from all users.
         pool: Pool name to cancel.
@@ -587,6 +592,12 @@ def cancel(
     if graceful and pool is not None:
         logger.warning('Pools are not cleaned up after job cancel, so '
                        '`--graceful` is ignored.')
+    if task is not None and (
+            remote_api_version is None or remote_api_version <
+            server_constants.MIN_JOBS_DYNAMIC_TASK_INDEX_API_VERSION):
+        raise click.UsageError(
+            'Cancelling one task of a job is not supported by your API '
+            'server. Please upgrade to a newer API server.')
     body = payloads.JobsCancelBody(
         name=name,
         job_ids=job_ids,
@@ -595,6 +606,7 @@ def cancel(
         pool=pool,
         graceful=graceful,
         graceful_timeout=graceful_timeout,
+        task=task,
     )
     response = server_common.make_authenticated_request(
         'POST',

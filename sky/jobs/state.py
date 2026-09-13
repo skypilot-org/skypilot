@@ -1481,6 +1481,29 @@ def next_dynamic_task_index(root_job_id: int) -> int:
     return num_tasks + count - 1
 
 
+def get_dynamic_task_job_id(root_job_id: int,
+                            task: Union[str, int]) -> Optional[int]:
+    """The job id of the dynamic task shown as ``task`` under ``root_job_id``.
+
+    An int is a dynamic task index (the numbering that continues from the
+    root's own tasks); a str is the launched job's name. Grandchildren
+    carry the same root and draw from the same counter, so both lookups
+    cover the whole tree. Names are not unique; the newest match wins.
+    Returns None when nothing matches.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        query = sqlalchemy.select(job_info_table.c.spot_job_id).where(
+            job_info_table.c.root_job_id == root_job_id)
+        if isinstance(task, int):
+            query = query.where(job_info_table.c.dynamic_task_index == task)
+        else:
+            query = query.where(job_info_table.c.name == task)
+        row = session.execute(
+            query.order_by(job_info_table.c.spot_job_id.desc())).fetchone()
+    return None if row is None else int(row[0])
+
+
 def get_latest_task_id_from_statuses(
     id_statuses: List[Tuple[int, ManagedJobStatus]]
 ) -> Tuple[Optional[int], Optional[ManagedJobStatus]]:
@@ -2392,19 +2415,32 @@ def get_managed_jobs_with_filters(
             status_expr=status_expr,
         )
 
-    # Apply sorting
+    # Apply sorting. Within a tree the rows always read the way the table
+    # shows them: the root's own tasks first, then the jobs launched under
+    # it by dynamic task index (rows from before the index existed last),
+    # then task id. Every surface (CLI, dashboard, API) gets this order.
+    within_tree = [
+        sqlalchemy.case((job_info_table.c.root_job_id.is_(None), 0),
+                        else_=1).asc(),
+        sqlalchemy.case((job_info_table.c.dynamic_task_index.is_(None), 1),
+                        else_=0).asc(),
+        job_info_table.c.dynamic_task_index.asc(),
+        spot_table.c.spot_job_id.desc(),
+        spot_table.c.task_id.asc(),
+    ]
     if sort_by and sort_by in sort_field_map:
         sort_column = sort_field_map[sort_by]
+        if sort_column == spot_table.c.spot_job_id:
+            # A tree's id is its root's id, so an id sort keeps each tree
+            # together (the members' own, higher ids do not pull them out).
+            sort_column = _tree_root_expr()
         if sort_order == 'asc':
-            query = query.order_by(sort_column.asc(),
-                                   spot_table.c.task_id.asc())
+            query = query.order_by(sort_column.asc(), *within_tree)
         else:
-            query = query.order_by(sort_column.desc(),
-                                   spot_table.c.task_id.asc())
+            query = query.order_by(sort_column.desc(), *within_tree)
     else:
-        # Default sort: job_id desc, task_id asc
-        query = query.order_by(spot_table.c.spot_job_id.desc(),
-                               spot_table.c.task_id.asc())
+        # Default sort: newest tree first (a tree sorts by its root's id).
+        query = query.order_by(_tree_root_expr().desc(), *within_tree)
     rows = None
     with orm.Session(engine) as session:
         rows = session.execute(query).fetchall()

@@ -1931,6 +1931,57 @@ class TestPaginationByTreeRoot:
         assert sorted(j['job_id'] for j in jobs) == [root, eval1]
 
 
+class TestTreeRowOrder:
+    """Every surface reads a tree the same way: the root's own tasks, then
+    the launched jobs by dynamic task index."""
+
+    def test_rows_come_out_in_display_order(self, _mock_managed_jobs_db_conn):
+        new_job = TestParentJobLinks._new_job
+        root = new_job('group')
+        state.set_pending(root,
+                          task_id=1,
+                          task_name='watcher',
+                          resources_str='{}',
+                          metadata='{}')
+        # Attach out of index order so the ids do not happen to sort right.
+        eval3 = state.set_job_info_without_job_id(name='eval-3',
+                                                  workspace='ws',
+                                                  entrypoint='ep',
+                                                  pool=None,
+                                                  pool_hash=None,
+                                                  user_hash='u',
+                                                  root_job_id=root,
+                                                  parent_job_id=root,
+                                                  parent_task_id=1,
+                                                  dynamic_task_index=3)
+        state.set_pending(eval3, 0, 'eval-3', '{}', '{}')
+        eval2 = state.set_job_info_without_job_id(name='eval-2',
+                                                  workspace='ws',
+                                                  entrypoint='ep',
+                                                  pool=None,
+                                                  pool_hash=None,
+                                                  user_hash='u',
+                                                  root_job_id=root,
+                                                  parent_job_id=root,
+                                                  parent_task_id=1,
+                                                  dynamic_task_index=2)
+        state.set_pending(eval2, 0, 'eval-2', '{}', '{}')
+        newer = new_job('newer')
+
+        def order(**kwargs):
+            rows, _ = state.get_managed_jobs_with_filters(**kwargs)
+            return [(r['job_id'], r['task_id']) for r in rows]
+
+        # Newest tree first; within the tree own tasks 0, 1 then the
+        # members by index (2 before 3 although 3 attached first).
+        expected = [(newer, 0), (root, 0), (root, 1), (eval2, 0), (eval3, 0)]
+        assert order() == expected
+        assert order(page=1, limit=10) == expected
+        # An explicit sort keeps the within-tree order as the tie-breaker.
+        assert order(sort_by='job_id', sort_order='desc', page=1,
+                     limit=10) == expected
+
+
 class TestDynamicTaskIndex:
     """Dynamic tasks number on from the root's own tasks, in attach order,
     from an atomic counter on the root's row."""

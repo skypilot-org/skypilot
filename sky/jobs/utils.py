@@ -4139,9 +4139,11 @@ def format_job_table(
             if is_member:
                 # A dynamic task (a job launched from this group) reads like
                 # one of the group's tasks: its index numbers on from the
-                # own tasks, and `<group id>-<index>` addresses it on the
-                # CLI. A multi-task member shows `<index>.<task id>`. Rows
-                # from before the index existed fall back to the job id.
+                # own tasks, and `sky jobs logs <group> <index>` / `sky jobs
+                # cancel <group> --task <index>` address it. A multi-task
+                # member shows `<index>.<task id>`. The member's own job id
+                # is shown with -v; rows from before the index existed
+                # always show it, in place of the index.
                 dynamic_index = task.get('dynamic_task_index')
                 if dynamic_index is None:
                     id_cell: Any = f' \u21B3 {task["job_id"]}'
@@ -4149,7 +4151,8 @@ def format_job_table(
                                       if member_row_counts[task['job_id']] > 1
                                       else '-')
                 else:
-                    id_cell = ' \u21B3'
+                    id_cell = (f' \u21B3 {task["job_id"]}'
+                               if show_all else ' \u21B3')
                     task_cell = (f'{dynamic_index}.{task["task_id"]}'
                                  if member_row_counts[task['job_id']] > 1 else
                                  dynamic_index)

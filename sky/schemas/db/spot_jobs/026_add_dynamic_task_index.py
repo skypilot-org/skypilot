@@ -3,7 +3,7 @@
 A job launched from inside a job group (a dynamic task, see migration 025)
 gets a stable ordinal within its tree so it reads and is addressed like a
 task of the group: the group's own tasks are 0..n-1, dynamic tasks number
-on from n in the order they attached, and ``<root job id>-<index>`` names
+on from n in the order they attached; ``sky jobs logs <root> <index>`` names
 one in ``sky jobs cancel`` and ``sky jobs logs``.
 
 - ``dynamic_task_index``: the member's ordinal within its root's tree.
