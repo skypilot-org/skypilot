@@ -680,6 +680,13 @@ const JOB_TREE_MEMBER_FIELDS = [
   'job_duration',
   'submitted_at',
   'user_name',
+  'resources',
+  'cloud',
+  'region',
+  'accelerators',
+  'cluster_resources',
+  'cluster_resources_full',
+  'recovery_count',
   // A launched job can itself be a job group: its status is aggregated
   // over its primary tasks, like its own detail page does.
   'is_primary_in_job_group',
@@ -698,6 +705,8 @@ const JOB_TREE_MEMBER_FIELDS = [
  */
 export function useJobTreeMembers(jobId, refreshTrigger = 0) {
   const [members, setMembers] = useState([]);
+  // `loaded` lets a page tell "no members" apart from "not fetched yet".
+  const [loaded, setLoaded] = useState(false);
   const prevRefreshTriggerRef = useRef(refreshTrigger);
 
   useEffect(() => {
@@ -723,6 +732,8 @@ export function useJobTreeMembers(jobId, refreshTrigger = 0) {
       } catch (error) {
         console.error('Error fetching jobs launched from job:', error);
         if (!cancelled) setMembers([]);
+      } finally {
+        if (!cancelled) setLoaded(true);
       }
     }
     fetchMembers();
@@ -731,7 +742,7 @@ export function useJobTreeMembers(jobId, refreshTrigger = 0) {
     };
   }, [jobId, refreshTrigger]);
 
-  return members;
+  return { members, loaded };
 }
 
 export async function streamManagedJobLogs({

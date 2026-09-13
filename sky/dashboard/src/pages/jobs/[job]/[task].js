@@ -2,7 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { CircularProgress } from '@mui/material';
 import { useRouter } from 'next/router';
 import { Card } from '@/components/ui/card';
-import { useSingleManagedJob, getPoolStatus } from '@/data/connectors/jobs';
+import {
+  useSingleManagedJob,
+  useJobTreeMembers,
+  getPoolStatus,
+} from '@/data/connectors/jobs';
+import JobDetails from '../[job]';
 import Link from 'next/link';
 import {
   RotateCwIcon,
@@ -38,6 +43,13 @@ function TaskDetails() {
   const { job: jobId, task: taskIndex } = router.query;
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { jobData, loading } = useSingleManagedJob(jobId, refreshTrigger);
+  // Dynamic tasks (jobs launched from inside this job) are addressed as
+  // /jobs/<root>/<index> too; resolved below when the index is not one of
+  // the job's own tasks.
+  const { members: treeMembers, loaded: treeLoaded } = useJobTreeMembers(
+    jobId,
+    refreshTrigger
+  );
   const [poolsData, setPoolsData] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -110,6 +122,54 @@ function TaskDetails() {
   const taskIndexNum = parseInt(taskIndex, 10);
   const taskData = allTasks[taskIndexNum] || null;
   const jobName = allTasks.length > 0 ? allTasks[0].name : '';
+  if (taskData === null) {
+    // Not one of the job's own tasks: a dynamic task with this index? Its
+    // page is the member job's page, headed as task <index> of this job.
+    const member = treeMembers.find(
+      (m) => String(m.dynamic_task_index) === String(taskIndexNum)
+    );
+    if (member) {
+      const launchedFrom =
+        member.parent_task_id != null
+          ? `task ${member.parent_task_id} of job ${member.parent_job_id}`
+          : `job ${member.parent_job_id}`;
+      // The launching task, addressed the way the rest of the page
+      // addresses tasks: an own task by its task id, a dynamic task by
+      // its dynamic index. The member's own job id stays out of view.
+      let parentTask = null;
+      if (String(member.parent_job_id) === String(jobId)) {
+        if (member.parent_task_id != null) {
+          parentTask = {
+            label: String(member.parent_task_id),
+            href: `/jobs/${jobId}/${member.parent_task_id}`,
+          };
+        }
+      } else {
+        const parentMember = treeMembers.find(
+          (m) => String(m.id) === String(member.parent_job_id)
+        );
+        if (parentMember && parentMember.dynamic_task_index != null) {
+          parentTask = {
+            label: String(parentMember.dynamic_task_index),
+            href: `/jobs/${jobId}/${parentMember.dynamic_task_index}`,
+          };
+        }
+      }
+      return (
+        <JobDetails
+          key={`dynamic-${member.id}`}
+          overrideJobId={String(member.id)}
+          taskContext={{
+            rootId: jobId,
+            rootName: jobName,
+            index: taskIndexNum,
+            launchedFrom,
+            parentTask,
+          }}
+        />
+      );
+    }
+  }
 
   const title = taskData
     ? `Task ${taskIndex}: ${taskData.task || 'Unnamed'} | Job ${jobId} | SkyPilot Dashboard`
@@ -162,7 +222,7 @@ function TaskDetails() {
           </div>
         </div>
 
-        {loading && isInitialLoad ? (
+        {(loading && isInitialLoad) || (taskData === null && !treeLoaded) ? (
           <div className="flex items-center justify-center py-32">
             <CircularProgress size={20} className="mr-2" />
             <span>Loading...</span>
