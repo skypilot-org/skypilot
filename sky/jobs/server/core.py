@@ -1824,7 +1824,7 @@ def wait(name: Optional[str],
         records, _, _, _, _ = queue_v2_api(refresh=False, job_ids=[job_id])
         if not records:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Managed job {job_id} not found.')
+                raise ValueError(f'No managed job with ID {job_id}.')
 
         # Filter to the requested task if specified.
         if task is not None:
@@ -2029,7 +2029,7 @@ def _resolve_task_id(job_id: int, task: Union[str, int]) -> int:
     """
     tasks = managed_job_state.get_managed_job_tasks(job_id)
     if not tasks:
-        raise ValueError(f'Managed job {job_id} not found.')
+        raise ValueError(f'No managed job with ID {job_id}.')
     if isinstance(task, str) and task.isdigit():
         task = int(task)
     if isinstance(task, int):
