@@ -121,7 +121,7 @@ class JobsCacheManager {
    * this rebuilds in the background match the root-aware pages the server
    * returns: a job launched from inside another job (root_job_id set) rides
    * with its root when the root is listed and takes no slot of its own;
-   * otherwise it stands as its own job. Roots and their own tasks are
+   * otherwise it stands as its own job. Roots and their declared tasks are
    * placed first, so a group starts with the job it is named after and the
    * order is the roots' order.
    */

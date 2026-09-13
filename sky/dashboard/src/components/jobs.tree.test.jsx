@@ -1,6 +1,6 @@
 // The managed jobs table nests a job launched from inside another managed
 // job (a dynamic job group member) under the top-level job of its tree, after
-// that job's own tasks, and only when that job is on the page.
+// that job's declared tasks, and only when that job is on the page.
 jest.mock('next/router', () => ({
   __esModule: true,
   useRouter: () => ({ query: {}, push: jest.fn(), asPath: '/jobs' }),
@@ -32,7 +32,7 @@ const row = (id, task, extra = {}) => ({
 });
 
 describe('groupJobRowsByTree', () => {
-  it("nests a launched job under its root, after the root's own tasks", () => {
+  it("nests a launched job under its root, after the root's declared tasks", () => {
     const rows = [
       row(43, 'eval', { root_job_id: 42, parent_job_id: 42 }),
       row(42, 'trainer'),

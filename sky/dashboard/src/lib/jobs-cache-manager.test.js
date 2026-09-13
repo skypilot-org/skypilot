@@ -24,7 +24,7 @@ describe('JobsCacheManager._groupTasksByJob', () => {
     const manager = new JobsCacheManager();
     const { jobMap, jobOrder } = manager._groupTasksByJob(rows);
     // Two jobs, in the roots' order; the members take no slot and sit
-    // under 66 after its own tasks.
+    // under 66 after its declared tasks.
     expect(jobOrder).toEqual([70, 66]);
     expect(jobMap.get(66).map((t) => [t.id, t.task_id])).toEqual([
       [66, 1],

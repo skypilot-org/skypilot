@@ -1786,7 +1786,7 @@ def build_managed_jobs_with_filters_no_status_query(
     if job_ids is not None:
         query = query.where(spot_table.c.spot_job_id.in_(job_ids))
     if tree_root_ids is not None:
-        # Every row in these trees: the roots' own tasks and the jobs
+        # Every row in these trees: the roots' declared tasks and the jobs
         # launched under them, at any depth. Spelled as two indexed
         # membership tests rather than COALESCE(...) IN (...): PostgreSQL
         # cannot use the primary key or the root_job_id index through the

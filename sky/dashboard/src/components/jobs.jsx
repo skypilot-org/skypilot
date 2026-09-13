@@ -170,9 +170,9 @@ const STATUS_PRIORITY = {
 /**
  * Group table rows into the jobs they are shown under, in row order.
  *
- * A job's own tasks share its id. A job launched from inside another managed
+ * A job's declared tasks share its id. A job launched from inside another managed
  * job (a dynamic job group member) carries root_job_id and is shown under
- * that top-level job when it is in the listing, after the job's own tasks;
+ * that top-level job when it is in the listing, after the job's declared tasks;
  * a member whose root is not listed is shown as its own job, since there is
  * nothing on this page to nest it under.
  *
@@ -187,7 +187,7 @@ export function groupJobRowsByTree(rows) {
     job.is_external ? (job.task_job_id ?? `external:${job.id}`) : job.id;
   const isMember = (job) =>
     !job.is_external && job.root_job_id != null && job.root_job_id !== job.id;
-  // Top-level jobs and their own tasks first, so every group starts with
+  // Top-level jobs and their declared tasks first, so every group starts with
   // the job it is named after.
   rows.forEach((job) => {
     if (isMember(job)) return;
@@ -1386,7 +1386,7 @@ export function ManagedJobsTable({
     const aggregates = new Map();
     groupedJobs.forEach((rows, jobId) => {
       if (rows.length > 1) {
-        // The group's own tasks aggregate. Jobs launched from it (dynamic
+        // The group's declared tasks aggregate. Jobs launched from it (dynamic
         // members, each with its own job id) are listed in the tooltip but
         // never change the group's status, duration or recovery count,
         // matching the CLI's format_job_table.
@@ -1625,7 +1625,7 @@ export function ManagedJobsTable({
   // - item: The task data
   // - renderMode: 'single' | 'groupParent' | 'groupChild'
   // - jobId, tasks, taskIndex, aggregates (for job groups)
-  // - ownTasks, memberTasks: the group's own tasks and the jobs launched
+  // - declaredTasks, memberTasks: the group's declared tasks and the jobs launched
   //   from it (dynamic members, own job ids); isMember, memberIsMultiTask
   //   on a groupChild row that belongs to a launched job
   // - isExpanded, toggleJobGroup, hasAnyJobGroups (for job group UI)
@@ -1743,7 +1743,7 @@ export function ManagedJobsTable({
             renderMode,
             jobId,
             tasks,
-            ownTasks,
+            declaredTasks,
             memberTasks,
             taskIndex,
             toggleJobGroup,
@@ -1756,9 +1756,9 @@ export function ManagedJobsTable({
             item.is_batch === true || item.batch_total_batches != null;
 
           if (renderMode === 'groupParent') {
-            // The badge counts the group's own tasks and, separately, the
+            // The badge counts the group's declared tasks and, separately, the
             // jobs launched from it (dynamic members).
-            const own = ownTasks || tasks;
+            const own = declaredTasks || tasks;
             const launchedJobs = new Set((memberTasks || []).map((t) => t.id))
               .size;
             const badgeParts = [];
@@ -1808,7 +1808,7 @@ export function ManagedJobsTable({
 
           if (renderMode === 'groupChild') {
             // Check if this job group has auxiliary tasks
-            const hasAuxiliaryTasks = (ownTasks || tasks).some(
+            const hasAuxiliaryTasks = (declaredTasks || tasks).some(
               (t) => t.is_primary_in_job_group === false
             );
             return (
@@ -2720,11 +2720,11 @@ export function ManagedJobsTable({
                     const isMultiTask = tasks.length > 1;
                     const isExpanded = isJobGroupExpanded(jobId);
                     const firstTask = tasks[0];
-                    // The group's own tasks come first (see
+                    // The group's declared tasks come first (see
                     // groupJobRowsByTree), then the jobs launched from it,
                     // each with its own job id and possibly several rows.
                     const memberTasks = tasks.filter((t) => t.id !== jobId);
-                    const ownTasks = memberTasks.length
+                    const declaredTasks = memberTasks.length
                       ? tasks.filter((t) => t.id === jobId)
                       : tasks;
                     const memberRowCounts = new Map();
@@ -2770,7 +2770,7 @@ export function ManagedJobsTable({
                       renderMode: 'groupParent',
                       jobId,
                       tasks,
-                      ownTasks,
+                      declaredTasks,
                       memberTasks,
                       aggregates,
                       isExpanded,
@@ -2807,7 +2807,7 @@ export function ManagedJobsTable({
                               renderMode: 'groupChild',
                               jobId,
                               tasks,
-                              ownTasks,
+                              declaredTasks,
                               memberTasks,
                               isMember,
                               memberIsMultiTask:

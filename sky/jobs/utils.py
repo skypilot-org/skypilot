@@ -3823,7 +3823,7 @@ def format_job_table(
 
     # A job launched from inside another managed job (a dynamic job group
     # member) is shown under the top-level job of its tree, like that job's
-    # own tasks. Only when the root is in this listing, though: a member
+    # declared tasks. Only when the root is in this listing, though: a member
     # whose root was filtered out (or is gone) is shown as its own job.
     listed_job_ids = {task['job_id'] for task in tasks}
 
@@ -3953,8 +3953,10 @@ def format_job_table(
     if max_jobs is not None:
         # Keep the first `max_jobs` jobs (trees), with every row of each.
         # Cutting rows instead would drop the tail of a job: since a job's
-        # dynamic members (newer, higher ids) come before its own rows, a
-        # group with more members than the budget would lose its own rows
+        # dynamic members (newer, higher ids) come before its declared-task
+        # rows, a
+        # group with more members than the budget would lose its declared-task
+        # rows
         # and be rendered from the members alone, under a member's name and
         # status.
         kept_hashes: Dict[Any, None] = {}
@@ -4003,7 +4005,7 @@ def format_job_table(
 
     for job_hash, group_tasks in jobs.items():
         group_id = job_hash[1] if tasks_have_k8s_user else job_hash
-        # The top-level job's own tasks, and the jobs launched under it
+        # The top-level job's declared tasks, and the jobs launched under it
         # (dynamic members, each with its own job id). The group row
         # aggregates the former only: a dynamic member never changes the
         # group's status, duration or recovery count.

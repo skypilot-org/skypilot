@@ -1945,7 +1945,7 @@ class TestFormatJobTableDynamicMembers:
                                             show_user=False,
                                             return_rows=True)
         cells = self._id_task_status(table)
-        # Group row, its own tasks, then the members with their own ids
+        # Group row, its declared tasks, then the members with their own ids
         # (a multi-task member shows task ids, a single-task one '-'), then
         # the unrelated job on its own.
         assert cells == [
@@ -1966,7 +1966,8 @@ class TestFormatJobTableDynamicMembers:
         # 50, by job; the server page is N trees with every row of each.
         # Group 42 has two tasks and six evals (43-48), all newer than the
         # group so listed first, and 49 is an unrelated newer job. A cut by
-        # rows would keep five evals and drop the group's own rows, so the
+        # rows would keep five evals and drop the group's declared-task rows, so
+        # the
         # group would render under an eval's name with an eval's status.
         rows = [self._row(49, status='SUCCEEDED')]
         rows += [
@@ -1992,7 +1993,7 @@ class TestFormatJobTableDynamicMembers:
                                             return_rows=True,
                                             max_jobs=2)
         # Blank separator rows aside: two jobs, 49, then the whole tree of
-        # 42 (own tasks first, then the members), with the group's status
+        # 42 (declared tasks first, then the members), with the group's status
         # the trainer's.
         cells = [c for c in self._id_task_status(table) if c != ('', '', '')]
         assert cells == [
