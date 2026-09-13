@@ -1904,26 +1904,26 @@ def test_managed_jobs_logs_sync_down(generic_cloud: str):
             's=$(SKYPILOT_DEBUG=0 sky jobs logs --controller --sync-down) && echo "$s" && '
             # Parse the log path
             'log_path=$(echo "$s" | grep -E "Job .* logs \\(controller\\): " | '
-            'sed -r "s/\\x1B\\[[0-9;]*[JKmsu]//g" | awk -F": " "{print \$2}") && echo "$log_path" && '
+            'sed -r "s/\\x1B\\[[0-9;]*[JKmsu]//g" | awk -F": " "{print \\$2}") && echo "$log_path" && '
             # Check if the log path is a valid path
             'eval "[ -d $log_path ]"',
             # Example output of `sky jobs logs --sync-down`:
             #   Job 8 logs: ~/sky_logs/managed_jobs/sky-2025-01-19-22-34-45-320451
             's=$(SKYPILOT_DEBUG=0 sky jobs logs --sync-down) && echo "$s" && '
             'log_path=$(echo "$s" | grep -E "Job .* logs: " | '
-            'sed -r "s/\\x1B\\[[0-9;]*[JKmsu]//g" | awk -F": " "{print \$2}") && echo "$log_path" && '
+            'sed -r "s/\\x1B\\[[0-9;]*[JKmsu]//g" | awk -F": " "{print \\$2}") && echo "$log_path" && '
             # Check if the log path is a valid path
             'eval "[ -d $log_path ]"',
             # Download jobs controller logs with job name
             f's=$(SKYPILOT_DEBUG=0 sky jobs logs --controller --name {name} --sync-down) && echo "$s" && '
             f'log_path=$(echo "$s" | grep -E "Job .* logs \\(controller\\): " | '
-            'sed -r "s/\\x1B\\[[0-9;]*[JKmsu]//g" | awk -F": " "{print \$2}" | sed "s|^~/|$HOME/|") && echo "$log_path" && '
+            'sed -r "s/\\x1B\\[[0-9;]*[JKmsu]//g" | awk -F": " "{print \\$2}" | sed "s|^~/|$HOME/|") && echo "$log_path" && '
             'echo "$log_path" && eval "[ -d $log_path ]" && '
-            'cat $(echo "$log_path")/controller.log | grep "Job status: JobStatus.SETTING_UP\|Job status: JobStatus.RUNNING"',
+            'cat $(echo "$log_path")/controller.log | grep "Job status: JobStatus.SETTING_UP\\|Job status: JobStatus.RUNNING"',
             # Download jobs logs with job name
             f's=$(SKYPILOT_DEBUG=0 sky jobs logs --name {name} --sync-down) && echo "$s" && '
             f'log_path=$(echo "$s" | grep -E "Job .* logs: " | '
-            'sed -r "s/\\x1B\\[[0-9;]*[JKmsu]//g" | awk -F": " "{print \$2}" | sed "s|^~/|$HOME/|") && echo "$log_path" && '
+            'sed -r "s/\\x1B\\[[0-9;]*[JKmsu]//g" | awk -F": " "{print \\$2}" | sed "s|^~/|$HOME/|") && echo "$log_path" && '
             'echo "$log_path" && eval "[ -d $log_path ]" && '
             'cat $(echo "$log_path")/run.log | grep "start counting"',
         ],
