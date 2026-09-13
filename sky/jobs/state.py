@@ -918,6 +918,46 @@ ControllerPidRecord = collections.namedtuple('ControllerPidRecord', [
 
 
 # === Status transition functions ===
+def _check_parent_accepts_attachment(session: orm.Session,
+                                     parent_job_id: int) -> None:
+    """Refuse to attach a job under a parent that is not running, atomically.
+
+    The launch path checks the parent up front, but the row is written much
+    later (after file mounts are uploaded). A cancel of the parent in
+    between would expand the parent's tree before this row exists and never
+    see it: an orphan under a CANCELLING root. So the parent's task rows are
+    locked and re-read here, inside the transaction that inserts the child.
+    The lock is a no-op UPDATE of the parent's task rows: it takes SQLite's
+    write lock and PostgreSQL's row locks, both of which a concurrent
+    CANCELLING write must wait for. Either the cancel committed first and
+    this raises, or this row commits first and the cancel, which expands
+    descendants only after marking the parent, finds it.
+
+    Raises:
+        ValueError: the parent does not exist, or is finished or being
+            cancelled (the wording matches the launch path's own check).
+    """
+    session.execute(
+        sqlalchemy.update(spot_table).where(
+            spot_table.c.spot_job_id == parent_job_id).values(
+                spot_job_id=spot_table.c.spot_job_id))
+    rows = session.execute(
+        sqlalchemy.select(spot_table.c.task_id, spot_table.c.status).where(
+            spot_table.c.spot_job_id == parent_job_id).order_by(
+                spot_table.c.task_id.asc())).fetchall()
+    if not rows:
+        raise ValueError(f'Cannot attach to job {parent_job_id}: no such '
+                         'managed job.')
+    _, status = get_latest_task_id_from_statuses([
+        (task_id, ManagedJobStatus(status)) for task_id, status in rows
+    ])
+    assert status is not None, rows
+    if status.is_terminal() or status == ManagedJobStatus.CANCELLING:
+        raise ValueError(f'Cannot attach to job {parent_job_id}: it is '
+                         f'{status.value}; only a running job group accepts '
+                         'new tasks.')
+
+
 def set_job_info_without_job_id(name: str,
                                 workspace: str,
                                 entrypoint: str,
@@ -939,6 +979,11 @@ def set_job_info_without_job_id(name: str,
             insert_func = postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
+
+        if parent_job_id is not None:
+            # Same transaction as the insert below, so a cancel of the parent
+            # cannot slip between this check and the row landing.
+            _check_parent_accepts_attachment(session, parent_job_id)
 
         insert_stmt = insert_func(job_info_table).values(
             name=name,

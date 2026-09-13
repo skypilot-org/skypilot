@@ -10,7 +10,9 @@ from unittest import mock
 
 import filelock
 import pytest
+import sqlalchemy
 from sqlalchemy import create_engine
+from sqlalchemy import orm
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from sky.jobs import state
@@ -1959,6 +1961,43 @@ class TestParentJobLinks:
                           metadata='{}')
         assert self._links([900]) == {900: (root, root, 0)}
         assert state.get_jobs_launched_from([root]) == [(900, root)]
+
+    @staticmethod
+    def _set_task_status(job_id: int, status: state.ManagedJobStatus) -> None:
+        engine = state._db_manager.get_engine()
+        with orm.Session(engine) as session:
+            session.execute(
+                sqlalchemy.update(state.spot_table).where(
+                    state.spot_table.c.spot_job_id == job_id).values(
+                        status=status.value))
+            session.commit()
+
+    def test_insert_checks_the_parent_in_its_own_transaction(
+            self, _mock_managed_jobs_db_conn):
+        # The launch path checks the parent up front, but the row lands much
+        # later; the insert re-checks so a cancel in between cannot orphan
+        # the child under a CANCELLING root. Anything not finished accepts.
+        root = self._new_job('group')
+        for status in (state.ManagedJobStatus.PENDING,
+                       state.ManagedJobStatus.STARTING,
+                       state.ManagedJobStatus.RUNNING,
+                       state.ManagedJobStatus.RECOVERING):
+            self._set_task_status(root, status)
+            self._new_job(f'eval-{status.value}', parent_job_id=root)
+        for status in (state.ManagedJobStatus.CANCELLING,
+                       state.ManagedJobStatus.CANCELLED,
+                       state.ManagedJobStatus.SUCCEEDED,
+                       state.ManagedJobStatus.FAILED):
+            self._set_task_status(root, status)
+            with pytest.raises(ValueError, match=status.value):
+                self._new_job(f'late-{status.value}', parent_job_id=root)
+        # Nothing was written for the refused ones.
+        assert [j for j, _ in state.get_jobs_launched_from([root])
+               ] == [root + 1, root + 2, root + 3, root + 4]
+
+    def test_insert_refuses_a_missing_parent(self, _mock_managed_jobs_db_conn):
+        with pytest.raises(ValueError, match='no such managed job'):
+            self._new_job('orphan', parent_job_id=12345)
 
     def test_tree_fetch_from_any_node(self, _mock_managed_jobs_db_conn):
         root = self._new_job('root')
