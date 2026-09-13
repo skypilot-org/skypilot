@@ -206,6 +206,27 @@ def test_cancel_parent_cascades_to_descendants(_mock_managed_jobs_db_conn,
     ]
 
 
+def test_inaccessible_job_is_not_expanded(_mock_managed_jobs_db_conn,
+                                          _signal_dir):
+    # The tree of a job outside the caller's workspace is not walked, so the
+    # refusal names only the id the caller supplied, not its descendants.
+    _seed_running_job(_mock_managed_jobs_db_conn, 40, workspace='private')
+    _seed_running_job(_mock_managed_jobs_db_conn,
+                      41,
+                      parent_job_id=40,
+                      workspace='private')
+    _seed_running_job(_mock_managed_jobs_db_conn,
+                      42,
+                      parent_job_id=41,
+                      workspace='private')
+    msg = utils.cancel_jobs_by_id(job_ids=[40], current_workspace='default')
+    assert 'No job to cancel.' in msg
+    assert 'ID 40 ' in msg
+    assert '41' not in msg and '42' not in msg
+    for job_id in (40, 41, 42):
+        assert not (_signal_dir / str(job_id)).exists()
+
+
 def test_cancel_child_leaves_parent_and_siblings(_mock_managed_jobs_db_conn,
                                                  _signal_dir):
     _seed_tree(_mock_managed_jobs_db_conn)

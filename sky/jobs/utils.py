@@ -1715,7 +1715,18 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
     requested_job_ids = set(job_ids)
     launched_from = _LaunchedFrom([], {}, {})
     if cancel_launched_from:
-        launched_from = _jobs_launched_from(job_ids)
+        # Expand only the requested jobs the caller may act on. Workspace is
+        # the authorization boundary; a job outside it is reported below by
+        # the id the caller supplied, and its tree must not be walked (the
+        # walk would surface its descendants' ids in that report).
+        expandable = [
+            job_id for job_id in job_ids
+            if managed_job_state.get_status(job_id) is not None and
+            (current_workspace is None or
+             managed_job_state.get_workspace(job_id) == current_workspace)
+        ]
+        if expandable:
+            launched_from = _jobs_launched_from(expandable)
     descendant_job_ids = launched_from.subtree_job_ids
     job_ids = job_ids + descendant_job_ids
 

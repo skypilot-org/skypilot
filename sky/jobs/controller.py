@@ -2689,15 +2689,22 @@ class JobController:
             return
         if self._dynamic_members_swept:
             return
-        self._dynamic_members_swept = True
         try:
             msg = await asyncio.to_thread(
                 managed_job_utils.cancel_descendant_jobs, self._job_id, note)
         except Exception as e:  # pylint: disable=broad-except
+            # Not marked swept: run()'s backstop (or the cancel pass) gets
+            # one more try. A repeat is harmless, a miss is not.
             logger.warning(
                 'Failed to cancel jobs launched from job '
                 f'{self._job_id}: {common_utils.format_exception(e)}')
             return
+        # Marked only once a sweep has fully run. A sweep interrupted by a
+        # cancel (CancelledError from the await) leaves the flag clear, so
+        # the cancel-time pass that follows the CANCELLING write still
+        # expands the tree; a child that landed during the interrupted
+        # sweep is caught there.
+        self._dynamic_members_swept = True
         if msg != 'No job to cancel.':
             logger.info(f'Cancelling jobs launched from job {self._job_id}: '
                         f'{msg}')

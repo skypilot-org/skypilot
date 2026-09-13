@@ -2513,15 +2513,38 @@ class TestCancelDynamicMembers:
                 controller._cancel_dynamic_members('cancelled', on_cancel=True))
         sweep.assert_not_called()
 
-    def test_sweep_failure_is_swallowed(self):
+    def test_sweep_failure_is_swallowed_and_not_marked_done(self):
         controller = self._make_controller(is_root=True)
         with patch.object(managed_job_utils,
                           'cancel_descendant_jobs',
                           side_effect=RuntimeError('db down')):
             asyncio.run(controller._cancel_dynamic_members('finished'))
-        # Marked swept regardless: the job's own completion must not retry
-        # or fail on account of the sweep.
-        assert controller._dynamic_members_swept is True
+        # The job's own completion must not fail on account of the sweep,
+        # and the sweep is not marked done: run()'s backstop gets another
+        # try (a repeat is harmless, a miss is not).
+        assert controller._dynamic_members_swept is False
+
+    def test_interrupted_sweep_does_not_block_the_cancel_pass(self):
+        # A finish-time sweep that is cancelled mid-await leaves the flag
+        # clear, so the pass after the CANCELLING write still runs.
+        controller = self._make_controller(is_root=True)
+
+        async def interrupted():
+            with patch.object(managed_job_utils,
+                              'cancel_descendant_jobs',
+                              side_effect=asyncio.CancelledError()):
+                with pytest.raises(asyncio.CancelledError):
+                    await controller._cancel_dynamic_members('finished')
+            assert controller._dynamic_members_swept is False
+            with patch.object(managed_job_utils,
+                              'cancel_descendant_jobs',
+                              return_value='No job to cancel.') as sweep:
+                await controller._cancel_dynamic_members('cancelled',
+                                                         on_cancel=True)
+            sweep.assert_called_once_with(42, 'cancelled')
+            assert controller._dynamic_members_swept is True
+
+        asyncio.run(interrupted())
 
 
 class TestJobGroupResumeWithFinishedPrimaries:
