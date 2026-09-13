@@ -1763,8 +1763,14 @@ def build_managed_jobs_with_filters_no_status_query(
         query = query.where(spot_table.c.spot_job_id.in_(job_ids))
     if tree_root_ids is not None:
         # Every row in these trees: the roots' own tasks and the jobs
-        # launched under them, at any depth.
-        query = query.where(_tree_root_expr().in_(tree_root_ids))
+        # launched under them, at any depth. Spelled as two indexed
+        # membership tests rather than COALESCE(...) IN (...): PostgreSQL
+        # cannot use the primary key or the root_job_id index through the
+        # COALESCE, and this runs on every page fetch the dashboard polls.
+        # (A member's own id is never a tree root, so the OR is exact.)
+        query = query.where(
+            sqlalchemy.or_(spot_table.c.spot_job_id.in_(tree_root_ids),
+                           job_info_table.c.root_job_id.in_(tree_root_ids)))
     if accessible_workspaces is not None:
         query = query.where(
             job_info_table.c.workspace.in_(accessible_workspaces))

@@ -3792,7 +3792,9 @@ def format_job_table(
     Args:
         jobs: A list of managed jobs.
         show_all: Whether to show all columns.
-        max_jobs: The maximum number of jobs to show in the table.
+        max_jobs: The maximum number of jobs to show in the table. A job
+          counts once with all of its rows (its tasks, and the jobs launched
+          under it), so the table never shows part of a job.
         return_rows: If True, return the rows as a list of strings instead of
           all rows concatenated into a single string.
         pool_status: List of pool status dictionaries with replica_info.
@@ -3938,7 +3940,21 @@ def format_job_table(
 
     all_tasks = tasks
     if max_jobs is not None:
-        all_tasks = tasks[:max_jobs]
+        # Keep the first `max_jobs` jobs (trees), with every row of each.
+        # Cutting rows instead would drop the tail of a job: since a job's
+        # dynamic members (newer, higher ids) come before its own rows, a
+        # group with more members than the budget would lose its own rows
+        # and be rendered from the members alone, under a member's name and
+        # status.
+        kept_hashes: Dict[Any, None] = {}
+        all_tasks = []
+        for task in tasks:
+            task_hash = get_hash(task)
+            if task_hash not in kept_hashes:
+                if len(kept_hashes) >= max_jobs:
+                    continue
+                kept_hashes[task_hash] = None
+            all_tasks.append(task)
     jobs = collections.defaultdict(list)
     for task in all_tasks:
         # The tasks within the same job_id are already sorted
