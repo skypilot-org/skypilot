@@ -5067,3 +5067,112 @@ def test_command_runners_fall_back_to_the_submitting_context():
             'namespace': 'ns',
         }))
     assert [r.context for r in runners] == ['ctx-a']
+
+
+def _mock_core_api(monkeypatch):
+    """Point instance.py's core_api() at one mock, and skip sleeps."""
+    api = mock.MagicMock()
+    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                        lambda *a, **kw: api)
+    monkeypatch.setattr('time.sleep', lambda *args: None)
+    return api
+
+
+def _not_found():
+    return kubernetes.api_exception()(status=404)
+
+
+@pytest.mark.parametrize(('resource_claims', 'expected'), [
+    ([mock.MagicMock()], True),
+    ([], False),
+    (None, False),
+])
+def test_pod_has_resource_claims(resource_claims, expected):
+    pod = mock.MagicMock()
+    pod.spec.resource_claims = resource_claims
+    assert instance._pod_has_resource_claims(pod) is expected
+
+
+def test_pod_has_resource_claims_without_dra_aware_client():
+    """Older kubernetes clients do not model spec.resourceClaims at all."""
+    pod = mock.MagicMock()
+    del pod.spec.resource_claims
+    assert instance._pod_has_resource_claims(pod) is False
+
+
+def test_delete_pod_force_deletes_pod_without_claims(monkeypatch):
+    api = _mock_core_api(monkeypatch)
+
+    instance._delete_pod('default', 'ctx', 'pod', graceful=False)
+
+    api.delete_namespaced_pod.assert_called_once()
+    assert api.delete_namespaced_pod.call_args.kwargs[
+        'grace_period_seconds'] == 0
+    # No point waiting for a pod we just removed from the API server.
+    api.read_namespaced_pod.assert_not_called()
+
+
+def test_delete_pod_graceful_waits_for_pod_to_go_away(monkeypatch):
+    api = _mock_core_api(monkeypatch)
+    # Still there for the first two polls, gone on the third.
+    api.read_namespaced_pod.side_effect = [
+        mock.MagicMock(), mock.MagicMock(),
+        _not_found()
+    ]
+
+    instance._delete_pod('default', 'ctx', 'pod', graceful=True)
+
+    # Deleted with the pod's own terminationGracePeriodSeconds, i.e. without
+    # overriding the grace period to 0.
+    api.delete_namespaced_pod.assert_called_once()
+    assert ('grace_period_seconds'
+            not in api.delete_namespaced_pod.call_args.kwargs)
+    assert api.read_namespaced_pod.call_count == 3
+
+
+def test_delete_pod_graceful_force_deletes_on_timeout(monkeypatch):
+    api = _mock_core_api(monkeypatch)
+    monkeypatch.setattr(instance, '_TIMEOUT_FOR_POD_TERMINATION', 0)
+
+    instance._delete_pod('default', 'ctx', 'pod', graceful=True)
+
+    assert api.delete_namespaced_pod.call_count == 2
+    first, second = api.delete_namespaced_pod.call_args_list
+    assert 'grace_period_seconds' not in first.kwargs
+    assert second.kwargs['grace_period_seconds'] == 0
+
+
+def test_delete_pod_graceful_keeps_polling_through_transient_errors(
+        monkeypatch):
+    api = _mock_core_api(monkeypatch)
+    api.read_namespaced_pod.side_effect = [
+        kubernetes.api_exception()(status=500),
+        _not_found(),
+    ]
+
+    instance._delete_pod('default', 'ctx', 'pod', graceful=True)
+
+    # A 500 must not be mistaken for "gone" nor escalate to a force delete.
+    assert api.read_namespaced_pod.call_count == 2
+    api.delete_namespaced_pod.assert_called_once()
+
+
+@pytest.mark.parametrize(('has_resource_claims', 'expected_graceful'), [
+    (True, True),
+    (False, False),
+])
+def test_terminate_node_passes_claim_state_to_delete(monkeypatch,
+                                                     has_resource_claims,
+                                                     expected_graceful):
+    monkeypatch.setattr(instance, '_delete_services', lambda *a, **kw: None)
+    recorded = {}
+    monkeypatch.setattr(
+        instance, '_delete_pod',
+        lambda *a, **kw: recorded.update(graceful=kw['graceful']))
+
+    instance._terminate_node('default',
+                             'ctx',
+                             'pod',
+                             has_resource_claims=has_resource_claims)
+
+    assert recorded['graceful'] is expected_graceful
