@@ -2688,11 +2688,109 @@ def _delete_cluster_services(cluster_name: str, namespace: str,
                        f'{cluster_name}: {e}')
 
 
+def _pod_has_resource_claims(pod: Any) -> bool:
+    """Whether the pod requests devices via dynamic resource allocation (DRA).
+
+    ``spec.resourceClaims`` is only modelled by kubernetes client versions that
+    know about DRA, so a missing attribute means the pod has no claims.
+    """
+    pod_spec = getattr(pod, 'spec', None)
+    return bool(getattr(pod_spec, 'resource_claims', None))
+
+
+def _force_delete_pod(namespace: str, context: Optional[str],
+                      pod_name: str) -> None:
+    """Delete a pod with a zero grace period.
+
+    Some misbehaving pods do not terminate gracefully if they have open file
+    descriptors, which used to make teardown hang for many minutes, so this is
+    the default path for pod deletion.
+    """
+    kubernetes_utils.delete_k8s_resource_with_retry(
+        delete_func=lambda: kubernetes.core_api(context).delete_namespaced_pod(
+            name=pod_name,
+            namespace=namespace,
+            _request_timeout=config_lib.DELETION_TIMEOUT,
+            grace_period_seconds=0),
+        resource_type='pod',
+        resource_name=pod_name)
+
+
+def _wait_for_pod_gone(namespace: str, context: Optional[str],
+                       pod_name: str) -> bool:
+    """Polls until the pod object is gone. False if it is still there."""
+    start_time = time.time()
+    while time.time() - start_time < _TIMEOUT_FOR_POD_TERMINATION:
+        try:
+            kubernetes.core_api(context).read_namespaced_pod(
+                pod_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
+        except kubernetes.api_exception() as e:
+            if e.status == 404:
+                return True
+            # A transient API error should not short-circuit the wait into a
+            # force delete; keep polling until the timeout.
+            logger.debug(f'Error while waiting for pod {pod_name} to '
+                         f'terminate: {e}')
+        time.sleep(POLL_INTERVAL)
+    return False
+
+
+def _delete_pod(namespace: str, context: Optional[str], pod_name: str,
+                graceful: bool) -> None:
+    """Deletes a pod, optionally waiting for the kubelet to finish with it.
+
+    A zero grace period removes the pod object from etcd immediately, without
+    waiting for the kubelet to confirm that the pod is gone. That is what we
+    want for most pods (see ``_force_delete_pod``), but it is unsafe for pods
+    holding DRA resource claims: the kubelet unprepares a pod's claims after
+    its containers stop and *before* it reports the terminal pod status,
+    precisely so that the cleanup happens while the pod still exists in the
+    API. Deleting the object out from under it lets the resourceclaim
+    controller drop the claim's ``reservedFor`` entry and finalizer while the
+    kubelet may still be unpreparing, which can strand device state on the node
+    and leave claims allocated to a pod that no longer exists.
+
+    So for those pods, delete with the pod's own
+    ``terminationGracePeriodSeconds`` and wait for the object to disappear --
+    the kubelet only lets that happen once termination is complete. The wait is
+    bounded (and independent of ``terminationGracePeriodSeconds``) so that a
+    pod the container runtime cannot stop still cannot hang teardown: on
+    timeout we fall back to the force delete.
+    """
+    if not graceful:
+        _force_delete_pod(namespace, context, pod_name)
+        return
+
+    kubernetes_utils.delete_k8s_resource_with_retry(
+        delete_func=lambda: kubernetes.core_api(context).delete_namespaced_pod(
+            name=pod_name,
+            namespace=namespace,
+            _request_timeout=config_lib.DELETION_TIMEOUT),
+        resource_type='pod',
+        resource_name=pod_name)
+
+    if _wait_for_pod_gone(namespace, context, pod_name):
+        return
+
+    logger.warning(f'Pod {pod_name} did not finish terminating within '
+                   f'{_TIMEOUT_FOR_POD_TERMINATION}s. Force deleting it - '
+                   'devices held by the pod may have to be reclaimed by their '
+                   'driver before they can be used again.')
+    _force_delete_pod(namespace, context, pod_name)
+
+
 def _terminate_node(namespace: str,
                     context: Optional[str],
                     pod_name: str,
-                    is_head: bool = False) -> None:
-    """Terminate a pod and its associated services."""
+                    is_head: bool = False,
+                    has_resource_claims: bool = False) -> None:
+    """Terminate a pod and its associated services.
+
+    Args:
+        has_resource_claims: whether the pod requests DRA devices, in which
+            case it is deleted gracefully rather than force deleted. See
+            ``_delete_pod``.
+    """
     logger.debug(f'terminate_instances: namespace: {namespace}, context: '
                  f'{context}, pod_name: {pod_name}, is_head: {is_head}')
 
@@ -2707,16 +2805,7 @@ def _terminate_node(namespace: str,
     # Note - delete pod after all other resources are deleted.
     # This is to ensure there are no leftover resources if this down is run
     # from within the pod, e.g., for autodown.
-    # Note - some misbehaving pods may not terminate gracefully if they have
-    # open file descriptors. We force delete pods to avoid this.
-    kubernetes_utils.delete_k8s_resource_with_retry(
-        delete_func=lambda: kubernetes.core_api(context).delete_namespaced_pod(
-            name=pod_name,
-            namespace=namespace,
-            _request_timeout=config_lib.DELETION_TIMEOUT,
-            grace_period_seconds=0),
-        resource_type='pod',
-        resource_name=pod_name)
+    _delete_pod(namespace, context, pod_name, graceful=has_resource_claims)
 
 
 def _terminate_deployment(cluster_name: str, namespace: str,
@@ -2775,7 +2864,11 @@ def terminate_instances(
         if _is_head(pod) and worker_only:
             return
         logger.debug(f'Terminating instance {pod_name}: {pod}')
-        _terminate_node(namespace, context, pod_name, _is_head(pod))
+        _terminate_node(namespace,
+                        context,
+                        pod_name,
+                        is_head=_is_head(pod),
+                        has_resource_claims=_pod_has_resource_claims(pod))
 
     # Run pod termination in parallel
     num_threads = max(1, min(_NUM_THREADS, len(pods)))
