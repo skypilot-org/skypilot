@@ -2041,33 +2041,33 @@ class TestParentJobLinks:
 
     def test_concurrent_attaches_never_land_after_the_cancel(
             self, _mock_managed_jobs_db_conn):
-        # Five attaches race a CANCELLING write on the root. The guard's lock
-        # serializes them with the write, so every attach that succeeded
-        # committed before the CANCELLING commit, and every attach that
-        # started after it was refused. Run several rounds with jittered
-        # starts so the interleavings differ.
+        # Five attaches race a CANCELLING write on the root, four rounds with
+        # jittered starts. Whatever the interleaving, the database ends up
+        # consistent: every attach either landed (and the tree walk finds
+        # it) or was refused on CANCELLING; nothing half-way. The ordering
+        # guarantee itself is pinned by the deterministic test below, since
+        # wall-clock timestamps taken after a commit can be reordered by
+        # thread scheduling.
         for _ in range(4):
             root = self._new_job('group')
             self._set_task_status(root, state.ManagedJobStatus.RUNNING)
             lock = threading.Lock()
-            events: List[Tuple[float, str]] = []
+            outcomes: List[str] = []
 
             def attach(i, root=root):
                 time.sleep(random.uniform(0, 0.02))
                 try:
                     self._new_job(f'eval-{i}', parent_job_id=root)
                     with lock:
-                        events.append((time.monotonic(), 'inserted'))
+                        outcomes.append('inserted')
                 except ValueError as e:
                     assert 'CANCELLING' in str(e), str(e)
                     with lock:
-                        events.append((time.monotonic(), 'refused'))
+                        outcomes.append('refused')
 
             def cancel(root=root):
                 time.sleep(random.uniform(0, 0.02))
                 self._set_task_status(root, state.ManagedJobStatus.CANCELLING)
-                with lock:
-                    events.append((time.monotonic(), 'cancelled'))
 
             threads = [
                 threading.Thread(target=attach, args=(i,)) for i in range(5)
@@ -2076,16 +2076,58 @@ class TestParentJobLinks:
                 th.start()
             for th in threads:
                 th.join()
-            events.sort()
-            kinds = [k for _, k in events]
-            assert kinds.count('cancelled') == 1
-            cancel_at = kinds.index('cancelled')
-            # No insert after the CANCELLING commit; no refusal before it.
-            assert all(k == 'inserted' for k in kinds[:cancel_at]), kinds
-            assert all(k == 'refused' for k in kinds[cancel_at + 1:]), kinds
-            # And the tree walk sees exactly the ones that landed.
-            inserted = kinds.count('inserted')
-            assert len(state.get_jobs_launched_from([root])) == inserted
+            assert len(outcomes) == 5
+            assert len(state.get_jobs_launched_from(
+                [root])) == outcomes.count('inserted')
+
+    def test_cancel_waits_for_an_attach_holding_the_lock(
+            self, _mock_managed_jobs_db_conn):
+        # The ordering guarantee, deterministically: an attach that has taken
+        # the guard's lock and is still inside its transaction holds off the
+        # CANCELLING write. The write lands only after the attach commits,
+        # so the child exists (it was found by the sweep that follows the
+        # write) and the next attach is refused.
+        root = self._new_job('group')
+        self._set_task_status(root, state.ManagedJobStatus.RUNNING)
+        original = state._check_parent_accepts_attachment  # pylint: disable=protected-access
+        hold_seconds = 0.6
+
+        def slow_guard(session, parent_job_id):
+            original(session, parent_job_id)
+            time.sleep(hold_seconds)  # still inside the insert's transaction
+
+        insert_done = {}
+        cancel_done = {}
+
+        def attach():
+            with mock.patch.object(state, '_check_parent_accepts_attachment',
+                                   slow_guard):
+                self._new_job('eval-slow', parent_job_id=root)
+            insert_done['at'] = time.monotonic()
+
+        def cancel():
+            time.sleep(0.1)  # let the attach take the lock first
+            started = time.monotonic()
+            self._set_task_status(root, state.ManagedJobStatus.CANCELLING)
+            cancel_done['at'] = time.monotonic()
+            cancel_done['waited'] = cancel_done['at'] - started
+
+        threads = [
+            threading.Thread(target=attach),
+            threading.Thread(target=cancel)
+        ]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
+        # The write waited for the lock (most of the hold) and finished after
+        # the insert committed; the child is in the tree; a late attach is
+        # refused.
+        assert cancel_done['waited'] > hold_seconds / 2, cancel_done
+        assert cancel_done['at'] > insert_done['at']
+        assert len(state.get_jobs_launched_from([root])) == 1
+        with pytest.raises(ValueError, match='CANCELLING'):
+            self._new_job('eval-late', parent_job_id=root)
 
     def test_codegen_insert_path_has_the_same_guard(self,
                                                     _mock_managed_jobs_db_conn):
