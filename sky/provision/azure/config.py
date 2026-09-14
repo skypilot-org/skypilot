@@ -55,6 +55,11 @@ def get_cluster_id_and_nsg_name(resource_group: str,
     return cluster_id, nsg_name
 
 
+def _get_ssh_source_address_prefix(use_internal_ips: bool) -> str:
+    """Returns the SSH source for a SkyPilot-managed network security group."""
+    return 'VirtualNetwork' if use_internal_ips else '*'
+
+
 @common.log_function_start_end
 def bootstrap_instances(
         region: str, cluster_name_on_cloud: str,
@@ -186,6 +191,10 @@ def bootstrap_instances(
                 },
                 'nsgName': {
                     'value': nsg_name
+                },
+                'sshSourceAddressPrefix': {
+                    'value': _get_ssh_source_address_prefix(
+                        provider_config.get('use_internal_ips', False))
                 },
                 'location': {
                     'value': params['location']

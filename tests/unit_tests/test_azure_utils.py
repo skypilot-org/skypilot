@@ -1,4 +1,6 @@
 """Tests for Azure utilities and provisioning config."""
+import json
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -7,6 +9,7 @@ from sky import clouds
 from sky import exceptions
 from sky.adaptors import azure
 from sky.clouds.utils import azure_utils
+from sky.provision.azure.config import _get_ssh_source_address_prefix
 from sky.provision.azure.config import _remove_msi_resources_from_template
 from sky.provision.azure.config import _remove_network_resources_from_template
 from sky.provision.azure.config import _resolve_custom_managed_identity
@@ -14,6 +17,28 @@ from sky.provision.azure.config import _resolve_custom_managed_identity
 _SIG_IMAGE_ID = ('/subscriptions/sub-123/resourceGroups/my-rg/providers/'
                  'Microsoft.Compute/galleries/my-gallery/images/my-image/'
                  'versions/1.0.3')
+
+
+def test_ssh_source_address_prefix():
+    assert _get_ssh_source_address_prefix(use_internal_ips=True) \
+        == 'VirtualNetwork'
+    assert _get_ssh_source_address_prefix(use_internal_ips=False) == '*'
+
+
+def test_azure_config_template_uses_ssh_source_parameter():
+    template_path = (Path(__file__).parents[2] / 'sky' / 'provision' / 'azure' /
+                     'azure-config-template.json')
+    template = json.loads(template_path.read_text(encoding='utf-8'))
+    assert template['parameters']['sshSourceAddressPrefix'][
+        'defaultValue'] == '*'
+    network_security_group = next(
+        resource for resource in template['resources']
+        if resource['type'] == 'Microsoft.Network/networkSecurityGroups')
+    ssh_rule = next(
+        rule for rule in network_security_group['properties']['securityRules']
+        if rule['name'] == 'SSH')
+    assert ssh_rule['properties']['sourceAddressPrefix'] == (
+        '[parameters(\'sshSourceAddressPrefix\')]')
 
 
 def test_validate_image_id():
