@@ -391,17 +391,24 @@ or perform cleanup.
 
 .. _job-groups-dynamic-members:
 
-Launching jobs from inside a job group
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Dynamically attaching jobs to a job group
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A task in a job group can launch further managed jobs with ``sky jobs launch``
-or :func:`sky.jobs.launch` (see :ref:`nested-skypilot-managed-jobs`). A job
-launched this way becomes a *dynamic task* of the group:
+A job can be attached to a running job group after the group has launched, in
+two ways:
+
+- **From inside**: a task in the group launches it with ``sky jobs launch`` or
+  :func:`sky.jobs.launch` (see :ref:`nested-skypilot-managed-jobs`). It
+  attaches to that group by default.
+- **From outside**: ``sky jobs launch --job-group <job id or name>`` attaches a
+  job to a running group from anywhere.
+
+Either way the job becomes a *dynamic task* of the group:
 
 - It is listed under the group in ``sky jobs queue`` and the dashboard,
-  numbered on from the group's current tasks (a group with tasks 0 and 1
-  shows its first launched job as task 2). It is addressed like the group's
-  other tasks: ``sky jobs logs 39 2`` tails it and ``sky jobs cancel 39 --task 2``
+  numbered on from the group's declared tasks (a group with tasks 0 and 1
+  shows its first launched job as task 2). It is addressed like a declared
+  task: ``sky jobs logs 39 2`` tails it and ``sky jobs cancel 39 --task 2``
   cancels it on its own. Underneath, it is a managed job of its own.
 - ``sky jobs cancel <group>`` cancels it together with the group.
 - When the group finishes, dynamic tasks still running are cancelled. A group
@@ -449,11 +456,11 @@ own resources, while the trainer keeps training.
 The watcher is a primary task so that the group stays alive until the last
 evaluation it launched has finished. As an auxiliary task it would instead be
 terminated once the trainer finished, after the group's ``termination_delay``,
-and its evaluations would be cancelled with it. A runnable version is in the
-`Job Group SDK examples <https://github.com/skypilot-org/skypilot/tree/master/examples/job-group-sdk>`_.
+and its evaluations would be cancelled with it. A runnable version is
+`job_group_eval_watcher.yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/job-group-sdk/job_group_eval_watcher.yaml>`_.
 
 The dashboard picks up the dynamic tasks as they are launched and lists them
-with the group's own tasks, marked ``Dynamic``:
+with the group's declared tasks, marked ``Dynamic``:
 
 .. figure:: ../images/job-groups-dynamic-tasks.png
    :alt: The dashboard's jobs list with a job group expanded: the trainer, the eval watcher, and three dynamic evaluation tasks marked Dynamic
@@ -461,7 +468,7 @@ with the group's own tasks, marked ``Dynamic``:
    :width: 90%
 
 The same tree appears in ``sky jobs queue``, with the dynamic tasks numbered on
-from the group's own tasks as 2, 3 and 4:
+from the declared tasks as 2, 3 and 4:
 
 .. code-block:: console
 
@@ -476,12 +483,15 @@ from the group's own tasks as 2, 3 and 4:
 
     $ sky jobs cancel 122 --task 4   # the third evaluation, on its own
 
-**Choosing the group.** A job launched from inside a job group attaches to that
-group by default. ``--job-group <job id or name>`` attaches to a running job
-group explicitly, from anywhere; ``--no-job-group`` launches a top-level job
-even from inside a group. In the SDK, :func:`sky.jobs.launch` takes
-``job_group``: ``sky.jobs.AUTO_JOB_GROUP`` (the default), a job id or unique
-running job name, or ``None`` for a top-level job.
+**Controlling where a job attaches.**
+
+- A launch from inside a job group attaches to that group by default.
+- ``--job-group <job id or name>`` attaches to a specific running group, from
+  inside another group or from outside.
+- ``--no-job-group`` launches a top-level job even from inside a group.
+- In the SDK, :func:`sky.jobs.launch` takes ``job_group``:
+  ``sky.jobs.AUTO_JOB_GROUP`` (the default), a job id or unique running job
+  name, or ``None`` for a top-level job.
 
 .. note::
 
