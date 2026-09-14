@@ -2234,14 +2234,24 @@ def _resolve_job_task(
     Returns ``(job_id, task)`` to pass on: for a declared task, unchanged; for
     a dynamic task, its own job id and ``None`` (the whole member job).
 
+    For logs, anything that is neither is also returned unchanged: the log
+    reader on the controller path already answers an unknown task with
+    ``No task found matching ...`` *in the stream*, which is what
+    ``--no-follow`` and SDK callers with ``follow=False`` read (a server-side
+    error raised before streaming would reach neither). Cancel has no stream,
+    so it raises.
+
     Raises:
-        ValueError: nothing matches; or, for cancel, a declared task (it shares
-            the job's lifecycle and cannot be cancelled alone).
+        ValueError: for cancel only: the job does not exist, nothing matches,
+            or the task is a declared one (it shares the job's lifecycle and
+            cannot be cancelled alone).
     """
     if isinstance(task, str) and task.isdigit():
         task = int(task)
     declared_tasks = managed_job_state.get_managed_job_tasks(job_id)
     if not declared_tasks:
+        if not for_cancel:
+            return job_id, task
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'No managed job with ID {job_id}.')
     is_declared = (any(t.get('task_id') == task for t in declared_tasks)
@@ -2257,6 +2267,8 @@ def _resolve_job_task(
         return job_id, task
     member_job_id = managed_job_state.get_dynamic_task_job_id(job_id, task)
     if member_job_id is None:
+        if not for_cancel:
+            return job_id, task
         names = ', '.join(
             repr(t.get('task_name'))
             for t in declared_tasks
