@@ -42,6 +42,7 @@ class ManagedJobRunner(Protocol):
         skip_finished: bool,
         accessible_workspaces: List[str],
         job_ids: Optional[List[int]],
+        include_tree: bool,
         workspace_match: Optional[str],
         name_match: Optional[str],
         pool_match: Optional[str],

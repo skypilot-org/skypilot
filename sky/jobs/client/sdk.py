@@ -327,6 +327,7 @@ def queue_v2(
     submitted_before: Optional[float] = None,
     infra_match: Optional[str] = None,
     name_match: Optional[str] = None,
+    include_tree: bool = False,
 ) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
         str, int], int]]:
     """Gets statuses of managed jobs.
@@ -354,6 +355,12 @@ def queue_v2(
         infra_match: Only show jobs on this infra, as an ``--infra`` spec:
             ``cloud``, ``cloud/region`` or ``cloud/region/zone``, with ``*``
             for any component (e.g. ``k8s/my-context``, ``aws/us-east-1``).
+        include_tree: With ``job_ids``, return every row of the trees those
+            jobs belong to -- a job group's declared tasks and the jobs
+            launched under it (its dynamic tasks), at any depth -- instead
+            of the jobs' own rows. Several ids from one tree come back as
+            that tree once, keyed on its root. Requires an API server of
+            version ``MIN_JOBS_INCLUDE_TREE_API_VERSION`` or newer.
 
     Returns:
         The request ID of the queue request.
@@ -425,12 +432,22 @@ def queue_v2(
             raise exceptions.NotSupportedError(
                 'Filtering managed jobs by infra is not supported by your API '
                 'server. Please upgrade the API server to enable it.')
+    if (include_tree and remote_api_version is not None and remote_api_version <
+            server_constants.MIN_JOBS_INCLUDE_TREE_API_VERSION):
+        # Same reasoning: a server that drops this field answers with the
+        # roots alone, which reads as the whole tree and is not.
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Loading a managed job together with the jobs launched under '
+                'it (include_tree) is not supported by your API server. '
+                'Please upgrade the API server to enable it.')
 
     body = payloads.JobsQueueV2Body(
         refresh=refresh,
         skip_finished=skip_finished,
         all_users=all_users,
         job_ids=job_ids,
+        include_tree=include_tree,
         limit=limit,
         fields=list(fields) if fields is not None else None,
         sort_by=sort_by,

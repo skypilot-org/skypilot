@@ -25,7 +25,6 @@ import {
 } from '@/components/ui/select';
 import {
   useSingleManagedJob,
-  useJobTreeMembers,
   getPoolStatus,
   computeJobGroupStatus,
 } from '@/data/connectors/jobs';
@@ -84,7 +83,13 @@ function JobDetails({ overrideJobId = null, taskContext = null } = {}) {
   const { job: routeJobId, tab } = router.query;
   const jobId = overrideJobId ?? routeJobId;
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const { jobData, loading } = useSingleManagedJob(jobId, refreshTrigger);
+  // The job's rows and, from the same fetch, the rows of the jobs launched
+  // from inside it (dynamic job group members).
+  const {
+    jobData,
+    loading,
+    members: treeMemberRows,
+  } = useSingleManagedJob(jobId, refreshTrigger);
   // A dynamic task is addressed as task <index> of its group: /jobs/67 for
   // task 2 of group 66 becomes /jobs/66/2 (the URL matches the `66-2` the
   // CLI takes). The page content is the same job's.
@@ -99,7 +104,6 @@ function JobDetails({ overrideJobId = null, taskContext = null } = {}) {
   }, [jobData, jobId, taskContext, overrideJobId, router, tab]);
   // Jobs launched from inside this job (dynamic job group members), one
   // entry per job with its rows, in submission order.
-  const { members: treeMemberRows } = useJobTreeMembers(jobId, refreshTrigger);
   const launchedJobs = useMemo(() => {
     const byJob = new Map();
     treeMemberRows.forEach((row) => {

@@ -5,11 +5,13 @@ from unittest import mock
 
 import pytest
 
+from sky import exceptions
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as jobs_utils
 # Target under test
 from sky.jobs.server import core as jobs_core
+from sky.server.requests import payloads
 from sky.skylet import constants as skylet_constants
 from sky.workspaces import constants as workspace_constants
 
@@ -268,12 +270,14 @@ class TestQueue:
                                sort_by,
                                sort_order,
                                submitted_after=None,
-                               submitted_before=None):
+                               submitted_before=None,
+                               include_tree=False):
             # Return a payload containing all args for the loader to consume
             return {
                 'skip_finished': skip_finished,
                 'accessible_workspaces': accessible_workspaces,
                 'job_ids': job_ids,
+                'include_tree': include_tree,
                 'workspace_match': workspace_match,
                 'name_match': name_match,
                 'pool_match': pool_match,
@@ -665,6 +669,65 @@ class TestQueue:
         assert sorted([j['job_id'] for j in filtered]) == [2, 3]
         assert total_no_filter == 3
 
+    def test_queue_include_tree_reaches_the_controller(self, monkeypatch):
+        jobs = [_make_job(1), _make_job(2)]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+        captured = {}
+        fake = jobs_core.managed_job_utils.ManagedJobCodeGen.get_job_table
+
+        def capturing(**kwargs):
+            captured.update(kwargs)
+            return fake(**kwargs)
+
+        monkeypatch.setattr(jobs_core.managed_job_utils.ManagedJobCodeGen,
+                            'get_job_table', capturing)
+        jobs_core.queue_v2(refresh=False, all_users=True, job_ids=[1])
+        assert captured['include_tree'] is False
+        jobs_core.queue_v2(refresh=False,
+                           all_users=True,
+                           job_ids=[1],
+                           include_tree=True)
+        assert captured['include_tree'] is True
+        assert captured['job_ids'] == [1]
+
+    def test_queue_surfaces_a_controller_that_refuses_include_tree(
+            self, monkeypatch):
+        jobs = [_make_job(1)]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+        marker = jobs_core.managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MARKER
+
+        class RefusingBackend:
+
+            def run_on_head(self,
+                            handle,
+                            code,
+                            require_outputs,
+                            stream_logs,
+                            separate_stderr=False):
+                return 1, '', f'RuntimeError: {marker}: too old for trees\n'
+
+        monkeypatch.setattr(jobs_core.backend_utils, 'get_backend_from_handle',
+                            lambda handle: RefusingBackend())
+        monkeypatch.setattr(jobs_core.backends, 'CloudVmRayBackend',
+                            RefusingBackend)
+        with pytest.raises(exceptions.NotSupportedError,
+                           match='too old for trees'):
+            jobs_core.queue_v2(refresh=False,
+                               all_users=True,
+                               job_ids=[1],
+                               include_tree=True)
+
+
+def test_queue_v2_body_carries_include_tree():
+    # The HTTP handler hands the body to queue_v2_api as kwargs, so the field
+    # has to round-trip; an old client that never sends it gets False.
+    body = payloads.JobsQueueV2Body(refresh=False, job_ids=[1])
+    assert body.to_kwargs()['include_tree'] is False
+    body = payloads.JobsQueueV2Body(refresh=False,
+                                    job_ids=[1],
+                                    include_tree=True)
+    assert body.to_kwargs()['include_tree'] is True
+
 
 class TestDumpManagedJobQueue:
 
@@ -726,6 +789,7 @@ class TestDumpManagedJobQueue:
                                                infra_match,
                                                page,
                                                limit,
+                                               include_tree=False,
                                                sort_by=None,
                                                sort_order=None,
                                                submitted_after=None,
@@ -754,6 +818,7 @@ class TestDumpManagedJobQueue:
                                                pool_match,
                                                user_hashes,
                                                skip_finished,
+                                               include_tree=False,
                                                infra_match=None,
                                                submitted_after=None,
                                                submitted_before=None,

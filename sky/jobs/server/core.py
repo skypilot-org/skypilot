@@ -237,6 +237,7 @@ class _DefaultManagedJobRunner:
         skip_finished: bool,
         accessible_workspaces: List[str],
         job_ids: Optional[List[int]],
+        include_tree: bool,
         workspace_match: Optional[str],
         name_match: Optional[str],
         pool_match: Optional[str],
@@ -276,6 +277,7 @@ class _DefaultManagedJobRunner:
                 skip_finished=skip_finished,
                 accessible_workspaces=accessible_workspaces,
                 job_ids=job_ids,
+                include_tree=include_tree,
                 workspace_match=workspace_match,
                 name_match=name_match,
                 pool_match=pool_match,
@@ -299,16 +301,22 @@ class _DefaultManagedJobRunner:
 
         if returncode != 0:
             output = job_table_payload + stderr
-            marker = managed_job_utils.INFRA_FILTER_UNSUPPORTED_MARKER
-            if marker in output:
-                # The controller refused the infra filter rather than answering
-                # without it. Its message names the version it actually runs,
-                # so surface that line on its own instead of a traceback.
+            refusals = (
+                (managed_job_utils.INFRA_FILTER_UNSUPPORTED_MARKER,
+                 managed_job_utils.INFRA_FILTER_UNSUPPORTED_MESSAGE),
+                (managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MARKER,
+                 managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE),
+            )
+            for marker, default_message in refusals:
+                if marker not in output:
+                    continue
+                # The controller refused the request (an infra filter or a
+                # whole-tree fetch it cannot apply) rather than answering
+                # without it. Surface its own line instead of a traceback.
                 detail = output.partition(f'{marker}: ')[2].splitlines()
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.NotSupportedError(
-                        detail[0].strip() if detail else managed_job_utils.
-                        INFRA_FILTER_UNSUPPORTED_MESSAGE)
+                        detail[0].strip() if detail else default_message)
             logger.error(output)
             raise RuntimeError('Failed to fetch managed jobs with returncode: '
                                f'{returncode}.\n{output}')
@@ -1483,6 +1491,7 @@ def queue_v2_api(
     sort_order: Optional[str] = None,
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
+    include_tree: bool = False,
 ) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int,
            List[str]]:
     """Gets statuses of managed jobs and parse the
@@ -1492,6 +1501,7 @@ def queue_v2_api(
         skip_finished=skip_finished,
         all_users=all_users,
         job_ids=job_ids,
+        include_tree=include_tree,
         user_match=user_match,
         workspace_match=workspace_match,
         name_match=name_match,
@@ -1540,6 +1550,7 @@ def queue_v2(
     sort_order: Optional[str] = None,
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
+    include_tree: bool = False,
 ) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int, List[str]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs with filtering.
@@ -1645,6 +1656,7 @@ def queue_v2(
                     workspaces=accessible_workspaces)),
                 job_ids=managed_jobsv1_pb2.JobIds(
                     ids=job_ids) if job_ids is not None else None,
+                include_tree=include_tree,
                 workspace_match=workspace_match,
                 name_match=name_match,
                 pool_match=pool_match,
@@ -1677,6 +1689,12 @@ def queue_v2(
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.NotSupportedError(
                         managed_job_utils.INFRA_FILTER_UNSUPPORTED_MESSAGE)
+            if include_tree and not response.include_tree_applied:
+                # Same shape of failure: dropped, the request is answered
+                # with the roots alone, which looks complete and is not.
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE)
             jobs = managed_job_utils.decode_managed_job_protos(response.jobs)
             return (jobs, response.total, dict(response.status_counts),
                     response.total_no_filter, list(response.infra_options))
@@ -1689,6 +1707,7 @@ def queue_v2(
         skip_finished=skip_finished,
         accessible_workspaces=accessible_workspaces,
         job_ids=job_ids,
+        include_tree=include_tree,
         workspace_match=workspace_match,
         name_match=name_match,
         pool_match=pool_match,
