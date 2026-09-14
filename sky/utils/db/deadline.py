@@ -116,7 +116,7 @@ class DBDeadlineExceeded(_OperationalErrorBase):  # type: ignore
 TIMEOUT_PGCODE_REASONS = {
     '57014': 'statement_timeout',
     '55P03': 'lock_timeout',
-    '25P03': 'idle_in_transaction',
+    '25P03': 'idle_in_transaction_session_timeout',
 }
 
 # Margin between the server-side bounds and the client deadline, so the

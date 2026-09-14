@@ -25,6 +25,14 @@ Both timeout and executor exhaustion must be converted to responses
 *inside* the middleware: app-level exception handlers wrap the router
 only, so an exception raised in a middleware surfaces as a bare 500,
 which clients do not retry.
+
+Every response helper here accepts the request it answers and, when given
+one, stamps the rejection reason on it (``middleware_utils.mark_rejection``)
+so the metrics middleware can count these 503s by cause: a middleware
+answering a request itself is otherwise invisible to request-level metrics.
+The request is optional so that callers outside this repository, which call
+the helpers with no arguments, keep getting the same 503; they only lose the
+per-reason attribution until they pass the request too.
 """
 import asyncio
 import concurrent.futures
@@ -36,6 +44,7 @@ import fastapi
 from sky import exceptions
 from sky import sky_logging
 from sky.metrics import utils as metrics_utils
+from sky.server import middleware_utils
 from sky.server.requests import executor
 from sky.users import permission
 from sky.utils import common_utils
@@ -106,7 +115,45 @@ def install_auth_db_deadline() -> bool:
     return db_deadline.install_wait_callback()
 
 
+# `cause` of a timeout the client-side deadline produced, as opposed to one
+# the database itself ended (those are named by their Postgres setting, see
+# `_SERVER_TIMEOUT_PGCODES`).
+TIMEOUT_CAUSE_DEADLINE = 'deadline'
+
+# `pool` label values: which executor's slot the timed-out call is holding.
+# Spelled as `sky_apiserver_threads_exhausted_total{name}` spells it, so a
+# timeout can be read next to that pool's exhaustion and saturation.
+POOL_AUTH = 'auth_thread_executor'
+POOL_REQUEST = 'request_thread_executor'
+
+
+def _count_timeout(func: Callable[..., Any], cause: str, pool: str) -> None:
+    """Count one auth-path timeout, on the pool whose slot it holds.
+
+    A no-op when metrics are off, like every other instrument outside the
+    metrics middleware (see `OnDemandThreadExecutor`, which does not even
+    materialise its counter children, and `record_federation_phase`).
+
+    Recorded through `record_safely` because this runs while an exception from
+    the auth path is in flight: a failure to record must not replace it, which
+    would turn a retryable 503 into a bare 500 during exactly the incident the
+    counter exists to make visible.
+    """
+    if not metrics_utils.METRICS_ENABLED:
+        return
+    site = getattr(func, '__name__', 'unknown')
+    middleware_utils.record_safely('an auth-path timeout', _record_timeout,
+                                   site, cause, pool)
+
+
+def _record_timeout(site: str, cause: str, pool: str) -> None:
+    metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL.labels(site=site,
+                                                           cause=cause,
+                                                           pool=pool).inc()
+
+
 async def _run_with_deadline(pool: concurrent.futures.Executor,
+                             pool_name: str,
                              func: Callable[..., Any], *args: Any) -> Any:
     """Run a sync auth DB call on ``pool`` with a deadline the DB layer honours.
 
@@ -148,7 +195,7 @@ async def _run_with_deadline(pool: concurrent.futures.Executor,
             late = time.monotonic() - (start + budget)
             if late > 0:
                 # `wait_for` has (almost certainly) already released the
-                # caller and counted `caller_timeout`; this outcome lands on a
+                # caller and counted `deadline`; this outcome lands on a
                 # cancelled future and would otherwise vanish. Keep it visible:
                 # it says what finally freed a thread the executor may have
                 # reported as stuck.
@@ -161,17 +208,22 @@ async def _run_with_deadline(pool: concurrent.futures.Executor,
             pool, _run),
                                       timeout=budget)
     except AuthDBTimeoutError as e:
-        metrics_utils.SKY_APISERVER_AUTH_DB_DEADLINE_TOTAL.labels(
-            reason=e.reason).inc()
+        # Counted here, at the one choke point every auth-path call goes
+        # through (see `_count_timeout`): a deadline the database or the
+        # client's own bounds enforced, named by how it fired. `db_error` is
+        # not a timeout and stays uncounted, keeping this counter about
+        # timeouts only (#10710).
+        if e.reason != 'db_error':
+            _count_timeout(func, e.reason, pool_name)
         logger.warning(f'Auth DB call {name} gave up at its deadline '
                        f'({e.reason}): '
                        f'{common_utils.format_exception(e.__cause__ or e)}')
         raise
     except asyncio.TimeoutError:
         # wait_for fired while the thread is still running: no bound below it
-        # freed the thread (a Python-level block, not DB I/O). The alarm label.
-        metrics_utils.SKY_APISERVER_AUTH_DB_DEADLINE_TOTAL.labels(
-            reason='caller_timeout').inc()
+        # freed the thread (a Python-level block, not DB I/O). The alarm
+        # cause: the thread is still holding its pool slot.
+        _count_timeout(func, TIMEOUT_CAUSE_DEADLINE, pool_name)
         raise
 
 
@@ -182,8 +234,8 @@ async def call_with_deadline(func: Callable[..., Any], *args: Any) -> Any:
     elapses -- whether the database, the client or `wait_for` enforced it --
     and ``ConcurrentWorkerExhaustedError`` when the executor is saturated.
     """
-    return await _run_with_deadline(executor.get_auth_thread_executor(), func,
-                                    *args)
+    return await _run_with_deadline(executor.get_auth_thread_executor(),
+                                    POOL_AUTH, func, *args)
 
 
 async def _call_on_request_pool(func: Callable[..., Any], *args: Any) -> Any:
@@ -198,12 +250,21 @@ async def _call_on_request_pool(func: Callable[..., Any], *args: Any) -> Any:
     logins exhaust authentication for every other request on this worker.
     """
     return await _run_with_deadline(executor.get_request_thread_executor(),
-                                    func, *args)
+                                    POOL_REQUEST, func, *args)
+
+
+def _mark(request: Optional[fastapi.Request], reason: str) -> None:
+    """Attribute a canned rejection for the metrics layer, if we know which
+    request it answers."""
+    if request is not None:
+        middleware_utils.mark_rejection(request, reason)
 
 
 async def ensure_role_for_authenticated_user(
-        user_id: str,
-        newly_added: bool) -> Optional[fastapi.responses.JSONResponse]:
+    user_id: str,
+    newly_added: bool,
+    request: Optional[fastapi.Request] = None
+) -> Optional[fastapi.responses.JSONResponse]:
     """Give an authenticated principal a role. A response to send, or None.
 
     Both auth front-ends (the auth-proxy middleware and the oauth2-proxy one)
@@ -231,7 +292,7 @@ async def ensure_role_for_authenticated_user(
             logger.error(f'Concurrent worker exhausted seeding a role for '
                          f'{user_id}: {e}')
             permission.permission_service.queue_role_repair(user_id)
-            return worker_exhausted_response()
+            return worker_exhausted_response(request=request)
         except asyncio.TimeoutError as e:
             # Separated from the clause below for the log, not the answer: the
             # seed hit the auth deadline. Either the DB layer cut it off (an
@@ -245,7 +306,7 @@ async def ensure_role_for_authenticated_user(
                          f'finish within {AUTH_DB_TIMEOUT_SECONDS}s ({how}); '
                          f'queueing it off the request')
             permission.permission_service.queue_role_repair(user_id)
-            return role_seed_unavailable_response()
+            return role_seed_unavailable_response(request=request)
         except Exception as e:  # pylint: disable=broad-except
             # Everything else, because an exception raised in a middleware
             # surfaces as a bare 500, which clients do not retry (see this
@@ -257,14 +318,16 @@ async def ensure_role_for_authenticated_user(
                          f'queueing it off the request: '
                          f'{common_utils.format_exception(e)}')
             permission.permission_service.queue_role_repair(user_id)
-            return role_seed_unavailable_response()
+            return role_seed_unavailable_response(request=request)
         return None
     if not permission.permission_service.probably_has_role(user_id):
         permission.permission_service.queue_role_repair(user_id)
     return None
 
 
-def db_timeout_response() -> fastapi.responses.JSONResponse:
+def db_timeout_response(
+    request: Optional[fastapi.Request] = None
+) -> fastapi.responses.JSONResponse:
     """503 for an auth lookup that timed out on a degraded database.
 
     503 (not 504/429) because the client maps exactly 503 to
@@ -273,6 +336,7 @@ def db_timeout_response() -> fastapi.responses.JSONResponse:
     The detail message is distinct from the worker-exhausted 503 so
     operators can tell the two apart in logs.
     """
+    _mark(request, middleware_utils.REJECT_REASON_AUTH_DB_TIMEOUT)
     return fastapi.responses.JSONResponse(
         status_code=503,
         headers={'Retry-After': str(max(1, int(AUTH_DB_TIMEOUT_SECONDS)))},
@@ -282,7 +346,9 @@ def db_timeout_response() -> fastapi.responses.JSONResponse:
         })
 
 
-def role_seed_unavailable_response() -> fastapi.responses.JSONResponse:
+def role_seed_unavailable_response(
+    request: Optional[fastapi.Request] = None
+) -> fastapi.responses.JSONResponse:
     """503 for a new user whose role could not be assigned in time.
 
     Not `db_timeout_response`: that one names a slow database, and the reason
@@ -290,6 +356,7 @@ def role_seed_unavailable_response() -> fastapi.responses.JSONResponse:
     healthy database doing exactly what it should. Same 503 so the client
     retries with backoff, and by then the queued repair has normally landed.
     """
+    _mark(request, middleware_utils.REJECT_REASON_ROLE_SEED_UNAVAILABLE)
     return fastapi.responses.JSONResponse(
         status_code=503,
         headers={'Retry-After': str(max(1, int(AUTH_DB_TIMEOUT_SECONDS)))},
@@ -300,13 +367,16 @@ def role_seed_unavailable_response() -> fastapi.responses.JSONResponse:
         })
 
 
-def jwt_secret_unavailable_response() -> fastapi.responses.JSONResponse:
+def jwt_secret_unavailable_response(
+    request: Optional[fastapi.Request] = None
+) -> fastapi.responses.JSONResponse:
     """503 for service-account auth that cannot load its signing secret.
 
     Not a 401: the token is well-formed and the server simply cannot reach the
     secret to check it. A 401 reads as "this credential is bad" and pushes
     operators to rotate tokens over what is a transient database problem.
     """
+    _mark(request, middleware_utils.REJECT_REASON_JWT_SECRET_UNAVAILABLE)
     return fastapi.responses.JSONResponse(
         status_code=503,
         headers={'Retry-After': str(max(1, int(AUTH_DB_TIMEOUT_SECONDS)))},
@@ -318,7 +388,9 @@ def jwt_secret_unavailable_response() -> fastapi.responses.JSONResponse:
         })
 
 
-def worker_exhausted_response() -> fastapi.responses.JSONResponse:
+def worker_exhausted_response(
+    request: Optional[fastapi.Request] = None
+) -> fastapi.responses.JSONResponse:
     """503 for auth-path work rejected by a saturated thread executor.
 
     Either pool: the auth executor for lookups, or the request executor for a
@@ -329,6 +401,7 @@ def worker_exhausted_response() -> fastapi.responses.JSONResponse:
     exceptions raised in middlewares, so middlewares must convert the
     error themselves or it surfaces as a bare 500.
     """
+    _mark(request, middleware_utils.REJECT_REASON_AUTH_WORKER_EXHAUSTED)
     return fastapi.responses.JSONResponse(
         status_code=503,
         content={

@@ -470,80 +470,114 @@ jobs:
 
   notify-slack-failure:
     runs-on: ubuntu-latest
-    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable, publish-and-validate-both, trigger-docker-and-helm-release, tag-nightly-release]
-    # Only run this job if any of the previous jobs failed
-    if: failure()
+    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable, publish-and-validate-both, trigger-docker-and-helm-release, tag-nightly-release, notify-downstream, summary]
+    # Fire when any upstream job failed OR the run was cancelled. A cancelled
+    # run (e.g. someone stopping it while Buildkite lanes are still waiting)
+    # publishes no nightly and dispatches nothing downstream, exactly like a
+    # failure -- but `failure()` alone is false for it, so 2026-09-10's nightly
+    # was skipped with no Slack message at all.
+    #
+    # The `needs` list names every other job in the workflow -- including the
+    # parallel `notify-downstream` and `summary` -- so this job cannot be
+    # evaluated early. A job left out of it can reach a terminal state last,
+    # and a cancel landing after that would find this one already skipped.
+    # (`gate-tests` is covered transitively: every lane needs it.)
+    if: failure() || cancelled()
     steps:
       - name: Prepare failure message
         id: message_content
         run: |
-          TITLE_TEXT="Workflow ${{ github.workflow }} failed."
           COMMIT_SHA="${{ github.sha }}"
           COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${COMMIT_SHA}"
           SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           EMOJI="🚨"
+
+          # A run that was stopped (only cancelled results, no failures) reads
+          # differently from one that broke; word the message accordingly.
+          OUTCOME="failed"
+          CANCEL_HINT=""
+          if [[ "${{ contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            OUTCOME="was cancelled"
+            if [[ "${{ needs.publish-and-validate-both.result }}" == "success" ]]; then
+              # Cancelled *after* the nightly reached PyPI. Re-running would only
+              # collide with that already-published version, so say what is left.
+              CANCEL_HINT=" \`${{ needs.nightly-build-pypi.outputs.version }}\` was already published; a post-publish step was cancelled, so check tagging / Docker+Helm / the downstream dispatch instead of re-running."
+            else
+              CANCEL_HINT=" No nightly was published and nothing was dispatched downstream; re-run the workflow to retry tonight's nightly (the Buildkite builds may still be running)."
+            fi
+          fi
+          TITLE_TEXT="Workflow ${{ github.workflow }} ${OUTCOME}."
+
+          # Only surface the lanes that actually broke -- a green lane's link is
+          # noise. A lane cancelled before extract-buildkite ran has no build
+          # number, so point at the run rather than emitting a `/builds/` URL with
+          # nothing after it.
           BUILDKITE_MSG=""
-          if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-no-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result }}" == "failure" || "${{ needs.smoke-tests-remote-server-kubernetes.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-jobs-consolidation.result }}" == "failure" || "${{ needs.smoke-tests-slurm-minimal.result }}" == "failure" || "${{ needs.backward-compat-test-nightly.result }}" == "failure" || "${{ needs.backward-compat-test-stable.result }}" == "failure" ]]; then
-            if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" ]]; then
-              BUILDKITE_MSG="<https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-aws.outputs.build_number }}|Buildkite Log(--aws)>"
-            fi
-            if [[ "${{ needs.smoke-tests-kubernetes-resource-heavy.result }}" == "failure" ]]; then
-              if [[ ! -z "$BUILDKITE_MSG" ]]; then
-                BUILDKITE_MSG="${BUILDKITE_MSG} and"
+          NO_BUILD_LANES=""
+          append_lane() { # <label> <result> <pipeline> <build_number>
+            case "$2" in
+              failure|cancelled) ;;
+              *) return 0 ;;
+            esac
+            if [[ -z "$4" ]]; then
+              # Stopped before extract-buildkite produced a build number. A
+              # `/builds/` URL with nothing after it 404s, so name the lane
+              # instead of linking it.
+              if [[ -n "$NO_BUILD_LANES" ]]; then
+                NO_BUILD_LANES="${NO_BUILD_LANES}, $1"
+              else
+                NO_BUILD_LANES="$1"
               fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-resource-heavy.outputs.build_number }}|Buildkite Log(--kubernetes --resource-heavy)>"
+              return 0
             fi
-            if [[ "${{ needs.smoke-tests-kubernetes-no-resource-heavy.result }}" == "failure" ]]; then
-              if [[ ! -z "$BUILDKITE_MSG" ]]; then
-                BUILDKITE_MSG="${BUILDKITE_MSG} and"
-              fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-no-resource-heavy.outputs.build_number }}|Buildkite Log(--kubernetes --no-resource-heavy)>"
+            local entry="<https://buildkite.com/skypilot-1/$3/builds/$4|Buildkite Log($1)>"
+            if [[ -n "$BUILDKITE_MSG" ]]; then
+              BUILDKITE_MSG="${BUILDKITE_MSG} and ${entry}"
+            else
+              BUILDKITE_MSG="${entry}"
             fi
-            if [[ "${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result }}" == "failure" ]]; then
-              if [[ ! -z "$BUILDKITE_MSG" ]]; then
-                BUILDKITE_MSG="${BUILDKITE_MSG} and"
-              fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.outputs.build_number }}|Buildkite Log(--kubernetes --no-resource-heavy --dependency kubernetes)>"
-            fi
-            if [[ "${{ needs.smoke-tests-remote-server-kubernetes.result }}" == "failure" ]]; then
-              if [[ ! -z "$BUILDKITE_MSG" ]]; then
-                BUILDKITE_MSG="${BUILDKITE_MSG} and"
-              fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}|Buildkite Log(--remote-server --kubernetes)>"
-            fi
-            if [[ "${{ needs.smoke-tests-kubernetes-jobs-consolidation.result }}" == "failure" ]]; then
-              if [[ ! -z "$BUILDKITE_MSG" ]]; then
-                BUILDKITE_MSG="${BUILDKITE_MSG} and"
-              fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-jobs-consolidation.outputs.build_number }}|Buildkite Log(--kubernetes --jobs-consolidation --no-resource-heavy)>"
-            fi
-            if [[ "${{ needs.smoke-tests-slurm-minimal.result }}" == "failure" ]]; then
-              if [[ ! -z "$BUILDKITE_MSG" ]]; then
-                BUILDKITE_MSG="${BUILDKITE_MSG} and"
-              fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-slurm-minimal.outputs.build_number }}|Buildkite Log(test_minimal --slurm)>"
-            fi
-            # if [[ "${{ needs.smoke-tests-runpod-minimal.result }}" == "failure" ]]; then
-            #   if [[ ! -z "$BUILDKITE_MSG" ]]; then
-            #     BUILDKITE_MSG="${BUILDKITE_MSG} and"
-            #   fi
-            #   BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-runpod-minimal.outputs.build_number }}|Buildkite Log(test_minimal --runpod)>"
-            # fi
-            if [[ "${{ needs.backward-compat-test-nightly.result }}" == "failure" ]]; then
-              if [[ ! -z "$BUILDKITE_MSG" ]]; then
-                BUILDKITE_MSG="${BUILDKITE_MSG} and"
-              fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.backward-compat-test-nightly.outputs.build_number }}|Buildkite Log(backward-compat-nightly)>"
-            fi
-            if [[ "${{ needs.backward-compat-test-stable.result }}" == "failure" ]]; then
-              if [[ ! -z "$BUILDKITE_MSG" ]]; then
-                BUILDKITE_MSG="${BUILDKITE_MSG} and"
-              fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.backward-compat-test-stable.outputs.build_number }}|Buildkite Log(backward-compat-stable)>"
-            fi
-            MARKDOWN_TEXT="${EMOJI} ${PRECHECK_TAG}Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed at Buildkite step for commit <${COMMIT_URL}|${SHORT_SHA}>. ${BUILDKITE_MSG}"
+          }
+
+          append_lane "--aws" \
+            "${{ needs.smoke-tests-aws.result }}" \
+            "smoke-tests" "${{ needs.smoke-tests-aws.outputs.build_number }}"
+          append_lane "--kubernetes --resource-heavy" \
+            "${{ needs.smoke-tests-kubernetes-resource-heavy.result }}" \
+            "smoke-tests" "${{ needs.smoke-tests-kubernetes-resource-heavy.outputs.build_number }}"
+          append_lane "--kubernetes --no-resource-heavy" \
+            "${{ needs.smoke-tests-kubernetes-no-resource-heavy.result }}" \
+            "smoke-tests" "${{ needs.smoke-tests-kubernetes-no-resource-heavy.outputs.build_number }}"
+          append_lane "--kubernetes --no-resource-heavy --dependency kubernetes" \
+            "${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result }}" \
+            "smoke-tests" "${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.outputs.build_number }}"
+          append_lane "--remote-server --kubernetes" \
+            "${{ needs.smoke-tests-remote-server-kubernetes.result }}" \
+            "smoke-tests" "${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}"
+          append_lane "--kubernetes --jobs-consolidation --no-resource-heavy" \
+            "${{ needs.smoke-tests-kubernetes-jobs-consolidation.result }}" \
+            "smoke-tests" "${{ needs.smoke-tests-kubernetes-jobs-consolidation.outputs.build_number }}"
+          append_lane "test_minimal --slurm" \
+            "${{ needs.smoke-tests-slurm-minimal.result }}" \
+            "smoke-tests" "${{ needs.smoke-tests-slurm-minimal.outputs.build_number }}"
+          append_lane "backward-compat-nightly" \
+            "${{ needs.backward-compat-test-nightly.result }}" \
+            "quicktest-core" "${{ needs.backward-compat-test-nightly.outputs.build_number }}"
+          append_lane "backward-compat-stable" \
+            "${{ needs.backward-compat-test-stable.result }}" \
+            "quicktest-core" "${{ needs.backward-compat-test-stable.outputs.build_number }}"
+          # append_lane "test_minimal --runpod" \
+          #   "${{ needs.smoke-tests-runpod-minimal.result }}" \
+          #   "smoke-tests" "${{ needs.smoke-tests-runpod-minimal.outputs.build_number }}"
+
+          NO_BUILD_MSG=""
+          if [[ -n "$NO_BUILD_LANES" ]]; then
+            NO_BUILD_MSG=" No Buildkite build was dispatched for: ${NO_BUILD_LANES}."
+          fi
+          if [[ -n "$BUILDKITE_MSG" ]]; then
+            MARKDOWN_TEXT="${EMOJI} Workflow <${RUN_URL}|*${{ github.workflow }}*> ${OUTCOME} at Buildkite step for commit <${COMMIT_URL}|${SHORT_SHA}>. ${BUILDKITE_MSG}.${NO_BUILD_MSG}${CANCEL_HINT}"
           else
-            MARKDOWN_TEXT="${EMOJI} ${PRECHECK_TAG}Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed for commit <${COMMIT_URL}|${SHORT_SHA}>."
+            MARKDOWN_TEXT="${EMOJI} Workflow <${RUN_URL}|*${{ github.workflow }}*> ${OUTCOME} for commit <${COMMIT_URL}|${SHORT_SHA}>.${NO_BUILD_MSG}${CANCEL_HINT}"
           fi
           echo "message_text=${TITLE_TEXT}" >> $GITHUB_OUTPUT
           echo "message_block=${MARKDOWN_TEXT}" >> $GITHUB_OUTPUT

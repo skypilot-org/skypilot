@@ -1202,7 +1202,7 @@ class TestClassification:
     @pytest.mark.parametrize('pgcode,reason',
                              [('57014', 'statement_timeout'),
                               ('55P03', 'lock_timeout'),
-                              ('25P03', 'idle_in_transaction')])
+                              ('25P03', 'idle_in_transaction_session_timeout')])
     def test_server_pgcodes(self, pgcode, reason):
         wrapped = sqlalchemy.exc.OperationalError('stmt', {}, _PgError(pgcode))
         assert deadline.deadline_reason(wrapped) == reason

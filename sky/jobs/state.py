@@ -3,6 +3,7 @@
 # that we can easily switch to a s3-based storage.
 import asyncio
 import collections
+import dataclasses
 import datetime
 import enum
 import json
@@ -217,6 +218,43 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('last_emergency_recovery_at',
                       sqlalchemy.Float,
                       server_default=None),
+    # Where a job launched from inside another managed job came from (e.g.
+    # an eval job launched by a job group's watcher task). All NULL for
+    # top-level jobs. Written once on the child's row; parent rows are never
+    # mutated.
+    #   root_job_id: the top-level job of the tree. Load-bearing: the group
+    #     the job is shown under and the lifecycle it shares (cancelled with
+    #     the root, swept when the root's primary tasks finish).
+    #   parent_job_id: the job that launched this one (== root for a direct
+    #     member).
+    #   parent_task_id: the task within the parent that launched this one.
+    #     Display only.
+    sqlalchemy.Column('root_job_id',
+                      sqlalchemy.Integer,
+                      server_default=None,
+                      index=True),
+    sqlalchemy.Column('parent_job_id',
+                      sqlalchemy.Integer,
+                      server_default=None,
+                      index=True),
+    sqlalchemy.Column('parent_task_id', sqlalchemy.Integer,
+                      server_default=None),
+    #   dynamic_task_index: a dynamic task's ordinal within its root's tree
+    # (the root's declared tasks are 0..n-1, dynamic tasks number on from n in
+    #     attach order); `<root>-<index>` names it on the CLI. NULL for
+    #     top-level jobs.
+    #   dynamic_task_count: on the root's row, how many dynamic tasks have
+    #     attached; incremented atomically to hand out the next index.
+    sqlalchemy.Column('dynamic_task_index',
+                      sqlalchemy.Integer,
+                      server_default=None),
+    sqlalchemy.Column('dynamic_task_count',
+                      sqlalchemy.Integer,
+                      server_default=None),
+    sqlalchemy.Index('ux_job_info_root_dynamic_task_index',
+                     'root_job_id',
+                     'dynamic_task_index',
+                     unique=True),
 )
 
 # Separate table for API access token IDs associated with managed jobs.
@@ -503,6 +541,13 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'batch_total_batches': r.get('batch_total_batches'),
         'batch_completed_batches': r.get('batch_completed_batches'),
         'node_names': common_utils.get_display_node_names(r.get('node_names')),
+        # The job/task that launched this job, when launched from inside
+        # another managed job. NULL for top-level jobs.
+        'root_job_id': r.get('root_job_id'),
+        'parent_job_id': r.get('parent_job_id'),
+        'parent_task_id': r.get('parent_task_id'),
+        'dynamic_task_index': r.get('dynamic_task_index'),
+        'dynamic_task_count': r.get('dynamic_task_count'),
     }
 
 
@@ -892,6 +937,69 @@ ControllerPidRecord = collections.namedtuple('ControllerPidRecord', [
 
 
 # === Status transition functions ===
+def _check_parent_accepts_attachment(session: orm.Session,
+                                     parent_job_id: int) -> None:
+    """Refuse to attach a job under a parent that is not running, atomically.
+
+    The launch path checks the parent up front, but the row is written much
+    later (after file mounts are uploaded). A cancel in between would expand
+    the tree before this row exists and never see it: an orphan under a
+    CANCELLING root. So the rows are locked and re-read here, inside the
+    transaction that inserts the child (``session`` is the insert's).
+
+    Two jobs matter: the direct parent (cancelling it takes its subtree)
+    and the tree's root (cancelling it, or its finishing, takes everything
+    under it, and an intermediate parent can still be RUNNING while the
+    root is being cancelled). The root is read from the parent's own row
+    here rather than trusted from the caller, so the guard cannot be
+    weakened by a caller that passes none. Both are locked with a no-op
+    UPDATE of their task rows: it takes SQLite's write lock and
+    PostgreSQL's row locks, which a concurrent CANCELLING write on either
+    must wait for. Either that write committed first and this raises, or
+    this row commits first and the controller, which expands descendants
+    right after writing CANCELLING, finds it.
+
+    A job's status is not a column: it is derived from its task rows, the
+    same way ``get_status`` does (first non-terminal task, else the last).
+
+    Raises:
+        ValueError: the parent (or root) does not exist, or is finished or
+            being cancelled (the wording matches the launch path's check).
+    """
+    parent_root = session.execute(
+        sqlalchemy.select(job_info_table.c.root_job_id).where(
+            job_info_table.c.spot_job_id == parent_job_id)).fetchone()
+    if parent_root is None:
+        raise ValueError(f'Cannot attach to job {parent_job_id}: no such '
+                         'managed job.')
+    root_job_id = parent_root[0]
+    job_ids = [parent_job_id]
+    if root_job_id is not None and root_job_id != parent_job_id:
+        job_ids.append(root_job_id)
+    # One lock statement for both, in a fixed order, so two attaches never
+    # take the two locks in opposite orders.
+    session.execute(
+        sqlalchemy.update(spot_table).where(
+            spot_table.c.spot_job_id.in_(
+                sorted(job_ids))).values(spot_job_id=spot_table.c.spot_job_id))
+    for job_id in job_ids:
+        rows = session.execute(
+            sqlalchemy.select(spot_table.c.task_id, spot_table.c.status).where(
+                spot_table.c.spot_job_id == job_id).order_by(
+                    spot_table.c.task_id.asc())).fetchall()
+        if not rows:
+            raise ValueError(
+                f'Cannot attach to job {job_id}: no such managed job.')
+        _, status = get_latest_task_id_from_statuses([
+            (task_id, ManagedJobStatus(status)) for task_id, status in rows
+        ])
+        assert status is not None, rows
+        if status.is_terminal() or status == ManagedJobStatus.CANCELLING:
+            raise ValueError(f'Cannot attach to job {job_id}: it is '
+                             f'{status.value}; only a running job group '
+                             'accepts new tasks.')
+
+
 def set_job_info_without_job_id(
         name: str,
         workspace: str,
@@ -901,7 +1009,11 @@ def set_job_info_without_job_id(
         user_hash: Optional[str],
         execution: Optional[str] = None,
         is_batch: bool = False,
-        file_mounts_blob_id: Optional[str] = None) -> int:
+        file_mounts_blob_id: Optional[str] = None,
+        parent_job_id: Optional[int] = None,
+        parent_task_id: Optional[int] = None,
+        root_job_id: Optional[int] = None,
+        dynamic_task_index: Optional[int] = None) -> int:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -911,6 +1023,12 @@ def set_job_info_without_job_id(
             insert_func = postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
+
+        if parent_job_id is not None:
+            # Same transaction as the insert below, so a cancel of the parent
+            # or of the tree's root cannot slip between this check and the
+            # row landing.
+            _check_parent_accepts_attachment(session, parent_job_id)
 
         insert_stmt = insert_func(job_info_table).values(
             name=name,
@@ -923,6 +1041,10 @@ def set_job_info_without_job_id(
             execution=execution,
             is_batch=is_batch,
             file_mounts_blob_id=file_mounts_blob_id,
+            root_job_id=root_job_id,
+            parent_job_id=parent_job_id,
+            parent_task_id=parent_task_id,
+            dynamic_task_index=dynamic_task_index,
         )
 
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -1323,6 +1445,65 @@ def get_num_tasks(job_id: int) -> int:
     return len(_get_all_task_ids_statuses(job_id))
 
 
+def next_dynamic_task_index(root_job_id: int) -> int:
+    """Reserve the next dynamic task index under ``root_job_id``.
+
+    The root's declared tasks are 0..n-1; the k-th dynamic task to attach gets
+    n + k - 1. The counter lives on the root's row and is bumped with one
+    UPDATE, which the database serializes (row lock on PostgreSQL, the
+    single writer on SQLite), so concurrent attaches never get the same
+    index and nothing has to retry. The unique index on
+    (root_job_id, dynamic_task_index) is only a safety net.
+
+    Raises:
+        ValueError: no such managed job.
+    """
+    num_tasks = get_num_tasks(root_job_id)
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        bump = sqlalchemy.update(job_info_table).where(
+            job_info_table.c.spot_job_id == root_job_id).values(
+                dynamic_task_count=sqlalchemy.func.coalesce(
+                    job_info_table.c.dynamic_task_count, 0) + 1)
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
+            count = session.execute(
+                bump.returning(job_info_table.c.dynamic_task_count)).scalar()
+        else:
+            # The UPDATE takes SQLite's write lock for the transaction, so
+            # the SELECT reads this transaction's own value.
+            session.execute(bump)
+            count = session.execute(
+                sqlalchemy.select(job_info_table.c.dynamic_task_count).where(
+                    job_info_table.c.spot_job_id == root_job_id)).scalar()
+        session.commit()
+    if count is None:
+        raise ValueError(f'No such managed job: {root_job_id}')
+    return num_tasks + count - 1
+
+
+def get_dynamic_task_job_id(root_job_id: int,
+                            task: Union[str, int]) -> Optional[int]:
+    """The job id of the dynamic task shown as ``task`` under ``root_job_id``.
+
+    An int is a dynamic task index (the numbering that continues from the
+    root's declared tasks); a str is the launched job's name. Grandchildren
+    carry the same root and draw from the same counter, so both lookups
+    cover the whole tree. Names are not unique; the newest match wins.
+    Returns None when nothing matches.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        query = sqlalchemy.select(job_info_table.c.spot_job_id).where(
+            job_info_table.c.root_job_id == root_job_id)
+        if isinstance(task, int):
+            query = query.where(job_info_table.c.dynamic_task_index == task)
+        else:
+            query = query.where(job_info_table.c.name == task)
+        row = session.execute(
+            query.order_by(job_info_table.c.spot_job_id.desc())).fetchone()
+    return None if row is None else int(row[0])
+
+
 def get_latest_task_id_from_statuses(
     id_statuses: List[Tuple[int, ManagedJobStatus]]
 ) -> Tuple[Optional[int], Optional[ManagedJobStatus]]:
@@ -1576,9 +1757,22 @@ def get_managed_jobs_highest_priority() -> int:
             0] is not None else constants.MIN_PRIORITY
 
 
+def _tree_root_expr() -> 'sqlalchemy.ColumnElement':
+    """The top-level job of a row's tree: its root_job_id, else itself.
+
+    A job launched from inside another managed job (a dynamic job group
+    member) has its own spot_job_id but belongs, for listing purposes, to
+    the tree of its root. The queue pages and counts by this expression so
+    a group and everything launched under it stay on one page.
+    """
+    return sqlalchemy.func.coalesce(job_info_table.c.root_job_id,
+                                    spot_table.c.spot_job_id)
+
+
 def build_managed_jobs_with_filters_no_status_query(
     fields: Optional[List[str]] = None,
     job_ids: Optional[List[int]] = None,
+    tree_root_ids: Optional[List[int]] = None,
     accessible_workspaces: Optional[List[str]] = None,
     workspace_match: Optional[str] = None,
     name_match: Optional[str] = None,
@@ -1618,10 +1812,12 @@ def build_managed_jobs_with_filters_no_status_query(
     # global_user_state.get_user() on it. This runs on the controller, which may
     # not have the user info. Prefer to do it on the API server side.
     if count_unique_jobs:
-        # Count unique jobs (by spot_job_id), not tasks
+        # Count unique top-level jobs (tree roots), not tasks and not the
+        # jobs launched from inside another job: those are listed under
+        # their root and must not take a page slot of their own.
         query = sqlalchemy.select(
             sqlalchemy.func.count(  # pylint: disable=not-callable
-                sqlalchemy.distinct(spot_table.c.spot_job_id)).label('count'))
+                sqlalchemy.distinct(_tree_root_expr())).label('count'))
     elif count_only:
         query = sqlalchemy.select(sqlalchemy.func.count().label('count'))  # pylint: disable=not-callable
     elif status_count:
@@ -1669,6 +1865,16 @@ def build_managed_jobs_with_filters_no_status_query(
         query = query.with_only_columns(*selected_columns)
     if job_ids is not None:
         query = query.where(spot_table.c.spot_job_id.in_(job_ids))
+    if tree_root_ids is not None:
+        # Every row in these trees: the roots' declared tasks and the jobs
+        # launched under them, at any depth. Spelled as two indexed
+        # membership tests rather than COALESCE(...) IN (...): PostgreSQL
+        # cannot use the primary key or the root_job_id index through the
+        # COALESCE, and this runs on every page fetch the dashboard polls.
+        # (A member's own id is never a tree root, so the OR is exact.)
+        query = query.where(
+            sqlalchemy.or_(spot_table.c.spot_job_id.in_(tree_root_ids),
+                           job_info_table.c.root_job_id.in_(tree_root_ids)))
     if accessible_workspaces is not None:
         query = query.where(
             job_info_table.c.workspace.in_(accessible_workspaces))
@@ -1733,6 +1939,7 @@ def build_managed_jobs_with_filters_no_status_query(
 def build_managed_jobs_with_filters_query(
     fields: Optional[List[str]] = None,
     job_ids: Optional[List[int]] = None,
+    tree_root_ids: Optional[List[int]] = None,
     accessible_workspaces: Optional[List[str]] = None,
     workspace_match: Optional[str] = None,
     name_match: Optional[str] = None,
@@ -1756,6 +1963,7 @@ def build_managed_jobs_with_filters_query(
     query = build_managed_jobs_with_filters_no_status_query(
         fields=fields,
         job_ids=job_ids,
+        tree_root_ids=tree_root_ids,
         accessible_workspaces=accessible_workspaces,
         workspace_match=workspace_match,
         name_match=name_match,
@@ -2057,8 +2265,10 @@ def get_managed_jobs_with_filters(
     rows still carry the raw ``status``; callers that want the refined value in
     the result should surface it separately.
 
-    Pagination is by unique jobs (spot_job_id), not by tasks. This means
-    if you request page 1 with limit 10, you get all tasks for 10 unique jobs.
+    Pagination is by top-level job (tree root), not by tasks and not by the
+    jobs launched from inside another job: page 1 with limit 10 is every
+    task of 10 top-level jobs plus every job launched under them, at any
+    depth, so a job group and its members are always on the same page.
 
     Args:
         sort_by: Field to sort by. Valid values: 'job_id', 'id', 'job_name',
@@ -2096,7 +2306,7 @@ def get_managed_jobs_with_filters(
 
     engine = _db_manager.get_engine()
 
-    # Count unique jobs (by spot_job_id), not tasks
+    # Count unique top-level jobs (tree roots), not tasks
     count_query = build_managed_jobs_with_filters_query(
         fields=None,
         job_ids=job_ids,
@@ -2116,13 +2326,15 @@ def get_managed_jobs_with_filters(
     with orm.Session(engine) as session:
         total = session.execute(count_query).fetchone()[0]
 
-    # For pagination, first get the unique job_ids for the current page,
-    # then fetch all tasks for those jobs
+    # For pagination, first get the tree roots for the current page, then
+    # fetch every row in those trees (the roots' tasks and the jobs launched
+    # under them).
     if page is not None and limit is not None:
-        # Get paginated unique job IDs with ordering
+        # Get paginated unique root ids with ordering
         # Use GROUP BY instead of DISTINCT to allow ORDER BY on different
         # columns (PostgreSQL requires ORDER BY columns to be in SELECT list
         # when using DISTINCT).
+        tree_root = _tree_root_expr()
         job_ids_subquery = build_managed_jobs_with_filters_query(
             fields=None,
             job_ids=job_ids,
@@ -2137,41 +2349,44 @@ def get_managed_jobs_with_filters(
             submitted_after=submitted_after,
             submitted_before=submitted_before,
             status_expr=status_expr,
-        ).with_only_columns(spot_table.c.spot_job_id).group_by(
-            spot_table.c.spot_job_id)
+        ).with_only_columns(tree_root.label('tree_root')).group_by(tree_root)
 
-        # Apply sorting to pagination query - this determines which jobs appear
-        # on each page. Use MAX aggregate for columns not in GROUP BY to ensure
-        # PostgreSQL compatibility.
+        # Apply sorting to pagination query - this determines which trees
+        # appear on each page. Use MAX aggregate for columns not in GROUP BY
+        # to ensure PostgreSQL compatibility; a tree sorts by its newest or
+        # largest value.
         if sort_by and sort_by in sort_field_map:
             sort_column = sort_field_map[sort_by]
-            # Use MAX aggregate for columns that aren't the grouped column
-            if sort_column != spot_table.c.spot_job_id:
+            # A tree's id is its root's id; every other column is aggregated
+            # over the tree's rows.
+            if sort_column == spot_table.c.spot_job_id:
+                sort_column = tree_root
+            else:
                 sort_column = sqlalchemy.func.max(sort_column)
             if sort_order == 'asc':
                 job_ids_subquery = job_ids_subquery.order_by(sort_column.asc())
             else:
                 job_ids_subquery = job_ids_subquery.order_by(sort_column.desc())
         else:
-            # Default sort: job_id desc (newest first)
-            job_ids_subquery = job_ids_subquery.order_by(
-                spot_table.c.spot_job_id.desc())
+            # Default sort: root id desc (newest top-level job first)
+            job_ids_subquery = job_ids_subquery.order_by(tree_root.desc())
 
         job_ids_subquery = job_ids_subquery.offset(
             (page - 1) * limit).limit(limit)
 
         with orm.Session(engine) as session:
-            paginated_job_ids = [
+            paginated_root_ids = [
                 row[0] for row in session.execute(job_ids_subquery).fetchall()
             ]
 
-        if not paginated_job_ids:
+        if not paginated_root_ids:
             return [], total
 
-        # Now get all tasks for those job IDs
+        # Now get every row in those trees
         query = build_managed_jobs_with_filters_query(
             fields=fields,
-            job_ids=paginated_job_ids,  # Filter to only paginated jobs
+            job_ids=job_ids,
+            tree_root_ids=paginated_root_ids,  # Only the paginated trees
             accessible_workspaces=accessible_workspaces,
             workspace_match=workspace_match,
             name_match=name_match,
@@ -2200,19 +2415,32 @@ def get_managed_jobs_with_filters(
             status_expr=status_expr,
         )
 
-    # Apply sorting
+    # Apply sorting. Within a tree the rows always read the way the table
+    # shows them: the root's declared tasks first, then the jobs launched under
+    # it by dynamic task index (rows from before the index existed last),
+    # then task id. Every surface (CLI, dashboard, API) gets this order.
+    within_tree = [
+        sqlalchemy.case((job_info_table.c.root_job_id.is_(None), 0),
+                        else_=1).asc(),
+        sqlalchemy.case((job_info_table.c.dynamic_task_index.is_(None), 1),
+                        else_=0).asc(),
+        job_info_table.c.dynamic_task_index.asc(),
+        spot_table.c.spot_job_id.desc(),
+        spot_table.c.task_id.asc(),
+    ]
     if sort_by and sort_by in sort_field_map:
         sort_column = sort_field_map[sort_by]
+        if sort_column == spot_table.c.spot_job_id:
+            # A tree's id is its root's id, so an id sort keeps each tree
+            # together (the members' own, higher ids do not pull them out).
+            sort_column = _tree_root_expr()
         if sort_order == 'asc':
-            query = query.order_by(sort_column.asc(),
-                                   spot_table.c.task_id.asc())
+            query = query.order_by(sort_column.asc(), *within_tree)
         else:
-            query = query.order_by(sort_column.desc(),
-                                   spot_table.c.task_id.asc())
+            query = query.order_by(sort_column.desc(), *within_tree)
     else:
-        # Default sort: job_id desc, task_id asc
-        query = query.order_by(spot_table.c.spot_job_id.desc(),
-                               spot_table.c.task_id.asc())
+        # Default sort: newest tree first (a tree sorts by its root's id).
+        query = query.order_by(_tree_root_expr().desc(), *within_tree)
     rows = None
     with orm.Session(engine) as session:
         rows = session.execute(query).fetchall()
@@ -3826,7 +4054,10 @@ def set_job_info(job_id: int,
                  pool_hash: Optional[str],
                  user_hash: Optional[str] = None,
                  execution: Optional[str] = None,
-                 is_batch: bool = False):
+                 is_batch: bool = False,
+                 parent_job_id: Optional[int] = None,
+                 parent_task_id: Optional[int] = None,
+                 root_job_id: Optional[int] = None):
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -3836,6 +4067,10 @@ def set_job_info(job_id: int,
             insert_func = postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
+        if parent_job_id is not None:
+            # The controller-side submission path (codegen): same guard as
+            # set_job_info_without_job_id, same transaction as the insert.
+            _check_parent_accepts_attachment(session, parent_job_id)
         insert_stmt = insert_func(job_info_table).values(
             spot_job_id=job_id,
             name=name,
@@ -3847,9 +4082,102 @@ def set_job_info(job_id: int,
             user_hash=user_hash,
             execution=execution,
             is_batch=is_batch,
+            root_job_id=root_job_id,
+            parent_job_id=parent_job_id,
+            parent_task_id=parent_task_id,
         )
         session.execute(insert_stmt)
         session.commit()
+
+
+@dataclasses.dataclass(frozen=True)
+class JobInfoRow:
+    """The job-level row of a managed job (``job_info``), typed.
+
+    ``workspace`` is already resolved: a row from before workspaces existed
+    has none stored and counts as the default workspace, the same way
+    ``get_workspace`` and cancel treat it. ``root_job_id`` /
+    ``parent_job_id`` / ``parent_task_id`` are None for a top-level job.
+    """
+    job_id: int
+    name: Optional[str]
+    workspace: str
+    user_hash: Optional[str]
+    root_job_id: Optional[int]
+    parent_job_id: Optional[int]
+    parent_task_id: Optional[int]
+    # The job's ``execution`` mode; 'parallel' marks a job group (the same
+    # derivation the queue uses for ``is_job_group``).
+    execution: Optional[str] = None
+
+    @property
+    def tree_root_job_id(self) -> int:
+        """The top-level job of this job's tree: its root, else itself."""
+        return self.root_job_id if self.root_job_id is not None else self.job_id
+
+    @property
+    def is_job_group(self) -> bool:
+        return self.execution == 'parallel'
+
+
+def get_job_info_row(job_id: int) -> Optional[JobInfoRow]:
+    """The typed ``job_info`` row of a managed job, or None if there is none.
+
+    Task status is not here (it lives per task in ``spot``); use
+    ``get_status`` for that.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.spot_job_id, job_info_table.c.name,
+                job_info_table.c.workspace, job_info_table.c.user_hash,
+                job_info_table.c.root_job_id, job_info_table.c.parent_job_id,
+                job_info_table.c.parent_task_id,
+                job_info_table.c.execution).where(
+                    job_info_table.c.spot_job_id == job_id)).fetchone()
+    if row is None:
+        return None
+    workspace = row[2]
+    if workspace is None:
+        workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
+    return JobInfoRow(job_id=row[0],
+                      name=row[1],
+                      workspace=workspace,
+                      user_hash=row[3],
+                      root_job_id=row[4],
+                      parent_job_id=row[5],
+                      parent_task_id=row[6],
+                      execution=row[7])
+
+
+def get_jobs_launched_from(
+        job_ids: List[int]) -> List[Tuple[int, Optional[int]]]:
+    """(job_id, parent_job_id) for every job in the trees ``job_ids`` live in.
+
+    Each given id is first resolved to the top-level job of its tree: its
+    ``root_job_id``, or itself when that is NULL (``COALESCE``). The result is
+    then every row under those roots, so passing a descendant returns the
+    whole tree it belongs to, not just the jobs under it. Callers walk the
+    parent edges in memory to pick out the subtree they want (see
+    ``utils._jobs_launched_from``); the roots themselves are not included.
+    One query regardless of depth.
+    """
+    if not job_ids:
+        return []
+    engine = _db_manager.get_engine()
+    roots = sqlalchemy.select(
+        sqlalchemy.func.coalesce(job_info_table.c.root_job_id,
+                                 job_info_table.c.spot_job_id)).where(
+                                     job_info_table.c.spot_job_id.in_(job_ids))
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.spot_job_id,
+                job_info_table.c.parent_job_id).where(
+                    job_info_table.c.root_job_id.in_(roots)).order_by(
+                        job_info_table.c.spot_job_id.asc())).fetchall()
+    return [(row[0], row[1]) for row in rows]
 
 
 def reset_jobs_for_recovery() -> None:

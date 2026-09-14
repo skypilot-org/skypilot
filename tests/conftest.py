@@ -902,10 +902,8 @@ def setup_docker_container(request):
         # Use create_and_setup_new_container to create and start the container
         docker_utils.create_and_setup_new_container(
             target_container_name=docker_utils.get_container_name(),
-            api_server_host_port=docker_utils.get_api_server_host_port(),
-            api_server_container_port=46580,
-            metrics_host_port=docker_utils.get_metrics_host_port(),
-            metrics_container_port=9090,
+            api_server_container_port=docker_utils.API_SERVER_CONTAINER_PORT,
+            metrics_container_port=docker_utils.METRICS_CONTAINER_PORT,
             username=default_user)
 
         logger.info(f'Container {docker_utils.get_container_name()} started')
