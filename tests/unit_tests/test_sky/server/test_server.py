@@ -1799,15 +1799,26 @@ def _chunks_for(total_bytes: int) -> int:
     return -(-total_bytes // server_constants.UPLOAD_CHUNK_BYTES)
 
 
+_CAP = 100 * 1000 * 1000 * 1000
+
+
+@pytest.fixture
+def upload_cap(monkeypatch):
+    """The cap is off unless a deployment sets it."""
+    monkeypatch.setenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR,
+                       str(_CAP))
+    return _CAP
+
+
 @pytest.mark.asyncio
 async def test_receive_chunks_rejects_a_chunk_group_over_the_total_cap(
-        tmp_path):
+        tmp_path, upload_cap):
     """The cap is checked from the declared chunk count, before any write.
 
     The upload and its extraction are not synchronous, so the space free at
     extraction time cannot be known here; the cap is absolute.
     """
-    over_cap = _chunks_for(server_constants.MAX_UPLOAD_TOTAL_BYTES) + 1
+    over_cap = _chunks_for(upload_cap) + 1
 
     with pytest.raises(fastapi.HTTPException) as exc_info:
         await server._receive_and_assemble_chunks(base_dir=tmp_path,
@@ -1823,9 +1834,9 @@ async def test_receive_chunks_rejects_a_chunk_group_over_the_total_cap(
 
 
 @pytest.mark.asyncio
-async def test_receive_chunks_accepts_a_chunk_group_at_the_total_cap(tmp_path):
-    at_cap = server_constants.MAX_UPLOAD_TOTAL_BYTES \
-        // server_constants.UPLOAD_CHUNK_BYTES
+async def test_receive_chunks_accepts_a_chunk_group_at_the_total_cap(
+        tmp_path, upload_cap):
+    at_cap = upload_cap // server_constants.UPLOAD_CHUNK_BYTES
 
     result = await server._receive_and_assemble_chunks(
         base_dir=tmp_path,
@@ -1901,7 +1912,7 @@ async def test_receive_chunks_bounds_the_bytes_actually_streamed(
     The declared chunk count is only a claim, so the cap has to be
     enforced against the bytes that reach disk.
     """
-    monkeypatch.setattr(server_constants, 'MAX_UPLOAD_TOTAL_BYTES', 8)
+    monkeypatch.setenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR, '8')
 
     with pytest.raises(fastapi.HTTPException) as exc_info:
         await server._receive_and_assemble_chunks(
@@ -1921,7 +1932,7 @@ async def test_receive_chunks_bounds_the_bytes_actually_streamed(
 async def test_receive_chunks_counts_the_chunks_already_stored(
         tmp_path, monkeypatch):
     """The cap covers one upload's chunks together, not each in turn."""
-    monkeypatch.setattr(server_constants, 'MAX_UPLOAD_TOTAL_BYTES', 8)
+    monkeypatch.setenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR, '8')
     chunk_dir = tmp_path / 'upload'
     chunk_dir.mkdir()
     (chunk_dir / 'part0').write_bytes(b'12345')
@@ -1989,3 +2000,44 @@ async def test_unzip_holds_its_space_while_it_writes(tmp_path, monkeypatch):
 
     assert held == [server._EXTRACT_BLOCK_BYTES]
     assert (target / 'payload.bin').stat().st_size == 4096
+
+
+@pytest.mark.asyncio
+async def test_receive_chunks_has_no_cap_unless_one_is_configured(
+        tmp_path, monkeypatch):
+    """The cap is opt-in, so an unset deployment uploads as before."""
+    monkeypatch.delenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR,
+                       raising=False)
+    scanned = []
+    real_scandir = os.scandir
+
+    def tracking_scandir(path):
+        scanned.append(str(path))
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, 'scandir', tracking_scandir)
+
+    result = await server._receive_and_assemble_chunks(
+        base_dir=tmp_path,
+        zip_name='upload',
+        request=_FakeUploadRequest(payload=b'0123456789'),
+        chunk_index=0,
+        total_chunks=1,
+        extract=False,
+        assemble=False)
+
+    assert result is None
+    assert (tmp_path / 'upload.zip').read_bytes() == b'0123456789'
+    # Nothing to enforce, so the stored-bytes scan is skipped too.
+    assert scanned == []
+
+
+@pytest.mark.parametrize('raw', ['', 'not-a-number', '0', '-1'])
+def test_an_unusable_cap_means_no_cap(monkeypatch, raw):
+    monkeypatch.setenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR, raw)
+    assert server._max_upload_total_bytes() is None
+
+
+def test_a_configured_cap_is_read_as_bytes(monkeypatch):
+    monkeypatch.setenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR, '12345')
+    assert server._max_upload_total_bytes() == 12345

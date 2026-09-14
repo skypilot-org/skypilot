@@ -1802,12 +1802,26 @@ def _gb(num_bytes: int) -> str:
     return f'{num_bytes / 1000 ** 3:.1f} GB'
 
 
-def _upload_too_large(num_bytes: int) -> fastapi.HTTPException:
+def _max_upload_total_bytes() -> Optional[int]:
+    """The configured cap on one upload, or None when uncapped."""
+    raw = os.environ.get(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR)
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(
+            'Ignoring unparseable '
+            f'{server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR}={raw!r}')
+        return None
+    return value if value > 0 else None
+
+
+def _upload_too_large(num_bytes: int, limit: int) -> fastapi.HTTPException:
     return fastapi.HTTPException(
         status_code=413,
-        detail=(f'Upload of {_gb(num_bytes)} exceeds the '
-                f'{_gb(server_constants.MAX_UPLOAD_TOTAL_BYTES)} limit on a '
-                'single upload. Upload fewer or smaller files.'))
+        detail=(f'Upload of {_gb(num_bytes)} exceeds the {_gb(limit)} limit '
+                'on a single upload. Upload fewer or smaller files.'))
 
 
 def _stored_bytes(directory: Optional[pathlib.Path]) -> int:
@@ -1893,9 +1907,11 @@ async def _receive_and_assemble_chunks(
         raise ValueError(
             f'Invalid total_chunks: {total_chunks}. Please use a valid integer.'
         )
-    declared_bytes = total_chunks * server_constants.UPLOAD_CHUNK_BYTES
-    if declared_bytes > server_constants.MAX_UPLOAD_TOTAL_BYTES:
-        raise _upload_too_large(declared_bytes)
+    max_total = _max_upload_total_bytes()
+    if max_total is not None:
+        declared_bytes = total_chunks * server_constants.UPLOAD_CHUNK_BYTES
+        if declared_bytes > max_total:
+            raise _upload_too_large(declared_bytes, max_total)
     # Write chunk to a unique private path first, so concurrent uploads for
     # a same blob does not interleave with each other.
     if total_chunks == 1:
@@ -1913,16 +1929,17 @@ async def _receive_and_assemble_chunks(
     # The declared chunk count bounds nothing on its own: a client is free
     # to stream a chunk of any size. Bound what this upload has actually
     # put on disk, across its chunks.
-    stored = await asyncio.to_thread(_stored_bytes,
-                                     chunk_dir if total_chunks > 1 else None)
-    allowance = server_constants.MAX_UPLOAD_TOTAL_BYTES - stored
+    stored = 0
+    if max_total is not None:
+        stored = await asyncio.to_thread(
+            _stored_bytes, chunk_dir if total_chunks > 1 else None)
     try:
         written = 0
         async with aiofiles.open(zip_file_path, 'wb') as f:
             async for chunk in request.stream():
                 written += len(chunk)
-                if written > allowance:
-                    raise _upload_too_large(stored + written)
+                if max_total is not None and stored + written > max_total:
+                    raise _upload_too_large(stored + written, max_total)
                 await f.write(chunk)
     except starlette.requests.ClientDisconnect as e:
         # Client disconnected, remove the zip file.

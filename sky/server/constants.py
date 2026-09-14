@@ -187,11 +187,11 @@ SERVER_HEARTBEAT_INTERVAL_SECONDS = 600  # 10 minutes
 # We use 95MB to leave headroom for HTTP headers and request overhead.
 UPLOAD_CHUNK_BYTES = 95 * 1000 * 1000
 
-# Largest total upload the server accepts, as declared by the chunk count.
-# Checked before any chunk is written, and independently of how much local
-# disk is free: an upload is extracted later, so the space available at
-# extraction time cannot be known here.
-MAX_UPLOAD_TOTAL_BYTES = 100 * 1000 * 1000 * 1000  # 100 GB
+# Largest total upload the server accepts, as an integer number of bytes.
+# Unset or non-positive means no limit. Checked independently of how much
+# local disk is free: an upload is extracted later, so the space available
+# at extraction time cannot be known while its chunks arrive.
+MAX_UPLOAD_TOTAL_BYTES_ENV_VAR = 'SKYPILOT_MAX_UPLOAD_TOTAL_BYTES'
 
 # Interval for the daemon that sweeps expired managed-job API access tokens
 # from the service_account_tokens table. These tokens are normally revoked
