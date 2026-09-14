@@ -25,14 +25,18 @@ Three notes on matching what the platform sees:
 * Not every root is charged to the container. A deployment can mount a
   persistent volume partway into the tree -- the same directory is local in
   one layout and shared in another -- and those bytes belong to the volume's
-  budget, not this container's. Each filesystem is classified, and only the
-  charged roots are compared against the budget.
+  budget, not this container's. Each filesystem is classified, and a root
+  that is not charged is left unwalked: its bytes do not count either way,
+  and it is where a network filesystem turns up, on which walking many
+  small files takes minutes rather than milliseconds.
 """
+import contextlib
 import dataclasses
 import errno
 import os
+import threading
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Generator, List, Optional
 
 from sky import sky_logging
 from sky.server import constants as server_constants
@@ -66,6 +70,10 @@ BUDGET_SOURCE_REQUEST = 'request'
 DEFAULT_SCAN_TIMEOUT_SECONDS = 20.0
 DEFAULT_SCAN_MAX_ENTRIES = 2_000_000
 
+_reserved_lock = threading.Lock()
+# Bytes callers are in the middle of writing, which no walk can see yet.
+_reserved_bytes = 0
+
 # Bytes per st_blocks unit, fixed by POSIX regardless of the filesystem's
 # own block size.
 _BLOCK_SIZE = 512
@@ -88,6 +96,9 @@ class RootUsage:
     # having gone away. Those bytes are missing from used_bytes, so a
     # non-zero count means the size is a lower bound.
     unreadable: int = 0
+    # False when the root was skipped rather than measured, so a zero here
+    # is not a measurement.
+    walked: bool = True
     # Mount point of the filesystem holding this root, so a root can be
     # joined to its entry in Snapshot.filesystems. None if it could not
     # be determined.
@@ -148,6 +159,11 @@ class Snapshot:
         return filesystem is not None and filesystem.charged_to_ephemeral
 
     @property
+    def truncated(self) -> bool:
+        """Whether any walk stopped early, making ``used_bytes`` partial."""
+        return any(usage.truncated for usage in self.roots.values())
+
+    @property
     def headroom_bytes(self) -> Optional[int]:
         """Room left before the budget stops the server writing.
 
@@ -172,10 +188,11 @@ def local_roots() -> Dict[str, str]:
     HOME are honored the way the owning modules resolve their own paths,
     and so a blob storage backend installed after import is included.
 
-    Deliberately excludes ``~/sky_logs``: in multi-replica deployments it
-    is on shared storage, where it does not count against this container's
-    local disk and where a directory walk is prohibitively slow. Its
+    Excludes ``~/sky_logs`` outright: it does not count against this
+    container's local disk in any layout that persists it, and its
     filesystem is already reported by the sky_logs retention instruments.
+    Roots that turn out to be on a volume are dropped later, by ``scan``,
+    which is what knows their filesystem.
     """
     roots = {
         'request_logs': runtime_utils.expanduser(
@@ -255,6 +272,79 @@ def budget() -> Optional[Budget]:
         if value > 0:
             return Budget(total_bytes=value, source=source)
     return None
+
+
+def available_bytes() -> Optional[int]:
+    """Bytes still writable before this container reaches its budget.
+
+    Measures against the declared allowance -- the limit if there is one,
+    otherwise the request -- so a caller can refuse work that would not
+    fit. Returns None when there is no allowance to check against, and
+    when the walk behind the used-bytes term was partial: subtracting a
+    partial total would overstate what is left.
+    """
+    declared = budget()
+    if declared is None:
+        return None
+    snapshot = scan()
+    if snapshot.truncated:
+        return None
+    with _reserved_lock:
+        used = snapshot.used_bytes + _reserved_bytes
+    return max(declared.total_bytes - used, 0)
+
+
+@contextlib.contextmanager
+def reserve(num_bytes: int) -> Generator[None, None, None]:
+    """Counts *num_bytes* as used while the caller writes them.
+
+    A walk cannot see bytes that have not been written yet, so without
+    this two callers admitted at the same time measure against the same
+    free space and overcommit together.
+    """
+    global _reserved_bytes
+    if num_bytes <= 0:
+        yield
+        return
+    with _reserved_lock:
+        _reserved_bytes += num_bytes
+    try:
+        yield
+    finally:
+        with _reserved_lock:
+            _reserved_bytes -= num_bytes
+
+
+def _nearest_existing(path: str) -> str:
+    """Returns *path*, or its closest ancestor that exists."""
+    current = os.path.abspath(path)
+    while not os.path.exists(current):
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return current
+
+
+def available_for_path(path: str) -> Optional[int]:
+    """Bytes writable at *path*, by whichever boundary applies to it.
+
+    A destination the platform does not charge to this container -- a
+    persistent volume, say -- is bounded by the free space on its own
+    filesystem and not by the container's ephemeral-storage budget. A
+    destination that is charged is bounded by both. Returns None when
+    neither boundary can be determined.
+    """
+    filesystems = _filesystem_usage([_nearest_existing(path)])
+    if not filesystems:
+        return None
+    filesystem = next(iter(filesystems.values()))
+    bounds = [filesystem.avail_bytes]
+    if filesystem.charged_to_ephemeral:
+        against_budget = available_bytes()
+        if against_budget is not None:
+            bounds.append(against_budget)
+    return min(bounds)
 
 
 def _count_unreadable(error: OSError) -> int:
@@ -454,22 +544,39 @@ def scan(
     timeout_seconds: float = DEFAULT_SCAN_TIMEOUT_SECONDS,
     max_entries: int = DEFAULT_SCAN_MAX_ENTRIES,
 ) -> Snapshot:
-    """Measures every local root, sharing one deadline across all of them."""
+    """Measures the roots that count, sharing one deadline across them.
+
+    A root on a filesystem the platform does not charge to this container
+    is not walked. Its bytes are excluded from the total either way, and
+    such a root is where a persistent volume gets mounted -- on a network
+    filesystem, where a walk of many small files takes minutes. The
+    filesystem behind it is still reported; for a volume shared between
+    replicas its free space is the meaningful number anyway.
+    """
     started = time.monotonic()
     deadline = started + timeout_seconds
+    # Not in use in this deployment; emitting a 0 would read as a measured
+    # emptiness.
+    present = [(name, path)
+               for name, path in local_roots().items()
+               if os.path.isdir(path)]
+    filesystems = _filesystem_usage([path for _, path in present])
     roots: Dict[str, RootUsage] = {}
-    measured: List[Tuple[str, str]] = []
-    for name, path in local_roots().items():
-        if not os.path.isdir(path):
-            # Not in use in this deployment; emitting a 0 would read as a
-            # measured emptiness.
+    for name, path in present:
+        mountpoint = _mountpoint(path)
+        filesystem = filesystems.get(mountpoint) if mountpoint else None
+        if filesystem is None or not filesystem.charged_to_ephemeral:
+            roots[name] = RootUsage(path=path,
+                                    used_bytes=0,
+                                    files=0,
+                                    truncated=False,
+                                    walked=False,
+                                    mountpoint=mountpoint)
             continue
-        measured.append((name, path))
         usage = _scan_root(path, deadline, max_entries)
-        usage.mountpoint = _mountpoint(path)
+        usage.mountpoint = mountpoint
         roots[name] = usage
     return Snapshot(roots=roots,
-                    filesystems=_filesystem_usage(
-                        [path for _, path in measured]),
+                    filesystems=filesystems,
                     budget=budget(),
                     duration_seconds=time.monotonic() - started)
