@@ -411,9 +411,9 @@ launched this way becomes a *dynamic task* of the group:
 - Its status is its own. A failed dynamic task does not fail the group, and a
   dynamic task finishing does not affect the group.
 
-One use case for dynamic tasks is an eval watcher: one task watches for new
-checkpoints and launches one evaluation job per checkpoint, each on its own
-resources, while the trainer keeps training.
+One common use case for dynamic tasks is an **eval watcher**: one task watches
+for new checkpoints and launches one evaluation job per checkpoint, each on its
+own resources, while the trainer keeps training.
 
 .. code-block:: yaml
 
@@ -432,17 +432,18 @@ resources, while the trainer keeps training.
     resources:
       cpus: 2
     run: |
-      # The SkyPilot client installed on every node (under $HOME on
-      # Kubernetes, $SKY_RUNTIME_DIR on Slurm); the task's credentials point
-      # it at the API server.
+      # Use the SkyPilot client installed on every node; the task's
+      # credentials already point it at the API server.
       source "${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime/bin/activate"
-      # One eval job per new checkpoint. Each is a dynamic task of this group:
-      # listed under it in `sky jobs queue`, cancelled with it.
+
+      # Launch one eval job per new checkpoint. Each becomes a dynamic
+      # task of this group.
       for ckpt in $(python watch_checkpoints.py /checkpoints); do
         sky jobs launch -y -d -n "eval-$ckpt" eval.yaml --env CKPT=$ckpt
       done
-      # Wait for the evals before exiting: the group finishes when both
-      # primaries have, and an eval still running then would be cancelled.
+
+      # Wait for the evals: the group finishes when both primaries have,
+      # and any eval still running at that point is cancelled.
       python wait_for_evals.py
 
 The watcher is a primary task so that the group stays alive until the last
@@ -451,7 +452,16 @@ terminated once the trainer finished, after the group's ``termination_delay``,
 and its evaluations would be cancelled with it. A runnable version is in the
 `Job Group SDK examples <https://github.com/skypilot-org/skypilot/tree/master/examples/job-group-sdk>`_.
 
-The queue shows the dynamic tasks under the group as tasks 2 and 3:
+The dashboard picks up the dynamic tasks as they are launched and lists them
+with the group's own tasks, marked ``Dynamic``:
+
+.. figure:: ../images/job-groups-dynamic-tasks.png
+   :alt: The dashboard's jobs list with a job group expanded: the trainer, the eval watcher, and three dynamic evaluation tasks marked Dynamic
+   :align: center
+   :width: 90%
+
+The same tree appears in ``sky jobs queue``, with the dynamic tasks numbered on
+from the group's own tasks as 2 and 3:
 
 .. code-block:: console
 
@@ -516,12 +526,12 @@ Here is a minimal example:
 Current limitations
 -------------------
 
-- **Co-location**: All tasks in a Job Group run on the same infrastructure
-  (same Kubernetes cluster or cloud zone).
-
-- **Networking**: Service discovery (hostname-based communication between tasks)
-  currently only works on Kubernetes. On other clouds, tasks can run in parallel
-  but cannot communicate with each other using the hostname format.
+- **Networking**: Service discovery (hostname-based communication between
+  tasks) requires all tasks to run on a single Kubernetes cluster
+  (``inter_connection`` ``true`` or unset). A Job Group can span Kubernetes
+  clusters or run on other infrastructure with ``inter_connection: false``;
+  its tasks then run in parallel without in-group networking. See
+  :ref:`job-groups-inter-connection`.
 
 .. note::
 
