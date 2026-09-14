@@ -441,11 +441,10 @@ function JobDetails({ overrideJobId = null, taskContext = null } = {}) {
                 )}
                 {(isMultiTask || launchedJobs.length > 0) && (
                   // Same count as the jobs table's badge: declared tasks plus
-                  // the dynamic tasks launched from inside the group.
+                  // the dynamic tasks launched from inside the group, which
+                  // are marked in the task list rather than here.
                   <span className="ml-2 text-xs text-gray-500 bg-gray-200 px-1.5 py-0.5 rounded">
                     {allTasks.length + launchedJobs.length} tasks
-                    {launchedJobs.length > 0 &&
-                      ` (${launchedJobs.length} dynamic)`}
                   </span>
                 )}
               </>
@@ -695,7 +694,12 @@ function JobDetails({ overrideJobId = null, taskContext = null } = {}) {
                                   <DynamicBadge
                                     launchedFrom={
                                       job.parent_task_id != null
-                                        ? `task ${job.parent_task_id} of job ${job.parent_job_id}`
+                                        ? `task ${job.parent_task_id} of ${
+                                            String(job.parent_job_id) ===
+                                            String(jobId)
+                                              ? 'this job'
+                                              : `job ${job.parent_job_id}`
+                                          }`
                                         : null
                                     }
                                   />

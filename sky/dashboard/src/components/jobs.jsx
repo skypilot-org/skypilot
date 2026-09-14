@@ -1706,7 +1706,7 @@ export function ManagedJobsTable({
                   // the name link.
                   <span
                     className="text-gray-500 pl-6"
-                    title={`Dynamic task ${item.dynamic_task_index} of job ${jobId} (job ${item.id}): sky jobs cancel ${jobId} --task ${item.dynamic_task_index}`}
+                    title={`Dynamic task ${item.dynamic_task_index} of this job (job ${item.id}): sky jobs cancel ${jobId} --task ${item.dynamic_task_index}`}
                   >
                     {item.dynamic_task_index}
                     {memberIsMultiTask ? `.${taskIndex}` : ''}
@@ -1787,13 +1787,13 @@ export function ManagedJobsTable({
             const own = declaredTasks || tasks;
             const launchedJobs = new Set((memberTasks || []).map((t) => t.id))
               .size;
-            // One task count, with the dynamic ones (jobs launched from
-            // inside the group; own id, own logs, cancellable alone, no
-            // effect on the group's status) called out.
+            // One task count: the group's declared tasks plus the jobs
+            // launched from it (dynamic members; own id, own logs,
+            // cancellable alone, no effect on the group's status). The
+            // dynamic ones are marked in the task list, not in this badge —
+            // fewer distinct concepts at the group level.
             const totalTasks = own.length + launchedJobs;
-            const badgeLabel =
-              `${totalTasks} task${totalTasks === 1 ? '' : 's'}` +
-              (launchedJobs > 0 ? ` (${launchedJobs} dynamic)` : '');
+            const badgeLabel = `${totalTasks} task${totalTasks === 1 ? '' : 's'}`;
             const badgeKind =
               own.length > 1 || item.is_job_group ? 'JobGroup' : 'Job';
             return (
