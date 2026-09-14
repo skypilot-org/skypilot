@@ -302,6 +302,50 @@ _MANAGED_JOB_REQUEST_NAMES = frozenset({
     request_names.RequestName.JOBS_LOGS.value,
 })
 
+# Request names whose whole output is a tail of a log that lives elsewhere:
+# exactly the requests streamed to the client via
+# stream_utils.stream_response_for_long_request (call sites: sky/logs and
+# sky/hook_logs in sky/server/server.py, sky/serve/logs in
+# sky/serve/server/server.py, sky/jobs/logs and sky/jobs/pool_logs in
+# sky/jobs/server/server.py). Their request.log is by definition a bridge
+# copy of that tail, so a client polling the same log (e.g. a jobs-logs
+# poller) produces many near-duplicate copies -- kept in check by the
+# per-group dedup in _dump_request_id_info.
+# NOTE: keep in sync with TestLogTailRequestNamesCoverage in
+# tests/unit_tests/test_sky/utils/test_debug_utils.py, which fails when a
+# new log-tail endpoint is added without updating this set.
+_LOG_TAIL_REQUEST_NAMES = frozenset({
+    server_constants.REQUEST_NAME_PREFIX +
+    request_names.RequestName.CLUSTER_JOB_LOGS.value,
+    server_constants.REQUEST_NAME_PREFIX +
+    request_names.RequestName.CLUSTER_HOOK_LOGS.value,
+    server_constants.REQUEST_NAME_PREFIX +
+    request_names.RequestName.SERVE_LOGS.value,
+    server_constants.REQUEST_NAME_PREFIX +
+    request_names.RequestName.JOBS_LOGS.value,
+    server_constants.REQUEST_NAME_PREFIX +
+    request_names.RequestName.JOBS_POOL_LOGS.value,
+})
+
+# How many request-log copies to keep per (name, cluster_name, user_id)
+# group of log-tail requests (see _LOG_TAIL_REQUEST_NAMES). The newest N
+# are kept -- enough to see how the tailed log evolved, cheap now that
+# each copy is size-capped.
+_LOG_COPIES_PER_GROUP = 3
+
+# Total-bytes budget for the requests section's log copies. Backstops
+# unique-but-huge logs (e.g. large exec outputs) that survive the
+# per-file cap and the dedup; once exceeded, remaining requests skip
+# their log copies (recorded per-request in errors.json). Iteration is
+# newest-first, so the skip biases to the oldest requests.
+_REQUEST_LOG_BUDGET_BYTES = 1024**3
+
+# Chunk size for the request-metadata pre-pass in _dump_request_id_info.
+# Mirrors requests.py's _ORPHAN_LOG_QUERY_CHUNK_SIZE rationale: avoid
+# oversized IN clauses against a DB that may itself be part of the
+# sickness being dumped.
+_REQUEST_METADATA_QUERY_CHUNK_SIZE = 500
+
 
 class DebugDumpContext(TypedDict):
     """The context for a debug dump."""
@@ -1046,9 +1090,15 @@ def _copy_request_log_file(request_id: str, request_dir: str,
     Standalone (not a per-iteration closure) so the deadline wrapper can call it
     via functools.partial without capturing the loop variable.
     """
-    return log_provider.get_log_provider().copy_log_file(
-        request_id, log_type,
-        pathlib.Path(request_dir) / filename)
+    dest_path = pathlib.Path(request_dir) / filename
+    copied = log_provider.get_log_provider().copy_log_file(
+        request_id, log_type, dest_path)
+    if copied:
+        # Backstop: cap the copy no matter which provider wrote it, so a
+        # provider that overrides copy_log_file without a size cap cannot
+        # dominate dump size (covers request.log AND request_debug.log).
+        log_provider.cap_log_file_in_place(dest_path)
+    return copied
 
 
 # Per-log-copy cap. A copy is normally instant, but copy_log_file on a
@@ -1059,12 +1109,54 @@ def _copy_request_log_file(request_id: str, request_dir: str,
 _REQUEST_LOG_COPY_TIMEOUT = 30
 
 
+def _prefetch_request_metadata(
+    request_ids: Set[str],
+    deadline: Optional[float] = None,
+    errors: Optional[List[Dict[str, str]]] = None,
+) -> Dict[str, requests_lib.Request]:
+    """Fetch Request metadata for all ids in chunked DB queries.
+
+    One query per _REQUEST_METADATA_QUERY_CHUNK_SIZE ids instead of one
+    per id, so a dump with thousands of requests does not hammer a
+    possibly-sick DB with thousands of round trips. Ids a chunk fails to
+    return (chunk error, or deadline hit between chunks) are simply
+    absent from the result; the caller falls back to the per-id fetch
+    for those, preserving the pre-fetch semantics.
+    """
+    metadata: Dict[str, requests_lib.Request] = {}
+    ids = sorted(request_ids)
+    for start in range(0, len(ids), _REQUEST_METADATA_QUERY_CHUNK_SIZE):
+        if _deadline_exceeded(deadline):
+            break
+        chunk = ids[start:start + _REQUEST_METADATA_QUERY_CHUNK_SIZE]
+        try:
+            chunk_requests = requests_lib.get_request_tasks(
+                requests_lib.RequestTaskFilter(request_ids=chunk))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to prefetch metadata for {len(chunk)} '
+                           f'requests: {e}; falling back to per-request '
+                           f'lookup')
+            if errors is not None:
+                errors.append({
+                    'component': 'requests',
+                    'resource': 'request_metadata',
+                    'error': (f'{e}; falling back to per-request lookup '
+                              'for these requests'),
+                    'traceback': _full_traceback(),
+                })
+            continue
+        for request in chunk_requests:
+            metadata[request.request_id] = request
+    return metadata
+
+
 def _dump_request_id_info(
         request_ids: Set[str],
         dump_dir: str,
         errors: Optional[List[Dict[str, str]]] = None,
         deadline: Optional[float] = None,
-        orphans: Optional[List[Dict[str, Any]]] = None) -> None:
+        orphans: Optional[List[Dict[str, Any]]] = None,
+        exempt_request_ids: Optional[Set[str]] = None) -> None:
     """Collect request logs and metadata.
 
     ``deadline`` (absolute monotonic) bounds the section two ways: each
@@ -1073,6 +1165,16 @@ def _dump_request_id_info(
     budget is gone we stop starting new requests and skip the rest -- so the
     dump still zips what it gathered. Per-request wall-clock is written to
     ``requests/_timings.json``.
+
+    Requests are visited newest-first (via a chunked metadata pre-pass;
+    ids the pre-pass misses fall back to the per-id fetch and are visited
+    last). Log-tail requests (see _LOG_TAIL_REQUEST_NAMES) are
+    deduplicated per (name, cluster_name, user_id) group: only the
+    _LOG_COPIES_PER_GROUP most recent contribute log copies, so a client
+    polling the same log does not flood the dump with near-duplicates.
+    ``exempt_request_ids`` (the request ids the dump was explicitly
+    filtered to) are never deduplicated. The section's total log bytes
+    are bounded by _REQUEST_LOG_BUDGET_BYTES.
     """
     if not request_ids:
         logger.debug('No requests to dump')
@@ -1083,8 +1185,29 @@ def _dump_request_id_info(
     requests_dir = os.path.join(dump_dir, 'requests')
     os.makedirs(requests_dir, exist_ok=True)
 
+    # Metadata pre-pass: one chunked query instead of a per-id round trip
+    # per request, and the source of the newest-first iteration order.
+    metadata_cache = _prefetch_request_metadata(request_ids,
+                                                deadline=deadline,
+                                                errors=errors)
+    exempt_ids = exempt_request_ids or set()
+    # Cached ids first, newest (created_at desc) to oldest, then the ids
+    # the pre-pass missed (sorted for determinism; their age relative to
+    # the cached ids is unknown, so they are exempt from dedup below).
+    ordered_ids = sorted((rid for rid in request_ids if rid in metadata_cache),
+                         key=lambda rid: (-metadata_cache[rid].created_at, rid))
+    ordered_ids += sorted(
+        rid for rid in request_ids if rid not in metadata_cache)
+
+    # (name, cluster_name, user_id) -> how many log copies the group has
+    # contributed so far / which request ids were kept or skipped in it.
+    kept_counts: Dict[Tuple[str, Optional[str], str], int] = {}
+    group_skipped: Dict[Tuple[str, Optional[str], str], List[str]] = {}
+    group_kept_ids: Dict[Tuple[str, Optional[str], str], List[str]] = {}
+    section_log_bytes = 0
+
     timings: List[Dict[str, Any]] = []
-    for request_id in request_ids:
+    for request_id in ordered_ids:
         if _deadline_exceeded(deadline):
             if errors is not None:
                 errors.append({
@@ -1097,9 +1220,15 @@ def _dump_request_id_info(
         request_dir = os.path.join(requests_dir, request_id)
         os.makedirs(request_dir, exist_ok=True)
 
-        # Get request metadata from DB
+        # Get request metadata from DB: from the pre-pass cache when
+        # present, else today's per-id fetch.
+        from_cache = request_id in metadata_cache
+        request = metadata_cache.get(request_id)
+        log_tail_key: Optional[Tuple[str, Optional[str], str]] = None
+        dedup_skipped = False
         try:
-            request = requests_lib.get_request(request_id)
+            if request is None:
+                request = requests_lib.get_request(request_id)
             if request is not None:
                 request_info: Dict[str, Any] = {
                     'request_id': request.request_id,
@@ -1130,6 +1259,27 @@ def _dump_request_id_info(
                 except Exception:  # pylint: disable=broad-except
                     pass
 
+                # Dedup decision, before the request_info write so the
+                # skip is visible there. Only cached requests participate:
+                # an id the pre-pass missed has no known age relative to
+                # the cached ones, and an explicitly-requested id is never
+                # deduplicated.
+                if (from_cache and request.name in _LOG_TAIL_REQUEST_NAMES and
+                        request_id not in exempt_ids):
+                    log_tail_key = (request.name, request.cluster_name,
+                                    request.user_id)
+                if (log_tail_key is not None and kept_counts.get(
+                        log_tail_key, 0) >= _LOG_COPIES_PER_GROUP):
+                    request_info['log_copy_skipped'] = (
+                        f'Skipped log copy: {_LOG_COPIES_PER_GROUP} more '
+                        f'recent copies of this {request.name} request '
+                        f'for cluster {request.cluster_name!r} were '
+                        f'already collected (near-duplicate log tails).')
+                    group_skipped.setdefault(log_tail_key,
+                                             []).append(request_id)
+                    log_tail_key = None
+                    dedup_skipped = True
+
                 request_info_path = os.path.join(request_dir,
                                                  'request_info.json')
                 with open(request_info_path, 'w', encoding='utf-8') as f:
@@ -1151,6 +1301,37 @@ def _dump_request_id_info(
                     'traceback': _full_traceback()
                 })
 
+        request_log_bytes: Optional[int] = None
+        request_debug_log_bytes: Optional[int] = None
+
+        if dedup_skipped:
+            timings.append({
+                'request_id': request_id,
+                'duration_s': round(time.monotonic() - request_start, 2),
+                'request_log_bytes': None,
+                'request_debug_log_bytes': None,
+            })
+            continue
+
+        # Total-bytes budget for the section's log copies: once exceeded,
+        # remaining requests skip their copies. Iteration is newest-first,
+        # so the skip biases to the oldest requests.
+        if section_log_bytes >= _REQUEST_LOG_BUDGET_BYTES:
+            if errors is not None:
+                errors.append({
+                    'component': 'requests',
+                    'resource': request_id,
+                    'error': ('Skipped: request log copy budget exceeded '
+                              f'({_REQUEST_LOG_BUDGET_BYTES} bytes).'),
+                })
+            timings.append({
+                'request_id': request_id,
+                'duration_s': round(time.monotonic() - request_start, 2),
+                'request_log_bytes': None,
+                'request_debug_log_bytes': None,
+            })
+            continue
+
         # Copy request log file. Routed through the LogProvider so that
         # deployments whose request logs are not on the local filesystem
         # can fetch them from wherever they live. Deadline-bounded: a
@@ -1168,6 +1349,37 @@ def _dump_request_id_info(
                 orphans=orphans)
             if ok and copied:
                 logger.debug(f'Copied request log for {request_id}')
+                try:
+                    request_log_bytes = os.path.getsize(
+                        os.path.join(request_dir, 'request.log'))
+                except OSError:
+                    request_log_bytes = None
+                if request_log_bytes is not None:
+                    section_log_bytes += request_log_bytes
+                    if request_log_bytes == 0:
+                        # Visible emptiness: a 0-byte copy is either a
+                        # genuinely empty log or an intake placeholder
+                        # from a deployment whose log provider routes
+                        # logs elsewhere; record it so the two are
+                        # distinguishable without opening the file.
+                        if errors is not None:
+                            errors.append({
+                                'component': 'requests',
+                                'resource': f'{request_id}/log',
+                                'error': ('Copied request log is empty '
+                                          '(0 bytes); it is either genuinely '
+                                          'empty or an intake placeholder '
+                                          'written before execution.'),
+                            })
+                    elif log_tail_key is not None:
+                        # The group's allowance is consumed only by a
+                        # successful non-empty copy: a missing or empty
+                        # newest log must not shadow older surviving
+                        # copies.
+                        kept_counts[log_tail_key] = (
+                            kept_counts.get(log_tail_key, 0) + 1)
+                        group_kept_ids.setdefault(log_tail_key,
+                                                  []).append(request_id)
             elif ok:
                 logger.debug(f'Request log not found for {request_id}')
         except Exception as e:  # pylint: disable=broad-except
@@ -1195,6 +1407,13 @@ def _dump_request_id_info(
                 orphans=orphans)
             if ok and copied:
                 logger.debug(f'Copied debug log for {request_id}')
+                try:
+                    request_debug_log_bytes = os.path.getsize(
+                        os.path.join(request_dir, 'request_debug.log'))
+                except OSError:
+                    request_debug_log_bytes = None
+                if request_debug_log_bytes is not None:
+                    section_log_bytes += request_debug_log_bytes
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(
                 f'Failed to copy debug log for request {request_id}: {e}')
@@ -1209,7 +1428,25 @@ def _dump_request_id_info(
         timings.append({
             'request_id': request_id,
             'duration_s': round(time.monotonic() - request_start, 2),
+            'request_log_bytes': request_log_bytes,
+            'request_debug_log_bytes': request_debug_log_bytes,
         })
+
+    # One aggregate record per deduplicated group, so the pattern is
+    # visible in errors.json without one record per skipped request.
+    if errors is not None:
+        for ((name, cluster_name, user_id),
+             skipped_ids) in sorted(group_skipped.items()):
+            kept_ids = sorted(
+                group_kept_ids.get((name, cluster_name, user_id), []))
+            errors.append({
+                'component': 'requests',
+                'resource': f'log_dedup/{name}/{cluster_name}',
+                'error': (f'Skipped log copies for {len(skipped_ids)} '
+                          f'near-duplicate {name} requests (cluster '
+                          f'{cluster_name!r}, user {user_id}); kept '
+                          f'request ids: {kept_ids}.'),
+            })
 
     try:
         with open(os.path.join(requests_dir, '_timings.json'),
@@ -2212,6 +2449,7 @@ def _build_debug_dump(
     client_info: Optional[Dict[str, Any]],
     requested: Dict[str, Any],
     deadline: Optional[float] = None,
+    explicit_request_ids: Optional[Set[str]] = None,
 ) -> None:
     """Build the debug dump contents in dump_dir.
 
@@ -2225,6 +2463,11 @@ def _build_debug_dump(
     timeouts are clamped to the remaining budget. The client-info / errors /
     summary writes below always run so the partial dump is self-describing.
     ``None`` (the default) keeps the previous behavior exactly.
+
+    ``explicit_request_ids`` are the request ids the dump was explicitly
+    filtered to (prefix-resolved); they are exempt from the request-log
+    dedup in the requests section, so a targeted dump never drops a
+    named request's log.
     """
     # Populate the context and cross-link related resources. Each helper
     # runs exactly once, and the order is load-bearing:
@@ -2310,7 +2553,9 @@ def _build_debug_dump(
                                        dump_dir,
                                        errors=errors,
                                        deadline=deadline,
-                                       orphans=orphans)),
+                                       orphans=orphans,
+                                       exempt_request_ids=explicit_request_ids)
+        ),
         ('clusters',
          lambda: _dump_cluster_info(debug_dump_context['cluster_names'],
                                     dump_dir,
@@ -2528,12 +2773,17 @@ def create_debug_dump(
                 'managed_job_ids': sorted(managed_job_ids or []),
                 'recent_minutes': recent_minutes,
             }
+            # Snapshot BEFORE _build_debug_dump: the context aliases and
+            # expands this same set in place (cross-linking adds ids and
+            # the system daemons), which would otherwise make the exempt
+            # set grow to the whole context and disable the dedup.
             _build_debug_dump(dump_dir,
                               debug_dump_context,
                               recent_minutes,
                               client_info,
                               requested=original_requested,
-                              deadline=deadline)
+                              deadline=deadline,
+                              explicit_request_ids=set(resolved_request_ids))
             # Report any op whose worker thread is still running (before we
             # detach the handler, so it lands in debug_dump.log too).
             _log_timed_out_stragglers(debug_dump_context['timed_out_ops'])

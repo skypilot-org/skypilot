@@ -4,7 +4,9 @@ import contextlib
 import datetime
 import json
 import os
+import pathlib
 import posixpath
+import re
 import subprocess
 import threading
 import time
@@ -1403,6 +1405,45 @@ class TestCreateDebugDump:
         assert result.exists()
         assert result.suffix == '.zip'
         assert zipfile.is_zipfile(result)
+
+    @mock.patch('sky.utils.debug_utils._dump_managed_job_info')
+    @mock.patch('sky.utils.debug_utils._dump_cluster_info')
+    @mock.patch('sky.utils.debug_utils._dump_request_id_info')
+    @mock.patch('sky.utils.debug_utils._dump_server_info')
+    @mock.patch('sky.utils.debug_utils._get_clusters_from_managed_jobs')
+    @mock.patch('sky.utils.debug_utils._get_clusters_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
+    @mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
+    def test_exempt_request_ids_is_a_snapshot(
+            self, mock_req_from_clusters, mock_req_from_jobs,
+            mock_jobs_from_req, mock_clusters_from_req, mock_clusters_from_jobs,
+            mock_dump_server, mock_dump_requests, mock_dump_clusters,
+            mock_dump_jobs, tmp_path):
+        """The dedup-exempt set must be a snapshot of the resolved ids.
+
+        The context's request_ids set starts as the same object as the
+        resolved ids and is expanded in place by cross-linking and the
+        system-daemon update. If the exempt set aliased it, every request
+        in the dump would become dedup-exempt and the log-tail dedup
+        would silently never fire.
+        """
+        del mock_req_from_clusters, mock_req_from_jobs, mock_jobs_from_req
+        del mock_clusters_from_req, mock_clusters_from_jobs
+        del mock_dump_server, mock_dump_clusters, mock_dump_jobs
+        with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
+                        str(tmp_path / 'debug_dumps')):
+            debug_utils.create_debug_dump(request_ids=['req-1'])
+
+        kwargs = mock_dump_requests.call_args.kwargs
+        exempt = kwargs['exempt_request_ids']
+        assert exempt == {'req-1'}
+        # The expanded context (system daemons et al.) must not leak into
+        # the exempt snapshot.
+        assert not (set(debug_utils.SYSTEM_REQUEST_IDS) & exempt)
+        # And the dumped context did get expanded (the alias exists).
+        request_ids_arg = mock_dump_requests.call_args.args[0]
+        assert set(debug_utils.SYSTEM_REQUEST_IDS) <= request_ids_arg
 
     @mock.patch('sky.utils.debug_utils._dump_managed_job_info')
     @mock.patch('sky.utils.debug_utils._dump_cluster_info')
@@ -2931,6 +2972,68 @@ class TestRequestBodyAllowlistCoverage:
                 f'Stale denylist entry: {name} is not a valid RequestName')
 
 
+# Endpoint-definition modules whose routes stream a tailed log to the
+# client via stream_utils.stream_response_for_long_request. A request
+# name found next to such a call site belongs in
+# debug_utils._LOG_TAIL_REQUEST_NAMES.
+_LOG_TAIL_ENDPOINT_MODULES = (
+    'server/server.py',
+    'jobs/server/server.py',
+    'serve/server/server.py',
+)
+
+
+def _derived_log_tail_request_names() -> Set[str]:
+    """Scan the endpoint modules for names routed through the long-request
+    log streamer (the closest RequestName reference above each call site
+    is the endpoint's own request_name)."""
+    sky_pkg_dir = pathlib.Path(debug_utils.__file__).parent.parent
+    derived: Set[str] = set()
+    for rel_path in _LOG_TAIL_ENDPOINT_MODULES:
+        source = (sky_pkg_dir / rel_path).read_text()
+        for match in re.finditer(r'stream_response_for_long_request\(', source):
+            window = source[max(0, match.start() - 2000):match.start()]
+            name_refs = re.findall(r'RequestName\.([A-Z_0-9]+)', window)
+            if name_refs:
+                derived.add(server_constants.REQUEST_NAME_PREFIX +
+                            request_names.RequestName[name_refs[-1]].value)
+    return derived
+
+
+class TestLogTailRequestNamesCoverage:
+    """_LOG_TAIL_REQUEST_NAMES must track the streamed log-tail endpoints.
+
+    Requests streamed via stream_response_for_long_request have a
+    request.log that is a bridge copy of a tailed log; the dump-side
+    dedup keys off this set. A new log-tail endpoint added without
+    updating the frozenset (or a stale entry left behind) fails here.
+    """
+
+    def test_no_stale_entries(self):
+        """Every entry must be a valid REQUEST_NAME_PREFIX + RequestName."""
+        all_request_names = {
+            server_constants.REQUEST_NAME_PREFIX + r.value
+            for r in request_names.RequestName
+        }
+        for name in debug_utils._LOG_TAIL_REQUEST_NAMES:
+            assert name in all_request_names, (
+                f'Stale _LOG_TAIL_REQUEST_NAMES entry: {name} is not a '
+                'valid RequestName')
+
+    def test_covers_streamed_log_tail_endpoints(self):
+        """The set equals the names routed through the long-request log
+        streamer in the endpoint modules."""
+        derived = _derived_log_tail_request_names()
+        assert derived, 'expected at least one streamed log-tail endpoint'
+        assert derived == set(debug_utils._LOG_TAIL_REQUEST_NAMES), (
+            'streamed log-tail endpoints and _LOG_TAIL_REQUEST_NAMES '
+            f'diverged: only-in-code={sorted(derived - set(debug_utils._LOG_TAIL_REQUEST_NAMES))} '
+            f'only-in-constant='
+            f'{sorted(set(debug_utils._LOG_TAIL_REQUEST_NAMES) - derived)}. '
+            'Update _LOG_TAIL_REQUEST_NAMES in debug_utils.py (or the '
+            'endpoint module list in this test).')
+
+
 # ---------------------------------------------------------------------------
 # Tests for _sanitize_request_body
 # ---------------------------------------------------------------------------
@@ -3070,6 +3173,14 @@ class TestRedactTaskYaml:
 # ---------------------------------------------------------------------------
 class TestDumpRequestIdInfo:
     """Tests for the _dump_request_id_info function."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_get_request_tasks(self):
+        # Empty metadata pre-pass: every id falls back to the per-id
+        # get_request mocks below, so tests drive behavior directly.
+        with mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                        return_value=[]):
+            yield
 
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
     def test_happy_path_writes_request_info(self, mock_get_request, tmp_path):
@@ -3506,7 +3617,10 @@ class TestDumpRequestIdInfoLogCollection:
     @pytest.fixture(autouse=True)
     def _mock_get_request(self):
         with mock.patch('sky.utils.debug_utils.requests_lib.get_request',
-                        return_value=None):
+                        return_value=None), mock.patch(
+                            'sky.utils.debug_utils.requests_lib'
+                            '.get_request_tasks',
+                            return_value=[]):
             yield
 
     def test_logs_collected_via_log_provider(self, tmp_path):
@@ -3564,6 +3678,291 @@ class TestDumpRequestIdInfoLogCollection:
         request_dir = tmp_path / 'requests' / 'req-2'
         assert (request_dir / 'request.log').read_text() == 'local content'
         assert not errors
+
+    # ------------------------------------------------------------------
+    # Size cap, dedup, and budget behavior
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _make_log_tail_requests(count=5,
+                                name='sky.jobs.logs',
+                                cluster_name='sky-jobs-controller-1',
+                                user_id='user-1'):
+        return [
+            _make_request(request_id=f'req-{i}',
+                          name=name,
+                          cluster_name=cluster_name,
+                          user_id=user_id,
+                          created_at=1700000000.0 + i) for i in range(count)
+        ]
+
+    @staticmethod
+    def _copying_provider(request_log_content=lambda rid: f'log {rid}'):
+        """Provider mock that writes request.log (and nothing else)."""
+        provider = mock.MagicMock()
+
+        def _fake_copy(request_id, log_type, dest_path):
+            if log_type == log_provider_lib.RequestLogType.REQUEST:
+                dest_path.write_text(request_log_content(request_id))
+                return True
+            return False
+
+        provider.copy_log_file.side_effect = _fake_copy
+        return provider
+
+    def test_oversized_log_capped_end_to_end(self, tmp_path):
+        """An oversized local log is capped by the default provider."""
+        src = tmp_path / 'src.log'
+        src.write_bytes(b'A' * 500 + b'B' * 100)
+        with mock.patch('sky.server.requests.log_provider.local_log_path',
+                        return_value=src), mock.patch.object(
+                            log_provider_lib, '_MAX_LOG_COPY_BYTES', 100):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({'req-2'}, str(tmp_path), errors)
+
+        dest = tmp_path / 'requests' / 'req-2' / 'request.log'
+        data = dest.read_bytes()
+        header, _, body = data.partition(b'\n')
+        assert header.startswith(b'[sky debug-dump] Truncated log:')
+        assert body == b'B' * 100
+        assert not errors
+
+    def test_oversized_provider_dest_backstopped_by_cap(self, tmp_path):
+        """A provider that ignores the cap still ends up with a capped dest.
+
+        Covers providers that override copy_log_file without a size cap;
+        the dump-side cap_log_file_in_place backstop truncates the copy
+        in place after the provider returns.
+        """
+        provider = mock.MagicMock()
+
+        def _fake_copy(request_id, log_type, dest_path):
+            del request_id, log_type
+            dest_path.write_bytes(b'X' * 500)
+            return True
+
+        provider.copy_log_file.side_effect = _fake_copy
+        with mock.patch('sky.utils.debug_utils.log_provider.get_log_provider',
+                        return_value=provider), mock.patch.object(
+                            log_provider_lib, '_MAX_LOG_COPY_BYTES', 100):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({'req-1'}, str(tmp_path), errors)
+
+        dest = tmp_path / 'requests' / 'req-1' / 'request.log'
+        data = dest.read_bytes()
+        header, _, body = data.partition(b'\n')
+        assert header.startswith(b'[sky debug-dump] Truncated log:')
+        assert body == b'X' * 100
+
+    def test_log_tail_requests_deduplicated(self, tmp_path):
+        """Only the newest N log-tail copies per group are kept."""
+        requests_ = self._make_log_tail_requests(5)
+        provider = self._copying_provider()
+        with mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                        return_value=requests_), mock.patch(
+                            'sky.utils.debug_utils.log_provider'
+                            '.get_log_provider',
+                            return_value=provider):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({r.request_id for r in requests_},
+                                              str(tmp_path), errors)
+
+        requests_dir = tmp_path / 'requests'
+        # Only the 3 newest get request.log copies.
+        copied = sorted(
+            p.parent.name for p in requests_dir.glob('*/request.log'))
+        assert copied == ['req-2', 'req-3', 'req-4']
+        # All five get request_info.json; the older two carry the note.
+        for i in range(5):
+            info = json.loads(
+                (requests_dir / f'req-{i}' / 'request_info.json').read_text())
+            if i < 2:
+                assert 'log_copy_skipped' in info
+            else:
+                assert 'log_copy_skipped' not in info
+        # Exactly one aggregate errors record, naming the kept ids.
+        dedup_records = [
+            e for e in errors if e['resource'].startswith('log_dedup/')
+        ]
+        assert len(dedup_records) == 1
+        assert '2 near-duplicate' in dedup_records[0]['error']
+        for kept in ('req-2', 'req-3', 'req-4'):
+            assert kept in dedup_records[0]['error']
+
+    def test_dedup_scopes_by_cluster_user_and_name(self, tmp_path):
+        """Distinct cluster, user, or request name -> not deduplicated."""
+        requests_ = [
+            _make_request(request_id='req-a',
+                          name='sky.jobs.logs',
+                          cluster_name='c1',
+                          user_id='u1',
+                          created_at=100.0),
+            _make_request(request_id='req-b',
+                          name='sky.jobs.logs',
+                          cluster_name='c2',
+                          user_id='u1',
+                          created_at=101.0),
+            _make_request(request_id='req-c',
+                          name='sky.jobs.logs',
+                          cluster_name='c1',
+                          user_id='u2',
+                          created_at=102.0),
+            _make_request(request_id='req-d',
+                          name='sky.launch',
+                          cluster_name='c1',
+                          user_id='u1',
+                          created_at=103.0),
+        ]
+        provider = self._copying_provider()
+        with mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                        return_value=requests_), mock.patch(
+                            'sky.utils.debug_utils.log_provider'
+                            '.get_log_provider',
+                            return_value=provider):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({r.request_id for r in requests_},
+                                              str(tmp_path), errors)
+
+        copied = sorted(p.parent.name
+                        for p in (tmp_path / 'requests').glob('*/request.log'))
+        assert copied == ['req-a', 'req-b', 'req-c', 'req-d']
+        assert not [e for e in errors if e['resource'].startswith('log_dedup/')]
+
+    def test_exempt_request_ids_not_deduplicated(self, tmp_path):
+        """An explicitly-requested id keeps its log even in a full group."""
+        requests_ = self._make_log_tail_requests(5)
+        provider = self._copying_provider()
+        with mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                        return_value=requests_), mock.patch(
+                            'sky.utils.debug_utils.log_provider'
+                            '.get_log_provider',
+                            return_value=provider):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({r.request_id for r in requests_},
+                                              str(tmp_path),
+                                              errors,
+                                              exempt_request_ids={'req-0'})
+
+        copied = sorted(p.parent.name
+                        for p in (tmp_path / 'requests').glob('*/request.log'))
+        # 3 newest plus the exempt oldest.
+        assert copied == ['req-0', 'req-2', 'req-3', 'req-4']
+
+    def test_empty_newest_copies_do_not_consume_allowance(self, tmp_path):
+        """A group's allowance is consumed only by non-empty copies."""
+        requests_ = self._make_log_tail_requests(5)
+        provider = self._copying_provider(
+            request_log_content=lambda rid: ''
+            if rid in ('req-2', 'req-3', 'req-4') else f'log {rid}')
+        with mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                        return_value=requests_), mock.patch(
+                            'sky.utils.debug_utils.log_provider'
+                            '.get_log_provider',
+                            return_value=provider):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({r.request_id for r in requests_},
+                                              str(tmp_path), errors)
+
+        # The 3 newest have empty (placeholder) logs; the two older
+        # surviving copies are still collected (non-empty request.log
+        # files exist only for the older two).
+        copied = sorted(p.parent.name
+                        for p in (tmp_path / 'requests').glob('*/request.log')
+                        if p.stat().st_size > 0)
+        assert copied == ['req-0', 'req-1']
+        # Each empty copy is flagged in errors.json.
+        empty_records = [e for e in errors if 'empty' in e['error']]
+        assert len(empty_records) == 3
+
+    def test_budget_skips_later_copies(self, tmp_path, monkeypatch):
+        """Once the section's byte budget is spent, later copies are
+        skipped with a recorded reason; metadata is still written."""
+        requests_ = [
+            _make_request(request_id=f'req-{i}',
+                          name='sky.launch',
+                          created_at=100.0 + i) for i in range(3)
+        ]
+        provider = self._copying_provider(
+            request_log_content=lambda rid: 'x' * 100)
+        monkeypatch.setattr(debug_utils, '_REQUEST_LOG_BUDGET_BYTES', 50)
+        with mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                        return_value=requests_), mock.patch(
+                            'sky.utils.debug_utils.log_provider'
+                            '.get_log_provider',
+                            return_value=provider):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({r.request_id for r in requests_},
+                                              str(tmp_path), errors)
+
+        # Newest-first: only the newest request fits the budget.
+        copied = sorted(p.parent.name
+                        for p in (tmp_path / 'requests').glob('*/request.log'))
+        assert copied == ['req-2']
+        budget_records = [e for e in errors if 'budget' in e['error']]
+        assert len(budget_records) == 2
+        # request_info.json is still written for every request.
+        for i in range(3):
+            assert (tmp_path / 'requests' / f'req-{i}' /
+                    'request_info.json').exists()
+
+    def test_prefetch_failure_falls_back_to_per_id(self, tmp_path):
+        """A pre-pass failure records one error and degrades to per-id
+        fetches without crashing."""
+        request = _make_request(request_id='req-1',
+                                name='sky.launch',
+                                created_at=100.0)
+        provider = self._copying_provider()
+        with mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                        side_effect=RuntimeError('DB down')), mock.patch(
+                            'sky.utils.debug_utils.requests_lib.get_request',
+                            return_value=request), mock.patch(
+                                'sky.utils.debug_utils.log_provider'
+                                '.get_log_provider',
+                                return_value=provider):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({'req-1'}, str(tmp_path), errors)
+
+        metadata_errors = [
+            e for e in errors if e['resource'] == 'request_metadata'
+        ]
+        assert len(metadata_errors) == 1
+        assert 'DB down' in metadata_errors[0]['error']
+        # request_info still written via the per-id fallback.
+        assert (tmp_path / 'requests' / 'req-1' / 'request_info.json').exists()
+
+    def test_timings_newest_first_with_log_bytes(self, tmp_path):
+        """_timings.json is created_at-descending and carries per-log
+        byte counts."""
+        requests_ = self._make_log_tail_requests(3)
+        provider = self._copying_provider(request_log_content=lambda rid: 'abc')
+        with mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                        return_value=requests_), mock.patch(
+                            'sky.utils.debug_utils.log_provider'
+                            '.get_log_provider',
+                            return_value=provider):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({r.request_id for r in requests_},
+                                              str(tmp_path), errors)
+
+        timings = json.loads(
+            (tmp_path / 'requests' / '_timings.json').read_text())
+        assert [t['request_id'] for t in timings] == ['req-2', 'req-1', 'req-0']
+        assert all(t['request_log_bytes'] == 3 for t in timings)
+        assert all(t['request_debug_log_bytes'] is None for t in timings)
+
+    def test_empty_copied_request_log_recorded(self, tmp_path):
+        """A successfully-copied 0-byte request.log is visible in
+        errors.json and in the timings byte counts."""
+        provider = self._copying_provider(request_log_content=lambda rid: '')
+        with mock.patch('sky.utils.debug_utils.log_provider.get_log_provider',
+                        return_value=provider):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({'req-1'}, str(tmp_path), errors)
+
+        assert any(e['resource'] == 'req-1/log' and 'empty' in e['error']
+                   for e in errors)
+        timings = json.loads(
+            (tmp_path / 'requests' / '_timings.json').read_text())
+        assert timings[0]['request_log_bytes'] == 0
 
 
 class TestJobsControllerUnreachableGate:
