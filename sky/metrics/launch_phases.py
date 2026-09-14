@@ -152,6 +152,43 @@ _JOB_PHASE_COLUMNS = {
     RUNTIME_SETUP: 't_runtime_setup',
 }
 
+# How late `instances_ready` can be. It is stamped when the provisioner's
+# readiness poll returns rather than when the instances became ready, so it
+# trails the real event by up to one poll interval -- 2s on Kubernetes today.
+# Held here as a plain bound rather than imported from any one provisioner:
+# this module is deliberately cloud-agnostic, and the number only has to be
+# large enough to cover a poll and far smaller than a recovery, which cannot
+# happen without a run and a teardown first.
+_READINESS_OBSERVATION_SLACK = 5.0
+
+
+def _delivering_attempt(attempts: List[Any], start_at: float) -> Optional[Any]:
+    """The attempt that delivered the cluster the job first ran on.
+
+    The newest success bounded by ``start_at``, not simply the newest: a job
+    can be preempted and recover before this is computed, and that recovery's
+    attempt finished after the job first ran. Picking it would make
+    ``runtime_setup`` negative and break the invariant that the phases sum to
+    the total -- which the detail page renders directly, as a segment of
+    negative width.
+
+    ``instances_ready`` is an observation and runs up to one poll interval
+    late, so a job that began work promptly after its instances came up can
+    fail that bound through no fault of its own. Rather than widen the bound --
+    which would also admit a short recovery, and change which attempt is picked
+    for jobs that work correctly today -- the slack is a second pass, reached
+    only when the strict one finds nothing.
+    """
+    for bound in (start_at, start_at + _READINESS_OBSERVATION_SLACK):
+        found = next(
+            (a for a in reversed(attempts)
+             if a.outcome == _OUTCOME_SUCCEEDED and
+             a.instances_ready is not None and a.instances_ready <= bound),
+            None)
+        if found is not None:
+            return found
+    return None
+
 
 def compute_job_timeline(task: Any,
                          attempts: List[Any]) -> Tuple[float, Dict[str, float]]:
@@ -175,15 +212,7 @@ def compute_job_timeline(task: Any,
         CONTROLLER_QUEUE: task['submitted_at'] - task['created_at'],
     }
 
-    # The attempt that delivered the cluster the job *first* ran on. Bounded by
-    # start_at rather than simply the newest success: a job can be preempted
-    # and recover before this is computed, and that recovery's attempt finished
-    # after the job first ran. Picking it would make runtime_setup negative and
-    # break the invariant that the phases sum to the total -- which the detail
-    # page renders directly, as a segment of negative width.
-    final = next((a for a in reversed(attempts)
-                  if a.outcome == _OUTCOME_SUCCEEDED and a.instances_ready
-                  is not None and a.instances_ready <= task['start_at']), None)
+    final = _delivering_attempt(attempts, task['start_at'])
     if final is None:
         # Nothing to break down: a job placed on a warm pool never
         # provisions, and one launched before these milestones has no attempt
@@ -215,6 +244,18 @@ def compute_job_timeline(task: Any,
     phases[NODE_STARTUP] = final.instances_ready - _first_set(
         final.admitted, startup_from)
     phases[RUNTIME_SETUP] = task['start_at'] - final.instances_ready
+    if phases[RUNTIME_SETUP] < 0:
+        # The job began work before the instances were *observed* ready. Both
+        # phases end at that same observation, so node_startup is long by
+        # exactly what runtime_setup is short by -- charge it back rather than
+        # clamping, which would drop the interval from the total instead of
+        # attributing it. Bounded by node_startup itself: it cannot be spent
+        # twice, and anything left over is a real inconsistency rather than
+        # poll lag, so it stays visible here instead of being smeared into a
+        # neighbouring phase.
+        moved = max(phases[RUNTIME_SETUP], -phases[NODE_STARTUP])
+        phases[NODE_STARTUP] += moved
+        phases[RUNTIME_SETUP] -= moved
     return total, phases
 
 
