@@ -35,12 +35,29 @@ if typing.TYPE_CHECKING:
 
     import requests
 
+    from sky import clouds as sky_clouds
+    from sky import global_user_state
     from sky import models
     from sky import resources as resources_lib
     from sky import task as task_lib
     from sky.adaptors import slurm as slurm_adaptor
+    from sky.clouds import cloud as cloud_lib
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    from sky.provision.slurm import utils as slurm_utils
     from sky.utils import status_lib
+    from sky.utils import subprocess_utils
+    from sky.utils.db import kv_cache
 else:
+    # These modules import usage_lib through cloud/provisioning and database
+    # dependencies. Defer their resolution to avoid initialization cycles.
+    sky_clouds = adaptors_common.LazyImport('sky.clouds')
+    global_user_state = adaptors_common.LazyImport('sky.global_user_state')
+    cloud_lib = adaptors_common.LazyImport('sky.clouds.cloud')
+    kubernetes_utils = adaptors_common.LazyImport(
+        'sky.provision.kubernetes.utils')
+    slurm_utils = adaptors_common.LazyImport('sky.provision.slurm.utils')
+    subprocess_utils = adaptors_common.LazyImport('sky.utils.subprocess_utils')
+    kv_cache = adaptors_common.LazyImport('sky.utils.db.kv_cache')
     # requests and inspect cost ~100ms to load, which can be postponed to
     # collection phase or skipped if user specifies no collection
     requests = adaptors_common.LazyImport('requests')
@@ -380,7 +397,7 @@ class ServerHeartbeatMessage(MessageToReport):
         ingress_host: Optional[str] — ingress DNS hostname if deployed
             with ingress (from SKYPILOT_INGRESS_HOST env var)
         total_gpus: int — installed GPU capacity across every node in every
-            allowed Kubernetes and SSH context. Cloud VM clusters have no
+            allowed Kubernetes/SSH context and Slurm cluster. Cloud VMs have no
             node inventory and do not contribute.
         gpus_by_type: Dict[str, int] — per-GPU-type breakdown of total_gpus
         infra_count: Dict[str, int] — how many infrastructures of each kind
@@ -775,19 +792,34 @@ def _try_list(kind: str,
         return None
 
 
+def _list_workspace_infra(
+        kind: str, fn: Callable[[],
+                                Collection[Any]]) -> Optional[Collection[Any]]:
+    """Union configured infrastructure across workspaces, including default."""
+    workspaces = skypilot_config.get_nested(('workspaces',), default_value={})
+    names = set(workspaces) | {skylet_constants.SKYPILOT_DEFAULT_WORKSPACE}
+    result: Set[Any] = set()
+    for workspace in sorted(names):
+        with skypilot_config.local_active_workspace_ctx(workspace):
+            values = _try_list(kind, fn)
+        if values is None:
+            # A partial count must not be presented as a complete inventory.
+            return None
+        result.update(values)
+    return result
+
+
 def send_server_heartbeat():
     """Send server-side heartbeat with fleet and plugin metrics to Loki."""
-    # pylint: disable=import-outside-toplevel
-    from sky import clouds as sky_clouds
 
     # Resolved once and shared by both collectors: each lookup re-parses the
     # kubeconfig or ~/.slurm/config.
-    k8s_contexts = _try_list(
+    k8s_contexts = _list_workspace_infra(
         'kubernetes',
         lambda: sky_clouds.Kubernetes.existing_allowed_contexts(silent=True))
-    ssh_contexts = _try_list(
+    ssh_contexts = _list_workspace_infra(
         'ssh', lambda: sky_clouds.SSH.existing_allowed_contexts(silent=True))
-    slurm_clusters = _try_list(
+    slurm_clusters = _list_workspace_infra(
         'slurm',
         lambda: sky_clouds.Slurm.existing_allowed_clusters(silent=True))
 
@@ -829,11 +861,12 @@ def _gpu_capacity_from_nodes(
     counts: Dict[str, int] = {}
     for node_info in nodes_info.node_info_dict.values():
         count = int(node_info.total.get('accelerator_count', 0) or 0)
-        if count <= 0 or node_info.accelerator_type is None:
+        if count <= 0:
             continue
-        acc_type = str(node_info.accelerator_type)
-        if acc_type.lower().startswith('tpu'):
-            # TPUs are tracked separately from GPUs.
+        acc_type = str(node_info.accelerator_type or 'gpu')
+        if (acc_type.lower().startswith('tpu') or
+                kubernetes_utils.is_neuron_accelerator(acc_type)):
+            # TPUs and Neuron devices are not GPUs.
             continue
         counts[acc_type] = counts.get(acc_type, 0) + count
     return counts
@@ -846,9 +879,6 @@ def _gpu_capacity_from_slurm_nodes(
     ``sinfo --Node`` emits one row per node *per partition*, so a node in two
     partitions appears twice. Dedupe by node name before summing.
     """
-    # pylint: disable=import-outside-toplevel
-    from sky.provision.slurm import utils as slurm_utils
-
     counts: Dict[str, int] = {}
     seen = set()
     for node in nodes_info:
@@ -866,9 +896,6 @@ def _gpu_capacity_from_slurm_nodes(
 
 def _read_all_capacity() -> Dict[str, Dict[str, int]]:
     """Read every unexpired capacity row in one query, keyed by infra id."""
-    # pylint: disable=import-outside-toplevel
-    from sky.utils.db import kv_cache
-
     prefix = constants.NODE_INFO_CACHE_KEY_PREFIX
     try:
         rows = kv_cache.get_cache_entries_by_prefix(prefix)
@@ -892,9 +919,6 @@ def record_gpu_capacity(infra: str, counts: Dict[str, int]) -> None:
     read its inventory. That check is one indexed read. Skipped when the user
     disabled usage collection.
     """
-    # pylint: disable=import-outside-toplevel
-    from sky.utils.db import kv_cache
-
     if env_options.Options.DISABLE_LOGGING.get():
         return
     key = constants.NODE_INFO_CACHE_KEY_PREFIX + infra
@@ -929,16 +953,12 @@ def record_node_info(context: Optional[str],
 
 
 def _fetch_k8s_capacity(context: Optional[str]) -> Dict[str, int]:
-    # pylint: disable=import-outside-toplevel
-    from sky.provision.kubernetes import utils as kubernetes_utils
     # The query records itself via record_node_info on the way out.
     return _gpu_capacity_from_nodes(
         kubernetes_utils.get_kubernetes_node_info(context))
 
 
 def _fetch_slurm_capacity(cluster: str) -> Dict[str, int]:
-    # pylint: disable=import-outside-toplevel
-    from sky.provision.slurm import utils as slurm_utils
     # get_slurm_nodes_info caches sinfo itself, so this is usually no SSH.
     counts = _gpu_capacity_from_slurm_nodes(
         slurm_utils.get_slurm_nodes_info(cluster))
@@ -953,15 +973,12 @@ def _collect_gpu_fleet(contexts: List[Optional[str]],
     Covers every allowed Kubernetes and SSH context and every allowed Slurm
     cluster. This is capacity, not usage: an idle GPU node counts the same as
     a busy one. Clusters on cloud VMs have no node inventory to read and do
-    not contribute. Non-GPU accelerators (currently TPUs) are excluded.
+    not contribute. Known TPU and Neuron accelerator types are excluded.
 
     Recorded rows are read in one query; only infras with no unexpired row
     are queried, in parallel, and each is guarded so an unreachable one drops
     out of the total for this tick rather than failing the heartbeat.
     """
-    # pylint: disable=import-outside-toplevel
-    from sky.utils import subprocess_utils
-
     fetchers: Dict[str, Callable[[], Dict[str, int]]] = {}
     for context in contexts:
         fetchers[_k8s_capacity_id(context)] = functools.partial(
@@ -1002,10 +1019,6 @@ def _collect_infra_count(
     ``clouds`` excludes the three kinds counted separately. A lookup that
     failed (None) leaves its key out rather than reporting zero.
     """
-    # pylint: disable=import-outside-toplevel
-    from sky import clouds as sky_clouds
-    from sky import global_user_state
-    from sky.clouds import cloud as cloud_lib
 
     def _enabled_clouds() -> Set[str]:
         # Enabled clouds are cached per workspace, so union across all.

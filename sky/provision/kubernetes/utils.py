@@ -4544,6 +4544,8 @@ def get_kubernetes_node_info(
     """
     nodes_info = _get_kubernetes_node_info(context)
     try:
+        # usage_lib's capacity collector calls this module; defer the import
+        # until both modules have finished initializing.
         # pylint: disable=import-outside-toplevel
         from sky.usage import usage_lib
         resolved_context = (context if context is not None else

@@ -8,6 +8,7 @@ import types
 import pytest
 
 from sky import clouds as sky_clouds
+from sky import skypilot_config
 from sky.usage import usage_lib
 from sky.utils import context
 from sky.utils import env_options
@@ -251,9 +252,8 @@ def _fake_node(acc_type, count):
 
 
 def _fake_nodes_info(*nodes):
-    return types.SimpleNamespace(node_info_dict={
-        f'n{i}': n for i, n in enumerate(nodes)
-    })
+    return types.SimpleNamespace(
+        node_info_dict={f'n{i}': n for i, n in enumerate(nodes)})
 
 
 def _fake_slurm_node(node, gres, partition='batch'):
@@ -315,6 +315,72 @@ def test_slurm_nodes_are_deduped_across_partitions():
         _fake_slurm_node('s2', '(null)'),
     ])
     assert counts == {'h100': 8}
+
+
+def test_gpu_capacity_preserves_unknown_gpus_and_excludes_neuron():
+    counts = usage_lib._gpu_capacity_from_nodes(
+        _fake_nodes_info(_fake_node(None, 8), _fake_node('H100', 4),
+                         _fake_node('TRAINIUM2',
+                                    8), _fake_node('inferentia', 2),
+                         _fake_node('tpu-v5e-8', 8), _fake_node(None, 0)))
+    assert counts == {'gpu': 8, 'H100': 4}
+
+
+def test_heartbeat_unions_workspaces(monkeypatch, capacity_store):
+    """Exercise the sender and serialized payload, without a network send."""
+    _reset_module_state()
+    monkeypatch.setattr(skypilot_config,
+                        'get_nested',
+                        lambda keys, default_value=None, **kw: {'team-a': {}}
+                        if keys == ('workspaces',) else default_value)
+    seen = []
+
+    def contexts():
+        workspace = skypilot_config.get_active_workspace()
+        seen.append(workspace)
+        return ['shared', workspace]
+
+    monkeypatch.setattr(sky_clouds.Kubernetes, 'existing_allowed_contexts',
+                        lambda silent: contexts())
+    monkeypatch.setattr(sky_clouds.SSH, 'existing_allowed_contexts',
+                        lambda silent: [])
+    monkeypatch.setattr(sky_clouds.Slurm, 'existing_allowed_clusters',
+                        lambda silent: [])
+    monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',
+                        lambda *args: [])
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils._get_kubernetes_node_info',
+        lambda context: _fake_nodes_info(_fake_node('H100', 8)))
+    sent = []
+    monkeypatch.setattr(
+        usage_lib.requests, 'post', lambda *args, **kwargs: sent.append(kwargs[
+            'data']) or types.SimpleNamespace(status_code=204, text=''))
+
+    original_workspace = skypilot_config.get_active_workspace()
+    usage_lib.send_server_heartbeat()
+    payload = json.loads(json.loads(sent[0])['streams'][0]['values'][0][1])
+    assert payload['total_gpus'] == 24
+    assert payload['gpus_by_type'] == {'H100': 24}
+    assert payload['infra_count'] == {
+        'kubernetes': 3,
+        'ssh_node_pools': 0,
+        'slurm': 0,
+        'clouds': 0
+    }
+    assert set(seen) == {'default', 'team-a'}
+    assert skypilot_config.get_active_workspace() == original_workspace
+
+
+def test_workspace_lookup_failure_is_not_reported_as_zero(monkeypatch):
+    monkeypatch.setattr(skypilot_config, 'get_nested',
+                        lambda *args, **kwargs: {'team-a': {}})
+
+    def lookup():
+        if skypilot_config.get_active_workspace() == 'team-a':
+            raise RuntimeError('unavailable')
+        return ['shared']
+
+    assert usage_lib._list_workspace_infra('kubernetes', lookup) is None
 
 
 def test_recorded_rows_skip_the_fetch(monkeypatch, capacity_store):
