@@ -85,7 +85,13 @@ class TestOAuth2ProxyMiddleware:
         await middleware(scope, receive, send)
 
         middleware.middleware.dispatch.assert_awaited_once()
-        app.assert_awaited_once_with(scope, receive, send)
+        # The handshake is forwarded to the app. The send callable is
+        # wrapped on the way in (websocket_aware counts the acceptance at
+        # the accept message), so it is not the same object the wrapper
+        # itself received.
+        app.assert_awaited_once()
+        assert app.await_args.args[0] is scope
+        assert app.await_args.args[1] is receive
         assert all(
             msg.get('type') != 'websocket.close' for msg in sent_messages)
 

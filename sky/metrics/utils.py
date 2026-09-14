@@ -269,6 +269,16 @@ SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL = prom.Counter(
     ['path', 'outcome'],
 )
 
+# WebSocket handshakes every middleware let through (the accept message went
+# out), by route: the session volume counterpart of the rejections counter
+# above. Counted inside `middleware_utils.websocket_aware`, at the accept
+# message, once per handshake.
+SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL = prom.Counter(
+    'sky_apiserver_websocket_handshake_accepts_total',
+    'WebSocket handshakes accepted by every middleware, by route',
+    ['path'],
+)
+
 SKY_APISERVER_WEBSOCKET_CONNECTIONS = prom.Gauge(
     'sky_apiserver_websocket_connections',
     'Number of websocket connections',

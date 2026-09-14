@@ -25,7 +25,7 @@ from fastapi.testclient import TestClient
 import pytest
 import starlette.middleware
 import starlette.middleware.base
-from starlette.websockets import WebSocketDisconnect
+from starlette.testclient import WebSocketDenialResponse
 
 from sky import exceptions
 from sky.metrics import utils as metrics_utils
@@ -44,6 +44,7 @@ _COUNTERS = (
     metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL,
     metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL,
     metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
+    metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL,
 )
 
 
@@ -194,18 +195,21 @@ def test_the_old_order_misses_the_middleware_503():
 
 def test_a_refused_websocket_handshake_is_counted():
     """ssh goes over a WebSocket. During the incident every handshake was
-    refused and no counter moved. The client still gets the same refusal
-    (a pre-accept close, which servers render as an empty HTTP 403)."""
+    refused and no counter moved, and the refusal reached the client as an
+    empty HTTP 403 that read as "please log in again". The TestClient, like
+    uvicorn, advertises the `websocket.http.response` extension, so the
+    client now gets the real 503 with the server's explanation."""
     app = _app()
     failure = exceptions.ConcurrentWorkerExhaustedError('32 of 32')
     with _broken_auth(failure):
-        with pytest.raises(WebSocketDisconnect) as refused:
+        with pytest.raises(WebSocketDenialResponse) as refused:
             with _client(app).websocket_connect('/kubernetes-pod-ssh-proxy',
                                                 headers=_AUTH_HEADER):
                 pass
 
-    # Unchanged client-visible behaviour: the 1011 close for a 503 verdict.
-    assert refused.value.code == 1011
+    # The client gets the real status and the server's explanation.
+    assert refused.value.status_code == 503
+    assert b'exhausted its concurrent worker limit' in refused.value.content
     assert _sample(
         metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
         path='/kubernetes-pod-ssh-proxy',
@@ -227,6 +231,10 @@ def test_an_accepted_websocket_handshake_is_not_counted_as_refused():
     assert _sample(
         metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL) == 0.0
     assert _sample(metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL) == 0.0
+    # The acceptance is counted by route.
+    assert _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL,
+        path='/kubernetes-pod-ssh-proxy') == 1.0
 
 
 def test_unauthenticated_scanner_paths_do_not_create_series():

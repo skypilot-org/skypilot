@@ -56,11 +56,7 @@ async def main(
                            additional_headers=headers) as websocket:
             await run_websocket_proxy(websocket, timestamps_supported)
     except websockets.exceptions.InvalidStatus as e:
-        if e.response.status_code == 403:
-            print(str(exceptions.ApiServerAuthenticationError(login_url)),
-                  file=sys.stderr)
-        else:
-            print(f'Error ssh into cluster: {e}', file=sys.stderr)
+        _print_handshake_rejection(e, login_url)
         sys.exit(1)
 
 
@@ -265,12 +261,48 @@ async def _connect_with_redirect(ws_url: str, timestamps_supported: bool,
                                       timestamps_supported,
                                       first_message=first_msg)
     except websockets.exceptions.InvalidStatus as e:
-        if e.response.status_code == 403:
-            print(str(exceptions.ApiServerAuthenticationError(login_url)),
-                  file=sys.stderr)
-        else:
-            print(f'Error ssh into cluster: {e}', file=sys.stderr)
+        _print_handshake_rejection(e, login_url)
         sys.exit(1)
+
+
+def _print_handshake_rejection(e: websockets.exceptions.InvalidStatus,
+                               login_url: str) -> None:
+    """Explain a rejected WebSocket handshake to the user.
+
+    The server answers a rejected handshake with the HTTP status of the
+    middleware that refused it: 403 for authentication and authorization
+    (the status every client release maps to the login hint; a 401 is read
+    the same way), 503 when it cannot serve right now (its authentication
+    pool is saturated, its database is slow, it is draining). Older servers
+    close the connection instead, which arrives as a bare 403.
+    """
+    status_code = e.response.status_code
+    if status_code in (401, 403):
+        print(str(exceptions.ApiServerAuthenticationError(login_url)),
+              file=sys.stderr)
+    elif status_code == 503:
+        # Surface the server's own explanation (it already says whether to
+        # retry): an "authentication required" here would send the user off
+        # to log in again for a problem that is not theirs.
+        print(
+            'API server is temporarily unavailable: '
+            f'{_rejection_detail(e.response)}',
+            file=sys.stderr)
+    else:
+        print(f'Error ssh into cluster: {e}', file=sys.stderr)
+
+
+def _rejection_detail(response) -> str:
+    """The `detail` of a JSON error body on a rejected handshake, if any."""
+    body = getattr(response, 'body', None)
+    if body:
+        try:
+            detail = json.loads(body).get('detail')
+            if detail:
+                return str(detail)
+        except (ValueError, AttributeError):
+            pass
+    return getattr(response, 'reason_phrase', '') or 'Service Unavailable'
 
 
 async def _handle_redirect(redirect_info: dict,

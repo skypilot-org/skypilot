@@ -33,14 +33,26 @@ class RecordingMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             return fastapi.Response(status_code=http.HTTPStatus.FORBIDDEN)
         if self.behavior == 'error':
             raise RuntimeError('middleware failure')
+        if self.behavior == 'redirect':
+            # What OAuth2ProxyMiddleware returns for an unauthenticated or
+            # expired session: a 307 to the sign-in page, without call_next.
+            return fastapi.responses.RedirectResponse(
+                url='http://x/oauth2/start?rd=%2Fws')
+        if self.behavior == 'answered':
+            # A middleware that serves the request itself with a 2xx.
+            return fastapi.responses.PlainTextResponse('served here',
+                                                       status_code=200)
         if self.behavior == 'unavailable':
-            # The shape db_lookup's helpers produce: a JSON 503 with a stamped
-            # rejection reason.
+            # The shape db_lookup's helpers produce: a JSON 503 with a
+            # Retry-After and a stamped rejection reason.
             middleware_utils.mark_rejection(
                 request, middleware_utils.REJECT_REASON_AUTH_DB_TIMEOUT)
             return fastapi.responses.JSONResponse(
                 status_code=http.HTTPStatus.SERVICE_UNAVAILABLE,
-                headers={'Retry-After': '5'},
+                headers={
+                    'Retry-After': '5',
+                    'X-Not-Forwarded': 'internal'
+                },
                 content={'detail': 'database is slow'})
         return None
 
@@ -243,13 +255,30 @@ def _sample(counter, **labels) -> float:
 def clear_rejection_counters():
     for counter in (
             metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
+            metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL,
             metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL):
         counter.clear()
     yield
     for counter in (
             metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
+            metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL,
             metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL):
         counter.clear()
+
+
+def _scope_with_extension(**overrides):
+    """A websocket scope whose server advertises `websocket.http.response`."""
+    return _make_websocket_scope(extensions={'websocket.http.response': {}},
+                                 **overrides)
+
+
+def _nothing_counted() -> bool:
+    """No handshake or rejection counter has a sample."""
+    return all(
+        _sample(counter) == 0.0 for counter in (
+            metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
+            metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL,
+            metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL))
 
 
 async def _run(middleware, scope):
@@ -314,20 +343,25 @@ async def test_a_refused_handshake_is_counted_and_the_close_frame_is_unchanged(
 @pytest.mark.asyncio
 async def test_a_refused_handshake_with_a_stamped_reason_is_attributed():
     """The auth helpers stamp why they answered 503; the handshake carries
-    it into the rejection counter with the status the middleware produced
-    (the client still sees a 403 close on the wire)."""
+    it into the rejection counter. Without the extension the client sees an
+    empty 403 close, and that is the `status` recorded: the counter never
+    disagrees with the wire (with the extension, the 503 is recorded
+    instead -- see the transport tests)."""
     middleware = _make_middleware(lambda *a: None, behavior='unavailable')
     await _run(middleware,
                _make_websocket_scope(path='/kubernetes-pod-ssh-proxy'))
     assert _sample(metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL,
                    reason=middleware_utils.REJECT_REASON_AUTH_DB_TIMEOUT,
-                   status='503',
+                   status='403',
                    kind='websocket') == 1.0
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('behavior', ['unauthorized', 'forbidden', 'error'])
+@pytest.mark.parametrize('behavior', ['unauthorized', 'forbidden'])
 async def test_a_refused_handshake_without_a_reason_is_not_attributed(behavior):
+    """A plain 401/403 with no stamped reason is counted by decision only.
+    (The `error` behavior is not here: an exception in dispatch stamps
+    `unhandled_exception`, which is attributed -- see the transport tests.)"""
     middleware = _make_middleware(lambda *a: None, behavior=behavior)
     await _run(middleware, _make_websocket_scope())
     assert _sample(metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL) == 0.0
@@ -345,6 +379,29 @@ async def test_an_accepted_handshake_is_not_counted_as_refused():
     assert sent == [{'type': 'websocket.accept'}]
     assert _sample(
         metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL) == 0.0
+    # ...and the acceptance is counted, once, by route.
+    assert _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL,
+        path='other') == 1.0
+
+
+@pytest.mark.asyncio
+async def test_an_accepted_handshake_is_counted_once_through_the_stack():
+    """Every websocket_aware middleware forwards an accepted handshake, so
+    the accept message passes back out through each wrapper; the count must
+    still be one."""
+
+    async def app(scope, receive, send):
+        del scope, receive
+        await send({'type': 'websocket.accept'})
+
+    inner = middleware_utils.websocket_aware(RecordingMiddleware)
+    outer = middleware_utils.websocket_aware(RecordingMiddleware)
+    middleware = outer(inner(app, behavior='accept'), behavior='accept')
+    sent = await _run(middleware, _make_websocket_scope())
+    assert sent == [{'type': 'websocket.accept'}]
+    assert _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL) == 1.0
 
 
 @pytest.mark.asyncio
@@ -439,3 +496,422 @@ def test_record_rejection_labels_an_http_status_enum_by_number():
                    reason='auth_db_timeout',
                    status='503',
                    kind='websocket') == 1.0
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# A refused handshake answered through the ASGI `websocket.http.response`
+# extension: the middleware's real status and body reach the client. Only
+# the headers a WebSocket client can use travel (content-type, retry-after);
+# an authentication or authorization refusal stays the 403 every shipped
+# ssh client maps to the login hint (`_AUTH_REFUSAL_STATUS`).
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_websocket_unavailable_is_rejected_with_the_real_503():
+    app_called = False
+
+    async def app(scope, receive, send):
+        del scope, receive, send
+        nonlocal app_called
+        app_called = True
+
+    middleware = _make_middleware(app, behavior='unavailable')
+    scope = _scope_with_extension()
+    sent = await _run(middleware, scope)
+
+    assert not app_called
+    assert [m['type'] for m in sent] == [
+        'websocket.http.response.start', 'websocket.http.response.body'
+    ]
+    start, body = sent
+    assert start['status'] == 503
+    headers = dict(start['headers'])
+    assert headers[b'content-type'] == b'application/json'
+    assert headers[b'retry-after'] == b'5'
+    # Only the headers a WebSocket client can use are forwarded.
+    assert b'x-not-forwarded' not in headers
+    assert body['body'] == b'{"detail":"database is slow"}'
+    # Counted with the status the client actually received.
+    assert _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
+        outcome='error') == 1.0
+    assert _sample(metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL,
+                   reason=middleware_utils.REJECT_REASON_AUTH_DB_TIMEOUT,
+                   status='503',
+                   kind='websocket') == 1.0
+
+
+@pytest.mark.asyncio
+async def test_websocket_unauthorized_is_rejected_with_a_403():
+    """Not the middleware's 401: see `_AUTH_REFUSAL_STATUS` and the contract
+    test below."""
+    middleware = _make_middleware(lambda *a: None, behavior='unauthorized')
+    sent = await _run(middleware, _scope_with_extension())
+    assert sent[0]['type'] == 'websocket.http.response.start'
+    assert sent[0]['status'] == 403
+    assert sent[1] == {'type': 'websocket.http.response.body', 'body': b''}
+    assert _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
+        outcome='unauthorized') == 1.0
+
+
+@pytest.mark.asyncio
+async def test_websocket_forbidden_is_rejected_with_a_403():
+    middleware = _make_middleware(lambda *a: None, behavior='forbidden')
+    sent = await _run(middleware, _scope_with_extension())
+    assert sent[0]['status'] == 403
+
+
+@pytest.mark.asyncio
+async def test_websocket_middleware_exception_is_rejected_with_a_500():
+    middleware = _make_middleware(lambda *a: None, behavior='error')
+    scope = _scope_with_extension()
+    sent = await _run(middleware, scope)
+    assert sent[0]['type'] == 'websocket.http.response.start'
+    assert sent[0]['status'] == 500
+    assert sent[1]['body'] == b'{"detail":"Internal Server Error"}'
+    assert middleware_utils.get_rejection_reason(scope) == \
+        middleware_utils.REJECT_REASON_UNHANDLED_EXCEPTION
+    assert _sample(metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL,
+                   reason=middleware_utils.REJECT_REASON_UNHANDLED_EXCEPTION,
+                   status='500',
+                   kind='websocket') == 1.0
+
+
+@pytest.mark.asyncio
+async def test_websocket_accept_ignores_the_extension():
+    sent_types = []
+
+    async def app(scope, receive, send):
+        del scope, receive
+        await send({'type': 'websocket.accept'})
+
+    middleware = _make_middleware(app, behavior='accept')
+
+    async def receive():
+        return {'type': 'websocket.connect'}
+
+    async def send(message):
+        sent_types.append(message['type'])
+
+    await middleware(_scope_with_extension(), receive, send)
+    assert sent_types == ['websocket.accept']
+    assert _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL) == 1.0
+
+
+@pytest.mark.asyncio
+async def test_websocket_rejection_without_the_extension_still_closes():
+    """The fallback is the pre-extension behaviour, byte for byte."""
+    middleware = _make_middleware(lambda *a: None, behavior='unavailable')
+    sent = await _run(middleware, _make_websocket_scope())
+    assert sent == [{
+        'type': 'websocket.close',
+        'code': 1011,
+        'reason': 'Internal Server Error',
+    }]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# A middleware that answers the handshake itself with a 2xx/3xx instead of
+# calling call_next -- the oauth2 sign-in redirect for an expired session.
+# A WebSocket client cannot follow an http(s) redirect, so it is refused as
+# an authentication failure, with the 403 every client maps to the login
+# hint.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('behavior', ['redirect', 'answered'])
+async def test_websocket_signin_redirect_is_rejected_with_a_403(behavior):
+    app_called = False
+
+    async def app(scope, receive, send):
+        del scope, receive, send
+        nonlocal app_called
+        app_called = True
+
+    middleware = _make_middleware(app, behavior=behavior)
+    scope = _scope_with_extension()
+    sent = await _run(middleware, scope)
+
+    assert not app_called
+    assert [m['type'] for m in sent] == [
+        'websocket.http.response.start', 'websocket.http.response.body'
+    ]
+    start, body = sent
+    assert start['status'] == 403
+    headers = dict(start['headers'])
+    # No Location: a WebSocket client could not follow it anyway, and the
+    # status must read as a rejection, not a redirect.
+    assert b'location' not in headers
+    assert headers == {b'content-type': b'application/json'}
+    assert body['body'] == b'{"detail":"Authentication required"}'
+    # The rejection counter attributes it as an auth failure.
+    assert _sample(metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL,
+                   reason=middleware_utils.REJECT_REASON_UNAUTHORIZED,
+                   status='403',
+                   kind='websocket') == 1.0
+
+
+@pytest.mark.asyncio
+async def test_websocket_signin_redirect_without_the_extension_closes_4401():
+    middleware = _make_middleware(lambda *a: None, behavior='redirect')
+    sent = await _run(middleware, _make_websocket_scope())
+    assert sent == [{
+        'type': 'websocket.close',
+        'code': 4401,
+        'reason': 'Unauthorized',
+    }]
+
+
+@pytest.mark.asyncio
+async def test_websocket_redirect_does_not_override_a_stamped_reason():
+    """A middleware that stamped its own reason before redirecting keeps it."""
+
+    class StampingRedirect(starlette.middleware.base.BaseHTTPMiddleware):
+
+        async def dispatch(self, request, call_next):
+            del call_next
+            middleware_utils.mark_rejection(
+                request, middleware_utils.REJECT_REASON_FORBIDDEN)
+            return fastapi.responses.RedirectResponse(url='http://x/denied')
+
+    middleware = middleware_utils.websocket_aware(StampingRedirect)(
+        lambda *a: None)
+    scope = _scope_with_extension()
+    sent = await _run(middleware, scope)
+    assert sent[0]['status'] == 403
+    assert middleware_utils.get_rejection_reason(scope) == \
+        middleware_utils.REJECT_REASON_FORBIDDEN
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# The contract with older ssh clients. Every `websocket_proxy.py` shipped
+# before this code maps exactly HTTP 403 on the handshake to the "run
+# `sky api login`" hint and prints a bare `HTTP <code>` for anything else;
+# servers have always rendered a refused handshake as an empty 403. So an
+# authentication or authorization refusal must stay a 403 on the wire even
+# though the middleware's own answer is a 401. Everything else (the 5xx this
+# extension exists for, other 4xx) keeps its real status.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class _AuthRefusalMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Refuses like the bearer/basic auth middlewares do: JSON 401 with a
+    `WWW-Authenticate` challenge, or a JSON 403, reason stamped."""
+
+    def __init__(self, app, status_code, reason):
+        super().__init__(app)
+        self.status_code = status_code
+        self.reason = reason
+
+    async def dispatch(self, request, call_next):
+        del call_next
+        middleware_utils.mark_rejection(request, self.reason)
+        headers = {}
+        if self.status_code == http.HTTPStatus.UNAUTHORIZED:
+            headers['WWW-Authenticate'] = 'Bearer'
+        return fastapi.responses.JSONResponse(
+            status_code=self.status_code,
+            headers=headers,
+            content={'detail': 'Authentication required'})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status_code, reason, expected', [
+    (http.HTTPStatus.UNAUTHORIZED, middleware_utils.REJECT_REASON_UNAUTHORIZED,
+     403),
+    (http.HTTPStatus.FORBIDDEN, middleware_utils.REJECT_REASON_FORBIDDEN, 403),
+    (http.HTTPStatus.SERVICE_UNAVAILABLE,
+     middleware_utils.REJECT_REASON_AUTH_DB_TIMEOUT, 503),
+    (http.HTTPStatus.PAYMENT_REQUIRED, middleware_utils.REJECT_REASON_FORBIDDEN,
+     402),
+])
+async def test_auth_refusals_keep_the_403_older_clients_understand(
+        status_code, reason, expected):
+    middleware = middleware_utils.websocket_aware(_AuthRefusalMiddleware)(
+        lambda *a: None, status_code=status_code, reason=reason)
+    scope = _scope_with_extension()
+    sent = await _run(middleware, scope)
+
+    assert [m['type'] for m in sent] == [
+        'websocket.http.response.start', 'websocket.http.response.body'
+    ]
+    assert sent[0]['status'] == expected
+    assert middleware_utils._AUTH_REFUSAL_STATUS == 403  # pylint: disable=protected-access
+    headers = dict(sent[0]['headers'])
+    # The middleware's explanation still travels with the response...
+    assert headers[b'content-type'] == b'application/json'
+    assert sent[1]['body'] == b'{"detail":"Authentication required"}'
+    # ...but a 401 challenge does not: it makes no sense on a 403 and no
+    # WebSocket client acts on it.
+    assert b'www-authenticate' not in headers
+    # The metric keeps the finer-grained cause even where the wire says 403.
+    assert middleware_utils.get_rejection_reason(scope) == reason
+
+
+@pytest.mark.asyncio
+async def test_auth_refusal_without_the_extension_still_closes_4401():
+    """The fallback close codes are untouched; servers render them as 403."""
+    middleware = middleware_utils.websocket_aware(_AuthRefusalMiddleware)(
+        lambda *a: None,
+        status_code=http.HTTPStatus.UNAUTHORIZED,
+        reason=middleware_utils.REJECT_REASON_UNAUTHORIZED)
+    sent = await _run(middleware, _make_websocket_scope())
+    assert sent == [{
+        'type': 'websocket.close',
+        'code': 4401,
+        'reason': 'Unauthorized',
+    }]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# The extension is detected from the scope, and absent / None / other-only
+# all mean "not supported": the pre-extension close path, byte for byte.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    'extensions',
+    [
+        # Key absent altogether (what `_make_websocket_scope` builds).
+        None,
+        {},
+        {
+            'http.response.push': {}
+        },
+    ],
+    ids=['absent', 'empty', 'other-extensions-only'])
+def test_extension_support_is_detected_only_when_advertised(extensions):
+    scope = _make_websocket_scope()
+    if extensions is not None:
+        scope['extensions'] = extensions
+    assert not middleware_utils.supports_websocket_http_response(scope)
+    assert middleware_utils.supports_websocket_http_response(
+        _scope_with_extension())
+
+
+def test_extension_support_tolerates_a_none_extensions_value():
+    scope = _make_websocket_scope(extensions=None)
+    assert not middleware_utils.supports_websocket_http_response(scope)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('extensions', [
+    {},
+    {
+        'http.response.push': {}
+    },
+    None,
+],
+                         ids=['empty', 'other-extensions-only', 'none'])
+@pytest.mark.parametrize('behavior, close_frame', [
+    ('unavailable', {
+        'type': 'websocket.close',
+        'code': 1011,
+        'reason': 'Internal Server Error',
+    }),
+    ('unauthorized', {
+        'type': 'websocket.close',
+        'code': 4401,
+        'reason': 'Unauthorized',
+    }),
+    ('forbidden', {
+        'type': 'websocket.close',
+        'code': 4403,
+        'reason': 'Forbidden',
+    }),
+    ('error', {
+        'type': 'websocket.close',
+        'code': 1011,
+        'reason': 'Internal Server Error',
+    }),
+    ('redirect', {
+        'type': 'websocket.close',
+        'code': 4401,
+        'reason': 'Unauthorized',
+    }),
+])
+async def test_a_scope_without_the_extension_takes_the_close_path(
+        extensions, behavior, close_frame):
+    """Servers render a pre-accept close as an empty HTTP 403; this is the
+    behaviour every client saw before the extension was used."""
+    app_called = False
+
+    async def app(scope, receive, send):
+        del scope, receive, send
+        nonlocal app_called
+        app_called = True
+
+    middleware = _make_middleware(app, behavior=behavior)
+    scope = _make_websocket_scope(extensions=extensions)
+    sent = await _run(middleware, scope)
+
+    assert not app_called
+    assert sent == [close_frame]
+
+
+class _StatusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Rejects every request with a configurable status."""
+
+    def __init__(self, app, status_code):
+        super().__init__(app)
+        self.status_code = status_code
+
+    async def dispatch(self, request, call_next):
+        del call_next
+        middleware_utils.mark_rejection(
+            request, middleware_utils.REJECT_REASON_FORBIDDEN)
+        return fastapi.responses.JSONResponse(status_code=self.status_code,
+                                              headers={'Retry-After': '1'},
+                                              content={'detail': 'no'})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status_code, expected', [
+    (460, 403),
+    (499, 403),
+    (599, 500),
+    (429, 429),
+    (503, 503),
+])
+async def test_a_status_the_server_cannot_render_is_replaced(
+        status_code, expected):
+    """uvicorn's `websockets` implementation looks the status up in
+    http.HTTPStatus and raises on a non-member; the server then logs a
+    traceback and answers 500. Send a status every implementation renders."""
+    middleware = middleware_utils.websocket_aware(_StatusMiddleware)(
+        lambda *a: None, status_code=status_code)
+    scope = _scope_with_extension()
+    sent = await _run(middleware, scope)
+
+    assert [m['type'] for m in sent] == [
+        'websocket.http.response.start', 'websocket.http.response.body'
+    ]
+    assert sent[0]['status'] == expected
+    assert isinstance(sent[0]['status'], int)
+    assert http.HTTPStatus(sent[0]['status'])  # renderable everywhere
+    # Body and the forwardable headers are kept whatever the status.
+    headers = dict(sent[0]['headers'])
+    assert headers[b'content-type'] == b'application/json'
+    assert headers[b'retry-after'] == b'1'
+    assert sent[1]['body'] == b'{"detail":"no"}'
+    assert middleware_utils.get_rejection_reason(scope) == \
+        middleware_utils.REJECT_REASON_FORBIDDEN
+
+
+@pytest.mark.parametrize('status_code, expected', [
+    (401, 401),
+    (403, 403),
+    (404, 404),
+    (429, 429),
+    (500, 500),
+    (502, 502),
+    (503, 503),
+    (460, 403),
+    (599, 500),
+])
+def test_renderable_status(status_code, expected):
+    assert middleware_utils._renderable_status(status_code) == expected  # pylint: disable=protected-access
