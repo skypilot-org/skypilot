@@ -140,3 +140,22 @@ tests:
       - matchRegex:
           path: data["api-server-overview.json"]
           pattern: "sky_launch_queue_wait_seconds_bucket"
+      # The attempt-level breakdown. Every launch appears here and only
+      # managed jobs appear in the panels above, so without this a plain
+      # cluster or a pool worker is measured and never shown.
+      - matchRegex:
+          path: data["api-server-overview.json"]
+          pattern: "sky_launch_phase_duration_seconds_bucket"
+      # The denominator. Without it the row shows only the jobs that
+      # started, so a fleet that mostly fails to start looks fast.
+      - matchRegex:
+          path: data["api-server-overview.json"]
+          pattern: "sky_managed_job_starts_total"
+      # Data quality for everything else on the row: either of these
+      # firing means the numbers above understate something.
+      - matchRegex:
+          path: data["api-server-overview.json"]
+          pattern: "sky_launch_phase_dropped_total"
+      - matchRegex:
+          path: data["api-server-overview.json"]
+          pattern: "sky_launch_phase_anomalies_total"
