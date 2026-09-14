@@ -48,6 +48,8 @@ from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
+from sky.workspaces import constants as workspace_constants
+from sky.workspaces import core as workspaces_core
 
 logger = sky_logging.init_logger(__name__)
 
@@ -637,6 +639,58 @@ def _managed_job_cluster_names_from_records(
     return cluster_names
 
 
+# Exactly the keys _managed_job_cluster_names_from_records reads; must stay
+# in sync with it so the fetch does not drag in per-job work (e.g. the
+# original user YAML reads) for fields the scan never consumes.
+_JOB_CLUSTER_FIELDS = ['job_id', 'task_name', 'pool', 'current_cluster_name']
+
+# Exactly the recency keys the recent-jobs scan in _populate_recent_context
+# reads (job_id plus the submitted_at/end_at window check); must stay in sync
+# with it for the same reason.
+_RECENT_JOB_FIELDS = ['job_id', 'submitted_at', 'end_at']
+
+
+def _fetch_managed_job_records(job_ids: Optional[List[int]],
+                               fields: List[str]) -> List[Dict[str, Any]]:
+    """Fetch managed job records for the dump's cross-link scans.
+
+    Both callers are discovery scans over the whole job table (no job_ids to
+    seed -- finding those jobs is the point), so the request is scoped by
+    ``fields`` instead: exactly the keys the caller consumes, which keeps the
+    per-job payload small and skips per-job work the dump does not need (e.g.
+    the original user YAML reads). Controllers that predate ``fields``
+    simply return the wider records.
+
+    In consolidation mode the jobs controller shares this process and its
+    database, so the records are read from the DB directly -- a queue_v2
+    round-trip would still reach the controller (as a local subprocess even
+    in consolidation mode) and walk its full job table. Outside
+    consolidation mode the jobs live on the (possibly remote) controller, so
+    queue_v2 is used; it is the only path that reaches them.
+    """
+    if managed_job_utils.is_consolidation_mode():
+        logger.debug('Reading managed jobs from the local DB (consolidation '
+                     f'mode; skipping the controller round-trip), '
+                     f'fields={fields!r}')
+        result = managed_job_utils.get_managed_job_queue(
+            job_ids=job_ids,
+            # Same workspace visibility queue_v2 applies (see
+            # managed_jobs_core.queue_v2): read-only workspaces' jobs must
+            # still be listed.
+            accessible_workspaces=list(
+                workspaces_core.get_accessible_workspace_names(
+                    action=workspace_constants.WORKSPACE_ACTION_READ)),
+            fields=fields)
+        return result['jobs']
+    logger.debug(f'Fetching managed jobs from the jobs controller, '
+                 f'fields={fields!r}')
+    jobs, _, _, _, _ = managed_jobs_core.queue_v2(refresh=False,
+                                                  job_ids=job_ids,
+                                                  all_users=True,
+                                                  fields=fields)
+    return jobs
+
+
 def _get_managed_jobs_from_clusters(
         debug_dump_context: DebugDumpContext,
         reachability: '_KubeContextReachabilityChecker',
@@ -666,21 +720,24 @@ def _get_managed_jobs_from_clusters(
                                    dead_context))
         return
     try:
-        # Bound the queue_v2 call dump-side (see _MANAGED_JOB_QUEUE_TIMEOUT); on
-        # timeout the helper records it and we skip the expansion, mirroring the
-        # except-and-return degrade below.
-        ok, result = _run_with_deadline(
-            functools.partial(managed_jobs_core.queue_v2,
-                              refresh=False,
-                              all_users=True),
+        # Bound the managed-jobs fetch dump-side (see
+        # _MANAGED_JOB_QUEUE_TIMEOUT); on timeout the helper records it and we
+        # skip the expansion, mirroring the except-and-return degrade below.
+        # The fetch is fields-scoped to what
+        # _managed_job_cluster_names_from_records reads; job_ids cannot be
+        # seeded here because discovering which jobs run on the requested
+        # clusters is the point of this scan.
+        ok, jobs = _run_with_deadline(
+            functools.partial(_fetch_managed_job_records,
+                              job_ids=None,
+                              fields=_JOB_CLUSTER_FIELDS),
             _bounded_timeout(_MANAGED_JOB_QUEUE_TIMEOUT, deadline),
             component='cross_link',
             resource='managed_jobs_from_clusters',
             errors=debug_dump_context['errors'],
             orphans=debug_dump_context['timed_out_ops'])
-        if not ok or result is None:
+        if not ok or jobs is None:
             return
-        jobs, _, _, _, _ = result
         job_cluster_names = _managed_job_cluster_names_from_records(jobs)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get managed jobs for clusters: {e}')
@@ -838,11 +895,12 @@ def _populate_recent_context(
             'traceback': _full_traceback()
         })
 
-    # Get recent managed jobs via queue_v2 (handles remote controllers
-    # via gRPC/SSH, unlike direct DB access which only works in
-    # consolidation mode). Skipped when the controller's kube context is
-    # unreachable -- the exec into the controller would just eat a kubectl
-    # connect timeout.
+    # Get recent managed jobs. In consolidation mode this reads the local DB
+    # (the jobs controller shares this process's database); otherwise
+    # queue_v2 handles remote controllers via gRPC/SSH, unlike direct DB
+    # access which only works in consolidation mode. Skipped when the
+    # controller's kube context is unreachable -- the exec into the
+    # controller would just eat a kubectl connect timeout.
     dead_context = _jobs_controller_unreachable_context(reachability)
     if dead_context is not None:
         logger.debug('Skipping recent managed jobs scan: controller '
@@ -852,20 +910,26 @@ def _populate_recent_context(
                                    dead_context))
     else:
         try:
-            # Bound the queue_v2 call dump-side (see
-            # _MANAGED_JOB_QUEUE_TIMEOUT); on timeout the helper records it and
-            # we skip the recent-jobs scan, mirroring the except degrade below.
-            ok, result = _run_with_deadline(
-                functools.partial(managed_jobs_core.queue_v2,
-                                  refresh=False,
-                                  all_users=True),
+            # Bound the managed-jobs fetch dump-side (see
+            # _MANAGED_JOB_QUEUE_TIMEOUT); on timeout the helper records it
+            # and we skip the recent-jobs scan, mirroring the except degrade
+            # below. The fetch is fields-scoped to the recency keys read
+            # below; job_ids cannot be seeded here because this is a
+            # discovery scan. Server-side submitted_after filtering is
+            # deliberately not used: it would silently drop recently-ended
+            # jobs submitted before the cutoff (exactly the incident-relevant
+            # ones), since the scan includes jobs with submitted_at OR end_at
+            # inside the window.
+            ok, jobs = _run_with_deadline(
+                functools.partial(_fetch_managed_job_records,
+                                  job_ids=None,
+                                  fields=_RECENT_JOB_FIELDS),
                 _bounded_timeout(_MANAGED_JOB_QUEUE_TIMEOUT, deadline),
                 component='recent_context',
                 resource='managed_jobs',
                 errors=debug_dump_context['errors'],
                 orphans=debug_dump_context['timed_out_ops'])
-            if ok and result is not None:
-                jobs, _, _, _, _ = result
+            if ok and jobs is not None:
                 for job in jobs:
                     submitted_at = job.get('submitted_at') or 0
                     end_at = job.get('end_at') or time.time()
