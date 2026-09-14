@@ -54,6 +54,7 @@ logger = sky_logging.init_logger(__name__)
 # the job with FAILED_PRECHECKS instead of entering the retry loop, so a job
 # does not sit there re-attempting something only an operator can resolve.
 PRECHECK_FAILURES = (
+    exceptions.ClusterNameCollisionError,
     exceptions.InvalidClusterNameError,
     exceptions.NoCloudAccessError,
     exceptions.ResourcesMismatchError,

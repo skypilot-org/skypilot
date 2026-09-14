@@ -2411,6 +2411,23 @@ def cluster_with_name_exists(cluster_name: str) -> bool:
 
 
 @metrics_lib.time_me
+def get_cluster_name_reservations() -> List[Dict[str, Any]]:
+    """Return live cluster handles and their persisted provisioning scope."""
+    with orm.Session(_db_manager.get_engine()) as session:
+        rows = session.query(cluster_table.c.name, cluster_table.c.handle,
+                             cluster_table.c.owner,
+                             cluster_yaml_table.c.yaml).outerjoin(
+                                 cluster_yaml_table, cluster_table.c.name ==
+                                 cluster_yaml_table.c.cluster_name).all()
+    return [{
+        'name': row.name,
+        'handle': pickle.loads(row.handle),
+        'owner': json.loads(row.owner) if row.owner is not None else None,
+        'yaml': row.yaml,
+    } for row in rows]
+
+
+@metrics_lib.time_me
 def get_clusters(
     *,  # keyword only separator
     exclude_managed_clusters: bool = False,
