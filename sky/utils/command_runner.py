@@ -1157,12 +1157,14 @@ class SSHCommandRunner(CommandRunner):
                                      port_forward=port_forward,
                                      connect_timeout=connect_timeout)
 
-    def ssh_base_command(self,
-                         *,
-                         ssh_mode: SshMode,
-                         port_forward: Optional[List[Tuple[int, int]]],
-                         connect_timeout: Optional[int],
-                         ssh_log_file: Optional[str] = None) -> List[str]:
+    def ssh_base_command(
+            self,
+            *,
+            ssh_mode: SshMode,
+            port_forward: Optional[List[Tuple[int, int]]],
+            connect_timeout: Optional[int],
+            ssh_log_file: Optional[str] = None,
+            disable_control_master: Optional[bool] = None) -> List[str]:
         ssh = ['ssh']
         if ssh_log_file is not None:
             # -E is needed to capture debug logs from the ControlMaster process
@@ -1201,7 +1203,9 @@ class SSHCommandRunner(CommandRunner):
             docker_ssh_proxy_command=docker_ssh_proxy_command,
             port=self.port,
             connect_timeout=connect_timeout,
-            disable_control_master=self.disable_control_master,
+            disable_control_master=(self.disable_control_master
+                                    if disable_control_master is None else
+                                    disable_control_master),
             ssh_log_file=ssh_log_file,
             disable_identities_only=self.disable_identities_only,
         ) + [f'{self.ssh_user}@{self.ip}']
@@ -1407,11 +1411,43 @@ class SSHCommandRunner(CommandRunner):
         else:
             ssh_log_file = None
 
+        # A `timeout` has to imply no ControlMaster, or it does not bound this
+        # call at all. `ControlMaster=auto` makes the first ssh fork a master
+        # that outlives it (`ControlPersist`) and inherits its stdout/stderr,
+        # as the comment on `-E` in `ssh_base_command` already notes. When the
+        # timeout fires the client is killed and the master keeps those pipes
+        # open, so `log_lib.process_subprocess_stream` blocks reading them
+        # until the remote command ends on its own; `TimeoutExpired` is then
+        # raised after the fact. Measured against a live login node: `sleep
+        # 60` with `timeout=15` raised at 60.1s, `sleep 600` at 600.1s, and
+        # 15.1s with the master disabled.
+        #
+        # This is the same hazard `ssh_options_list` already handles for a
+        # ProxyCommand by sending its stderr to /dev/null. Nothing did the
+        # equivalent for a ControlMaster, and nothing told a caller that
+        # passing `timeout` was not enough.
+        #
+        # An unreachable host was always bounded -- no master is established
+        # there -- which is why this survives a first look.
+        #
+        # KNOWN GAP: a runner with `enable_interactive_auth` loses the
+        # authenticated socket for bounded calls. The retry sets
+        # `ControlPersist=1d`, which needs a master and a path to persist
+        # anything, so a cluster that asks for a password asks again on the
+        # next bounded command. Giving the retry its master back does not
+        # close the gap: the master then holds the pipes for that call too,
+        # and a master is no less of a holder for being reused -- two calls in
+        # a row against an existing one both waited out the full command.
+        # Closing it means separating authentication from execution, so the
+        # auth invocation can keep a socket while the bounded one never
+        # touches one. That is more than this change should carry.
         base_ssh_command = self.ssh_base_command(
             ssh_mode=ssh_mode,
             port_forward=port_forward,
             connect_timeout=connect_timeout,
-            ssh_log_file=ssh_log_file)
+            ssh_log_file=ssh_log_file,
+            disable_control_master=(True if kwargs.get('timeout') is not None
+                                    else None))
 
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
