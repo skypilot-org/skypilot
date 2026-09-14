@@ -17,14 +17,19 @@ import { trackJobAction } from '@/lib/analytics';
 import { applyEnhancements } from '@/plugins/dataEnhancement';
 
 /**
- * Tooltip for a job's status badge: pending reason for PENDING jobs, and
- * the failure details (which carry the failure attribution and exit code,
+ * Tooltip for a job's status badge: pending reason for PENDING jobs, the
+ * failure details (which carry the failure attribution and exit code,
  * e.g. "Job exited with exit code 7 (user program failure). ...") for
- * FAILED* jobs. Same text as the details column, surfaced on hover.
+ * FAILED* jobs, and who requested the cancellation (e.g. "Cancellation
+ * requested by user alice (request ID: ...)") for CANCELLING/CANCELLED
+ * jobs. Same text as the details column, surfaced on hover.
  */
 function getStatusTooltip(job) {
   if (job.status === 'PENDING' || job.status?.startsWith('FAILED')) {
     return job.details || job.failure_reason || null;
+  }
+  if (job.status === 'CANCELLING' || job.status === 'CANCELLED') {
+    return job.details || null;
   }
   return null;
 }
@@ -85,6 +90,11 @@ const DEFAULT_FIELDS = [
   'batch_completed_batches',
   'node_names',
   'priority_class',
+  // Where a job launched from inside another managed job sits in its tree.
+  'root_job_id',
+  'parent_job_id',
+  'parent_task_id',
+  'dynamic_task_index',
 ];
 
 /**
@@ -140,6 +150,7 @@ export async function getManagedJobs(options = {}) {
       userMatch,
       workspaceMatch,
       poolMatch,
+      infraMatch,
       page,
       limit,
       statuses,
@@ -156,6 +167,7 @@ export async function getManagedJobs(options = {}) {
     if (userMatch !== undefined) body.user_match = userMatch;
     if (workspaceMatch !== undefined) body.workspace_match = workspaceMatch;
     if (poolMatch !== undefined) body.pool_match = poolMatch;
+    if (infraMatch !== undefined) body.infra_match = infraMatch;
     if (page !== undefined) body.page = page;
     if (limit !== undefined) body.limit = limit;
     if (statuses !== undefined && statuses.length > 0) body.statuses = statuses;
@@ -184,6 +196,9 @@ export async function getManagedJobs(options = {}) {
     }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     let errorMessage = fetchedData.statusText;
+    // Recorded rather than thrown from inside the parse below: a throw there
+    // lands in that block's own catch and is reported as a parse failure.
+    let infraFilterUnsupported = null;
     if (fetchedData.status === 500) {
       try {
         const data = await fetchedData.json();
@@ -193,6 +208,16 @@ export async function getManagedJobs(options = {}) {
             // Handle specific error types
             if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
               return { jobs: [], total: 0, controllerStopped: true };
+            } else if (
+              error.type === NOT_SUPPORTED_ERROR &&
+              infraMatch !== undefined
+            ) {
+              // Only the infra filter can be refused here, and only by a
+              // controller too old to apply it. Carry that out so the page can
+              // say so, rather than fall back to an unfiltered table -- which
+              // is the one thing this filter must never show.
+              infraFilterUnsupported =
+                error.message || 'Filtering by infra is not supported.';
             } else {
               errorMessage = error.message || String(data.detail.error);
             }
@@ -209,6 +234,11 @@ export async function getManagedJobs(options = {}) {
         errorMessage = String(parseError);
       }
     }
+    if (infraFilterUnsupported) {
+      const unsupported = new Error(infraFilterUnsupported);
+      unsupported.infraFilterUnsupported = true;
+      throw unsupported;
+    }
     // Handle all error status codes (4xx, 5xx, etc.)
     if (!fetchedData.ok) {
       const msg = `API request to get managed jobs result failed with status ${fetchedData.status}, error: ${errorMessage}`;
@@ -223,6 +253,11 @@ export async function getManagedJobs(options = {}) {
       : (parsed?.total ?? managedJobs.length);
     const totalNoFilter = parsed?.total_no_filter || total;
     const statusCounts = parsed?.status_counts || {};
+    // The distinct `--infra` specs across everything the other filters select,
+    // computed server-side because the queue is paginated. Absent from a server
+    // or jobs controller that predates the field, in which case the page falls
+    // back to deriving the options from the rows it has.
+    const infraOptions = parsed?.infra_options || [];
 
     // Process jobs data
     const jobData = managedJobs.map((job) => {
@@ -301,6 +336,8 @@ export async function getManagedJobs(options = {}) {
         resources_str_full: job.cluster_resources_full || cluster_resources,
         cloud: cloud,
         region: job.region,
+        // Zone; for Slurm this is the partition the job was scheduled to.
+        zone: job.zone && job.zone !== '-' ? job.zone : null,
         infra: infra,
         full_infra: full_infra,
         recoveries: job.recovery_count,
@@ -315,6 +352,7 @@ export async function getManagedJobs(options = {}) {
         submitted_at: job.submitted_at
           ? new Date(job.submitted_at * 1000)
           : null,
+        started_at: job.start_at ? new Date(job.start_at * 1000) : null,
         events: events,
         dag_yaml: job.user_yaml,
         entrypoint: job.entrypoint,
@@ -333,6 +371,15 @@ export async function getManagedJobs(options = {}) {
         is_job_group: job.is_job_group,
         execution: job.execution,
         is_primary_in_job_group: job.is_primary_in_job_group,
+        // Job tree fields, null for a top-level job: root_job_id is the
+        // top-level job of the tree, parent_job_id/parent_task_id the job
+        // and task that launched this one.
+        root_job_id: job.root_job_id ?? null,
+        parent_job_id: job.parent_job_id ?? null,
+        parent_task_id: job.parent_task_id ?? null,
+        // A dynamic task's ordinal within its root's tree (declared tasks are
+        // 0..n-1, dynamic tasks number on); `<root>-<index>` names it.
+        dynamic_task_index: job.dynamic_task_index ?? null,
         // Batch progress
         batch_total_batches: job.batch_total_batches,
         batch_completed_batches: job.batch_completed_batches,
@@ -352,6 +399,7 @@ export async function getManagedJobs(options = {}) {
       totalNoFilter,
       controllerStopped: false,
       statusCounts,
+      infraOptions,
     };
   } catch (error) {
     console.error('Error fetching managed job data:', error);
@@ -543,6 +591,11 @@ export async function getPoolStatus() {
     const pools = poolData.map((pool) => ({
       ...pool,
       jobCounts: jobCountsByPool[pool.name] || {},
+      // Normalize the owning user onto the same `user`/`user_hash` shape the
+      // clusters and jobs tables use, so the shared UserDisplay/filtering
+      // helpers work unchanged.
+      user: pool.user_name,
+      user_hash: pool.user_hash,
     }));
 
     return { pools, controllerStopped: false };
@@ -615,6 +668,81 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
   }, [jobId, refreshTrigger]);
 
   return { jobData, loading };
+}
+
+// Fields needed to list the jobs launched under a job on its detail page.
+const JOB_TREE_MEMBER_FIELDS = [
+  'job_id',
+  '_job_id',
+  'job_name',
+  'task_name',
+  'status',
+  'job_duration',
+  'submitted_at',
+  'user_name',
+  'resources',
+  'cloud',
+  'region',
+  'accelerators',
+  'cluster_resources',
+  'cluster_resources_full',
+  'recovery_count',
+  // A launched job can itself be a job group: its status is aggregated
+  // over its primary tasks, like its own detail page does.
+  'is_primary_in_job_group',
+  'root_job_id',
+  'parent_job_id',
+  'parent_task_id',
+  'dynamic_task_index',
+];
+
+/**
+ * Rows of every job launched from inside the job `jobId`, directly or
+ * through another launched job: the jobs whose root_job_id is jobId. Empty
+ * for a job that is not the top-level job of a tree. The queue API has no
+ * filter on root_job_id, so this reads the cached listing with a minimal
+ * field set and filters client-side, like the pool job counts do.
+ */
+export function useJobTreeMembers(jobId, refreshTrigger = 0) {
+  const [members, setMembers] = useState([]);
+  // `loaded` lets a page tell "no members" apart from "not fetched yet".
+  const [loaded, setLoaded] = useState(false);
+  const prevRefreshTriggerRef = useRef(refreshTrigger);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchMembers() {
+      if (!jobId) return;
+      const cacheArgs = [{ allUsers: true, fields: JOB_TREE_MEMBER_FIELDS }];
+      // Same refresh handling as useSingleManagedJob: drop the cached
+      // entry only when the trigger actually increments.
+      if (refreshTrigger > prevRefreshTriggerRef.current) {
+        dashboardCache.invalidate(getManagedJobs, cacheArgs);
+      }
+      prevRefreshTriggerRef.current = refreshTrigger;
+      try {
+        const data = await dashboardCache.get(getManagedJobs, cacheArgs);
+        if (cancelled) return;
+        setMembers(
+          data?.jobs?.filter(
+            (j) =>
+              j.root_job_id != null && String(j.root_job_id) === String(jobId)
+          ) || []
+        );
+      } catch (error) {
+        console.error('Error fetching jobs launched from job:', error);
+        if (!cancelled) setMembers([]);
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    }
+    fetchMembers();
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId, refreshTrigger]);
+
+  return { members, loaded };
 }
 
 export async function streamManagedJobLogs({

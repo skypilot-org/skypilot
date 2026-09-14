@@ -14,11 +14,11 @@ there is to do:
   the bound -- nearly the whole table -- to discover that: 120ms per tick,
   inside a write transaction that blocks other writers for its duration.
 
-A separate revision from 023 so that a database already stamped at 023 still
+A separate revision from 024 so that a database already stamped at 024 still
 gets them.
 
-Revision ID: 024
-Revises: 023
+Revision ID: 025
+Revises: 024
 Create Date: 2026-09-03
 
 """
@@ -32,8 +32,8 @@ from sky.global_user_state import Base
 from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
-revision: str = '024'
-down_revision: Union[str, Sequence[str], None] = '023'
+revision: str = '025'
+down_revision: Union[str, Sequence[str], None] = '024'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -48,7 +48,7 @@ def upgrade():
     bind = op.get_bind()
     inspector = sa.inspect(bind)
     if 'launch_attempts' not in inspector.get_table_names():
-        # 023 owns creating it, so this should not happen -- but inspecting a
+        # 024 owns creating it, so this should not happen -- but inspecting a
         # table that is not there raises, and a raising migration fails the
         # whole upgrade, which takes the server down over a metrics table.
         # Create it instead of either crashing or skipping: skipping would

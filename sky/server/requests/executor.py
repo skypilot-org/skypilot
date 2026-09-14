@@ -712,6 +712,12 @@ def override_request_env_and_config(
             # Remove the db connection uri from client supplied env vars, as
             # the client should not set the db string on server side.
             request_body.env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
+            # Likewise the auth DB deadline: `add_or_update_user` below derives
+            # the server-side timeouts on its own transaction from it, and a
+            # client (in particular an older one that still forwards the
+            # variable) must not be able to loosen or break them.
+            request_body.env_vars.pop(constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS,
+                                      None)
             # Remove the in-cluster context name from client supplied env
             # vars. When a client runs inside a Kubernetes pod (e.g., a
             # managed job with api_server_access), its env has
@@ -866,6 +872,25 @@ def _gated_sigterm_handler(signum: int,
         pass
 
 
+def _maybe_observe_request_pending(request: api_requests.Request) -> None:
+    """Observe creation -> first-execution-start time, once per request.
+
+    Must be called before the caller flips the request to RUNNING. PENDING
+    means the request never started executing before: the retry/pause
+    requeue path is the only writer of WAITING, so a WAITING request here
+    is a re-execution (e.g. retry_until_up), not the first start. pid
+    cannot discriminate this, since the ExecutionRetryableError handler
+    clears it before requeueing. Observing only the first start also means
+    retry backoff after that start can never re-inflate the histogram
+    (see #9988).
+    """
+    if request.status != api_requests.RequestStatus.PENDING:
+        return
+    metrics_utils.observe_request_pending(request.name,
+                                          request.schedule_type.value,
+                                          time.time() - request.created_at)
+
+
 def _request_execution_wrapper(request_id: str,
                                ignore_return_value: bool,
                                num_db_connections_per_worker: int = 0) -> None:
@@ -938,6 +963,7 @@ def _request_execution_wrapper(request_id: str,
                     f'skipping execution')
                 return
             log_path = request_task.log_path
+            _maybe_observe_request_pending(request_task)
             request_task.pid = pid
             request_task.status = api_requests.RequestStatus.RUNNING
             # Clear any leftover retry-backoff message now that we are running.
@@ -1126,6 +1152,7 @@ async def _execute_request_coroutine(request: api_requests.Request):
     logger.info(f'Executing request {request.request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body
+    _maybe_observe_request_pending(request)
     await api_requests.update_status_async(request.request_id,
                                            api_requests.RequestStatus.RUNNING)
     # Redirect stdout and stderr to the request log path.

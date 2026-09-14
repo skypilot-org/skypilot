@@ -476,6 +476,7 @@ def upload_mounts_to_api_server(
                         params={
                             'user_hash': common_utils.get_user_hash(),
                             'blob_id': blob_id,
+                            'size_bytes': os.path.getsize(temp_zip_file.name),
                         })
                     if resp.status_code != 200:
                         raise RuntimeError(f'Failed to check blob existence: '

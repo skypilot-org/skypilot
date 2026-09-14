@@ -9,8 +9,8 @@
   the jobs list renders from one indexed row read rather than a per-job scan
   of launch_attempts.
 
-Revision ID: 025
-Revises: 024
+Revision ID: 027
+Revises: 026
 Create Date: 2026-09-02
 
 """
@@ -23,8 +23,8 @@ import sqlalchemy as sa
 from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
-revision: str = '025'
-down_revision: Union[str, Sequence[str], None] = '024'
+revision: str = '027'
+down_revision: Union[str, Sequence[str], None] = '026'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -423,7 +423,14 @@ class DockerInitializer:
             'exec 200>/var/tmp/sky_apt.lock; '
             'flock -x -w 120 200 || exit 1; '
             'export DEBIAN_FRONTEND=noninteractive; '
-            'apt-get -yq update && '
+            # `apt-get update` fails as a whole when any one configured
+            # repository is unusable -- an expired release file on an
+            # end-of-life suite, say -- even though the packages below all
+            # resolve from the suites that did refresh. Keep going and let
+            # the install be what decides: it fails loudly, and with the
+            # name of the package it could not get.
+            '{ apt-get -yq update || echo "apt-get update failed; '
+            'continuing with the existing package index"; } && '
             # Our mount script will install gcsfuse without fuse package.
             # We need to install fuse package first to enable storage mount.
             # The dpkg option is to suppress the prompt for fuse installation.

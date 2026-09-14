@@ -173,6 +173,13 @@ SKY_APISERVER_REQUESTS_TOTAL = prom.Counter(
     ['path', 'method', 'status'],
 )
 
+SKY_APISERVER_BLOB_CHECK_SIZE_BYTES = prom.Histogram(
+    'sky_apiserver_blob_check_size_bytes',
+    'Client-reported compressed blob bytes per existence check.',
+    ['result'],
+    buckets=[2**exponent for exponent in range(10, 37, 2)],
+)
+
 # Total number of API server requests per user.
 # This is a separate metric to avoid high cardinality in the primary metric.
 SKY_APISERVER_REQUESTS_BY_USER_TOTAL = prom.Counter(
@@ -232,6 +239,34 @@ SKY_APISERVER_EVENT_LOOP_STALL_TOTAL = prom.Counter(
     'sky_apiserver_event_loop_stall_total',
     'Event loop stalls, by the code that was blocking the loop',
     ['source'],
+)
+
+# Requests a middleware answered itself with a canned rejection instead of
+# letting a route handler run: authentication failures, auth-path database
+# deadlines, auth executor exhaustion, RBAC denials. These responses never
+# reach a route handler, so they are only visible to the request counters
+# because the metrics middleware is the outermost one; this counter says
+# *why* they were rejected. Bounded on purpose: `reason` is a closed set (see
+# sky/server/middleware_utils.py), `status` is the HTTP status the middleware
+# answered with and `kind` is `http` or `websocket` (a rejected WebSocket
+# handshake). No path label: the paths of rejected requests are chosen by
+# unauthenticated clients.
+SKY_APISERVER_REQUEST_REJECTIONS_TOTAL = prom.Counter(
+    'sky_apiserver_request_rejections_total',
+    'Requests a middleware rejected with a canned response, by reason',
+    ['reason', 'status', 'kind'],
+)
+
+# WebSocket handshakes refused by a middleware, by the decision that refused
+# them (the close-code set in sky/server/middleware_utils.websocket_aware:
+# unauthorized / forbidden / error). Handshakes are not HTTP requests from
+# the request counter's point of view, so without this counter a storm of
+# refused handshakes is invisible: it only shows up as fewer connections.
+# `path` is restricted to the registered WebSocket routes, else `other`.
+SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL = prom.Counter(
+    'sky_apiserver_websocket_handshake_rejections_total',
+    'WebSocket handshakes refused by a middleware, by decision',
+    ['path', 'outcome'],
 )
 
 SKY_APISERVER_WEBSOCKET_CONNECTIONS = prom.Gauge(
@@ -332,6 +367,54 @@ SKY_APISERVER_THREADS_EXHAUSTED_TOTAL = prom.Counter(
     'sky_apiserver_threads_exhausted_total',
     'Number of tasks rejected because an on-demand thread executor was full',
     ['name'],
+)
+
+# Auth-path work that ended in a timeout instead of a result. This is the
+# earliest signal that authentication is degrading: in a production incident
+# the first one landed 13 minutes before the first client-visible 503, and it
+# was log-only, so nothing could alert on it.
+#
+# `pool` is the executor the work ran on, spelled as
+# `sky_apiserver_threads_exhausted_total{name}` spells it so the two can be
+# read together. It matters because the deadline frees the caller and never
+# the thread (`wait_for` cannot cancel a thread parked on a blocking call),
+# so every `cause="deadline"` costs a slot in THAT pool until the call
+# returns on its own:
+#   `auth_thread_executor` (32) -- short DB lookups. Losing slots here locks
+#       every authenticated request out, so this is the pre-exhaustion signal.
+#   `request_thread_executor` (128) -- role seeding, which reloads config and
+#       runs policy operations. Its blocker is often a policy lock rather
+#       than the database, and it is deliberately on the larger pool for
+#       exactly that reason, so do not read it as auth-pool pressure.
+#
+# `cause` says which timeout ended the call:
+#   `deadline` -- the client-side `asyncio.wait_for` deadline elapsed; the
+#       thread is still held (see above).
+#   anything else -- the database ended the call at one of the server-side
+#       timeouts the auth path sets on its own transaction (`lock_timeout`,
+#       `statement_timeout`, `idle_in_transaction_session_timeout`). The
+#       thread comes back; a `lock_timeout` says another session holds the
+#       row lock.
+#
+# `site` is the name of the function that was called. Bounded, not
+# attacker-influenced: every call site passes a module-level function or a
+# bound method, so the values are fixed at build time. It is not only the
+# eight OSS names, though -- `call_with_deadline` is also called from the
+# enterprise plugin's session and RBAC middlewares and its volume gate, which
+# contribute their own, so a hosted deployment has more. A callable with no
+# `__name__` (a partial) records `unknown` rather than widening the label.
+#
+# Two things are deliberately NOT counted here. Executor exhaustion, which
+# already has `sky_apiserver_threads_exhausted_total`; and whatever response
+# the caller went on to produce. Most callers answer a retryable 503, but the
+# `/api/health` basic-auth path swallows the timeout and proceeds
+# unauthenticated, so it yields no client-visible error at all -- those
+# requests reach no request-level metric, and this counter is the only place
+# they appear.
+SKY_APISERVER_AUTH_TIMEOUTS_TOTAL = prom.Counter(
+    'sky_apiserver_auth_timeouts_total',
+    'Auth-path work that timed out, by call site, cause and executor pool',
+    ['site', 'cause', 'pool'],
 )
 
 # Time a request spends waiting in the task queue (from creation to dequeue).
@@ -579,6 +662,73 @@ def observe_managed_job_time_to_running(workspace: str,
             workspace=workspace).observe(max(0.0, duration_seconds))
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Failed to observe time-to-running metric: {e}')
+
+
+# Time a request spent before its execution first started: from the request
+# row being created (PENDING) to its first transition to RUNNING. Unlike
+# SKY_APISERVER_QUEUE_WAIT_SECONDS (per-enqueue queue residency), this
+# includes scheduling preconditions, which hold a request PENDING. It is
+# observed exactly once, at the first execution start, so retry backoff
+# after that start is excluded and a request looping through the
+# retry-requeue path cannot re-observe its ever-growing age (see #9988).
+# The tail extends past the queue-wait buckets because precondition waits
+# (e.g. exec waiting on cluster start) routinely exceed 600s.
+SKY_APISERVER_REQUEST_PENDING_SECONDS = prom.Histogram(
+    'sky_apiserver_request_pending_seconds',
+    'Time from request creation to its first execution start',
+    ['name', 'schedule_type'],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0,
+             300.0, 600.0, 1800.0, 3600.0, 7200.0, float('inf')),
+)
+
+
+def observe_request_pending(name: str, schedule_type: str,
+                            pending_seconds: float) -> None:
+    """Record time a request spent pending before its first execution.
+
+    Metric emission must never disrupt the execution path, so any failure
+    is logged and swallowed.
+    """
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_APISERVER_REQUEST_PENDING_SECONDS.labels(
+            name=name,
+            schedule_type=schedule_type).observe(max(0.0, pending_seconds))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe request pending metric: {e}')
+
+
+# Wall-clock time of a single provisioning attempt (one cloud/region), from
+# provision start to instances up on the cloud, i.e. the compute acquisition
+# time. Failover across regions/clouds yields one observation per attempt,
+# labeled by outcome. Provisioning routinely takes minutes and can take hours
+# under capacity shortages, so the buckets extend far past _LATENCY_BUCKETS.
+SKY_PROVISION_DURATION_SECONDS = prom.Histogram(
+    'sky_provision_duration_seconds',
+    'Wall-clock time of a single provisioning attempt, from provision start '
+    'to instances running on the cloud',
+    ['cloud', 'result'],
+    buckets=(5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1200.0, 1800.0, 3600.0,
+             7200.0, float('inf')),
+)
+
+
+def observe_provision_duration(cloud: str, result: str,
+                               duration_seconds: float) -> None:
+    """Record the duration of one provisioning attempt.
+
+    Metric emission must never disrupt provisioning, so any failure is
+    logged and swallowed.
+    """
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_PROVISION_DURATION_SECONDS.labels(cloud=cloud,
+                                              result=result).observe(
+                                                  max(0.0, duration_seconds))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe provision duration metric: {e}')
 
 
 # --- Managed Jobs Metrics ---

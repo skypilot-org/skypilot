@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 57  # Slurm inline host path volume mounts
+API_VERSION = 62  # managed jobs: dynamic_task_index queue field
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -42,6 +42,18 @@ MIN_API_ACCESS_API_VERSION = 42
 
 # Minimum API version that supports the SSH redirect first-frame protocol.
 MIN_SSH_REDIRECT_PROTOCOL_VERSION = 47
+
+# Minimum server API version that supports filtering the managed jobs queue by
+# infra (`infra_match`, surfaced as the CLI `--infra` flag and the dashboard's
+# Infra filter). An older server drops the field and answers with jobs on every
+# infra, so the client refuses to ask rather than mislabel that as filtered.
+MIN_JOBS_INFRA_FILTER_API_VERSION = 58
+# Minimum API version for attaching a managed job to a parent job (dynamic
+# job group members): `parent_job_id`/`parent_task_id` on jobs launch.
+MIN_JOBS_PARENT_LINK_API_VERSION = 61
+# Minimum server API version whose managed-jobs queue knows
+# dynamic_task_index (a dynamic task's ordinal within its job group).
+MIN_JOBS_DYNAMIC_TASK_INDEX_API_VERSION = 62
 
 # Minimum API version that supports Sky Batch (sky.batch module).
 MIN_BATCH_API_VERSION = 49

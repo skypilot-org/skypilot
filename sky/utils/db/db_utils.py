@@ -2,6 +2,7 @@
 import asyncio
 import contextlib
 import enum
+import math
 import os
 import pathlib
 import sqlite3
@@ -614,11 +615,154 @@ def _pooler_configured() -> bool:
         os.environ.get(constants.ENV_VAR_DB_POOL_HOSTPORT))
 
 
+# Postgres timeout settings (lock_timeout, statement_timeout,
+# idle_in_transaction_session_timeout) are 32-bit signed milliseconds, so the
+# largest deadline whose derived timeouts the database still accepts is
+# 2147483.647 s; anything above that would make every users upsert fail on
+# the SET LOCAL itself.
+AUTH_DB_TIMEOUT_MAX_SECONDS = 2147483
+
+
+def get_auth_db_timeout_seconds() -> float:
+    """The deadline on the API server's auth-path DB calls, in seconds.
+
+    Read from ``constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS`` (default
+    ``constants.DEFAULT_AUTH_DB_TIMEOUT_SECONDS``). This is the single
+    source for that value: ``sky.server.auth.db_lookup`` uses it as the
+    client-side ``asyncio.wait_for`` deadline on every auth DB lookup, and
+    ``sky.global_user_state.add_or_update_user`` derives the server-side
+    ``SET LOCAL`` timeouts on the users upsert from it, so the database
+    always gives up at or before the caller does. The environment is read
+    on each call (a cheap lookup) so tests can vary it; that read always
+    sees the server's own setting, because the variable is stripped from
+    client request payloads (`payloads.request_body_env_vars`) and again
+    from the per-request environment overlay on the server
+    (`executor.override_request_env_and_config`).
+
+    Raises:
+        ValueError: if the variable is set but is not a positive, finite
+            number of seconds no greater than
+            ``AUTH_DB_TIMEOUT_MAX_SECONDS``. A non-positive deadline would
+            fail every auth call client-side, and as a Postgres timeout
+            ``0`` means *disabled* (and a negative value is rejected), so
+            such a value is refused loudly rather than silently substituted;
+            a larger one would exceed Postgres' millisecond range.
+    """
+    raw = os.environ.get(constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS)
+    if raw is None:
+        return constants.DEFAULT_AUTH_DB_TIMEOUT_SECONDS
+    try:
+        seconds = float(raw)
+    except ValueError:
+        raise ValueError(
+            f'{constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS}={raw!r} is not a '
+            'number of seconds.') from None
+    if not (math.isfinite(seconds) and
+            0 < seconds <= AUTH_DB_TIMEOUT_MAX_SECONDS):
+        raise ValueError(
+            f'{constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS}={raw!r} must be a '
+            'positive, finite number of seconds, at most '
+            f'{AUTH_DB_TIMEOUT_MAX_SECONDS}.')
+    return seconds
+
+
 # Bound on the connect phase of a no_pool engine. Unlike a pooled checkout,
 # connection establishment is part of every operation on a NullPool engine,
 # and a server-side statement_timeout cannot bound it — an unresponsive
 # database would otherwise hang the caller for the OS default.
 _NO_POOL_CONNECT_TIMEOUT_SECONDS = 10
+
+# Server-side bound on how long one of our transactions may sit idle (no
+# statement in flight) before Postgres terminates the session, rolling the
+# transaction back and releasing every lock it held.
+#
+# Why: a client that opens a transaction and then never speaks again (a
+# thread parked forever on a dead socket, a process frozen mid-transaction)
+# leaves its backend `idle in transaction` holding its row locks until
+# something closes the session. Postgres' default for this timeout is 0
+# (never), and a transaction-mode pooler in front of the database never
+# touches a live-but-silent client either. Every later writer of the same
+# row then blocks on the lock; on a hot row (e.g. the per-request `users`
+# upsert) that turns one orphaned transaction into a stalled thread pool.
+#
+# Why 60 s: every transaction in this codebase runs DB statements with only
+# in-process Python between them, so legitimate idle-in-transaction time is
+# milliseconds — low seconds under GIL starvation on a saturated process.
+# Anything idle for a minute is a fault, and cutting it is the desired
+# outcome: the transaction is rolled back atomically and the caller sees an
+# OperationalError on its next statement (most writers retry via
+# db_retries). Only IDLE time counts: a long-running statement (a slow
+# query, a lock wait, a big DDL) never trips it, nor does a transaction
+# that keeps issuing statements. Session-scoped advisory locks (see
+# sky/utils/locks.py) are held on autocommit connections, which are `idle`,
+# not `idle in transaction`, so they are unaffected.
+#
+# Why per transaction (`SET LOCAL`) rather than a connection option: a
+# libpq startup `options=-c ...` is dropped or rejected by transaction-mode
+# poolers (PgBouncer ignores it when `options` is in
+# ignore_startup_parameters and refuses the connection otherwise), and a
+# plain `SET` on connect leaks onto whichever client next borrows that
+# server connection. `SET LOCAL` inside the transaction reaches the server
+# on a direct connection AND through a transaction-mode pooler, and is
+# scoped to that one transaction. Cost: one extra round trip per
+# transaction.
+#
+# Why "lower, never raise": the statement only applies the bound when the
+# value in effect is 0 (unbounded) or looser than ours, so a tighter bound
+# is always kept no matter where it came from or when it ran -- a stricter
+# server/role/database default set by a DBA, a caller's own tighter
+# `SET LOCAL` issued after this one (the usual case: the later `SET LOCAL`
+# wins anyway), and a caller's tighter `SET LOCAL` that ran BEFORE this
+# statement. The last case matters for event hooks: this listener's
+# statement is the first cursor execute of every transaction, so a hook that
+# prepends its own `SET LOCAL ...;` to "the first statement of the
+# transaction" (a `before_cursor_execute` listener with retval=True) attaches
+# them to this statement; a plain `SET LOCAL 60000` would then run last and
+# silently undo the tighter bound. The conditional form makes the ordering
+# irrelevant, so no coordination flag is needed between hooks.
+_IDLE_IN_TRANSACTION_TIMEOUT_MS = 60_000
+# `set_config(name, value, is_local => true)` is `SET LOCAL` in function
+# form. The guard reads the value in effect for this session and transaction
+# with `current_setting()`, a direct GUC lookup (microseconds). It must NOT
+# go through `pg_settings`: that view calls pg_show_all_settings(), which
+# formats every GUC (~360 rows) on each call -- measured 0.8 ms of server CPU
+# per transaction on Postgres 16, ~20x the statement's own cost. The GUC's
+# text form is always `0` or a number with one unit (`30s`, `90500ms`, `1d`),
+# which `::interval` parses, so the comparison is unit-safe.
+_IDLE_IN_TRANSACTION_TIMEOUT_SQL = (
+    'SELECT pg_catalog.set_config('
+    '\'idle_in_transaction_session_timeout\', '
+    f'\'{_IDLE_IN_TRANSACTION_TIMEOUT_MS}\', true) '
+    'WHERE pg_catalog.current_setting('
+    '\'idle_in_transaction_session_timeout\')::interval = interval \'0\' '
+    'OR pg_catalog.current_setting('
+    '\'idle_in_transaction_session_timeout\')::interval '
+    f'> interval \'{_IDLE_IN_TRANSACTION_TIMEOUT_MS} ms\'')
+
+
+def _install_idle_in_transaction_timeout(engine: Any) -> None:
+    """Bound idle_in_transaction_session_timeout on every transaction of a
+    Postgres engine (sync or async) to at most
+    ``_IDLE_IN_TRANSACTION_TIMEOUT_MS``. No-op for other dialects. See the
+    constant's comment for the rationale and the lower-never-raise rule."""
+    target = getattr(engine, 'sync_engine', engine)
+    if target.dialect.name != 'postgresql':
+        return
+
+    @sqlalchemy.event.listens_for(target, 'begin')
+    def _set_idle_in_transaction_timeout(conn):
+        # A transaction-local setting outside a transaction block is a no-op,
+        # and a connection in DBAPI autocommit mode (e.g. isolation_level=
+        # 'AUTOCOMMIT') never has one, so skip it there. Advisory-lock
+        # holders bypass SQLAlchemy Connections entirely
+        # (engine.raw_connection()) and never reach this listener.
+        if getattr(conn.connection.dbapi_connection, 'autocommit', False):
+            return
+        # Runs inside the connection's begin(): SQLAlchemy does not
+        # re-enter begin for statements issued from this event, and the
+        # driver sends its BEGIN before this statement, so the setting lands
+        # inside the transaction it bounds.
+        conn.exec_driver_sql(_IDLE_IN_TRANSACTION_TIMEOUT_SQL).close()
 
 
 @typing.overload
@@ -741,6 +885,8 @@ def get_engine(
                             pool_pre_ping=True,
                             pool_recycle=1800))
                 sql_metrics.install(_postgres_engine_cache[cache_key], role)
+                _install_idle_in_transaction_timeout(
+                    _postgres_engine_cache[cache_key])
             engine = _postgres_engine_cache[cache_key]
     else:
         assert db_name is not None, 'db_name must be provided for SQLite'

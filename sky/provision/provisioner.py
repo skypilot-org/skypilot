@@ -24,6 +24,7 @@ from sky import skypilot_config
 from sky.adaptors import aws
 from sky.backends import backend_utils
 from sky.jobs.server import utils as server_jobs_utils
+from sky.metrics import utils as metrics_utils
 from sky.provision import common as provision_common
 from sky.provision import constants as provision_constants
 from sky.provision import instance_setup
@@ -190,37 +191,51 @@ def bulk_provision(
             redacted_config = bootstrap_config.get_redacted_config()
             logger.debug('Provision config:\n'
                          f'{json.dumps(redacted_config, indent=2)}')
+            # One timestamp for both: the attempt's phases have to add up to
+            # the duration reported beside them, and two time.time() calls
+            # here would make them disagree by however long opening the row
+            # took.
+            provision_start = time.time()
             attempt_id = global_user_state.open_launch_attempt(
                 cluster_name=cluster_name.display_name,
                 cluster_hash=global_user_state.get_cluster_hash(
                     cluster_name.display_name),
                 request_id=request_id,
-                provision_start=time.time(),
+                provision_start=provision_start,
                 cluster_name_on_cloud=cluster_name.name_on_cloud,
                 workspace=_active_workspace())
             try:
                 provision_record = _bulk_provision(cloud, region, cluster_name,
                                                    bootstrap_config)
             except exceptions.ExecutionPausedError:
-                # Deliberately left open. The resources are kept for the
-                # resume, which re-enters here and continues this same
-                # attempt, so the wait being served stays one interval
-                # instead of being split at the pause.
+                # A pause to wait on an external condition is neither a
+                # success nor a failure; the attempt resumes later. The row is
+                # deliberately left open for that resume, which re-enters here
+                # and continues this same attempt, so the wait being measured
+                # stays one interval instead of being split at the pause.
                 raise
             except (KeyboardInterrupt, SystemExit):
-                # Cancellation is not an outcome of the attempt. The row stays
-                # open and the sweep closes it as abandoned, which is honest:
-                # the measurement really was lost.
+                # User cancellation (SIGTERM on the executor surfaces as
+                # KeyboardInterrupt): not an outcome of the attempt, so record
+                # nothing. The row stays open and the sweep closes it as
+                # abandoned, which is honest -- the measurement really was
+                # lost.
                 raise
             except BaseException:
                 global_user_state.close_launch_attempt(
                     attempt_id, global_user_state.LaunchOutcome.FAILED)
+                metrics_utils.observe_provision_duration(
+                    repr(cloud), 'failure',
+                    time.time() - provision_start)
                 raise
             global_user_state.record_launch_milestone(
                 attempt_id, global_user_state.LaunchMilestone.INSTANCES_READY,
                 time.time())
             global_user_state.close_launch_attempt(
                 attempt_id, global_user_state.LaunchOutcome.SUCCEEDED)
+            metrics_utils.observe_provision_duration(
+                repr(cloud), 'success',
+                time.time() - provision_start)
             return provision_record
         except exceptions.NoClusterLaunchedError:
             # Skip the teardown if the cluster was never launched.

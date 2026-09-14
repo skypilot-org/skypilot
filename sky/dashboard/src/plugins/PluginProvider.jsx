@@ -353,9 +353,19 @@ function normalizeRoute(route) {
     ? normalizedPath
     : `/${normalizedPath}`;
 
+  // Optional: the built-in nav link this route belongs under (e.g. '/jobs'),
+  // so the sidebar can highlight it while the route is open. Plugin routes
+  // are all served by one catch-all page, so the router's pathname alone
+  // cannot tell the sidebar which section a plugin page is part of.
+  const navHref =
+    typeof route.navHref === 'string' && route.navHref.startsWith('/')
+      ? route.navHref
+      : undefined;
+
   return {
     id: String(route.id),
     path: pathname,
+    navHref,
     title: typeof route.title === 'string' ? route.title : undefined,
     description:
       typeof route.description === 'string' ? route.description : undefined,

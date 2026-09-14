@@ -6,6 +6,7 @@ import ipaddress
 import logging
 import re
 import shlex
+import subprocess
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from sky.adaptors import common
@@ -26,6 +27,10 @@ _ALL_JOBS_INFO_CMD = (f'squeue -h --states=running,completing '
                       f'-o "%i{SEP}%j{SEP}%u{SEP}%N{SEP}%b"')
 _PARTITIONS_INFO_CMD = 'scontrol show partitions -o'
 _BATCH_OUTPUT_HEADER = 'SKYPILOT_SLURM_BATCH\n'
+_JOB_STEP_ID_REGEX = re.compile(r'(?:^|\s)StepId=(\S+)')
+_JOB_STEP_NAME_REGEX = re.compile(r'(?:^|\s)Name=(\S+)')
+_JOB_STEP_NOT_FOUND_REGEX = re.compile(
+    r'(?:Invalid job id|Job step .* not found)', re.IGNORECASE)
 
 # Wall-clock bound for the batched inventory invocations (SSH connect
 # included). The inventory endpoints fan out over every configured cluster,
@@ -91,6 +96,12 @@ class JobGresInfo(NamedTuple):
     # The job's per-node GRES request (squeue %b, TRES_PER_NODE), e.g.
     # 'gres/gpu:h100:4'.
     gres_str: str
+
+
+class JobStepInfo(NamedTuple):
+    """A Slurm job step returned by scontrol."""
+    step_id: str
+    name: str
 
 
 class SlurmInventorySnapshot(NamedTuple):
@@ -291,6 +302,25 @@ class SlurmClient:
                 disable_identities_only=not identities_only,
                 slurm_user=slurm_user,
             )
+
+    def validate_submit_user(self, cluster_name: str, submit_user: str) -> None:
+        """Check the Unix account through the submit runner."""
+        target = shlex.quote(submit_user)
+        command = (f'id -u -- {target} >/dev/null && '
+                   f'test "$(id -u)" = "$(id -u -- {target})"')
+        error = (f'Cannot submit to Slurm cluster {cluster_name!r} as Unix '
+                 f'user {submit_user!r} through SSH user {self.ssh_user!r}. ')
+        try:
+            rc, stdout, stderr = self._run_slurm_cmd(command, timeout=15)
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(error + 'Account validation timed out after '
+                               '15 seconds.') from e
+        if rc != 0:
+            raise RuntimeError(
+                error + f'Account validation exited with code {rc}. '
+                'Check that the account exists and the SSH user can run '
+                'the submission shell as that account. '
+                f'{stdout}\n{stderr}')
 
     def _run_slurm_cmd(self,
                        cmd: str,
@@ -519,6 +549,65 @@ class SlurmClient:
                                            stderr=f'{stdout}\n{stderr}',
                                            stream_logs=False)
         logger.debug(f'Successfully cancelled job {job_name}: {stdout}')
+
+    def list_job_steps(self, job_id: str) -> List[JobStepInfo]:
+        """Lists the active steps in a Slurm job allocation."""
+        cmd = f'scontrol -o show step {shlex.quote(job_id)}'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        error_output = f'{stdout}\n{stderr}'
+        if rc != 0 and _JOB_STEP_NOT_FOUND_REGEX.search(error_output):
+            subprocess_utils.handle_returncode(
+                rc,
+                cmd,
+                f'Slurm allocation {job_id} disappeared during stop.',
+                stderr=error_output,
+                stream_logs=False)
+        subprocess_utils.handle_returncode(
+            rc,
+            cmd,
+            f'Failed to query steps for Slurm job {job_id}.',
+            stderr=error_output,
+            stream_logs=False)
+        steps = []
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            step_id_match = _JOB_STEP_ID_REGEX.search(line)
+            name_match = _JOB_STEP_NAME_REGEX.search(line)
+            if step_id_match is None or name_match is None:
+                raise RuntimeError(
+                    f'Unexpected Slurm job step output: {line!r}.')
+            steps.append(
+                JobStepInfo(step_id=step_id_match.group(1),
+                            name=name_match.group(1)))
+        if not steps:
+            raise RuntimeError('Unexpected empty Slurm job step output for '
+                               f'allocation {job_id}.')
+        return steps
+
+    def signal_job_step(self, job_id: str, step_id: str, signal: str) -> None:
+        """Signals one step, tolerating its concurrent completion."""
+        if not step_id.startswith(f'{job_id}.'):
+            raise ValueError(f'Slurm step {step_id!r} does not belong to job '
+                             f'{job_id!r}.')
+        cmd = (f'scancel --signal {shlex.quote(signal)} '
+               f'{shlex.quote(step_id)}')
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        if rc != 0:
+            active_step_ids = {
+                step.step_id for step in self.list_job_steps(job_id)
+            }
+            if step_id not in active_step_ids:
+                logger.debug(f'Slurm step {step_id} exited before it could be '
+                             f'signalled.')
+                return
+        subprocess_utils.handle_returncode(
+            rc,
+            cmd,
+            f'Failed to signal Slurm job step {step_id}.',
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
 
     def info(self) -> str:
         """Get Slurm cluster information.
@@ -1107,18 +1196,6 @@ class SlurmClient:
     def get_remote_home_dir(self) -> str:
         """Returns the remote user's home directory."""
         return self._runner.get_remote_home_dir()
-
-    def check_file_exists(self, path: str) -> bool:
-        """Check if a file exists on the remote host."""
-        cmd = f'test -f {shlex.quote(path)}'
-        rc, stdout, stderr = self._run_slurm_cmd(cmd)
-        if rc not in (0, 1):
-            subprocess_utils.handle_returncode(
-                rc,
-                cmd,
-                f'Failed to check for file: {path}',
-                stderr=f'{stdout}\n{stderr}')
-        return rc == 0
 
     def check_fuse_enabled(self) -> bool:
         """Check if FUSE is available on the cluster.

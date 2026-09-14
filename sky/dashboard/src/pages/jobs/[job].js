@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/select';
 import {
   useSingleManagedJob,
+  useJobTreeMembers,
   getPoolStatus,
   computeJobGroupStatus,
 } from '@/data/connectors/jobs';
@@ -51,6 +52,7 @@ import {
 } from '@/data/connectors/jobs';
 import { JobStartupTimeline } from '@/components/jobs.startuptimeline';
 import { StatusBadge } from '@/components/elements/StatusBadge';
+import { DynamicBadge } from '@/components/elements/DynamicBadge';
 import { PrimaryBadge } from '@/components/elements/PrimaryBadge';
 import { BatchBadge } from '@/components/elements/BatchBadge';
 import { useMobile } from '@/hooks/useMobile';
@@ -75,11 +77,65 @@ import { hasAccelerator } from '@/utils/gpuUtils';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import PropTypes from 'prop-types';
 
-function JobDetails() {
+function JobDetails({ overrideJobId = null, taskContext = null } = {}) {
+  // `taskContext` is set when this page renders a dynamic task under its
+  // group's URL (/jobs/<root>/<index>, see [task].js): the job shown is
+  // `overrideJobId`, and the header reads as task <index> of the root.
   const router = useRouter();
-  const { job: jobId, tab } = router.query;
+  const { job: routeJobId, tab } = router.query;
+  const jobId = overrideJobId ?? routeJobId;
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { jobData, loading } = useSingleManagedJob(jobId, refreshTrigger);
+  // A dynamic task is addressed as task <index> of its group: /jobs/67 for
+  // task 2 of group 66 becomes /jobs/66/2 (the URL matches the `66-2` the
+  // CLI takes). The page content is the same job's.
+  useEffect(() => {
+    if (taskContext || overrideJobId) return;
+    const row = jobData?.jobs?.find((j) => String(j.id) === String(jobId));
+    if (row && row.root_job_id != null && row.dynamic_task_index != null) {
+      router.replace(
+        `/jobs/${row.root_job_id}/${row.dynamic_task_index}${tab ? `?tab=${tab}` : ''}`
+      );
+    }
+  }, [jobData, jobId, taskContext, overrideJobId, router, tab]);
+  // Jobs launched from inside this job (dynamic job group members), one
+  // entry per job with its rows, in submission order.
+  const { members: treeMemberRows } = useJobTreeMembers(jobId, refreshTrigger);
+  const launchedJobs = useMemo(() => {
+    const byJob = new Map();
+    treeMemberRows.forEach((row) => {
+      if (!byJob.has(row.id)) {
+        byJob.set(row.id, []);
+      }
+      byJob.get(row.id).push(row);
+    });
+    const jobs = Array.from(byJob.entries()).map(([id, rows]) => ({
+      id,
+      rows,
+      name: rows[0].name,
+      user: rows[0].user,
+      parent_job_id: rows[0].parent_job_id,
+      parent_task_id: rows[0].parent_task_id,
+      dynamic_task_index: rows[0].dynamic_task_index,
+      status: rows.length > 1 ? computeJobGroupStatus(rows) : rows[0].status,
+      job_duration: rows.reduce((sum, r) => sum + (r.job_duration || 0), 0),
+      infra: rows[0].infra,
+      full_infra: rows[0].full_infra,
+      cloud: rows[0].cloud,
+      requested_resources: rows[0].requested_resources,
+      resources_str: rows[0].resources_str,
+      resources_str_full: rows[0].resources_str_full,
+      recoveries: rows.reduce((sum, r) => sum + (r.recoveries || 0), 0),
+    }));
+    // In the order the jobs table shows them: by dynamic task index, else
+    // by job id (launch order).
+    const orderKey = (j) =>
+      j.dynamic_task_index != null
+        ? Number(j.dynamic_task_index)
+        : Number(j.id);
+    jobs.sort((a, b) => orderKey(a) - orderKey(b));
+    return jobs;
+  }, [treeMemberRows]);
   const [poolsData, setPoolsData] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -91,6 +147,10 @@ function JobDetails() {
   const [refreshLogsFlag, setRefreshLogsFlag] = useState(0);
   const [refreshControllerLogsFlag, setRefreshControllerLogsFlag] = useState(0);
   const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
+  // The Logs selector also offers the dynamic tasks; their logs live on
+  // their own managed job, so a selected one streams that job instead of a
+  // task index of this one.
+  const [selectedDynamicJob, setSelectedDynamicJob] = useState(null);
   const [selectedNode, setSelectedNode] = useState('all');
   const [logNodes, setLogNodes] = useState([]);
   // If a plugin owns the logs slot, the OSS "(Logs are not streaming;
@@ -320,9 +380,21 @@ function JobDetails() {
       }
     : null;
 
-  const title = jobId
-    ? `Job: ${jobId} | SkyPilot Dashboard`
-    : 'Job Details | SkyPilot Dashboard';
+  // What the Logs card streams: a dynamic task streams its own managed job
+  // (all of its tasks); otherwise the selected task of this job.
+  const logsJobData = selectedDynamicJob
+    ? selectedDynamicJob.rows[0]
+    : isMultiTask
+      ? allTasks[selectedTaskIndex]
+      : detailJobData;
+  const logsTaskIndex =
+    !selectedDynamicJob && isMultiTask ? selectedTaskIndex : null;
+
+  const title = taskContext
+    ? `Job ${taskContext.rootId} › Task ${taskContext.index} | SkyPilot Dashboard`
+    : jobId
+      ? `Job: ${jobId} | SkyPilot Dashboard`
+      : 'Job Details | SkyPilot Dashboard';
 
   return (
     <>
@@ -336,20 +408,48 @@ function JobDetails() {
               Managed Jobs
             </Link>
             <span className="mx-2 text-gray-500">›</span>
-            <Link
-              href={`/jobs/${jobId}`}
-              className="text-sky-blue hover:underline"
-            >
-              {jobId} {detailJobData?.name ? `(${detailJobData.name})` : ''}
-            </Link>
-            {(detailJobData?.is_batch === true ||
-              detailJobData?.batch_total_batches != null) && (
-              <BatchBadge className="ml-2" />
-            )}
-            {isMultiTask && (
-              <span className="ml-2 text-xs text-gray-500 bg-gray-200 px-1.5 py-0.5 rounded">
-                {allTasks.length} tasks
-              </span>
+            {taskContext ? (
+              <>
+                <Link
+                  href={`/jobs/${taskContext.rootId}`}
+                  className="text-sky-blue hover:underline"
+                >
+                  {taskContext.rootId}
+                  {taskContext.rootName ? ` (${taskContext.rootName})` : ''}
+                </Link>
+                <span className="mx-2 text-gray-500">›</span>
+                <span className="text-gray-700">
+                  Task {taskContext.index}
+                  {detailJobData?.name && (
+                    <span className="text-gray-500">
+                      {' '}
+                      ({detailJobData.name})
+                    </span>
+                  )}
+                </span>
+              </>
+            ) : (
+              <>
+                <Link
+                  href={`/jobs/${jobId}`}
+                  className="text-sky-blue hover:underline"
+                >
+                  {jobId} {detailJobData?.name ? `(${detailJobData.name})` : ''}
+                </Link>
+                {(detailJobData?.is_batch === true ||
+                  detailJobData?.batch_total_batches != null) && (
+                  <BatchBadge className="ml-2" />
+                )}
+                {(isMultiTask || launchedJobs.length > 0) && (
+                  // Same count as the jobs table's badge: declared tasks plus
+                  // the dynamic tasks launched from inside the group.
+                  <span className="ml-2 text-xs text-gray-500 bg-gray-200 px-1.5 py-0.5 rounded">
+                    {allTasks.length + launchedJobs.length} tasks
+                    {launchedJobs.length > 0 &&
+                      ` (${launchedJobs.length} dynamic)`}
+                  </span>
+                )}
+              </>
             )}
           </div>
 
@@ -391,6 +491,7 @@ function JobDetails() {
                 </div>
                 <div className="p-4">
                   <JobDetailsContent
+                    taskContext={taskContext}
                     jobData={enhancedJobData}
                     allTasks={allTasks}
                     activeTab="info"
@@ -408,15 +509,20 @@ function JobDetails() {
               </Card>
             </div>
 
-            {/* Tasks Section - only show for multi-task jobs */}
-            {isMultiTask && (
+            {/* Tasks: the job's declared tasks, then the dynamic tasks launched
+                 from inside it (each a managed job of its own), numbered on
+                 from the declared tasks exactly as the jobs table shows them. */}
+            {(isMultiTask || launchedJobs.length > 0) && (
               <div id="tasks-section" className="mt-6">
                 <Card>
                   <div className="flex items-center justify-between px-4 pt-4">
                     <h3 className="text-lg font-semibold flex items-center">
                       Tasks
                       <span className="ml-2 text-sm font-normal text-gray-500">
-                        ({allTasks.length} tasks)
+                        ({allTasks.length + launchedJobs.length} tasks
+                        {launchedJobs.length > 0 &&
+                          `, ${launchedJobs.length} dynamic`}
+                        )
                       </span>
                     </h3>
                   </div>
@@ -491,7 +597,7 @@ function JobDetails() {
                               <TableCell>
                                 {formatDuration(task.job_duration)}
                               </TableCell>
-                              <TableCell>
+                              <TableCell className="whitespace-nowrap">
                                 {task.infra && task.infra !== '-' ? (
                                   <NonCapitalizedTooltip
                                     content={task.full_infra || task.infra}
@@ -553,6 +659,122 @@ function JobDetails() {
                               </TableCell>
                             </TableRow>
                           ))}
+                          {launchedJobs.map((job) => (
+                            <TableRow
+                              key={`dynamic-${job.id}`}
+                              className="hover:bg-gray-50"
+                            >
+                              <TableCell>
+                                <Link
+                                  href={
+                                    job.dynamic_task_index != null
+                                      ? `/jobs/${jobId}/${job.dynamic_task_index}`
+                                      : `/jobs/${job.id}`
+                                  }
+                                  className="text-blue-600 hover:underline"
+                                  title={
+                                    job.dynamic_task_index != null
+                                      ? `sky jobs cancel ${jobId} --task ${job.dynamic_task_index}`
+                                      : `Dynamic task, job ${job.id}`
+                                  }
+                                >
+                                  {job.dynamic_task_index ?? '↳'}
+                                </Link>
+                              </TableCell>
+                              <TableCell>
+                                <Link
+                                  href={
+                                    job.dynamic_task_index != null
+                                      ? `/jobs/${jobId}/${job.dynamic_task_index}`
+                                      : `/jobs/${job.id}`
+                                  }
+                                  className="text-blue-600 hover:underline"
+                                >
+                                  {job.name || `Job ${job.id}`}
+                                </Link>
+                                <span className="ml-1.5">
+                                  <DynamicBadge
+                                    launchedFrom={
+                                      job.parent_task_id != null
+                                        ? `task ${job.parent_task_id} of job ${job.parent_job_id}`
+                                        : null
+                                    }
+                                  />
+                                </span>
+                                {job.rows.length > 1 && (
+                                  <span className="ml-1.5 text-xs text-gray-500">
+                                    {job.rows.length} tasks
+                                  </span>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <StatusBadge status={job.status} />
+                              </TableCell>
+                              <TableCell>
+                                {formatDuration(job.job_duration)}
+                              </TableCell>
+                              <TableCell className="whitespace-nowrap">
+                                {job.infra && job.infra !== '-' ? (
+                                  <NonCapitalizedTooltip
+                                    content={job.full_infra || job.infra}
+                                    className="text-sm text-muted-foreground"
+                                  >
+                                    <span>
+                                      {job.cloud ||
+                                        job.infra.split('(')[0].trim()}
+                                      {job.infra.includes('(') && (
+                                        <span className="text-gray-500">
+                                          {' ' +
+                                            job.infra.substring(
+                                              job.infra.indexOf('(')
+                                            )}
+                                        </span>
+                                      )}
+                                    </span>
+                                  </NonCapitalizedTooltip>
+                                ) : (
+                                  <span>-</span>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <NonCapitalizedTooltip
+                                  content={
+                                    job.requested_resources ||
+                                    job.resources_str_full ||
+                                    job.resources_str ||
+                                    '-'
+                                  }
+                                  className="text-sm text-muted-foreground"
+                                >
+                                  <span>
+                                    {job.requested_resources ||
+                                      job.resources_str ||
+                                      '-'}
+                                  </span>
+                                </NonCapitalizedTooltip>
+                              </TableCell>
+                              <TableCell>{job.recoveries || 0}</TableCell>
+                              <TableCell>
+                                <Tooltip
+                                  content="Download job logs"
+                                  className="text-muted-foreground"
+                                >
+                                  <button
+                                    onClick={() =>
+                                      downloadManagedJobLogs({
+                                        jobId: parseInt(job.id),
+                                        controller: false,
+                                        jobStatus: job.status,
+                                      })
+                                    }
+                                    className="text-sky-blue hover:text-sky-blue-bright"
+                                  >
+                                    <Download className="w-4 h-4" />
+                                  </button>
+                                </Tooltip>
+                              </TableCell>
+                            </TableRow>
+                          ))}
                         </TableBody>
                       </Table>
                     </div>
@@ -569,12 +791,25 @@ function JobDetails() {
                 <div className="flex items-center justify-between px-4 pt-4">
                   <div className="flex items-center gap-4">
                     <h3 className="text-lg font-semibold">Logs</h3>
-                    {isMultiTask && (
+                    {(isMultiTask || launchedJobs.length > 0) && (
                       <Select
-                        onValueChange={(value) =>
-                          setSelectedTaskIndex(parseInt(value, 10))
+                        onValueChange={(value) => {
+                          if (value.startsWith('dyn:')) {
+                            const id = value.slice(4);
+                            setSelectedDynamicJob(
+                              launchedJobs.find((j) => String(j.id) === id) ||
+                                null
+                            );
+                          } else {
+                            setSelectedDynamicJob(null);
+                            setSelectedTaskIndex(parseInt(value, 10));
+                          }
+                        }}
+                        value={
+                          selectedDynamicJob
+                            ? `dyn:${selectedDynamicJob.id}`
+                            : String(selectedTaskIndex)
                         }
-                        value={String(selectedTaskIndex)}
                       >
                         <SelectTrigger
                           aria-label="Task"
@@ -590,6 +825,15 @@ function JobDetails() {
                             >
                               Task {index}
                               {task.task ? `: ${task.task}` : ''}
+                            </SelectItem>
+                          ))}
+                          {launchedJobs.map((job) => (
+                            <SelectItem
+                              key={`dyn-${job.id}`}
+                              value={`dyn:${job.id}`}
+                            >
+                              Task {job.dynamic_task_index ?? '↳'}
+                              {job.name ? `: ${job.name}` : ''} (dynamic)
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -622,11 +866,8 @@ function JobDetails() {
                     <PluginSlot
                       name="jobs.detail.logfilters"
                       context={{
-                        jobId: (isMultiTask
-                          ? allTasks[selectedTaskIndex]
-                          : detailJobData
-                        )?.id,
-                        taskId: isMultiTask ? selectedTaskIndex : null,
+                        jobId: logsJobData?.id,
+                        taskId: logsTaskIndex,
                         isController: false,
                         refreshTrigger: refreshLogsFlag,
                       }}
@@ -691,9 +932,8 @@ function JobDetails() {
                 </div>
                 <div className="p-4">
                   <JobDetailsContent
-                    jobData={
-                      isMultiTask ? allTasks[selectedTaskIndex] : detailJobData
-                    }
+                    taskContext={taskContext}
+                    jobData={logsJobData}
                     allTasks={allTasks}
                     activeTab="logs"
                     setIsLoadingLogs={setIsLoadingLogs}
@@ -702,7 +942,7 @@ function JobDetails() {
                     isLoadingControllerLogs={isLoadingControllerLogs}
                     refreshFlag={refreshLogsFlag}
                     poolsData={poolsData}
-                    selectedTaskIndex={isMultiTask ? selectedTaskIndex : null}
+                    selectedTaskIndex={logsTaskIndex}
                     selectedNode={selectedNode}
                     onNodesExtracted={setLogNodes}
                     onLinksExtracted={setLogExtractedLinks}
@@ -966,6 +1206,7 @@ function ControllerLogsSection({
   );
 }
 function JobDetailsContent({
+  taskContext,
   jobData,
   allTasks = [],
   activeTab,
@@ -1369,11 +1610,29 @@ function JobDetailsContent({
         <JobStartupTimeline jobData={jobData} />
       </div>
       <div>
-        <div className="text-gray-600 font-medium text-base">Job ID (Name)</div>
+        <div className="text-gray-600 font-medium text-base">
+          {taskContext ? 'Task' : 'Job ID (Name)'}
+        </div>
         <div className="text-base mt-1 flex items-center gap-2">
-          <span>
-            {jobData.id} {jobData.name ? `(${jobData.name})` : ''}
-          </span>
+          {taskContext ? (
+            // Same shape as a declared task's page; the handle
+            // `<root>-<index>` is what `sky jobs cancel` / `logs` take.
+            <span
+              title={`sky jobs cancel ${taskContext.rootId} --task ${taskContext.index}`}
+            >
+              {taskContext.index}
+              {jobData.name && (
+                <span className="text-gray-500"> ({jobData.name})</span>
+              )}
+            </span>
+          ) : (
+            <span>
+              {jobData.id} {jobData.name ? `(${jobData.name})` : ''}
+            </span>
+          )}
+          {taskContext && (
+            <DynamicBadge launchedFrom={taskContext.launchedFrom} />
+          )}
           {/* Badge for batch job */}
           {(jobData.is_batch === true ||
             jobData.batch_total_batches != null) && <BatchBadge />}
@@ -1384,7 +1643,32 @@ function JobDetailsContent({
             </span>
           )}
         </div>
+        {taskContext && taskContext.parentTask && (
+          <div className="text-sm text-gray-500 mt-1">
+            Launched by Task:{' '}
+            <Link
+              href={taskContext.parentTask.href}
+              className="text-sky-blue hover:text-sky-blue-bright hover:underline"
+            >
+              {taskContext.parentTask.label}
+            </Link>
+          </div>
+        )}
       </div>
+      {taskContext && (
+        <div>
+          <div className="text-gray-600 font-medium text-base">Job</div>
+          <div className="text-base mt-1">
+            <Link
+              href={`/jobs/${taskContext.rootId}`}
+              className="text-sky-blue hover:text-sky-blue-bright hover:underline"
+            >
+              {taskContext.rootId}
+              {taskContext.rootName ? ` (${taskContext.rootName})` : ''}
+            </Link>
+          </div>
+        </div>
+      )}
       <div>
         <div className="text-gray-600 font-medium text-base">Status</div>
         <div className="text-base mt-1">
@@ -1462,9 +1746,28 @@ function JobDetailsContent({
         </div>
       </div>
       <div>
+        <div className="text-gray-600 font-medium text-base">Started</div>
+        <div className="text-base mt-1">
+          {jobData.started_at ? formatFullTimestamp(jobData.started_at) : '-'}
+        </div>
+      </div>
+      <div>
         <div className="text-gray-600 font-medium text-base">Duration</div>
         <div className="text-base mt-1">
-          {formatDuration(jobData.job_duration)}
+          {(() => {
+            if (allTasks.length <= 1) {
+              return formatDuration(jobData.job_duration);
+            }
+            // For a job group, sum the durations of all tasks instead of
+            // showing only the first task's duration, matching the CLI's
+            // aggregated row. A task that has not started yet contributes
+            // 0; one that has started keeps accruing.
+            const totalDuration = allTasks.reduce(
+              (sum, t) => sum + (t.job_duration || 0),
+              0
+            );
+            return formatDuration(totalDuration);
+          })()}
         </div>
       </div>
       <div>
@@ -1527,6 +1830,41 @@ function JobDetailsContent({
           )}
         </div>
       </div>
+      {/* Slurm schedules onto a partition (its zone); it is how quota and
+          priority are carved up on a Slurm cluster, so it gets its own row.
+          Multi-task jobs list every task's partition, like Requested
+          Resources above. */}
+      {(() => {
+        const slurmTasks = allTasks.filter(
+          (t) => t.cloud && t.cloud.toLowerCase() === 'slurm' && t.zone
+        );
+        if (slurmTasks.length === 0) return null;
+        const partitions = [...new Set(slurmTasks.map((t) => t.zone))];
+        return (
+          <div>
+            <div className="text-gray-600 font-medium text-base">Partition</div>
+            <div className="text-base mt-1">
+              {allTasks.length > 1 ? (
+                <NonCapitalizedTooltip
+                  content={slurmTasks
+                    .map(
+                      (task) =>
+                        `Task ${allTasks.indexOf(task)}${task.task ? ` (${task.task})` : ''}: ${task.zone}`
+                    )
+                    .join('\n')}
+                  className="text-sm text-muted-foreground"
+                >
+                  <span className="cursor-help border-b border-dotted border-gray-400">
+                    {partitions.join(', ')}
+                  </span>
+                </NonCapitalizedTooltip>
+              ) : (
+                partitions[0]
+              )}
+            </div>
+          </div>
+        );
+      })()}
       <div>
         <div className="text-gray-600 font-medium text-base">Resources</div>
         <div className="text-base mt-1">

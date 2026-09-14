@@ -9,8 +9,8 @@ ordering from the index rather than a temp b-tree: 18ms against nothing
 measurable over 200k rows, and it grows with the job history rather than with
 the work there is to do.
 
-Revision ID: 026
-Revises: 025
+Revision ID: 028
+Revises: 027
 Create Date: 2026-09-03
 
 """
@@ -21,8 +21,8 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision: str = '026'
-down_revision: Union[str, Sequence[str], None] = '025'
+revision: str = '028'
+down_revision: Union[str, Sequence[str], None] = '027'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

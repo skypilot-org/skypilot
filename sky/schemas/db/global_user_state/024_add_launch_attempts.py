@@ -1,7 +1,7 @@
 """Add launch_attempts table for launch latency breakdown.
 
-Revision ID: 023
-Revises: 022
+Revision ID: 024
+Revises: 023
 Create Date: 2026-09-02
 
 """
@@ -14,8 +14,8 @@ from sky.global_user_state import Base
 from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
-revision: str = '023'
-down_revision: Union[str, Sequence[str], None] = '022'
+revision: str = '024'
+down_revision: Union[str, Sequence[str], None] = '023'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
