@@ -30,12 +30,13 @@ Three notes on matching what the platform sees:
   and it is where a network filesystem turns up, on which walking many
   small files takes minutes rather than milliseconds.
 """
+import contextlib
 import dataclasses
 import errno
 import os
 import threading
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Generator, List, Optional
 
 from sky import sky_logging
 from sky.server import constants as server_constants
@@ -69,14 +70,9 @@ BUDGET_SOURCE_REQUEST = 'request'
 DEFAULT_SCAN_TIMEOUT_SECONDS = 20.0
 DEFAULT_SCAN_MAX_ENTRIES = 2_000_000
 
-# How long available_bytes() reuses one walk of the roots.
-DEFAULT_USED_BYTES_TTL_SECONDS = 10.0
-
-_used_bytes_lock = threading.Lock()
-_used_bytes_cache: Optional[Tuple[float, int, bool]] = None
-# Bytes callers have admitted but that no walk has counted yet. Cleared by
-# the next walk, which sees them on disk.
-_admitted_bytes = 0
+_reserved_lock = threading.Lock()
+# Bytes callers are in the middle of writing, which no walk can see yet.
+_reserved_bytes = 0
 
 # Bytes per st_blocks unit, fixed by POSIX regardless of the filesystem's
 # own block size.
@@ -278,63 +274,45 @@ def budget() -> Optional[Budget]:
     return None
 
 
-def available_bytes(
-        max_age_seconds: float = DEFAULT_USED_BYTES_TTL_SECONDS
-) -> Optional[int]:
+def available_bytes() -> Optional[int]:
     """Bytes still writable before this container reaches its budget.
 
     Measures against the declared allowance -- the limit if there is one,
     otherwise the request -- so a caller can refuse work that would not
-    fit. Returns None when neither field is exposed, which means the
-    caller has no budget to check against.
-
-    The walk behind the used-bytes term is cached for *max_age_seconds*.
-    Its cost scales with the number of files on disk and not with the
-    caller's payload, so walking per call would dominate a small one.
+    fit. Returns None when there is no allowance to check against, and
+    when the walk behind the used-bytes term was partial: subtracting a
+    partial total would overstate what is left.
     """
     declared = budget()
     if declared is None:
         return None
-    used, truncated = _used_bytes(max_age_seconds)
-    if truncated:
-        # A partial walk under-reports usage, which would overstate what is
-        # left. Report no budget bound rather than a generous one.
+    snapshot = scan()
+    if snapshot.truncated:
         return None
+    with _reserved_lock:
+        used = snapshot.used_bytes + _reserved_bytes
     return max(declared.total_bytes - used, 0)
 
 
-def debit(num_bytes: int) -> None:
-    """Counts *num_bytes* as used until the next walk of the roots.
+@contextlib.contextmanager
+def reserve(num_bytes: int) -> Generator[None, None, None]:
+    """Counts *num_bytes* as used while the caller writes them.
 
-    Lets concurrent callers see work each other has admitted but not yet
-    written. Without it they measure against the same free space and
-    overcommit together, and a caller arriving just after a completed
-    write measures against a total that predates it.
+    A walk cannot see bytes that have not been written yet, so without
+    this two callers admitted at the same time measure against the same
+    free space and overcommit together.
     """
-    global _admitted_bytes
+    global _reserved_bytes
     if num_bytes <= 0:
+        yield
         return
-    with _used_bytes_lock:
-        _admitted_bytes += num_bytes
-
-
-def _used_bytes(max_age_seconds: float) -> Tuple[int, bool]:
-    """Returns (used bytes, whether the walk behind it was partial).
-
-    The lock spans the walk so a burst of callers arriving on a cold
-    cache produces one walk rather than one each.
-    """
-    global _used_bytes_cache, _admitted_bytes
-    with _used_bytes_lock:
-        cached = _used_bytes_cache
-        if (cached is not None and
-                time.monotonic() - cached[0] <= max_age_seconds):
-            return cached[1] + _admitted_bytes, cached[2]
-        snapshot = scan()
-        _used_bytes_cache = (time.monotonic(), snapshot.used_bytes,
-                             snapshot.truncated)
-        _admitted_bytes = 0
-        return snapshot.used_bytes, snapshot.truncated
+    with _reserved_lock:
+        _reserved_bytes += num_bytes
+    try:
+        yield
+    finally:
+        with _reserved_lock:
+            _reserved_bytes -= num_bytes
 
 
 def _nearest_existing(path: str) -> str:
@@ -348,10 +326,7 @@ def _nearest_existing(path: str) -> str:
     return current
 
 
-def available_for_path(
-    path: str,
-    max_age_seconds: float = DEFAULT_USED_BYTES_TTL_SECONDS,
-) -> Optional[int]:
+def available_for_path(path: str) -> Optional[int]:
     """Bytes writable at *path*, by whichever boundary applies to it.
 
     A destination the platform does not charge to this container -- a
@@ -366,7 +341,7 @@ def available_for_path(
     filesystem = next(iter(filesystems.values()))
     bounds = [filesystem.avail_bytes]
     if filesystem.charged_to_ephemeral:
-        against_budget = available_bytes(max_age_seconds)
+        against_budget = available_bytes()
         if against_budget is not None:
             bounds.append(against_budget)
     return min(bounds)

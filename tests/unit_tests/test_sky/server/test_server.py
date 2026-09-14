@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 import pathlib
@@ -1972,12 +1973,13 @@ async def test_unzip_refuses_an_archive_of_tiny_files_that_would_not_fit(
 
 
 @pytest.mark.asyncio
-async def test_unzip_debits_what_it_admits(tmp_path, monkeypatch):
-    """A second extraction must see what the first was allowed to write."""
-    debited = []
+async def test_unzip_holds_its_space_while_it_writes(tmp_path, monkeypatch):
+    """A concurrent extraction must measure against what is left."""
+    held = []
     monkeypatch.setattr(server.local_disk, 'available_for_path',
                         lambda path: 1024**3)
-    monkeypatch.setattr(server.local_disk, 'debit', debited.append)
+    monkeypatch.setattr(server.local_disk, 'reserve',
+                        lambda n: held.append(n) or contextlib.nullcontext())
     zip_path = tmp_path / 'upload.zip'
     _write_zip(zip_path, 4096)
     target = tmp_path / 'out'
@@ -1985,4 +1987,5 @@ async def test_unzip_debits_what_it_admits(tmp_path, monkeypatch):
 
     await server.unzip_file(zip_path, target)
 
-    assert debited == [server._EXTRACT_BLOCK_BYTES]
+    assert held == [server._EXTRACT_BLOCK_BYTES]
+    assert (target / 'payload.bin').stat().st_size == 4096

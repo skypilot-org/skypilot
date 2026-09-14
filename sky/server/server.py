@@ -1837,20 +1837,24 @@ def _on_disk_bytes(members: List[zipfile.ZipInfo]) -> int:
         _EXTRACT_BLOCK_BYTES for member in members)
 
 
-def _check_extraction_fits(members: List[zipfile.ZipInfo],
-                           target_dir: pathlib.Path) -> None:
-    """Raises if extracting *members* into *target_dir* would not fit."""
-    available = local_disk.available_for_path(str(target_dir))
-    if available is None:
-        return
+@contextlib.contextmanager
+def _admit_extraction(members: List[zipfile.ZipInfo], target_dir: pathlib.Path):
+    """Refuses an extraction that would not fit, and holds its space.
+
+    The space stays reserved for as long as the extraction is writing, so
+    a concurrent one measures against what is left rather than against
+    the same free space.
+    """
     needed = _on_disk_bytes(members)
-    if needed > available:
+    available = local_disk.available_for_path(str(target_dir))
+    if available is not None and needed > available:
         raise fastapi.HTTPException(
             status_code=507,
             detail=(f'Extracting this upload needs {_gb(needed)} of disk '
                     f'under {target_dir}, but only {_gb(available)} is '
                     'available there. Upload fewer or smaller files.'))
-    local_disk.debit(needed)
+    with local_disk.reserve(needed):
+        yield
 
 
 async def _receive_and_assemble_chunks(
@@ -2133,6 +2137,53 @@ def _is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
         return False
 
 
+def _extract_members(zipf, members: List[zipfile.ZipInfo],
+                     client_file_mounts_dir: pathlib.Path) -> None:
+    """Writes the zip's members under *client_file_mounts_dir*."""
+    for member in members:
+        # Determine the new path
+        original_path = os.path.normpath(member.filename)
+        new_path = client_file_mounts_dir / original_path.lstrip('/')
+
+        # Security check: ensure extracted path stays within target
+        # directory to prevent Zip Slip attacks (path traversal via
+        # malicious "../" sequences in archive member names).
+        resolved_path = new_path.resolve()
+        if not _is_relative_to(resolved_path, client_file_mounts_dir):
+            raise ValueError(f'Zip member {member.filename!r} would extract '
+                             'outside target directory. Aborted.')
+
+        if (member.external_attr >> 28) == 0xA:
+            # Symlink. Read the target path and create a symlink.
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            target = zipf.read(member).decode()
+            assert not os.path.isabs(target), target
+            # Since target is a relative path, we need to check that
+            # it is under `client_file_mounts_dir` for security.
+            full_target_path = (new_path.parent / target).resolve()
+            if not _is_relative_to(full_target_path, client_file_mounts_dir):
+                raise ValueError(f'Symlink target {target} leads to a '
+                                 'file not in userspace. Aborted.')
+
+            if new_path.exists() or new_path.is_symlink():
+                new_path.unlink(missing_ok=True)
+            new_path.symlink_to(
+                target, target_is_directory=member.filename.endswith('/'))
+            continue
+
+        # Handle directories
+        if member.filename.endswith('/'):
+            new_path.mkdir(parents=True, exist_ok=True)
+            continue
+
+        # Handle files
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        with zipf.open(member) as member_file, new_path.open('wb') as f:
+            # Use shutil.copyfileobj to copy files in chunks,
+            # so it does not load the entire file into memory.
+            shutil.copyfileobj(member_file, f)
+
+
 async def unzip_file(zip_file_path: pathlib.Path,
                      client_file_mounts_dir: pathlib.Path) -> None:
     """Unzips a zip file without blocking the event loop."""
@@ -2141,56 +2192,8 @@ async def unzip_file(zip_file_path: pathlib.Path,
         try:
             with zipfile.ZipFile(zip_file_path, 'r') as zipf:
                 members = zipf.infolist()
-                _check_extraction_fits(members, client_file_mounts_dir)
-                for member in members:
-                    # Determine the new path
-                    original_path = os.path.normpath(member.filename)
-                    new_path = client_file_mounts_dir / original_path.lstrip(
-                        '/')
-
-                    # Security check: ensure extracted path stays within target
-                    # directory to prevent Zip Slip attacks (path traversal via
-                    # malicious "../" sequences in archive member names).
-                    resolved_path = new_path.resolve()
-                    if not _is_relative_to(resolved_path,
-                                           client_file_mounts_dir):
-                        raise ValueError(
-                            f'Zip member {member.filename!r} would extract '
-                            'outside target directory. Aborted.')
-
-                    if (member.external_attr >> 28) == 0xA:
-                        # Symlink. Read the target path and create a symlink.
-                        new_path.parent.mkdir(parents=True, exist_ok=True)
-                        target = zipf.read(member).decode()
-                        assert not os.path.isabs(target), target
-                        # Since target is a relative path, we need to check that
-                        # it is under `client_file_mounts_dir` for security.
-                        full_target_path = (new_path.parent / target).resolve()
-                        if not _is_relative_to(full_target_path,
-                                               client_file_mounts_dir):
-                            raise ValueError(
-                                f'Symlink target {target} leads to a '
-                                'file not in userspace. Aborted.')
-
-                        if new_path.exists() or new_path.is_symlink():
-                            new_path.unlink(missing_ok=True)
-                        new_path.symlink_to(
-                            target,
-                            target_is_directory=member.filename.endswith('/'))
-                        continue
-
-                    # Handle directories
-                    if member.filename.endswith('/'):
-                        new_path.mkdir(parents=True, exist_ok=True)
-                        continue
-
-                    # Handle files
-                    new_path.parent.mkdir(parents=True, exist_ok=True)
-                    with zipf.open(member) as member_file, new_path.open(
-                            'wb') as f:
-                        # Use shutil.copyfileobj to copy files in chunks,
-                        # so it does not load the entire file into memory.
-                        shutil.copyfileobj(member_file, f)
+                with _admit_extraction(members, client_file_mounts_dir):
+                    _extract_members(zipf, members, client_file_mounts_dir)
         except zipfile.BadZipFile as e:
             logger.error(f'Bad zip file: {zip_file_path}')
             raise fastapi.HTTPException(

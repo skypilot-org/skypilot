@@ -36,10 +36,9 @@ def roots(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _fresh_used_bytes_cache(monkeypatch):
-    """The cache and the debit are module-level, so they cross tests."""
-    monkeypatch.setattr(local_disk, '_used_bytes_cache', None)
-    monkeypatch.setattr(local_disk, '_admitted_bytes', 0)
+def _no_reservation(monkeypatch):
+    """The reservation is module-level, so it would cross tests."""
+    monkeypatch.setattr(local_disk, '_reserved_bytes', 0)
 
 
 @pytest.fixture(autouse=True)
@@ -396,87 +395,44 @@ def test_available_never_goes_negative(roots, monkeypatch):
     assert local_disk.available_bytes() == 0
 
 
-def _counting_scan(monkeypatch):
-    """Replaces the walk with a counter over the real one."""
-    calls = []
-    real_scan = local_disk.scan
-
-    def counting(*args, **kwargs):
-        calls.append(1)
-        return real_scan(*args, **kwargs)
-
-    monkeypatch.setattr(local_disk, 'scan', counting)
-    return calls
-
-
-def test_available_reuses_one_walk_within_the_ttl(roots, monkeypatch):
-    """The walk costs the same whatever the caller is about to write."""
-    present, _ = roots
-    _write(str(present / 'a.log'), 4096)
-    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, str(1024**3))
-    calls = _counting_scan(monkeypatch)
-
-    first = local_disk.available_bytes()
-    for _ in range(20):
-        assert local_disk.available_bytes() == first
-
-    assert len(calls) == 1
-
-
-def test_available_walks_again_once_the_cache_ages_out(roots, monkeypatch):
-    present, _ = roots
-    _write(str(present / 'a.log'), 4096)
-    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, str(1024**3))
-    calls = _counting_scan(monkeypatch)
-
-    local_disk.available_bytes()
-    local_disk.available_bytes(max_age_seconds=-1.0)
-
-    assert len(calls) == 2
-
-
-def test_available_reads_the_budget_fresh_even_on_a_cache_hit(
+def test_a_reservation_counts_against_available_while_it_is_held(
         roots, monkeypatch):
-    """Only the walk is cached; the declared budget is env and cheap."""
-    present, _ = roots
-    _write(str(present / 'a.log'), 4096)
-    calls = _counting_scan(monkeypatch)
-
-    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, str(1024**3))
-    first = local_disk.available_bytes()
-    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR,
-                       str(2 * 1024**3))
-    second = local_disk.available_bytes()
-
-    assert second - first == 1024**3
-    assert len(calls) == 1
-
-
-def test_debit_counts_against_available_until_the_next_walk(roots, monkeypatch):
-    """Concurrent callers have to see work each other has admitted."""
-    present, _ = roots
-    _write(str(present / 'a.log'), 4096)
-    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, str(1024**3))
-
-    before = local_disk.available_bytes()
-    local_disk.debit(100 * 1024)
-
-    assert local_disk.available_bytes() == before - 100 * 1024
-    # A fresh walk sees those bytes on disk, so the debit is cleared.
-    local_disk.available_bytes(max_age_seconds=-1.0)
-    assert local_disk.available_bytes() == before
-
-
-def test_debit_ignores_a_non_positive_amount(roots, monkeypatch):
+    """A walk cannot see bytes a concurrent caller has not written yet."""
     present, _ = roots
     _write(str(present / 'a.log'), 4096)
     monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, str(1024**3))
     before = local_disk.available_bytes()
 
-    local_disk.debit(0)
-    local_disk.debit(-5)
+    with local_disk.reserve(100 * 1024):
+        assert local_disk.available_bytes() == before - 100 * 1024
 
     assert local_disk.available_bytes() == before
+
+
+def test_a_reservation_is_released_even_when_the_caller_raises(
+        roots, monkeypatch):
+    present, _ = roots
+    _write(str(present / 'a.log'), 4096)
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, str(1024**3))
+    before = local_disk.available_bytes()
+
+    with pytest.raises(RuntimeError):
+        with local_disk.reserve(100 * 1024):
+            raise RuntimeError('extraction failed')
+
+    assert local_disk.available_bytes() == before
+
+
+def test_a_non_positive_reservation_is_a_no_op(roots, monkeypatch):
+    present, _ = roots
+    _write(str(present / 'a.log'), 4096)
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, str(1024**3))
+    before = local_disk.available_bytes()
+
+    with local_disk.reserve(0):
+        assert local_disk.available_bytes() == before
+    with local_disk.reserve(-5):
+        assert local_disk.available_bytes() == before
 
 
 def test_a_destination_not_charged_to_this_container_ignores_the_budget(
@@ -547,7 +503,7 @@ def test_a_truncated_walk_reports_no_budget_bound(roots, monkeypatch):
 
     monkeypatch.setattr(local_disk, 'scan',
                         lambda *a, **k: _truncated_snapshot())
-    assert local_disk.available_bytes(max_age_seconds=-1.0) is None
+    assert local_disk.available_bytes() is None
 
 
 def _truncated_snapshot():
