@@ -280,15 +280,25 @@ class TestResolveJobTask:
         assert result == (57, None)
         lookup.assert_called_once_with(39, 'eval-3')
 
-    def test_unknown_task_raises(self):
-        with pytest.raises(ValueError, match='no task 9'):
-            self._run(9, member=None)
-        with pytest.raises(ValueError, match="no task 'nope'"):
-            self._run('nope', member=None)
+    def test_unknown_task_passes_through_for_logs(self):
+        # The controller-side log reader answers an unknown task with
+        # 'No task found matching ...' in the stream, which --no-follow and
+        # SDK follow=False callers read; a server-side raise would reach
+        # neither (smoke test_job_group_task_logs[_sdk] on a consolidation
+        # server).
+        assert self._run(9, member=None)[0] == (39, 9)
+        assert self._run('nope', member=None)[0] == (39, 'nope')
 
-    def test_missing_job_raises(self):
+    def test_unknown_task_raises_for_cancel(self):
+        with pytest.raises(ValueError, match='no task 9'):
+            self._run(9, member=None, for_cancel=True)
+        with pytest.raises(ValueError, match="no task 'nope'"):
+            self._run('nope', member=None, for_cancel=True)
+
+    def test_missing_job_passes_through_for_logs_and_raises_for_cancel(self):
+        assert self._run(2, own=[])[0] == (39, 2)
         with pytest.raises(ValueError, match='No managed job with ID 39'):
-            self._run(2, own=[])
+            self._run(2, own=[], for_cancel=True)
 
     def test_cancel_refuses_a_declared_task(self):
         # Declared tasks share the group's lifecycle.
