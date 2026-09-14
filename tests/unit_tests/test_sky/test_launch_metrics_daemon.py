@@ -100,6 +100,24 @@ def _one_running_job(tmp_path, monkeypatch, pool=None):
         session.commit()
 
 
+def test_a_job_with_no_submission_time_is_not_broken_down(
+        tmp_path, monkeypatch):
+    """Every timestamp the split subtracts has to be there before it runs.
+
+    The row is not dropped by being excluded here -- the counts come from a
+    different query -- but a breakdown that raises parks a total-only timeline,
+    so the job would report its whole wait as unattributed.
+    """
+    _one_running_job(tmp_path, monkeypatch)
+    engine = managed_job_state._db_manager.get_engine()
+    with sqlalchemy.orm.Session(engine) as session:
+        session.execute(
+            managed_job_state.spot_table.update().values(submitted_at=None))
+        session.commit()
+
+    assert managed_job_state.get_jobs_pending_launch_timeline() == []
+
+
 def test_a_job_that_cannot_be_broken_down_leaves_the_pending_set(
         tmp_path, monkeypatch):
     """A row that keeps raising must not be handed back every tick.

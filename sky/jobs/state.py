@@ -4765,12 +4765,22 @@ def get_jobs_pending_launch_timeline(limit: int = 200) -> List[Dict[str, Any]]:
                 spot_table.join(
                     job_info_table,
                     spot_table.c.spot_job_id == job_info_table.c.spot_job_id,
-                    isouter=True)).where(
-                        sqlalchemy.and_(
-                            spot_table.c.start_at.is_not(None),
-                            spot_table.c.created_at.is_not(None),
-                            spot_table.c.t_time_to_running.is_(None),
-                        )).order_by(spot_table.c.start_at).limit(limit)).all()
+                    isouter=True)).
+            where(
+                sqlalchemy.and_(
+                    spot_table.c.start_at.is_not(None),
+                    spot_table.c.created_at.is_not(None),
+                    # Every timestamp the breakdown subtracts, so the
+                    # computation cannot meet a NULL. Without this the
+                    # row still gets counted -- the caller parks a
+                    # total-only timeline when the split raises -- but
+                    # it reports its whole wait as unattributed, which
+                    # is the misdiagnosis this breakdown exists to
+                    # prevent. The sibling query for jobs that never
+                    # ran already guards it.
+                    spot_table.c.submitted_at.is_not(None),
+                    spot_table.c.t_time_to_running.is_(None),
+                )).order_by(spot_table.c.start_at).limit(limit)).all()
         return [dict(row._mapping) for row in rows]  # pylint: disable=protected-access
 
 
