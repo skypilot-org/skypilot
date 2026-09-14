@@ -33,10 +33,12 @@ import asyncio
 import concurrent.futures
 import functools
 import os
+import sqlite3
 import time
 import unittest.mock as mock
 
 import fastapi
+import psycopg2
 import pytest
 import sqlalchemy.exc
 
@@ -818,6 +820,107 @@ class TestDeadlineHandedToTheDbLayer:
 
         await db_lookup.call_with_deadline(_probe)
         assert seen['remaining'] > 0
+
+
+class TestDeadlineErrorMapping:
+    """What the DB layer raises reaches the middleware as the retryable 503.
+
+    A server-side timeout the database enforced, and a connection that
+    dropped under the call (a plain psycopg2 error with no SQLSTATE). Both
+    are the client's bad luck, not a bad request, and must not surface as a
+    bare 500. Real faults still propagate unchanged.
+    """
+
+    @pytest.fixture(autouse=True)
+    def real_deadline(self, monkeypatch, clear_timeouts):
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+
+    @pytest.mark.asyncio
+    async def test_server_timeout_carries_its_reason(self):
+        with pytest.raises(db_lookup.AuthDBTimeoutError) as ei:
+            await db_lookup.call_with_deadline(_raises_db_error('55P03'))
+        assert ei.value.reason == 'lock_timeout'
+        assert isinstance(ei.value.__cause__, sqlalchemy.exc.OperationalError)
+        assert _timeouts(cause='lock_timeout',
+                         pool=db_lookup.POOL_AUTH) == 1.0
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('orig', [
+        psycopg2.OperationalError('server closed the connection unexpectedly'),
+        psycopg2.InterfaceError('connection already closed'),
+    ])
+    async def test_dropped_connection_becomes_retryable(self, orig):
+
+        def _raise():
+            raise sqlalchemy.exc.OperationalError('stmt', {}, orig)
+
+        with pytest.raises(db_lookup.AuthDBTimeoutError) as ei:
+            await db_lookup.call_with_deadline(_raise)
+        assert ei.value.reason == 'db_error'
+        # Not a timeout: the timeout counter stays about timeouts (#10710).
+        assert _timeouts(cause='db_error') == 0.0
+
+    @pytest.mark.asyncio
+    async def test_dropped_connection_is_a_503_at_the_middleware(
+            self, mock_request, call_next_sentinel):
+        proxy_config = mock.Mock()
+        proxy_config.enabled = True
+        with mock.patch.object(server.server_config,
+                               'load_external_proxy_config',
+                               return_value=proxy_config):
+            middleware = server.AuthProxyMiddleware(app=mock.Mock())
+
+        def _dropped(*args, **kwargs):
+            del args, kwargs
+            raise sqlalchemy.exc.OperationalError(
+                'INSERT INTO users ...', {},
+                psycopg2.OperationalError('SSL SYSCALL error: EOF detected'))
+
+        with mock.patch.object(
+                server,
+                '_extract_user_from_header',
+                return_value=models.User(id='u-1', name='tester')), \
+                mock.patch('sky.global_user_state.add_or_update_user',
+                           _dropped):
+            response = await middleware.dispatch(mock_request,
+                                                 call_next_sentinel)
+        _assert_retryable_timeout_503(response)
+        assert not call_next_sentinel.reached
+
+    @pytest.mark.asyncio
+    async def test_sqlite_operational_error_still_propagates(self):
+        # sqlite3.OperationalError also covers schema errors ("no such
+        # table"); those are real faults, not transient, and stay a 500.
+
+        def _raise():
+            raise sqlalchemy.exc.OperationalError(
+                'stmt', {}, sqlite3.OperationalError('no such table: users'))
+
+        with pytest.raises(sqlalchemy.exc.OperationalError) as ei:
+            await db_lookup.call_with_deadline(_raise)
+        assert not isinstance(ei.value, asyncio.TimeoutError)
+
+    @pytest.mark.asyncio
+    async def test_programming_error_still_propagates(self):
+
+        def _raise():
+            raise sqlalchemy.exc.ProgrammingError(
+                'stmt', {}, psycopg2.ProgrammingError('syntax error'))
+
+        with pytest.raises(sqlalchemy.exc.ProgrammingError):
+            await db_lookup.call_with_deadline(_raise)
+
+    @pytest.mark.asyncio
+    async def test_caller_timeout_still_raises_and_is_counted(
+            self, monkeypatch):
+        # The thread does not give up (a Python-level block, not DB I/O):
+        # wait_for is the backstop, and its firing is the "pinned" alarm.
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 0.1)
+        with pytest.raises(asyncio.TimeoutError) as ei:
+            await db_lookup.call_with_deadline(lambda: time.sleep(0.6))
+        assert not isinstance(ei.value, db_lookup.AuthDBTimeoutError)
+        assert _timeouts(cause=db_lookup.TIMEOUT_CAUSE_DEADLINE,
+                         pool=db_lookup.POOL_AUTH) == 1.0
 
 
 def _never_runs():

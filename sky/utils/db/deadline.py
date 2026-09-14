@@ -123,6 +123,60 @@ def get_deadline() -> Optional[float]:
     return getattr(_local, 'deadline', None)
 
 
+# --- exception classification (shared by callers and retry logic) ----------
+
+# Postgres SQLSTATEs the server-side bounds raise, mapped to the `cause`
+# labels of `sky_apiserver_auth_timeouts_total` (see `sky.metrics.utils`).
+# 57014 = statement_timeout (query cancelled), 55P03 = lock_timeout (lock not
+# available), 25P03 = idle_in_transaction_session_timeout (the killed
+# session's own next statement, when the client reads the FATAL; if nobody
+# was reading, that client sees a closed connection instead).
+TIMEOUT_PGCODE_REASONS = {
+    '57014': 'statement_timeout',
+    '55P03': 'lock_timeout',
+    '25P03': 'idle_in_transaction_session_timeout',
+}
+
+
+def deadline_reason(exc: BaseException) -> Optional[str]:
+    """The timeout reason if ``exc`` is a deadline our bounds made, else None.
+
+    Handles both the wrapped case (SQLAlchemy ``DBAPIError`` with ``.orig``
+    carrying the SQLSTATE) and the unwrapped driver exception. The reason is
+    the ``cause`` label of ``sky_apiserver_auth_timeouts_total``.
+    """
+    orig = getattr(exc, 'orig', exc)
+    pgcode = getattr(orig, 'pgcode', None)
+    if pgcode is None:
+        return None
+    return TIMEOUT_PGCODE_REASONS.get(pgcode)
+
+
+def is_deadline_error(exc: BaseException) -> bool:
+    """Whether ``exc`` was produced by a deadline bound (server-side here)."""
+    return deadline_reason(exc) is not None
+
+
+def is_transient_driver_error(exc: BaseException) -> bool:
+    """Whether ``exc`` is a psycopg2 operational/interface error.
+
+    A connection dropped or closed under the call, a lost server, a pooler
+    that went away: an operational failure of the database layer, never the
+    request's fault, so the caller answers with a retryable status.
+    "Transient" is the common case, not a guarantee: psycopg2 reports a bad
+    password (28P01) as an OperationalError too, and a retry will not fix
+    that -- the log line the caller writes carries the real error. Gated on
+    the psycopg2 classes on purpose -- ``sqlite3.OperationalError`` also
+    covers schema errors ("no such table"), which are programming errors
+    and propagate unchanged.
+    """
+    if psycopg2 is None:
+        return False
+    orig = getattr(exc, 'orig', exc)
+    return isinstance(orig,
+                      (psycopg2.OperationalError, psycopg2.InterfaceError))
+
+
 # --- server-side SET LOCAL listener ----------------------------------------
 
 

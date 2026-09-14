@@ -20,6 +20,12 @@ them saturate the auth executor -- every authenticated endpoint then fails
 until the process restarts. The executor still acts as a saturation
 buffer: requests beyond it fail fast with the worker-exhausted 503.
 
+What the DB layer raises is translated into the same retryable 503: a
+server-side timeout, and a transient driver error (a connection dropped
+under the call), which is the client's bad luck rather than a bad request
+-- without the translation both would surface as a bare 500, which
+clients do not retry.
+
 Both timeout and executor exhaustion must be converted to responses
 *inside* the middleware: app-level exception handlers wrap the router
 only, so an exception raised in a middleware surfaces as a bare 500,
@@ -66,21 +72,6 @@ logger = sky_logging.init_logger(__name__)
 # message naming the variable.
 AUTH_DB_TIMEOUT_SECONDS = db_utils.get_auth_db_timeout_seconds()
 
-# Postgres SQLSTATE codes raised when the database itself gives up on an
-# auth-path call at a server-side timeout. The users upsert sets these
-# timeouts on its own transaction (see `global_user_state.add_or_update_user`),
-# derived from the same configured deadline as `AUTH_DB_TIMEOUT_SECONDS` and
-# strictly below or equal to it, so the database normally fails the call
-# *before* `asyncio.wait_for` does -- and, unlike `wait_for`, actually
-# releases the executor thread. Such an error is the same condition as the
-# client-side deadline (a slow or locked database) and gets the same
-# retryable 503; anything else still propagates unchanged.
-_SERVER_TIMEOUT_PGCODES = {
-    '55P03': 'lock_timeout',  # LockNotAvailable
-    '57014': 'statement_timeout',  # QueryCanceled
-    '25P03': 'idle_in_transaction_session_timeout',
-}
-
 # The DB work gives up this far before the caller's `wait_for`, so the
 # DB layer's own bounds fire first -- the server-side SET LOCAL bounds in
 # `sky.utils.db.deadline` -- before `wait_for` releases only the caller.
@@ -102,31 +93,22 @@ _MIN_INNER_BUDGET_SECONDS = 0.05
 
 
 class AuthDBTimeoutError(asyncio.TimeoutError):
-    """An auth DB call was cut off by the database's own timeout.
+    """An auth DB call gave up at its deadline -- in the database or the client.
 
     Subclasses ``asyncio.TimeoutError`` so every ``except asyncio.TimeoutError``
     in the auth middlewares keeps answering ``db_timeout_response()`` unchanged.
+    ``reason`` names how it gave up; it is the ``cause`` label of
+    ``sky_apiserver_auth_timeouts_total`` (see `sky.metrics.utils`).
     """
 
-
-def _server_timeout_pgcode(exc: BaseException) -> Optional[str]:
-    """``exc``'s SQLSTATE if it is one of the server-side timeouts, else None.
-
-    ``sqlalchemy.exc.DBAPIError`` wraps the driver's error as ``.orig``; a
-    driver error that escaped unwrapped (raw connections) carries ``pgcode``
-    itself. Duck-typed so this module does not import psycopg2, which is a
-    server-only dependency.
-    """
-    orig = getattr(exc, 'orig', exc)
-    pgcode = getattr(orig, 'pgcode', None)
-    if pgcode in _SERVER_TIMEOUT_PGCODES:
-        return pgcode
-    return None
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 # `cause` of a timeout the client-side deadline produced, as opposed to one
 # the database itself ended (those are named by their Postgres setting, see
-# `_SERVER_TIMEOUT_PGCODES`).
+# `db_deadline.TIMEOUT_PGCODE_REASONS`).
 TIMEOUT_CAUSE_DEADLINE = 'deadline'
 
 # `pool` label values: which executor's slot the timed-out call is holding.
@@ -170,45 +152,59 @@ async def _run_with_deadline(pool: concurrent.futures.Executor,
     a busy pool or a loop stall cannot make the two disagree). The DB layer --
     the ``SET LOCAL`` bounds the engine listener adds to the transaction --
     gives up at that deadline, which frees the executor thread; ``wait_for``
-    only ever frees the caller. A server-side timeout the database raises is
-    classified by the caller below, exactly as before.
+    only ever frees the caller.
+
+    What the DB raises is translated, on the worker thread, into
+    ``AuthDBTimeoutError`` (an ``asyncio.TimeoutError``): a server-side
+    timeout the database enforced (one of the bounds above), and also a
+    transient driver error (the connection dropped under the call), which is
+    the client's bad luck rather than a bad request and gets the same
+    retryable 503 instead of a bare 500. Every other error (a programming or
+    integrity error) propagates unchanged.
     """
     budget = AUTH_DB_TIMEOUT_SECONDS
     inner = max(_MIN_INNER_BUDGET_SECONDS,
                 budget - _CLIENT_DEADLINE_MARGIN_SECONDS)
     deadline_at = time.monotonic() + inner
+    name = getattr(func, '__name__', repr(func))
 
     def _run() -> Any:
         db_deadline.set_deadline(deadline_at)
         try:
             return func(*args)
+        except Exception as e:  # pylint: disable=broad-except
+            reason = db_deadline.deadline_reason(e)
+            if reason is None and db_deadline.is_transient_driver_error(e):
+                reason = 'db_error'
+            if reason is None:
+                raise
+            raise AuthDBTimeoutError(reason) from e
         finally:
             db_deadline.clear_deadline()
-
 
     try:
         return await asyncio.wait_for(context_utils.to_thread_with_executor(
             pool, _run),
                                       timeout=budget)
-    except Exception as e:  # pylint: disable=broad-except
-        pgcode = _server_timeout_pgcode(e)
-        if pgcode is None:
-            if isinstance(e, asyncio.TimeoutError):
-                # The deadline elapsed. Counted here, at the one choke point
-                # every auth-path call goes through, rather than at the call
-                # sites: several of them convert the timeout to a 503 and one
-                # (the /api/health probe) swallows it entirely, so counting
-                # per caller would miss the cases with no client-visible
-                # symptom -- which are the early ones.
-                _count_timeout(func, TIMEOUT_CAUSE_DEADLINE, pool_name)
-            raise
-        reason = _SERVER_TIMEOUT_PGCODES[pgcode]
-        _count_timeout(func, reason, pool_name)
-        logger.warning(f'Auth DB call {getattr(func, "__name__", func)} was '
-                       f'cut off by the database\'s {reason} '
-                       f'(pgcode {pgcode}): '
-                       f'{common_utils.format_exception(e)}')
-        raise AuthDBTimeoutError(reason) from e
+    except AuthDBTimeoutError as e:
+        # Counted here, at the one choke point every auth-path call goes
+        # through (see `_count_timeout`): a timeout the database enforced,
+        # named by its Postgres setting. `db_error` is not a timeout and
+        # stays uncounted, keeping the counter about timeouts only (#10710).
+        if e.reason != 'db_error':
+            _count_timeout(func, e.reason, pool_name)
+        logger.warning(f'Auth DB call {name} gave up at its deadline '
+                       f'({e.reason}): '
+                       f'{common_utils.format_exception(e.__cause__ or e)}')
+        raise
+    except asyncio.TimeoutError:
+        # wait_for fired. Counted here, at the one choke point every
+        # auth-path call goes through, rather than at the call sites: several
+        # of them convert the timeout to a 503 and one (the /api/health
+        # probe) swallows it entirely, so counting per caller would miss the
+        # cases with no client-visible symptom -- which are the early ones.
+        _count_timeout(func, TIMEOUT_CAUSE_DEADLINE, pool_name)
+        raise
 
 
 async def call_with_deadline(func: Callable[..., Any], *args: Any) -> Any:
@@ -217,10 +213,10 @@ async def call_with_deadline(func: Callable[..., Any], *args: Any) -> Any:
     The same deadline is handed to the DB layer as a thread-local deadline
     (the ``SET LOCAL`` bounds `sky.utils.db.deadline` adds to the
     transaction), so the executor thread gives up too. Raises
-    ``asyncio.TimeoutError`` when the deadline elapses (or when the database
-    cut the call off at its own, aligned timeout -- see
-    `_SERVER_TIMEOUT_PGCODES`) and ``ConcurrentWorkerExhaustedError`` when
-    the executor is saturated.
+    ``asyncio.TimeoutError`` (``AuthDBTimeoutError``, with a ``reason``) when
+    the deadline elapses -- whether the database or `wait_for` enforced it --
+    or when the connection dropped under the call, and
+    ``ConcurrentWorkerExhaustedError`` when the executor is saturated.
     """
     return await _run_with_deadline(executor.get_auth_thread_executor(),
                                     POOL_AUTH, func, *args)
@@ -281,15 +277,18 @@ async def ensure_role_for_authenticated_user(
                          f'{user_id}: {e}')
             permission.permission_service.queue_role_repair(user_id)
             return worker_exhausted_response(request=request)
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
             # Separated from the clause below for the log, not the answer: the
-            # deadline elapsed but the seed is still running in its thread and
-            # usually lands, whereas the cases below have already failed. The
-            # caller gets the same 503 either way -- from a client's side both
-            # are "not ready yet, come back".
+            # seed hit the auth deadline. Either the DB layer cut it off (an
+            # `AuthDBTimeoutError`: the transaction was rolled back and the
+            # thread freed) or `wait_for` fired first and the seed is still
+            # running in its thread. The caller gets the same 503 either way
+            # -- from a client's side both are "not ready yet, come back" --
+            # and the queued repair redoes the seed.
+            how = getattr(e, 'reason', 'caller timeout')
             logger.error(f'Seeding a role for new user {user_id} did not '
-                         f'finish within {AUTH_DB_TIMEOUT_SECONDS}s; queueing '
-                         f'it off the request')
+                         f'finish within {AUTH_DB_TIMEOUT_SECONDS}s ({how}); '
+                         f'queueing it off the request')
             permission.permission_service.queue_role_repair(user_id)
             return role_seed_unavailable_response(request=request)
         except Exception as e:  # pylint: disable=broad-except

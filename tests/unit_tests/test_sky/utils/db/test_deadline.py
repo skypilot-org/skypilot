@@ -377,3 +377,54 @@ class TestSetLocalListener:
 
         assert _val('statement_timeout') == deadline._MIN_TIMEOUT_MS
         assert _val('lock_timeout') == deadline._MIN_TIMEOUT_MS
+
+
+class _PgError(Exception):
+    """Stand-in for a psycopg2 error: carries the SQLSTATE as ``pgcode``.
+
+    Duck-typed on purpose -- a manually constructed psycopg2 error has no
+    pgcode anyway; only the C layer sets it from a real server reply.
+    """
+
+    def __init__(self, pgcode, message='x'):
+        super().__init__(message)
+        self.pgcode = pgcode
+
+
+class TestClassification:
+    """deadline_reason / is_deadline_error / is_transient_driver_error."""
+
+    @pytest.mark.parametrize('pgcode,reason',
+                             [('57014', 'statement_timeout'),
+                              ('55P03', 'lock_timeout'),
+                              ('25P03', 'idle_in_transaction_session_timeout')])
+    def test_server_pgcodes(self, pgcode, reason):
+        wrapped = sqlalchemy.exc.OperationalError('stmt', {}, _PgError(pgcode))
+        assert deadline.deadline_reason(wrapped) == reason
+        assert deadline.is_deadline_error(wrapped)
+
+    def test_unwrapped_driver_error_with_pgcode(self):
+        assert deadline.deadline_reason(_PgError('55P03')) == 'lock_timeout'
+
+    def test_idle_session_timeout_is_not_ours(self):
+        # 57P05 is idle_session_timeout, which the bounds never set.
+        wrapped = sqlalchemy.exc.OperationalError('stmt', {}, _PgError('57P05'))
+        assert deadline.deadline_reason(wrapped) is None
+
+    def test_non_deadline_error(self):
+        orig = psycopg2.OperationalError('connection dropped')
+        wrapped = sqlalchemy.exc.OperationalError('stmt', {}, orig)
+        assert deadline.deadline_reason(wrapped) is None
+        assert not deadline.is_deadline_error(wrapped)
+
+    @pytest.mark.parametrize('orig,transient', [
+        (psycopg2.OperationalError('server closed the connection'), True),
+        (psycopg2.InterfaceError('connection already closed'), True),
+        (sqlite3.OperationalError('no such table: users'), False),
+        (_PgError(None), False),
+        (Exception('x'), False),
+    ])
+    def test_transient_driver_error_is_psycopg2_only(self, orig, transient):
+        wrapped = sqlalchemy.exc.OperationalError('stmt', {}, orig)
+        assert deadline.is_transient_driver_error(wrapped) is transient
+        assert deadline.is_transient_driver_error(orig) is transient
