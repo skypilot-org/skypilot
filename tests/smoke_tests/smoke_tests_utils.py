@@ -577,7 +577,7 @@ def get_cluster_name() -> str:
 def is_eks_cluster() -> bool:
     cmd = 'kubectl config view --minify -o jsonpath='\
           '{.clusters[0].cluster.server}' \
-          ' | grep -q "eks\.amazonaws\.com"'
+          ' | grep -q "eks\\.amazonaws\\.com"'
     result = subprocess.run(cmd,
                             shell=True,
                             stdout=subprocess.DEVNULL,
@@ -1573,7 +1573,7 @@ def get_available_gpus(default_gpu: str = 'T4',
         env_file = pytest_config_file_override()
         if env_file is not None:
             prefix = f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}={env_file}'
-        command = f'{prefix} sky gpus list --infra {infra} | grep -A1 "^GPU" | grep " {count}" | tail -1 | awk "{{print \$1}}"'
+        command = f'{prefix} sky gpus list --infra {infra} | grep -A1 "^GPU" | grep " {count}" | tail -1 | awk "{{print \\$1}}"'
         Test.echo_without_prefix(command)
         result = subprocess_utils.run(command,
                                       shell=True,
