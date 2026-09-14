@@ -4778,6 +4778,18 @@ def get_jobs_pending_launch_timeline(limit: int = 200) -> List[Dict[str, Any]]:
                     # is the misdiagnosis this breakdown exists to
                     # prevent. The sibling query for jobs that never
                     # ran already guards it.
+                    #
+                    # The trade, chosen rather than inherited: such a
+                    # task is then returned by neither query -- the
+                    # other one wants start_at IS NULL -- so it drops
+                    # out of the counts too, which is the very thing
+                    # those counts exist to prevent. Accepted because a
+                    # task that started without a submission time
+                    # should not exist, and if one does, losing it
+                    # moves no distribution while a fabricated
+                    # all-unattributed breakdown moves two. Counting it
+                    # would mean widening the never-ran query, whose
+                    # whole shape says otherwise.
                     spot_table.c.submitted_at.is_not(None),
                     spot_table.c.t_time_to_running.is_(None),
                 )).order_by(spot_table.c.start_at).limit(limit)).all()
