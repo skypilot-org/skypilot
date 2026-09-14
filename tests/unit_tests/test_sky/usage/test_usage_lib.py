@@ -298,7 +298,13 @@ def test_collect_gpu_fleet(monkeypatch, capacity_store):
 
     counts = usage_lib._collect_gpu_fleet(['ctx-a', 'ctx-b', 'ssh-pool'],
                                           ['slurm-a'])
-    assert counts == {'H100': 16, 'A100:80GB': 4, 'h100': 4, 'gpu': 2}
+    assert counts == {
+        'H100': 16,
+        'A100:80GB': 4,
+        'tpu-v5e-8': 8,
+        'h100': 4,
+        'gpu': 2
+    }
 
     # Every reachable infra was recorded for the next tick.
     assert _k8s_key('ctx-a') in capacity_store.rows
@@ -317,13 +323,20 @@ def test_slurm_nodes_are_deduped_across_partitions():
     assert counts == {'h100': 8}
 
 
-def test_gpu_capacity_preserves_unknown_gpus_and_excludes_neuron():
+def test_gpu_capacity_includes_tpu_neuron_and_unknown_types():
     counts = usage_lib._gpu_capacity_from_nodes(
         _fake_nodes_info(_fake_node(None, 8), _fake_node('H100', 4),
                          _fake_node('TRAINIUM2',
                                     8), _fake_node('inferentia', 2),
                          _fake_node('tpu-v5e-8', 8), _fake_node(None, 0)))
-    assert counts == {'gpu': 8, 'H100': 4}
+    assert counts == {
+        'gpu': 8,
+        'H100': 4,
+        'TRAINIUM2': 8,
+        'inferentia': 2,
+        'tpu-v5e-8': 8
+    }
+    assert sum(counts.values()) == 30
 
 
 def test_heartbeat_unions_workspaces(monkeypatch, capacity_store):
@@ -350,7 +363,12 @@ def test_heartbeat_unions_workspaces(monkeypatch, capacity_store):
                         lambda *args: [])
     monkeypatch.setattr(
         'sky.provision.kubernetes.utils._get_kubernetes_node_info',
-        lambda context: _fake_nodes_info(_fake_node('H100', 8)))
+        lambda context: _fake_nodes_info(
+            _fake_node({
+                'default': 'H100',
+                'shared': 'TRAINIUM2',
+                'team-a': 'tpu-v5e-8'
+            }[context], 8)))
     sent = []
     monkeypatch.setattr(
         usage_lib.requests, 'post', lambda *args, **kwargs: sent.append(kwargs[
@@ -360,7 +378,12 @@ def test_heartbeat_unions_workspaces(monkeypatch, capacity_store):
     usage_lib.send_server_heartbeat()
     payload = json.loads(json.loads(sent[0])['streams'][0]['values'][0][1])
     assert payload['total_gpus'] == 24
-    assert payload['gpus_by_type'] == {'H100': 24}
+    assert payload['gpus_by_type'] == {
+        'H100': 8,
+        'TRAINIUM2': 8,
+        'tpu-v5e-8': 8
+    }
+    assert payload['total_gpus'] == sum(payload['gpus_by_type'].values())
     assert payload['infra_count'] == {
         'kubernetes': 3,
         'ssh_node_pools': 0,

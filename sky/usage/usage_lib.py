@@ -396,10 +396,11 @@ class ServerHeartbeatMessage(MessageToReport):
         sky_version: str — SkyPilot version
         ingress_host: Optional[str] — ingress DNS hostname if deployed
             with ingress (from SKYPILOT_INGRESS_HOST env var)
-        total_gpus: int — installed GPU capacity across every node in every
-            allowed Kubernetes/SSH context and Slurm cluster. Cloud VMs have no
-            node inventory and do not contribute.
-        gpus_by_type: Dict[str, int] — per-GPU-type breakdown of total_gpus
+        total_gpus: int — installed accelerator capacity (GPUs, TPUs, Neuron)
+            across all allowed Kubernetes/SSH contexts and Slurm clusters.
+            Cloud VMs have no node inventory and do not contribute.
+        gpus_by_type: Dict[str, int] — per-accelerator-type breakdown of
+            total_gpus; TPU and Neuron types remain distinct from GPU types
         infra_count: Dict[str, int] — how many infrastructures of each kind
             the server is configured to use, e.g.
             ``{'kubernetes': 3, 'ssh_node_pools': 1, 'slurm': 0, 'clouds': 2}``
@@ -420,7 +421,7 @@ class ServerHeartbeatMessage(MessageToReport):
         self.sky_version: str = sky.__version__
         self.ingress_host: Optional[str] = os.getenv('SKYPILOT_INGRESS_HOST')
         self.total_gpus: int = 0
-        #: Per-GPU-type breakdown, e.g. ``{'H100': 64, 'A100:80GB': 16}``.
+        #: Per-accelerator-type breakdown, including GPU, TPU and Neuron types.
         self.gpus_by_type: Dict[str, int] = {}
         #: Per-infra-kind counts, e.g. ``{'kubernetes': 3, 'clouds': 2}``.
         self.infra_count: Dict[str, int] = {}
@@ -864,10 +865,6 @@ def _gpu_capacity_from_nodes(
         if count <= 0:
             continue
         acc_type = str(node_info.accelerator_type or 'gpu')
-        if (acc_type.lower().startswith('tpu') or
-                kubernetes_utils.is_neuron_accelerator(acc_type)):
-            # TPUs and Neuron devices are not GPUs.
-            continue
         counts[acc_type] = counts.get(acc_type, 0) + count
     return counts
 
@@ -968,12 +965,13 @@ def _fetch_slurm_capacity(cluster: str) -> Dict[str, int]:
 
 def _collect_gpu_fleet(contexts: List[Optional[str]],
                        slurm_clusters: List[str]) -> Dict[str, int]:
-    """Sum installed GPU capacity per accelerator type across the fleet.
+    """Sum installed accelerator capacity per type across the fleet.
 
     Covers every allowed Kubernetes and SSH context and every allowed Slurm
     cluster. This is capacity, not usage: an idle GPU node counts the same as
     a busy one. Clusters on cloud VMs have no node inventory to read and do
-    not contribute. Known TPU and Neuron accelerator types are excluded.
+    not contribute. TPU and Neuron devices contribute to the total under
+    their own accelerator types, despite the GPU-oriented field names.
 
     Recorded rows are read in one query; only infras with no unexpired row
     are queried, in parallel, and each is guarded so an unreachable one drops
