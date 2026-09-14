@@ -303,6 +303,7 @@ Cancel managed jobs.
 - `--name`, `-n` — Managed job name to cancel.
 - `--pool`, `-p` — Pool name to cancel.
 - `JOB_IDS` — integer
+- `--task` — Cancel one dynamic task of the job (a job launched from inside it), by the index shown in `sky jobs queue` or by name. A declared task cannot be cancelled alone.
 - `--graceful` — Wait for MOUNT_CACHED uploads to complete before stopping/terminating. Will cancel current jobs first.
 - `--graceful-timeout` — Timeout in seconds for `--graceful` flag. When not set, will wait for MOUNT_CACHED uploads until they are finished.
 - `--all`, `-a` — Cancel all managed jobs for the current user.
@@ -354,6 +355,8 @@ Launch a managed job from a YAML or a command.
 - `--detach-run`, `-d` — If True, as soon as a job is submitted, return from this call and do not stream execution logs.
 - `--pool`, `-p` — (Experimental; optional) Pool to use for jobs submission.
 - `--num-jobs` — Number of jobs to submit.
+- `--job-group` — Attach to an existing job group, by job id or unique running job name. The job is shown under it and cancelled with it. Defaults to the surrounding job group when launched from inside one.
+- `--no-job-group` — Launch a top-level job even when running inside a job group (do not attach to it).
 - `--git-url` — Git repository URL.
 - `--git-ref` — Git reference (branch, tag, or commit hash) to use.
 - `--workspace`, `-w` — Workspace to submit the managed job into. Shorthand for `--config active_workspace=<name>`.

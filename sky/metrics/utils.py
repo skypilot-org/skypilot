@@ -241,6 +241,34 @@ SKY_APISERVER_EVENT_LOOP_STALL_TOTAL = prom.Counter(
     ['source'],
 )
 
+# Requests a middleware answered itself with a canned rejection instead of
+# letting a route handler run: authentication failures, auth-path database
+# deadlines, auth executor exhaustion, RBAC denials. These responses never
+# reach a route handler, so they are only visible to the request counters
+# because the metrics middleware is the outermost one; this counter says
+# *why* they were rejected. Bounded on purpose: `reason` is a closed set (see
+# sky/server/middleware_utils.py), `status` is the HTTP status the middleware
+# answered with and `kind` is `http` or `websocket` (a rejected WebSocket
+# handshake). No path label: the paths of rejected requests are chosen by
+# unauthenticated clients.
+SKY_APISERVER_REQUEST_REJECTIONS_TOTAL = prom.Counter(
+    'sky_apiserver_request_rejections_total',
+    'Requests a middleware rejected with a canned response, by reason',
+    ['reason', 'status', 'kind'],
+)
+
+# WebSocket handshakes refused by a middleware, by the decision that refused
+# them (the close-code set in sky/server/middleware_utils.websocket_aware:
+# unauthorized / forbidden / error). Handshakes are not HTTP requests from
+# the request counter's point of view, so without this counter a storm of
+# refused handshakes is invisible: it only shows up as fewer connections.
+# `path` is restricted to the registered WebSocket routes, else `other`.
+SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL = prom.Counter(
+    'sky_apiserver_websocket_handshake_rejections_total',
+    'WebSocket handshakes refused by a middleware, by decision',
+    ['path', 'outcome'],
+)
+
 SKY_APISERVER_WEBSOCKET_CONNECTIONS = prom.Gauge(
     'sky_apiserver_websocket_connections',
     'Number of websocket connections',
@@ -264,16 +292,21 @@ SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL = prom.Counter(
     ['request', 'pid'],
 )
 
+# 'liveall' for the same reason as sky_apiserver_threads_active below: keep
+# the per-pid series, but only for processes that still exist. The default
+# ('all') would keep emitting each dead worker's last value forever.
 SKY_APISERVER_PROCESS_PEAK_RSS = prom.Gauge(
     'sky_apiserver_process_peak_rss',
     'Peak RSS we saw in each process in last 30 seconds',
     ['pid', 'type'],
+    multiprocess_mode='liveall',
 )
 
 SKY_APISERVER_PROCESS_CPU_TOTAL = prom.Gauge(
     'sky_apiserver_process_cpu_total',
     'Total CPU times a worker process has been running',
     ['pid', 'type', 'mode'],
+    multiprocess_mode='liveall',
 )
 
 SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES = prom.Histogram(
@@ -295,14 +328,19 @@ SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
     buckets=_LATENCY_BUCKETS,
 )
 
+# Fleet-wide free-executor counts, so 'livesum'. The default ('all') emits
+# one series per pid and never drops dead ones, so the count kept including
+# workers that had exited.
 SKY_APISERVER_LONG_EXECUTORS = prom.Gauge(
     'sky_apiserver_long_executors',
     'Total number of long-running request executors in the API server',
+    multiprocess_mode='livesum',
 )
 
 SKY_APISERVER_SHORT_EXECUTORS = prom.Gauge(
     'sky_apiserver_short_executors',
     'Total number of short-running request executors in the API server',
+    multiprocess_mode='livesum',
 )
 
 # Active threads in on-demand thread executors. Each process has its own
@@ -339,6 +377,54 @@ SKY_APISERVER_THREADS_EXHAUSTED_TOTAL = prom.Counter(
     'sky_apiserver_threads_exhausted_total',
     'Number of tasks rejected because an on-demand thread executor was full',
     ['name'],
+)
+
+# Auth-path work that ended in a timeout instead of a result. This is the
+# earliest signal that authentication is degrading: in a production incident
+# the first one landed 13 minutes before the first client-visible 503, and it
+# was log-only, so nothing could alert on it.
+#
+# `pool` is the executor the work ran on, spelled as
+# `sky_apiserver_threads_exhausted_total{name}` spells it so the two can be
+# read together. It matters because the deadline frees the caller and never
+# the thread (`wait_for` cannot cancel a thread parked on a blocking call),
+# so every `cause="deadline"` costs a slot in THAT pool until the call
+# returns on its own:
+#   `auth_thread_executor` (32) -- short DB lookups. Losing slots here locks
+#       every authenticated request out, so this is the pre-exhaustion signal.
+#   `request_thread_executor` (128) -- role seeding, which reloads config and
+#       runs policy operations. Its blocker is often a policy lock rather
+#       than the database, and it is deliberately on the larger pool for
+#       exactly that reason, so do not read it as auth-pool pressure.
+#
+# `cause` says which timeout ended the call:
+#   `deadline` -- the client-side `asyncio.wait_for` deadline elapsed; the
+#       thread is still held (see above).
+#   anything else -- the database ended the call at one of the server-side
+#       timeouts the auth path sets on its own transaction (`lock_timeout`,
+#       `statement_timeout`, `idle_in_transaction_session_timeout`). The
+#       thread comes back; a `lock_timeout` says another session holds the
+#       row lock.
+#
+# `site` is the name of the function that was called. Bounded, not
+# attacker-influenced: every call site passes a module-level function or a
+# bound method, so the values are fixed at build time. It is not only the
+# eight OSS names, though -- `call_with_deadline` is also called from the
+# enterprise plugin's session and RBAC middlewares and its volume gate, which
+# contribute their own, so a hosted deployment has more. A callable with no
+# `__name__` (a partial) records `unknown` rather than widening the label.
+#
+# Two things are deliberately NOT counted here. Executor exhaustion, which
+# already has `sky_apiserver_threads_exhausted_total`; and whatever response
+# the caller went on to produce. Most callers answer a retryable 503, but the
+# `/api/health` basic-auth path swallows the timeout and proceeds
+# unauthenticated, so it yields no client-visible error at all -- those
+# requests reach no request-level metric, and this counter is the only place
+# they appear.
+SKY_APISERVER_AUTH_TIMEOUTS_TOTAL = prom.Counter(
+    'sky_apiserver_auth_timeouts_total',
+    'Auth-path work that timed out, by call site, cause and executor pool',
+    ['site', 'cause', 'pool'],
 )
 
 # Time a request spends waiting in the task queue (from creation to dequeue).

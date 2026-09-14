@@ -36,6 +36,12 @@ def roots(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_reservation(monkeypatch):
+    """The reservation is module-level, so it would cross tests."""
+    monkeypatch.setattr(local_disk, '_reserved_bytes', 0)
+
+
+@pytest.fixture(autouse=True)
 def _no_budget(monkeypatch):
     monkeypatch.delenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR,
                        raising=False)
@@ -237,15 +243,22 @@ def test_only_charged_roots_count_against_the_budget(roots, monkeypatch):
     assert snapshot.used_bytes == snapshot.roots['present'].used_bytes
     assert snapshot.used_bytes < 8 * 1024 * 1024
     assert snapshot.headroom_bytes == 1024**3 - snapshot.used_bytes
-    # Both roots still report their own size; only the aggregate is scoped.
-    assert snapshot.roots['other'].used_bytes >= 8 * 1024 * 1024
+    # 'other' is listed with its filesystem but never walked, so its zero
+    # is not a measurement.
+    assert snapshot.roots['other'].walked is False
+    assert snapshot.roots['present'].walked is True
 
+    families = _families(metrics.LocalDiskUsageCollector())
     charged = {
-        s.labels['root']: s.value
-        for s in _families(metrics.LocalDiskUsageCollector())
-        ['sky_apiserver_local_disk_root_charged_to_ephemeral'].samples
+        s.labels['root']: s.value for s in
+        families['sky_apiserver_local_disk_root_charged_to_ephemeral'].samples
     }
     assert charged == {'present': 1.0, 'other': 0.0}
+    reported = {
+        s.labels['root']
+        for s in families['sky_apiserver_local_disk_used_bytes'].samples
+    }
+    assert reported == {'present'}
 
 
 def test_charging_follows_the_device_then_the_mount_source(tmp_path):
@@ -345,3 +358,161 @@ def test_a_root_inside_another_root_is_measured_once(tmp_path, monkeypatch):
 
     assert list(snapshot.roots) == ['outer']
     assert snapshot.roots['outer'].files == 1
+
+
+def test_available_is_absent_without_a_declared_budget(roots):
+    present, _ = roots
+    _write(str(present / 'a.log'), 4096)
+
+    assert local_disk.available_bytes() is None
+
+
+def test_available_counts_a_request_as_well_as_a_limit(roots, monkeypatch):
+    """A guard measures against whatever the deployment declared.
+
+    Unlike the published headroom gauge, which reports only an enforced
+    limit, refusing work that would overrun a declared request is correct
+    on its own terms.
+    """
+    present, _ = roots
+    _write(str(present / 'a.log'), 64 * 1024)
+    used = local_disk.scan().used_bytes
+
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_REQUEST_ENV_VAR,
+                       str(1024**3))
+    assert local_disk.available_bytes() == 1024**3 - used
+
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR,
+                       str(2 * 1024**3))
+    assert local_disk.available_bytes() == 2 * 1024**3 - used
+
+
+def test_available_never_goes_negative(roots, monkeypatch):
+    present, _ = roots
+    _write(str(present / 'a.log'), 64 * 1024)
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, '1')
+
+    assert local_disk.available_bytes() == 0
+
+
+def test_a_reservation_counts_against_available_while_it_is_held(
+        roots, monkeypatch):
+    """A walk cannot see bytes a concurrent caller has not written yet."""
+    present, _ = roots
+    _write(str(present / 'a.log'), 4096)
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, str(1024**3))
+    before = local_disk.available_bytes()
+
+    with local_disk.reserve(100 * 1024):
+        assert local_disk.available_bytes() == before - 100 * 1024
+
+    assert local_disk.available_bytes() == before
+
+
+def test_a_reservation_is_released_even_when_the_caller_raises(
+        roots, monkeypatch):
+    present, _ = roots
+    _write(str(present / 'a.log'), 4096)
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, str(1024**3))
+    before = local_disk.available_bytes()
+
+    with pytest.raises(RuntimeError):
+        with local_disk.reserve(100 * 1024):
+            raise RuntimeError('extraction failed')
+
+    assert local_disk.available_bytes() == before
+
+
+def test_a_non_positive_reservation_is_a_no_op(roots, monkeypatch):
+    present, _ = roots
+    _write(str(present / 'a.log'), 4096)
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, str(1024**3))
+    before = local_disk.available_bytes()
+
+    with local_disk.reserve(0):
+        assert local_disk.available_bytes() == before
+    with local_disk.reserve(-5):
+        assert local_disk.available_bytes() == before
+
+
+def test_a_destination_not_charged_to_this_container_ignores_the_budget(
+        tmp_path, monkeypatch):
+    """A persistent volume's bytes belong to the volume, not the budget.
+
+    The chart mounts one over part of the tree, so an extraction's
+    destination is not always charged to this container.
+    """
+    monkeypatch.setattr(local_disk, '_charged_to_ephemeral',
+                        lambda mountpoint, sources, device: False)
+    monkeypatch.setattr(local_disk, 'available_bytes', lambda *a, **k: 0)
+
+    assert local_disk.available_for_path(str(tmp_path)) > 0
+
+
+def test_a_charged_destination_is_bounded_by_the_budget_too(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(local_disk, '_charged_to_ephemeral',
+                        lambda mountpoint, sources, device: True)
+    monkeypatch.setattr(local_disk, 'available_bytes', lambda *a, **k: 4096)
+
+    assert local_disk.available_for_path(str(tmp_path)) == 4096
+
+
+def test_availability_resolves_a_path_that_does_not_exist_yet(tmp_path):
+    """An extraction target may not have been created yet."""
+    missing = tmp_path / 'not' / 'created' / 'yet'
+
+    assert local_disk.available_for_path(str(missing)) == \
+        local_disk.available_for_path(str(tmp_path))
+
+
+def test_an_unwalked_root_is_not_walked_at_all(roots, monkeypatch):
+    """The point of skipping it is to not touch the filesystem.
+
+    A volume mounted into the tree sits on a network filesystem, where a
+    walk of many small files takes minutes.
+    """
+    present, other = roots
+    _write(str(other / 'b.log'), 4096)
+    visited = []
+    real_scandir = os.scandir
+
+    def tracking_scandir(path):
+        visited.append(str(path))
+        return real_scandir(path)
+
+    monkeypatch.setattr(local_disk, '_mountpoint', lambda path: path)
+    monkeypatch.setattr(
+        local_disk, '_charged_to_ephemeral',
+        lambda mountpoint, sources, device: mountpoint == str(present))
+    monkeypatch.setattr(local_disk.os, 'scandir', tracking_scandir)
+
+    local_disk.scan()
+
+    assert not any(str(other) in path for path in visited)
+
+
+def test_a_truncated_walk_reports_no_budget_bound(roots, monkeypatch):
+    """A partial walk under-reports usage, so it cannot bound the budget."""
+    present, _ = roots
+    for i in range(20):
+        _write(str(present / f'{i}.log'), 1024)
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, str(1024**3))
+
+    assert local_disk.scan(max_entries=5).truncated is True
+
+    monkeypatch.setattr(local_disk, 'scan',
+                        lambda *a, **k: _truncated_snapshot())
+    assert local_disk.available_bytes() is None
+
+
+def _truncated_snapshot():
+    usage = local_disk.RootUsage(path='/x',
+                                 used_bytes=1024,
+                                 files=1,
+                                 truncated=True,
+                                 mountpoint='/x')
+    return local_disk.Snapshot(roots={'x': usage},
+                               filesystems={},
+                               budget=local_disk.budget(),
+                               duration_seconds=0.0)

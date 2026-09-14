@@ -16,13 +16,22 @@ from sky.server import server
 from sky.server.blob import local_blob_storage
 
 _METRIC = 'sky_apiserver_blob_check_size_bytes'
+_UPLOAD_ROUTE_PATHS = ('/upload_v2/blob', '/upload_v2')
 
 
 @pytest.fixture(name='blob_upload_app')
 def _blob_upload_app(tmp_path, monkeypatch):
     app = fastapi.FastAPI()
-    app.router.routes.extend(route for route in server.app.routes
-                             if route.path in ('/upload_v2/blob', '/upload_v2'))
+    # FastAPI >=0.137 also puts private included-router wrappers, which have
+    # no ``path``, in ``app.routes``. The upload routes are registered on the
+    # app itself, so a guarded flat scan still reaches both.
+    upload_routes = [
+        route for route in server.app.routes
+        if getattr(route, 'path', None) in _UPLOAD_ROUTE_PATHS
+    ]
+    found_paths = {route.path for route in upload_routes}
+    assert found_paths == set(_UPLOAD_ROUTE_PATHS), found_paths
+    app.router.routes.extend(upload_routes)
     requests = []
 
     @app.middleware('http')
@@ -71,7 +80,7 @@ def test_client_upload_records_size_on_miss_and_hit(blob_upload_app, tmp_path,
                         str(tmp_path / 'logs'))
     monkeypatch.setattr(client_common, '_FILE_UPLOAD_LOCK_DIR',
                         str(tmp_path / 'locks'))
-    monkeypatch.setattr(client_common, '_UPLOAD_CHUNK_BYTES', chunk_bytes)
+    monkeypatch.setattr(server_constants, 'UPLOAD_CHUNK_BYTES', chunk_bytes)
     monkeypatch.setattr(
         client_common.tempfile, 'NamedTemporaryFile',
         functools.partial(client_common.tempfile.NamedTemporaryFile,
