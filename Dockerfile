@@ -1,7 +1,14 @@
 # syntax=docker/dockerfile:1
 
+# The interpreter every stage builds on. Overridable so a deployment can
+# build this image on a newer Python: the API server's
+# SKYPILOT_API_SERVER_WORKER_MAX_TASKS_PER_CHILD worker recycling needs
+# ProcessPoolExecutor's max_tasks_per_child, which is 3.11+ only, so on the
+# default 3.10 base that setting is silently inert.
+ARG PYTHON_VERSION=3.10.19
+
 # Stage 1: Install Google Cloud SDK using APT
-FROM python:3.10.19-slim AS gcloud-apt-install
+FROM python:${PYTHON_VERSION}-slim AS gcloud-apt-install
 
 # Keep in sync with _GCLOUD_VERSION in sky/clouds/gcp.py. Pinned so the apt
 # install layer doesn't bake in a stale version via buildx registry caching
@@ -24,7 +31,7 @@ RUN apt-get update && \
 
 
 # Stage 2: Process the source code for INSTALL_FROM_SOURCE
-FROM python:3.10.19-slim AS process-source
+FROM python:${PYTHON_VERSION}-slim AS process-source
 
 # Control installation method - default to install from source
 ARG INSTALL_FROM_SOURCE=true
@@ -75,7 +82,7 @@ RUN cd /skypilot && \
 
 
 # Stage 3: Main image
-FROM python:3.10.19-slim
+FROM python:${PYTHON_VERSION}-slim
 
 ARG INSTALL_FROM_SOURCE=true
 
