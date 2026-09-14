@@ -461,19 +461,20 @@ with the group's own tasks, marked ``Dynamic``:
    :width: 90%
 
 The same tree appears in ``sky jobs queue``, with the dynamic tasks numbered on
-from the group's own tasks as 2 and 3:
+from the group's own tasks as 2, 3 and 4:
 
 .. code-block:: console
 
     $ sky jobs queue
     ID    TASK  NAME              ...  STATUS
-    42    -     train-and-eval    ...  RUNNING
+    122   -     train-and-eval    ...  RUNNING
      ↳    0     trainer [P]       ...  RUNNING
      ↳    1     eval-watcher [P]  ...  RUNNING
-     ↳    2     eval-step-1000    ...  SUCCEEDED
-     ↳    3     eval-step-2000    ...  RUNNING
+     ↳    2     eval-step-1       ...  SUCCEEDED
+     ↳    3     eval-step-2       ...  RUNNING
+     ↳    4     eval-step-3       ...  RUNNING
 
-    $ sky jobs cancel 42 --task 3   # the second evaluation, on its own
+    $ sky jobs cancel 122 --task 4   # the third evaluation, on its own
 
 **Choosing the group.** A job launched from inside a job group attaches to that
 group by default. ``--job-group <job id or name>`` attaches to a running job
