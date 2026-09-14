@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { PaginationControls } from '@/components/elements/PaginationControls';
+import { DynamicBadge } from '@/components/elements/DynamicBadge';
 import { SegmentedToggle } from '@/components/elements/SegmentedToggle';
 import { CircularProgress } from '@mui/material';
 import { Button } from '@/components/ui/button';
@@ -1822,6 +1823,16 @@ export function ManagedJobsTable({
                 : memberIsMultiTask
                   ? `/jobs/${item.id}/${taskIndex}`
                   : `/jobs/${item.id}`;
+            // Same Dynamic pill as the job page's task list: hover names the
+            // launching task, or says the member was attached from outside.
+            const launchedFrom =
+              item.parent_task_id != null
+                ? `task ${item.parent_task_id} of ${
+                    String(item.parent_job_id) === String(jobId)
+                      ? 'this job'
+                      : `job ${item.parent_job_id}`
+                  }`
+                : null;
             return (
               <TableCell className="whitespace-nowrap">
                 <Link href={href} className="text-blue-600 hover:underline">
@@ -1832,6 +1843,11 @@ export function ManagedJobsTable({
                     </span>
                   )}
                 </Link>
+                {item.dynamic_task_index != null && (
+                  <span className="ml-1.5">
+                    <DynamicBadge launchedFrom={launchedFrom} />
+                  </span>
+                )}
               </TableCell>
             );
           }
