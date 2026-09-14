@@ -49,6 +49,58 @@ INSTALL_AWS_CLI_CMD = (
     'unzip -q /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install '
     '&& rm -rf /tmp/awscliv2.zip /tmp/aws)')
 
+# The packages the container needs for SkyPilot to operate inside it. LC_ALL=C
+# keeps apt's diagnostics in English so that _PREFER_BASE_SUITE_FN can read
+# them regardless of the image's locale.
+_APT_INSTALL_DEPS_CMD = (
+    'LC_ALL=C apt-get -o DPkg::Options::=--force-confnew install -y '
+    'rsync curl wget patch openssh-server python3-pip fuse')
+
+# Shell function, spliced into the container setup command below, that reacts
+# to an install whose packages could not be FETCHED.
+#
+# A companion suite (<codename>-security, <codename>-updates) can outlive its
+# pool: once a release leaves support the distro may prune the pool while still
+# serving, or even re-signing, the suite's index. `apt-get update` then
+# succeeds, apt resolves the packages to the companion suite's higher versions,
+# and every one of those files is a 404 -- so the install fails on fetch even
+# though the base suite still serves working builds of the same packages.
+# Retrying identically cannot recover.
+#
+# APT::Default-Release gives the base suite priority 990 over the companions'
+# 500 (the config-file form of `apt-get -t`), so the retry -- and every later
+# apt run in this container, such as the storage mount setup -- prefers the
+# base suite, without editing any sources file.
+#
+# Guarded so that a healthy release never loses its security suite: the failure
+# must be a 404 from a companion suite of this release's codename (a timeout,
+# DNS or proxy failure is not a 404; a 404 from the base suite or from a
+# third-party repository is not a companion), and apt must have an index for
+# that codename, so a derived distro falls through unchanged. Returns 0 only
+# once the preference has been written, i.e. only when a retry can help.
+#
+# Note: the setup command below is nested inside `bash -lc '...'`, so nothing
+# spliced into it may contain a single quote.
+_PREFER_BASE_SUITE_FN = (
+    'sky_prefer_base_suite() { '
+    'local log="$1" base; '
+    '[ -f /etc/apt/apt.conf.d/99-skypilot-default-release ] && return 1; '
+    'base=$(sed -n "s/^VERSION_CODENAME=//p" /etc/os-release 2>/dev/null '
+    '| tr -cd "a-z"); '
+    '[ -n "$base" ] || return 1; '
+    # apt reports each failed download as an "Err:N <uri> <suite>/<component>
+    # ..." line followed by its status line, so pair the two with -A1.
+    'grep -A1 -E "^Err:[0-9]+ .* $base-[a-z]+/" "$log" 2>/dev/null '
+    '| grep -q "404  Not Found" || return 1; '
+    'apt-cache policy 2>/dev/null | grep -q "n=$base," || return 1; '
+    'printf "APT::Default-Release \\"%s\\";\\n" "$base" '
+    '> /etc/apt/apt.conf.d/99-skypilot-default-release 2>/dev/null '
+    '|| return 1; '
+    'echo "apt could not fetch packages from a companion suite of $base '
+    '(404 -- its pool may be gone); preferring the base suite $base and '
+    'retrying the install"; '
+    '}; ')
+
 # Pattern to extract SSH user from command output, handling MOTD contamination
 _DOCKER_USER_PATTERN = re.compile(r'SKYPILOT_DOCKER_USER: ([^\s\n]+)')
 
@@ -423,6 +475,7 @@ class DockerInitializer:
             'exec 200>/var/tmp/sky_apt.lock; '
             'flock -x -w 120 200 || exit 1; '
             'export DEBIAN_FRONTEND=noninteractive; '
+            f'{_PREFER_BASE_SUITE_FN}'
             # `apt-get update` fails as a whole when any one configured
             # repository is unusable -- an expired release file on an
             # end-of-life suite, say -- even though the packages below all
@@ -430,12 +483,20 @@ class DockerInitializer:
             # the install be what decides: it fails loudly, and with the
             # name of the package it could not get.
             '{ apt-get -yq update || echo "apt-get update failed; '
-            'continuing with the existing package index"; } && '
+            'continuing with the existing package index"; }; '
             # Our mount script will install gcsfuse without fuse package.
             # We need to install fuse package first to enable storage mount.
             # The dpkg option is to suppress the prompt for fuse installation.
-            'apt-get -o DPkg::Options::=--force-confnew install -y '
-            'rsync curl wget patch openssh-server python3-pip fuse\'')
+            # The attempt is captured so that a fetch failure can be told apart
+            # from a dpkg or dependency error, and replayed so that the setup
+            # log reads as it did before.
+            'sky_apt_log=/tmp/sky_apt_install.log; '
+            f'{_APT_INSTALL_DEPS_CMD} > "$sky_apt_log" 2>&1; '
+            'sky_apt_rc=$?; cat "$sky_apt_log"; '
+            'if [ $sky_apt_rc -ne 0 ] && sky_prefer_base_suite "$sky_apt_log"; '
+            f'then {_APT_INSTALL_DEPS_CMD} > "$sky_apt_log" 2>&1; '
+            'sky_apt_rc=$?; cat "$sky_apt_log"; fi; '
+            'exit $sky_apt_rc\'')
         self._run(cmd, run_env='docker')
 
         # Copy local authorized_keys to docker container.
