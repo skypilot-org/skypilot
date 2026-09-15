@@ -129,7 +129,12 @@ _ACC_INSTANCE_TYPE_DICTS = {
         8: ['a4-highgpu-8g'],
     },
     'RTXPRO6000': {
-        1: ['g4-standard-48'],
+        1: [
+            'g4-standard-6',
+            'g4-standard-12',
+            'g4-standard-24',
+            'g4-standard-48',
+        ],
         2: ['g4-standard-96'],
         4: ['g4-standard-192'],
         8: ['g4-standard-384'],
