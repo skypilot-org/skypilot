@@ -249,6 +249,18 @@ cloud_dependencies: Dict[str, List[str]] = {
         # See https://github.com/aio-libs/aiodns/issues/214
         'pycares<5',
     ],
+    'modal': [
+        # Modal SDK for Sandbox-based compute. Modal Sandboxes have a
+        # 24-hour maximum lifetime; the SSH tunnel (unencrypted_ports=[22])
+        # used for SkyPilot access is experimental as of 2026-06.
+        'modal>=1.0.0,<2',
+        # Modal needs a TOML parser to read ~/.modal.toml. On Python 3.11+
+        # stdlib provides tomllib; on lower versions we depend on tomli.
+        # Installed unconditionally (same pattern as runpod extra) because
+        # conditional installation does not work with controller package
+        # installation code.
+        'tomli',
+    ],
     'fluidstack': [],  # No dependencies needed for fluidstack
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
