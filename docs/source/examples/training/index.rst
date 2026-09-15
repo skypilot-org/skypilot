@@ -16,6 +16,7 @@ Training
    Finetuning Llama 2 <llama-2-finetuning.md>
    nanochat <nanochat.md>
    NeMo <nemo.md>
+   NeMo Automodel <https://docs.nvidia.com/nemo/automodel/latest/job-launchers/skypilot>
    NeMo RL <nemorl.md>
    OpenRLHF <openrlhf.md>
    PyTorch Monarch <https://github.com/meta-pytorch/monarch/tree/main/examples/skypilot>
