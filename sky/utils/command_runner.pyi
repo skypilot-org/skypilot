@@ -86,6 +86,7 @@ class CommandRunner:
             source_bashrc: bool = ...,
             skip_lines: int = ...,
             run_in_background: bool = ...,
+            timeout: Optional[int] = ...,
             **kwargs) -> int:
         ...
 
@@ -102,6 +103,7 @@ class CommandRunner:
             source_bashrc: bool = ...,
             skip_lines: int = ...,
             run_in_background: bool = ...,
+            timeout: Optional[int] = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -118,10 +120,11 @@ class CommandRunner:
             source_bashrc: bool = ...,
             skip_lines: int = ...,
             run_in_background: bool = ...,
+            timeout: Optional[int] = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
-    def get_remote_home_dir(self) -> str:
+    def get_remote_home_dir(self, timeout: Optional[int] = ...) -> str:
         ...
 
     def rsync(
@@ -133,6 +136,7 @@ class CommandRunner:
         log_path: str = ...,
         stream_logs: bool = ...,
         max_retry: int = ...,
+        timeout: Optional[int] = ...,
     ) -> None:
         ...
 
@@ -187,7 +191,8 @@ class CommandRunner:
                      up: bool,
                      log_path: str = ...,
                      stream_logs: bool = ...,
-                     max_retry: int = ...) -> None:
+                     max_retry: int = ...,
+                     timeout: Optional[int] = ...) -> None:
         ...
 
     def rsync_setup(self,
@@ -197,7 +202,8 @@ class CommandRunner:
                     up: bool,
                     log_path: str = ...,
                     stream_logs: bool = ...,
-                    max_retry: int = ...) -> None:
+                    max_retry: int = ...,
+                    timeout: Optional[int] = ...) -> None:
         ...
 
     def port_forward_command(
@@ -263,6 +269,7 @@ class SSHCommandRunner(CommandRunner):
             source_bashrc: bool = ...,
             skip_lines: int = ...,
             run_in_background: bool = ...,
+            timeout: Optional[int] = ...,
             **kwargs) -> int:
         ...
 
@@ -281,6 +288,7 @@ class SSHCommandRunner(CommandRunner):
             source_bashrc: bool = ...,
             skip_lines: int = ...,
             run_in_background: bool = ...,
+            timeout: Optional[int] = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -299,6 +307,7 @@ class SSHCommandRunner(CommandRunner):
             source_bashrc: bool = ...,
             skip_lines: int = ...,
             run_in_background: bool = ...,
+            timeout: Optional[int] = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
@@ -360,6 +369,7 @@ class KubernetesCommandRunner(CommandRunner):
             source_bashrc: bool = ...,
             skip_lines: int = ...,
             run_in_background: bool = ...,
+            timeout: Optional[int] = ...,
             **kwargs) -> int:
         ...
 
@@ -378,6 +388,7 @@ class KubernetesCommandRunner(CommandRunner):
             source_bashrc: bool = ...,
             skip_lines: int = ...,
             run_in_background: bool = ...,
+            timeout: Optional[int] = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -396,6 +407,7 @@ class KubernetesCommandRunner(CommandRunner):
             source_bashrc: bool = ...,
             skip_lines: int = ...,
             run_in_background: bool = ...,
+            timeout: Optional[int] = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
@@ -408,6 +420,7 @@ class KubernetesCommandRunner(CommandRunner):
         log_path: str = ...,
         stream_logs: bool = ...,
         max_retry: int = ...,
+        timeout: Optional[int] = ...,
     ) -> None:
         ...
 
@@ -480,6 +493,7 @@ class LocalProcessCommandRunner(CommandRunner):
             source_bashrc: bool = ...,
             skip_lines: int = ...,
             run_in_background: bool = ...,
+            timeout: Optional[int] = ...,
             **kwargs) -> int:
         ...
 
@@ -498,6 +512,7 @@ class LocalProcessCommandRunner(CommandRunner):
             source_bashrc: bool = ...,
             skip_lines: int = ...,
             run_in_background: bool = ...,
+            timeout: Optional[int] = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -516,5 +531,6 @@ class LocalProcessCommandRunner(CommandRunner):
             source_bashrc: bool = ...,
             skip_lines: int = ...,
             run_in_background: bool = ...,
+            timeout: Optional[int] = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...

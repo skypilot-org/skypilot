@@ -2919,6 +2919,21 @@ def get_config_schema():
             'install_conda': {
                 'type': 'boolean',
             },
+            # Wall-clock bound (seconds) for a single provisioning-phase
+            # remote command: setup commands, ray start, skylet start. A
+            # non-positive value disables the bound. See
+            # skypilot-org/skypilot#10167 for why an unbounded command can
+            # wedge `sky launch` forever.
+            'setup_command_timeout': {
+                'type': 'integer',
+            },
+            # Wall-clock bound (seconds) applied to each remote operation of
+            # an internal file mount -- the mkdir and the rsync of
+            # ~/.sky/.runtime_files are bounded separately, so a single mount
+            # can take up to twice this value.
+            'file_mount_timeout': {
+                'type': 'integer',
+            },
         }
     }
 
