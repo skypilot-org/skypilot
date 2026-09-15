@@ -139,6 +139,41 @@ class TestResolution:
             'kubernetes', _REGION, 'c-on-cloud')
         assert seen == [('kubernetes', _REGION, 'c-on-cloud')]
 
+    def test_a_resolver_raising_a_bare_exit_is_contained(self, resolvers):
+        """SystemExit and KeyboardInterrupt derive from BaseException, and
+        escaping here would be read as user cancellation by bulk_provision --
+        filing an already-launched cluster as cancelled."""
+
+        def _exit(*args):
+            raise SystemExit(1)
+
+        resolvers.append(_exit)
+        assert provisioner._resolve_execution_target(  # pylint: disable=protected-access
+            'kubernetes', _REGION, 'c-on-cloud') is None
+
+
+class TestRegistration:
+    """`register_execution_target_resolver` is the supported entry point."""
+
+    def test_registering_adds_the_resolver(self, resolvers):
+
+        def _resolver(*args):
+            del args
+
+        provisioner.register_execution_target_resolver(_resolver)
+        assert resolvers == [_resolver]
+
+    def test_registering_twice_keeps_one(self, resolvers):
+        """A module registering on import is loaded in several process
+        contexts; the list must not grow on each."""
+
+        def _resolver(*args):
+            del args
+
+        provisioner.register_execution_target_resolver(_resolver)
+        provisioner.register_execution_target_resolver(_resolver)
+        assert resolvers == [_resolver]
+
 
 class TestEvent:
     """The text the event actually carries."""
@@ -160,6 +195,30 @@ class TestEvent:
         resolvers.append(lambda *a: _OTHER)
         assert launched_message() == ('Instances launched on kubernetes in '
                                       f'{_REGION}, running on {_OTHER}')
+
+    def test_a_canonically_named_provider_hook_fires(self, resolvers,
+                                                     launched_message):
+        """Regression: the provider name reaching hooks used to be
+        ``repr(cloud)`` ('Kubernetes'), so a hook matching the canonical name
+        the provision registry dispatches on never fired and the placement was
+        silently dropped from the event."""
+
+        def _only_kubernetes(provider_name, region_name, cluster_name_on_cloud):
+            del region_name, cluster_name_on_cloud
+            return _OTHER if provider_name == 'kubernetes' else None
+
+        resolvers.append(_only_kubernetes)
+        assert launched_message() == ('Instances launched on kubernetes in '
+                                      f'{_REGION}, running on {_OTHER}')
+
+    def test_hooks_are_handed_the_canonical_provider_name(
+            self, resolvers, launched_message):
+        """The contract, pinned at the real call site rather than asserted of
+        a hand-built argument."""
+        seen = []
+        resolvers.append(lambda *args: seen.append(args[0]))
+        launched_message()
+        assert seen == ['kubernetes']
 
     def test_a_resolver_answering_the_region_changes_nothing(
             self, resolvers, launched_message):
