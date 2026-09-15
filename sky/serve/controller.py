@@ -129,7 +129,7 @@ class SkyServeController:
             # can use the URL for routing and the ID for accounting.
             active_replica_infos = (
                 self._replica_manager.get_active_replica_infos())
-            replica_info = []
+            replica_infos = []
             for info in active_replica_infos:
                 url = info.url
                 assert url is not None, info
@@ -142,14 +142,14 @@ class SkyServeController:
                     if accelerators:
                         gpu_type = list(accelerators.keys())[0]
 
-                replica_info.append({
+                replica_infos.append({
                     'replica_id': info.replica_id,
                     'url': url,
                     'gpu_type': gpu_type,
                 })
 
             return responses.JSONResponse(
-                content={'replica_info': replica_info}, status_code=200)
+                content={'replica_info': replica_infos}, status_code=200)
 
         @self._app.post('/controller/update_service')
         async def update_service(request: fastapi.Request) -> fastapi.Response:

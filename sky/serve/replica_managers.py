@@ -720,7 +720,13 @@ class ReplicaManager:
     def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
                  version: int) -> None:
         self.lock = threading.Lock()
-        self._next_replica_id: int = 1
+        # Initialize above IDs that survived a controller recovery. This is
+        # only a short-term guard; IDs can still be reused after all replica
+        # rows have been purged.
+        # TODO(jgsweets): Persist a service-level replica ID high-water mark.
+        replica_infos = serve_state.get_replica_infos(service_name)
+        self._next_replica_id: int = max(
+            (info.replica_id for info in replica_infos), default=0) + 1
         self._service_name: str = service_name
         self._uptime: Optional[float] = None
         self._update_mode = serve_utils.DEFAULT_UPDATE_MODE
