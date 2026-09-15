@@ -1125,7 +1125,8 @@ def add_cluster_event(cluster_name: str,
                       nop_if_duplicate: bool = False,
                       duplicate_regex: Optional[str] = None,
                       expose_duplicate_error: bool = False,
-                      transitioned_at: Optional[int] = None) -> None:
+                      transitioned_at: Optional[int] = None,
+                      cluster_hash: Optional[str] = None) -> None:
     """Add a cluster event.
 
     Args:
@@ -1139,13 +1140,33 @@ def add_cluster_event(cluster_name: str,
         expose_duplicate_error: If True, raise an error if the event is a
             duplicate. Only used if nop_if_duplicate is True.
         transitioned_at: If provided, use this timestamp for the event.
+        cluster_hash: If provided, the event is recorded against this hash and
+            the `clusters` table is not consulted at all: the name is not
+            resolved to a hash, and the event's starting_status is left empty,
+            since whichever row owns the name now may belong to a different
+            cluster. This lets a caller record an event for a cluster whose row
+            is already gone (e.g. after teardown); without it such an event is
+            silently dropped.
+
+    Note:
+        The event is still stored with the given cluster_name in the `name`
+        column, and the by-name readers (`get_cluster_events_by_name` and
+        `get_latest_cluster_events`) filter on that column, so they will return
+        an explicit-hash event for a later cluster that reuses the name. A
+        caller recording a post-teardown event for a name that may be reused
+        should pick an event type those readers do not select (they select
+        STATUS_CHANGE and LAUNCH_PROGRESS).
     """
     engine = _db_manager.get_engine()
-    cluster_hash = _get_hash_for_existing_cluster(cluster_name)
+    # An explicit hash identifies a cluster that may no longer own its name, so
+    # the clusters table must not be consulted for it at all.
+    explicit_cluster_hash = cluster_hash is not None
     if cluster_hash is None:
-        logger.debug(f'Hash for cluster {cluster_name} not found. '
-                     'Skipping event.')
-        return
+        cluster_hash = _get_hash_for_existing_cluster(cluster_name)
+        if cluster_hash is None:
+            logger.debug(f'Hash for cluster {cluster_name} not found. '
+                         'Skipping event.')
+            return
     if transitioned_at is None:
         transitioned_at = int(time.time())
     with orm.Session(engine) as session:
@@ -1158,9 +1179,13 @@ def add_cluster_event(cluster_name: str,
             session.rollback()
             raise ValueError('Unsupported database dialect')
 
-        cluster_row = session.query(cluster_table).filter_by(name=cluster_name)
-        last_status = cluster_row.first(
-        ).status if cluster_row and cluster_row.first() is not None else None
+        if explicit_cluster_hash:
+            last_status = None
+        else:
+            cluster_row = session.query(cluster_table).filter_by(
+                name=cluster_name)
+            last_status = cluster_row.first().status if (
+                cluster_row and cluster_row.first() is not None) else None
         if nop_if_duplicate:
             last_event = get_last_cluster_event(cluster_hash,
                                                 event_type=event_type)
