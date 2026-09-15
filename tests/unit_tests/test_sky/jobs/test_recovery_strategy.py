@@ -322,6 +322,52 @@ async def test_launch_parks_and_reattaches_without_teardown(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_launch_skips_api_start_inside_api_server(monkeypatch):
+    """A consolidation-mode controller (IS_SKYPILOT_SERVER set) must not call
+    sdk.api_start.
+
+    The controller runs as a child of the API server and inherits
+    IS_SKYPILOT_SERVER, so the server is its own parent -- there is nothing to
+    start. Calling sdk.api_start here is at best redundant and, on a transient
+    healthz blip under load, actively destructive:
+    check_server_healthy_or_start_fn would route into _start_api_server, whose
+    _set_metrics_env_var rmtree's the prometheus multiproc dir.
+    sdk.launch still runs against the local parent.
+    """
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+    monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+
+    result = await executor._launch(max_retry=1, raise_on_failure=True)
+
+    assert result == 123.45
+    patches.sdk_launch.assert_called_once()
+    recovery_strategy.sdk.api_start.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_launch_calls_api_start_on_standalone_controller(monkeypatch):
+    """A standalone controller (IS_SKYPILOT_SERVER unset) still calls
+    sdk.api_start to start a local API server on its own VM.
+
+    Guards the non-consolidation path: the IS_SKYPILOT_SERVER gate is the only
+    thing that should suppress the start, and it is intentionally absent on a
+    standalone controller VM (see server.common.is_running_in_api_server).
+    """
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+    monkeypatch.delenv('IS_SKYPILOT_SERVER', raising=False)
+
+    result = await executor._launch(max_retry=1, raise_on_failure=True)
+
+    assert result == 123.45
+    patches.sdk_launch.assert_called_once()
+    recovery_strategy.sdk.api_start.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_launch_parking_does_not_consume_retry_budget(monkeypatch):
     """Park cycles must not count against max_retry."""
     executor = _make_launch_executor()
