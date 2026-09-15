@@ -1812,15 +1812,12 @@ def get_tree_root_ids(job_ids: List[int]) -> List[int]:
     tree_root = sqlalchemy.func.coalesce(job_info_table.c.root_job_id,
                                          spot_table.c.spot_job_id)
 
-    # Filter on spot's id: the column every job has.
+    # Filter on spot's id: the column every job has. DISTINCT because a job
+    # has one spot row per task, and requested jobs can share a root.
     query = sqlalchemy.select(tree_root).select_from(spot_with_job_info).where(
-        spot_table.c.spot_job_id.in_(job_ids))
+        spot_table.c.spot_job_id.in_(job_ids)).distinct().order_by(tree_root)
     with orm.Session(engine) as session:
-        rows = session.execute(query).fetchall()
-
-    # The same root comes back once per task row of each requested job, and
-    # once per requested job that shares it. The set collapses those.
-    return sorted({row[0] for row in rows})
+        return [row[0] for row in session.execute(query).fetchall()]
 
 
 def build_managed_jobs_with_filters_no_status_query(
