@@ -789,6 +789,29 @@ class TestQueue:
                            include_tree=True)
         assert seen['include_tree'] is True
 
+    def test_queue_refuses_include_tree_without_ids_or_with_extras(
+            self, monkeypatch):
+        jobs = [_make_job(1)]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+        with pytest.raises(ValueError, match='requires job_ids'):
+            jobs_core.queue_v2(refresh=False, all_users=True, include_tree=True)
+        with pytest.raises(ValueError, match='pagination'):
+            jobs_core.queue_v2(refresh=False,
+                               all_users=True,
+                               job_ids=[1],
+                               include_tree=True,
+                               page=1,
+                               limit=5)
+        with pytest.raises(ValueError, match='skip_finished, statuses'):
+            jobs_core.queue_v2(refresh=False,
+                               all_users=True,
+                               job_ids=[1],
+                               include_tree=True,
+                               skip_finished=True,
+                               statuses=['RUNNING'])
+        # Visibility is not a filter: all_users=False is allowed.
+        jobs_core.queue_v2(refresh=False, job_ids=[1], include_tree=True)
+
 
 def test_queue_v2_body_carries_include_tree():
     # The HTTP handler hands the body to queue_v2_api as kwargs, so the field

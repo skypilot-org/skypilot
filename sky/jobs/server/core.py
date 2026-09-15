@@ -1619,6 +1619,31 @@ def queue_v2(
         if page is not None:
             raise ValueError('Limit must be specified when page is specified')
 
+    if include_tree:
+        # The tree lookup takes job ids and nothing else. Whether a filter
+        # should test the named jobs, their roots, or every row of the tree
+        # is undecided (SKY-7163), so the combination is refused rather than
+        # answered one way. Visibility (workspace access, all_users) still
+        # applies; it is not a filter the caller chose.
+        if job_ids is None:
+            raise ValueError('include_tree requires job_ids.')
+        if page is not None or limit is not None:
+            raise ValueError('include_tree cannot be combined with pagination.')
+        extras = {
+            'skip_finished': skip_finished or None,
+            'user_match': user_match,
+            'workspace_match': workspace_match,
+            'name_match': name_match,
+            'pool_match': pool_match,
+            'infra_match': infra_match,
+            'statuses': statuses,
+            'submitted_after': submitted_after,
+            'submitted_before': submitted_before,
+        }
+        given = sorted(k for k, v in extras.items() if v is not None)
+        if given:
+            raise ValueError('include_tree cannot be combined with filters; '
+                             f'got {", ".join(given)}.')
     with metrics_lib.time_it('jobs.queue.restart_controller', group='jobs'):
         handle = _maybe_restart_controller(refresh,
                                            stopped_message='No in-progress '

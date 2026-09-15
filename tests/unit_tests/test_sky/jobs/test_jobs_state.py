@@ -1988,7 +1988,7 @@ class TestIncludeTree:
         rows, total = state.get_managed_jobs_with_filters(job_ids=[root])
         assert self._keys(rows) == [(root, 0), (root, 1)]
 
-    def test_several_trees_and_pagination(self, _mock_managed_jobs_db_conn):
+    def test_several_trees(self, _mock_managed_jobs_db_conn):
         root, eval1, eval1a = self._tree()
         other = TestParentJobLinks._new_job('other')
         other_child = TestParentJobLinks._new_job('other-child',
@@ -1998,15 +1998,38 @@ class TestIncludeTree:
         assert total == 2
         assert self._keys(rows) == [(root, 0), (root, 1), (eval1, 0),
                                     (eval1a, 0), (other, 0), (other_child, 0)]
-        # Paged: one tree per page, newest root first, every row of it.
-        page1, total = state.get_managed_jobs_with_filters(
-            job_ids=[eval1a, other_child], include_tree=True, page=1, limit=1)
-        assert total == 2
-        assert self._keys(page1) == [(other, 0), (other_child, 0)]
-        page2, _ = state.get_managed_jobs_with_filters(
-            job_ids=[eval1a, other_child], include_tree=True, page=2, limit=1)
-        assert self._keys(page2) == [(root, 0), (root, 1), (eval1, 0),
-                                     (eval1a, 0)]
+        # Newest tree first, the same order the list gives.
+        assert [j['job_id'] for j in rows][:2] == [other, other_child]
+
+    def test_tree_lookup_takes_job_ids_and_nothing_else(
+            self, _mock_managed_jobs_db_conn):
+        root, eval1, _ = self._tree()
+        with pytest.raises(ValueError, match='requires job_ids'):
+            state.get_managed_jobs_with_filters(include_tree=True)
+        with pytest.raises(ValueError, match='pagination'):
+            state.get_managed_jobs_with_filters(job_ids=[root],
+                                                include_tree=True,
+                                                page=1,
+                                                limit=1)
+        with pytest.raises(ValueError, match='name_match, statuses'):
+            state.get_managed_jobs_with_filters(job_ids=[root],
+                                                include_tree=True,
+                                                name_match='x',
+                                                statuses=['PENDING'])
+        with pytest.raises(ValueError, match='skip_finished'):
+            state.get_managed_jobs_with_filters(job_ids=[root],
+                                                include_tree=True,
+                                                skip_finished=True)
+        # Visibility is not a filter: it still applies, and still passes.
+        rows, total = state.get_managed_jobs_with_filters(
+            job_ids=[eval1],
+            include_tree=True,
+            accessible_workspaces=['ws'],
+            user_hashes=['user1'])
+        assert total == 1 and len(rows) == 4
+        rows, total = state.get_managed_jobs_with_filters(
+            job_ids=[eval1], include_tree=True, accessible_workspaces=['nope'])
+        assert rows == [] and total == 0
 
     def test_counts_and_options_cover_the_tree(self,
                                                _mock_managed_jobs_db_conn):
