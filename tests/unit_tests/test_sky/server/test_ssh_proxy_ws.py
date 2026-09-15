@@ -306,9 +306,13 @@ def _run_handler(loop, fake_kubectl, mode, proxy_stub):
     websocket = _make_websocket()
     websocket.accept = mock.AsyncMock()
 
-    async def stub(websocket, read_from_backend, write_to_backend,
-                   close_backend, timestamps_supported):
-        del websocket, timestamps_supported
+    async def stub(websocket,
+                   read_from_backend,
+                   write_to_backend,
+                   close_backend,
+                   timestamps_supported,
+                   path=None):
+        del websocket, timestamps_supported, path
         return await proxy_stub(captured, read_from_backend, write_to_backend,
                                 close_backend)
 
