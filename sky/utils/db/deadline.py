@@ -28,7 +28,14 @@ that the caller sets around the DB function:
 
 The engine listener is inert without a thread-local deadline, so attaching
 it to every Postgres engine is harmless in every process.
+
+The deadline is a *sync-thread* contract end to end: it is set on the worker
+thread that runs the DB work, read by same-thread consumers, and async
+engines get no listener at all. ``set_deadline`` refuses to be called from
+async code so a deadline can never be (silently ineffectively) imposed
+around async DB calls.
 """
+import asyncio
 import logging
 import threading
 import time
@@ -111,7 +118,29 @@ _installed: 'weakref.WeakSet' = weakref.WeakSet()
 
 
 def set_deadline(deadline_monotonic: float) -> None:
-    """Set the current thread's DB deadline (a ``time.monotonic()`` value)."""
+    """Set the current thread's DB deadline (a ``time.monotonic()`` value).
+
+    Sync threads only: raises when called from async code (a running event
+    loop on this thread). Every consumer of the deadline is a same-thread
+    synchronous one -- the SET LOCAL listener and the retry gates -- and
+    async engines get no listener at all (see ``install``), so a deadline
+    set from async code would bound nothing while looking like it does.
+    Set it inside the worker thread that runs the DB work (see
+    ``db_lookup._run_with_deadline``). The thread-local is chosen over a
+    contextvar on purpose: ``to_thread_with_executor`` copies the caller's
+    contextvars into the worker, so a contextvar would let a deadline set on
+    an event-loop thread reach executor threads -- a thread-local cannot.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        raise RuntimeError(
+            'set_deadline must be called from the sync thread that runs '
+            'the DB work, not from async code: it does not bound async DB '
+            'calls (async engines get no listener). See '
+            'db_lookup._run_with_deadline for the intended call site.')
     _local.deadline = deadline_monotonic
 
 
