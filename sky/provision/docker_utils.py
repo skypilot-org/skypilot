@@ -56,6 +56,13 @@ _APT_INSTALL_DEPS_CMD = (
     'LC_ALL=C apt-get -o DPkg::Options::=--force-confnew install -y '
     'rsync curl wget patch openssh-server python3-pip fuse')
 
+# Where the two steps below record what they decided. Both are read by every
+# later apt run in the container (the storage mount setup, the user's own
+# commands), which is the point: once a release's companion suites are known to
+# be unusable, nothing in the container should resolve to them again.
+_APT_PREFERENCES_PATH = '/etc/apt/preferences.d/99-skypilot-base-suite'
+_APT_CONF_PATH = '/etc/apt/apt.conf.d/99-skypilot-base-suite'
+
 # Shell function, spliced into the container setup command below, that reacts
 # to an install whose packages could not be FETCHED.
 #
@@ -67,10 +74,20 @@ _APT_INSTALL_DEPS_CMD = (
 # though the base suite still serves working builds of the same packages.
 # Retrying identically cannot recover.
 #
-# APT::Default-Release gives the base suite priority 990 over the companions'
-# 500 (the config-file form of `apt-get -t`), so the retry -- and every later
-# apt run in this container, such as the storage mount setup -- prefers the
-# base suite, without editing any sources file.
+# The fix is to stop apt resolving to the companion suites, by pinning them
+# below the priority 100 that apt gives an installed version. That matters:
+# raising the base suite instead (APT::Default-Release, priority 990) does
+# nothing for a package whose installed version is newer than the base suite's,
+# because apt_preferences(5) applies 990 "unless there is a version available
+# belonging to the target release or the installed version is more recent" --
+# so apt falls straight back to the companion's version, the one that 404s.
+# Images commonly ship a package at a security version newer than the base
+# suite's, which is exactly when this fallback is needed.
+#
+# Debian names the companions in Codename (n=bullseye-security) and Ubuntu
+# shares one Codename across its pockets and names them in Suite
+# (a=jammy-security), so both forms are written; the ones that match nothing
+# are inert.
 #
 # Guarded so that a healthy release never loses its security suite: the failure
 # must be a 404 from a companion suite of this release's codename (a timeout,
@@ -83,8 +100,8 @@ _APT_INSTALL_DEPS_CMD = (
 # spliced into it may contain a single quote.
 _PREFER_BASE_SUITE_FN = (
     'sky_prefer_base_suite() { '
-    'local log="$1" base; '
-    '[ -f /etc/apt/apt.conf.d/99-skypilot-default-release ] && return 1; '
+    'local log="$1" base k s; '
+    f'[ -f {_APT_PREFERENCES_PATH} ] && return 1; '
     'base=$(sed -n "s/^VERSION_CODENAME=//p" /etc/os-release 2>/dev/null '
     '| tr -cd "a-z"); '
     '[ -n "$base" ] || return 1; '
@@ -93,12 +110,55 @@ _PREFER_BASE_SUITE_FN = (
     'grep -A1 -E "^Err:[0-9]+ .* $base-[a-z]+/" "$log" 2>/dev/null '
     '| grep -q "404  Not Found" || return 1; '
     'apt-cache policy 2>/dev/null | grep -q "n=$base," || return 1; '
-    'printf "APT::Default-Release \\"%s\\";\\n" "$base" '
-    '> /etc/apt/apt.conf.d/99-skypilot-default-release 2>/dev/null '
-    '|| return 1; '
+    '{ for k in n a; do for s in security updates; do '
+    'printf "Package: *\\nPin: release %s=%s-%s\\nPin-Priority: 1\\n\\n" '
+    '"$k" "$base" "$s"; '
+    f'done; done; }} > {_APT_PREFERENCES_PATH} 2>/dev/null || return 1; '
     'echo "apt could not fetch packages from a companion suite of $base '
-    '(404 -- its pool may be gone); preferring the base suite $base and '
-    'retrying the install"; '
+    '(404 -- its pool may be pruned); deprioritizing the companion suites of '
+    '$base and retrying the install"; '
+    '}; ')
+
+# Second and last step, used only when the retry above still fails.
+#
+# Deprioritizing the companions leaves the base suite to satisfy the install on
+# its own, and it cannot always do so without moving a package backwards: a
+# package that is not installed yet but whose sibling is (openssh-server next
+# to an openssh-client from the pruned suite, say) carries a strict
+# "= ${binary:Version}" dependency that only a downgrade of the installed
+# sibling can meet, and apt will not downgrade on its own. Priority 1001 is
+# what apt_preferences(5) defines as "causes a version to be installed even if
+# this constitutes a downgrade", and APT::Get::allow-downgrades lets apt act on
+# it here and in the container's later apt runs.
+#
+# This is deliberately the fallback rather than the first move: it rolls
+# installed packages back to the base suite's builds, which on a supported
+# release would mean giving up applied security updates. It only ever runs
+# after a companion suite has already 404ed and the gentler pinning has failed,
+# i.e. when those updates are not obtainable anyway -- and only for the two
+# failures it can actually fix, a fetch that still 404s and a dependency set
+# apt cannot satisfy. A dpkg error is left alone.
+_FORCE_BASE_SUITE_FN = (
+    'sky_force_base_suite() { '
+    'local log="$1" base key; '
+    f'[ -f {_APT_PREFERENCES_PATH} ] || return 1; '
+    f'[ -f {_APT_CONF_PATH} ] && return 1; '
+    'grep -qE "404  Not Found|Unable to correct problems" "$log" 2>/dev/null '
+    '|| return 1; '
+    'base=$(sed -n "s/^VERSION_CODENAME=//p" /etc/os-release 2>/dev/null '
+    '| tr -cd "a-z"); '
+    '[ -n "$base" ] || return 1; '
+    # Pin the base suite by whichever key does not also match its companions:
+    # Codename on Debian (n=bullseye vs n=bullseye-security), Suite on Ubuntu
+    # (a=jammy vs a=jammy-security, all of which share n=jammy).
+    'if apt-cache policy 2>/dev/null | grep -q "n=$base-"; '
+    'then key=n; else key=a; fi; '
+    'printf "Package: *\\nPin: release %s=%s\\nPin-Priority: 1001\\n\\n" '
+    f'"$key" "$base" >> {_APT_PREFERENCES_PATH} 2>/dev/null || return 1; '
+    'printf "APT::Get::allow-downgrades \\"true\\";\\n" '
+    f'> {_APT_CONF_PATH} 2>/dev/null || return 1; '
+    'echo "the base suite $base still could not satisfy the install; making '
+    'it authoritative and allowing downgrades, then retrying"; '
     '}; ')
 
 # Pattern to extract SSH user from command output, handling MOTD contamination
@@ -476,6 +536,7 @@ class DockerInitializer:
             'flock -x -w 120 200 || exit 1; '
             'export DEBIAN_FRONTEND=noninteractive; '
             f'{_PREFER_BASE_SUITE_FN}'
+            f'{_FORCE_BASE_SUITE_FN}'
             # `apt-get update` fails as a whole when any one configured
             # repository is unusable -- an expired release file on an
             # end-of-life suite, say -- even though the packages below all
@@ -495,7 +556,10 @@ class DockerInitializer:
             'sky_apt_rc=$?; cat "$sky_apt_log"; '
             'if [ $sky_apt_rc -ne 0 ] && sky_prefer_base_suite "$sky_apt_log"; '
             f'then {_APT_INSTALL_DEPS_CMD} > "$sky_apt_log" 2>&1; '
-            'sky_apt_rc=$?; cat "$sky_apt_log"; fi; '
+            'sky_apt_rc=$?; cat "$sky_apt_log"; '
+            'if [ $sky_apt_rc -ne 0 ] && sky_force_base_suite "$sky_apt_log"; '
+            f'then {_APT_INSTALL_DEPS_CMD} > "$sky_apt_log" 2>&1; '
+            'sky_apt_rc=$?; cat "$sky_apt_log"; fi; fi; '
             'exit $sky_apt_rc\'')
         self._run(cmd, run_env='docker')
 

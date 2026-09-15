@@ -893,24 +893,72 @@ available_node_types:
                 # of the same packages. Retrying identically cannot recover,
                 # and neither can a mirror rotation that keeps the same suites.
                 #
-                # APT::Default-Release gives the base suite priority 990 over
-                # the companions' 500 (the config-file form of `apt-get -t`), so
-                # the next attempt here, and the storage-mount, docker and user
-                # setup commands that run apt on this node later, all prefer
-                # the base suite without editing any sources file. Guarded
-                # three ways, so a healthy release never loses its security
-                # suite: the failure must be a 404 from a companion suite of
-                # this release's codename (a timeout, DNS or proxy failure is
-                # not a 404; a 404 from the base suite or a third-party repo
-                # is not a companion), apt must have an index for that
-                # codename (a derived distro falls through), and the
+                # The fix is to stop apt resolving to the companion suites, by
+                # pinning them below the priority 100 that apt gives an
+                # installed version. That matters: raising the base suite
+                # instead (APT::Default-Release, priority 990) does nothing for
+                # a package whose installed version is newer than the base
+                # suite's, because apt_preferences(5) applies 990 "unless there
+                # is a version available belonging to the target release or the
+                # installed version is more recent" -- so apt falls straight
+                # back to the companion's version, the one that 404s. Images
+                # commonly ship a package at a security version newer than the
+                # base suite's, which is exactly when this fallback is needed.
+                #
+                # Debian names the companions in Codename (n=bullseye-security)
+                # and Ubuntu shares one Codename across its pockets and names
+                # them in Suite (a=jammy-security), so both forms are written;
+                # the ones that match nothing are inert. The preference applies
+                # to the next attempt here and to the storage-mount, docker and
+                # user setup commands that run apt on this node later.
+                #
+                # Guarded three ways, so a healthy release never loses its
+                # security suite: the failure must be a 404 from a companion
+                # suite of this release's codename (a timeout, DNS or proxy
+                # failure is not a 404; a 404 from the base suite or a
+                # third-party repo is not a companion), apt must have an index
+                # for that codename (a derived distro falls through), and the
                 # preference is only reported once it has been written.
+                #
+                # If the next attempt still fails, escalate once: the base
+                # suite cannot always satisfy the install on its own without
+                # moving a package backwards, because a package that is not
+                # installed yet but whose sibling is (openssh-server next to an
+                # openssh-client from the pruned suite, say) carries a strict
+                # "= ${binary:Version}" dependency that only a downgrade of the
+                # installed sibling can meet, and apt will not downgrade on its
+                # own. Priority 1001 is what apt_preferences(5) defines as
+                # "causes a version to be installed even if this constitutes a
+                # downgrade", and APT::Get::allow-downgrades lets apt act on it.
+                # That step rolls installed packages back to the base suite's
+                # builds, so it is deliberately last: it only runs once a
+                # companion suite has 404ed and the gentler pinning has failed,
+                # i.e. when those updates are not obtainable anyway, and only
+                # for the failures it can fix.
                 apt_prefer_base_suite_on_fetch_failure() {
                   local attempt_log="$1"
-                  [ -f /etc/apt/apt.conf.d/99-skypilot-default-release ] && return 0
-                  grep -q '404  Not Found' "$attempt_log" || return 0
+                  local pref=/etc/apt/preferences.d/99-skypilot-base-suite
+                  local conf=/etc/apt/apt.conf.d/99-skypilot-base-suite
                   local base
                   base=$( . /etc/os-release 2>/dev/null && echo "${VERSION_CODENAME:-}" )
+                  if [ -f "$pref" ]; then
+                    # Second and last step, only for what it can fix.
+                    [ -f "$conf" ] && return 0
+                    grep -qE '404  Not Found|Unable to correct problems' "$attempt_log" || return 0
+                    [ -n "$base" ] || return 0
+                    # Pin the base suite by whichever key does not also match
+                    # its companions: Codename on Debian (n=bullseye vs
+                    # n=bullseye-security), Suite on Ubuntu (a=jammy vs
+                    # a=jammy-security, all of which share n=jammy).
+                    local key=a
+                    $(prefix_cmd) apt-cache policy 2>/dev/null | grep -q "n=${base}-" && key=n
+                    if printf 'Package: *\nPin: release %s=%s\nPin-Priority: 1001\n\n' "$key" "$base" | $(prefix_cmd) tee -a "$pref" >/dev/null 2>&1 &&
+                       printf 'APT::Get::allow-downgrades "true";\n' | $(prefix_cmd) tee "$conf" >/dev/null 2>&1; then
+                      echo "the base suite '$base' still could not satisfy the install; making it authoritative and allowing downgrades for this and later apt runs" >> /tmp/apt-update.log
+                    fi
+                    return 0
+                  fi
+                  grep -q '404  Not Found' "$attempt_log" || return 0
                   if [ -z "$base" ]; then
                     echo "install got a 404 fetching packages and /etc/os-release names no VERSION_CODENAME; retrying as is" >> /tmp/apt-update.log
                     return 0
@@ -926,8 +974,10 @@ available_node_types:
                     echo "a companion suite of '$base' returned 404, but apt has no index for release '$base' itself; retrying as is" >> /tmp/apt-update.log
                     return 0
                   fi
-                  if printf 'APT::Default-Release "%s";\n' "$base" | $(prefix_cmd) tee /etc/apt/apt.conf.d/99-skypilot-default-release >/dev/null 2>&1; then
-                    echo "a companion suite of '$base' returned 404 for packages to install (its pool may be gone); preferring the base suite '$base' for this and later apt runs" >> /tmp/apt-update.log
+                  if { for k in n a; do for s in security updates; do
+                         printf 'Package: *\nPin: release %s=%s-%s\nPin-Priority: 1\n\n' "$k" "$base" "$s"
+                       done; done; } | $(prefix_cmd) tee "$pref" >/dev/null 2>&1; then
+                    echo "a companion suite of '$base' returned 404 for packages to install (its pool may be pruned); deprioritizing the companion suites of '$base' for this and later apt runs" >> /tmp/apt-update.log
                   else
                     echo "a companion suite of '$base' returned 404 for packages to install, but the apt preference could not be written; retrying as is" >> /tmp/apt-update.log
                   fi
