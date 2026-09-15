@@ -539,7 +539,10 @@ _LOCAL_DISK_ROOT_CHARGED_HELP = (
     'a persistent volume or a memory-backed tmpfs mounted into the tree. '
     'Only the roots marked 1 go into '
     'sky_apiserver_local_disk_headroom_bytes, so this is what makes that '
-    'number reproducible from the per-root series.')
+    'number reproducible from the per-root series. A root marked 0 is not '
+    'measured at all -- it reports no size or file count -- because a '
+    'volume is where a network filesystem turns up and walking one is '
+    'prohibitively slow.')
 
 _LOCAL_DISK_SCAN_DURATION_HELP = (
     'Wall-clock seconds the last walk of all local roots took. Runs off the '
@@ -635,12 +638,15 @@ class LocalDiskUsageCollector:
             _LOCAL_DISK_UNREADABLE_HELP,
             labels=['root'])
         for root, usage in snapshot.roots.items():
+            charged.add_metric(
+                [root], 1 if snapshot.is_charged_to_ephemeral(root) else 0)
+            if not usage.walked:
+                # A zero here would read as a measurement.
+                continue
             used.add_metric([root], usage.used_bytes)
             files.add_metric([root], usage.files)
             truncated.add_metric([root], 1 if usage.truncated else 0)
             unreadable.add_metric([root], usage.unreadable)
-            charged.add_metric(
-                [root], 1 if snapshot.is_charged_to_ephemeral(root) else 0)
         yield used
         yield files
         yield truncated
