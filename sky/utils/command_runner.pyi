@@ -124,7 +124,7 @@ class CommandRunner:
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
-    def get_remote_home_dir(self) -> str:
+    def get_remote_home_dir(self, timeout: Optional[int] = ...) -> str:
         ...
 
     def rsync(
