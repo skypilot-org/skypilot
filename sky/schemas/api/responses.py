@@ -219,6 +219,19 @@ class ManagedJobRecord(ResponseBaseModel):
     submitted_at: Optional[float] = None
     start_at: Optional[float] = None
     end_at: Optional[float] = None
+    # The startup breakdown. All None until the job first reaches RUNNING, on
+    # jobs that never run, and on jobs that predate it -- the dashboard draws
+    # nothing rather than a bar of zero width. Undeclared fields are dropped by
+    # the response model, so a phase missing here is invisible on the page with
+    # nothing failing anywhere.
+    t_time_to_running: Optional[float] = None
+    t_controller_queue: Optional[float] = None
+    t_retry_overhead: Optional[float] = None
+    t_unattributed: Optional[float] = None
+    t_provision_setup: Optional[float] = None
+    t_queue_wait: Optional[float] = None
+    t_node_startup: Optional[float] = None
+    t_runtime_setup: Optional[float] = None
     user_yaml: Optional[str] = None
     entrypoint: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None

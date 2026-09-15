@@ -15,8 +15,10 @@ phase list so a phase added later has to be carried everywhere or go red here.
 """
 from google.protobuf import json_format
 
+from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.metrics import launch_phases
+from sky.schemas.api import responses
 from sky.schemas.generated import managed_jobsv1_pb2
 
 # What the recorder writes, as the recorder itself defines it. Derived rather
@@ -40,6 +42,56 @@ def test_every_phase_column_crosses_the_controller_boundary():
     assert not missing, (
         f'{missing} are recorded but have no field on ManagedJobInfo, so they '
         f'stop at the jobs controller')
+
+
+def test_every_phase_column_is_declared_on_the_response_model():
+    """The API serializes through `ManagedJobRecord`, which drops what it does
+    not declare.
+
+    This is the link that was still broken after the protobuf was fixed: the
+    fields crossed the controller boundary and were then discarded on their way
+    out of the API, so the payload the dashboard received had no trace of them.
+    """
+    declared = set(responses.ManagedJobRecord.model_fields)
+
+    missing = [c for c in TIMELINE_COLUMNS if c not in declared]
+    assert not missing, (
+        f'{missing} cross the controller boundary but are not declared on '
+        f'ManagedJobRecord, so the API drops them on the way out')
+
+
+def test_the_response_model_keeps_the_values_it_is_given():
+    """Declared is not the same as carried: a wrong type would coerce or
+    raise, and either way the page would not get the number it draws."""
+    recorded = {c: 1.5 + i for i, c in enumerate(TIMELINE_COLUMNS)}
+
+    record = responses.ManagedJobRecord(job_id=1, task_id=0, **recorded)
+
+    for column, value in recorded.items():
+        assert getattr(record, column) == value, column
+
+
+def test_the_columns_the_recorder_writes_are_the_ones_the_readers_expect():
+    """One list, four readers.
+
+    `timeline_columns` is what the daemon actually writes to the spot table.
+    Every hop below is asserted against it rather than against a list retyped
+    per test, so a phase added to the recorder cannot quietly stop at any of
+    them.
+    """
+    # Every phase at once. No single job records all of them -- unattributed
+    # is what a job gets *instead* of a breakdown -- but this asks which
+    # columns can exist, not which co-occur.
+    written = set(
+        launch_phases.timeline_columns(
+            {phase: 1.0 for phase in launch_phases._JOB_PHASE_COLUMNS}, 15.0))
+
+    assert written == set(TIMELINE_COLUMNS), (
+        'the recorder and this suite disagree about which columns exist; '
+        'update TIMELINE_COLUMNS and check every hop below')
+    # And the spot table actually has them, or nothing upstream matters.
+    columns = {c.name for c in managed_job_state.spot_table.columns}
+    assert not (written - columns)
 
 
 def test_the_values_survive_the_round_trip():
