@@ -4,12 +4,19 @@ import types
 from sky.metrics import launch_phases
 
 
-def _task(created_at=0.0, submitted_at=10.0, start_at=1000.0):
+def _task(created_at=0.0,
+          submitted_at=10.0,
+          start_at=1000.0,
+          eligible_at=None,
+          task_id=0):
     return {
         'spot_job_id': 1,
-        'task_id': 0,
+        'task_id': task_id,
         'task_name': 'train',
         'created_at': created_at,
+        # When this task could first have started. The query coalesces it to
+        # created_at, so leaving it None here is a row from before the column.
+        'eligible_at': eligible_at,
         'submitted_at': submitted_at,
         'start_at': start_at,
         'workspace': 'eng',
@@ -36,6 +43,69 @@ def test_phases_account_for_the_whole_wait():
 
     assert total == 1000.0
     assert sum(phases.values()) == total
+
+
+def test_a_pipeline_task_is_measured_from_its_own_turn():
+    """The second task of a pipeline does not wait from submission.
+
+    A pipeline runs its tasks one after another, so task N is not waiting on
+    anything of ours until task N-1 finishes. Measured from submission, an
+    upstream task that ran for two hours is reported as two hours of queueing
+    for a controller -- unbounded, and indistinguishable afterwards from a
+    genuinely saturated scheduler.
+    """
+    # Submitted at 0; the task before this one ran until 7200 and this task was
+    # claimed 10s later, running 20s after that.
+    task = _task(created_at=0.0,
+                 eligible_at=7200.0,
+                 submitted_at=7210.0,
+                 start_at=7220.0,
+                 task_id=1)
+
+    total, phases = launch_phases.compute_job_timeline(task, [
+        _attempt(provision_start=7211.0,
+                 instances_requested=7212.0,
+                 admitted=None,
+                 instances_ready=7215.0)
+    ])
+
+    assert total == 20.0
+    assert phases[launch_phases.CONTROLLER_QUEUE] == 10.0
+    assert sum(phases.values()) == total
+
+
+def test_a_job_groups_tasks_all_start_waiting_together():
+    """A job group is parallel, so its tasks share the submission instant.
+
+    Its second task really has been waiting since submission, so its origin is
+    created_at and nothing about it changes. The write path records that by
+    stamping eligible_at at submission for every task of a group.
+    """
+    task = _task(created_at=0.0,
+                 eligible_at=0.0,
+                 submitted_at=10.0,
+                 start_at=1000.0,
+                 task_id=1)
+
+    total, phases = launch_phases.compute_job_timeline(task, [_attempt()])
+
+    assert total == 1000.0
+    assert phases[launch_phases.CONTROLLER_QUEUE] == 10.0
+    assert sum(phases.values()) == total
+
+
+def test_a_row_from_before_the_column_keeps_its_old_answer():
+    """Backfilling is not possible, so the fallback has to be exact.
+
+    Jobs that predate eligible_at were measured from created_at; reading them
+    any other way would move numbers that are already published.
+    """
+    with_origin = _task(created_at=0.0, eligible_at=0.0)
+    without = _task(created_at=0.0, eligible_at=None)
+
+    assert (launch_phases.compute_job_timeline(
+        without, [_attempt()]) == launch_phases.compute_job_timeline(
+            with_origin, [_attempt()]))
 
 
 def test_the_gap_between_attempts_becomes_retry_overhead():

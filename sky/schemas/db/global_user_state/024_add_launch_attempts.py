@@ -29,9 +29,8 @@ def upgrade():
         # Creating the table brings its indexes with it, but checkfirst skips
         # the whole statement when the table is already there, and then the
         # indexes are never created. Make the revision idempotent instead of
-        # half-applied. (A database already stamped at this revision is not
-        # reached by this -- alembic will not re-run it -- which is what 024
-        # is for.)
+        # half-applied -- a half-created table is how an index that the
+        # retention sweep depends on goes missing without anything failing.
         for index in Base.metadata.tables['launch_attempts'].indexes:
             index.create(bind=bind, checkfirst=True)
 

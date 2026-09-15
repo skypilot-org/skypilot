@@ -140,6 +140,21 @@ spot_table = sqlalchemy.Table(
     # negative observation lands silently in a histogram's lowest bucket, so
     # the metric would look healthy while being wrong.
     sqlalchemy.Column('created_at', sqlalchemy.Float, server_default=None),
+    # When this task could first have started, as epoch seconds. The origin the
+    # startup breakdown is measured from.
+    #
+    # Equal to created_at for a single task and for every task of a job group,
+    # whose tasks all begin waiting together. A pipeline runs its tasks one
+    # after another, so task N is not waiting on anything of ours until task
+    # N-1 finishes -- measuring from submission would fold every upstream
+    # task's runtime into t_controller_queue, which claims to mean "the
+    # scheduler was saturated". Unbounded, and indistinguishable downstream:
+    # the histogram is labelled by workspace only.
+    #
+    # Recording the moment rather than special-casing the formula keeps one
+    # meaning for every task. NULL on jobs that predate the column; readers
+    # fall back to created_at.
+    sqlalchemy.Column('eligible_at', sqlalchemy.Float, server_default=None),
     # The launch timeline, denormalized once the job first reaches RUNNING, so
     # the jobs list renders from one indexed row read instead of a per-job scan
     # of launch_attempts. Write-once: they describe how long the job took to
@@ -1133,8 +1148,15 @@ def set_pending(
     resources_str: str,
     metadata: str,
     is_primary_in_job_group: Optional[bool] = None,
+    eligible_at: Optional[float] = None,
 ):
-    """Set the task to pending state."""
+    """Set the task to pending state.
+
+    ``eligible_at`` is when this task could first have started. The caller
+    passes the submission instant for a task that is waiting from now -- task 0
+    of anything, and every task of a job group -- and None for a pipeline's
+    later tasks, whose origin is not known yet and is written at the handoff.
+    """
     add_job_event(job_id, task_id, ManagedJobStatus.PENDING,
                   'Job submitted to queue')
 
@@ -1150,6 +1172,7 @@ def set_pending(
                 status=ManagedJobStatus.PENDING.value,
                 is_primary_in_job_group=is_primary_in_job_group,
                 created_at=time.time(),
+                eligible_at=eligible_at,
             ))
         session.commit()
 
@@ -3438,6 +3461,38 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
     await callback_func('STARTED')
 
 
+async def set_eligible_at_async(job_id: int, task_id: int,
+                                eligible_at: float) -> None:
+    """Record when a pipeline's task became able to start.
+
+    Called at the handoff, once the task before this one has finished. Only
+    a pipeline needs it: task 0 and every task of a job group are waiting from
+    submission, and the submission path writes theirs.
+
+    Write-once. A controller that restarts mid-pipeline re-enters the loop and
+    would otherwise stamp the restart instead of the handoff, shrinking every
+    phase measured from it. Best-effort besides: this is a measurement, and it
+    must not be able to fail the task it is measuring.
+    """
+
+    async def _op(session: sql_async.AsyncSession) -> int:
+        result = await session.execute(
+            sqlalchemy.update(spot_table).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id,
+                    spot_table.c.eligible_at.is_(None),
+                )).values({spot_table.c.eligible_at: eligible_at}))
+        return result.rowcount
+
+    try:
+        await _retry_session(_op)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Could not record when job {job_id} task {task_id} '
+                       f'became eligible to start; its breakdown will fall '
+                       f'back to the job submission time: {e}')
+
+
 def get_job_status_with_task_id(job_id: int,
                                 task_id: int) -> Optional[ManagedJobStatus]:
     engine = _db_manager.get_engine()
@@ -4755,6 +4810,12 @@ def get_jobs_pending_launch_timeline(limit: int = 200) -> List[Dict[str, Any]]:
                 spot_table.c.task_id,
                 spot_table.c.task_name,
                 spot_table.c.created_at,
+                # Where this task's clock starts. NULL on jobs older than the
+                # column, and on those created_at is what they were measured
+                # from, so the fallback preserves their numbers exactly.
+                sqlalchemy.func.coalesce(
+                    spot_table.c.eligible_at,
+                    spot_table.c.created_at).label('eligible_at'),
                 spot_table.c.submitted_at,
                 spot_table.c.start_at,
                 job_info_table.c.workspace,
@@ -4836,6 +4897,9 @@ def get_jobs_that_never_ran(limit: int = 200) -> List[Dict[str, Any]]:
                 spot_table.c.spot_job_id,
                 spot_table.c.task_id,
                 spot_table.c.created_at,
+                sqlalchemy.func.coalesce(
+                    spot_table.c.eligible_at,
+                    spot_table.c.created_at).label('eligible_at'),
                 spot_table.c.submitted_at,
                 job_info_table.c.workspace,
                 job_info_table.c.pool,

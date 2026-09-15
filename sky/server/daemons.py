@@ -450,7 +450,8 @@ def _record_job_launch_timelines() -> int:
             logger.error(f'Failed to record the launch timeline of job '
                          f'{task["spot_job_id"]}: {e}')
             try:
-                total = task['start_at'] - task['created_at']
+                total = task['start_at'] - (task.get('eligible_at') or
+                                            task['created_at'])
                 managed_job_state.record_launch_timeline(
                     task['spot_job_id'], task['task_id'], {
                         't_time_to_running': total,
@@ -467,7 +468,9 @@ def _record_job_launch_timelines() -> int:
         try:
             if managed_job_state.record_controller_queue_only(
                     task['spot_job_id'], task['task_id'],
-                    max(0.0, task['submitted_at'] - task['created_at'])):
+                    max(
+                        0.0, task['submitted_at'] -
+                        (task.get('eligible_at') or task['created_at']))):
                 launch_phases.count_job_that_never_ran(task['workspace'],
                                                        bool(task.get('pool')))
         except Exception as e:  # pylint: disable=broad-except

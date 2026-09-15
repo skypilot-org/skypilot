@@ -194,9 +194,15 @@ def compute_job_timeline(task: Any,
                          attempts: List[Any]) -> Tuple[float, Dict[str, float]]:
     """Split a job's submission-to-running time into phases.
 
-    ``task`` carries created_at (accepted), submitted_at (claimed by a
-    controller) and start_at (running); ``attempts`` is every launch attempt
-    made for its cluster, oldest first.
+    ``task`` carries eligible_at (when this task could first have started),
+    submitted_at (claimed by a controller) and start_at (running); ``attempts``
+    is every launch attempt made for its cluster, oldest first.
+
+    The origin is eligible_at rather than the job's creation time because a
+    pipeline's tasks run one after another: task N is not waiting on anything
+    of ours until task N-1 finishes, and measuring from submission would fold
+    every upstream task's runtime into controller_queue. For a single task, and
+    for every task of a job group, the two are the same moment.
 
     ``retry_overhead`` spans from the first attempt to the one that worked, so
     it covers the tries that were thrown away and the backoff between them.
@@ -207,9 +213,10 @@ def compute_job_timeline(task: Any,
 
     Returns the total and the per-phase durations, which sum to it.
     """
-    total = task['start_at'] - task['created_at']
+    origin = task.get('eligible_at') or task['created_at']
+    total = task['start_at'] - origin
     phases: Dict[str, float] = {
-        CONTROLLER_QUEUE: task['submitted_at'] - task['created_at'],
+        CONTROLLER_QUEUE: task['submitted_at'] - origin,
     }
 
     final = _delivering_attempt(attempts, task['start_at'])
