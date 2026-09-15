@@ -7,7 +7,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { PaginationControls } from '@/components/elements/PaginationControls';
-import { DynamicBadge } from '@/components/elements/DynamicBadge';
 import { SegmentedToggle } from '@/components/elements/SegmentedToggle';
 import { CircularProgress } from '@mui/material';
 import { Button } from '@/components/ui/button';
@@ -1707,7 +1706,7 @@ export function ManagedJobsTable({
                   // the name link.
                   <span
                     className="text-gray-500 pl-6"
-                    title={`Dynamic task ${item.dynamic_task_index} of this job (job ${item.id}): sky jobs cancel ${jobId} --task ${item.dynamic_task_index}`}
+                    title={`Dynamic task ${item.dynamic_task_index} of job ${jobId} (job ${item.id}): sky jobs cancel ${jobId} --task ${item.dynamic_task_index}`}
                   >
                     {item.dynamic_task_index}
                     {memberIsMultiTask ? `.${taskIndex}` : ''}
@@ -1788,13 +1787,13 @@ export function ManagedJobsTable({
             const own = declaredTasks || tasks;
             const launchedJobs = new Set((memberTasks || []).map((t) => t.id))
               .size;
-            // One task count: the group's declared tasks plus the jobs
-            // launched from it (dynamic members; own id, own logs,
-            // cancellable alone, no effect on the group's status). The
-            // dynamic ones are marked in the task list, not in this badge —
-            // fewer distinct concepts at the group level.
+            // One task count, with the dynamic ones (jobs launched from
+            // inside the group; own id, own logs, cancellable alone, no
+            // effect on the group's status) called out.
             const totalTasks = own.length + launchedJobs;
-            const badgeLabel = `${totalTasks} task${totalTasks === 1 ? '' : 's'}`;
+            const badgeLabel =
+              `${totalTasks} task${totalTasks === 1 ? '' : 's'}` +
+              (launchedJobs > 0 ? ` (${launchedJobs} dynamic)` : '');
             const badgeKind =
               own.length > 1 || item.is_job_group ? 'JobGroup' : 'Job';
             return (
@@ -1823,16 +1822,6 @@ export function ManagedJobsTable({
                 : memberIsMultiTask
                   ? `/jobs/${item.id}/${taskIndex}`
                   : `/jobs/${item.id}`;
-            // Same Dynamic pill as the job page's task list: hover names the
-            // launching task, or says the member was attached from outside.
-            const launchedFrom =
-              item.parent_task_id != null
-                ? `task ${item.parent_task_id} of ${
-                    String(item.parent_job_id) === String(jobId)
-                      ? 'this job'
-                      : `job ${item.parent_job_id}`
-                  }`
-                : null;
             return (
               <TableCell className="whitespace-nowrap">
                 <Link href={href} className="text-blue-600 hover:underline">
@@ -1843,11 +1832,6 @@ export function ManagedJobsTable({
                     </span>
                   )}
                 </Link>
-                {item.dynamic_task_index != null && (
-                  <span className="ml-1.5">
-                    <DynamicBadge launchedFrom={launchedFrom} />
-                  </span>
-                )}
               </TableCell>
             );
           }
