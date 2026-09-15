@@ -2404,6 +2404,21 @@ def _build_debug_dump(
         json.dump(summary, f, indent=2)
 
 
+# DEFLATE level for the dump zip. The zlib default (6) optimizes ratio, not
+# speed, but the dump is a support artifact whose value is arriving quickly
+# and small enough to download -- and the zip step runs after the collection
+# deadline, so its CPU cost is unbudgeted tail time (a production 11GB dump
+# spent several minutes in DEFLATE-6; one 5.2GB server log took 2+ minutes
+# alone). Benchmarked on that dump's content mix (request/server logs and
+# JSON metadata, all highly compressible text): level 3 is ~3x faster than
+# level 6 for a ~25-35% larger zip (the 18:1 production dump would land
+# around 14:1), and level 1 costs only ~5-15% less CPU than 3 while
+# compressing another ~5-10% worse, so 3 keeps more of the ratio at similar
+# speed. Not configurable: this is a measured internal choice,
+# not a user preference.
+_ZIP_DEFLATE_LEVEL = 3
+
+
 def create_debug_dump(
     request_ids: Optional[List[str]] = None,
     cluster_names: Optional[List[str]] = None,
@@ -2559,7 +2574,10 @@ def create_debug_dump(
 
         zip_start = time.monotonic()
         file_count = 0
-        with zipfile.ZipFile(zip_file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        with zipfile.ZipFile(zip_file_path,
+                             'w',
+                             zipfile.ZIP_DEFLATED,
+                             compresslevel=_ZIP_DEFLATE_LEVEL) as zipf:
             for root, _, files in os.walk(dump_dir):
                 for file in files:
                     file_path = os.path.join(root, file)
@@ -2567,8 +2585,11 @@ def create_debug_dump(
                     zipf.write(file_path, arcname)
                     file_count += 1
 
-        logger.info(f'debug dump: created {zip_filename} ({file_count} files) '
-                    f'in {time.monotonic() - zip_start:.1f}s')
+        # Log the compressed size next to the pre-zip total logged above, so
+        # the achieved ratio is visible without fetching the artifact.
+        zip_size = os.path.getsize(zip_file_path)
+        logger.info(f'debug dump: created {zip_filename} ({file_count} files, '
+                    f'{zip_size} bytes) in {time.monotonic() - zip_start:.1f}s')
 
     logger.info(f'debug dump: finished in {time.monotonic() - dump_start:.1f}s '
                 f'-> {zip_file_path}')
