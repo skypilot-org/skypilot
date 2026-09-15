@@ -1784,13 +1784,14 @@ def _rows_in_trees_of(root_ids: List[int]) -> 'sqlalchemy.ColumnElement':
 
 
 def get_tree_root_ids(job_ids: List[int]) -> List[int]:
-    """Given job ids, the root of each job's tree: its ``root_job_id``, or
-    itself when that is NULL. One query, deduplicated and sorted; three ids
-    from one tree give that tree's one root, an unknown id gives nothing.
+    """Return the tree root of each given job: its ``root_job_id``, or the
+    job's own id when ``root_job_id`` is NULL.
 
-    Starts from the spot table with job_info outer-joined, like the queue
-    query: a job from before job_info existed has no job_info row and is
-    its own root.
+    The result is the distinct root ids, sorted. Ids that belong to the same
+    tree produce that root once. Ids that match no job are dropped. Runs one
+    query, starting from the spot table with job_info outer-joined so a job
+    without a job_info row (from before the table existed) resolves to its
+    own id.
     """
     if not job_ids:
         return []
