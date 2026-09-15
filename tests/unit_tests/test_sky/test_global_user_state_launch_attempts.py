@@ -9,6 +9,7 @@ never be adopted by a later one.
 import time
 
 from sky import global_user_state
+from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils.db import db_utils
 
@@ -129,6 +130,35 @@ def test_open_row_from_a_different_request_is_not_adopted(
 
     assert later != orphan
     assert len(_rows()) == 2
+
+
+def test_a_killed_request_is_never_re_executed_under_its_own_id():
+    """The other half of why leaving a dead attempt's row open is safe.
+
+    The test above covers the half this file owns: a *different* request never
+    adopts the row. The rest of the argument lives in the request scheduler.
+    ``open_launch_attempt`` resumes on ``(cluster_name, request_id, outcome IS
+    NULL)``, and a launch killed mid-flight deliberately leaves its row open
+    for the sweep to close as abandoned. Those two only fit together while a
+    request that reached RUNNING can never execute again under the same id.
+
+    If one could, the re-run would adopt the dead attempt, keep its hours-old
+    write-once milestones, and close it with ``instances_ready`` set to now --
+    reporting a multi-hour ``node_startup`` that looks entirely genuine and
+    trips no dropped-phase counter. That is worse than losing the measurement,
+    which at least gets counted.
+
+    This property would be changed for reasons having nothing to do with this
+    table: an API server that dies mid-request leaves its row saying RUNNING
+    with nothing executing it, and re-enqueueing those on startup is one of the
+    two obvious ways to clean that up. If this test fails, that is what
+    happened, and ``open_launch_attempt`` needs to stop keying on request_id
+    alone before the change lands.
+    """
+    executable = requests_lib.RequestStatus.executable_statuses()
+
+    assert requests_lib.RequestStatus.RUNNING not in executable
+    assert requests_lib.RequestStatus.CANCELLED not in executable
 
 
 def test_attempt_seq_continues_across_a_managed_job_recovery(
