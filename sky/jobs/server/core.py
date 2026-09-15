@@ -228,8 +228,8 @@ def _runner_accepts(method: Any, keyword: str) -> bool:
     try:
         params = inspect.signature(method).parameters
     except (TypeError, ValueError):
-        # Not introspectable (a C callable, a mock without a spec): assume
-        # the current protocol rather than silently drop the request.
+        # Signature not available (a C callable, a mock without a spec).
+        # Assume the current protocol so the request is not silently dropped.
         return True
     return keyword in params or any(
         p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
@@ -323,9 +323,9 @@ class _DefaultManagedJobRunner:
             for marker, default_message in refusals:
                 if marker not in output:
                     continue
-                # The controller refused the request (an infra filter or a
-                # whole-tree fetch it cannot apply) rather than answering
-                # without it. Surface its own line instead of a traceback.
+                # The controller refused the infra filter or the include_tree
+                # request because it predates it. Show the controller's own
+                # message instead of a traceback.
                 detail = output.partition(f'{marker}: ')[2].splitlines()
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.NotSupportedError(
@@ -1703,8 +1703,8 @@ def queue_v2(
                     raise exceptions.NotSupportedError(
                         managed_job_utils.INFRA_FILTER_UNSUPPORTED_MESSAGE)
             if include_tree and not response.include_tree_applied:
-                # Same shape of failure: dropped, the request is answered
-                # with the roots alone, which looks complete and is not.
+                # Same for include_tree: an old controller ignores the field
+                # and returns only the requested jobs' rows.
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.NotSupportedError(
                         managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE)
@@ -1715,11 +1715,11 @@ def queue_v2(
             pass
 
     runner = managed_job_runner.current()
-    # A runner registered out of tree (a plugin's) may predate `include_tree`
-    # and reject the keyword outright, which would break every queue request
-    # and not just the ones asking for a tree. Hand it the keyword only when
-    # it takes it; a tree request it cannot serve is refused the same way an
-    # old controller refuses one.
+    # A runner registered by a plugin may predate `include_tree`. Passing the
+    # keyword to it would raise TypeError on every queue request, not only the
+    # ones asking for a tree. Pass the keyword only to a runner that takes it.
+    # If the runner does not take it and a tree was asked for, refuse the
+    # request the way an old controller does.
     tree_kwargs: Dict[str, Any] = {}
     if _runner_accepts(runner.fetch_managed_job_table, 'include_tree'):
         tree_kwargs['include_tree'] = include_tree

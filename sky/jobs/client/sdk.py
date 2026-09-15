@@ -355,12 +355,11 @@ def queue_v2(
         infra_match: Only show jobs on this infra, as an ``--infra`` spec:
             ``cloud``, ``cloud/region`` or ``cloud/region/zone``, with ``*``
             for any component (e.g. ``k8s/my-context``, ``aws/us-east-1``).
-        include_tree: With ``job_ids``, return every row of the trees those
-            jobs belong to -- a job group's declared tasks and the jobs
-            launched under it (its dynamic tasks), at any depth -- instead
-            of the jobs' own rows. Several ids from one tree come back as
-            that tree once, keyed on its root. Requires an API server of
-            version ``MIN_JOBS_INCLUDE_TREE_API_VERSION`` or newer.
+        include_tree: With ``job_ids``, also return the rest of each job's
+            tree: the jobs launched under it (a job group's dynamic tasks),
+            at any depth. Ids from the same tree return that tree once.
+            Requires an API server of version
+            ``MIN_JOBS_INCLUDE_TREE_API_VERSION`` or newer.
 
     Returns:
         The request ID of the queue request.
@@ -434,8 +433,8 @@ def queue_v2(
                 'server. Please upgrade the API server to enable it.')
     if (include_tree and remote_api_version is not None and remote_api_version <
             server_constants.MIN_JOBS_INCLUDE_TREE_API_VERSION):
-        # Same reasoning: a server that drops this field answers with the
-        # roots alone, which reads as the whole tree and is not.
+        # Same reason: an old server ignores the field and returns only the
+        # requested jobs' rows, and the caller cannot tell.
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
                 'Loading a managed job together with the jobs launched under '

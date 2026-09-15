@@ -661,11 +661,10 @@ class JobsQueueV2Body(RequestBody):
     skip_finished: bool = False
     all_users: bool = False
     job_ids: Optional[List[int]] = None
-    # With `job_ids`, return every row of the trees those jobs belong to (the
-    # roots' declared tasks and the jobs launched under them, at any depth)
-    # instead of the jobs' own rows. Servers older than
-    # MIN_JOBS_INCLUDE_TREE_API_VERSION drop this field silently, so the
-    # client checks the server version before sending it.
+    # With `job_ids`, also return the rest of each job's tree: the jobs
+    # launched under it, at any depth. Servers older than
+    # MIN_JOBS_INCLUDE_TREE_API_VERSION ignore this field, so the client
+    # checks the server version before sending it.
     include_tree: bool = False
     user_match: Optional[str] = None
     workspace_match: Optional[str] = None

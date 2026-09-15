@@ -54,11 +54,10 @@ MIN_JOBS_PARENT_LINK_API_VERSION = 61
 # Minimum server API version whose managed-jobs queue knows
 # dynamic_task_index (a dynamic task's ordinal within its job group).
 MIN_JOBS_DYNAMIC_TASK_INDEX_API_VERSION = 62
-# Minimum server API version whose managed-jobs queue takes `include_tree`:
-# with `job_ids`, every row of the trees those jobs belong to (a job group's
-# declared tasks and the jobs launched under it) in one answer. An older
-# server drops the field and answers with the roots alone -- an answer that
-# looks complete and is not -- so the client refuses to ask.
+# Minimum server API version whose managed-jobs queue takes `include_tree`
+# (with `job_ids`, also return the jobs launched under those jobs). An older
+# server ignores the field and returns only the requested jobs' rows, and the
+# client cannot tell, so the client refuses to send it.
 MIN_JOBS_INCLUDE_TREE_API_VERSION = 63
 
 # Minimum API version that supports Sky Batch (sky.batch module).

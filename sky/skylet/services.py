@@ -596,8 +596,8 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 # tells an empty result apart from an unfiltered one.
                 infra_match_applied=True,
                 infra_options=infra_options,
-                # Same for the whole-tree request: a root-only answer to it
-                # would look complete.
+                # Same for include_tree: the caller cannot otherwise tell a
+                # tree answer from a root-only one.
                 include_tree_applied=True)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(e, exc_info=True)

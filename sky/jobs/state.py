@@ -1770,14 +1770,18 @@ def _tree_root_expr() -> 'sqlalchemy.ColumnElement':
 
 
 def _rows_in_trees_of(root_ids: List[int]) -> 'sqlalchemy.ColumnElement':
-    """Filter for every row in the trees rooted at ``root_ids``: the roots'
-    own rows and the rows of every job launched under them, at any depth.
+    """Filter that matches every row of the trees rooted at ``root_ids``: the
+    roots' own rows and the rows of every job launched under them, at any
+    depth.
 
-    ``root_ids`` must be tree roots (see ``get_tree_root_ids``): the test is
-    "is the root, or has it as root_job_id", so a member id here would match
-    only itself. Two indexed membership tests rather than
-    ``COALESCE(...) IN (...)``, which PostgreSQL cannot serve from the primary
-    key or the root_job_id index; this runs on every dashboard poll.
+    ``root_ids`` must be tree roots (see ``get_tree_root_ids``). The test is
+    "the row's job is one of the roots, or has one of them as root_job_id".
+    A member id passed here would match only its own rows.
+
+    Written as two IN tests instead of ``COALESCE(root_job_id, spot_job_id)
+    IN (...)`` because PostgreSQL can use the primary key and the root_job_id
+    index for the two tests and cannot for the COALESCE. The dashboard runs
+    this on every poll.
     """
     return sqlalchemy.or_(spot_table.c.spot_job_id.in_(root_ids),
                           job_info_table.c.root_job_id.in_(root_ids))
@@ -1847,14 +1851,16 @@ def build_managed_jobs_with_filters_no_status_query(
     (e.g. a plugin override) without changing the underlying column. When None,
     the raw ``spot.status`` column is used.
 
-    job_ids selects those jobs' rows. With include_tree it selects the rest
-    of their trees as well: the jobs launched under them, at any depth. The
-    ids must already be tree roots then; the public entry points
-    (``get_managed_jobs_with_filters`` and the count/options functions) call
-    ``get_tree_root_ids`` before building, and the builder does not normalize
-    itself because it is built several times per request. page_root_ids is
-    the pagination step's own tree constraint: the roots that made the
-    current page, applied on top of the other filters.
+    job_ids selects those jobs' rows. With include_tree it also selects the
+    rest of their trees: the jobs launched under them, at any depth. The ids
+    must already be tree roots in that case. The public entry points
+    (``get_managed_jobs_with_filters``, ``get_status_count_with_filters``,
+    ``get_infra_options_with_filters``) call ``get_tree_root_ids`` first. The
+    builder does not normalize, because one request builds several queries.
+
+    page_root_ids restricts the rows to the trees rooted at those ids. The
+    pagination step passes the roots that make up the current page. It is
+    applied on top of the other filters.
 
     submitted_after / submitted_before are epoch seconds (matching the
     ``submitted_at`` column) and restrict the result to jobs submitted within
@@ -2377,8 +2383,8 @@ def get_managed_jobs_with_filters(
     engine = _db_manager.get_engine()
 
     if include_tree and job_ids is not None:
-        # Normalize once, up front: every query below then works on tree
-        # roots, and three ids from one tree read as that one tree.
+        # Resolve the ids to their tree roots once. Every query below then
+        # takes roots, and ids from the same tree count as one tree.
         job_ids = get_tree_root_ids(job_ids)
 
     # Count unique top-level jobs (tree roots), not tasks

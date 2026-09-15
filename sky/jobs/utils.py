@@ -3350,12 +3350,10 @@ def get_managed_job_queue(
             time (seconds).
         submitted_before: Only include jobs submitted at or before this epoch
             time (seconds).
-        include_tree: With job_ids, return every row of the trees those jobs
-            belong to (the roots' declared tasks and the jobs launched under
-            them, at any depth) instead of the jobs' own rows. The ids are
-            normalized to their tree roots first, so several ids from one
-            tree come back as that tree once; the total and the status
-            counts cover the trees too.
+        include_tree: With job_ids, also return the rest of each job's tree:
+            the jobs launched under it, at any depth. The ids are resolved to
+            their tree roots first, so ids from the same tree return that
+            tree once. The total and the status counts cover the trees.
 
     Returns:
         A dictionary containing the managed job queue.
@@ -4365,9 +4363,10 @@ INFRA_FILTER_UNSUPPORTED_MESSAGE = (
 # The managed jobs version that first accepted `infra_match`.
 INFRA_FILTER_MANAGED_JOBS_VERSION = 24
 
-# Same arrangement for `include_tree`: a controller that predates it would
-# answer a whole-tree request with the roots alone, which looks complete and
-# is not, so the generated code refuses with this marker instead.
+# Same for `include_tree`. A controller that predates it would ignore the
+# flag and return only the requested jobs' rows, and the caller could not
+# tell that the tree is missing. The generated code raises with this marker
+# instead.
 INCLUDE_TREE_UNSUPPORTED_MARKER = 'SKYPILOT_INCLUDE_TREE_UNSUPPORTED'
 INCLUDE_TREE_UNSUPPORTED_MESSAGE = (
     'The jobs controller does not support loading a managed job together '
@@ -4444,8 +4443,8 @@ class ManagedJobCodeGen:
         _infra_match = {infra_match!r}
         if _infra_match is not None and managed_job_version < {infra_version}:
             raise RuntimeError('{marker}: {message}')
-        # Likewise a whole-tree request: dropped, it answers with the roots
-        # alone, which looks complete and is not.
+        # Same for include_tree: an old controller would ignore it and return
+        # only the requested jobs' rows.
         _include_tree = {include_tree!r}
         if _include_tree and managed_job_version < {tree_version}:
             raise RuntimeError('{tree_marker}: {tree_message}')

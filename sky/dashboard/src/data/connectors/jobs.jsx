@@ -176,9 +176,8 @@ export async function getManagedJobs(options = {}) {
     const resolvedJobIDs = jobIdMatch ? [jobIdMatch] : jobIDs;
     if (resolvedJobIDs !== undefined && resolvedJobIDs.length > 0)
       body.job_ids = resolvedJobIDs;
-    // With job_ids: every row of the trees those jobs belong to -- a job
-    // group's declared tasks and the jobs launched under it -- in this one
-    // answer, instead of the jobs' own rows.
+    // With job_ids, also return the jobs launched under those jobs, so a
+    // job group and its dynamic tasks come back in one answer.
     if (includeTree && body.job_ids) body.include_tree = true;
     if (!allFields) {
       if (fields && fields.length > 0) {
@@ -218,14 +217,13 @@ export async function getManagedJobs(options = {}) {
               error.type === NOT_SUPPORTED_ERROR &&
               (infraMatch !== undefined || includeTree)
             ) {
-              // A controller too old to apply what was asked for: the infra
-              // filter, or the whole-tree fetch. Tag the error with what was
-              // requested so each caller can react -- the list page reports
-              // a refused infra filter rather than fall back to an unfiltered
-              // table (the one thing that filter must never show); a detail
+              // The controller is too old for the infra filter or for
+              // include_tree. Tag the error with what was requested so each
+              // caller can react: the list page reports a refused infra
+              // filter instead of showing an unfiltered table, and a detail
               // page falls back to reading the tree out of the full listing.
-              // No caller asks for both on one request; if one did, both
-              // tags are set, since exactly one of the two was refused.
+              // No caller asks for both on one request. If one did, both
+              // tags are set, because exactly one of the two was refused.
               if (infraMatch !== undefined) {
                 infraFilterUnsupported =
                   error.message || 'Filtering by infra is not supported.';
@@ -652,24 +650,24 @@ const JOB_TREE_MEMBER_FIELDS = [
   'dynamic_task_index',
 ];
 
-// Set once a jobs controller refuses `include_tree` (it predates the field,
-// and updates itself on the next managed job launch). Until then every job
-// page would pay a refused request before its fallback; after, they go to
-// the fallback directly.
+// Set once a jobs controller refuses `include_tree` because it predates the
+// field (it updates itself on the next managed job launch). After that,
+// job pages skip the refused request and go straight to the fallback.
 let treeFetchUnsupported = false;
 
-// The one queue call a job's detail page makes: the job's own rows and, in
-// the same answer, every job launched under it. All fields, because the page
-// shows everything about the job; the tree is small.
+// The one queue call a job's detail page makes. It returns the job's own
+// rows and the rows of every job launched under it. All fields are
+// requested because the page shows everything about the job. The tree is
+// small.
 function jobTreeCacheArgs(jobId) {
   return [
     { allUsers: true, allFields: true, jobIDs: [jobId], includeTree: true },
   ];
 }
 
-// The two calls the detail page made before `include_tree` existed, kept as
-// the fallback for a controller that predates it: the job's own rows, and
-// the full listing the members are picked out of client-side.
+// The two calls the detail page made before `include_tree` existed. Kept as
+// the fallback for a controller that predates it: one call for the job's own
+// rows, one for the full listing that the members are filtered out of.
 function legacyJobCacheArgs(jobId) {
   return [{ allUsers: true, allFields: true, jobIDs: [jobId] }];
 }
@@ -680,13 +678,13 @@ const LEGACY_TREE_CACHE_ARGS = [
 /**
  * A job and the jobs launched under it, for the job detail pages.
  *
- * One `include_tree` queue call returns every row of the job's tree: the
- * job's own tasks (`jobData.jobs`, one row per task -- supports multi-task
- * jobs) and the rows of every job launched from inside it, directly or
- * through another launched job (`members`: the rows whose root_job_id is
- * `jobId`, empty for a job that is not the top-level job of a tree). Both
- * arrive together, so the Tasks table never shows the declared tasks first
- * and the dynamic ones seconds later.
+ * One `include_tree` queue call returns every row of the job's tree.
+ * `jobData.jobs` is the job's own rows, one per task. `members` is the rows
+ * of every job launched from inside it, directly or through another
+ * launched job: the rows whose root_job_id is `jobId`. It is empty when the
+ * job is not the top of its tree. Both arrive in the same response, so the
+ * Tasks table does not show the declared tasks first and the dynamic tasks
+ * seconds later.
  *
  * `membersLoaded` tells "no members" apart from "not fetched yet".
  */
