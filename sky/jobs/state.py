@@ -1809,8 +1809,7 @@ def get_tree_root_ids(job_ids: List[int]) -> List[int]:
     # A row's tree root: job_info.root_job_id when set, else the job's own
     # id. The fallback covers a tree root (root_job_id is NULL) and a legacy
     # job (no job_info row, so root_job_id is NULL from the outer join).
-    tree_root = sqlalchemy.func.coalesce(job_info_table.c.root_job_id,
-                                         spot_table.c.spot_job_id)
+    tree_root = _tree_root_expr()
 
     # Filter on spot's id: the column every job has. DISTINCT because a job
     # has one spot row per task, and requested jobs can share a root.
