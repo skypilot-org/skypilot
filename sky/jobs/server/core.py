@@ -1,6 +1,7 @@
 """SDK functions for managed jobs."""
 import contextlib
 import datetime
+import inspect
 import ipaddress
 import os
 import pathlib
@@ -220,6 +221,18 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
 
 def _job_ids_to_str(job_ids: Optional[List[int]]) -> str:
     return managed_job_utils.format_job_ids_as_ranges(job_ids)
+
+
+def _runner_accepts(method: Any, keyword: str) -> bool:
+    """Whether a runner method takes ``keyword`` (or ``**kwargs``)."""
+    try:
+        params = inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        # Not introspectable (a C callable, a mock without a spec): assume
+        # the current protocol rather than silently drop the request.
+        return True
+    return keyword in params or any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
 class _DefaultManagedJobRunner:
@@ -1701,13 +1714,25 @@ def queue_v2(
         except exceptions.SkyletMethodNotImplementedError:
             pass
 
-    fetched = managed_job_runner.current().fetch_managed_job_table(
+    runner = managed_job_runner.current()
+    # A runner registered out of tree (a plugin's) may predate `include_tree`
+    # and reject the keyword outright, which would break every queue request
+    # and not just the ones asking for a tree. Hand it the keyword only when
+    # it takes it; a tree request it cannot serve is refused the same way an
+    # old controller refuses one.
+    tree_kwargs: Dict[str, Any] = {}
+    if _runner_accepts(runner.fetch_managed_job_table, 'include_tree'):
+        tree_kwargs['include_tree'] = include_tree
+    elif include_tree:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE)
+    fetched = runner.fetch_managed_job_table(
         handle=handle,
         backend=backend,
         skip_finished=skip_finished,
         accessible_workspaces=accessible_workspaces,
         job_ids=job_ids,
-        include_tree=include_tree,
         workspace_match=workspace_match,
         name_match=name_match,
         pool_match=pool_match,
@@ -1721,6 +1746,7 @@ def queue_v2(
         sort_order=sort_order,
         submitted_after=submitted_after,
         submitted_before=submitted_before,
+        **tree_kwargs,
     )
     # A runner registered out of tree may still be on the five-value signature
     # that predates the infra options. That costs the dashboard its option list

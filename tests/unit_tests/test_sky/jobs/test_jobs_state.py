@@ -2022,6 +2022,27 @@ class TestIncludeTree:
         assert state.get_infra_options_with_filters(job_ids=[eval1],
                                                     include_tree=True) == []
 
+    def test_legacy_job_without_job_info_is_its_own_root(
+            self, _mock_managed_jobs_db_conn):
+        # A job from before job_info existed: spot rows only. The queue lists
+        # it (outer join), so a tree request for it must find it too.
+        root, _, _ = self._tree()
+        legacy = 500
+        with _mock_managed_jobs_db_conn.begin() as conn:
+            conn.execute(state.spot_table.insert().values(
+                spot_job_id=legacy,
+                task_id=0,
+                task_name='legacy',
+                job_name='legacy',
+                status=state.ManagedJobStatus.SUCCEEDED.value,
+                resources='{}'))
+        assert state.get_tree_root_ids([legacy]) == [legacy]
+        assert state.get_tree_root_ids([legacy, root]) == [root, legacy]
+        rows, total = state.get_managed_jobs_with_filters(job_ids=[legacy],
+                                                          include_tree=True)
+        assert self._keys(rows) == [(legacy, 0)]
+        assert total == 1
+
     def test_unknown_or_empty_ids_select_nothing(self,
                                                  _mock_managed_jobs_db_conn):
         self._tree()

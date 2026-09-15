@@ -97,6 +97,21 @@ describe('getManagedJobs and include_tree', () => {
     );
   });
 
+  it('tags both when both were asked for and one was refused', async () => {
+    // No caller sends both today; if one did, exactly one of the two was
+    // refused and the connector cannot tell which, so each caller's tag is
+    // set and each reacts to its own.
+    apiClient.get.mockResolvedValue(
+      serverError('NotSupportedError', UNSUPPORTED)
+    );
+    await expect(
+      getManagedJobs({ jobIDs: ['122'], includeTree: true, infraMatch: 'aws' })
+    ).rejects.toMatchObject({
+      includeTreeUnsupported: true,
+      infraFilterUnsupported: true,
+    });
+  });
+
   it('leaves an unrelated failure untagged', async () => {
     apiClient.get.mockResolvedValue(serverError('ValueError', 'boom'));
     await expect(

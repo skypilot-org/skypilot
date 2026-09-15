@@ -1791,14 +1791,22 @@ def get_tree_root_ids(job_ids: List[int]) -> List[int]:
     has resolves to nothing. This is what ``include_tree`` requests are
     normalized through, so the rows come back once however the tree was
     named. One indexed lookup; the result is sorted for a stable answer.
+
+    Starts from the spot table with job_info outer-joined, like the queue
+    query itself: a job from before job_info existed has spot rows and no
+    job_info row, and it is its own root.
     """
     if not job_ids:
         return []
     engine = _db_manager.get_engine()
     query = sqlalchemy.select(
-        sqlalchemy.func.coalesce(job_info_table.c.root_job_id,
-                                 job_info_table.c.spot_job_id)).where(
-                                     job_info_table.c.spot_job_id.in_(job_ids))
+        sqlalchemy.func.coalesce(
+            job_info_table.c.root_job_id,
+            spot_table.c.spot_job_id)).select_from(
+                spot_table.outerjoin(
+                    job_info_table, spot_table.c.spot_job_id ==
+                    job_info_table.c.spot_job_id)).where(
+                        spot_table.c.spot_job_id.in_(job_ids))
     with orm.Session(engine) as session:
         return sorted({row[0] for row in session.execute(query).fetchall()})
 

@@ -216,19 +216,24 @@ export async function getManagedJobs(options = {}) {
               return { jobs: [], total: 0, controllerStopped: true };
             } else if (
               error.type === NOT_SUPPORTED_ERROR &&
-              infraMatch !== undefined
+              (infraMatch !== undefined || includeTree)
             ) {
-              // The infra filter was refused by a controller too old to apply
-              // it. Carry that out so the page can say so, rather than fall
-              // back to an unfiltered table -- which is the one thing this
-              // filter must never show.
-              infraFilterUnsupported =
-                error.message || 'Filtering by infra is not supported.';
-            } else if (error.type === NOT_SUPPORTED_ERROR && includeTree) {
-              // Same refusal for the whole-tree fetch. The caller falls back
-              // to reading the tree out of the full listing.
-              includeTreeUnsupported =
-                error.message || 'Loading the job tree is not supported.';
+              // A controller too old to apply what was asked for: the infra
+              // filter, or the whole-tree fetch. Tag the error with what was
+              // requested so each caller can react -- the list page reports
+              // a refused infra filter rather than fall back to an unfiltered
+              // table (the one thing that filter must never show); a detail
+              // page falls back to reading the tree out of the full listing.
+              // No caller asks for both on one request; if one did, both
+              // tags are set, since exactly one of the two was refused.
+              if (infraMatch !== undefined) {
+                infraFilterUnsupported =
+                  error.message || 'Filtering by infra is not supported.';
+              }
+              if (includeTree) {
+                includeTreeUnsupported =
+                  error.message || 'Loading the job tree is not supported.';
+              }
             } else {
               errorMessage = error.message || String(data.detail.error);
             }
@@ -245,14 +250,12 @@ export async function getManagedJobs(options = {}) {
         errorMessage = String(parseError);
       }
     }
-    if (infraFilterUnsupported) {
-      const unsupported = new Error(infraFilterUnsupported);
-      unsupported.infraFilterUnsupported = true;
-      throw unsupported;
-    }
-    if (includeTreeUnsupported) {
-      const unsupported = new Error(includeTreeUnsupported);
-      unsupported.includeTreeUnsupported = true;
+    if (infraFilterUnsupported || includeTreeUnsupported) {
+      const unsupported = new Error(
+        infraFilterUnsupported || includeTreeUnsupported
+      );
+      unsupported.infraFilterUnsupported = Boolean(infraFilterUnsupported);
+      unsupported.includeTreeUnsupported = Boolean(includeTreeUnsupported);
       throw unsupported;
     }
     // Handle all error status codes (4xx, 5xx, etc.)

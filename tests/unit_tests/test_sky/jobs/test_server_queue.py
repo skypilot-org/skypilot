@@ -717,6 +717,78 @@ class TestQueue:
                                job_ids=[1],
                                include_tree=True)
 
+    def test_queue_spares_a_runner_that_predates_include_tree(
+            self, monkeypatch):
+        # A plugin's runner built against the previous protocol must keep
+        # serving ordinary queue requests; only a tree request is refused.
+        jobs = [_make_job(1), _make_job(2)]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+        default = jobs_core._DefaultManagedJobRunner()  # pylint: disable=protected-access
+        seen = {}
+
+        class OldRunner:
+
+            def fetch_managed_job_table(self, *, handle, backend, skip_finished,
+                                        accessible_workspaces, job_ids,
+                                        workspace_match, name_match, pool_match,
+                                        infra_match, page, limit, user_hashes,
+                                        statuses, fields, sort_by, sort_order,
+                                        submitted_after, submitted_before):
+                seen['job_ids'] = job_ids
+                return default.fetch_managed_job_table(
+                    handle=handle,
+                    backend=backend,
+                    skip_finished=skip_finished,
+                    accessible_workspaces=accessible_workspaces,
+                    job_ids=job_ids,
+                    include_tree=False,
+                    workspace_match=workspace_match,
+                    name_match=name_match,
+                    pool_match=pool_match,
+                    infra_match=infra_match,
+                    page=page,
+                    limit=limit,
+                    user_hashes=user_hashes,
+                    statuses=statuses,
+                    fields=fields,
+                    sort_by=sort_by,
+                    sort_order=sort_order,
+                    submitted_after=submitted_after,
+                    submitted_before=submitted_before)
+
+        monkeypatch.setattr(jobs_core.managed_job_runner, 'current',
+                            lambda: OldRunner())
+        filtered, total, _, _, _ = jobs_core.queue_v2(refresh=False,
+                                                      all_users=True,
+                                                      job_ids=[2])
+        assert seen['job_ids'] == [2]
+        assert total == 1 and [j['job_id'] for j in filtered] == [2]
+        with pytest.raises(exceptions.NotSupportedError):
+            jobs_core.queue_v2(refresh=False,
+                               all_users=True,
+                               job_ids=[2],
+                               include_tree=True)
+
+    def test_queue_passes_include_tree_to_a_kwargs_runner(self, monkeypatch):
+        jobs = [_make_job(1)]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+        default = jobs_core._DefaultManagedJobRunner()  # pylint: disable=protected-access
+        seen = {}
+
+        class ForwardingRunner:
+
+            def fetch_managed_job_table(self, **kwargs):
+                seen.update(kwargs)
+                return default.fetch_managed_job_table(**kwargs)
+
+        monkeypatch.setattr(jobs_core.managed_job_runner, 'current',
+                            lambda: ForwardingRunner())
+        jobs_core.queue_v2(refresh=False,
+                           all_users=True,
+                           job_ids=[1],
+                           include_tree=True)
+        assert seen['include_tree'] is True
+
 
 def test_queue_v2_body_carries_include_tree():
     # The HTTP handler hands the body to queue_v2_api as kwargs, so the field
