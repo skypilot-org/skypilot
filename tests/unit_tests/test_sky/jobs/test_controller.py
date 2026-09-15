@@ -2597,7 +2597,9 @@ class TestRunJobLoopTransientDbErrors:
         await manager.run_job_loop(1, 'job.log')
 
         assert manager._cleanup.await_count > 2
-        assert sum(sleeps) >= (
+        # The last sleep is clamped to the remaining budget, so the sleeps add
+        # up to the budget exactly.
+        assert sum(sleeps) == pytest.approx(
             jobs_constants.JOB_FINALIZE_DB_RETRY_BUDGET_SECONDS)
         assert max(sleeps) <= (
             jobs_constants.JOB_FINALIZE_DB_RETRY_BACKOFF_CAP_SECONDS *
