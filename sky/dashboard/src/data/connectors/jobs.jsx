@@ -383,6 +383,17 @@ export async function getManagedJobs(options = {}) {
         // Batch progress
         batch_total_batches: job.batch_total_batches,
         batch_completed_batches: job.batch_completed_batches,
+        // Startup breakdown, drawn by JobStartupTimeline. Undefined on jobs
+        // that never ran and on those that predate the breakdown; the panel
+        // renders nothing rather than an empty bar.
+        t_time_to_running: job.t_time_to_running,
+        t_controller_queue: job.t_controller_queue,
+        t_retry_overhead: job.t_retry_overhead,
+        t_unattributed: job.t_unattributed,
+        t_provision_setup: job.t_provision_setup,
+        t_queue_wait: job.t_queue_wait,
+        t_node_startup: job.t_node_startup,
+        t_runtime_setup: job.t_runtime_setup,
       };
     });
 
