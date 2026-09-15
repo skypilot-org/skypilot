@@ -130,15 +130,10 @@ function TaskDetails() {
     );
     if (member) {
       // No launching task means the job was attached explicitly, from
-      // outside the group (`--job-group`); the badge's hover says so. The
-      // launching job is this job, so it is not named by id.
+      // outside the group (`--job-group`); the badge's hover says so.
       const launchedFrom =
         member.parent_task_id != null
-          ? `task ${member.parent_task_id} of ${
-              String(member.parent_job_id) === String(jobId)
-                ? 'this job'
-                : `job ${member.parent_job_id}`
-            }`
+          ? `task ${member.parent_task_id} of job ${member.parent_job_id}`
           : null;
       // The launching task, addressed the way the rest of the page
       // addresses tasks: a declared task by its task id, a dynamic task by

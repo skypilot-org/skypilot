@@ -20,6 +20,25 @@ import sky
 _SDK_NAME = 'fakesdk'
 _TARGET_MODULE = 'sky_fake_sdk_target'
 
+# --- diagnostics (throwaway) ---
+_CREATED = []
+
+
+def _diag(label):
+    import os
+    import threading
+    alias = sys.modules.get(f'sky.{_SDK_NAME}')
+    target_mod = sys.modules.get(_TARGET_MODULE)
+    print(f'[DIAG] {label} pid={os.getpid()} '
+          f'created={[id(m) for m in _CREATED]} '
+          f'sky_dict_has={_SDK_NAME in vars(sky)} '
+          f'sky_dict_id={id(vars(sky).get(_SDK_NAME))} '
+          f'sysmod_alias={id(alias) if alias else None} '
+          f'sysmod_target={id(target_mod) if target_mod else None} '
+          f'sky_id={id(sky)} sysmod_sky_id={id(sys.modules.get("sky"))} '
+          f'threads={threading.active_count()}',
+          flush=True)
+
 
 def _make_entry_point():
     return importlib.metadata.EntryPoint(name=_SDK_NAME,
@@ -56,6 +75,8 @@ def fake_sdk(monkeypatch):
     target.__spec__ = importlib.machinery.ModuleSpec(_TARGET_MODULE,
                                                      loader=None)
     target.create = lambda: 'created'  # type: ignore[attr-defined]
+    _CREATED.append(target)
+    _diag('setup')
     monkeypatch.setitem(sys.modules, _TARGET_MODULE, target)
 
     def _entry_points():
@@ -73,6 +94,10 @@ def fake_sdk(monkeypatch):
 def test_attribute_access_resolves_sdk(fake_sdk):
     # ``import sky; sky.fakesdk`` (bare attribute access via __getattr__).
     resolved = getattr(sky, _SDK_NAME)
+    _diag('after-getattr')
+    print(f'[DIAG] attr resolved={id(resolved)} expected={id(fake_sdk)} '
+          f'match_index={[i for i, m in enumerate(_CREATED) if m is resolved]}',
+          flush=True)
     assert resolved is fake_sdk
     assert resolved.create() == 'created'
 
@@ -81,6 +106,10 @@ def test_dotted_import_resolves_sdk(fake_sdk):
     # Cold ``import sky.fakesdk`` (dotted submodule form via the meta-path
     # finder); the alias must be the same module object, not a re-execution.
     module = importlib.import_module(f'sky.{_SDK_NAME}')
+    _diag('after-import')
+    print(f'[DIAG] dotted resolved={id(module)} expected={id(fake_sdk)} '
+          f'match_index={[i for i, m in enumerate(_CREATED) if m is module]}',
+          flush=True)
     assert module is fake_sdk
     assert sys.modules[f'sky.{_SDK_NAME}'] is fake_sdk
 
