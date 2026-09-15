@@ -1788,24 +1788,35 @@ def get_tree_root_ids(job_ids: List[int]) -> List[int]:
     job's own id when ``root_job_id`` is NULL.
 
     The result is the distinct root ids, sorted. Ids that belong to the same
-    tree produce that root once. Ids that match no job are dropped. Runs one
-    query, starting from the spot table with job_info outer-joined so a job
-    without a job_info row (from before the table existed) resolves to its
-    own id.
+    tree produce that root once. Ids that match no job are dropped. One query.
     """
     if not job_ids:
         return []
     engine = _db_manager.get_engine()
-    query = sqlalchemy.select(
-        sqlalchemy.func.coalesce(
-            job_info_table.c.root_job_id,
-            spot_table.c.spot_job_id)).select_from(
-                spot_table.outerjoin(
-                    job_info_table, spot_table.c.spot_job_id ==
-                    job_info_table.c.spot_job_id)).where(
-                        spot_table.c.spot_job_id.in_(job_ids))
+
+    # Every spot row (one per task), widened with the job's job_info row when
+    # it has one. This is a LEFT OUTER join from spot: a spot row with no
+    # job_info row (a job from before job_info existed) is kept, with NULL in
+    # every job_info column. An inner join would drop it.
+    spot_with_job_info = spot_table.outerjoin(
+        job_info_table,
+        spot_table.c.spot_job_id == job_info_table.c.spot_job_id)
+
+    # A row's tree root: job_info.root_job_id when set, else the job's own
+    # id. The fallback covers a tree root (root_job_id is NULL) and a legacy
+    # job (no job_info row, so root_job_id is NULL from the outer join).
+    tree_root = sqlalchemy.func.coalesce(job_info_table.c.root_job_id,
+                                         spot_table.c.spot_job_id)
+
+    # Filter on spot's id: the column every job has.
+    query = sqlalchemy.select(tree_root).select_from(spot_with_job_info).where(
+        spot_table.c.spot_job_id.in_(job_ids))
     with orm.Session(engine) as session:
-        return sorted({row[0] for row in session.execute(query).fetchall()})
+        rows = session.execute(query).fetchall()
+
+    # The same root comes back once per task row of each requested job, and
+    # once per requested job that shares it. The set collapses those.
+    return sorted({row[0] for row in rows})
 
 
 def build_managed_jobs_with_filters_no_status_query(
