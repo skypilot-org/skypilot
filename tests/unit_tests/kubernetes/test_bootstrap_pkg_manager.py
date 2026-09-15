@@ -367,6 +367,32 @@ _THIRD_PARTY_404 = textwrap.dedent("""\
     E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?
     """)
 _OS_RELEASE_BULLSEYE = 'ID=debian\nVERSION_ID="11"\nVERSION_CODENAME=bullseye\n'
+# What the deprioritized retry prints when the base suite alone cannot satisfy
+# the install: a package it must install depends on the exact version of one
+# already installed from the pruned suite, which only a downgrade can meet.
+_UNSATISFIABLE = textwrap.dedent("""\
+    The following packages have unmet dependencies:
+     openssh-server : Depends: openssh-client (= 1:8.4p1-5+deb11u3) but 1:8.4p1-5+deb11u5 is to be installed
+    E: Unable to correct problems, you have held broken packages.
+    """)
+_COMPANIONS_DEPRIORITIZED = textwrap.dedent("""\
+    Package: *
+    Pin: release n=bullseye-security
+    Pin-Priority: 1
+
+    Package: *
+    Pin: release n=bullseye-updates
+    Pin-Priority: 1
+
+    Package: *
+    Pin: release a=bullseye-security
+    Pin-Priority: 1
+
+    Package: *
+    Pin: release a=bullseye-updates
+    Pin-Priority: 1
+
+    """)
 
 
 def _apt_install_harness(tmp: str,
@@ -374,6 +400,7 @@ def _apt_install_harness(tmp: str,
                          policy: str,
                          os_release: str,
                          calls: str,
+                         pref: str = '',
                          conf: str = '') -> str:
     """The real apt_install_with_retries and its fetch-failure helper, with
     apt-get, apt-cache, timeout and sleep stubbed on PATH.
@@ -386,13 +413,16 @@ def _apt_install_harness(tmp: str,
     """
     body = _extract('apt_prefer_base_suite_on_fetch_failure() {',
                     'apt_update_install_with_retries() {')
-    conf = conf or os.path.join(tmp, 'default-release.conf')
+    pref = pref or os.path.join(tmp, 'preferences')
+    conf = conf or os.path.join(tmp, 'apt.conf')
     body = (body.replace(
         '/tmp/apt-update.log', os.path.join(tmp, 'apt-update.log')).replace(
             '/tmp/apt-install-attempt.log',
             os.path.join(tmp, 'attempt.log')).replace(
                 '/etc/os-release', os.path.join(tmp, 'os-release')).replace(
-                    '/etc/apt/apt.conf.d/99-skypilot-default-release', conf))
+                    '/etc/apt/preferences.d/99-skypilot-base-suite',
+                    pref).replace('/etc/apt/apt.conf.d/99-skypilot-base-suite',
+                                  conf))
     bin_dir = os.path.join(tmp, 'bin')
     os.makedirs(bin_dir)
 
@@ -432,11 +462,24 @@ def _apt_install_harness(tmp: str,
 
 
 def _fetch_failure_unless_retargeted(tmp: str) -> str:
-    # The first attempt 404s on the companion pool. Once the base suite is
-    # preferred (the conf file exists) the same install succeeds, which is
-    # what apt does with the base suite at priority 990.
-    conf = os.path.join(tmp, 'default-release.conf')
+    # The first attempt 404s on the companion pool. Once the companions are
+    # deprioritized (the preferences file exists) the same install succeeds,
+    # which is what apt does once it stops resolving to that pool.
+    pref = os.path.join(tmp, 'preferences')
+    return (f'if [ -f {pref} ]; then exit 0; fi; '
+            f"cat <<'OUT'\n{_FETCH_FAILURE}OUT\nexit 100")
+
+
+def _unsatisfiable_unless_forced(tmp: str) -> str:
+    # The pruned pool again, but deprioritizing the companions is not enough:
+    # the base suite can only satisfy the install by moving an installed
+    # package backwards, so the second attempt ends in a dependency error and
+    # only the forced base suite (the apt.conf file) gets there.
+    pref = os.path.join(tmp, 'preferences')
+    conf = os.path.join(tmp, 'apt.conf')
     return (f'if [ -f {conf} ]; then exit 0; fi; '
+            f'if [ -f {pref} ]; then '
+            f"cat <<'OUT'\n{_UNSATISFIABLE}OUT\nexit 100; fi; "
             f"cat <<'OUT'\n{_FETCH_FAILURE}OUT\nexit 100")
 
 
@@ -453,8 +496,14 @@ def _install_lines(trace: str):
 
 
 def test_apt_install_prefers_the_base_suite_after_a_fetch_failure():
-    """A fetch failure must make the next attempt prefer the base suite, and
-    the preference must persist for later apt runs on the node."""
+    """A fetch failure must make the next attempt stop resolving to the
+    companion suites, and that must persist for later apt runs on the node.
+
+    The companions land *below* the priority 100 apt gives an installed
+    version. Raising the base suite instead would be a no-op for any package
+    the image ships at a version newer than the base suite's -- apt would go
+    right back to the companion version that 404s.
+    """
     tmp = tempfile.mkdtemp()
     try:
         script = _apt_install_harness(tmp,
@@ -467,17 +516,69 @@ def test_apt_install_prefers_the_base_suite_after_a_fetch_failure():
         assert result.returncode == 0, result.stderr[-800:]
         assert len(_install_lines(trace)) == 2, trace
         assert 'rc=0' in trace
-        assert _read(
-            tmp,
-            'default-release.conf') == ('APT::Default-Release "bullseye";\n')
+        assert _read(tmp, 'preferences') == _COMPANIONS_DEPRIORITIZED
+        # The gentle step alone: nothing was allowed to move backwards.
+        assert not os.path.exists(os.path.join(tmp, 'apt.conf'))
         log = _read(tmp, 'apt-update.log')
-        assert "preferring the base suite 'bullseye'" in log
+        assert "deprioritizing the companion suites of 'bullseye'" in log
         # The attempt's own output still reaches the step log.
         assert 'E: Failed to fetch' in log
         # LC_ALL=C is set on the install so those diagnostics are English
         # for the detector regardless of the image's locale.
         assert 'LC_ALL=C' in _extract('apt_install_with_retries() {',
                                       'apt_update_install_with_retries() {')
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_apt_install_forces_the_base_suite_when_deprioritizing_is_not_enough():
+    """Second and last step. Deprioritizing the companions leaves the base
+    suite to satisfy the install alone, and it cannot always do that without
+    moving an installed package backwards -- apt will not downgrade on its own,
+    so the install ends in a dependency error until the base suite is made
+    authoritative."""
+    tmp = tempfile.mkdtemp()
+    try:
+        script = _apt_install_harness(tmp,
+                                      _unsatisfiable_unless_forced(tmp),
+                                      _POLICY_WITH_BULLSEYE,
+                                      _OS_RELEASE_BULLSEYE,
+                                      calls='curl')
+        result = _run(script)
+        trace = _read(tmp, 'trace')
+        assert result.returncode == 0, result.stderr[-800:]
+        assert len(_install_lines(trace)) == 3, trace
+        assert 'rc=0' in trace
+        # Debian's companions differ from the base in Codename, so the base pin
+        # can key off n= without also matching them.
+        assert _read(tmp, 'preferences') == (
+            _COMPANIONS_DEPRIORITIZED +
+            'Package: *\nPin: release n=bullseye\nPin-Priority: 1001\n\n')
+        assert _read(tmp, 'apt.conf') == 'APT::Get::allow-downgrades "true";\n'
+        log = _read(tmp, 'apt-update.log')
+        assert "the base suite 'bullseye' still could not satisfy" in log
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_apt_install_does_not_force_the_base_suite_for_a_dpkg_error():
+    """Once the companions are deprioritized, a dpkg error is not something a
+    downgrade can fix, so it must not cost the node its installed versions."""
+    tmp = tempfile.mkdtemp()
+    try:
+        pref = os.path.join(tmp, 'preferences')
+        script = _apt_install_harness(
+            tmp,
+            f"cat <<'OUT'\n{_DPKG_FAILURE}OUT\nexit 100",
+            _POLICY_WITH_BULLSEYE,
+            _OS_RELEASE_BULLSEYE,
+            calls='curl')
+        with open(pref, 'w', encoding='utf-8') as f:
+            f.write(_COMPANIONS_DEPRIORITIZED)
+        result = _run(script)
+        assert result.returncode == 0, result.stderr[-800:]
+        assert not os.path.exists(os.path.join(tmp, 'apt.conf'))
+        assert _read(tmp, 'preferences') == _COMPANIONS_DEPRIORITIZED
     finally:
         shutil.rmtree(tmp)
 
@@ -498,7 +599,7 @@ def test_apt_install_keeps_the_plain_retry_on_a_non_fetch_failure():
         assert result.returncode == 0, result.stderr[-800:]
         assert len(_install_lines(trace)) == 3, trace
         assert 'rc=1' in trace
-        assert not os.path.exists(os.path.join(tmp, 'default-release.conf'))
+        assert not os.path.exists(os.path.join(tmp, 'preferences'))
     finally:
         shutil.rmtree(tmp)
 
@@ -528,7 +629,7 @@ def test_apt_install_does_not_retarget_without_a_usable_codename(
         assert result.returncode == 0, result.stderr[-800:]
         assert len(_install_lines(trace)) == 3, trace
         assert 'rc=1' in trace
-        assert not os.path.exists(os.path.join(tmp, 'default-release.conf'))
+        assert not os.path.exists(os.path.join(tmp, 'preferences'))
         assert expected_note in _read(tmp, 'apt-update.log')
     finally:
         shutil.rmtree(tmp)
@@ -578,8 +679,9 @@ def test_apt_install_pins_only_on_a_companion_suite_404(output, why):
         assert result.returncode == 0, result.stderr[-800:]
         assert len(_install_lines(trace)) == 3, (why, trace)
         assert 'rc=1' in trace
-        assert not os.path.exists(os.path.join(tmp, 'default-release.conf'))
-        assert 'preferring the base suite' not in _read(tmp, 'apt-update.log')
+        assert not os.path.exists(os.path.join(tmp, 'preferences'))
+        assert 'deprioritizing the companion suites' not in _read(
+            tmp, 'apt-update.log')
     finally:
         shutil.rmtree(tmp)
 
@@ -589,19 +691,19 @@ def test_apt_install_reports_when_the_preference_cannot_be_written():
     tmp = tempfile.mkdtemp()
     try:
         # A path inside a directory that does not exist: tee fails.
-        unwritable = os.path.join(tmp, 'no-such-dir', 'default-release.conf')
+        unwritable = os.path.join(tmp, 'no-such-dir', 'preferences')
         script = _apt_install_harness(tmp,
                                       _fetch_failure_unless_retargeted(tmp),
                                       _POLICY_WITH_BULLSEYE,
                                       _OS_RELEASE_BULLSEYE,
                                       calls='curl',
-                                      conf=unwritable)
+                                      pref=unwritable)
         result = _run(script)
         trace = _read(tmp, 'trace')
         assert result.returncode == 0, result.stderr[-800:]
         log = _read(tmp, 'apt-update.log')
         assert 'the apt preference could not be written' in log
-        assert 'preferring the base suite' not in log
+        assert 'deprioritizing the companion suites' not in log
         # No pin, so the retries stay identical and end in the usual 1.
         assert len(_install_lines(trace)) == 3, trace
         assert 'rc=1' in trace
