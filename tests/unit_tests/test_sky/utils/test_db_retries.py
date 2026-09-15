@@ -1,6 +1,7 @@
 """Unit tests for sky.utils.db.retries."""
 # pylint: disable=missing-class-docstring,protected-access,unnecessary-lambda
 import socket
+import asyncio
 import time
 from unittest import mock
 
@@ -251,12 +252,16 @@ class TestRetriesUnderAnAuthDeadline:
             assert retries.with_db_retries(fn) == 'ok'
         assert fn.call_count == 2
 
-    @pytest.mark.asyncio
-    async def test_async_variant_stops_too(self):
+    def test_async_variant_stops_too(self):
+        # The realistic shape: a sync thread that already holds the deadline
+        # (an executor thread) drives async DB code with asyncio.run, so the
+        # coroutine runs on this thread and sees the thread-local. Setting a
+        # deadline from *within* async code is refused (see the deadline
+        # tests' TestSetDeadlineSyncOnly).
         db_deadline.set_deadline(time.monotonic() + 60)
         fn = mock.AsyncMock(side_effect=_deadline_error())
         with mock.patch.object(retries.asyncio, 'sleep') as sleep:
             with pytest.raises(sqlalchemy.exc.OperationalError):
-                await retries.with_db_retries_async(fn)
+                asyncio.run(retries.with_db_retries_async(fn))
         fn.assert_called_once()
         sleep.assert_not_called()
