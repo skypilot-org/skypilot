@@ -176,6 +176,11 @@ def start_controller() -> None:
     # leaks permanently into the API server's os.environ and causes
     # serve_utils.is_consolidation_mode() to return True for all serve
     # requests, even when serve consolidation mode is not configured.
+    # Keep the controller invocation LAST: bash execs the final simple command
+    # of a `-c` script, so the pid recorded below is the controller itself and
+    # not a surviving wrapper. Appending anything after it would make the
+    # step-down drain in managed_job_refresh_thread.py confirm the death of the
+    # wrapper while the controller kept running.
     run_cmd = (f'export {constants.OVERRIDE_CONSOLIDATION_MODE}=true; '
                f'{activate_python_env_cmd}'
                f'{run_controller_cmd}')

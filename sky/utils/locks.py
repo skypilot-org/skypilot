@@ -401,8 +401,22 @@ class PostgresLock(DistributedLock):
         could now hold the same lock.
 
         This method exposes a cheap ``SELECT 1`` probe on the very connection
-        that holds the lock so the holder can detect the loss and react
-        (typically by exiting and letting the orchestrator restart it).
+        that holds the lock so the holder can detect the loss and react.
+
+        A holder that also serves traffic need not exit on a lost session; it
+        can step down in place, stop whatever work the lock guarded, drop this
+        lock object and go back to contending.
+
+        Either way, do not reuse this object afterwards: a failed ``release()``
+        on a dead connection leaves ``self._acquired`` True (it is only cleared
+        after a successful unlock) and ``is_locked()`` returns that flag, so the
+        holder would believe it still holds the lock. Build a fresh one.
+
+        TODO(aylei): that transition belongs to this class rather than to every
+        caller's memory — an explicit ``mark_lost()``. Note that simply clearing
+        ``_acquired`` in ``release()``'s ``DatabaseError`` branch is not it: the
+        branch also catches non-connection errors, where our own session may
+        still hold the lock.
 
         Returns ``False`` if the lock was never acquired, if the connection
         is missing, or if the probe raises any exception.  Returns ``True``
