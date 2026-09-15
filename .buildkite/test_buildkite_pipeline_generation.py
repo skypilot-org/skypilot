@@ -12,6 +12,7 @@ pytest -n 0 --dist no .buildkite/test_buildkite_pipeline_generation.py
 
 """
 
+import hashlib
 import os
 import pathlib
 import re
@@ -231,6 +232,57 @@ def test_concurrency_group_marker():
             f"concurrency_group step should have concurrency 1: {step}"
         assert step.get('concurrency_group') == 'my-global-lock', \
             f"concurrency_group step should carry the marker name: {step}"
+    finally:
+        test_file.unlink(missing_ok=True)
+
+
+def test_env_file_serializes_serve_tests(tmp_path):
+    """Env-file SkyServe steps serialize without limiting other tests."""
+    test_file = pathlib.Path(
+        'tests/smoke_tests/test_env_file_serve_concurrency_tmp.py')
+    test_file.write_text('import pytest\n'
+                         '\n'
+                         '\n'
+                         '@pytest.mark.aws\n'
+                         '@pytest.mark.serve\n'
+                         'def test_serve_example():\n'
+                         '    pass\n'
+                         '\n'
+                         '\n'
+                         '@pytest.mark.aws\n'
+                         'def test_ordinary_example():\n'
+                         '    pass\n')
+    env_file = tmp_path / 'remote-env.yaml'
+    env_file.write_text('api_server:\n  endpoint: https://example.com\n')
+    try:
+        env = dict(os.environ)
+        env['PYTHONPATH'] = f"{pathlib.Path.cwd()}/tests:" \
+                            f"{env.get('PYTHONPATH', '')}"
+        env['BUILDKITE_BUILD_ID'] = 'test-build'
+
+        subprocess.run([
+            'python', '.buildkite/generate_pipeline.py', '--args',
+            f'--aws --env-file {env_file} --base-branch master',
+            '--file_pattern', 'test_env_file_serve_concurrency_tmp'
+        ],
+                       env=env,
+                       check=True)
+
+        pipeline_path = pathlib.Path(
+            '.buildkite/pipeline_smoke_tests_release.yaml')
+        steps = _extract_steps_from_pipeline(pipeline_path)
+        steps_by_label = {step['label']: step for step in steps}
+
+        serve_step = steps_by_label['test_serve_example on aws']
+        env_file_tag = hashlib.sha256(str(env_file).encode()).hexdigest()[:12]
+        assert serve_step['concurrency'] == 1
+        assert serve_step[
+            'concurrency_group'] == f'env-file-serve-{env_file_tag}'
+
+        ordinary_step = steps_by_label['test_ordinary_example on aws']
+        assert ordinary_step['concurrency'] == 10
+        assert ordinary_step[
+            'concurrency_group'] == 'env-file-smoke-test-test-build'
     finally:
         test_file.unlink(missing_ok=True)
 
