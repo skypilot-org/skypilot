@@ -17,6 +17,7 @@ from sky import logs
 from sky import provision
 from sky import resources as resources_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky.provision import common
 from sky.provision import docker_utils
 from sky.provision import logging as provision_logging
@@ -37,6 +38,49 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 _MAX_RETRY = 6
+
+# Default wall-clock bounds for a single provisioning-phase remote command /
+# file sync, overridable via the `provision` section of ~/.sky/config.yaml.
+#
+# Without a bound, a wedged transport hangs `sky launch` forever with no
+# recovery: the cluster stays INIT, and a `sky serve up` controller stuck in
+# INIT cannot even be torn down. The motivating case is a `kubectl exec` stream
+# that transfers every byte but never delivers EOF, leaving both ends idle
+# indefinitely (skypilot-org/skypilot#10167).
+#
+# These are deliberately generous: a legitimate setup on a slow network can
+# take many minutes. Their job is to turn "hangs forever, silently" into
+# "fails, then retries" so the existing _auto_retry can recover -- not to
+# police slowness.
+_DEFAULT_SETUP_COMMAND_TIMEOUT = 1800
+_DEFAULT_FILE_MOUNT_TIMEOUT = 600
+
+
+def _timeout_from_config(key: str, default: int) -> Optional[int]:
+    """Reads a provisioning timeout (seconds) from the SkyPilot config.
+
+    Read at call time rather than import time so that per-request config
+    overrides (and remote API servers) see the right value. A non-positive
+    value disables the bound, restoring the previous unbounded behavior as an
+    escape hatch.
+    """
+    value = skypilot_config.get_nested(('provision', key), default)
+    if not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
+def _setup_command_timeout() -> Optional[int]:
+    """Bound for setup commands, ray start, skylet start and logging setup."""
+    return _timeout_from_config('setup_command_timeout',
+                                _DEFAULT_SETUP_COMMAND_TIMEOUT)
+
+
+def _file_mount_timeout() -> Optional[int]:
+    """Bound for the internal file mounts (mkdir + rsync of runtime files)."""
+    return _timeout_from_config('file_mount_timeout',
+                                _DEFAULT_FILE_MOUNT_TIMEOUT)
+
 
 # The open files (nofile) limit we want for ray. Ray recommends at least
 # 65535; 1048576 is the higher value SkyPilot's templates apply everywhere
@@ -447,7 +491,8 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                 require_outputs=True,
                 # Installing dependencies requires source bashrc to access
                 # conda.
-                source_bashrc=True)
+                source_bashrc=True,
+                timeout=_setup_command_timeout())
             retry_cnt = 0
             while returncode == 255 and retry_cnt < _MAX_RETRY:
                 # Got network connection issue occur during setup. This could
@@ -463,7 +508,8 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                     stream_logs=False,
                     log_path=log_path,
                     require_outputs=True,
-                    source_bashrc=True)
+                    source_bashrc=True,
+                    timeout=_setup_command_timeout())
                 if not returncode:
                     break
 
@@ -629,7 +675,8 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
         require_outputs=True,
         # Source bashrc for starting ray cluster to make sure actors started by
         # ray will have the correct PATH.
-        source_bashrc=True)
+        source_bashrc=True,
+        timeout=_setup_command_timeout())
     if returncode:
         raise RuntimeError('Failed to start ray on the head node '
                            f'(exit code {returncode}). Error: \n'
@@ -703,7 +750,8 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
             log_path=log_path_abs,
             # Source bashrc for starting ray cluster to make sure actors started
             # by ray will have the correct PATH.
-            source_bashrc=True)
+            source_bashrc=True,
+            timeout=_setup_command_timeout())
 
     num_threads = subprocess_utils.get_parallel_threads(
         cluster_info.provider_name)
@@ -807,7 +855,8 @@ def start_skylet_on_head_node(
         stream_logs=False,
         require_outputs=True,
         log_path=log_path_abs,
-        source_bashrc=True)
+        source_bashrc=True,
+        timeout=_setup_command_timeout())
     if returncode:
         raise RuntimeError('Failed to start skylet on the head node '
                            f'(exit code {returncode}). Error: '
@@ -834,7 +883,8 @@ def _internal_file_mounts(file_mounts: Dict,
         rc, stdout, stderr = runner.run_setup(mkdir_command,
                                               log_path=log_path,
                                               stream_logs=False,
-                                              require_outputs=True)
+                                              require_outputs=True,
+                                              timeout=_file_mount_timeout())
         subprocess_utils.handle_returncode(
             rc,
             mkdir_command, ('Failed to run command before rsync '
@@ -847,6 +897,7 @@ def _internal_file_mounts(file_mounts: Dict,
             up=True,
             log_path=log_path,
             stream_logs=False,
+            timeout=_file_mount_timeout(),
         )
 
 
@@ -890,11 +941,13 @@ def setup_logging_on_cluster(logging_agent: logs.LoggingAgent,
     def _setup_node(runner: command_runner.CommandRunner, log_path: str):
         cmd = logging_agent.get_setup_command(cluster_name)
         logger.info(f'Running command on node: {cmd}')
-        returncode, stdout, stderr = runner.run(cmd,
-                                                stream_logs=False,
-                                                require_outputs=True,
-                                                log_path=log_path,
-                                                source_bashrc=True)
+        returncode, stdout, stderr = runner.run(
+            cmd,
+            stream_logs=False,
+            require_outputs=True,
+            log_path=log_path,
+            source_bashrc=True,
+            timeout=_setup_command_timeout())
         if returncode:
             raise RuntimeError(f'Failed to setup logging agent\n{cmd}\n'
                                f'(exit code {returncode}). Error: '

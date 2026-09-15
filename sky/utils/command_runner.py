@@ -82,6 +82,38 @@ RSYNC_NO_OWNER_NO_GROUP_OPTION = '--no-owner --no-group'
 _HASH_MAX_LENGTH = 10
 _DEFAULT_CONNECT_TIMEOUT = 30
 
+# Returncode reported when a command is killed because it exceeded its
+# `timeout`. 124 is what timeout(1) uses, and -- unlike 255 -- it does not
+# collide with ssh's "connection failed" code. That distinction matters:
+# callers such as `setup_runtime_on_cluster` treat 255 as a transient network
+# blip and retry it in an inner loop, which would multiply with the outer
+# `_auto_retry` and turn a wedged command into a much longer stall.
+TIMEOUT_RETURNCODE = 124
+
+
+def _timed_out_result(
+    cmd: Union[str, List[str]],
+    timeout: int,
+    require_outputs: bool,
+) -> Union[int, Tuple[int, str, str]]:
+    """Builds the result for a command killed by its timeout.
+
+    `log_lib.run_with_log` has already terminated the process tree by the time
+    this is called. We surface a non-zero returncode rather than letting
+    `subprocess.TimeoutExpired` escape, so that existing callers -- which all
+    branch on the returncode -- report a normal command failure and retry.
+    """
+    cmd_str = cmd if isinstance(cmd, str) else ' '.join(cmd)
+    stderr = (f'Command timed out after {timeout} seconds: {cmd_str}\n'
+              'The connection to the remote node stopped making progress. '
+              'This is usually a wedged transport rather than a slow command; '
+              'see the log above for how far it got.')
+    logger.warning(f'Command timed out after {timeout} seconds.')
+    if require_outputs:
+        return TIMEOUT_RETURNCODE, '', stderr
+    return TIMEOUT_RETURNCODE
+
+
 DEFAULT_SSH_CONTROL_NAME = '__default__'
 
 # SSH authentication failure patterns to detect when interactive auth retry
@@ -705,6 +737,7 @@ class CommandRunner:
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             run_in_background: bool = False,
+            timeout: Optional[int] = None,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Runs the command on the cluster.
 
@@ -724,6 +757,10 @@ class CommandRunner:
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
             run_in_background: Whether to run the command in the background.
+            timeout: Optional wall-clock timeout in seconds for the command. On
+                expiry the process tree is terminated and
+                `TIMEOUT_RETURNCODE` is returned instead of raising. None means
+                no timeout (default).
 
         Returns:
             returncode
@@ -1369,6 +1406,7 @@ class SSHCommandRunner(CommandRunner):
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             run_in_background: bool = False,
+            timeout: Optional[int] = None,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -1445,14 +1483,19 @@ class SSHCommandRunner(CommandRunner):
             executable = '/bin/bash'
 
         try:
-            result = log_lib.run_with_log(' '.join(command),
-                                          log_path,
-                                          require_outputs=require_outputs,
-                                          stream_logs=stream_logs,
-                                          process_stream=process_stream,
-                                          shell=True,
-                                          executable=executable,
-                                          **kwargs)
+            try:
+                result = log_lib.run_with_log(' '.join(command),
+                                              log_path,
+                                              require_outputs=require_outputs,
+                                              stream_logs=stream_logs,
+                                              process_stream=process_stream,
+                                              shell=True,
+                                              executable=executable,
+                                              timeout=timeout,
+                                              **kwargs)
+            except subprocess.TimeoutExpired:
+                assert timeout is not None
+                return _timed_out_result(cmd, timeout, require_outputs)
             if not self.enable_interactive_auth:
                 return result
 
@@ -1704,6 +1747,7 @@ class KubernetesCommandRunner(CommandRunner):
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             run_in_background: bool = False,
+            timeout: Optional[int] = None,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'kubectl exec' to run 'cmd' on a pod or deployment by its
         name and namespace.
@@ -1729,6 +1773,10 @@ class KubernetesCommandRunner(CommandRunner):
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
             run_in_background: Whether to run the command in the background.
+            timeout: Optional wall-clock timeout in seconds. Without one a
+                `kubectl exec` whose stream never delivers EOF wedges the
+                caller forever (see #10167); with one the command fails and
+                the caller's existing retry can take over.
 
         Returns:
             returncode
@@ -1809,14 +1857,19 @@ class KubernetesCommandRunner(CommandRunner):
             # immediately at EOF, making it impossible to detect
             # disconnection.
             kwargs.setdefault('stdin', subprocess.PIPE)
-        result = log_lib.run_with_log(' '.join(command),
-                                      log_path,
-                                      require_outputs=require_outputs,
-                                      stream_logs=stream_logs,
-                                      process_stream=process_stream,
-                                      shell=True,
-                                      executable=executable,
-                                      **kwargs)
+        try:
+            result = log_lib.run_with_log(' '.join(command),
+                                          log_path,
+                                          require_outputs=require_outputs,
+                                          stream_logs=stream_logs,
+                                          process_stream=process_stream,
+                                          shell=True,
+                                          executable=executable,
+                                          timeout=timeout,
+                                          **kwargs)
+        except subprocess.TimeoutExpired:
+            assert timeout is not None
+            return _timed_out_result(cmd, timeout, require_outputs)
         # When `kubectl exec` fails because the target pod is already gone
         # (e.g. it was OOMKilled), the bare kubectl error ("cannot exec into a
         # container in a completed pod") hides the real cause. Enrich stderr
@@ -1955,6 +2008,7 @@ class LocalProcessCommandRunner(CommandRunner):
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             run_in_background: bool = False,
+            timeout: Optional[int] = None,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Use subprocess to run the command.
 
@@ -2017,6 +2071,7 @@ class LocalProcessCommandRunner(CommandRunner):
                                     process_stream=process_stream,
                                     shell=True,
                                     executable=executable,
+                                    timeout=timeout,
                                     env=clean_env_module.get_clean_server_env(),
                                     **kwargs)
 
