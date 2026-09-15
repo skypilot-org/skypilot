@@ -17,6 +17,7 @@ from sqlalchemy import create_engine
 from sqlalchemy import orm
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
 from sky.jobs import utils as jobs_utils
 from sky.skylet import constants
@@ -1886,6 +1887,194 @@ class TestInfraFilterCodegenCompatibility:
         with pytest.raises(RuntimeError,
                            match=jobs_utils.INFRA_FILTER_UNSUPPORTED_MARKER):
             self._run_branch(code, one_older)
+
+
+class TestIncludeTreeCodegenCompatibility:
+    """The generated queue code against a controller that predates
+    `include_tree`: same arrangement as the infra filter above. Dropped, the
+    request would be answered with the roots alone -- which looks complete
+    and is not -- so the old controller has to refuse instead."""
+
+    def _run_branch(self, built: str, version: int):
+        return TestInfraFilterCodegenCompatibility._run_branch(
+            self, built, version)
+
+    def test_old_controller_is_not_handed_the_kwarg(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(job_ids=[1])
+        one_older = jobs_utils.INCLUDE_TREE_MANAGED_JOBS_VERSION - 1
+        kwargs = self._run_branch(code, one_older)
+        assert 'include_tree' not in kwargs
+        # The rest of the request still goes through unchanged.
+        assert kwargs['job_ids'] == [1]
+
+    def test_new_controller_is_handed_the_kwarg(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(job_ids=[1],
+                                                          include_tree=True)
+        kwargs = self._run_branch(code,
+                                  jobs_utils.INCLUDE_TREE_MANAGED_JOBS_VERSION)
+        assert kwargs['include_tree'] is True
+        assert kwargs['job_ids'] == [1]
+        # Not asked for: passed as False, not omitted, on a new controller.
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(job_ids=[1])
+        kwargs = self._run_branch(code,
+                                  jobs_utils.INCLUDE_TREE_MANAGED_JOBS_VERSION)
+        assert kwargs['include_tree'] is False
+
+    def test_old_controller_refuses_a_tree_request(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(job_ids=[1],
+                                                          include_tree=True)
+        one_older = jobs_utils.INCLUDE_TREE_MANAGED_JOBS_VERSION - 1
+        with pytest.raises(RuntimeError,
+                           match=jobs_utils.INCLUDE_TREE_UNSUPPORTED_MARKER):
+            self._run_branch(code, one_older)
+
+    def test_current_version_accepts_the_kwarg(self):
+        # The guard and the branch that passes the kwarg are keyed on the
+        # same version, and it is the version this tree ships.
+        assert (jobs_utils.INCLUDE_TREE_MANAGED_JOBS_VERSION ==
+                managed_job_constants.MANAGED_JOBS_VERSION)
+
+
+class TestIncludeTree:
+    """`include_tree`: with job_ids, every row of the trees those jobs belong
+    to, normalized to the trees' roots, however the tree was named."""
+
+    @staticmethod
+    def _tree():
+        new_job = TestParentJobLinks._new_job
+        root = new_job('group')
+        state.set_pending(root,
+                          task_id=1,
+                          task_name='watcher',
+                          resources_str='{}',
+                          metadata='{}')
+        eval1 = new_job('eval-1', parent_job_id=root, parent_task_id=1)
+        eval1a = new_job('eval-1a', parent_job_id=eval1, root_job_id=root)
+        return root, eval1, eval1a
+
+    @staticmethod
+    def _keys(rows):
+        return sorted((j['job_id'], j['task_id']) for j in rows)
+
+    def test_root_ids_normalize_and_dedupe(self, _mock_managed_jobs_db_conn):
+        root, eval1, eval1a = self._tree()
+        other = TestParentJobLinks._new_job('other')
+        assert state.get_tree_root_ids([root]) == [root]
+        assert state.get_tree_root_ids([eval1a]) == [root]
+        # Three names for one tree are that one tree; an unknown id is
+        # nothing; the answer is sorted.
+        assert state.get_tree_root_ids([eval1a, other, root, eval1,
+                                        12345]) == [root, other]
+        assert state.get_tree_root_ids([]) == []
+        assert state.get_tree_root_ids([12345]) == []
+
+    def test_whole_tree_from_any_node(self, _mock_managed_jobs_db_conn):
+        root, eval1, eval1a = self._tree()
+        TestParentJobLinks._new_job('other')
+        whole = [(root, 0), (root, 1), (eval1, 0), (eval1a, 0)]
+        for named in ([root], [eval1], [eval1a], [root, eval1, eval1a]):
+            rows, total = state.get_managed_jobs_with_filters(job_ids=named,
+                                                              include_tree=True)
+            assert self._keys(rows) == whole, named
+            # The total counts trees, so three ids from one tree are one.
+            assert total == 1, named
+
+    def test_without_include_tree_is_unchanged(self,
+                                               _mock_managed_jobs_db_conn):
+        root, eval1, eval1a = self._tree()
+        rows, total = state.get_managed_jobs_with_filters(job_ids=[eval1])
+        assert self._keys(rows) == [(eval1, 0)]
+        assert total == 1
+        rows, total = state.get_managed_jobs_with_filters(job_ids=[root])
+        assert self._keys(rows) == [(root, 0), (root, 1)]
+
+    def test_several_trees(self, _mock_managed_jobs_db_conn):
+        root, eval1, eval1a = self._tree()
+        other = TestParentJobLinks._new_job('other')
+        other_child = TestParentJobLinks._new_job('other-child',
+                                                  parent_job_id=other)
+        rows, total = state.get_managed_jobs_with_filters(
+            job_ids=[eval1a, other_child], include_tree=True)
+        assert total == 2
+        assert self._keys(rows) == [(root, 0), (root, 1), (eval1, 0),
+                                    (eval1a, 0), (other, 0), (other_child, 0)]
+        # Newest tree first, the same order the list gives.
+        assert [j['job_id'] for j in rows][:2] == [other, other_child]
+
+    def test_tree_lookup_takes_job_ids_and_nothing_else(
+            self, _mock_managed_jobs_db_conn):
+        root, eval1, _ = self._tree()
+        with pytest.raises(ValueError, match='requires job_ids'):
+            state.get_managed_jobs_with_filters(include_tree=True)
+        with pytest.raises(ValueError, match='pagination'):
+            state.get_managed_jobs_with_filters(job_ids=[root],
+                                                include_tree=True,
+                                                page=1,
+                                                limit=1)
+        with pytest.raises(ValueError, match='name_match, statuses'):
+            state.get_managed_jobs_with_filters(job_ids=[root],
+                                                include_tree=True,
+                                                name_match='x',
+                                                statuses=['PENDING'])
+        with pytest.raises(ValueError, match='skip_finished'):
+            state.get_managed_jobs_with_filters(job_ids=[root],
+                                                include_tree=True,
+                                                skip_finished=True)
+        # Visibility is not a filter: it still applies, and still passes.
+        rows, total = state.get_managed_jobs_with_filters(
+            job_ids=[eval1],
+            include_tree=True,
+            accessible_workspaces=['ws'],
+            user_hashes=['user1'])
+        assert total == 1 and len(rows) == 4
+        rows, total = state.get_managed_jobs_with_filters(
+            job_ids=[eval1], include_tree=True, accessible_workspaces=['nope'])
+        assert rows == [] and total == 0
+
+    def test_counts_and_options_cover_the_tree(self,
+                                               _mock_managed_jobs_db_conn):
+        root, eval1, eval1a = self._tree()
+        TestParentJobLinks._new_job('other')
+        counts = state.get_status_count_with_filters(job_ids=[eval1],
+                                                     include_tree=True)
+        assert sum(counts.values()) == 4
+        counts = state.get_status_count_with_filters(job_ids=[eval1])
+        assert sum(counts.values()) == 1
+        # Nothing here has been placed, so no infra either way; the point is
+        # the call takes the flag and does not blow up on it.
+        assert state.get_infra_options_with_filters(job_ids=[eval1],
+                                                    include_tree=True) == []
+
+    def test_legacy_job_without_job_info_is_its_own_root(
+            self, _mock_managed_jobs_db_conn):
+        # A job from before job_info existed: spot rows only. The queue lists
+        # it (outer join), so a tree request for it must find it too.
+        root, _, _ = self._tree()
+        legacy = 500
+        with _mock_managed_jobs_db_conn.begin() as conn:
+            conn.execute(state.spot_table.insert().values(
+                spot_job_id=legacy,
+                task_id=0,
+                task_name='legacy',
+                job_name='legacy',
+                status=state.ManagedJobStatus.SUCCEEDED.value,
+                resources='{}'))
+        assert state.get_tree_root_ids([legacy]) == [legacy]
+        assert state.get_tree_root_ids([legacy, root]) == [root, legacy]
+        rows, total = state.get_managed_jobs_with_filters(job_ids=[legacy],
+                                                          include_tree=True)
+        assert self._keys(rows) == [(legacy, 0)]
+        assert total == 1
+
+    def test_unknown_or_empty_ids_select_nothing(self,
+                                                 _mock_managed_jobs_db_conn):
+        self._tree()
+        rows, total = state.get_managed_jobs_with_filters(job_ids=[12345],
+                                                          include_tree=True)
+        assert rows == [] and total == 0
+        rows, total = state.get_managed_jobs_with_filters(job_ids=[],
+                                                          include_tree=True)
+        assert rows == [] and total == 0
 
 
 class TestPaginationByTreeRoot:

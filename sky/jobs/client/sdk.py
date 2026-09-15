@@ -327,6 +327,7 @@ def queue_v2(
     submitted_before: Optional[float] = None,
     infra_match: Optional[str] = None,
     name_match: Optional[str] = None,
+    include_tree: bool = False,
 ) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
         str, int], int]]:
     """Gets statuses of managed jobs.
@@ -354,6 +355,11 @@ def queue_v2(
         infra_match: Only show jobs on this infra, as an ``--infra`` spec:
             ``cloud``, ``cloud/region`` or ``cloud/region/zone``, with ``*``
             for any component (e.g. ``k8s/my-context``, ``aws/us-east-1``).
+        include_tree: With ``job_ids``, also return the rest of each job's
+            tree: the jobs launched under it (a job group's dynamic tasks),
+            at any depth. Ids from the same tree return that tree once.
+            Requires an API server of version
+            ``MIN_JOBS_INCLUDE_TREE_API_VERSION`` or newer.
 
     Returns:
         The request ID of the queue request.
@@ -425,12 +431,22 @@ def queue_v2(
             raise exceptions.NotSupportedError(
                 'Filtering managed jobs by infra is not supported by your API '
                 'server. Please upgrade the API server to enable it.')
+    if (include_tree and remote_api_version is not None and remote_api_version <
+            server_constants.MIN_JOBS_INCLUDE_TREE_API_VERSION):
+        # Same reason: an old server ignores the field and returns only the
+        # requested jobs' rows, and the caller cannot tell.
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Loading a managed job together with the jobs launched under '
+                'it (include_tree) is not supported by your API server. '
+                'Please upgrade the API server to enable it.')
 
     body = payloads.JobsQueueV2Body(
         refresh=refresh,
         skip_finished=skip_finished,
         all_users=all_users,
         job_ids=job_ids,
+        include_tree=include_tree,
         limit=limit,
         fields=list(fields) if fields is not None else None,
         sort_by=sort_by,

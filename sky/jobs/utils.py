@@ -3008,6 +3008,7 @@ def dump_managed_job_queue(
     sort_order: Optional[str] = None,
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
+    include_tree: bool = False,
 ) -> str:
     # Passed by name: this is called from generated code that pins the
     # arguments it knows about, and the parameter list has outgrown the point
@@ -3016,6 +3017,7 @@ def dump_managed_job_queue(
         get_managed_job_queue(skip_finished=skip_finished,
                               accessible_workspaces=accessible_workspaces,
                               job_ids=job_ids,
+                              include_tree=include_tree,
                               workspace_match=workspace_match,
                               name_match=name_match,
                               pool_match=pool_match,
@@ -3324,6 +3326,7 @@ def get_managed_job_queue(
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
     status_expr: Optional['sqlalchemy.ColumnElement'] = None,
+    include_tree: bool = False,
 ) -> Dict[str, Any]:
     """Get the managed job queue.
 
@@ -3347,6 +3350,10 @@ def get_managed_job_queue(
             time (seconds).
         submitted_before: Only include jobs submitted at or before this epoch
             time (seconds).
+        include_tree: With job_ids, also return the rest of each job's tree:
+            the jobs launched under it, at any depth. The ids are resolved to
+            their tree roots first, so ids from the same tree return that
+            tree once. The total and the status counts cover the trees.
 
     Returns:
         A dictionary containing the managed job queue.
@@ -3368,6 +3375,7 @@ def get_managed_job_queue(
     # does not hide the others. See `get_infra_options_with_filters`.
     infra_options = managed_job_state.get_infra_options_with_filters(
         job_ids=job_ids,
+        include_tree=include_tree,
         accessible_workspaces=accessible_workspaces,
         workspace_match=workspace_match,
         name_match=name_match,
@@ -3381,6 +3389,7 @@ def get_managed_job_queue(
     status_counts = managed_job_state.get_status_count_with_filters(
         fields=fields,
         job_ids=job_ids,
+        include_tree=include_tree,
         accessible_workspaces=accessible_workspaces,
         workspace_match=workspace_match,
         name_match=name_match,
@@ -3396,6 +3405,7 @@ def get_managed_job_queue(
     jobs, total = managed_job_state.get_managed_jobs_with_filters(
         fields=updated_fields,
         job_ids=job_ids,
+        include_tree=include_tree,
         accessible_workspaces=accessible_workspaces,
         workspace_match=workspace_match,
         name_match=name_match,
@@ -4353,6 +4363,18 @@ INFRA_FILTER_UNSUPPORTED_MESSAGE = (
 # The managed jobs version that first accepted `infra_match`.
 INFRA_FILTER_MANAGED_JOBS_VERSION = 24
 
+# Same for `include_tree`. A controller that predates it would ignore the
+# flag and return only the requested jobs' rows, and the caller could not
+# tell that the tree is missing. The generated code raises with this marker
+# instead.
+INCLUDE_TREE_UNSUPPORTED_MARKER = 'SKYPILOT_INCLUDE_TREE_UNSUPPORTED'
+INCLUDE_TREE_UNSUPPORTED_MESSAGE = (
+    'The jobs controller does not support loading a managed job together '
+    'with the jobs launched under it. Launching your next managed job '
+    'updates the controller automatically; try again after that.')
+# The managed jobs version that first accepted `include_tree`.
+INCLUDE_TREE_MANAGED_JOBS_VERSION = 27
+
 
 class ManagedJobCodeGen:
     """Code generator for managed job utility functions.
@@ -4405,10 +4427,14 @@ class ManagedJobCodeGen:
         sort_order: Optional[str] = None,
         submitted_after: Optional[float] = None,
         submitted_before: Optional[float] = None,
+        include_tree: bool = False,
     ) -> str:
         marker = INFRA_FILTER_UNSUPPORTED_MARKER
         message = INFRA_FILTER_UNSUPPORTED_MESSAGE
         infra_version = INFRA_FILTER_MANAGED_JOBS_VERSION
+        tree_marker = INCLUDE_TREE_UNSUPPORTED_MARKER
+        tree_message = INCLUDE_TREE_UNSUPPORTED_MESSAGE
+        tree_version = INCLUDE_TREE_MANAGED_JOBS_VERSION
         code = textwrap.dedent(f"""\
         # An infra filter a controller cannot apply must be an error, not a
         # silently wider answer: unlike every other filter here, dropping it
@@ -4417,6 +4443,11 @@ class ManagedJobCodeGen:
         _infra_match = {infra_match!r}
         if _infra_match is not None and managed_job_version < {infra_version}:
             raise RuntimeError('{marker}: {message}')
+        # Same for include_tree: an old controller would ignore it and return
+        # only the requested jobs' rows.
+        _include_tree = {include_tree!r}
+        if _include_tree and managed_job_version < {tree_version}:
+            raise RuntimeError('{tree_marker}: {tree_message}')
         # Filter out is_primary_in_job_group for older controllers (< 15)
         _fields = {fields!r}
         if managed_job_version < 15 and _fields is not None:
@@ -4506,11 +4537,30 @@ class ManagedJobCodeGen:
                                 sort_order={sort_order!r},
                                 submitted_after={submitted_after!r},
                                 submitted_before={submitted_before!r})
+        elif managed_job_version < {tree_version}:
+            job_table = utils.dump_managed_job_queue(
+                                skip_finished={skip_finished},
+                                accessible_workspaces={accessible_workspaces!r},
+                                job_ids={job_ids!r},
+                                workspace_match={workspace_match!r},
+                                name_match={name_match!r},
+                                pool_match={pool_match!r},
+                                infra_match={infra_match!r},
+                                page={page!r},
+                                limit={limit!r},
+                                user_hashes={user_hashes!r},
+                                statuses={statuses!r},
+                                fields=_fields,
+                                sort_by={sort_by!r},
+                                sort_order={sort_order!r},
+                                submitted_after={submitted_after!r},
+                                submitted_before={submitted_before!r})
         else:
             job_table = utils.dump_managed_job_queue(
                                 skip_finished={skip_finished},
                                 accessible_workspaces={accessible_workspaces!r},
                                 job_ids={job_ids!r},
+                                include_tree=_include_tree,
                                 workspace_match={workspace_match!r},
                                 name_match={name_match!r},
                                 pool_match={pool_match!r},

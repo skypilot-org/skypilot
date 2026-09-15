@@ -2,11 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { CircularProgress } from '@mui/material';
 import { useRouter } from 'next/router';
 import { Card } from '@/components/ui/card';
-import {
-  useSingleManagedJob,
-  useJobTreeMembers,
-  getPoolStatus,
-} from '@/data/connectors/jobs';
+import { useSingleManagedJob, getPoolStatus } from '@/data/connectors/jobs';
 import JobDetails from '../[job]';
 import Link from 'next/link';
 import {
@@ -42,14 +38,15 @@ function TaskDetails() {
   const router = useRouter();
   const { job: jobId, task: taskIndex } = router.query;
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const { jobData, loading } = useSingleManagedJob(jobId, refreshTrigger);
   // Dynamic tasks (jobs launched from inside this job) are addressed as
-  // /jobs/<root>/<index> too; resolved below when the index is not one of
-  // the job's declared tasks.
-  const { members: treeMembers, loaded: treeLoaded } = useJobTreeMembers(
-    jobId,
-    refreshTrigger
-  );
+  // /jobs/<root>/<index> too; their rows come with the job's own, and are
+  // resolved below when the index is not one of the job's declared tasks.
+  const {
+    jobData,
+    loading,
+    members: treeMembers,
+    membersLoaded: treeLoaded,
+  } = useSingleManagedJob(jobId, refreshTrigger);
   const [poolsData, setPoolsData] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);

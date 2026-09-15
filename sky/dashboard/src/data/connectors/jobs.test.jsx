@@ -17,10 +17,14 @@ jest.mock('@/lib/cache', () => ({
 import dashboardCache from '@/lib/cache';
 import { useSingleManagedJob, getManagedJobs } from '@/data/connectors/jobs';
 
-describe('useSingleManagedJob manual-refresh cache invalidation', () => {
-  const jobId = '56164';
-  const expectedArgs = [{ allUsers: true, allFields: true, jobIDs: [jobId] }];
+const jobId = '56164';
+// The one call a job's detail page makes: the job's own rows and every job
+// launched under it, in the same answer.
+const treeArgs = [
+  { allUsers: true, allFields: true, jobIDs: [jobId], includeTree: true },
+];
 
+describe('useSingleManagedJob manual-refresh cache invalidation', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     dashboardCache.get.mockResolvedValue({
@@ -33,6 +37,7 @@ describe('useSingleManagedJob manual-refresh cache invalidation', () => {
     renderHook(() => useSingleManagedJob(jobId, 0));
 
     await waitFor(() => expect(dashboardCache.get).toHaveBeenCalledTimes(1));
+    expect(dashboardCache.get).toHaveBeenCalledWith(getManagedJobs, treeArgs);
     expect(dashboardCache.invalidate).not.toHaveBeenCalled();
   });
 
@@ -55,12 +60,12 @@ describe('useSingleManagedJob manual-refresh cache invalidation', () => {
     // cache key is cleared and the refresh stays stale.
     expect(dashboardCache.invalidate).toHaveBeenCalledWith(
       getManagedJobs,
-      expectedArgs
+      treeArgs
     );
     await waitFor(() => expect(dashboardCache.get).toHaveBeenCalledTimes(2));
     expect(dashboardCache.get).toHaveBeenLastCalledWith(
       getManagedJobs,
-      expectedArgs
+      treeArgs
     );
   });
 
@@ -85,5 +90,114 @@ describe('useSingleManagedJob manual-refresh cache invalidation', () => {
 
     await waitFor(() => expect(dashboardCache.get).toHaveBeenCalledTimes(1));
     expect(dashboardCache.invalidate).not.toHaveBeenCalled();
+  });
+});
+
+describe('useSingleManagedJob tree in one fetch', () => {
+  const root = Number(jobId);
+  const treeRows = [
+    { id: root, task_id: 0, root_job_id: null },
+    { id: root, task_id: 1, root_job_id: null },
+    // Launched from inside the job, and from inside that job in turn: both
+    // have the root as root_job_id.
+    { id: root + 1, task_id: 0, root_job_id: root, parent_job_id: root },
+    { id: root + 2, task_id: 0, root_job_id: root, parent_job_id: root + 1 },
+  ];
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('splits the answer into the job rows and the jobs launched under it', async () => {
+    dashboardCache.get.mockResolvedValue({
+      jobs: treeRows,
+      controllerStopped: false,
+    });
+    const { result } = renderHook(() => useSingleManagedJob(jobId, 0));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    // One request, for the whole tree.
+    expect(dashboardCache.get).toHaveBeenCalledTimes(1);
+    expect(dashboardCache.get).toHaveBeenCalledWith(getManagedJobs, treeArgs);
+    expect(result.current.jobData.jobs.map((j) => j.task_id)).toEqual([0, 1]);
+    expect(result.current.members.map((j) => j.id)).toEqual([
+      root + 1,
+      root + 2,
+    ]);
+    // Both arrive together: nothing shows the declared tasks first and the
+    // dynamic ones later.
+    expect(result.current.membersLoaded).toBe(true);
+  });
+
+  it('shows no members for a job that is not the top of its tree', async () => {
+    // Asking for a launched job returns its whole tree (normalized to the
+    // root); its own page lists only its rows and no members.
+    const memberId = String(root + 1);
+    dashboardCache.get.mockResolvedValue({
+      jobs: treeRows,
+      controllerStopped: false,
+    });
+    const { result } = renderHook(() => useSingleManagedJob(memberId, 0));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.jobData.jobs.map((j) => j.id)).toEqual([root + 1]);
+    expect(result.current.members).toEqual([]);
+    expect(result.current.membersLoaded).toBe(true);
+  });
+
+  it('reports an empty job on a failed fetch', async () => {
+    dashboardCache.get.mockRejectedValue(new Error('boom'));
+    const { result } = renderHook(() => useSingleManagedJob(jobId, 0));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.jobData).toEqual({
+      jobs: [],
+      controllerStopped: false,
+    });
+    expect(result.current.members).toEqual([]);
+    expect(result.current.membersLoaded).toBe(true);
+  });
+
+  // Last: the fallback is remembered for the rest of the module's life, so
+  // tests after this one would skip the tree fetch.
+  it('falls back to the two-call path when the controller refuses include_tree', async () => {
+    const jobArgs = [{ allUsers: true, allFields: true, jobIDs: [jobId] }];
+    const refused = new Error('The jobs controller does not support ...');
+    refused.includeTreeUnsupported = true;
+    dashboardCache.get.mockImplementation((fn, args) => {
+      if (args[0].includeTree) return Promise.reject(refused);
+      if (args[0].jobIDs) {
+        return Promise.resolve({
+          jobs: treeRows.slice(0, 2),
+          controllerStopped: false,
+        });
+      }
+      // The full listing, with a row from another tree mixed in.
+      return Promise.resolve({
+        jobs: [...treeRows.slice(2), { id: 9, root_job_id: 8 }],
+        controllerStopped: false,
+      });
+    });
+    const { result } = renderHook(() => useSingleManagedJob(jobId, 0));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(dashboardCache.get).toHaveBeenCalledWith(getManagedJobs, treeArgs);
+    expect(dashboardCache.get).toHaveBeenCalledWith(getManagedJobs, jobArgs);
+    expect(dashboardCache.get).toHaveBeenCalledTimes(3);
+    expect(result.current.jobData.jobs.map((j) => j.task_id)).toEqual([0, 1]);
+    expect(result.current.members.map((j) => j.id)).toEqual([
+      root + 1,
+      root + 2,
+    ]);
+    expect(result.current.membersLoaded).toBe(true);
+
+    // Remembered: the next job goes straight to the two calls.
+    jest.clearAllMocks();
+    renderHook(() => useSingleManagedJob('56165', 0));
+    await waitFor(() => expect(dashboardCache.get).toHaveBeenCalledTimes(2));
+    expect(dashboardCache.get).not.toHaveBeenCalledWith(
+      getManagedJobs,
+      expect.arrayContaining([expect.objectContaining({ includeTree: true })])
+    );
   });
 });

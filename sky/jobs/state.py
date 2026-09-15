@@ -1757,6 +1757,37 @@ def get_managed_jobs_highest_priority() -> int:
             0] is not None else constants.MIN_PRIORITY
 
 
+# How a managed jobs queue request selects rows
+# ------------------------------------------------
+# A managed job is one or more rows in ``spot`` (one per task) plus one row in
+# ``job_info``. A dynamic task is a managed job whose ``job_info.root_job_id``
+# is set. A tree is a top-level job (root_job_id NULL) plus every job whose
+# root_job_id is that job. A tree is addressed by its root's id.
+#
+# A request answers three questions, in this order:
+#
+# 1. Scope: which jobs. Decided by ``job_ids`` and ``include_tree`` only.
+#      no job_ids                 every job (the list page, the CLI)
+#      job_ids                    exactly those jobs' rows (id lookups)
+#      job_ids + include_tree     every row of the trees those jobs belong to
+#                                 (the job detail pages)
+#    ``include_tree`` changes nothing else. Without ``job_ids`` it is an error.
+#    It cannot be combined with pagination or the explicit filters below;
+#    ``core.queue_v2`` and ``get_managed_jobs_with_filters`` both reject that.
+#
+# 2. Filters: which of those rows pass. Visibility (``accessible_workspaces``,
+#    ``user_hashes``) and the explicit filters (name, pool, workspace, infra,
+#    status, skip_finished, submitted window). Each is tested on the row's own
+#    job or task; a dynamic task is its own job here (SKY-7163 tracks moving
+#    the job-level filters to the tree root).
+#
+# 3. Slice: which page. The pagination unit is the tree, so a group and its
+#    dynamic tasks always share a page. ``total`` counts trees. Paging takes
+#    two queries: the roots of the trees with a matching row, sorted, sliced;
+#    then every matching row of those trees. This has been the shape since
+#    #10725 and is independent of scope.
+
+
 def _tree_root_expr() -> 'sqlalchemy.ColumnElement':
     """The top-level job of a row's tree: its root_job_id, else itself.
 
@@ -1767,6 +1798,56 @@ def _tree_root_expr() -> 'sqlalchemy.ColumnElement':
     """
     return sqlalchemy.func.coalesce(job_info_table.c.root_job_id,
                                     spot_table.c.spot_job_id)
+
+
+def _rows_in_trees_of(root_ids: List[int]) -> 'sqlalchemy.ColumnElement':
+    """Filter that matches every row of the trees rooted at ``root_ids``: the
+    roots' own rows and the rows of every job launched under them, at any
+    depth.
+
+    ``root_ids`` must be tree roots (see ``get_tree_root_ids``). The test is
+    "the row's job is one of the roots, or has one of them as root_job_id".
+    A member id passed here would match only its own rows.
+
+    Written as two IN tests instead of ``COALESCE(root_job_id, spot_job_id)
+    IN (...)`` because PostgreSQL can use the primary key and the root_job_id
+    index for the two tests and cannot for the COALESCE. The dashboard runs
+    this on every poll.
+    """
+    return sqlalchemy.or_(spot_table.c.spot_job_id.in_(root_ids),
+                          job_info_table.c.root_job_id.in_(root_ids))
+
+
+def get_tree_root_ids(job_ids: List[int]) -> List[int]:
+    """Return the tree root of each given job: its ``root_job_id``, or the
+    job's own id when ``root_job_id`` is NULL.
+
+    The result is the distinct root ids, sorted. Ids that belong to the same
+    tree produce that root once. Ids that match no job are dropped. One query.
+    """
+    if not job_ids:
+        return []
+    engine = _db_manager.get_engine()
+
+    # Every spot row (one per task), widened with the job's job_info row when
+    # it has one. This is a LEFT OUTER join from spot: a spot row with no
+    # job_info row (a job from before job_info existed) is kept, with NULL in
+    # every job_info column. An inner join would drop it.
+    spot_with_job_info = spot_table.outerjoin(
+        job_info_table,
+        spot_table.c.spot_job_id == job_info_table.c.spot_job_id)
+
+    # A row's tree root: job_info.root_job_id when set, else the job's own
+    # id. The fallback covers a tree root (root_job_id is NULL) and a legacy
+    # job (no job_info row, so root_job_id is NULL from the outer join).
+    tree_root = _tree_root_expr()
+
+    # Filter on spot's id: the column every job has. DISTINCT because a job
+    # has one spot row per task, and requested jobs can share a root.
+    query = sqlalchemy.select(tree_root).select_from(spot_with_job_info).where(
+        spot_table.c.spot_job_id.in_(job_ids)).distinct().order_by(tree_root)
+    with orm.Session(engine) as session:
+        return [row[0] for row in session.execute(query).fetchall()]
 
 
 def build_managed_jobs_with_filters_no_status_query(
@@ -1795,6 +1876,13 @@ def build_managed_jobs_with_filters_no_status_query(
     status-count grouping column). It lets a caller surface a refined status
     (e.g. a plugin override) without changing the underlying column. When None,
     the raw ``spot.status`` column is used.
+
+    job_ids keeps only those jobs' own rows. tree_root_ids keeps only the
+    rows of the trees rooted at those ids (the roots' tasks and every job
+    launched under them). The ids must be tree roots; see
+    ``get_tree_root_ids``. Pagination passes the roots on the current page,
+    and the tree lookup (``include_tree``) passes the requested jobs' roots.
+    See the module comment above ``_tree_root_expr`` for the whole picture.
 
     submitted_after / submitted_before are epoch seconds (matching the
     ``submitted_at`` column) and restrict the result to jobs submitted within
@@ -1866,15 +1954,7 @@ def build_managed_jobs_with_filters_no_status_query(
     if job_ids is not None:
         query = query.where(spot_table.c.spot_job_id.in_(job_ids))
     if tree_root_ids is not None:
-        # Every row in these trees: the roots' declared tasks and the jobs
-        # launched under them, at any depth. Spelled as two indexed
-        # membership tests rather than COALESCE(...) IN (...): PostgreSQL
-        # cannot use the primary key or the root_job_id index through the
-        # COALESCE, and this runs on every page fetch the dashboard polls.
-        # (A member's own id is never a tree root, so the OR is exact.)
-        query = query.where(
-            sqlalchemy.or_(spot_table.c.spot_job_id.in_(tree_root_ids),
-                           job_info_table.c.root_job_id.in_(tree_root_ids)))
+        query = query.where(_rows_in_trees_of(tree_root_ids))
     if accessible_workspaces is not None:
         query = query.where(
             job_info_table.c.workspace.in_(accessible_workspaces))
@@ -1997,15 +2077,20 @@ def get_status_count_with_filters(
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
     status_expr: Optional['sqlalchemy.ColumnElement'] = None,
+    include_tree: bool = False,
 ) -> Dict[str, int]:
     """Get the status count of the managed jobs with filters.
 
     status_expr, when provided, replaces the raw ``spot.status`` column as the
     grouping key, so counts are bucketed by the refined user-facing status.
     """
+    tree_root_ids = None
+    if include_tree:
+        job_ids, tree_root_ids = _tree_scope(job_ids)
     query = build_managed_jobs_with_filters_no_status_query(
         fields=fields,
         job_ids=job_ids,
+        tree_root_ids=tree_root_ids,
         accessible_workspaces=accessible_workspaces,
         workspace_match=workspace_match,
         name_match=name_match,
@@ -2041,6 +2126,7 @@ def get_infra_options_with_filters(
     skip_finished: bool = False,
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
+    include_tree: bool = False,
 ) -> List[str]:
     """The distinct `--infra` specs of the jobs a filter set selects.
 
@@ -2058,8 +2144,12 @@ def get_infra_options_with_filters(
     would only narrow what the option already selects. A job that never got
     placed has no cloud and contributes nothing.
     """
+    tree_root_ids = None
+    if include_tree:
+        job_ids, tree_root_ids = _tree_scope(job_ids)
     query = build_managed_jobs_with_filters_no_status_query(
         job_ids=job_ids,
+        tree_root_ids=tree_root_ids,
         accessible_workspaces=accessible_workspaces,
         workspace_match=workspace_match,
         name_match=name_match,
@@ -2238,52 +2328,10 @@ def get_active_emergency_recovery_episodes(
     return [(int(row[0]), row[1], row[2], int(row[3])) for row in rows]
 
 
-def get_managed_jobs_with_filters(
-    fields: Optional[List[str]] = None,
-    job_ids: Optional[List[int]] = None,
-    accessible_workspaces: Optional[List[str]] = None,
-    workspace_match: Optional[str] = None,
-    name_match: Optional[str] = None,
-    pool_match: Optional[str] = None,
-    infra_match: Optional[str] = None,
-    user_hashes: Optional[List[Optional[str]]] = None,
-    statuses: Optional[List[str]] = None,
-    skip_finished: bool = False,
-    submitted_after: Optional[float] = None,
-    submitted_before: Optional[float] = None,
-    page: Optional[int] = None,
-    limit: Optional[int] = None,
-    sort_by: Optional[str] = None,
-    sort_order: Optional[str] = None,
-    status_expr: Optional['sqlalchemy.ColumnElement'] = None,
-) -> Tuple[List[Dict[str, Any]], int]:
-    """Get managed jobs from the database with filters.
-
-    status_expr, when provided, is used to match the ``statuses`` filter
-    against a refined user-facing status instead of the raw ``spot.status``
-    column (see build_managed_jobs_with_filters_no_status_query). The returned
-    rows still carry the raw ``status``; callers that want the refined value in
-    the result should surface it separately.
-
-    Pagination is by top-level job (tree root), not by tasks and not by the
-    jobs launched from inside another job: page 1 with limit 10 is every
-    task of 10 top-level jobs plus every job launched under them, at any
-    depth, so a job group and its members are always on the same page.
-
-    Args:
-        sort_by: Field to sort by. Valid values: 'job_id', 'id', 'job_name',
-            'name', 'submitted_at', 'status', 'job_duration', 'duration',
-            'recovery_count', 'recoveries', 'resources', 'user_hash', 'user',
-            'cloud', 'infra'.
-        sort_order: Sort direction, 'asc' or 'desc'. Defaults to 'desc'.
-
-    Returns:
-        A tuple containing
-         - the list of managed jobs (all tasks for the paginated jobs)
-         - the total number of unique jobs (not tasks)
-    """
-    # Column mapping for sorting
-    sort_field_map = {
+def _sort_field_map(
+        status_expr: Optional['sqlalchemy.ColumnElement']) -> Dict[str, Any]:
+    """Sort keys accepted by the queue, mapped to their columns."""
+    return {
         'job_id': spot_table.c.spot_job_id,
         'id': spot_table.c.spot_job_id,
         'job_name': spot_table.c.job_name,
@@ -2303,6 +2351,227 @@ def get_managed_jobs_with_filters(
         'cloud': job_info_table.c.cloud,
         'infra': job_info_table.c.cloud,  # Sort by cloud for infra
     }
+
+
+def _order_for_display(query: sqlalchemy.Select, sort_by: Optional[str],
+                       sort_order: Optional[str],
+                       sort_field_map: Dict[str, Any]) -> sqlalchemy.Select:
+    """Order rows the way every surface shows them.
+
+    Trees stay together and sort by the requested column (their root's id for
+    an id sort). Within a tree: the root's declared tasks by task id, then the
+    jobs launched under it by dynamic task index, then rows without an index
+    by id.
+    """
+    within_tree = [
+        sqlalchemy.case((job_info_table.c.root_job_id.is_(None), 0),
+                        else_=1).asc(),
+        sqlalchemy.case((job_info_table.c.dynamic_task_index.is_(None), 1),
+                        else_=0).asc(),
+        job_info_table.c.dynamic_task_index.asc(),
+        spot_table.c.spot_job_id.desc(),
+        spot_table.c.task_id.asc(),
+    ]
+    if sort_by and sort_by in sort_field_map:
+        sort_column = sort_field_map[sort_by]
+        if sort_column == spot_table.c.spot_job_id:
+            # A tree's id is its root's id, so an id sort keeps each tree
+            # together (the members' own, higher ids do not pull them out).
+            sort_column = _tree_root_expr()
+        if sort_order == 'asc':
+            query = query.order_by(sort_column.asc(), *within_tree)
+        else:
+            query = query.order_by(sort_column.desc(), *within_tree)
+    else:
+        # Default sort: newest tree first (a tree sorts by its root's id).
+        query = query.order_by(_tree_root_expr().desc(), *within_tree)
+    return query
+
+
+def _load_job_rows(engine: sqlalchemy.engine.Engine,
+                   query: sqlalchemy.Select) -> List[Dict[str, Any]]:
+    """Run the query and convert each row to the queue's job dict."""
+    with orm.Session(engine) as session:
+        rows = session.execute(query).fetchall()
+    jobs: List[Dict[str, Any]] = []
+    for row in rows:
+        job_dict = _get_jobs_dict(row._mapping)  # pylint: disable=protected-access
+        if job_dict.get('status') is not None:
+            job_dict['status'] = ManagedJobStatus(job_dict['status'])
+        if job_dict.get('schedule_state') is not None:
+            job_dict['schedule_state'] = ManagedJobScheduleState(
+                job_dict['schedule_state'])
+        if job_dict.get('job_name') is None:
+            job_dict['job_name'] = job_dict.get('task_name')
+        if job_dict.get('metadata') is not None:
+            job_dict['metadata'] = json.loads(job_dict['metadata'])
+
+        # Add user YAML content for managed jobs.
+        job_dict['user_yaml'] = job_dict.get('original_user_yaml_content')
+        if job_dict['user_yaml'] is None:
+            # Backwards compatibility - try to read from file path
+            yaml_path = job_dict.get('original_user_yaml_path')
+            if yaml_path:
+                try:
+                    with open(yaml_path, 'r', encoding='utf-8') as f:
+                        job_dict['user_yaml'] = f.read()
+                except (FileNotFoundError, IOError, OSError) as e:
+                    job_id = job_dict.get('job_id')
+                    if job_id is not None:
+                        logger.debug('Failed to read original user YAML for '
+                                     f'job {job_id} from {yaml_path}: {e}')
+                    else:
+                        logger.debug('Failed to read original user YAML from '
+                                     f'{yaml_path}: {e}')
+
+        jobs.append(job_dict)
+    return jobs
+
+
+def _tree_scope(job_ids: Optional[List[int]]) -> Tuple[None, List[int]]:
+    """The tree lookup's scope: the roots of the trees ``job_ids`` belong to.
+
+    Returns ``(None, roots)`` so callers can pass ``job_ids=None,
+    tree_root_ids=roots`` to the builder. Raises if no job ids were given;
+    ``include_tree`` means nothing without them.
+    """
+    if job_ids is None:
+        raise ValueError('include_tree requires job_ids.')
+    return None, get_tree_root_ids(job_ids)
+
+
+def _reject_tree_lookup_extras(job_ids, workspace_match, name_match, pool_match,
+                               infra_match, statuses, skip_finished,
+                               submitted_after, submitted_before, page,
+                               limit) -> None:
+    """The tree lookup takes job ids and nothing else.
+
+    Whether a filter should test the named jobs, their roots, or every row
+    of the tree is undecided (SKY-7163), so a request that combines them is
+    refused instead of answered one way. Pagination is refused for the same
+    reason. Visibility (accessible_workspaces, user_hashes) is not a filter
+    the caller chose and still applies.
+    """
+    if job_ids is None:
+        raise ValueError('include_tree requires job_ids.')
+    if page is not None or limit is not None:
+        raise ValueError('include_tree cannot be combined with pagination.')
+    extras = {
+        'workspace_match': workspace_match,
+        'name_match': name_match,
+        'pool_match': pool_match,
+        'infra_match': infra_match,
+        'statuses': statuses,
+        'submitted_after': submitted_after,
+        'submitted_before': submitted_before,
+    }
+    if skip_finished:
+        extras['skip_finished'] = True
+    given = sorted(k for k, v in extras.items() if v is not None)
+    if given:
+        raise ValueError('include_tree cannot be combined with filters; '
+                         f'got {", ".join(given)}.')
+
+
+def _get_job_trees(
+    job_ids: Optional[List[int]],
+    fields: Optional[List[str]],
+    accessible_workspaces: Optional[List[str]],
+    user_hashes: Optional[List[Optional[str]]],
+    sort_by: Optional[str],
+    sort_order: Optional[str],
+    status_expr: Optional['sqlalchemy.ColumnElement'],
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Every row of the trees ``job_ids`` belong to, as visible to the caller.
+
+    Steps: resolve the ids to their tree roots (ids from one tree give one
+    root); count the trees the caller can see; fetch every row of those trees
+    the caller can see; order for display. ``total`` is the number of trees.
+    """
+    _, roots = _tree_scope(job_ids)
+    engine = _db_manager.get_engine()
+    count_query = build_managed_jobs_with_filters_query(
+        fields=None,
+        tree_root_ids=roots,
+        accessible_workspaces=accessible_workspaces,
+        user_hashes=user_hashes,
+        count_unique_jobs=True,
+        status_expr=status_expr,
+    )
+    with orm.Session(engine) as session:
+        total = session.execute(count_query).fetchone()[0]
+    query = build_managed_jobs_with_filters_query(
+        fields=fields,
+        tree_root_ids=roots,
+        accessible_workspaces=accessible_workspaces,
+        user_hashes=user_hashes,
+        status_expr=status_expr,
+    )
+    query = _order_for_display(query, sort_by, sort_order,
+                               _sort_field_map(status_expr))
+    return _load_job_rows(engine, query), total
+
+
+def get_managed_jobs_with_filters(
+    fields: Optional[List[str]] = None,
+    job_ids: Optional[List[int]] = None,
+    accessible_workspaces: Optional[List[str]] = None,
+    workspace_match: Optional[str] = None,
+    name_match: Optional[str] = None,
+    pool_match: Optional[str] = None,
+    infra_match: Optional[str] = None,
+    user_hashes: Optional[List[Optional[str]]] = None,
+    statuses: Optional[List[str]] = None,
+    skip_finished: bool = False,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
+    page: Optional[int] = None,
+    limit: Optional[int] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
+    status_expr: Optional['sqlalchemy.ColumnElement'] = None,
+    include_tree: bool = False,
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Get managed jobs from the database with filters.
+
+    status_expr, when provided, is used to match the ``statuses`` filter
+    against a refined user-facing status instead of the raw ``spot.status``
+    column (see build_managed_jobs_with_filters_no_status_query). The returned
+    rows still carry the raw ``status``; callers that want the refined value in
+    the result should surface it separately.
+
+    Pagination is by top-level job (tree root), not by tasks and not by the
+    jobs launched from inside another job: page 1 with limit 10 is every
+    task of 10 top-level jobs plus every job launched under them, at any
+    depth, so a job group and its members are always on the same page.
+
+    Args:
+        job_ids: Only these jobs' rows.
+        include_tree: With job_ids, every row of the trees those jobs belong
+            to instead (see ``_get_job_trees``). Requires job_ids; cannot be
+            combined with pagination or the explicit filters.
+        sort_by: Field to sort by. Valid values: 'job_id', 'id', 'job_name',
+            'name', 'submitted_at', 'status', 'job_duration', 'duration',
+            'recovery_count', 'recoveries', 'resources', 'user_hash', 'user',
+            'cloud', 'infra'.
+        sort_order: Sort direction, 'asc' or 'desc'. Defaults to 'desc'.
+
+    Returns:
+        A tuple containing
+         - the list of managed jobs (all tasks for the paginated jobs)
+         - the total number of unique jobs (not tasks)
+    """
+    if include_tree:
+        # The tree lookup is its own path: no filters besides visibility, no
+        # pagination. The list path below never sees include_tree.
+        _reject_tree_lookup_extras(job_ids, workspace_match, name_match,
+                                   pool_match, infra_match, statuses,
+                                   skip_finished, submitted_after,
+                                   submitted_before, page, limit)
+        return _get_job_trees(job_ids, fields, accessible_workspaces,
+                              user_hashes, sort_by, sort_order, status_expr)
+
+    sort_field_map = _sort_field_map(status_expr)
 
     engine = _db_manager.get_engine()
 
@@ -2326,14 +2595,16 @@ def get_managed_jobs_with_filters(
     with orm.Session(engine) as session:
         total = session.execute(count_query).fetchone()[0]
 
-    # For pagination, first get the tree roots for the current page, then
-    # fetch every row in those trees (the roots' tasks and the jobs launched
-    # under them).
+    # Pagination pages by tree so a group and its dynamic tasks share a page.
+    # Two queries: the roots of the trees with a matching row, sorted and
+    # sliced; then every matching row of those trees. Independent of scope.
     if page is not None and limit is not None:
         # Get paginated unique root ids with ordering
         # Use GROUP BY instead of DISTINCT to allow ORDER BY on different
         # columns (PostgreSQL requires ORDER BY columns to be in SELECT list
         # when using DISTINCT).
+        # The builder gives task rows. Keep only each row's tree root, group
+        # so each tree is one unit, sort, slice: the page is a slice of trees.
         tree_root = _tree_root_expr()
         job_ids_subquery = build_managed_jobs_with_filters_query(
             fields=None,
@@ -2415,67 +2686,8 @@ def get_managed_jobs_with_filters(
             status_expr=status_expr,
         )
 
-    # Apply sorting. Within a tree the rows always read the way the table
-    # shows them: the root's declared tasks first, then the jobs launched under
-    # it by dynamic task index (rows from before the index existed last),
-    # then task id. Every surface (CLI, dashboard, API) gets this order.
-    within_tree = [
-        sqlalchemy.case((job_info_table.c.root_job_id.is_(None), 0),
-                        else_=1).asc(),
-        sqlalchemy.case((job_info_table.c.dynamic_task_index.is_(None), 1),
-                        else_=0).asc(),
-        job_info_table.c.dynamic_task_index.asc(),
-        spot_table.c.spot_job_id.desc(),
-        spot_table.c.task_id.asc(),
-    ]
-    if sort_by and sort_by in sort_field_map:
-        sort_column = sort_field_map[sort_by]
-        if sort_column == spot_table.c.spot_job_id:
-            # A tree's id is its root's id, so an id sort keeps each tree
-            # together (the members' own, higher ids do not pull them out).
-            sort_column = _tree_root_expr()
-        if sort_order == 'asc':
-            query = query.order_by(sort_column.asc(), *within_tree)
-        else:
-            query = query.order_by(sort_column.desc(), *within_tree)
-    else:
-        # Default sort: newest tree first (a tree sorts by its root's id).
-        query = query.order_by(_tree_root_expr().desc(), *within_tree)
-    rows = None
-    with orm.Session(engine) as session:
-        rows = session.execute(query).fetchall()
-    jobs = []
-    for row in rows:
-        job_dict = _get_jobs_dict(row._mapping)  # pylint: disable=protected-access
-        if job_dict.get('status') is not None:
-            job_dict['status'] = ManagedJobStatus(job_dict['status'])
-        if job_dict.get('schedule_state') is not None:
-            job_dict['schedule_state'] = ManagedJobScheduleState(
-                job_dict['schedule_state'])
-        if job_dict.get('job_name') is None:
-            job_dict['job_name'] = job_dict.get('task_name')
-        if job_dict.get('metadata') is not None:
-            job_dict['metadata'] = json.loads(job_dict['metadata'])
-
-        # Add user YAML content for managed jobs.
-        job_dict['user_yaml'] = job_dict.get('original_user_yaml_content')
-        if job_dict['user_yaml'] is None:
-            # Backwards compatibility - try to read from file path
-            yaml_path = job_dict.get('original_user_yaml_path')
-            if yaml_path:
-                try:
-                    with open(yaml_path, 'r', encoding='utf-8') as f:
-                        job_dict['user_yaml'] = f.read()
-                except (FileNotFoundError, IOError, OSError) as e:
-                    job_id = job_dict.get('job_id')
-                    if job_id is not None:
-                        logger.debug('Failed to read original user YAML for '
-                                     f'job {job_id} from {yaml_path}: {e}')
-                    else:
-                        logger.debug('Failed to read original user YAML from '
-                                     f'{yaml_path}: {e}')
-
-        jobs.append(job_dict)
+    query = _order_for_display(query, sort_by, sort_order, sort_field_map)
+    jobs = _load_job_rows(engine, query)
     return jobs, total
 
 
