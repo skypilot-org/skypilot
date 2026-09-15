@@ -44,6 +44,7 @@ _COUNTERS = (
     metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL,
     metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL,
     metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
+    metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL,
 )
 
 
@@ -214,11 +215,16 @@ def test_a_refused_websocket_handshake_is_counted():
                    reason=middleware_utils.REJECT_REASON_AUTH_WORKER_EXHAUSTED,
                    status='503',
                    kind='websocket') == 1.0
+    # The refusal is also counted as an attempt, by design: the outcome
+    # split reads off the two counters.
+    assert _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL,
+        path='/kubernetes-pod-ssh-proxy') == 1.0
     # Handshakes are not HTTP requests: the request counter is untouched.
     assert _sample(metrics_utils.SKY_APISERVER_REQUESTS_TOTAL) == 0.0
 
 
-def test_an_accepted_websocket_handshake_is_not_counted_as_refused():
+def test_an_accepted_websocket_handshake_is_counted():
     app = _app()
     with _healthy_auth():
         with _client(app).websocket_connect('/kubernetes-pod-ssh-proxy',
@@ -227,6 +233,11 @@ def test_an_accepted_websocket_handshake_is_not_counted_as_refused():
     assert _sample(
         metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL) == 0.0
     assert _sample(metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL) == 0.0
+    # The attempt is counted by route, once; with no refusal it is the
+    # accepted volume.
+    assert _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL,
+        path='/kubernetes-pod-ssh-proxy') == 1.0
 
 
 def test_unauthenticated_scanner_paths_do_not_create_series():
