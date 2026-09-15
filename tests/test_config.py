@@ -2401,6 +2401,95 @@ def test_get_effective_queue_name_slurm_ignores_sbatch_options(
         cluster='clusterA', workspace='default') is None
 
 
+def test_get_effective_slurm_quota_value(monkeypatch, tmp_path) -> None:
+    """An arbitrary `quota.<key>` walks the same scopes as `quota.queue`."""
+    with open(tmp_path / 'slurm_quota_value.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        slurm:
+            quota:
+                borrow_queue: global-cloud-borrow
+            cluster_configs:
+                clusterA:
+                    partition_configs:
+                        gpu:
+                            quota:
+                                borrow_queue: global-clusterA-gpu-borrow
+        workspaces:
+            workspaceA:
+                slurm:
+                    quota:
+                        borrow_queue: ws-cloud-borrow
+            workspaceB: {}
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'slurm_quota_value.yaml')
+    skypilot_config.reload_config()
+
+    assert skypilot_config.get_effective_slurm_quota_value(
+        'borrow_queue',
+        cluster='clusterA',
+        partition='gpu',
+        workspace='workspaceA') == 'ws-cloud-borrow'
+    assert skypilot_config.get_effective_slurm_quota_value(
+        'borrow_queue',
+        cluster='clusterA',
+        partition='gpu',
+        workspace='workspaceB') == 'global-clusterA-gpu-borrow'
+    assert skypilot_config.get_effective_slurm_quota_value(
+        'borrow_queue',
+        cluster='clusterA',
+        partition='cpu',
+        workspace='workspaceB') == 'global-cloud-borrow'
+    assert skypilot_config.get_effective_slurm_quota_value(
+        'borrow_queue',
+        cluster='clusterA',
+        partition='cpu',
+        workspace='workspaceB',
+        override_configs={'slurm': {
+            'quota': {
+                'borrow_queue': 'task-borrow'
+            }
+        }}) == 'task-borrow'
+    # A cluster with no entry of its own still inherits the cloud scope.
+    assert skypilot_config.get_effective_slurm_quota_value(
+        'borrow_queue',
+        cluster='clusterB',
+        partition='gpu',
+        workspace='workspaceB') == 'global-cloud-borrow'
+    # A sub-field nobody set reads as absent rather than raising.
+    assert skypilot_config.get_effective_slurm_quota_value(
+        'not_a_field', cluster='clusterA', partition='gpu') is None
+
+
+def test_get_effective_slurm_quota_value_preserves_type(monkeypatch,
+                                                        tmp_path) -> None:
+    """Non-string sub-fields come back as configured, not coerced.
+
+    `slurm.quota` is `additionalProperties: True`, so a sub-field can hold
+    any JSON type. Coercing to str would mask a mis-typed config and
+    returning None would silently drop it, so the value passes through and
+    the caller validates -- which is why the getter is annotated `Any`.
+    """
+    with open(tmp_path / 'slurm_quota_types.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        slurm:
+            quota:
+                a_number: 42
+                a_bool: true
+                a_list: [one, two]
+                a_mapping: {nested: value}
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'slurm_quota_types.yaml')
+    skypilot_config.reload_config()
+
+    get = skypilot_config.get_effective_slurm_quota_value
+    assert get('a_number', cluster='clusterA') == 42
+    assert get('a_bool', cluster='clusterA') is True
+    assert get('a_list', cluster='clusterA') == ['one', 'two']
+    assert get('a_mapping', cluster='clusterA') == {'nested': 'value'}
+
+
 def test_get_effective_slurm_account(monkeypatch, tmp_path) -> None:
     """`quota.account` walks the same scopes as the Slurm `quota.queue`."""
     with open(tmp_path / 'slurm_account.yaml', 'w', encoding='utf-8') as f:

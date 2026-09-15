@@ -1345,6 +1345,20 @@ class RetryingVmProvisioner(object):
                         # Pausing to wait on an external condition: keep the
                         # resources for resume, do not tear down or fail over.
                         raise
+                    except exceptions.ProvisionUnsupportedError as e:
+                        # The request itself cannot be served here, so the
+                        # remaining zones of this candidate cannot help. Tear
+                        # down what was created and let the caller decide
+                        # whether another candidate might serve it.
+                        last_error_reason = str(e)
+                        CloudVmRayBackend().post_teardown_cleanup(
+                            handle,
+                            terminate=not prev_cluster_ever_up,
+                            remove_from_db=False,
+                            failover=True,
+                        )
+                        with ux_utils.print_exception_no_traceback():
+                            raise
                     except config_lib.KubernetesError as e:
                         if e.insufficent_resources:
                             insufficient_resources = e.insufficent_resources
@@ -1877,6 +1891,34 @@ class RetryingVmProvisioner(object):
                     self._blocked_resources,
                     resources_lib.Resources(cloud=to_provision.cloud))
                 failover_history.append(e)
+            except exceptions.ProvisionUnsupportedError as e:
+                # Recorded in the history like any other failover reason, but
+                # deliberately not as a ResourcesUnavailableError: a caller
+                # deciding whether to keep waiting for capacity reads the
+                # history for capacity failures, and this is not one. When it
+                # is the only kind of failure the history holds, "wait for
+                # room" is the wrong answer and the caller can say so.
+                logger.warning(common_utils.format_exception(e))
+                failover_history.append(e)
+                cluster_cannot_fail_over = (
+                    prev_cluster_status is not None and
+                    prev_cluster_status != status_lib.ClusterStatus.INIT)
+                if cluster_cannot_fail_over or launchable_retries_disabled:
+                    # Two cases cannot reach the tail below. An UP or STOPPED
+                    # cluster is never failed over for (see _yield_zones, and
+                    # the INIT-only assertion in that tail) -- but an INIT one
+                    # is, which is why this is not simply "there is an
+                    # existing cluster". And with no registered DAG there is
+                    # nothing to fail over to. The wrapper is what reaches the
+                    # caller; the history it carries is what says this was not
+                    # a capacity failure.
+                    raise exceptions.ResourcesUnavailableError(
+                        common_utils.format_exception(e),
+                        no_failover=True,
+                        failover_history=failover_history) from e
+                # Otherwise fall through: the tail blocks this candidate and
+                # records it in resource_exceptions, then re-optimizes over
+                # what remains.
             except exceptions.ResourcesUnavailableError as e:
                 failover_history.append(e)
                 if e.no_failover:
