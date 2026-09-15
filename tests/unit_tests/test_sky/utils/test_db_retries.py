@@ -1,12 +1,15 @@
 """Unit tests for sky.utils.db.retries."""
 # pylint: disable=missing-class-docstring,protected-access,unnecessary-lambda
 import socket
+import asyncio
+import time
 from unittest import mock
 
 import psycopg2
 import pytest
 import sqlalchemy.exc
 
+from sky.utils.db import deadline as db_deadline
 from sky.utils.db import retries
 
 
@@ -188,3 +191,77 @@ async def _coro_returning(value):
 
 async def _coro_raising(exc):
     raise exc
+
+class _PgError(Exception):
+
+    def __init__(self, pgcode):
+        super().__init__('cancelled')
+        self.pgcode = pgcode
+
+
+def _deadline_error():
+    # A deadline error as the DB layer raises it on the auth path: the
+    # server cut the call off at lock_timeout (55P03).
+    return sqlalchemy.exc.OperationalError('stmt', {}, _PgError('55P03'))
+
+
+class TestRetriesUnderAnAuthDeadline:
+    """With a thread-local deadline set (the bounded auth path), retrying
+    cannot help: a deadline error IS the bound firing, and a backoff sleep
+    that outlives the deadline holds the thread the bound exists to free.
+    Without a deadline, nothing changes."""
+
+    @pytest.fixture(autouse=True)
+    def _clear(self):
+        db_deadline.clear_deadline()
+        yield
+        db_deadline.clear_deadline()
+
+    @pytest.mark.parametrize('pgcode', ['55P03', '57014', '25P03'])
+    def test_a_server_timeout_is_not_retried(self, pgcode):
+        db_deadline.set_deadline(time.monotonic() + 60)
+        fn = mock.Mock(side_effect=sqlalchemy.exc.OperationalError(
+            'stmt', {}, _PgError(pgcode)))
+        with mock.patch.object(retries.time, 'sleep') as sleep:
+            with pytest.raises(sqlalchemy.exc.OperationalError):
+                retries.with_db_retries(fn)
+        fn.assert_called_once()
+        sleep.assert_not_called()
+
+    def test_a_backoff_past_the_deadline_stops_retrying(self):
+        # A non-deadline transient error (e.g. EBADF on a stolen fd) with
+        # 0.3s of budget left: the first backoff (~1s) would outlive it.
+        db_deadline.set_deadline(time.monotonic() + 0.3)
+        fn = mock.Mock(side_effect=_make_op_error('EBADF'))
+        with mock.patch.object(retries.time, 'sleep') as sleep:
+            with pytest.raises(sqlalchemy.exc.OperationalError):
+                retries.with_db_retries(fn)
+        fn.assert_called_once()
+        sleep.assert_not_called()
+
+    def test_a_transient_error_within_budget_is_still_retried(self):
+        db_deadline.set_deadline(time.monotonic() + 60)
+        fn = mock.Mock(side_effect=[_make_op_error('EBADF'), 'ok'])
+        with mock.patch.object(retries.time, 'sleep'):
+            assert retries.with_db_retries(fn) == 'ok'
+        assert fn.call_count == 2
+
+    def test_without_a_deadline_a_deadline_error_is_retried_as_before(self):
+        fn = mock.Mock(side_effect=[_deadline_error(), 'ok'])
+        with mock.patch.object(retries.time, 'sleep'):
+            assert retries.with_db_retries(fn) == 'ok'
+        assert fn.call_count == 2
+
+    def test_async_variant_stops_too(self):
+        # The realistic shape: a sync thread that already holds the deadline
+        # (an executor thread) drives async DB code with asyncio.run, so the
+        # coroutine runs on this thread and sees the thread-local. Setting a
+        # deadline from *within* async code is refused (see the deadline
+        # tests' TestSetDeadlineSyncOnly).
+        db_deadline.set_deadline(time.monotonic() + 60)
+        fn = mock.AsyncMock(side_effect=_deadline_error())
+        with mock.patch.object(retries.asyncio, 'sleep') as sleep:
+            with pytest.raises(sqlalchemy.exc.OperationalError):
+                asyncio.run(retries.with_db_retries_async(fn))
+        fn.assert_called_once()
+        sleep.assert_not_called()
