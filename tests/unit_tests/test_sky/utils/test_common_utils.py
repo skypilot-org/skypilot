@@ -1,6 +1,7 @@
 import asyncio
 import contextvars
 import os
+import re
 import tempfile
 from unittest import mock
 
@@ -8,6 +9,7 @@ import pytest
 
 from sky import exceptions
 from sky import models
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import context
 
@@ -148,6 +150,106 @@ class TestMakeClusterNameOnCloud:
             "Cuda_11.8")
         assert "cuda-11-8-ab12cd34" == common_utils.make_cluster_name_on_cloud(
             "Cuda_11.8", max_length=20)
+
+    # (display_name, max_length, user_hash). The 'cluster-xxx...' names are
+    # 33 and 34 characters: with an 8-character user hash the first still
+    # fits in max_length=42 and the second is truncated with the 2-character
+    # infix.
+    @pytest.mark.parametrize(
+        'display_name,max_length,user_hash',
+        [
+            ('lora', 15, 'ab12cd34'),
+            ('lora', 42, 'sa-0123456789abcdef'),
+            ('Cuda_11.8', 15, 'ab12cd34'),
+            ('Cuda_11.8', 42, 'sa-0123456789abcdef'),
+            ('My.Cluster_Name', 42, 'ab12cd34'),
+            ('My.Cluster_Name', 42, 'sa-0123456789abcdef'),
+            ('cluster-' + 'x' * 25, 42, 'ab12cd34'),
+            ('cluster-' + 'x' * 26, 42, 'ab12cd34'),
+            ('cluster-' + 'x' * 25, 42, 'sa-0123456789abcdef'),
+            ('cluster-' + 'x' * 26, 42, 'sa-0123456789abcdef'),
+        ],
+    )
+    def test_explicit_user_hash_matches_env(self, display_name, max_length,
+                                            user_hash, monkeypatch):
+        """An explicit user hash gives what the same hash in the environment
+        would have given."""
+        monkeypatch.setenv(constants.USER_ID_ENV_VAR, user_hash)
+        from_env = common_utils.make_cluster_name_on_cloud(
+            display_name, max_length=max_length)
+
+        # A different identity in the environment must not be used.
+        monkeypatch.setenv(constants.USER_ID_ENV_VAR, 'ff99ff99')
+        explicit = common_utils.make_cluster_name_on_cloud(
+            display_name, max_length=max_length, user_hash=user_hash)
+
+        assert explicit == from_env
+        assert explicit.endswith(f'-{user_hash}')
+        assert len(explicit) <= max_length
+
+    def test_omitted_user_hash_still_reads_the_environment(self, monkeypatch):
+        """Existing callers are unaffected."""
+        monkeypatch.setenv(constants.USER_ID_ENV_VAR, MOCKED_USER_HASH)
+        assert common_utils.make_cluster_name_on_cloud(
+            'lora') == f'lora-{MOCKED_USER_HASH}'
+        assert common_utils.make_cluster_name_on_cloud(
+            'lora', user_hash=None) == f'lora-{MOCKED_USER_HASH}'
+
+    def test_user_hash_ignored_when_not_added(self, monkeypatch):
+        monkeypatch.setenv(constants.USER_ID_ENV_VAR, MOCKED_USER_HASH)
+        assert common_utils.make_cluster_name_on_cloud(
+            'lora', add_user_hash=False, user_hash='ff99ff99') == 'lora'
+
+    def test_long_name_is_truncated_with_the_infix(self, monkeypatch):
+        """Pins the shape the equality tests above compare against: the 34
+        character name does not merely fit."""
+        monkeypatch.setenv(constants.USER_ID_ENV_VAR, 'ff99ff99')
+        fits = common_utils.make_cluster_name_on_cloud('cluster-' + 'x' * 25,
+                                                       max_length=42,
+                                                       user_hash='ab12cd34')
+        assert fits == 'cluster-' + 'x' * 25 + '-ab12cd34'
+
+        truncated = common_utils.make_cluster_name_on_cloud(
+            'cluster-' + 'x' * 26, max_length=42, user_hash='ab12cd34')
+        assert len(truncated) == 42
+        # 42 - 9 (user hash) - 3 (infix and its dash) = 30 name characters.
+        assert truncated.startswith('cluster-' + 'x' * 22)
+        assert truncated.endswith('-ab12cd34')
+
+    # (max_length, user_hash) pairs where the hash cannot fit: 15 is the
+    # default limit and 24 is the smallest one that still rejects a 20
+    # character service-account style hash.
+    @pytest.mark.parametrize('max_length,user_hash', [
+        (15, 'sa-0123456789abcdef'),
+        (15, 'ab12cd34ab12cd34'),
+        (24, 'sa-0123456789abcdefgh'),
+    ])
+    def test_user_hash_that_does_not_fit_raises(self, max_length, user_hash,
+                                                monkeypatch):
+        """A hash longer than the budget used to slice the name with a
+        negative length, producing a name no cloud accepts."""
+        monkeypatch.setenv(constants.USER_ID_ENV_VAR, MOCKED_USER_HASH)
+        with pytest.raises(ValueError, match=re.escape(user_hash)):
+            common_utils.make_cluster_name_on_cloud('lora',
+                                                    max_length=max_length,
+                                                    user_hash=user_hash)
+
+    @pytest.mark.parametrize('max_length', [15, 42, None])
+    def test_empty_user_hash_raises(self, max_length, monkeypatch):
+        """An empty hash would yield a name ending in a dash."""
+        monkeypatch.setenv(constants.USER_ID_ENV_VAR, MOCKED_USER_HASH)
+        with pytest.raises(ValueError, match='non-empty'):
+            common_utils.make_cluster_name_on_cloud('lora',
+                                                    max_length=max_length,
+                                                    user_hash='')
+
+    def test_a_long_user_hash_is_allowed_without_a_max_length(
+            self, monkeypatch):
+        """No max_length means no budget to bust."""
+        monkeypatch.setenv(constants.USER_ID_ENV_VAR, MOCKED_USER_HASH)
+        assert common_utils.make_cluster_name_on_cloud(
+            'lora', max_length=None,
+            user_hash='sa-0123456789abcdef') == 'lora-sa-0123456789abcdef'
 
 
 class TestCgroupFunctions:
