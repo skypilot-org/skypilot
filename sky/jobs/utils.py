@@ -1501,6 +1501,51 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
     return f'{cluster_name}-{job_id}'
 
 
+# Managed-job queue fields by the controller SKYLET_VERSION that introduced
+# them. A remote controller older than that version has no such column and
+# rejects a request naming it, so the server strips them before asking over
+# gRPC (the legacy codegen path does the same on the controller itself, keyed
+# on MANAGED_JOBS_VERSION).
+_JOB_FIELDS_BY_MIN_CONTROLLER_VERSION = {
+    41: frozenset({'root_job_id', 'parent_job_id', 'parent_task_id'}),
+    42: frozenset({'dynamic_task_index'}),
+}
+
+
+def queue_fields_need_controller_version(fields: Optional[List[str]]) -> bool:
+    """Whether ``fields`` names any queue field some controller versions lack,
+    so the caller has to ask the controller's version before requesting them.
+    ``None`` (all fields) is interpreted by the controller itself and needs no
+    check."""
+    if fields is None:
+        return False
+    return any(f in versioned
+               for versioned in _JOB_FIELDS_BY_MIN_CONTROLLER_VERSION.values()
+               for f in fields)
+
+
+def fields_for_controller(
+        fields: Optional[List[str]],
+        controller_version: Optional[str]) -> Optional[List[str]]:
+    """Drop queue fields a remote controller of ``controller_version`` (its
+    SKYLET_VERSION string) does not know. Unknown/unparsable versions strip
+    nothing, so a newer controller is never under-asked."""
+    if fields is None or controller_version is None:
+        return fields
+    try:
+        version = int(controller_version)
+    except (TypeError, ValueError):
+        return fields
+    unsupported: set = set()
+    for min_version, new_fields in _JOB_FIELDS_BY_MIN_CONTROLLER_VERSION.items(
+    ):
+        if version < min_version:
+            unsupported |= new_fields
+    if not unsupported:
+        return fields
+    return [f for f in fields if f not in unsupported]
+
+
 @dataclasses.dataclass
 class CancelRequestInfo:
     """Who asked for a cancellation, and under which API request.
@@ -1516,6 +1561,10 @@ class CancelRequestInfo:
     user_hash: Optional[str] = None
     user_name: Optional[str] = None
     request_id: Optional[str] = None
+    # Why SkyPilot itself cancelled the job, when no user asked for it (e.g.
+    # a job group sweeping the jobs launched from it once its primary tasks
+    # finished). Appended to the event reason.
+    note: Optional[str] = None
 
     @classmethod
     def from_request_context(cls) -> Optional['CancelRequestInfo']:
@@ -1542,7 +1591,7 @@ class CancelRequestInfo:
         # The hash is the fallback identity: a user row (and so the display
         # name) may be missing on the controller side.
         who = self.user_name or self.user_hash
-        if who is None and self.request_id is None:
+        if who is None and self.request_id is None and self.note is None:
             return None
         # The queue finds this event by its prefix to surface the requester
         # in the job's `details` (see
@@ -1554,6 +1603,8 @@ class CancelRequestInfo:
             reason = prefix
         if self.request_id is not None:
             reason += f' (request ID: {self.request_id})'
+        if self.note is not None:
+            reason += f' {self.note}'
         return reason
 
 
@@ -1575,14 +1626,64 @@ def _record_cancel_request_event(job_id: int, reason: Optional[str]) -> None:
                        f'{job_id}: {common_utils.format_exception(e)}')
 
 
-def cancel_jobs_by_id(
-        job_ids: Optional[List[int]],
-        all_users: bool = False,
-        current_workspace: Optional[str] = None,
-        user_hash: Optional[str] = None,
-        graceful: bool = False,
-        graceful_timeout: Optional[int] = None,
-        cancel_request_info: Optional[CancelRequestInfo] = None) -> str:
+@dataclasses.dataclass(frozen=True)
+class _LaunchedFrom:
+    """The jobs launched under a set of requested jobs, at any depth.
+
+    ``subtree_job_ids``: a FLAT list of every descendant of any requested
+    id (children, grandchildren, ...), parents before children, with the
+    requested ids themselves left out.
+
+    Per id in that list, for the event log of a cascaded cancel:
+    ``cancelled_with[id]``: the REQUESTED id whose subtree it is in (what the
+    user actually cancelled); ``direct_parent_of[id]``: the ONE job that
+    launched it. Neither is a children map.
+    """
+    subtree_job_ids: List[int]
+    cancelled_with: Dict[int, int]
+    direct_parent_of: Dict[int, int]
+
+
+def _jobs_launched_from(job_ids: List[int]) -> _LaunchedFrom:
+    """Every job launched under any of ``job_ids``, at any depth.
+
+    One query fetches the parent edges of the whole tree(s) the ids belong
+    to; the subtrees are then walked in memory, so depth never costs another
+    round trip.
+    """
+    children_of: Dict[int, List[int]] = collections.defaultdict(list)
+    for job_id, parent_job_id in managed_job_state.get_jobs_launched_from(
+            job_ids):
+        if parent_job_id is not None:
+            children_of[parent_job_id].append(job_id)
+    requested = set(job_ids)
+    subtree_job_ids: List[int] = []
+    cancelled_with: Dict[int, int] = {}
+    direct_parent_of: Dict[int, int] = {}
+    # (job, the requested id whose subtree we are walking)
+    frontier = [(job_id, job_id) for job_id in job_ids]
+    while frontier:
+        next_frontier: List[Tuple[int, int]] = []
+        for job_id, requested_root in frontier:
+            for child in children_of.get(job_id, []):
+                if child in requested or child in direct_parent_of:
+                    continue
+                direct_parent_of[child] = job_id
+                cancelled_with[child] = requested_root
+                subtree_job_ids.append(child)
+                next_frontier.append((child, requested_root))
+        frontier = next_frontier
+    return _LaunchedFrom(subtree_job_ids, cancelled_with, direct_parent_of)
+
+
+def cancel_jobs_by_id(job_ids: Optional[List[int]],
+                      all_users: bool = False,
+                      current_workspace: Optional[str] = None,
+                      user_hash: Optional[str] = None,
+                      graceful: bool = False,
+                      graceful_timeout: Optional[int] = None,
+                      cancel_request_info: Optional[CancelRequestInfo] = None,
+                      cancel_launched_from: bool = True) -> str:
     """Cancel jobs by id.
 
     If job_ids is None, cancel all jobs.
@@ -1592,6 +1693,10 @@ def cancel_jobs_by_id(
             job's event log. Defaults to the ambient API request context,
             which is only set when this runs in-process on the API server
             (consolidation mode); a remote controller gets it passed in.
+        cancel_launched_from: also cancel every job launched under the given
+            ids, at any depth (the default: cancelling a job takes its
+            tree). False when the caller already holds the full list, e.g.
+            the controller sweep.
     """
     if job_ids is None:
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(
@@ -1602,10 +1707,54 @@ def cancel_jobs_by_id(
     if current_workspace is None:
         current_workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
 
+    # Cancelling a job takes every job launched under it, at any depth: a
+    # job launched from inside a managed job records that job as its parent
+    # (dynamic job group members). The requested ids come first so the
+    # result message leads with what the caller asked for. A parent that is
+    # already terminal is skipped below like any other terminal job, but its
+    # still-running descendants are cancelled all the same.
+    requested_job_ids = set(job_ids)
+    launched_from = _LaunchedFrom([], {}, {})
+    if cancel_launched_from:
+        # Expand only the requested jobs the caller may act on. Workspace is
+        # the authorization boundary; a job outside it is reported below by
+        # the id the caller supplied, and its tree must not be walked (the
+        # walk would surface its descendants' ids in that report).
+        expandable = [
+            job_id for job_id in job_ids
+            if managed_job_state.get_status(job_id) is not None and
+            (current_workspace is None or
+             managed_job_state.get_workspace(job_id) == current_workspace)
+        ]
+        if expandable:
+            launched_from = _jobs_launched_from(expandable)
+    descendant_job_ids = launched_from.subtree_job_ids
+    job_ids = job_ids + descendant_job_ids
+
     if cancel_request_info is None:
         cancel_request_info = CancelRequestInfo.from_request_context()
     cancel_event_reason = (cancel_request_info.event_reason()
                            if cancel_request_info is not None else None)
+
+    def _event_reason_for(job_id: int) -> Optional[str]:
+        """The requester's reason, plus which job a descendant went down with.
+
+        A cascaded cancel is always recorded, even when the requester is
+        unknown: the child's event log must say the cancel came from an
+        ancestor rather than look like a spontaneous CANCELLING. It names the
+        job the caller actually cancelled and, when different, the job that
+        launched this one.
+        """
+        if job_id in requested_job_ids:
+            return cancel_event_reason
+        base = (cancel_event_reason if cancel_event_reason is not None else
+                managed_job_state.CANCEL_REQUESTED_EVENT_REASON_PREFIX)
+        cancelled_job_id = launched_from.cancelled_with[job_id]
+        launcher_job_id = launched_from.direct_parent_of[job_id]
+        if launcher_job_id == cancelled_job_id:
+            return f'{base} (cancelled with job {cancelled_job_id})'
+        return (f'{base} (cancelled with job {cancelled_job_id}, launched '
+                f'from job {launcher_job_id})')
 
     cancelled_job_ids: List[int] = []
     wrong_workspace_job_ids: List[int] = []
@@ -1637,7 +1786,7 @@ def cancel_jobs_by_id(
         # the job is known to be cancellable and before any of the paths
         # below act on it, so the audit entry precedes the resulting
         # CANCELLING / CANCELLED events.
-        _record_cancel_request_event(job_id, cancel_event_reason)
+        _record_cancel_request_event(job_id, _event_reason_for(job_id))
 
         if job_status == managed_job_state.ManagedJobStatus.PENDING:
             # the "if PENDING" is a short circuit, this will be atomic.
@@ -1702,8 +1851,40 @@ def cancel_jobs_by_id(
         cancelled_job_ids_str = ', '.join(map(str, cancelled_job_ids))
         identity_str = f'Jobs with IDs {cancelled_job_ids_str} are'
 
-    msg = f'{identity_str} scheduled to be cancelled.{wrong_workspace_job_str}'
+    cascade_str = ''
+    cancelled_descendants = [
+        job_id for job_id in cancelled_job_ids if job_id in descendant_job_ids
+    ]
+    if cancelled_descendants:
+        plural = 's' if len(cancelled_descendants) > 1 else ''
+        cascade_str = (f' This includes {len(cancelled_descendants)} job'
+                       f'{plural} launched from the cancelled job'
+                       f'{"s" if len(requested_job_ids) > 1 else ""}.')
+
+    msg = (f'{identity_str} scheduled to be cancelled.{cascade_str}'
+           f'{wrong_workspace_job_str}')
     return msg
+
+
+def cancel_descendant_jobs(job_id: int, note: str) -> str:
+    """Cancel every job launched (transitively) from ``job_id``, not the job.
+
+    Used by the controller when a job's primary tasks have all finished:
+    jobs launched from it are dynamic auxiliary members and are swept with
+    the declared auxiliaries (no termination delay). ``note`` says why, for
+    the descendants' event logs.
+    """
+    subtree_job_ids = _jobs_launched_from([job_id]).subtree_job_ids
+    if not subtree_job_ids:
+        return 'No job to cancel.'
+    # The whole subtree is already in hand, so cancel_jobs_by_id must not
+    # fetch and expand it again. Every swept job gets the same reason: it
+    # went down because the root finished.
+    return cancel_jobs_by_id(
+        subtree_job_ids,
+        current_workspace=managed_job_state.get_workspace(job_id),
+        cancel_request_info=CancelRequestInfo(note=note),
+        cancel_launched_from=False)
 
 
 def cancel_job_by_name(
@@ -3623,7 +3804,9 @@ def format_job_table(
     Args:
         jobs: A list of managed jobs.
         show_all: Whether to show all columns.
-        max_jobs: The maximum number of jobs to show in the table.
+        max_jobs: The maximum number of jobs to show in the table. A job
+          counts once with all of its rows (its tasks, and the jobs launched
+          under it), so the table never shows part of a job.
         return_rows: If True, return the rows as a list of strings instead of
           all rows concatenated into a single string.
         pool_status: List of pool status dictionaries with replica_info.
@@ -3639,10 +3822,22 @@ def format_job_table(
     if max_jobs and tasks_have_k8s_user:
         raise ValueError('max_jobs is not supported when tasks have user info.')
 
+    # A job launched from inside another managed job (a dynamic job group
+    # member) is shown under the top-level job of its tree, like that job's
+    # declared tasks. Only when the root is in this listing, though: a member
+    # whose root was filtered out (or is gone) is shown as its own job.
+    listed_job_ids = {task['job_id'] for task in tasks}
+
+    def group_job_id(task) -> int:
+        root_job_id = task.get('root_job_id')
+        if root_job_id is not None and root_job_id in listed_job_ids:
+            return root_job_id
+        return task['job_id']
+
     def get_hash(task):
         if tasks_have_k8s_user:
-            return (task['user'], task['job_id'])
-        return task['job_id']
+            return (task['user'], group_job_id(task))
+        return group_job_id(task)
 
     def _get_job_id_to_worker_map(
             pool_status: Optional[List[Dict[str, Any]]]) -> Dict[int, int]:
@@ -3757,7 +3952,23 @@ def format_job_table(
 
     all_tasks = tasks
     if max_jobs is not None:
-        all_tasks = tasks[:max_jobs]
+        # Keep the first `max_jobs` jobs (trees), with every row of each.
+        # Cutting rows instead would drop the tail of a job: since a job's
+        # dynamic members (newer, higher ids) come before its declared-task
+        # rows, a
+        # group with more members than the budget would lose its declared-task
+        # rows
+        # and be rendered from the members alone, under a member's name and
+        # status.
+        kept_hashes: Dict[Any, None] = {}
+        all_tasks = []
+        for task in tasks:
+            task_hash = get_hash(task)
+            if task_hash not in kept_hashes:
+                if len(kept_hashes) >= max_jobs:
+                    continue
+                kept_hashes[task_hash] = None
+            all_tasks.append(task)
     jobs = collections.defaultdict(list)
     for task in all_tasks:
         # The tasks within the same job_id are already sorted
@@ -3793,7 +4004,18 @@ def format_job_table(
 
         return user_values
 
-    for job_hash, job_tasks in jobs.items():
+    for job_hash, group_tasks in jobs.items():
+        group_id = job_hash[1] if tasks_have_k8s_user else job_hash
+        # The top-level job's declared tasks, and the jobs launched under it
+        # (dynamic members, each with its own job id). The group row
+        # aggregates the former only: a dynamic member never changes the
+        # group's status, duration or recovery count.
+        job_tasks = [t for t in group_tasks if t['job_id'] == group_id]
+        member_tasks = [t for t in group_tasks if t['job_id'] != group_id]
+        if not job_tasks:
+            # Should not happen (the root is listed by construction of
+            # group_job_id); render the members as their own jobs.
+            job_tasks, member_tasks = member_tasks, []
         if show_all:
             schedule_state = job_tasks[0]['schedule_state']
         workspace = job_tasks[0].get('workspace',
@@ -3883,14 +4105,22 @@ def format_job_table(
         has_auxiliary_tasks = any(
             t.get('is_primary_in_job_group') is False for t in job_tasks)
 
-        for task in job_tasks:
+        # How many rows each dynamic member has, so a multi-task member
+        # shows its task ids and a single-task one shows '-', like top-level
+        # jobs do.
+        member_row_counts = collections.Counter(
+            t['job_id'] for t in member_tasks)
+
+        for task in job_tasks + member_tasks:
+            is_member = task['job_id'] != group_id
             # The job['job_duration'] is already calculated in
             # dump_managed_job_queue().
             job_duration = log_utils.readable_time_duration(
                 0, task['job_duration'], absolute=True)
             submitted = log_utils.readable_time_duration(task['submitted_at'])
             user_values = get_user_column_values(task)
-            task_workspace = '-' if len(job_tasks) > 1 else workspace
+            task_workspace = ('-'
+                              if len(job_tasks) > 1 or is_member else workspace)
             pool = task.get('pool')
             if pool is None:
                 pool = '-'
@@ -3902,12 +4132,38 @@ def format_job_table(
 
             # Add [P] marker for primary tasks in job groups with auxiliaries
             task_name = task['task_name']
-            if has_auxiliary_tasks and task.get('is_primary_in_job_group'):
+            if (not is_member and has_auxiliary_tasks and
+                    task.get('is_primary_in_job_group')):
                 task_name = f'{task_name} [P]'
 
+            if is_member:
+                # A dynamic task (a job launched from this group) reads like
+                # one of the group's tasks: its index numbers on from the
+                # declared tasks, and `sky jobs logs <group> <index>` / `sky
+                # jobs
+                # cancel <group> --task <index>` address it. A multi-task
+                # member shows `<index>.<task id>`. The member's own job id
+                # is shown with -v; rows from before the index existed
+                # always show it, in place of the index.
+                dynamic_index = task.get('dynamic_task_index')
+                if dynamic_index is None:
+                    id_cell: Any = f' \u21B3 {task["job_id"]}'
+                    task_cell: Any = (task['task_id']
+                                      if member_row_counts[task['job_id']] > 1
+                                      else '-')
+                else:
+                    id_cell = (f' \u21B3 {task["job_id"]}'
+                               if show_all else ' \u21B3')
+                    task_cell = (f'{dynamic_index}.{task["task_id"]}'
+                                 if member_row_counts[task['job_id']] > 1 else
+                                 dynamic_index)
+            else:
+                id_cell = task['job_id'] if len(job_tasks) == 1 else ' \u21B3'
+                task_cell = task['task_id'] if len(job_tasks) > 1 else '-'
+
             values = [
-                task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
-                task['task_id'] if len(job_tasks) > 1 else '-',
+                id_cell,
+                task_cell,
                 *([task_workspace] if show_workspace else []),
                 task_name,
                 *user_values,
@@ -3928,7 +4184,8 @@ def format_job_table(
                 # schedule_state is only set at the job level, so if we have
                 # more than one task, only display on the aggregated row.
                 schedule_state = (task['schedule_state']
-                                  if len(job_tasks) == 1 else '-')
+                                  if len(job_tasks) == 1 and not is_member else
+                                  '-')
                 infra_str = task.get('infra')
                 if infra_str is None:
                     cloud = task.get('cloud')
@@ -4168,6 +4425,13 @@ class ManagedJobCodeGen:
         _BATCH_FIELDS = {{'is_batch', 'batch_total_batches', 'batch_completed_batches'}}
         if managed_job_version < 18 and _fields is not None:
             _fields = [f for f in _fields if f not in _BATCH_FIELDS]
+        # Filter out parent-link fields for older controllers (< 25)
+        _PARENT_FIELDS = {{'root_job_id', 'parent_job_id', 'parent_task_id'}}
+        if managed_job_version < 25 and _fields is not None:
+            _fields = [f for f in _fields if f not in _PARENT_FIELDS]
+        # Filter out the dynamic task index for older controllers (< 26)
+        if managed_job_version < 26 and _fields is not None:
+            _fields = [f for f in _fields if f != 'dynamic_task_index']
         if managed_job_version < 9:
             # For backward compatibility, since filtering is not supported
             # before #6652.

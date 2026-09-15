@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 59  # task name/id filter for /jobs/events
+API_VERSION = 62  # managed jobs: dynamic_task_index queue field
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -48,6 +48,12 @@ MIN_SSH_REDIRECT_PROTOCOL_VERSION = 47
 # Infra filter). An older server drops the field and answers with jobs on every
 # infra, so the client refuses to ask rather than mislabel that as filtered.
 MIN_JOBS_INFRA_FILTER_API_VERSION = 58
+# Minimum API version for attaching a managed job to a parent job (dynamic
+# job group members): `parent_job_id`/`parent_task_id` on jobs launch.
+MIN_JOBS_PARENT_LINK_API_VERSION = 61
+# Minimum server API version whose managed-jobs queue knows
+# dynamic_task_index (a dynamic task's ordinal within its job group).
+MIN_JOBS_DYNAMIC_TASK_INDEX_API_VERSION = 62
 
 # Minimum API version that supports Sky Batch (sky.batch module).
 MIN_BATCH_API_VERSION = 49
@@ -174,9 +180,25 @@ DEFAULT_DAEMON_LOG_MAX_BYTES = 128 * 1024 * 1024  # 128 MB
 # server. Configurable via api_server.logs_retention_hours; negative disables.
 DEFAULT_LOGS_RETENTION_HOURS = 720  # 30 days
 
-# Interval for the server-side heartbeat daemon that sends plugin metrics
-# to Loki (e.g., GPU inventory from billing plugin).
+# Interval for the server-side heartbeat daemon that sends fleet-wide GPU
+# counts to Loki, plus plugin metrics when a plugin registered a provider
+# (e.g., GPU inventory from billing plugin).
 SERVER_HEARTBEAT_INTERVAL_SECONDS = 600  # 10 minutes
+
+# The chunk size for the zip file to be uploaded to the API server. We split
+# the zip file into chunks to avoid network issues for large request body that
+# can be caused by NGINX's client_max_body_size or Cloudflare's upload limit.
+# As of 09/25/2025, the upload limit for Cloudflare's free plan is 100MB
+# (not 100MiB; 100MB = 100,000,000 bytes):
+# https://developers.cloudflare.com/support/troubleshooting/http-status-codes/4xx-client-error/error-413/
+# We use 95MB to leave headroom for HTTP headers and request overhead.
+UPLOAD_CHUNK_BYTES = 95 * 1000 * 1000
+
+# Largest total upload the server accepts, as an integer number of bytes.
+# Unset or non-positive means no limit. Checked independently of how much
+# local disk is free: an upload is extracted later, so the space available
+# at extraction time cannot be known while its chunks arrive.
+MAX_UPLOAD_TOTAL_BYTES_ENV_VAR = 'SKYPILOT_MAX_UPLOAD_TOTAL_BYTES'
 
 # Interval for the daemon that sweeps expired managed-job API access tokens
 # from the service_account_tokens table. These tokens are normally revoked

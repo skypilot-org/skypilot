@@ -624,6 +624,14 @@ class JobsLaunchBody(RequestBody):
     name: Optional[str]
     pool: Optional[str] = None
     num_jobs: Optional[int] = None
+    # The managed job (and task within it) this job is launched from, when it
+    # should join that job as a dynamic member. None for top-level jobs.
+    parent_job_id: Optional[int] = None
+    parent_task_id: Optional[int] = None
+    # True when the caller asked for the attachment (an explicit job_group);
+    # False when it came from the in-job-group default. Decides whether a
+    # server that cannot record attachments errors or launches top-level.
+    job_group_explicit: bool = False
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
@@ -684,6 +692,9 @@ class JobsCancelBody(RequestBody):
     pool: Optional[str] = None
     graceful: bool = False
     graceful_timeout: Optional[int] = None
+    # With exactly one job id: cancel only this dynamic task of it (index as
+    # shown in the queue, or name). int for the index, str for the name.
+    task: Optional[Union[str, int]] = None
 
 
 class JobsLogsBody(RequestBody):

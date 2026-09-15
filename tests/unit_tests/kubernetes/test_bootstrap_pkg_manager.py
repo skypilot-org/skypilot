@@ -324,3 +324,286 @@ def test_nonapt_core_install_fails_when_packages_are_really_absent():
                   errexit=True)
     assert 'INSTALL_SUCCESS=true' not in result.stdout, (
         f'packages absent must not report success. stdout={result.stdout!r}')
+
+
+# --------------------------------------------------------------------------
+# apt_install_with_retries: prefer the base suite when a fetch fails
+# --------------------------------------------------------------------------
+
+_POLICY_WITH_BULLSEYE = textwrap.dedent("""\
+     500 http://deb.debian.org/debian-security bullseye-security/main amd64 Packages
+         release v=11,o=Debian,a=oldoldstable-security,n=bullseye-security,l=Debian-Security,c=main,b=amd64
+     500 http://deb.debian.org/debian bullseye/main amd64 Packages
+         release v=11,o=Debian,a=oldoldstable,n=bullseye,l=Debian,c=main,b=amd64
+    """)
+# Only the companion suite: apt has no index for the codename itself.
+_POLICY_WITHOUT_BULLSEYE = textwrap.dedent("""\
+     500 http://deb.debian.org/debian-security bullseye-security/main amd64 Packages
+         release v=11,o=Debian,a=oldoldstable-security,n=bullseye-security,l=Debian-Security,c=main,b=amd64
+    """)
+# What apt prints when a companion suite's pool has been pruned but its index
+# is still served: the fetch of the newer version fails, nothing is installed.
+_FETCH_FAILURE = textwrap.dedent("""\
+    Err:1 http://deb.debian.org/debian-security bullseye-security/main amd64 curl amd64 7.74.0-1.3+deb11u16
+      404  Not Found [IP: 151.101.2.132 80]
+    E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/c/curl/curl_7.74.0-1.3+deb11u16_amd64.deb  404  Not Found [IP: 151.101.2.132 80]
+    E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?
+    """)
+_DPKG_FAILURE = 'E: Sub-process /usr/bin/dpkg returned an error code (1)\n'
+# A transient failure prints the same "Failed to fetch" text but no 404; it
+# must not pin anything.
+_TRANSIENT_FAILURE = textwrap.dedent("""\
+    Err:1 http://deb.debian.org/debian-security bullseye-security/main amd64 curl amd64 7.74.0-1.3+deb11u16
+      Could not resolve 'deb.debian.org'
+    E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/c/curl/curl_7.74.0-1.3+deb11u16_amd64.deb  Could not resolve 'deb.debian.org'
+    E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?
+    """)
+# A 404 from a third-party repository on the base suite: not a companion
+# suite of the release, so preferring the base suite would not help.
+_THIRD_PARTY_404 = textwrap.dedent("""\
+    Err:1 https://download.docker.com/linux/debian bullseye/stable amd64 docker-ce amd64 5:24.0.7-1~debian.11~bullseye
+      404  Not Found [IP: 13.224.29.98 443]
+    E: Failed to fetch https://download.docker.com/linux/debian/dists/bullseye/pool/stable/amd64/docker-ce_24.0.7-1~debian.11~bullseye_amd64.deb  404  Not Found [IP: 13.224.29.98 443]
+    E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?
+    """)
+_OS_RELEASE_BULLSEYE = 'ID=debian\nVERSION_ID="11"\nVERSION_CODENAME=bullseye\n'
+
+
+def _apt_install_harness(tmp: str,
+                         install_stub: str,
+                         policy: str,
+                         os_release: str,
+                         calls: str,
+                         conf: str = '') -> str:
+    """The real apt_install_with_retries and its fetch-failure helper, with
+    apt-get, apt-cache, timeout and sleep stubbed on PATH.
+
+    ``install_stub`` is the bash the apt-get stub runs for ``install``; it sees
+    the full argv in ``$*`` and must ``exit`` with apt's status. Every apt-get
+    invocation is appended to ``$TRACE`` so tests can assert on the exact retry
+    sequence. The hardcoded paths are redirected into ``tmp``; the shell is
+    otherwise verbatim from the template.
+    """
+    body = _extract('apt_prefer_base_suite_on_fetch_failure() {',
+                    'apt_update_install_with_retries() {')
+    conf = conf or os.path.join(tmp, 'default-release.conf')
+    body = (body.replace(
+        '/tmp/apt-update.log', os.path.join(tmp, 'apt-update.log')).replace(
+            '/tmp/apt-install-attempt.log',
+            os.path.join(tmp, 'attempt.log')).replace(
+                '/etc/os-release', os.path.join(tmp, 'os-release')).replace(
+                    '/etc/apt/apt.conf.d/99-skypilot-default-release', conf))
+    bin_dir = os.path.join(tmp, 'bin')
+    os.makedirs(bin_dir)
+
+    def stub(name: str, text: str) -> None:
+        path = os.path.join(bin_dir, name)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('#!/usr/bin/env bash\n' + text + '\n')
+        os.chmod(path, 0o755)
+
+    stub(
+        'apt-get', 'echo "apt-get $*" >> "$TRACE"\n'
+        'case "$1" in\n'
+        f'  install) {install_stub} ;;\n'
+        '  *) exit 0 ;;\n'
+        'esac')
+    stub('apt-cache', f"cat <<'POLICY'\n{policy}POLICY")
+    # ``timeout <secs> cmd...`` -> run cmd directly.
+    stub('timeout', 'shift; exec "$@"')
+    stub('sleep', 'exit 0')
+    with open(os.path.join(tmp, 'os-release'), 'w', encoding='utf-8') as f:
+        f.write(os_release)
+    # Call sites redirect the helper into the step log and guard the call
+    # with ``|| { ...; continue; }``; the helper re-arms ``set -e`` before
+    # ``return 1``, so an unguarded failing call would abort the script here
+    # instead of recording the status the pod's call sites observe.
+    call_lines = '\n'.join(
+        f'if apt_install_with_retries {c} >> {tmp}/apt-update.log 2>&1; then '
+        f'echo "rc=0" >> "$TRACE"; else echo "rc=$?" >> "$TRACE"; fi'
+        for c in calls.split(','))
+    return textwrap.dedent(f"""
+        export TRACE={tmp}/trace
+        export PATH={bin_dir}:$PATH
+        prefix_cmd() {{ echo ""; }}
+        APT_OPTS=""
+        APT_INSTALL_CMD_TIMEOUT=1
+        """) + body + '\n' + call_lines + '\n'
+
+
+def _fetch_failure_unless_retargeted(tmp: str) -> str:
+    # The first attempt 404s on the companion pool. Once the base suite is
+    # preferred (the conf file exists) the same install succeeds, which is
+    # what apt does with the base suite at priority 990.
+    conf = os.path.join(tmp, 'default-release.conf')
+    return (f'if [ -f {conf} ]; then exit 0; fi; '
+            f"cat <<'OUT'\n{_FETCH_FAILURE}OUT\nexit 100")
+
+
+def _read(tmp: str, name: str) -> str:
+    path = os.path.join(tmp, name)
+    if not os.path.exists(path):
+        return ''
+    with open(path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+
+def _install_lines(trace: str):
+    return [l for l in trace.splitlines() if l.startswith('apt-get install')]
+
+
+def test_apt_install_prefers_the_base_suite_after_a_fetch_failure():
+    """A fetch failure must make the next attempt prefer the base suite, and
+    the preference must persist for later apt runs on the node."""
+    tmp = tempfile.mkdtemp()
+    try:
+        script = _apt_install_harness(tmp,
+                                      _fetch_failure_unless_retargeted(tmp),
+                                      _POLICY_WITH_BULLSEYE,
+                                      _OS_RELEASE_BULLSEYE,
+                                      calls='curl')
+        result = _run(script)
+        trace = _read(tmp, 'trace')
+        assert result.returncode == 0, result.stderr[-800:]
+        assert len(_install_lines(trace)) == 2, trace
+        assert 'rc=0' in trace
+        assert _read(
+            tmp,
+            'default-release.conf') == ('APT::Default-Release "bullseye";\n')
+        log = _read(tmp, 'apt-update.log')
+        assert "preferring the base suite 'bullseye'" in log
+        # The attempt's own output still reaches the step log.
+        assert 'E: Failed to fetch' in log
+        # LC_ALL=C is set on the install so those diagnostics are English
+        # for the detector regardless of the image's locale.
+        assert 'LC_ALL=C' in _extract('apt_install_with_retries() {',
+                                      'apt_update_install_with_retries() {')
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_apt_install_keeps_the_plain_retry_on_a_non_fetch_failure():
+    """A dpkg or dependency error is not a pool problem; the retries stay
+    identical and the final status is the helper's usual 1."""
+    tmp = tempfile.mkdtemp()
+    try:
+        script = _apt_install_harness(
+            tmp,
+            f"cat <<'OUT'\n{_DPKG_FAILURE}OUT\nexit 100",
+            _POLICY_WITH_BULLSEYE,
+            _OS_RELEASE_BULLSEYE,
+            calls='curl')
+        result = _run(script)
+        trace = _read(tmp, 'trace')
+        assert result.returncode == 0, result.stderr[-800:]
+        assert len(_install_lines(trace)) == 3, trace
+        assert 'rc=1' in trace
+        assert not os.path.exists(os.path.join(tmp, 'default-release.conf'))
+    finally:
+        shutil.rmtree(tmp)
+
+
+@pytest.mark.parametrize(
+    'policy,os_release,expected_note',
+    [
+        # apt has no index for the codename: preferring it would turn a
+        # fetch failure into a different failure.
+        (_POLICY_WITHOUT_BULLSEYE, _OS_RELEASE_BULLSEYE,
+         "apt has no index for release 'bullseye'"),
+        # No codename to prefer at all.
+        (_POLICY_WITH_BULLSEYE, 'ID=debian\nVERSION_ID="11"\n',
+         'names no VERSION_CODENAME'),
+    ])
+def test_apt_install_does_not_retarget_without_a_usable_codename(
+        policy, os_release, expected_note):
+    tmp = tempfile.mkdtemp()
+    try:
+        script = _apt_install_harness(tmp,
+                                      _fetch_failure_unless_retargeted(tmp),
+                                      policy,
+                                      os_release,
+                                      calls='curl')
+        result = _run(script)
+        trace = _read(tmp, 'trace')
+        assert result.returncode == 0, result.stderr[-800:]
+        assert len(_install_lines(trace)) == 3, trace
+        assert 'rc=1' in trace
+        assert not os.path.exists(os.path.join(tmp, 'default-release.conf'))
+        assert expected_note in _read(tmp, 'apt-update.log')
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_apt_install_preference_carries_over_to_later_installs():
+    """STEP 1 installs in several calls; once one has discovered the
+    preference, the next must start with it rather than burn a failing
+    first attempt of its own."""
+    tmp = tempfile.mkdtemp()
+    try:
+        script = _apt_install_harness(tmp,
+                                      _fetch_failure_unless_retargeted(tmp),
+                                      _POLICY_WITH_BULLSEYE,
+                                      _OS_RELEASE_BULLSEYE,
+                                      calls='curl,rsync wget')
+        result = _run(script)
+        trace = _read(tmp, 'trace')
+        assert result.returncode == 0, result.stderr[-800:]
+        assert len(_install_lines(trace)) == 3, trace
+        assert trace.count('rc=0') == 2
+    finally:
+        shutil.rmtree(tmp)
+
+
+@pytest.mark.parametrize(
+    'output,why',
+    [
+        # Same "Failed to fetch" text as the pool case, but no 404: a
+        # timeout, DNS or proxy blip. Pinning here would make a healthy
+        # release stop taking its security suite after one hiccup.
+        (_TRANSIENT_FAILURE, 'transient'),
+        # A 404, but from a third-party repo on the base suite, not from a
+        # companion suite of the release: the base suite cannot help.
+        (_THIRD_PARTY_404, 'third-party'),
+    ])
+def test_apt_install_pins_only_on_a_companion_suite_404(output, why):
+    tmp = tempfile.mkdtemp()
+    try:
+        script = _apt_install_harness(tmp,
+                                      f"cat <<'OUT'\n{output}OUT\nexit 100",
+                                      _POLICY_WITH_BULLSEYE,
+                                      _OS_RELEASE_BULLSEYE,
+                                      calls='curl')
+        result = _run(script)
+        trace = _read(tmp, 'trace')
+        assert result.returncode == 0, result.stderr[-800:]
+        assert len(_install_lines(trace)) == 3, (why, trace)
+        assert 'rc=1' in trace
+        assert not os.path.exists(os.path.join(tmp, 'default-release.conf'))
+        assert 'preferring the base suite' not in _read(tmp, 'apt-update.log')
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_apt_install_reports_when_the_preference_cannot_be_written():
+    """The log must not claim a preference apt never received."""
+    tmp = tempfile.mkdtemp()
+    try:
+        # A path inside a directory that does not exist: tee fails.
+        unwritable = os.path.join(tmp, 'no-such-dir', 'default-release.conf')
+        script = _apt_install_harness(tmp,
+                                      _fetch_failure_unless_retargeted(tmp),
+                                      _POLICY_WITH_BULLSEYE,
+                                      _OS_RELEASE_BULLSEYE,
+                                      calls='curl',
+                                      conf=unwritable)
+        result = _run(script)
+        trace = _read(tmp, 'trace')
+        assert result.returncode == 0, result.stderr[-800:]
+        log = _read(tmp, 'apt-update.log')
+        assert 'the apt preference could not be written' in log
+        assert 'preferring the base suite' not in log
+        # No pin, so the retries stay identical and end in the usual 1.
+        assert len(_install_lines(trace)) == 3, trace
+        assert 'rc=1' in trace
+    finally:
+        shutil.rmtree(tmp)

@@ -1004,6 +1004,15 @@ class Kubernetes(clouds.Cloud):
         # Use _REPR, instead of directly using 'kubernetes' as the config key,
         # because it could be SSH node pool as well.
         cloud_config_str = self._REPR.lower()
+        # Resolved here, with the task's config overrides and the workspace
+        # scope, and passed to the provisioner through the cluster YAML so an
+        # explicit `kueue.admission_timeout` at any scope is honored while
+        # pods wait for queue admission. None leaves the provisioner default.
+        k8s_kueue_admission_timeout = (
+            skypilot_config.get_effective_queue_admission_timeout(
+                cloud=cloud_config_str,
+                region=context,
+                override_configs=resources.cluster_config_overrides))
         timeout = skypilot_config.get_effective_region_config(
             cloud=cloud_config_str,
             region=context,
@@ -1169,6 +1178,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_automount_sa_token': 'true',
             'k8s_fuse_device_required': fuse_device_required,
             'k8s_kueue_local_queue_name': k8s_kueue_local_queue_name,
+            'k8s_kueue_admission_timeout': k8s_kueue_admission_timeout,
             # Namespace to run the fusermount-server daemonset in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
             'k8s_fusermount_shared_dir': kubernetes_fuse.FUSERMOUNT_SHARED_DIR,

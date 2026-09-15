@@ -1,4 +1,5 @@
 """SDK functions for managed jobs."""
+import contextlib
 import datetime
 import ipaddress
 import os
@@ -436,7 +437,10 @@ def _maybe_submit_job_locally(
         prefix: str,
         dag: 'sky.Dag',
         num_jobs: int,
-        file_mounts_blob_id: Optional[str] = None) -> Optional[List[int]]:
+        file_mounts_blob_id: Optional[str] = None,
+        parent_job_id: Optional[int] = None,
+        parent_task_id: Optional[int] = None,
+        root_job_id: Optional[int] = None) -> Optional[List[int]]:
     """Submit the managed job locally if in consolidation mode.
 
     In normal mode the managed job submission is done in the ray job submission.
@@ -476,6 +480,11 @@ def _maybe_submit_job_locally(
         # would drop back to the literal 'default' for users who never set
         # `active_workspace` server-side, which breaks users without
         # access to the 'default' workspace.
+        # A dynamic task gets its ordinal within the root's tree here, from
+        # the counter on the root's row (race-free without a lock of ours).
+        dynamic_task_index = (
+            managed_job_state.next_dynamic_task_index(root_job_id)
+            if root_job_id is not None else None)
         consolidation_mode_job_id = (
             managed_job_state.set_job_info_without_job_id(
                 dag.name,
@@ -486,7 +495,11 @@ def _maybe_submit_job_locally(
                 user_hash=common_utils.get_user_hash(),
                 execution=execution_mode,
                 is_batch=is_batch,
-                file_mounts_blob_id=file_mounts_blob_id))
+                file_mounts_blob_id=file_mounts_blob_id,
+                parent_job_id=parent_job_id,
+                parent_task_id=parent_task_id,
+                root_job_id=root_job_id,
+                dynamic_task_index=dynamic_task_index))
         for task_id, task in enumerate(dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
@@ -654,6 +667,115 @@ def _submit_remotely(controller: controller_utils.Controllers,
     return job_ids
 
 
+def _client_set_workspace() -> bool:
+    """Whether the request named a workspace itself.
+
+    The executor resolves an unset workspace to the user's preferred one and
+    sets it as the thread-local context before the handler runs, so the
+    context alone cannot tell "the client said default" from "nothing was
+    said". The merged config still can: the client's override only carries
+    ``active_workspace`` when it was set.
+    """
+    return skypilot_config.get_nested(keys=('active_workspace',),
+                                      default_value=None) is not None
+
+
+def _check_job_group_attachment(
+    parent_job_id: Optional[int], parent_task_id: Optional[int],
+    job_group_explicit: bool
+) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[str]]:
+    """Validate, and possibly drop, a dynamic job group attachment.
+
+    Attachments are recorded in consolidation mode only, where the
+    managed-jobs state lives on the API server and the parent can be checked.
+    With a remote jobs controller (OSS local API server) dynamic job groups
+    are not supported: an explicit request errors, the in-job-group default
+    is dropped with a log so a watcher's nested launch keeps working as a
+    top-level job, as it did before.
+
+    Returns ``(parent_job_id, parent_task_id, root_job_id, workspace)``: the
+    ids to record (all None when nothing is to be recorded; the root comes
+    from the parent's row, which is authoritative for the tree) and the
+    workspace the launch must run in when it did not name one itself, i.e.
+    the parent's (None when the request already runs in it).
+
+    Raises:
+        ValueError: parent_task_id without parent_job_id; or the parent does
+            not exist, is not a job group or part of one, is no longer
+            running (finished, or being cancelled), or is in a different
+            workspace than the one the request named.
+        exceptions.NotSupportedError: explicit attachment with a remote jobs
+            controller.
+    """
+    if parent_job_id is None:
+        if parent_task_id is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('parent_task_id requires parent_job_id.')
+        return None, None, None, None
+    if not managed_job_utils.is_consolidation_mode():
+        if job_group_explicit:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    'Attaching a job to a job group requires the API server '
+                    'to run managed jobs in consolidation mode (a remote API '
+                    'server). This server uses a separate jobs controller.')
+        logger.info(f'Not attaching to job group {parent_job_id}: dynamic '
+                    'job groups are not supported with a separate jobs '
+                    'controller (non-consolidation mode). Launching as a '
+                    'top-level job.')
+        return None, None, None, None
+    parent = managed_job_state.get_job_info_row(parent_job_id)
+    status = managed_job_state.get_status(parent_job_id)
+    if parent is None or status is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Cannot attach to job {parent_job_id}: no such '
+                             'managed job.')
+    # The target is a job group, or a job already inside one (a dynamic task
+    # launching its own). A plain job's own nested launches stay top-level
+    # (the controller gives its tasks no tree marker), so letting an outside
+    # launch root a tree at it would leave that tree inconsistent: cancel it
+    # and one child goes, the other does not.
+    if not parent.is_job_group and parent.root_job_id is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Cannot attach to job {parent_job_id}: it is not '
+                             'a job group. Pass a job group\'s id or name.')
+    # Only a job that is still running accepts new tasks. A finished one
+    # has nothing left to sweep them, and a cancel in flight would orphan
+    # them, so both are refused rather than special-cased.
+    if (status.is_terminal() or
+            status == managed_job_state.ManagedJobStatus.CANCELLING):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Cannot attach to job {parent_job_id}: it is '
+                             f'{status.value}; only a running job group '
+                             'accepts new tasks.')
+    # A nested launch carries no workspace of its own: the controller sets
+    # the job and root ids on the task, not the workspace, so the request
+    # arrives unset and resolves to the user's preferred workspace. It must
+    # run where its group runs, so the parent's workspace is adopted unless
+    # the request named one, in which case a mismatch is an error (same
+    # rule as cancel; a row from before workspaces existed counts as the
+    # default workspace, which JobInfoRow resolves).
+    workspace: Optional[str] = None
+    active_workspace = skypilot_config.get_active_workspace()
+    if parent.workspace != active_workspace:
+        if _client_set_workspace():
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot attach to job {parent_job_id}: it is in '
+                    f'workspace {parent.workspace!r}, not the requested '
+                    f'workspace {active_workspace!r}.')
+        # The executor authorized the caller for the workspace the request
+        # resolved to, not for this one. Switching workspaces is a launch
+        # there, so it needs the same write access a `--workspace` launch
+        # would; a group id is not a capability.
+        workspaces_core.check_workspace_permission(
+            common_utils.get_current_user(),
+            parent.workspace,
+            action=workspace_constants.WORKSPACE_ACTION_WRITE)
+        workspace = parent.workspace
+    return parent_job_id, parent_task_id, parent.tree_root_job_id, workspace
+
+
 def _create_job_api_token(creator_user_id: str, job_name: Optional[str],
                           dag_uuid: str) -> Tuple[str, str]:
     """Create a service account token for a managed job with api_server_access.
@@ -697,6 +819,9 @@ def launch(
     num_jobs: Optional[int] = None,
     stream_logs: bool = True,
     file_mounts_blob_id: Optional[str] = None,
+    parent_job_id: Optional[int] = None,
+    parent_task_id: Optional[int] = None,
+    job_group_explicit: bool = False,
 ) -> Tuple[Optional[Union[int, List[int]]], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launches a managed job.
@@ -707,6 +832,15 @@ def launch(
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
           managed job.
         name: Name of the managed job.
+        parent_job_id: Managed job to attach this job to as a dynamic member
+          (it is shown under that job and cancelled with it). None for a
+          top-level job.
+        parent_task_id: Task within the parent that launched this job, when
+          known. Recorded for display only.
+        job_group_explicit: Whether the caller asked for the attachment (as
+          opposed to the in-job-group default). Only matters where
+          attachments are unsupported (non-consolidation mode): explicit
+          errors, automatic launches top-level.
 
     Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
@@ -722,6 +856,38 @@ def launch(
       handle: Optional[backends.ResourceHandle]; handle to the controller VM.
         None if dryrun.
     """
+    parent_job_id, parent_task_id, root_job_id, workspace = (
+        _check_job_group_attachment(parent_job_id, parent_task_id,
+                                    job_group_explicit))
+    # A launch attaching to a group runs in the group's workspace when it
+    # did not name one (see _check_job_group_attachment): the row it writes,
+    # the policies and the credentials it launches with all follow.
+    workspace_ctx = (skypilot_config.local_active_workspace_ctx(workspace)
+                     if workspace is not None else contextlib.nullcontext())
+    with workspace_ctx:
+        return _launch(task,
+                       name=name,
+                       pool=pool,
+                       num_jobs=num_jobs,
+                       stream_logs=stream_logs,
+                       file_mounts_blob_id=file_mounts_blob_id,
+                       parent_job_id=parent_job_id,
+                       parent_task_id=parent_task_id,
+                       root_job_id=root_job_id)
+
+
+def _launch(
+    task: Union['sky.Task', 'sky.Dag'],
+    name: Optional[str],
+    pool: Optional[str],
+    num_jobs: Optional[int],
+    stream_logs: bool,
+    file_mounts_blob_id: Optional[str],
+    parent_job_id: Optional[int],
+    parent_task_id: Optional[int],
+    root_job_id: Optional[int],
+) -> Tuple[Optional[Union[int, List[int]]], Optional[backends.ResourceHandle]]:
+    """``launch`` after the attachment is resolved; ids are recorded as-is."""
     entrypoint = task
     # using hasattr instead of isinstance to avoid importing sky
     if hasattr(task, 'metadata'):
@@ -936,7 +1102,10 @@ def launch(
     job_ids = _maybe_submit_job_locally(prefix,
                                         dag,
                                         num_jobs,
-                                        file_mounts_blob_id=file_mounts_blob_id)
+                                        file_mounts_blob_id=file_mounts_blob_id,
+                                        parent_job_id=parent_job_id,
+                                        parent_task_id=parent_task_id,
+                                        root_job_id=root_job_id)
     is_consolidation_mode = job_ids is not None
     if not is_consolidation_mode:
         job_ids = _submit_remotely(controller, dag, pool, num_jobs)
@@ -1457,6 +1626,19 @@ def queue_v2(
 
     if handle.is_grpc_enabled_with_flag:
         try:
+            # The controller may be older than this server (it only picks up
+            # new skylet code on the next launch). When the request names a
+            # field some controller versions lack, ask its version first and
+            # drop the fields it does not know, or it rejects the whole
+            # request. Skipped otherwise: one round trip, not two.
+            if managed_job_utils.queue_fields_need_controller_version(fields):
+                version_response = backend_utils.invoke_skylet_with_retries(
+                    lambda: cloud_vm_ray_backend.SkyletClient(
+                        handle.get_grpc_channel(
+                        )).get_managed_job_controller_version(
+                            managed_jobsv1_pb2.GetVersionRequest()))
+                fields = managed_job_utils.fields_for_controller(
+                    fields, version_response.controller_version)
             request = managed_jobsv1_pb2.GetJobTableRequest(
                 skip_finished=skip_finished,
                 accessible_workspaces=(managed_jobsv1_pb2.Workspaces(
@@ -1592,16 +1774,38 @@ def cancel(name: Optional[str] = None,
            all_users: bool = False,
            pool: Optional[str] = None,
            graceful: bool = False,
-           graceful_timeout: Optional[int] = None) -> None:
+           graceful_timeout: Optional[int] = None,
+           task: Optional[Union[str, int]] = None) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancels managed jobs.
 
     Please refer to sky.cli.job_cancel for documentation.
 
+    Args:
+        task: With exactly one job id, cancel only this dynamic task of it
+            (a job launched from inside it, by the index shown in the queue
+            or by name), and the jobs launched from that task in turn. One
+            of the job's a task declared in the job\'s YAML cannot be cancelled
+            alone; it goes with the job.
+
     Raises:
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
         RuntimeError: failed to cancel the job.
+        ValueError: invalid arguments, or ``task`` names a declared task.
     """
+    if task is not None:
+        if (not job_ids or len(job_ids) != 1 or name is not None or
+                pool is not None or all or all_users):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('task requires exactly one job id and no '
+                                 'name, pool, all or all_users.')
+        if not managed_job_utils.is_consolidation_mode():
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    'Cancelling one task of a job requires the API server '
+                    'to run managed jobs in consolidation mode.')
+        member_job_id, _ = _resolve_job_task(job_ids[0], task, for_cancel=True)
+        job_ids = [member_job_id]
     with rich_utils.safe_status(
             ux_utils.spinner_message('Cancelling managed jobs')):
         job_ids = [] if job_ids is None else job_ids
@@ -1716,6 +1920,13 @@ def tail_logs(name: Optional[str],
     if name is not None and job_id is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot specify both name and job_id.')
+    # `sky jobs logs 39 2`: task 2 may be a dynamic task (a job launched
+    # from inside job 39, numbered on from its declared tasks); then it is that
+    # job's log. Declared tasks resolve as before. Dynamic tasks exist in
+    # consolidation mode only, where the state is on this server.
+    if (task is not None and job_id is not None and
+            managed_job_utils.is_consolidation_mode()):
+        job_id, task = _resolve_job_task(job_id, task, for_cancel=False)
 
     jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
     job_name_or_id_str = ''
@@ -2005,6 +2216,69 @@ def _get_job_clusters(
             task_name, job_id), task.get('task_id')))
     # De-duplicate while preserving order.
     return list(dict.fromkeys(clusters))
+
+
+def _resolve_job_task(
+        job_id: int, task: Union[str, int], *,
+        for_cancel: bool) -> Tuple[int, Optional[Union[str, int]]]:
+    """Resolve ``<job> <task>`` to the job to act on.
+
+    A dynamic task (a job launched from inside ``job_id``, shown under it
+    with an index that continues from its declared tasks) is addressed the same
+    way as a declared task: ``sky jobs logs 39 2`` / ``sky jobs logs 39 eval-3``
+    / ``sky jobs cancel 39 --task 2``. Declared tasks take precedence: an int
+    below the declared task count or a str naming a declared task is that task.
+    Anything else is looked up among the jobs launched under the root by
+    index or name.
+
+    Returns ``(job_id, task)`` to pass on: for a declared task, unchanged; for
+    a dynamic task, its own job id and ``None`` (the whole member job).
+
+    For logs, anything that is neither is also returned unchanged: the log
+    reader on the controller path already answers an unknown task with
+    ``No task found matching ...`` *in the stream*, which is what
+    ``--no-follow`` and SDK callers with ``follow=False`` read (a server-side
+    error raised before streaming would reach neither). Cancel has no stream,
+    so it raises.
+
+    Raises:
+        ValueError: for cancel only: the job does not exist, nothing matches,
+            or the task is a declared one (it shares the job's lifecycle and
+            cannot be cancelled alone).
+    """
+    if isinstance(task, str) and task.isdigit():
+        task = int(task)
+    declared_tasks = managed_job_state.get_managed_job_tasks(job_id)
+    if not declared_tasks:
+        if not for_cancel:
+            return job_id, task
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'No managed job with ID {job_id}.')
+    is_declared = (any(t.get('task_id') == task for t in declared_tasks)
+                   if isinstance(task, int) else any(
+                       t.get('task_name') == task for t in declared_tasks))
+    if is_declared:
+        if for_cancel:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Task {task!r} of job {job_id} is not a dynamic task; '
+                    f'it can only be cancelled together with the job '
+                    f'(sky jobs cancel {job_id}).')
+        return job_id, task
+    member_job_id = managed_job_state.get_dynamic_task_job_id(job_id, task)
+    if member_job_id is None:
+        if not for_cancel:
+            return job_id, task
+        names = ', '.join(
+            repr(t.get('task_name'))
+            for t in declared_tasks
+            if t.get('task_name'))
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Job {job_id} has no task {task!r}: it is not one of its '
+                f'declared tasks ({names}), and no dynamic task launched from '
+                'inside it has that index or name.')
+    return member_job_id, None
 
 
 def _resolve_task_id(job_id: int, task: Union[str, int]) -> int:

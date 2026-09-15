@@ -2033,6 +2033,11 @@ indefinitely.
 
 Default: ``86400`` (24 hours).
 
+SkyServe replicas and pool workers are standing requests for capacity, so
+when this field is not set they wait for admission indefinitely instead of
+failing after 24 hours and re-entering the queue at the back. Set the field
+explicitly to bound their wait as well.
+
 .. _config-yaml-kubernetes-dws:
 
 ``kubernetes.dws``

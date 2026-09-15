@@ -150,6 +150,33 @@ def test_get_last_event_of_type_multiple(tmp_path, monkeypatch):
     assert result == {h1: 'a-new', h2: 'b-only'}
 
 
+def test_get_last_event_of_type_multiple_chunks_large_sets(
+        tmp_path, monkeypatch):
+    """More hashes than one IN clause may hold are queried in chunks and
+    merged, so a large pool's status does not exceed SQLite's bind limit."""
+    _fresh_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(global_user_state, '_CLUSTER_IN_QUERY_CHUNK_SIZE', 2)
+    expected = {}
+    for i in range(5):
+        name = f'c{i}'
+        cluster_hash = _add_cluster(name)
+        for t, reason in ((1, f'{name}-old'), (2, f'{name}-new')):
+            global_user_state.add_cluster_event(
+                name,
+                new_status=None,
+                reason=reason,
+                event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+                transitioned_at=t,
+            )
+        expected[cluster_hash] = f'{name}-new'
+
+    result = global_user_state.get_last_cluster_event_of_type_multiple(
+        set(expected),
+        event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+    )
+    assert result == expected
+
+
 def test_get_clusters_marks_launching_init(tmp_path, monkeypatch):
     _fresh_db(tmp_path, monkeypatch)
     _add_cluster('init-cluster')

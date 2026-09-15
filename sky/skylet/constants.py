@@ -95,12 +95,32 @@ SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
 SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
                f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || command -v ray)')
 
-# Use $(which env) to find env, falling back to /usr/bin/env if which is
-# unavailable. This works around a Slurm quirk where srun's execvp() doesn't
-# check execute permissions, failing when $HOME/.local/bin/env (non-executable,
-# from uv installation) shadows /usr/bin/env.
-SKY_SLURM_UNSET_PYTHONPATH = ('$(which env 2>/dev/null || echo /usr/bin/env) '
-                              '-u PYTHONPATH')
+# Resolve `env` by preferring the absolute path /usr/bin/env when it is an
+# executable file, then falling back to bash's `type -P env` (a PATH search
+# returning only an on-disk executable, ignoring functions/aliases/builtins),
+# then to a literal /usr/bin/env. `type -P` is a bashism, but it is safe here:
+# both consumers run this command under bash (task_codegen.py's
+# `build_task_runner_cmd` and slurm/instance.py's `_srun_on_node`, each
+# `bash -c ...`), and on standard layouts the `[ -x /usr/bin/env ]` branch
+# short-circuits before `type -P` is ever evaluated, so a non-bash shell never
+# reaches it. This avoids three failure modes:
+#   1. A non-executable $HOME/.local/bin/env (left by a uv installation)
+#      shadowing /usr/bin/env on PATH: `[ -x /usr/bin/env ]` selects the real
+#      binary first, and `type -P` only reports executables anyway, whereas a
+#      Slurm srun execvp() would pick the shadow without an exec check.
+#   2. A `which` bash function re-imported into a container by
+#      `srun --export=ALL` (Debian/Ubuntu export one calling `/usr/bin/which`
+#      with GNU-only flags); a minimal image's `/usr/bin/which` rejects them
+#      and prints "Usage: ..." to stdout, which would poison `$(which env ...)`
+#      -> the run command begins with `Usage:` -> exit 127. This never calls
+#      `which`.
+#   3. An exported `env` *function*: the common branch expands to the literal
+#      path /usr/bin/env; and if that is absent, `type -P` returns only the
+#      on-disk executable, never the function (whereas `command -v env` would
+#      return the bare name `env` and invoke the function).
+SKY_SLURM_UNSET_PYTHONPATH = (
+    '$([ -x /usr/bin/env ] && echo /usr/bin/env || type -P env 2>/dev/null || '
+    'echo /usr/bin/env) -u PYTHONPATH')
 SKY_SLURM_PYTHON_CMD = (f'{SKY_SLURM_UNSET_PYTHONPATH} '
                         f'$({SKY_GET_PYTHON_PATH_CMD})')
 
@@ -164,6 +184,10 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 
 # The integer managed job ID assigned by the jobs controller.
 MANAGED_JOB_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}MANAGED_JOB_ID'
+# Set only on tasks that are part of a job tree: a job group's tasks (the
+# group's own id) and a dynamic member's tasks (the member's root). A job
+# launched from such a task joins that tree. Absent on plain top-level jobs.
+ROOT_JOB_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}ROOT_JOB_ID'
 
 # The version of skylet. MUST bump this version whenever we need the skylet to
 # be restarted on existing clusters updated with the new version of SkyPilot,
@@ -172,7 +196,7 @@ MANAGED_JOB_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}MANAGED_JOB_ID'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '40'  # managed job table supports infra_match.
+SKYLET_VERSION = '42'  # managed job table carries dynamic_task_index.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -753,6 +777,12 @@ ENV_VAR_ENABLE_SERVICE_ACCOUNTS = 'ENABLE_SERVICE_ACCOUNTS'
 # Enable debug logging for requests.
 ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING = (
     f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}ENABLE_REQUEST_DEBUG_LOGGING')
+
+# When set to a truthy value, each API server worker binds its own listening
+# socket with SO_REUSEPORT so the kernel load-balances new connections across
+# workers, instead of all workers sharing a single inherited socket. Only takes
+# effect on Linux and with more than one worker.
+ENV_VAR_SERVER_REUSE_PORT = (f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}REUSE_PORT')
 
 SKYPILOT_DEFAULT_WORKSPACE = 'default'
 

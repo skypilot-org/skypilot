@@ -345,16 +345,16 @@ def expired_token_cleanup_event():
 
 
 def server_heartbeat_event():
-    """Periodically send server-side plugin metrics to Loki."""
+    """Periodically send server-side fleet and plugin metrics to Loki."""
     # pylint: disable=import-outside-toplevel
     from sky.usage import usage_lib
 
-    # Skip if no plugins registered providers (check inside event_fn, not
-    # should_skip, because providers register in executor processes via
-    # plugin install(), not in the main process where should_skip runs),
-    # or if the user explicitly disabled usage collection.
-    if (not usage_lib.ServerHeartbeatMessage.has_providers() or
-            _user_disabled_usage_collection):
+    # The heartbeat reports fleet-wide GPU counts from every API server, so it
+    # is no longer gated on plugin providers. Plugin metrics stay opt-in:
+    # providers register in executor processes via plugin install(), and
+    # ServerHeartbeatMessage.get_properties() omits the 'plugins' field when
+    # none registered. Skip only when the user disabled usage collection.
+    if _user_disabled_usage_collection:
         time.sleep(server_constants.SERVER_HEARTBEAT_INTERVAL_SECONDS)
         return
 
