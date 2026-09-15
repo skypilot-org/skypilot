@@ -1,4 +1,5 @@
 """The daemon that turns finished launch attempts into phase metrics."""
+import asyncio
 import types
 from unittest import mock
 
@@ -226,6 +227,49 @@ def test_the_park_writes_nothing_for_a_row_it_cannot_measure(
                 managed_job_state.spot_table.c.t_time_to_running).where(
                     managed_job_state.spot_table.c.spot_job_id == 3)).scalar()
     assert parked is None, f'the park invented a duration: {parked}'
+
+
+def test_the_handoff_origin_survives_its_own_session(tmp_path, monkeypatch):
+    """A pipeline's handoff write must still be there after the session closes.
+
+    The helper that runs this update opens a session and closes it; it does not
+    commit, so an _op that does not commit itself is rolled back on exit. The
+    write then fails silently -- nothing raises, nothing is logged, and the
+    task simply has no origin. Because the timeline queries require one, the
+    consequence is not a wrong number but no measurement at all.
+
+    Reading in a FRESH session is what makes that visible: within the writing
+    session an uncommitted row still reads back.
+    """
+    monkeypatch.setenv(skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY,
+                       str(tmp_path))
+    monkeypatch.setattr(
+        managed_job_state, '_db_manager',
+        db_utils.DatabaseManager('spot_jobs', managed_job_state.create_table))
+
+    engine = managed_job_state._db_manager.get_engine()
+    with sqlalchemy.orm.Session(engine) as session:
+        session.execute(managed_job_state.spot_table.insert().values(
+            spot_job_id=42,
+            task_id=1,
+            task_name='second',
+            status='PENDING',
+            created_at=100.0,
+            eligible_at=None))
+        session.commit()
+
+    asyncio.run(managed_job_state.set_eligible_at_async(42, 1, 7200.0))
+
+    with sqlalchemy.orm.Session(engine) as session:
+        got = session.execute(
+            sqlalchemy.select(managed_job_state.spot_table.c.eligible_at).where(
+                sqlalchemy.and_(
+                    managed_job_state.spot_table.c.spot_job_id == 42,
+                    managed_job_state.spot_table.c.task_id == 1))).scalar()
+
+    assert got == 7200.0, (
+        'the handoff origin did not survive the session; the task would be '
+        'skipped by the timeline queries entirely')
 
 
 def test_a_job_with_no_submission_time_is_not_broken_down(

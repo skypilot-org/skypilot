@@ -3530,6 +3530,12 @@ async def set_eligible_at_async(job_id: int, task_id: int,
                     spot_table.c.task_id == task_id,
                     spot_table.c.eligible_at.is_(None),
                 )).values({spot_table.c.eligible_at: eligible_at}))
+        # _retry_session opens the session and closes it; it does not commit.
+        # Without this the UPDATE is rolled back on exit, the row keeps a NULL
+        # origin, and -- because the queries require one -- the task silently
+        # gets no timeline at all. Every other caller of _retry_session commits
+        # inside its own _op for the same reason.
+        await session.commit()
         return result.rowcount
 
     try:
