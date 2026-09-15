@@ -63,24 +63,27 @@ def _bulk_provision(
 
     start = time.time()
 
-    provision_volume.provision_ephemeral_volumes(cloud, region_name,
-                                                 cluster_name.name_on_cloud,
-                                                 bootstrap_config)
+    with timeline.Event('provision.ephemeral_volumes'):
+        provision_volume.provision_ephemeral_volumes(cloud, region_name,
+                                                     cluster_name.name_on_cloud,
+                                                     bootstrap_config)
 
     # TODO(suquark): Should we cache the bootstrapped result?
     #  Currently it is not necessary as bootstrapping takes
     #  only ~3s, caching it seems over-engineering and could
     #  cause other issues like the cache is not synced
     #  with the cloud configuration.
-    config = provision.bootstrap_instances(provider_name, region_name,
-                                           cluster_name.name_on_cloud,
-                                           bootstrap_config)
-
-    provision_record = provision.run_instances(provider_name,
-                                               region_name,
-                                               str(cluster_name),
+    with timeline.Event('provision.bootstrap_instances'):
+        config = provision.bootstrap_instances(provider_name, region_name,
                                                cluster_name.name_on_cloud,
-                                               config=config)
+                                               bootstrap_config)
+
+    with timeline.Event('provision.run_instances'):
+        provision_record = provision.run_instances(provider_name,
+                                                   region_name,
+                                                   str(cluster_name),
+                                                   cluster_name.name_on_cloud,
+                                                   config=config)
 
     # Kubernetes-based clouds' run_instances already synchronously wait for all
     # pods to be scheduled and running, and their wait_instances is a no-op,
@@ -98,10 +101,11 @@ def _bulk_provision(
         time.sleep(1)
         for retry_cnt in range(_MAX_RETRY):
             try:
-                provision.wait_instances(provider_name,
-                                         region_name,
-                                         cluster_name.name_on_cloud,
-                                         state=status_lib.ClusterStatus.UP)
+                with timeline.Event('provision.wait_instances'):
+                    provision.wait_instances(provider_name,
+                                             region_name,
+                                             cluster_name.name_on_cloud,
+                                             state=status_lib.ClusterStatus.UP)
                 break
             except (aws.botocore_exceptions().WaiterError, RuntimeError):
                 time.sleep(backoff.current_backoff())
@@ -477,10 +481,12 @@ def _post_provision_setup(
         handle_cluster_yaml)
     provider_config = config_from_yaml.get('provider')
     cloud_name = repr(launched_resources.cloud)
-    cluster_info = provision.get_cluster_info(cloud_name,
-                                              provision_record.region,
-                                              cluster_name.name_on_cloud,
-                                              provider_config=provider_config)
+    with timeline.Event('provision.get_cluster_info'):
+        cluster_info = provision.get_cluster_info(
+            cloud_name,
+            provision_record.region,
+            cluster_name.name_on_cloud,
+            provider_config=provider_config)
 
     # Update cluster info in handle so cluster instance ids are set. This
     # allows us to expose provision logs to debug nodes that failed during post
@@ -645,6 +651,7 @@ def _post_provision_setup(
                     num_active_nodes += 1
             return num_active_nodes == expected_num_nodes
 
+        @timeline.event('provision.check_ray_cluster_health')
         def check_ray_port_and_cluster_healthy() -> Tuple[int, bool, bool]:
             head_ray_needs_restart = True
             ray_cluster_healthy = False

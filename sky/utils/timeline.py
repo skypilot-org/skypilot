@@ -5,6 +5,7 @@ https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/
 """  # pylint: disable=line-too-long
 import atexit
 import json
+import logging
 import os
 import threading
 import time
@@ -14,10 +15,16 @@ from typing import Callable, Optional, Union
 from sky.utils import common_utils
 
 _events = []
+logger = logging.getLogger(__name__)
 
 
 def _get_events_file_path():
     return os.environ.get('SKYPILOT_TIMELINE_FILE_PATH')
+
+
+def _log_events_enabled() -> bool:
+    value = os.environ.get('SKYPILOT_TIMELINE_LOG', '1')
+    return value.lower() not in ('0', 'false', 'no')
 
 
 class Event:
@@ -29,9 +36,11 @@ class Event:
     """
 
     def __init__(self, name: str, message: Optional[str] = None):
-        self._skipped = False
-        if not _get_events_file_path():
-            self._skipped = True
+        self._write_events = _get_events_file_path() is not None
+        self._log_events = _log_events_enabled()
+        self._skipped = not self._write_events and not self._log_events
+        self._started_at: Optional[float] = None
+        if self._skipped:
             return
         self._name = name
         self._message = message
@@ -51,6 +60,11 @@ class Event:
     def begin(self):
         if self._skipped:
             return
+        self._started_at = time.perf_counter()
+        if self._log_events:
+            self._log('begin')
+        if not self._write_events:
+            return
         event_begin = self._event.copy()
         event_begin.update({
             'ph': 'B',
@@ -62,8 +76,15 @@ class Event:
                 'message'] = self._message  # type: ignore[index]
         _events.append(event_begin)
 
-    def end(self):
+    def end(self, exc_type=None):
         if self._skipped:
+            return
+        elapsed = None
+        if self._started_at is not None:
+            elapsed = time.perf_counter() - self._started_at
+        if self._log_events:
+            self._log('end', elapsed, exc_type)
+        if not self._write_events:
             return
         event_end = self._event.copy()
         event_end.update({
@@ -74,16 +95,53 @@ class Event:
             event_end['args'] = {'message': self._message}
         _events.append(event_end)
 
+    def instant(self):
+        if self._skipped:
+            return
+        if self._log_events:
+            self._log('instant')
+        if not self._write_events:
+            return
+        instant_event = self._event.copy()
+        instant_event.update({
+            'ph': 'i',
+            's': 't',
+            'ts': f'{time.time() * 10 ** 6: .3f}',
+        })
+        _events.append(instant_event)
+
     def __enter__(self):
         self.begin()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.end()
+        self.end(exc_type)
+
+    def _log(self,
+             event_type: str,
+             elapsed: Optional[float] = None,
+             exc_type=None) -> None:
+        record = {
+            'elapsed_s': round(elapsed, 6) if elapsed is not None else None,
+            'event': event_type,
+            'message': self._message,
+            'name': self._name,
+            'outcome': ('error' if exc_type is not None else
+                        ('success' if event_type == 'end' else None)),
+            'pid': os.getpid(),
+            'thread_id': threading.current_thread().ident,
+            'wall_time_s': time.time(),
+        }
+        logger.info('SKYPILOT_TIMELINE %s',
+                    json.dumps(record, sort_keys=True, separators=(',', ':')))
 
 
 def event(name_or_fn: Union[str, Callable], message: Optional[str] = None):
     return common_utils.make_decorator(Event, name_or_fn, message=message)
+
+
+def instant(name: str, message: Optional[str] = None) -> None:
+    Event(name, message).instant()
 
 
 def save_timeline():

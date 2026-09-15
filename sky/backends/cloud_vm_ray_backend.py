@@ -3728,17 +3728,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # from cluster_info.
                 handle.cached_cluster_info = cluster_info
                 handle.docker_user = cluster_info.docker_user
-                handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
-                                          cluster_info=cluster_info)
-                handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
+                with timeline.Event('backend.provision.update_cluster_ips'):
+                    handle.update_cluster_ips(
+                        max_attempts=_FETCH_IP_MAX_ATTEMPTS,
+                        cluster_info=cluster_info)
+                with timeline.Event('backend.provision.update_ssh_ports'):
+                    handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
 
                 # Update launched resources.
                 handle.launched_resources = handle.launched_resources.copy(
                     region=provision_record.region, zone=provision_record.zone)
 
-                self._update_after_cluster_provisioned(
-                    handle, to_provision_config.prev_handle, task,
-                    prev_cluster_status, config_hash)
+                with timeline.Event('backend.provision.update_state'):
+                    self._update_after_cluster_provisioned(
+                        handle, to_provision_config.prev_handle, task,
+                        prev_cluster_status, config_hash)
                 return handle, False
 
             cluster_config_file = config_dict['ray']

@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Tuple, Union
 os.environ['RAY_DEDUP_LOGS'] = '0'
 os.environ['RAY_SCHEDULER_EVENTS'] = '0'
 
+import json
 import ray
 import ray.util as ray_util
 
@@ -39,12 +40,21 @@ kwargs = dict()
 # launched before #1790.
 if os.path.exists('/tmp/ray_skypilot'):
     kwargs['_temp_dir'] = '/tmp/ray_skypilot'
+_ray_init_started = time.perf_counter()
+print('SKYPILOT_TIMELINE ' + json.dumps(dict(
+    event='begin', name='task.ray_init', wall_time_s=time.time()
+)), flush=True)
 ray.init(
     address='auto',
     namespace='__sky__3__',
     log_to_driver=True,
     **kwargs
 )
+print('SKYPILOT_TIMELINE ' + json.dumps(dict(
+    event='end', name='task.ray_init', wall_time_s=time.time(),
+    elapsed_s=time.perf_counter() - _ray_init_started,
+    outcome='success'
+)), flush=True)
 def get_or_fail(futures, pg) -> List[int]:
     """Wait for tasks, if any fails, cancel all unready."""
     if not futures:
@@ -505,13 +515,34 @@ message = ('[2m├── [0m[2m'
            'Waiting for task resources on '
            f'{node_str}.[0m')
 print(message, flush=True)
+_sky_pg_wait_start = time.perf_counter()
+print('SKYPILOT_TIMELINE ' + json.dumps({
+    'elapsed_s': None,
+    'event': 'begin',
+    'name': 'task.placement_group_ready',
+    'wall_time_s': time.time(),
+}, sort_keys=True, separators=(',', ':')), flush=True)
 # FIXME: This will print the error message from autoscaler if
 # it is waiting for other task to finish. We should hide the
 # error message.
 ray.get(pg.ready())
+print('SKYPILOT_TIMELINE ' + json.dumps({
+    'elapsed_s': round(time.perf_counter() - _sky_pg_wait_start, 6),
+    'event': 'end',
+    'name': 'task.placement_group_ready',
+    'outcome': 'success',
+    'wall_time_s': time.time(),
+}, sort_keys=True, separators=(',', ':')), flush=True)
 print('\x1b[2m└── \x1b[0mJob started. Streaming logs... \x1b[2m(Ctrl-C to exit log streaming; job will not be killed)\x1b[0m', flush=True)
 job_lib.set_job_started(3)
 job_lib.scheduler.schedule_step()
+_sky_node_mapping_start = time.perf_counter()
+print('SKYPILOT_TIMELINE ' + json.dumps({
+    'elapsed_s': None,
+    'event': 'begin',
+    'name': 'task.resolve_node_ranks',
+    'wall_time_s': time.time(),
+}, sort_keys=True, separators=(',', ':')), flush=True)
 @ray.remote
 def check_ip():
     return ray.util.get_node_ip_address()
@@ -533,6 +564,21 @@ job_ip_rank_list = sorted(
     key=lambda ip: (cluster_ips_to_node_id.get(ip, len(cluster_ips_to_node_id)), ip))
 job_ip_rank_map = {ip: i for i, ip in enumerate(job_ip_rank_list)}
 job_ip_list_str = '\n'.join(job_ip_rank_list)
+print('SKYPILOT_TIMELINE ' + json.dumps({
+    'elapsed_s': round(time.perf_counter() - _sky_node_mapping_start, 6),
+    'event': 'end',
+    'name': 'task.resolve_node_ranks',
+    'outcome': 'success',
+    'wall_time_s': time.time(),
+}, sort_keys=True, separators=(',', ':')), flush=True)
+
+_sky_task_dispatch_start = time.perf_counter()
+print('SKYPILOT_TIMELINE ' + json.dumps({
+    'elapsed_s': None,
+    'event': 'begin',
+    'name': 'task.dispatch_user_commands',
+    'wall_time_s': time.time(),
+}, sort_keys=True, separators=(',', ':')), flush=True)
 
 sky_env_vars_dict = {}
 sky_env_vars_dict['SKYPILOT_NODE_IPS'] = job_ip_list_str
@@ -608,6 +654,14 @@ if script is not None:
                 stream_logs=True,
                 with_ray=True,
             ))
+print('SKYPILOT_TIMELINE ' + json.dumps({
+    'elapsed_s': round(time.perf_counter() - _sky_task_dispatch_start, 6),
+    'event': 'end',
+    'name': 'task.dispatch_user_commands',
+    'outcome': 'success',
+    'wall_time_s': time.time(),
+}, sort_keys=True, separators=(',', ':')), flush=True)
+
 returncodes, _ = get_or_fail(futures, pg)
 if sum(returncodes) != 0:
     # Save exit codes to job metadata for potential recovery logic

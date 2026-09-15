@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import timeline
 from sky.utils import yaml_utils
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 DELETION_TIMEOUT = 90
 
 
+@timeline.event
 def bootstrap_instances(
         region: str, cluster_name: str,
         config: common.ProvisionConfig) -> common.ProvisionConfig:
@@ -606,6 +608,7 @@ def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
                 f'in namespace {fuse_proxy_namespace!r}')
 
 
+@timeline.event
 def _configure_services(namespace: str, context: Optional[str],
                         provider_config: Dict[str, Any]) -> None:
     service_field = 'services'
@@ -622,11 +625,13 @@ def _configure_services(namespace: str, context: Optional[str],
 
         name = service['metadata']['name']
         field_selector = f'metadata.name={name}'
-        services = (kubernetes.core_api(context).list_namespaced_service(
-            namespace, field_selector=field_selector).items)
-        if services:
-            assert len(services) == 1
-            existing_service = services[0]
+        with timeline.Event('kubernetes.service.list', message=name):
+            existing_services = (
+                kubernetes.core_api(context).list_namespaced_service(
+                    namespace, field_selector=field_selector).items)
+        if existing_services:
+            assert len(existing_services) == 1
+            existing_service = existing_services[0]
             # Convert to k8s object to compare
             new_svc = kubernetes_utils.dict_to_k8s_object(service, 'V1Service')
             if new_svc.spec.ports == existing_service.spec.ports:
@@ -636,13 +641,15 @@ def _configure_services(namespace: str, context: Optional[str],
             else:
                 logger.info('_configure_services: '
                             f'{updating_existing_msg("service", name)}')
-                kubernetes.core_api(context).patch_namespaced_service(
-                    name, namespace, service)
+                with timeline.Event('kubernetes.service.patch', message=name):
+                    kubernetes.core_api(context).patch_namespaced_service(
+                        name, namespace, service)
         else:
             logger.info(
                 f'_configure_services: {not_found_msg("service", name)}')
-            kubernetes.core_api(context).create_namespaced_service(
-                namespace, service)
+            with timeline.Event('kubernetes.service.create', message=name):
+                kubernetes.core_api(context).create_namespaced_service(
+                    namespace, service)
             logger.info(f'_configure_services: {created_msg("service", name)}')
 
 

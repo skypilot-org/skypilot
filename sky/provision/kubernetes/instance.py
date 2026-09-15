@@ -1019,6 +1019,7 @@ def _count_transport_error(e: Exception, first_error_time: Optional[float],
     return first_error_time
 
 
+@timeline.event
 def _wait_for_pods_to_schedule(namespace,
                                context,
                                new_nodes,
@@ -1127,6 +1128,7 @@ def _wait_for_pods_to_schedule(namespace,
                                        cluster_name=cluster_name,
                                        pods_created_at=create_pods_start)
     last_volume_status_text: Optional[str] = None
+    last_schedule_progress: Optional[Tuple[int, int, int]] = None
     iteration = 0
     transport_error_since: Optional[float] = None
     while _evaluate_timeout():
@@ -1135,11 +1137,12 @@ def _wait_for_pods_to_schedule(namespace,
         cluster_name_on_cloud = new_nodes[0].metadata.labels[
             constants.TAG_SKYPILOT_CLUSTER_NAME]
         try:
-            pods = kubernetes.core_api(context).list_namespaced_pod(
-                namespace,
-                label_selector=(f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
-                                f'{cluster_name_on_cloud}'),
-                _request_timeout=_POD_POLL_REQUEST_TIMEOUT).items
+            with timeline.Event('kubernetes.pods.list_for_scheduling'):
+                pods = kubernetes.core_api(context).list_namespaced_pod(
+                    namespace,
+                    label_selector=(f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
+                                    f'{cluster_name_on_cloud}'),
+                    _request_timeout=_POD_POLL_REQUEST_TIMEOUT).items
             transport_error_since = None
         except (kubernetes.api_exception(),
                 kubernetes.urllib3_http_error()) as e:
@@ -1173,6 +1176,21 @@ def _wait_for_pods_to_schedule(namespace,
             if pod.metadata.name in expected_pod_names and
             pod.spec.scheduling_gates
         ]
+        schedule_progress = (sum(1 for pod in pods
+                                 if pod.metadata.name in expected_pod_names and
+                                 _pod_is_scheduled(pod)),
+                             len(expected_pod_names), len(gated_pod_names))
+        if schedule_progress != last_schedule_progress:
+            timeline.instant(
+                'kubernetes.pods.schedule_progress',
+                json.dumps(
+                    {
+                        'gated': schedule_progress[2],
+                        'scheduled': schedule_progress[0],
+                        'total': schedule_progress[1],
+                    },
+                    sort_keys=True))
+            last_schedule_progress = schedule_progress
         if gated_pod_names:
             if not pods_are_gated:
                 pods_are_gated = True
@@ -1612,16 +1630,18 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
     missing_pods_retry = 0
     transport_error_since: Optional[float] = None
     last_status_msg: Optional[str] = None
+    last_running_progress: Optional[Tuple[int, str]] = None
     while True:
         # Get all pods in a single API call
         cluster_name_on_cloud = new_pods[0].metadata.labels[
             constants.TAG_SKYPILOT_CLUSTER_NAME]
         try:
-            all_pods = kubernetes.core_api(context).list_namespaced_pod(
-                namespace,
-                label_selector=(f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
-                                f'{cluster_name_on_cloud}'),
-                _request_timeout=_POD_POLL_REQUEST_TIMEOUT).items
+            with timeline.Event('kubernetes.pods.list_for_running'):
+                all_pods = kubernetes.core_api(context).list_namespaced_pod(
+                    namespace,
+                    label_selector=(f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
+                                    f'{cluster_name_on_cloud}'),
+                    _request_timeout=_POD_POLL_REQUEST_TIMEOUT).items
             transport_error_since = None
         except (kubernetes.api_exception(),
                 kubernetes.urllib3_http_error()) as e:
@@ -1689,9 +1709,9 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             pod for pod in all_pods if pod.metadata.name in expected_pod_names
         ]
         num_threads = max(1, min(_NUM_THREADS, len(pods_to_check)))
-        pod_statuses = subprocess_utils.run_in_parallel(_inspect_pod_status,
-                                                        pods_to_check,
-                                                        num_threads)
+        with timeline.Event('kubernetes.pods.inspect_statuses'):
+            pod_statuses = subprocess_utils.run_in_parallel(
+                _inspect_pod_status, pods_to_check, num_threads)
 
         all_pods_running = True
         pending_reasons_count: Dict[str, int] = {}
@@ -1725,6 +1745,21 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                 elif (now - previous[1] >=
                       _stall_timeout_seconds(pending_reason)):
                     _raise_stalled(pod_name, pending_reason)
+
+        running_count = sum(1 for is_running, _ in pod_statuses if is_running)
+        reasons_json = json.dumps(pending_reasons_count, sort_keys=True)
+        running_progress = (running_count, reasons_json)
+        if running_progress != last_running_progress:
+            timeline.instant(
+                'kubernetes.pods.running_progress',
+                json.dumps(
+                    {
+                        'pending_reasons': pending_reasons_count,
+                        'running': running_count,
+                        'total': len(expected_pod_names),
+                    },
+                    sort_keys=True))
+            last_running_progress = running_progress
 
         if all_pods_running:
             break
@@ -2003,8 +2038,10 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
     """
     try:
         # Attempt to create the Pod with the AppArmor annotation
-        pod = kubernetes.core_api(context).create_namespaced_pod(
-            namespace, pod_spec)
+        pod_name = pod_spec['metadata']['name']
+        with timeline.Event('kubernetes.pod.create_api', message=pod_name):
+            pod = kubernetes.core_api(context).create_namespaced_pod(
+                namespace, pod_spec)
         return pod
     except kubernetes.api_exception() as e:
         try:
@@ -2506,7 +2543,9 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
         # Check if any PVCs with access mode ReadWriteOnce or ReadWriteOncePod
         # is used by any pod in the namespace.
-        volume.check_pvc_usage_for_pod(context, namespace, pod_spec_copy)
+        pod_name = pod_spec_copy['metadata']['name']
+        with timeline.Event('kubernetes.pod.check_pvc_usage', message=pod_name):
+            volume.check_pvc_usage_for_pod(context, namespace, pod_spec_copy)
 
         return _create_namespaced_pod_with_retries(namespace, pod_spec_copy,
                                                    context)
@@ -2610,6 +2649,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     )
 
 
+@timeline.event
 def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""

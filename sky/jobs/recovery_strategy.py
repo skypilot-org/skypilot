@@ -41,6 +41,7 @@ from sky.utils import env_options
 from sky.utils import instance_links as instance_links_utils
 from sky.utils import registry
 from sky.utils import status_lib
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -395,7 +396,10 @@ class StrategyExecutor:
         Raises: Please refer to the docstring of self._launch().
         """
 
-        job_submit_at = await self._launch(max_retry=None)
+        message = (f'job_id={self.job_id},task_id={self.task_id},'
+                   f'cluster_name={self.cluster_name}')
+        with timeline.Event('jobs.strategy.launch', message=message):
+            job_submit_at = await self._launch(max_retry=None)
         assert job_submit_at is not None
         return job_submit_at
 
