@@ -491,7 +491,8 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                 require_outputs=True,
                 # Installing dependencies requires source bashrc to access
                 # conda.
-                source_bashrc=True)
+                source_bashrc=True,
+                timeout=_setup_command_timeout())
             retry_cnt = 0
             while returncode == 255 and retry_cnt < _MAX_RETRY:
                 # Got network connection issue occur during setup. This could
@@ -507,7 +508,8 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                     stream_logs=False,
                     log_path=log_path,
                     require_outputs=True,
-                    source_bashrc=True)
+                    source_bashrc=True,
+                    timeout=_setup_command_timeout())
                 if not returncode:
                     break
 
@@ -673,7 +675,8 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
         require_outputs=True,
         # Source bashrc for starting ray cluster to make sure actors started by
         # ray will have the correct PATH.
-        source_bashrc=True)
+        source_bashrc=True,
+        timeout=_setup_command_timeout())
     if returncode:
         raise RuntimeError('Failed to start ray on the head node '
                            f'(exit code {returncode}). Error: \n'
@@ -747,7 +750,8 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
             log_path=log_path_abs,
             # Source bashrc for starting ray cluster to make sure actors started
             # by ray will have the correct PATH.
-            source_bashrc=True)
+            source_bashrc=True,
+            timeout=_setup_command_timeout())
 
     num_threads = subprocess_utils.get_parallel_threads(
         cluster_info.provider_name)
@@ -851,7 +855,8 @@ def start_skylet_on_head_node(
         stream_logs=False,
         require_outputs=True,
         log_path=log_path_abs,
-        source_bashrc=True)
+        source_bashrc=True,
+        timeout=_setup_command_timeout())
     if returncode:
         raise RuntimeError('Failed to start skylet on the head node '
                            f'(exit code {returncode}). Error: '
@@ -878,7 +883,8 @@ def _internal_file_mounts(file_mounts: Dict,
         rc, stdout, stderr = runner.run_setup(mkdir_command,
                                               log_path=log_path,
                                               stream_logs=False,
-                                              require_outputs=True)
+                                              require_outputs=True,
+                                              timeout=_file_mount_timeout())
         subprocess_utils.handle_returncode(
             rc,
             mkdir_command, ('Failed to run command before rsync '
@@ -891,6 +897,7 @@ def _internal_file_mounts(file_mounts: Dict,
             up=True,
             log_path=log_path,
             stream_logs=False,
+            timeout=_file_mount_timeout(),
         )
 
 
@@ -934,11 +941,13 @@ def setup_logging_on_cluster(logging_agent: logs.LoggingAgent,
     def _setup_node(runner: command_runner.CommandRunner, log_path: str):
         cmd = logging_agent.get_setup_command(cluster_name)
         logger.info(f'Running command on node: {cmd}')
-        returncode, stdout, stderr = runner.run(cmd,
-                                                stream_logs=False,
-                                                require_outputs=True,
-                                                log_path=log_path,
-                                                source_bashrc=True)
+        returncode, stdout, stderr = runner.run(
+            cmd,
+            stream_logs=False,
+            require_outputs=True,
+            log_path=log_path,
+            source_bashrc=True,
+            timeout=_setup_command_timeout())
         if returncode:
             raise RuntimeError(f'Failed to setup logging agent\n{cmd}\n'
                                f'(exit code {returncode}). Error: '
