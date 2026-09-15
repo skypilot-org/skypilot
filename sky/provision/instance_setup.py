@@ -77,7 +77,13 @@ def _setup_command_timeout() -> Optional[int]:
 
 
 def _file_mount_timeout() -> Optional[int]:
-    """Bound for the internal file mounts (mkdir + rsync of runtime files)."""
+    """Bound for one remote operation of an internal file mount.
+
+    Applied separately to the mkdir and to the rsync, so a single mount can
+    take up to twice this value. That is deliberate -- they are independent
+    commands and either can wedge on its own -- but it means this is a
+    per-operation bound, not a per-mount one.
+    """
     return _timeout_from_config('file_mount_timeout',
                                 _DEFAULT_FILE_MOUNT_TIMEOUT)
 

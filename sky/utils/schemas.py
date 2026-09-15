@@ -2927,8 +2927,10 @@ def get_config_schema():
             'setup_command_timeout': {
                 'type': 'integer',
             },
-            # Wall-clock bound (seconds) for each internal file mount (the
-            # mkdir plus the rsync of ~/.sky/.runtime_files).
+            # Wall-clock bound (seconds) applied to each remote operation of
+            # an internal file mount -- the mkdir and the rsync of
+            # ~/.sky/.runtime_files are bounded separately, so a single mount
+            # can take up to twice this value.
             'file_mount_timeout': {
                 'type': 'integer',
             },
