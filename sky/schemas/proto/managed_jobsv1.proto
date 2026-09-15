@@ -168,26 +168,6 @@ message ManagedJobInfo {
   // A dynamic task's ordinal within its root's tree (unset for top-level
   // jobs); `<root_job_id>-<dynamic_task_index>` names it on the CLI.
   optional int64 dynamic_task_index = 44;
-  // The startup breakdown, added in ManagedJobsService v27. All unset
-  // until the job first reaches RUNNING, on jobs that never run, and on
-  // jobs that predate the breakdown -- the dashboard draws nothing rather
-  // than a bar of zero width.
-  // the whole submission-to-running wait
-  optional double t_time_to_running = 45;
-  // waiting for a controller to claim the job
-  optional double t_controller_queue = 46;
-  // launch attempts thrown away, plus their backoff
-  optional double t_retry_overhead = 47;
-  // time no phase claims
-  optional double t_unattributed = 48;
-  // preparing the launch, up to asking for instances
-  optional double t_provision_setup = 49;
-  // parked in an external scheduler queue
-  optional double t_queue_wait = 50;
-  // instances asked for, until they are running
-  optional double t_node_startup = 51;
-  // instances up, until the job is running
-  optional double t_runtime_setup = 52;
 }
 
 // A pair of internal and external IP addresses
