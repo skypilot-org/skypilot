@@ -34,11 +34,10 @@ name: eval-watcher
 resources:
   cpus: 2
   infra: kubernetes
+setup: |
+  pip install "skypilot-nightly[remote]"
 run: |
-  # The SkyPilot client installed on every node, the same version as the
-  # API server; the task's credentials point it at the server. The runtime
-  # lives under $HOME on Kubernetes and under $SKY_RUNTIME_DIR on Slurm.
-  source "${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime/bin/activate"
+  # API server credentials are injected into the task automatically.
 
   # In a real watcher, this loop would poll the checkpoint directory. Here it
   # follows the trainer's schedule: one evaluation per checkpoint.
