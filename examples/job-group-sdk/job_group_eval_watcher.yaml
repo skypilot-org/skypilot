@@ -35,7 +35,7 @@ resources:
   cpus: 2
   infra: kubernetes
 setup: |
-  pip install "skypilot-nightly[remote]"
+  pip install skypilot-nightly
 run: |
   # API server credentials are injected into the task automatically.
 

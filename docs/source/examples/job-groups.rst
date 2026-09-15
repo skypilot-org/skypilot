@@ -441,7 +441,7 @@ without being blocked by evaluation.
     volumes:
       /checkpoints: checkpoints
     setup: |
-      pip install "skypilot-nightly[remote]"
+      pip install skypilot-nightly
     run: |
       # API server credentials are injected into the task automatically.
       # Launch one eval job per new checkpoint; each becomes a dynamic task
