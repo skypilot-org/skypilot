@@ -53,6 +53,27 @@ class TestCleanServerEnvCapture:
             os.environ.pop('SKY_TEST_CAPTURE_KEY', None)
             os.environ.pop('SKY_TEST_NEW_KEY', None)
 
+    def test_capture_drops_multiproc_dir(self):
+        # A spawned subprocess that inherits this joins the parent's
+        # multiprocess registry and leaves per-pid files behind for good.
+        os.environ['PROMETHEUS_MULTIPROC_DIR'] = '/tmp/does-not-matter'
+        try:
+            clean_env_module.capture_clean_server_env()
+            snapshot = clean_env_module.get_clean_server_env()
+            assert 'PROMETHEUS_MULTIPROC_DIR' not in snapshot
+        finally:
+            os.environ.pop('PROMETHEUS_MULTIPROC_DIR', None)
+
+    def test_adopted_snapshot_drops_multiproc_dir(self):
+        # Workers adopt the snapshot instead of capturing it; that path must
+        # strip the same variable.
+        clean_env_module.set_clean_server_env({
+            'PATH': '/usr/bin',
+            'PROMETHEUS_MULTIPROC_DIR': '/tmp/does-not-matter',
+        })
+        snapshot = clean_env_module.get_clean_server_env()
+        assert snapshot == {'PATH': '/usr/bin'}
+
     def test_capture_is_idempotent(self):
         os.environ['SKY_TEST_IDEMPOTENT'] = 'first'
         try:
