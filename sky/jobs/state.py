@@ -71,6 +71,24 @@ Base = declarative.declarative_base()
 # to identify the job.
 # TODO(zhwu): schema migration may be needed.
 
+# The daemon's two "not processed yet" predicates, used by both the index
+# definitions and the migration so an index cannot drift from the query it
+# exists to serve.
+#
+# Both are built from _MEASURABLE rather than spelled out, because the first
+# version of this spelled them out and the second one lost a clause: without
+# the origin columns the never-ran index kept every pre-upgrade row forever --
+# 1078 unmatchable rows against 0 real candidates on the tenant it was measured
+# on, which is the very thing partial indexes were introduced here to stop.
+#
+# Each predicate must stay implied by its query's WHERE or the planner cannot
+# use the index. Every clause here is one the corresponding query already has.
+_MEASURABLE = 'created_at IS NOT NULL AND eligible_at IS NOT NULL'
+
+PENDING_TIMELINE_PREDICATE = f't_time_to_running IS NULL AND {_MEASURABLE}'
+NEVER_RAN_PREDICATE = (f't_controller_queue IS NULL AND start_at IS NULL AND '
+                       f'{_MEASURABLE}')
+
 spot_table = sqlalchemy.Table(
     'spot',
     Base.metadata,
@@ -211,12 +229,33 @@ spot_table = sqlalchemy.Table(
     # The metrics daemon's pending-timeline query, once a minute. Without it
     # that query full-scans spot and sorts the result to return the handful of
     # jobs that just started -- and in the steady state, to return nothing.
-    # Leading with t_time_to_running seeks straight to the rows without a
-    # timeline; start_at then serves the ordering from the index rather than a
-    # temp b-tree. 18ms against nothing measurable over 200k rows, growing
-    # with the job history rather than with the work there is to do.
-    sqlalchemy.Index('ix_spot_pending_timeline', 't_time_to_running',
-                     'start_at'),
+    # The predicate selects the rows without a timeline; start_at then serves
+    # the ordering from the index rather than a temp b-tree.
+    #
+    # Partial, and that is the whole point rather than a refinement. A full
+    # index stores one entry per task ever run and keeps it forever: a
+    # pre-upgrade row has no created_at, so it can never satisfy the query,
+    # is never given a timeline, and never leaves the unprocessed group it
+    # sorts to the front of. Every tick then walks the entire history to reach
+    # the few rows with work in them -- 9156 dead entries against 9 live ones
+    # on the dev tenant this was measured on. Restricted to what the query can
+    # return, the index holds the pending work instead, and a row drops out of
+    # it the moment its timeline is recorded.
+    #
+    # Safe to restrict because the marker column is only ever asked IS NULL --
+    # both selects and both conditional updates -- so no query wants the rows
+    # this leaves out. The predicates must keep matching those queries or the
+    # planner will quietly stop using the index, which is what the EXPLAIN
+    # tests are for.
+    sqlalchemy.Index(
+        'ix_spot_pending_timeline',
+        'start_at',
+        postgresql_where=sqlalchemy.text(PENDING_TIMELINE_PREDICATE),
+        sqlite_where=sqlalchemy.text(PENDING_TIMELINE_PREDICATE)),
+    sqlalchemy.Index('ix_spot_never_ran',
+                     'end_at',
+                     postgresql_where=sqlalchemy.text(NEVER_RAN_PREDICATE),
+                     sqlite_where=sqlalchemy.text(NEVER_RAN_PREDICATE)),
 )
 
 job_info_table = sqlalchemy.Table(

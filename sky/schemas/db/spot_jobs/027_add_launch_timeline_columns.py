@@ -15,9 +15,11 @@
 - spot.t_*: the timeline denormalized once the job first reaches RUNNING, so
   the jobs list renders from one indexed row read rather than a per-job scan
   of launch_attempts.
-- ix_spot_pending_timeline: the metrics daemon asks once a minute for tasks
-  that have started but have no timeline yet. Without the index that is a full
-  scan of every task ever run, every minute.
+- ix_spot_pending_timeline / ix_spot_never_ran: the metrics daemon asks once a
+  minute for tasks that have started but have no timeline yet, and for tasks
+  that ended without ever running. Without these, each is a full scan of every
+  task ever run, every minute. Both are partial, so they hold the pending work
+  rather than the job history -- see the note in sky/jobs/state.py.
 
 Revision ID: 027
 Revises: 026
@@ -30,6 +32,7 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
+from sky.jobs import state
 from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
@@ -38,7 +41,10 @@ down_revision: Union[str, Sequence[str], None] = '026'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-_INDEX_NAME = 'ix_spot_pending_timeline'
+# Imported rather than repeated: an index whose predicate has drifted from the
+# query it serves is silently not used, and nothing fails.
+_PENDING_INDEX = 'ix_spot_pending_timeline'
+_NEVER_RAN_INDEX = 'ix_spot_never_ran'
 
 _TIMELINE_COLUMNS = (
     'created_at',
@@ -65,12 +71,29 @@ def upgrade():
     # Separate inspection pass: the columns have to exist before an index can
     # be built over them, and create_index is not idempotent on its own.
     bind = op.get_bind()
-    if _INDEX_NAME in {
-            ix['name'] for ix in sa.inspect(bind).get_indexes('spot')
-    }:
-        return
-    with op.get_context().autocommit_block():
-        op.create_index(_INDEX_NAME, 'spot', ['t_time_to_running', 'start_at'])
+    existing = {ix['name'] for ix in sa.inspect(bind).get_indexes('spot')}
+    # Partial on purpose: the queries these serve ask for rows that have not
+    # been processed, and a full index would also carry every row already
+    # processed and every pre-upgrade row that can never match -- permanently,
+    # since neither is ever given a timeline. See the model for the full note.
+    for name, column, predicate in (
+        (_PENDING_INDEX, 'start_at', state.PENDING_TIMELINE_PREDICATE),
+        (_NEVER_RAN_INDEX, 'end_at', state.NEVER_RAN_PREDICATE),
+    ):
+        # Dropped first rather than skipped when present. Skipping is what
+        # makes a migration idempotent, and it is also what stops it replacing
+        # an index whose definition changed -- this revision is unreleased and
+        # has already been deployed carrying a full index under this same name,
+        # so a deployment that ran the earlier version would otherwise keep it
+        # forever and never receive this fix. Re-creating is cheap here: the
+        # index covers pending work, so it is small by construction.
+        with op.get_context().autocommit_block():
+            if name in existing:
+                op.drop_index(name, table_name='spot')
+            op.create_index(name,
+                            'spot', [column],
+                            postgresql_where=sa.text(predicate),
+                            sqlite_where=sa.text(predicate))
 
 
 def downgrade():
