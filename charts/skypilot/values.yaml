@@ -696,6 +696,14 @@ slurmCredentials:
 extraInitContainers: null
 
 # Set securityContext for the api pod
+# On Kubernetes >= 1.30 the chart adds a default
+# `net.ipv4.ip_local_reserved_ports` sysctl covering the API server's listen
+# ports, so that other processes in the pod's network namespace cannot be
+# assigned them as ephemeral source ports (which makes the server fail to bind
+# with "Address already in use" until the pod is recreated). Setting `sysctls`
+# here — to any value, including `[]` — replaces that default. See the
+# `podSecurityContext` section of the Helm values reference for the version
+# gate, the offline-rendering caveat, and Pod Security Admission notes.
 # @schema type: [object, null]
 podSecurityContext: {}
 
