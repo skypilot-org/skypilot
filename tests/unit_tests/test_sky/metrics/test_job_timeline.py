@@ -1,6 +1,8 @@
 """Splitting a managed job's submission-to-running time into phases."""
 import types
 
+import pytest
+
 from sky.metrics import launch_phases
 
 
@@ -14,9 +16,10 @@ def _task(created_at=0.0,
         'task_id': task_id,
         'task_name': 'train',
         'created_at': created_at,
-        # When this task could first have started. The query coalesces it to
-        # created_at, so leaving it None here is a row from before the column.
-        'eligible_at': eligible_at,
+        # When this task could first have started. The queries require it, so
+        # a row reaching this code always has one; defaulting it to created_at
+        # is what a single task and every job-group task get at set_pending.
+        'eligible_at': created_at if eligible_at is None else eligible_at,
         'submitted_at': submitted_at,
         'start_at': start_at,
         'workspace': 'eng',
@@ -94,18 +97,24 @@ def test_a_job_groups_tasks_all_start_waiting_together():
     assert sum(phases.values()) == total
 
 
-def test_a_row_from_before_the_column_keeps_its_old_answer():
-    """Backfilling is not possible, so the fallback has to be exact.
+def test_a_task_with_no_origin_is_an_error_not_a_guess():
+    """The breakdown must not invent an origin when the query's guard is gone.
 
-    Jobs that predate eligible_at were measured from created_at; reading them
-    any other way would move numbers that are already published.
+    The queries require eligible_at, so this cannot happen today -- which is
+    exactly why it is worth pinning: with the invariant enforced in SQL alone,
+    relaxing either query would silently restore measurement from created_at,
+    and a pipeline task measured from the job's submission carries every
+    upstream task's runtime in its controller wait. Failing loudly here keeps
+    that from being a plausible number.
     """
-    with_origin = _task(created_at=0.0, eligible_at=0.0)
-    without = _task(created_at=0.0, eligible_at=None)
+    task = _task(created_at=0.0, task_id=1)
+    task['eligible_at'] = None
 
-    assert (launch_phases.compute_job_timeline(
-        without, [_attempt()]) == launch_phases.compute_job_timeline(
-            with_origin, [_attempt()]))
+    # Deliberately broad: what matters is that it refuses, not how. Today the
+    # refusal is a TypeError from arithmetic on None; an explicit raise later
+    # would be an improvement and must not redden this.
+    with pytest.raises(Exception):
+        launch_phases.compute_job_timeline(task, [_attempt()])
 
 
 def test_the_gap_between_attempts_becomes_retry_overhead():

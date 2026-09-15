@@ -449,17 +449,34 @@ def _record_job_launch_timelines() -> int:
             # is honest about the rest being unknown.
             logger.error(f'Failed to record the launch timeline of job '
                          f'{task["spot_job_id"]}: {e}')
-            try:
-                total = task['start_at'] - (task.get('eligible_at') or
-                                            task['created_at'])
-                managed_job_state.record_launch_timeline(
-                    task['spot_job_id'], task['task_id'], {
-                        't_time_to_running': total,
-                        't_unattributed': total,
-                    })
-            except Exception as inner:  # pylint: disable=broad-except
-                logger.error(f'Could not park the launch timeline of job '
-                             f'{task["spot_job_id"]}: {inner}')
+            origin = task.get('eligible_at')
+            if origin is None:
+                # The one row this park cannot take out of the pending set:
+                # every number it could write is measured from the origin that
+                # is missing, and guessing one is what this daemon stopped
+                # doing. Named here rather than discovered through a failed
+                # subtraction, because the consequence is the starvation
+                # described above and the message is the only warning of it.
+                #
+                # The selection query requires eligible_at so this cannot
+                # arrive; if it ever does, the repair is that query, not an
+                # origin invented here.
+                logger.error(
+                    f'Cannot park the launch timeline of job '
+                    f'{task["spot_job_id"]}: it has no origin, so it will be '
+                    f'selected again every tick. The selection guard on '
+                    f'eligible_at is what should have excluded it.')
+            else:
+                try:
+                    total = task['start_at'] - origin
+                    managed_job_state.record_launch_timeline(
+                        task['spot_job_id'], task['task_id'], {
+                            't_time_to_running': total,
+                            't_unattributed': total,
+                        })
+                except Exception as inner:  # pylint: disable=broad-except
+                    logger.error(f'Could not park the launch timeline of job '
+                                 f'{task["spot_job_id"]}: {inner}')
 
     # Jobs that went terminal without ever running have no timing to report,
     # but they belong in the counts: a fleet that mostly fails to start would
@@ -468,9 +485,7 @@ def _record_job_launch_timelines() -> int:
         try:
             if managed_job_state.record_controller_queue_only(
                     task['spot_job_id'], task['task_id'],
-                    max(
-                        0.0, task['submitted_at'] -
-                        (task.get('eligible_at') or task['created_at']))):
+                    max(0.0, task['submitted_at'] - task['eligible_at'])):
                 launch_phases.count_job_that_never_ran(task['workspace'],
                                                        bool(task.get('pool')))
         except Exception as e:  # pylint: disable=broad-except

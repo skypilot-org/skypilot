@@ -152,12 +152,31 @@ spot_table = sqlalchemy.Table(
     # the histogram is labelled by workspace only.
     #
     # Recording the moment rather than special-casing the formula keeps one
-    # meaning for every task. NULL on jobs that predate the column; readers
-    # fall back to created_at.
+    # meaning for every task.
+    #
+    # Written on the consolidation path only: of the three set_pending callers,
+    # just the one in jobs/server/core.py passes it -- the skylet service and
+    # the generated remote-controller code do not. So on a remote controller
+    # this is NULL for every task and the correction above does not apply
+    # there. Deliberate rather than overlooked: that path keeps its own
+    # database, the metrics daemon never reads these rows, and the breakdown is
+    # scoped to consolidation. Readers require it NOT NULL, so a row without it
+    # is skipped rather than measured from the wrong origin.
     sqlalchemy.Column('eligible_at', sqlalchemy.Float, server_default=None),
     # The launch timeline, denormalized once the job first reaches RUNNING, so
     # the jobs list renders from one indexed row read instead of a per-job scan
-    # of launch_attempts. Write-once: they describe how long the job took to
+    # of launch_attempts.
+    #
+    # Only two of these are read today. t_time_to_running and
+    # t_controller_queue are the conditional-UPDATE targets that make recording
+    # exactly-once across replicas, one for a task that ran and one for a task
+    # that never did. The other six have no reader: the Prometheus series are
+    # observed from the in-memory breakdown in the same call that computes it,
+    # not from these columns. They are stored for the job-detail view, which
+    # lands separately -- so if that view is dropped, these should go with it
+    # rather than linger as a table that nothing consults.
+    #
+    # Write-once: they describe how long the job took to
     # start, which a preemption three hours later does not redefine.
     #
     # Together they partition the wall clock from created_at to RUNNING:
@@ -556,17 +575,6 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'status': r.get('status'),
         'run_timestamp': r.get('run_timestamp'),
         'start_at': r.get('start_at'),
-        # The launch timeline. All None until the job first reaches RUNNING,
-        # and on jobs that predate it.
-        'created_at': r.get('created_at'),
-        't_controller_queue': r.get('t_controller_queue'),
-        't_retry_overhead': r.get('t_retry_overhead'),
-        't_unattributed': r.get('t_unattributed'),
-        't_provision_setup': r.get('t_provision_setup'),
-        't_queue_wait': r.get('t_queue_wait'),
-        't_node_startup': r.get('t_node_startup'),
-        't_runtime_setup': r.get('t_runtime_setup'),
-        't_time_to_running': r.get('t_time_to_running'),
         'end_at': r.get('end_at'),
         'last_recovered_at': r.get('last_recovered_at'),
         'recovery_count': r.get('recovery_count'),
@@ -4810,12 +4818,8 @@ def get_jobs_pending_launch_timeline(limit: int = 200) -> List[Dict[str, Any]]:
                 spot_table.c.task_id,
                 spot_table.c.task_name,
                 spot_table.c.created_at,
-                # Where this task's clock starts. NULL on jobs older than the
-                # column, and on those created_at is what they were measured
-                # from, so the fallback preserves their numbers exactly.
-                sqlalchemy.func.coalesce(
-                    spot_table.c.eligible_at,
-                    spot_table.c.created_at).label('eligible_at'),
+                # Where this task's clock starts.
+                spot_table.c.eligible_at,
                 spot_table.c.submitted_at,
                 spot_table.c.start_at,
                 job_info_table.c.workspace,
@@ -4830,6 +4834,9 @@ def get_jobs_pending_launch_timeline(limit: int = 200) -> List[Dict[str, Any]]:
             where(
                 sqlalchemy.and_(
                     spot_table.c.start_at.is_not(None),
+                    # Implied by the eligible_at guard below -- set_pending
+                    # writes created_at on every row -- and kept because the
+                    # two are independent columns whose writers could diverge.
                     spot_table.c.created_at.is_not(None),
                     # Every timestamp the breakdown subtracts, so the
                     # computation cannot meet a NULL. Without this the
@@ -4852,6 +4859,20 @@ def get_jobs_pending_launch_timeline(limit: int = 200) -> List[Dict[str, Any]]:
                     # would mean widening the never-ran query, whose
                     # whole shape says otherwise.
                     spot_table.c.submitted_at.is_not(None),
+                    # Not coalesced to created_at, which would look like the
+                    # forgiving choice and is the harmful one. A task reaches
+                    # here without an origin only when its best-effort write
+                    # failed, and that is a pipeline's later task -- for which
+                    # created_at is the submission of the whole job, so the
+                    # fallback would charge every upstream task's runtime to
+                    # this one's controller wait. That is the distortion this
+                    # column was added to remove, reappearing on the failure
+                    # path. Same rule as the guard above: skip it.
+                    #
+                    # It cannot be NULL merely for being old -- 027 adds this
+                    # column and created_at together, so a pre-column row has
+                    # neither and is already excluded.
+                    spot_table.c.eligible_at.is_not(None),
                     spot_table.c.t_time_to_running.is_(None),
                 )).order_by(spot_table.c.start_at).limit(limit)).all()
         return [dict(row._mapping) for row in rows]  # pylint: disable=protected-access
@@ -4897,9 +4918,7 @@ def get_jobs_that_never_ran(limit: int = 200) -> List[Dict[str, Any]]:
                 spot_table.c.spot_job_id,
                 spot_table.c.task_id,
                 spot_table.c.created_at,
-                sqlalchemy.func.coalesce(
-                    spot_table.c.eligible_at,
-                    spot_table.c.created_at).label('eligible_at'),
+                spot_table.c.eligible_at,
                 spot_table.c.submitted_at,
                 job_info_table.c.workspace,
                 job_info_table.c.pool,
@@ -4907,14 +4926,20 @@ def get_jobs_that_never_ran(limit: int = 200) -> List[Dict[str, Any]]:
                 spot_table.join(
                     job_info_table,
                     spot_table.c.spot_job_id == job_info_table.c.spot_job_id,
-                    isouter=True)).where(
-                        sqlalchemy.and_(
-                            spot_table.c.end_at.is_not(None),
-                            spot_table.c.start_at.is_(None),
-                            spot_table.c.created_at.is_not(None),
-                            spot_table.c.submitted_at.is_not(None),
-                            spot_table.c.t_controller_queue.is_(None),
-                        )).order_by(spot_table.c.end_at).limit(limit)).all()
+                    isouter=True)).
+            where(
+                sqlalchemy.and_(
+                    spot_table.c.end_at.is_not(None),
+                    spot_table.c.start_at.is_(None),
+                    spot_table.c.created_at.is_not(None),
+                    spot_table.c.submitted_at.is_not(None),
+                    # See the sibling query: an absent origin is a
+                    # failed write, not an old row, and measuring from
+                    # created_at would be wrong rather than merely
+                    # imprecise.
+                    spot_table.c.eligible_at.is_not(None),
+                    spot_table.c.t_controller_queue.is_(None),
+                )).order_by(spot_table.c.end_at).limit(limit)).all()
         return [dict(row._mapping) for row in rows]  # pylint: disable=protected-access
 
 

@@ -213,7 +213,11 @@ def compute_job_timeline(task: Any,
 
     Returns the total and the per-phase durations, which sum to it.
     """
-    origin = task.get('eligible_at') or task['created_at']
+    # Indexed, not defaulted: the queries that produce these rows
+    # require eligible_at, so a missing one is a broken invariant and
+    # should surface as an error rather than as a plausible number
+    # measured from the wrong instant.
+    origin = task['eligible_at']
     total = task['start_at'] - origin
     phases: Dict[str, float] = {
         CONTROLLER_QUEUE: task['submitted_at'] - origin,
