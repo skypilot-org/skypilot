@@ -166,9 +166,10 @@ _LATENCY_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30,
 # output than a very slow echo. Buckets above the cap would be structurally
 # empty and would advertise a reach the measurement does not have. Keep the two
 # numbers in step -- raising one without the other is what made 2.5/5/10 dead
-# boundaries. A reply that never arrives inside the cap is not silently lost:
-# it increments SKY_APISERVER_SSH_BACKEND_TURNAROUND_DROPPED_TOTAL, which is
-# how a backend too slow to measure stays visible.
+# boundaries. A late reply that does arrive is not silently lost: it
+# increments SKY_APISERVER_SSH_BACKEND_TURNAROUND_DROPPED_TOTAL, which is how
+# a backend too slow to measure stays visible. A write the backend never
+# answers at all is a different case and is not counted -- see that counter.
 _SSH_ROUND_TRIP_BUCKETS = (0.001, 0.002, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25,
                            0.5, 1, 2, float('inf'))
 
@@ -356,10 +357,22 @@ SKY_APISERVER_SSH_BACKEND_TURNAROUND_SECONDS = prom.Histogram(
 # look slow. So count the drops. A rising ratio of dropped to observed is the
 # signal for "too slow to measure", which the distribution cannot express and
 # the session counter cannot either.
+#
+# Scope, precisely: this counts a late reply that *arrives*. It is incremented
+# from _BackendTurnaroundSampler.on_read(), which the proxy calls only when the
+# backend returns bytes, and there is no flush at teardown -- so a session that
+# closes with a write still unanswered discards its pending timestamp without
+# counting anything. Covering that too means counting a still-pending stamp
+# when the proxy tears down, which is not obviously free: SSH teardown sends
+# small client-to-backend packets, and one the backend never answers before the
+# socket closes would put a baseline drop on every ordinary session and blunt
+# the ratio this counter exists to carry. Left out until that baseline is
+# measured on a live server.
 SKY_APISERVER_SSH_BACKEND_TURNAROUND_DROPPED_TOTAL = prom.Counter(
     'sky_apiserver_ssh_backend_turnaround_dropped_total',
-    ('Keystroke-sized writes whose backend reply did not arrive within the '
-     'pairing window, so no turnaround sample was taken. Read against '
+    ('Keystroke-sized writes whose backend reply arrived later than the '
+     'pairing window, so no turnaround sample was taken. Does not count a '
+     'write the backend never answered at all. Read against '
      'sky_apiserver_ssh_backend_turnaround_seconds_count: a rising share of '
      'drops means the backend is slower than the measurement can express, '
      'not that SSH went idle.'),
