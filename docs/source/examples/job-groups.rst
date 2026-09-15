@@ -353,6 +353,8 @@ This example demonstrates a distributed RL post-training architecture with 5 tas
 
 See the `full RL post-training example <https://github.com/skypilot-org/skypilot/tree/master/llm/rl-post-training-jobgroup>`_ in the SkyPilot repository.
 
+.. _job-groups-primary-auxiliary:
+
 Primary and auxiliary tasks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -405,83 +407,78 @@ two ways:
 
 Either way the job becomes a *dynamic task* of the group:
 
-- It is listed under the group in ``sky jobs queue`` and the dashboard,
-  numbered on from the group's declared tasks (a group with tasks 0 and 1
-  shows its first launched job as task 2). It is addressed like a declared
-  task: ``sky jobs logs 39 2`` tails it and ``sky jobs cancel 39 --task 2``
-  cancels it on its own. Underneath, it is a managed job of its own.
-- ``sky jobs cancel <group>`` cancels it together with the group.
-- When the group finishes, dynamic tasks still running are cancelled. A group
-  finishes once all its primary tasks have finished and its auxiliary tasks
-  have been terminated (after their ``termination_delay``), so a dynamic task
-  launched by an auxiliary task keeps running through that delay.
-- Its status is its own. A failed dynamic task does not fail the group, and a
-  dynamic task finishing does not affect the group.
+- It is listed under the group in ``sky jobs queue`` and the dashboard, and is
+  addressed like any other task: ``sky jobs logs 39 2`` tails it and
+  ``sky jobs cancel 39 --task 2`` cancels it on its own.
+- Dynamic tasks are :ref:`auxiliary <job-groups-primary-auxiliary>`: they do
+  not keep the group alive and are cancelled when it finishes. A failed dynamic
+  task does not fail the group.
 
-One common use case for dynamic tasks is an **eval watcher**: one task watches
-for new checkpoints and launches one evaluation job per checkpoint, each on its
-own resources, while the trainer keeps training.
+One common use case for dynamic tasks is an **eval watcher** during model
+training: one task watches for new checkpoints and launches one evaluation job
+per checkpoint, each on its own resources, while the trainer keeps going
+without being blocked by evaluation.
 
 .. code-block:: yaml
 
     ---
     name: train-and-eval
     execution: parallel
+    # The watcher is primary so the group stays alive until its evals finish.
     primary_tasks: [trainer, eval-watcher]
     ---
     name: trainer
     resources:
       accelerators: H100:8
+    volumes:
+      /checkpoints: checkpoints  # shared volume, also mounted by the watcher
     run: |
       python train.py --checkpoint-dir /checkpoints
     ---
     name: eval-watcher
     resources:
       cpus: 2
+    volumes:
+      /checkpoints: checkpoints
+    setup: |
+      pip install "skypilot-nightly[remote]"
     run: |
-      # Use the SkyPilot client installed on every node; the task's
-      # credentials already point it at the API server.
-      source "${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime/bin/activate"
-
-      # Launch one eval job per new checkpoint. Each becomes a dynamic
-      # task of this group.
+      # API server credentials are injected into the task automatically.
+      # Launch one eval job per new checkpoint; each becomes a dynamic task
+      # of this group.
       for ckpt in $(python watch_checkpoints.py /checkpoints); do
         sky jobs launch -y -d -n "eval-$ckpt" eval.yaml --env CKPT=$ckpt
       done
 
-      # Wait for the evals: the group finishes when both primaries have,
-      # and any eval still running at that point is cancelled.
+      # Wait for the evals: any still running when the group finishes is
+      # cancelled.
       python wait_for_evals.py
 
-The watcher is a primary task so that the group stays alive until the last
-evaluation it launched has finished. As an auxiliary task it would instead be
-terminated once the trainer finished, after the group's ``termination_delay``,
-and its evaluations would be cancelled with it. A runnable version is
+A runnable demo example is available at
 `job_group_eval_watcher.yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/job-group-sdk/job_group_eval_watcher.yaml>`_.
 
-The dashboard picks up the dynamic tasks as they are launched and lists them
-with the group's declared tasks, marked ``Dynamic``:
+The dashboard lists the dynamic tasks with the group's declared tasks, marked
+``Dynamic``:
 
 .. figure:: ../images/job-groups-dynamic-tasks.png
    :alt: The dashboard's jobs list with a job group expanded: the trainer, the eval watcher, and three dynamic evaluation tasks marked Dynamic
    :align: center
    :width: 90%
 
-The same tree appears in ``sky jobs queue``, with the dynamic tasks numbered on
-from the declared tasks as 2, 3 and 4:
+The tasks also appear underneath the parent job in ``sky jobs queue``:
 
-.. code-block:: console
+.. dropdown:: Example output
 
-    $ sky jobs queue
-    ID    TASK  NAME              ...  STATUS
-    122   -     train-and-eval    ...  RUNNING
-     ↳    0     trainer [P]       ...  RUNNING
-     ↳    1     eval-watcher [P]  ...  RUNNING
-     ↳    2     eval-step-1       ...  SUCCEEDED
-     ↳    3     eval-step-2       ...  RUNNING
-     ↳    4     eval-step-3       ...  RUNNING
+    .. code-block:: console
 
-    $ sky jobs cancel 122 --task 4   # the third evaluation, on its own
+        $ sky jobs queue
+        ID    TASK  NAME              ...  STATUS
+        122   -     train-and-eval    ...  RUNNING
+         ↳    0     trainer [P]       ...  RUNNING
+         ↳    1     eval-watcher [P]  ...  RUNNING
+         ↳    2     eval-step-1       ...  SUCCEEDED
+         ↳    3     eval-step-2       ...  RUNNING
+         ↳    4     eval-step-3       ...  RUNNING
 
 **Controlling where a job attaches.**
 
@@ -502,10 +499,11 @@ from the declared tasks as 2, 3 and 4:
    ``--job-group`` is rejected and a launch from inside a group runs as a
    top-level job.
 
-Members do not take part in the group's :ref:`service discovery
-<job-groups-service-discovery>` (they are not reachable by group hostname and
-do not get one), are scheduled independently of the group, and have no
-``termination_delay`` of their own.
+.. note::
+
+   Dynamic tasks are not part of the group's :ref:`service discovery
+   <job-groups-service-discovery>`: they get no group hostname and cannot
+   reach the group's tasks by hostname.
 
 Using the Python SDK
 ~~~~~~~~~~~~~~~~~~~~
