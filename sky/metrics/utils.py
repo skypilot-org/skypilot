@@ -155,6 +155,24 @@ _anchor_read_failed = False
 _LATENCY_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30,
                     60, 120, 300, 600, 1000, float('inf'))
 
+# Interactive-SSH scale, for the round trips a keystroke takes. _LATENCY_BUCKETS
+# starts at 5ms and runs to 1000s because it is sized for request durations; a
+# healthy API-server-to-pod round trip inside one cluster is sub-millisecond to
+# a few ms, so every good value would land in that ladder's first bucket.
+#
+# The ladder stops at 2s because that is the largest value the sampler can
+# produce: _BackendTurnaroundSampler discards a reply that takes longer than
+# _MAX_PENDING_SECONDS, since past that it is far more likely to be unrelated
+# output than a very slow echo. Buckets above the cap would be structurally
+# empty and would advertise a reach the measurement does not have. Keep the two
+# numbers in step -- raising one without the other is what made 2.5/5/10 dead
+# boundaries. A late reply that does arrive is not silently lost: it
+# increments SKY_APISERVER_SSH_BACKEND_TURNAROUND_DROPPED_TOTAL, which is how
+# a backend too slow to measure stays visible. A write the backend never
+# answers at all is a different case and is not counted -- see that counter.
+_SSH_ROUND_TRIP_BUCKETS = (0.001, 0.002, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25,
+                           0.5, 1, 2, float('inf'))
+
 # Time spent processing a piece of code, refer to time_it().
 SKY_APISERVER_CODE_DURATION_SECONDS = prom.Histogram(
     'sky_apiserver_code_duration_seconds',
@@ -171,6 +189,13 @@ SKY_APISERVER_REQUESTS_TOTAL = prom.Counter(
     'sky_apiserver_requests_total',
     'Total number of API server requests',
     ['path', 'method', 'status'],
+)
+
+SKY_APISERVER_BLOB_CHECK_SIZE_BYTES = prom.Histogram(
+    'sky_apiserver_blob_check_size_bytes',
+    'Client-reported compressed blob bytes per existence check.',
+    ['result'],
+    buckets=[2**exponent for exponent in range(10, 37, 2)],
 )
 
 # Total number of API server requests per user.
@@ -234,6 +259,34 @@ SKY_APISERVER_EVENT_LOOP_STALL_TOTAL = prom.Counter(
     ['source'],
 )
 
+# Requests a middleware answered itself with a canned rejection instead of
+# letting a route handler run: authentication failures, auth-path database
+# deadlines, auth executor exhaustion, RBAC denials. These responses never
+# reach a route handler, so they are only visible to the request counters
+# because the metrics middleware is the outermost one; this counter says
+# *why* they were rejected. Bounded on purpose: `reason` is a closed set (see
+# sky/server/middleware_utils.py), `status` is the HTTP status the middleware
+# answered with and `kind` is `http` or `websocket` (a rejected WebSocket
+# handshake). No path label: the paths of rejected requests are chosen by
+# unauthenticated clients.
+SKY_APISERVER_REQUEST_REJECTIONS_TOTAL = prom.Counter(
+    'sky_apiserver_request_rejections_total',
+    'Requests a middleware rejected with a canned response, by reason',
+    ['reason', 'status', 'kind'],
+)
+
+# WebSocket handshakes refused by a middleware, by the decision that refused
+# them (the close-code set in sky/server/middleware_utils.websocket_aware:
+# unauthorized / forbidden / error). Handshakes are not HTTP requests from
+# the request counter's point of view, so without this counter a storm of
+# refused handshakes is invisible: it only shows up as fewer connections.
+# `path` is restricted to the registered WebSocket routes, else `other`.
+SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL = prom.Counter(
+    'sky_apiserver_websocket_handshake_rejections_total',
+    'WebSocket handshakes refused by a middleware, by decision',
+    ['path', 'outcome'],
+)
+
 SKY_APISERVER_WEBSOCKET_CONNECTIONS = prom.Gauge(
     'sky_apiserver_websocket_connections',
     'Number of websocket connections',
@@ -257,16 +310,21 @@ SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL = prom.Counter(
     ['request', 'pid'],
 )
 
+# 'liveall' for the same reason as sky_apiserver_threads_active below: keep
+# the per-pid series, but only for processes that still exist. The default
+# ('all') would keep emitting each dead worker's last value forever.
 SKY_APISERVER_PROCESS_PEAK_RSS = prom.Gauge(
     'sky_apiserver_process_peak_rss',
     'Peak RSS we saw in each process in last 30 seconds',
     ['pid', 'type'],
+    multiprocess_mode='liveall',
 )
 
 SKY_APISERVER_PROCESS_CPU_TOTAL = prom.Gauge(
     'sky_apiserver_process_cpu_total',
     'Total CPU times a worker process has been running',
     ['pid', 'type', 'mode'],
+    multiprocess_mode='liveall',
 )
 
 SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES = prom.Histogram(
@@ -281,21 +339,109 @@ SKY_APISERVER_REQUEST_RSS_INCR_BYTES = prom.Histogram(
 
 SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
     'sky_apiserver_websocket_ssh_latency_seconds',
-    ('Time taken for ssh message to go from client to API server and back'
-     'to the client. This does not include: latency to reach the pod, '
-     'overhead from sending through the k8s port-forward tunnel, or '
-     'ssh server lag on the destination pod.'),
+    # NOT keystroke latency. Read the whole string before alerting on it.
+    ('SSH websocket heartbeat round trip, client to API server and back. '
+     'This is a synthetic PING the client sends every 10s while a session is '
+     'open -- NOT keystroke latency, and not tied to any user input. The '
+     'server echoes the PING without forwarding it, so the k8s port-forward '
+     'tunnel and the destination pod sshd are excluded by construction; see '
+     'sky_apiserver_ssh_backend_turnaround_seconds for those. Because the '
+     'PONG cannot be sent until the websocket read loop is free, this is '
+     'also an indirect event-loop responsiveness probe. Empty -- not zero -- '
+     'when clients are older than API version 21, when '
+     'SKYPILOT_SSH_DISABLE_LATENCY_MEASUREMENT=1, or when a plugin redirected '
+     'the session away from this API server.'),
     buckets=_LATENCY_BUCKETS,
 )
 
+# The leg the heartbeat above cannot see: API server -> (k8s API server ->
+# kubelet -> pod sshd, or a plugin's direct in-cluster connection) -> shell
+# echo -> back. Measured by pairing a small write to the backend with the next
+# read from it, so it costs two clock reads on a path that already inspects
+# every frame -- no injected bytes, no added latency, and no client support
+# needed. See sky.server.websocket_utils._BackendTurnaroundSampler for the
+# pairing rules and what makes a sample get dropped.
+#
+# `path` distinguishes how the session reached the pod: 'portforward' for this
+# server's kubectl port-forward, or a plugin-supplied value when a hook routes
+# the connection elsewhere. Two or three values in practice, so no cardinality
+# concern.
+#
+# A redirect hook that hands the session off labels it SSH_PATH_REDIRECTED here
+# and records no turnaround -- this server never touches the stream, so it has
+# nothing to time. A plugin that terminates the stream itself instead calls
+# run_websocket_proxy() with its own `path`, and that sample lands in whichever
+# process runs the proxy. So an empty histogram alongside redirected sessions is
+# expected rather than a fault, which is what SKY_APISERVER_SSH_SESSIONS_TOTAL
+# below exists to make legible.
+SKY_APISERVER_SSH_BACKEND_TURNAROUND_SECONDS = prom.Histogram(
+    'sky_apiserver_ssh_backend_turnaround_seconds',
+    ('Round trip from the API server to the SSH backend and back, measured by '
+     'pairing a keystroke-sized write with the next read. Covers everything '
+     'the websocket heartbeat excludes: the port-forward tunnel, both sshd '
+     'hops and the shell echo. A distribution, not a per-keystroke truth -- '
+     'unpaired backend traffic can attach a read to the wrong write.'),
+    ['path'],
+    buckets=_SSH_ROUND_TRIP_BUCKETS,
+)
+
+# The histogram's blind spot, made visible. A keystroke-sized write whose reply
+# does not arrive within _MAX_PENDING_SECONDS is dropped rather than observed,
+# because at that age a reply is far more likely to be unrelated output than a
+# very slow echo -- admitting it would put a multi-second sample in a
+# distribution whose real values are single-digit milliseconds, and one such
+# sample moves p99 by four orders of magnitude.
+#
+# Dropping is right for the distribution and wrong as the whole story: a
+# backend that genuinely echoes slower than the cap would go quiet rather than
+# look slow. So count the drops. A rising ratio of dropped to observed is the
+# signal for "too slow to measure", which the distribution cannot express and
+# the session counter cannot either.
+#
+# Scope, precisely: this counts a late reply that *arrives*. It is incremented
+# from _BackendTurnaroundSampler.on_read(), which the proxy calls only when the
+# backend returns bytes, and there is no flush at teardown -- so a session that
+# closes with a write still unanswered discards its pending timestamp without
+# counting anything. Covering that too means counting a still-pending stamp
+# when the proxy tears down, which is not obviously free: SSH teardown sends
+# small client-to-backend packets, and one the backend never answers before the
+# socket closes would put a baseline drop on every ordinary session and blunt
+# the ratio this counter exists to carry. Left out until that baseline is
+# measured on a live server.
+SKY_APISERVER_SSH_BACKEND_TURNAROUND_DROPPED_TOTAL = prom.Counter(
+    'sky_apiserver_ssh_backend_turnaround_dropped_total',
+    ('Keystroke-sized writes whose backend reply arrived later than the '
+     'pairing window, so no turnaround sample was taken. Does not count a '
+     'write the backend never answered at all. Read against '
+     'sky_apiserver_ssh_backend_turnaround_seconds_count: a rising share of '
+     'drops means the backend is slower than the measurement can express, '
+     'not that SSH went idle.'),
+    ['path'],
+)
+
+# Denominator for the histograms above. Without it an empty
+# sky_apiserver_ssh_backend_turnaround_seconds is ambiguous: nobody is SSHing,
+# or every session was redirected away, or the pairing never fires. An alert on
+# the histogram alone is a rule that can go silently dead.
+SKY_APISERVER_SSH_SESSIONS_TOTAL = prom.Counter(
+    'sky_apiserver_ssh_sessions_total',
+    'SSH proxy sessions accepted, by how the session was served',
+    ['path'],
+)
+
+# Fleet-wide free-executor counts, so 'livesum'. The default ('all') emits
+# one series per pid and never drops dead ones, so the count kept including
+# workers that had exited.
 SKY_APISERVER_LONG_EXECUTORS = prom.Gauge(
     'sky_apiserver_long_executors',
     'Total number of long-running request executors in the API server',
+    multiprocess_mode='livesum',
 )
 
 SKY_APISERVER_SHORT_EXECUTORS = prom.Gauge(
     'sky_apiserver_short_executors',
     'Total number of short-running request executors in the API server',
+    multiprocess_mode='livesum',
 )
 
 # Active threads in on-demand thread executors. Each process has its own
@@ -332,6 +478,54 @@ SKY_APISERVER_THREADS_EXHAUSTED_TOTAL = prom.Counter(
     'sky_apiserver_threads_exhausted_total',
     'Number of tasks rejected because an on-demand thread executor was full',
     ['name'],
+)
+
+# Auth-path work that ended in a timeout instead of a result. This is the
+# earliest signal that authentication is degrading: in a production incident
+# the first one landed 13 minutes before the first client-visible 503, and it
+# was log-only, so nothing could alert on it.
+#
+# `pool` is the executor the work ran on, spelled as
+# `sky_apiserver_threads_exhausted_total{name}` spells it so the two can be
+# read together. It matters because the deadline frees the caller and never
+# the thread (`wait_for` cannot cancel a thread parked on a blocking call),
+# so every `cause="deadline"` costs a slot in THAT pool until the call
+# returns on its own:
+#   `auth_thread_executor` (32) -- short DB lookups. Losing slots here locks
+#       every authenticated request out, so this is the pre-exhaustion signal.
+#   `request_thread_executor` (128) -- role seeding, which reloads config and
+#       runs policy operations. Its blocker is often a policy lock rather
+#       than the database, and it is deliberately on the larger pool for
+#       exactly that reason, so do not read it as auth-pool pressure.
+#
+# `cause` says which timeout ended the call:
+#   `deadline` -- the client-side `asyncio.wait_for` deadline elapsed; the
+#       thread is still held (see above).
+#   anything else -- the database ended the call at one of the server-side
+#       timeouts the auth path sets on its own transaction (`lock_timeout`,
+#       `statement_timeout`, `idle_in_transaction_session_timeout`). The
+#       thread comes back; a `lock_timeout` says another session holds the
+#       row lock.
+#
+# `site` is the name of the function that was called. Bounded, not
+# attacker-influenced: every call site passes a module-level function or a
+# bound method, so the values are fixed at build time. It is not only the
+# eight OSS names, though -- `call_with_deadline` is also called from the
+# enterprise plugin's session and RBAC middlewares and its volume gate, which
+# contribute their own, so a hosted deployment has more. A callable with no
+# `__name__` (a partial) records `unknown` rather than widening the label.
+#
+# Two things are deliberately NOT counted here. Executor exhaustion, which
+# already has `sky_apiserver_threads_exhausted_total`; and whatever response
+# the caller went on to produce. Most callers answer a retryable 503, but the
+# `/api/health` basic-auth path swallows the timeout and proceeds
+# unauthenticated, so it yields no client-visible error at all -- those
+# requests reach no request-level metric, and this counter is the only place
+# they appear.
+SKY_APISERVER_AUTH_TIMEOUTS_TOTAL = prom.Counter(
+    'sky_apiserver_auth_timeouts_total',
+    'Auth-path work that timed out, by call site, cause and executor pool',
+    ['site', 'cause', 'pool'],
 )
 
 # Time a request spends waiting in the task queue (from creation to dequeue).
@@ -382,6 +576,73 @@ SKY_APISERVER_SKY_LOGS_PRUNED_ENTRIES_TOTAL = prom.Counter(
     'sky_apiserver_sky_logs_pruned_entries_total',
     'Expired ~/sky_logs artifacts removed by the retention sweep',
 )
+
+# Time a request spent before its execution first started: from the request
+# row being created (PENDING) to its first transition to RUNNING. Unlike
+# SKY_APISERVER_QUEUE_WAIT_SECONDS (per-enqueue queue residency), this
+# includes scheduling preconditions, which hold a request PENDING. It is
+# observed exactly once, at the first execution start, so retry backoff
+# after that start is excluded and a request looping through the
+# retry-requeue path cannot re-observe its ever-growing age (see #9988).
+# The tail extends past the queue-wait buckets because precondition waits
+# (e.g. exec waiting on cluster start) routinely exceed 600s.
+SKY_APISERVER_REQUEST_PENDING_SECONDS = prom.Histogram(
+    'sky_apiserver_request_pending_seconds',
+    'Time from request creation to its first execution start',
+    ['name', 'schedule_type'],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0,
+             300.0, 600.0, 1800.0, 3600.0, 7200.0, float('inf')),
+)
+
+
+def observe_request_pending(name: str, schedule_type: str,
+                            pending_seconds: float) -> None:
+    """Record time a request spent pending before its first execution.
+
+    Metric emission must never disrupt the execution path, so any failure
+    is logged and swallowed.
+    """
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_APISERVER_REQUEST_PENDING_SECONDS.labels(
+            name=name,
+            schedule_type=schedule_type).observe(max(0.0, pending_seconds))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe request pending metric: {e}')
+
+
+# Wall-clock time of a single provisioning attempt (one cloud/region), from
+# provision start to instances up on the cloud, i.e. the compute acquisition
+# time. Failover across regions/clouds yields one observation per attempt,
+# labeled by outcome. Provisioning routinely takes minutes and can take hours
+# under capacity shortages, so the buckets extend far past _LATENCY_BUCKETS.
+SKY_PROVISION_DURATION_SECONDS = prom.Histogram(
+    'sky_provision_duration_seconds',
+    'Wall-clock time of a single provisioning attempt, from provision start '
+    'to instances running on the cloud',
+    ['cloud', 'result'],
+    buckets=(5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1200.0, 1800.0, 3600.0,
+             7200.0, float('inf')),
+)
+
+
+def observe_provision_duration(cloud: str, result: str,
+                               duration_seconds: float) -> None:
+    """Record the duration of one provisioning attempt.
+
+    Metric emission must never disrupt provisioning, so any failure is
+    logged and swallowed.
+    """
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_PROVISION_DURATION_SECONDS.labels(cloud=cloud,
+                                              result=result).observe(
+                                                  max(0.0, duration_seconds))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe provision duration metric: {e}')
+
 
 # --- Managed Jobs Metrics ---
 

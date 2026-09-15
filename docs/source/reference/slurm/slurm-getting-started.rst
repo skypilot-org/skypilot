@@ -457,6 +457,16 @@ deletes the snapshot.
 Stopping is available only when the cluster uses a container image and Pyxis
 is installed. Slurm clusters that run directly on the host cannot be stopped.
 
+Autostop on container clusters
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Container clusters support autostop: ``sky launch -i N``,
+``sky start -i N``, or ``sky autostop -i N`` schedules the cluster to stop
+after N idle minutes, and adding ``--down`` schedules it to terminate
+instead. Skylet, running on the allocation's head node, performs the same
+snapshot-and-release procedure as ``sky stop`` (or the full cleanup of
+``sky down``).
+
 Private registries
 ^^^^^^^^^^^^^^^^^^
 
@@ -588,7 +598,6 @@ Current limitations
 
 Slurm support in SkyPilot is under active development. The following features are not yet supported:
 
-* **Autostop**: Slurm clusters cannot be automatically terminated after idle time.
 * **SkyServe**: Serving deployments on Slurm is not yet supported.
 
 FAQs

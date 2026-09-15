@@ -34,8 +34,9 @@ class Slurm(clouds.Cloud):
 
     _REPR = 'Slurm'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.AUTOSTOP: 'Slurm does not '
-                                                     'support autostop.',
+        clouds.CloudImplementationFeatures.AUTOSTOP:
+            'Autostop is supported only for container clusters on Slurm '
+            'clusters with Pyxis installed.',
         clouds.CloudImplementationFeatures.STOP:
             'Stopping is supported only for container clusters on Slurm '
             'clusters with Pyxis installed.',
@@ -67,6 +68,7 @@ class Slurm(clouds.Cloud):
     # Features that are checked dynamically per cluster (e.g., via SSH).
     # Used for early exit in _unsupported_features_for_resources().
     _DYNAMICALLY_CHECKED_FEATURES = {
+        clouds.CloudImplementationFeatures.AUTOSTOP,
         clouds.CloudImplementationFeatures.DOCKER_IMAGE,
         clouds.CloudImplementationFeatures.STOP,
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING,
@@ -121,8 +123,11 @@ class Slurm(clouds.Cloud):
         uses_container = resources.extract_docker_image() is not None
         dynamically_checked_features = cls._DYNAMICALLY_CHECKED_FEATURES.copy()
         if not uses_container:
+            # Stop and autostop additionally require a container cluster.
             dynamically_checked_features.remove(
                 clouds.CloudImplementationFeatures.STOP)
+            dynamically_checked_features.remove(
+                clouds.CloudImplementationFeatures.AUTOSTOP)
         for c in clusters:
             try:
                 # Docker image support requires the Pyxis SPANK plugin.
@@ -132,6 +137,8 @@ class Slurm(clouds.Cloud):
                     if uses_container:
                         unsupported.pop(clouds.CloudImplementationFeatures.STOP,
                                         None)
+                        unsupported.pop(
+                            clouds.CloudImplementationFeatures.AUTOSTOP, None)
                 # Storage mounting requires FUSE (/dev/fuse).
                 if slurm_utils.check_fuse_enabled(c):
                     unsupported.pop(
@@ -288,7 +295,7 @@ class Slurm(clouds.Cloud):
                     partitions = [p for p in partitions if p == zone]
                 zones = [clouds.Zone(p) for p in partitions]
             except Exception as e:  # pylint: disable=broad-except
-                logger.debug(f'Failed to get partitions for {cluster}: {e}')
+                logger.warning(f'Failed to get partitions for {cluster}: {e}')
                 zones = []
 
             r = clouds.Region(cluster)
@@ -602,6 +609,27 @@ class Slurm(clouds.Cloud):
             keys=('sbatch_options',))
         if task_sbatch is not None:
             sbatch_options.update(task_sbatch)
+        # `quota.queue` / `quota.account` name the QOS and account with
+        # workspace > global and partition > cluster > cloud precedence
+        # (task `config:` overrides apply at every scope). Set at any scope,
+        # they take precedence over the `sbatch_options` spelling.
+        queue_name = skypilot_config.get_effective_queue_name(
+            cloud='slurm',
+            region=cluster,
+            partition=partition,
+            override_configs=resources.cluster_config_overrides)
+        if queue_name is not None:
+            # sbatch accepts the short form too; drop it so the job does not
+            # carry two directives for the same option.
+            sbatch_options.pop('q', None)
+            sbatch_options['qos'] = queue_name
+        account = skypilot_config.get_effective_slurm_account(
+            cluster=cluster,
+            partition=partition,
+            override_configs=resources.cluster_config_overrides)
+        if account is not None:
+            sbatch_options.pop('A', None)
+            sbatch_options['account'] = account
 
         # Read admin-declared container mounts with two-level merge:
         # global < cluster. Each entry maps a container path to either a

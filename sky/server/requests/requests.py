@@ -10,6 +10,7 @@ import pathlib
 import shutil
 import signal
 import sqlite3
+import stat
 import threading
 import time
 import traceback
@@ -675,15 +676,19 @@ def init_db_async(func):
     return wrapper
 
 
+def request_log_dirs() -> Tuple[pathlib.Path, ...]:
+    """Local directories holding per-request log files."""
+    return (pathlib.Path(server_constants.REQUEST_LOG_PATH_PREFIX).expanduser(),
+            pathlib.Path(sky_logging.DEBUG_LOG_DIR))
+
+
 def reset_db_and_logs():
     """Clear local state and re-initialize the request storage backend."""
     logger.debug('clearing local API server database')
     server_common.clear_local_api_server_database()
-    logger.debug('clearing local API server logs directory at '
-                 f'{server_constants.REQUEST_LOG_PATH_PREFIX}')
-    shutil.rmtree(pathlib.Path(
-        server_constants.REQUEST_LOG_PATH_PREFIX).expanduser(),
-                  ignore_errors=True)
+    for log_dir in request_log_dirs():
+        logger.debug(f'clearing API server logs directory at {log_dir}')
+        shutil.rmtree(log_dir, ignore_errors=True)
     # Also clear legacy path for backward compatibility cleanup
     logger.debug('clearing legacy API server logs directory at '
                  f'{LEGACY_REQUEST_LOG_PATH_PREFIX}')
@@ -1030,6 +1035,8 @@ class RequestTaskFilter:
 
     Args:
         status: a list of statuses of the requests to filter on.
+        request_ids: a list of request IDs to filter requests on. An empty
+            list matches nothing.
         cluster_names: a list of cluster names to filter requests on.
         exclude_request_names: a list of request names to exclude from results.
             Mutually exclusive with include_request_names.
@@ -1049,6 +1056,7 @@ class RequestTaskFilter:
             provided.
     """
     status: Optional[List[RequestStatus]] = None
+    request_ids: Optional[List[str]] = None
     cluster_names: Optional[List[str]] = None
     user_id: Optional[str] = None
     exclude_request_names: Optional[List[str]] = None
@@ -1082,6 +1090,15 @@ class RequestTaskFilter:
             status_placeholders = ','.join(['?'] * len(self.status))
             filters.append(f'status IN ({status_placeholders})')
             filter_params.extend(status.value for status in self.status)
+        if self.request_ids is not None:
+            if len(self.request_ids) == 0:
+                # Empty IN () is invalid SQL in PostgreSQL.
+                # An empty list means "match nothing".
+                filters.append('1=0')
+            else:
+                id_placeholders = ','.join(['?'] * len(self.request_ids))
+                filters.append(f'request_id IN ({id_placeholders})')
+                filter_params.extend(self.request_ids)
         if self.include_request_names is not None:
             name_placeholders = ','.join(['?'] *
                                          len(self.include_request_names))
@@ -1316,12 +1333,109 @@ async def _cleanup_legacy_directory_if_empty():
         logger.debug(f'Failed to cleanup legacy directory: {e}')
 
 
+# Number of request IDs per `request_id IN (...)` existence query, to stay
+# under SQLite's 999-parameter cap.
+_ORPHAN_LOG_QUERY_CHUNK_SIZE = 500
+
+
+def _list_stale_log_files(log_dir: pathlib.Path,
+                          cutoff: float) -> List[Tuple[str, str, int]]:
+    """List (request_id, path, size) of logs written before cutoff."""
+    if not log_dir.is_dir():
+        return []
+    stale = []
+    with os.scandir(log_dir) as entries:
+        for entry in entries:
+            if not entry.name.endswith('.log'):
+                continue
+            request_id = entry.name[:-len('.log')]
+            # A live daemon holds its log file open for the lifetime of the
+            # server process; never unlink it.
+            if daemons.is_daemon_request_id(request_id):
+                continue
+            try:
+                # os.stat, not DirEntry.stat: see _prune_sky_logs in
+                # sky/server/server.py for why.
+                st = os.stat(entry.path, follow_symlinks=False)
+            except OSError:
+                continue
+            if not stat.S_ISREG(st.st_mode) or st.st_mtime >= cutoff:
+                continue
+            stale.append((request_id, entry.path, st.st_size))
+    return stale
+
+
+def _unlink_log_files(files: List[Tuple[str, int]]) -> Tuple[int, int]:
+    """Unlink (path, size) pairs; returns (files removed, bytes removed)."""
+    removed_files = 0
+    removed_bytes = 0
+    for path, size in files:
+        try:
+            os.unlink(path)
+        except OSError:
+            continue
+        removed_files += 1
+        removed_bytes += size
+    return removed_files, removed_bytes
+
+
+async def _clean_orphan_request_logs() -> None:
+    """Delete request log files whose request row is already gone.
+
+    When the API server runs with more than one replica, the replicas share
+    one database but each writes its request logs to local disk, so the
+    row-driven cleanup above only reaches the files that sit on the replica
+    running it. A file left behind on another replica outlives the row that
+    names it, after which nothing on the database side can enumerate it.
+
+    A file with no row is already garbage — it cannot be read back through
+    the API — so the age cutoff is a grace period against reading a
+    directory while a request is being recorded, not a retention period.
+    """
+    cutoff = time.time() - bs.GC_GRACE_SECONDS
+    listings = await asyncio.gather(*[
+        asyncio.to_thread(_list_stale_log_files, log_dir, cutoff)
+        for log_dir in request_log_dirs()
+    ])
+    # A request writes one file per log directory, so group by request ID to
+    # ask the database about each one once.
+    stale: Dict[str, List[Tuple[str, int]]] = {}
+    for listing in listings:
+        for request_id, path, size in listing:
+            stale.setdefault(request_id, []).append((path, size))
+
+    request_ids = list(stale)
+    removed_files = 0
+    removed_bytes = 0
+    for start in range(0, len(request_ids), _ORPHAN_LOG_QUERY_CHUNK_SIZE):
+        batch = request_ids[start:start + _ORPHAN_LOG_QUERY_CHUNK_SIZE]
+        live = {
+            req.request_id for req in await get_request_tasks_async(
+                req_filter=RequestTaskFilter(request_ids=batch,
+                                             fields=['request_id']))
+        }
+        orphans = [
+            log_file for request_id in batch if request_id not in live
+            for log_file in stale[request_id]
+        ]
+        if not orphans:
+            continue
+        batch_files, batch_bytes = await asyncio.to_thread(
+            _unlink_log_files, orphans)
+        removed_files += batch_files
+        removed_bytes += batch_bytes
+    if removed_files:
+        logger.info(f'Cleaned up {removed_files} orphan request log file(s), '
+                    f'{removed_bytes} bytes freed')
+
+
 async def clean_finished_requests_with_retention(retention_seconds: int,
                                                  batch_size: int = 1000):
     """Clean up finished requests older than the retention period.
 
     This function removes old finished requests (SUCCEEDED, FAILED, CANCELLED)
-    from the database and cleans up their associated log files.
+    from the database and cleans up their associated log files. It then sweeps
+    the log directories for files that no longer have a request row at all.
 
     For backward compatibility, it also cleans up log files from the legacy
     path (~/sky_logs/api_server/requests/) to handle server upgrades.
@@ -1382,6 +1496,8 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
     # request task in the database.
     logger.info(f'Cleaned up {total_deleted} finished requests '
                 f'older than {retention_seconds} seconds')
+
+    await _clean_orphan_request_logs()
 
 
 async def requests_gc_daemon():

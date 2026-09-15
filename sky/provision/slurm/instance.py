@@ -15,6 +15,7 @@ import uuid
 import colorama
 
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
@@ -49,6 +50,11 @@ def _sbatch_log_path(base_dir: str, job_id: str) -> str:
 
 
 POLL_INTERVAL_SECONDS = 2
+# A Slurm status query opens one SSH command per state, so keep this lower than
+# the Kubernetes equivalent. The retry is only used when an entire status
+# round returns no jobs and no stopped snapshot is found.
+_MAX_QUERY_INSTANCES_RETRIES = 2
+_QUERY_INSTANCES_RETRY_INTERVAL_SECONDS = 0.5
 # Default KillWait is 30 seconds, so we add some buffer time here.
 _JOB_TERMINATION_TIMEOUT_SECONDS = 60
 # How long to give the batch script's TERM trap to run cleanup and exit
@@ -265,6 +271,17 @@ def _wait_for_job_nodes(
             raise RuntimeError(f'Job {job_id} terminated with state {state} '
                                'before nodes were allocated.')
 
+        # Checked before the pending branch, not after: the state read above
+        # can say CONFIGURING (or PENDING) while the nodes are granted moments
+        # later in this same iteration, and recording a pending reason then
+        # would write it in the same second as the caller's node-allocated
+        # event. transitioned_at is whole seconds, so those two rows would tie
+        # with nothing but the database's collation to separate them -- the
+        # thing the two event types exist to avoid.
+        if client.check_job_has_nodes(job_id):
+            logger.debug(f'Job {job_id} has nodes allocated')
+            return
+
         if state in ('PENDING', 'CONFIGURING') and on_pending is not None:
             try:
                 reason = client.get_job_reason(job_id)
@@ -279,14 +296,141 @@ def _wait_for_job_nodes(
                 logger.debug(f'Failed to get pending status for job '
                              f'{job_id}: {e}')
 
-        if client.check_job_has_nodes(job_id):
-            logger.debug(f'Job {job_id} has nodes allocated')
-            return
-
         time.sleep(2)
 
     raise TimeoutError(f'Job {job_id} did not get nodes allocated within '
                        f'{timeout} seconds. Last state: {last_state}')
+
+
+def _record_pending_reason(cluster_name: str, reason: Optional[str],
+                           partition: Optional[str]) -> None:
+    """Persist the squeue pending reason as a cluster launch-progress event.
+
+    The spinner is transient; this makes the reason visible in `sky jobs queue
+    -v` details and in the job's event timeline. Only the reason is
+    recorded (not the pending count) so nop_if_duplicate collapses repeated
+    polls into one event.
+
+    The partition rides along because a reader has no other way to get it: by
+    the time anyone looks at the event the allocation may be gone, and Slurm's
+    reason code alone ('Resources') cannot say *where* the job was waiting.
+    Deliberately not recorded: node counts. They are a snapshot, and a
+    "3 idle nodes" claim still sitting in the event log an hour later is worse
+    than no claim -- a reader that wants counts should ask for them now.
+    """
+    if not reason:
+        return
+    detail = f'pending: {reason}'
+    if partition:
+        detail += f'; partition: {partition}'
+    try:
+        global_user_state.add_cluster_event(
+            cluster_name,
+            new_status=None,
+            reason=f'Launching ({detail})',
+            event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+            nop_if_duplicate=True,
+        )
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to record pending reason for {cluster_name}: '
+                     f'{e}')
+
+
+def _record_allocation(cluster_name: str, slurm_cluster: str,
+                       job_id: str) -> None:
+    """Persist which Slurm allocation backs this cluster.
+
+    The cluster row carries the same two facts -- its resources' region, and
+    cluster_name_on_cloud on the handle -- but teardown removes it, while
+    cluster events outlive it. Recording them is what lets a finished job
+    still be asked what its allocation did, which is the whole reason to read
+    sacct: it is the only source for a job squeue has already forgotten.
+
+    Written at submission, so it survives a job cancelled while it was still
+    queued -- the case most worth asking about afterwards.
+
+    One event per allocation, by id: a recovery submits a new one and adds a
+    row rather than replacing this one, so every attempt stays addressable.
+
+    A DEBUG event rather than launch progress: which allocation backs a
+    cluster is metadata. It never changes and the launch is not waiting on it,
+    so it does not belong in the column that says what the launch *is* waiting
+    on -- where it also landed in the same second as the first pending reason,
+    leaving the database's collation to decide which of the two a reader saw.
+    The launch-progress half is recorded once the nodes are granted, by which
+    time it is strictly later than any pending reason.
+    """
+    try:
+        global_user_state.add_cluster_event(
+            cluster_name,
+            new_status=None,
+            reason=f'Slurm allocation {job_id} on {slurm_cluster}',
+            event_type=global_user_state.ClusterEventType.DEBUG,
+            nop_if_duplicate=True,
+        )
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to record the Slurm allocation of '
+                     f'{cluster_name}: {e}')
+
+
+def _record_nodes_allocated(cluster_name: str, slurm_cluster: str,
+                            job_id: str) -> None:
+    """Record that the allocation has its nodes, as launch progress.
+
+    Written once the wait returns, so `details` moves from why the queue was
+    waiting to which allocation is now bootstrapping the runtime. The text
+    leads with the transition rather than the id, because marking the end of
+    the queue wait is what a reader watching that column is waiting for.
+    """
+    reason = (f'Launching (nodes allocated; Slurm job {job_id} '
+              f'on {slurm_cluster})')
+    try:
+        global_user_state.add_cluster_event(
+            cluster_name,
+            new_status=None,
+            reason=reason,
+            event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+            nop_if_duplicate=True,
+        )
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to record the node allocation of '
+                     f'{cluster_name}: {e}')
+
+
+def _make_pending_callback(
+    cluster_name: str,
+    partition: Optional[str] = None,
+) -> Callable[[str, Optional[str], Optional[int]], None]:
+    """Callback for the pending phase of a Slurm allocation.
+
+    Refreshes the launch spinner and records the squeue reason as a cluster
+    event. Both are change-gated: the wait loop polls every few seconds, and
+    the spinner message embeds the pending count (which moves far more often
+    than the reason), so the two need separate memories.
+    """
+    last_status_msg: Optional[str] = None
+    last_recorded_reason: Optional[str] = None
+
+    def _on_pending(state: str, reason: Optional[str],
+                    pending_count: Optional[int]) -> None:
+        nonlocal last_status_msg, last_recorded_reason
+        del state  # unused
+        parts = []
+        if reason:
+            parts.append(f'pending: {reason}')
+        if pending_count is not None and pending_count > 0:
+            word = 'other' if pending_count == 1 else 'others'
+            parts.append(f'{pending_count} {word} pending')
+        msg = f'Launching ({", ".join(parts)})' if parts else 'Launching'
+        status_msg = ux_utils.spinner_message(msg, cluster_name=cluster_name)
+        if status_msg != last_status_msg:
+            rich_utils.force_update_status(status_msg)
+            last_status_msg = status_msg
+        if reason != last_recorded_reason:
+            _record_pending_reason(cluster_name, reason, partition)
+            last_recorded_reason = reason
+
+    return _on_pending
 
 
 def _sky_cluster_home_dir(base_dir: str, cluster_name_on_cloud: str) -> str:
@@ -322,7 +466,7 @@ def _snapshot_job_db_path(generation_dir: str) -> str:
 
 
 def _run_on_login_node(
-        login_node_runner: 'command_runner.SlurmLoginNodeCommandRunner',
+        login_node_runner: command_runner.CommandRunner,
         cmd: str,
         failure_message: str,
         tolerate_returncodes: Tuple[int, ...] = (),
@@ -387,7 +531,7 @@ def _validate_snapshot_manifest(
 
 
 def _read_snapshot_manifest(
-        login_node_runner: 'command_runner.SlurmLoginNodeCommandRunner',
+        login_node_runner: command_runner.CommandRunner,
         snapshot_dir: str,
         expected_num_nodes: Optional[int] = None) -> Optional[Dict[str, Any]]:
     """Read a snapshot manifest from the Slurm cluster's shared storage."""
@@ -425,13 +569,21 @@ def _manifest_paths(
     return rank_paths, job_db_path
 
 
-def _write_snapshot_manifest(
-        login_node_runner: 'command_runner.SlurmLoginNodeCommandRunner',
-        snapshot_dir: str, manifest: Dict[str, Any]) -> None:
+def _write_snapshot_manifest(login_node_runner: command_runner.CommandRunner,
+                             snapshot_dir: str, manifest: Dict[str,
+                                                               Any]) -> None:
     """Atomically write a validated snapshot manifest to shared storage."""
     _validate_snapshot_manifest(manifest)
     manifest_path = _snapshot_manifest_path(snapshot_dir)
     remote_tmp_path = f'{manifest_path}.tmp'
+    if isinstance(login_node_runner, command_runner.LocalProcessCommandRunner):
+        # Inside the cluster (autostop), the shared filesystem is mounted
+        # on the head node, so write the manifest directly.
+        with open(remote_tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(manifest, f, sort_keys=True)
+            f.write('\n')
+        os.replace(remote_tmp_path, manifest_path)
+        return
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json') as f:
         json.dump(manifest, f, sort_keys=True)
         f.write('\n')
@@ -447,7 +599,7 @@ def _write_snapshot_manifest(
 
 
 def _remove_snapshot_path_best_effort(
-    login_node_runner: 'command_runner.SlurmLoginNodeCommandRunner',
+    login_node_runner: command_runner.CommandRunner,
     path: str,
     description: str,
 ) -> None:
@@ -461,9 +613,9 @@ def _remove_snapshot_path_best_effort(
         logger.debug('Full exception details:', exc_info=True)
 
 
-def _validate_snapshot_files(
-        login_node_runner: 'command_runner.SlurmLoginNodeCommandRunner',
-        snapshot_dir: str, manifest: Dict[str, Any]) -> None:
+def _validate_snapshot_files(login_node_runner: command_runner.CommandRunner,
+                             snapshot_dir: str, manifest: Dict[str,
+                                                               Any]) -> None:
     """Raise if a file referenced by a snapshot manifest is missing."""
     rank_paths, job_db_path = _manifest_paths(snapshot_dir, manifest)
     labeled_paths = [
@@ -549,6 +701,25 @@ def _make_login_node_runner(
     )
 
 
+def _make_client_and_login_runner(
+    provider_config: Dict[str, Any],
+    inside_slurm_cluster: bool,
+) -> Tuple['slurm.SlurmClient', command_runner.CommandRunner]:
+    """Build the client and runner used for Slurm control commands.
+
+    Inside a Slurm allocation (skylet-driven autostop/autodown), the Slurm
+    CLIs, the shared filesystem, and the allocation itself are reachable
+    locally from the head node, and the client-side SSH key for the login
+    node is not present on the cluster — so all commands run locally.
+    """
+    if inside_slurm_cluster:
+        logger.debug('Running inside a Slurm cluster, using local execution')
+        return (slurm.SlurmClient(is_inside_slurm_cluster=True),
+                command_runner.LocalProcessCommandRunner())
+    return (_make_slurm_client(provider_config),
+            _make_login_node_runner(provider_config))
+
+
 def _resolve_sky_base_dir(client: 'slurm.SlurmClient',
                           provider_config: Dict[str, Any]) -> str:
     """Resolve the shared base directory used for Slurm cluster state."""
@@ -565,8 +736,22 @@ def _resolve_sky_base_dir(client: 'slurm.SlurmClient',
 
 def _resolve_skypilot_runtime_dir(client: 'slurm.SlurmClient',
                                   provider_config: Dict[str, Any],
-                                  cluster_name_on_cloud: str) -> str:
+                                  cluster_name_on_cloud: str,
+                                  inside_slurm_cluster: bool = False) -> str:
     """Resolve the node-local SkyPilot runtime directory for a cluster."""
+    if inside_slurm_cluster:
+        # Skylet carries the runtime dir in its environment (attempt_skylet
+        # serializes SKY_* variables into the keeper's start spec). A
+        # config-based guess here could target an empty runtime directory
+        # whose jobs database has never seen this cluster's jobs.
+        runtime_dir = os.environ.get(
+            skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY)
+        if runtime_dir is None:
+            raise RuntimeError(
+                f'{skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY} is not set; '
+                'cannot resolve the SkyPilot runtime directory from inside '
+                'the cluster.')
+        return runtime_dir
     slurm_cluster = slurm_utils.get_slurm_cluster_from_config(provider_config)
     tmpdir = skypilot_config.get_effective_region_config(cloud='slurm',
                                                          region=slurm_cluster,
@@ -646,6 +831,9 @@ def _create_virtual_instance(
     provider_config = config.provider_config
     partition = slurm_utils.get_partition_from_config(provider_config)
     client = _make_slurm_client(provider_config)
+    submit_user = provider_config.get('slurm_user')
+    if submit_user is not None:
+        client.validate_submit_user(region, submit_user)
 
     slurm_cluster = slurm_utils.get_slurm_cluster_from_config(provider_config)
 
@@ -698,26 +886,7 @@ def _create_virtual_instance(
                  f'job to be allocated on partition {partition}')
 
     num_nodes = config.count
-    last_status_msg = None
-
-    def _on_pending(state: str, reason: Optional[str],
-                    pending_count: Optional[int]) -> None:
-        nonlocal last_status_msg
-        del state  # unused
-        parts = []
-        if reason:
-            parts.append(f'pending: {reason}')
-        if pending_count is not None and pending_count > 0:
-            word = 'other' if pending_count == 1 else 'others'
-            parts.append(f'{pending_count} {word} pending')
-        if parts:
-            msg = f'Launching ({", ".join(parts)})'
-        else:
-            msg = 'Launching'
-        status_msg = ux_utils.spinner_message(msg, cluster_name=cluster_name)
-        if status_msg != last_status_msg:
-            rich_utils.force_update_status(status_msg)
-            last_status_msg = status_msg
+    on_pending = _make_pending_callback(cluster_name, partition)
 
     if existing_jobs:
         assert len(existing_jobs) == 1, (
@@ -727,10 +896,12 @@ def _create_virtual_instance(
         job_id = existing_jobs[0]
         logger.debug(f'Job with name {cluster_name_on_cloud} already exists '
                      f'(JOBID: {job_id})')
+        _record_allocation(cluster_name, slurm_cluster, job_id)
 
         # Wait for nodes to be allocated (job might be in PENDING state)
         _wait_for_job_nodes(client, job_id, provision_timeout, partition,
-                            _on_pending)
+                            on_pending)
+        _record_nodes_allocated(cluster_name, slurm_cluster, job_id)
         nodes, _ = client.get_job_nodes(job_id)
         # Reset spinner since nodes are now allocated
         rich_utils.force_update_status(
@@ -792,7 +963,6 @@ def _create_virtual_instance(
     # between registry and path. See:
     # https://github.com/NVIDIA/pyxis/wiki/Usage#registry-syntax
     container_image = resources.get('image_id')
-    original_container_image = container_image
     if snapshot_manifest is not None:
         if container_image is None:
             raise RuntimeError('A Slurm container snapshot exists for this '
@@ -886,8 +1056,6 @@ apt-get install -y ca-certificates rsync curl git wget fuse
 echo 'alias sudo=""' >> ~/.bashrc
 echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 """
-        container_marker_file = (f'{sky_cluster_home_dir}/'
-                                 f'{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
         container_init_done_dir = (
             f'{sky_cluster_home_dir}/.sky_container_init_done')
         pyxis_args = (f'--container-name={shlex.quote(container_name)}:create '
@@ -986,7 +1154,6 @@ done
 echo "[container] ERROR: Container is not running as $global_target or $job_target." >&2
 exit 1
 """
-        assert original_container_image is not None
         snapshot_restore_complete_block = ''
         if snapshot_manifest is not None:
             snapshot_restore_complete_block = (
@@ -1024,8 +1191,6 @@ exit 1
             f'{shlex.quote(container_ready_script)}'
             f' || exit 1\n'
             f'echo "[container] Ready in $((SECONDS - CONTAINER_START))s"\n'
-            f'printf \'%s\\n\' {shlex.quote(original_container_image)} > '
-            f'{container_marker_file}\n'
             f'{snapshot_restore_complete_block}'
             f'touch {ready_signal}')
 
@@ -1152,6 +1317,22 @@ touch {sky_cluster_home_dir}/.hushlogin
         cmd,
         'Failed to create provision scripts directory on login node.',
         stderr=f'{stdout}\n{stderr}')
+    if snapshot_manifest is not None:
+        # A stop leaves only sky_logs in the shared home. If stale NFS
+        # handles interrupted that cleanup, remove the leftovers now: the
+        # runtime setup is not idempotent against a half-cleaned home
+        # (e.g. a partially deleted uv-managed Python install breaks the
+        # venv creation). This runs before the sbatch is submitted so it
+        # only sees the stop's leftovers and a failure surfaces while the
+        # snapshot is still unconsumed; the sbatch writes its control
+        # files after it.
+        _run_on_login_node(
+            login_node_runner,
+            _remove_shared_state_script(sky_cluster_home_dir,
+                                        preserve_logs=True),
+            'Failed to clean leftover shared state before restoring the '
+            'Slurm cluster.')
+
     # Rsync the provision script to the login node
     with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=True) as f:
         f.write(provision_script)
@@ -1164,9 +1345,11 @@ touch {sky_cluster_home_dir}/.hushlogin
     logger.debug(f'Successfully submitted Slurm job {job_id} to partition '
                  f'{partition} for cluster {cluster_name_on_cloud} '
                  f'with {num_nodes} nodes')
+    _record_allocation(cluster_name, slurm_cluster, job_id)
 
     _wait_for_job_nodes(client, job_id, provision_timeout, partition,
-                        _on_pending)
+                        on_pending)
+    _record_nodes_allocated(cluster_name, slurm_cluster, job_id)
     nodes, _ = client.get_job_nodes(job_id)
     # Reset spinner since nodes are now allocated
     rich_utils.force_update_status(
@@ -1233,7 +1416,7 @@ def query_instances(
     retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional[status_lib.ClusterStatus], Optional[str]]]:
     """See sky/provision/__init__.py"""
-    del cluster_name, retry_if_missing  # Unused for Slurm
+    del cluster_name  # Unused for Slurm
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
 
     client = _make_slurm_client(provider_config)
@@ -1255,57 +1438,77 @@ def query_instances(
         'node_fail': None,
     }
 
-    statuses: Dict[str, Tuple[Optional[status_lib.ClusterStatus],
-                              Optional[str]]] = {}
-    for state, sky_status in status_map.items():
-        jobs = client.query_jobs(
-            cluster_name_on_cloud,
-            [state],
-        )
+    attempts = 0
+    snapshot_checked = False
+    while True:
+        statuses: Dict[str, Tuple[Optional[status_lib.ClusterStatus],
+                                  Optional[str]]] = {}
+        found_any_job = False
+        for state, sky_status in status_map.items():
+            jobs = client.query_jobs(
+                cluster_name_on_cloud,
+                [state],
+            )
+            found_any_job = found_any_job or bool(jobs)
 
-        for job_id in jobs:
-            if state in ('pending', 'failed', 'node_fail', 'cancelled',
-                         'completed'):
-                reason = client.get_job_reason(job_id)
-                if non_terminated_only and sky_status is None:
-                    # TODO(kevin): For better UX, we should also find out
-                    # which node(s) exactly that failed if it's a node_fail
-                    # state.
-                    logger.debug(f'Job {job_id} is terminated, but '
-                                 'query_instances is called with '
-                                 f'non_terminated_only=True. State: {state}, '
-                                 f'Reason: {reason}')
-                    continue
-                statuses[job_id] = (sky_status, reason)
-            else:
-                nodes, _ = client.get_job_nodes(job_id)
-                for node in nodes:
-                    instance_id = slurm_utils.instance_id(job_id, node)
-                    statuses[instance_id] = (sky_status, None)
+            for job_id in jobs:
+                if state in ('pending', 'failed', 'node_fail', 'cancelled',
+                             'completed'):
+                    reason = client.get_job_reason(job_id)
+                    if non_terminated_only and sky_status is None:
+                        # TODO(kevin): For better UX, we should also find out
+                        # which node(s) exactly that failed if it's a node_fail
+                        # state.
+                        logger.debug(f'Job {job_id} is terminated, but '
+                                     'query_instances is called with '
+                                     f'non_terminated_only=True. State: '
+                                     f'{state}, Reason: {reason}')
+                        continue
+                    statuses[job_id] = (sky_status, reason)
+                else:
+                    nodes, _ = client.get_job_nodes(job_id)
+                    for node in nodes:
+                        instance_id = slurm_utils.instance_id(job_id, node)
+                        statuses[instance_id] = (sky_status, None)
 
-        # TODO(kevin): Query sacct too to get more historical job info.
-        # squeue only includes completed jobs that finished in the last
-        # MinJobAge seconds (default 300s). Or could be earlier if it
-        # reaches MaxJobCount first (default 10_000).
+            # TODO(kevin): Query sacct too to get more historical job info.
+            # squeue only includes completed jobs that finished in the last
+            # MinJobAge seconds (default 300s). Or could be earlier if it
+            # reaches MaxJobCount first (default 10_000).
 
-    non_terminated_statuses = {
-        instance_id: status_and_reason
-        for instance_id, status_and_reason in statuses.items()
-        if status_and_reason[0] is not None
-    }
-    if non_terminated_statuses:
-        return non_terminated_statuses
-    login_node_runner = _make_login_node_runner(provider_config)
-    sky_base_dir = _resolve_sky_base_dir(client, provider_config)
-    snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud)
-    manifest = _read_snapshot_manifest(login_node_runner, snapshot_dir)
-    if manifest is not None:
-        return {
-            f'snapshot-rank-{rank}': (status_lib.ClusterStatus.STOPPED, None)
-            for rank in range(len(manifest['nodes']))
+        non_terminated_statuses = {
+            instance_id: status_and_reason
+            for instance_id, status_and_reason in statuses.items()
+            if status_and_reason[0] is not None
         }
+        if non_terminated_statuses:
+            return non_terminated_statuses
 
-    return statuses
+        if not snapshot_checked:
+            # A snapshot is the stopped steady state. Check it before retrying
+            # so stopped clusters do not pay for additional Slurm queries.
+            login_node_runner = _make_login_node_runner(provider_config)
+            sky_base_dir = _resolve_sky_base_dir(client, provider_config)
+            snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud)
+            manifest = _read_snapshot_manifest(login_node_runner, snapshot_dir)
+            snapshot_checked = True
+            if manifest is not None:
+                return {
+                    f'snapshot-rank-{rank}':
+                    (status_lib.ClusterStatus.STOPPED, None)
+                    for rank in range(len(manifest['nodes']))
+                }
+
+        if (found_any_job or not retry_if_missing or
+                attempts >= _MAX_QUERY_INSTANCES_RETRIES):
+            return statuses
+
+        attempts += 1
+        logger.debug(
+            f'No Slurm jobs found for {cluster_name_on_cloud}; retrying '
+            f'{attempts}/{_MAX_QUERY_INSTANCES_RETRIES} after '
+            f'{_QUERY_INSTANCES_RETRY_INTERVAL_SECONDS} seconds.')
+        time.sleep(_QUERY_INSTANCES_RETRY_INTERVAL_SECONDS)
 
 
 def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
@@ -1413,8 +1616,10 @@ def stop_instances(
             'worker_only=True is not supported for Slurm, this is a no-op.')
         return
 
-    client = _make_slurm_client(provider_config)
-    login_node_runner = _make_login_node_runner(provider_config)
+    # Autostop runs this from the cluster's head node (skylet).
+    inside_slurm_cluster = slurm_utils.is_inside_slurm_cluster()
+    client, login_node_runner = _make_client_and_login_runner(
+        provider_config, inside_slurm_cluster)
     sky_base_dir = _resolve_sky_base_dir(client, provider_config)
     snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud)
 
@@ -1436,53 +1641,89 @@ def stop_instances(
     job_id = running_jobs[0]
     nodes, _ = client.get_job_nodes(job_id)
 
-    sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
-                                                 cluster_name_on_cloud)
-    container_marker = (
-        f'{sky_cluster_home_dir}/{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
-    rc, stdout = _run_on_login_node(
-        login_node_runner,
-        f'cat {shlex.quote(container_marker)}',
-        'Failed to read the Slurm container marker.',
-        tolerate_returncodes=(1,))
-    if rc != 0:
+    # Container-ness is persisted in the cluster config at launch
+    # (provider.container_image) and never probed over the shared
+    # filesystem: NFS attribute caching on the login node can hide the
+    # marker file right after the allocation wrote it, which would
+    # silently run a container cluster on the host as the login user.
+    image_id = provider_config.get('container_image')
+    if image_id is None:
         raise exceptions.NotSupportedError(
-            'Stopping Slurm clusters is supported only for containers '
-            'launched with Pyxis. The running cluster has no container '
-            'snapshot metadata.')
-    image_id = stdout.strip()
-    # An empty marker identifies a Pyxis cluster without the image metadata
-    # required to create a restorable snapshot.
-    if not image_id:
-        raise exceptions.NotSupportedError(
-            'The running Slurm cluster has no container snapshot metadata. '
-            'Relaunch the cluster before stopping it.')
+            'Stopping Slurm clusters is supported only for container '
+            'clusters, and the cluster record has no container image. '
+            'Relaunch the cluster with --image-id to use stop.')
     previous_manifest = _read_snapshot_manifest(login_node_runner, snapshot_dir)
 
-    cluster_info = get_cluster_info('', cluster_name_on_cloud, provider_config)
-    command_runners = get_command_runners(cluster_info)
-    if not command_runners:
-        raise RuntimeError('Cannot stop Slurm cluster because its head node '
-                           'command runner is unavailable.')
+    skypilot_runtime_dir = _resolve_skypilot_runtime_dir(
+        client,
+        provider_config,
+        cluster_name_on_cloud,
+        inside_slurm_cluster=inside_slurm_cluster)
+
     cancel_jobs_code = job_lib.JobLibCodeGen.cancel_jobs(None, cancel_all=True)
-    rc, stdout, stderr = command_runners[0].run_driver(cancel_jobs_code,
+    # The cancel code sources the runtime venv, which a half-broken cluster
+    # may no longer have. Skipping the cancel keeps stop working as the
+    # recovery path: without a runtime there is no job driver left to cancel,
+    # and the allocation teardown below reclaims everything regardless.
+    runtime_venv_activate = shlex.quote(
+        f'{skypilot_runtime_dir}/'
+        f'{skylet_constants.SKY_REMOTE_PYTHON_ENV_NAME}/bin/activate')
+    runtime_venv_check = f'test -f {runtime_venv_activate}'
+    if inside_slurm_cluster:
+        # Skylet runs in the same environment as the job driver, so the
+        # cancel runs locally against the shared jobs database.
+        rc, _, _ = login_node_runner.run(runtime_venv_check,
+                                         require_outputs=True,
+                                         stream_logs=False)
+        has_runtime = rc == 0
+        if has_runtime:
+            cancel_cmd = (f'export '
+                          f'{skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
+                          f'{shlex.quote(skypilot_runtime_dir)} && '
+                          f'{cancel_jobs_code}')
+            rc, stdout, stderr = login_node_runner.run(cancel_cmd,
                                                        require_outputs=True,
                                                        stream_logs=False)
-    subprocess_utils.handle_returncode(
-        rc,
-        cancel_jobs_code,
-        'Failed to cancel jobs before snapshotting the Slurm container.',
-        stderr=f'{stdout}\n{stderr}',
-        stream_logs=False)
+    else:
+        cluster_info = get_cluster_info('', cluster_name_on_cloud,
+                                        provider_config)
+        command_runners = get_command_runners(cluster_info)
+        if not command_runners:
+            raise RuntimeError('Cannot stop Slurm cluster because its head '
+                               'node command runner is unavailable.')
+        head_runner = command_runners[0]
+        rc, _, _ = head_runner.run_driver(runtime_venv_check,
+                                          require_outputs=True,
+                                          stream_logs=False)
+        has_runtime = rc == 0
+        if has_runtime:
+            rc, stdout, stderr = head_runner.run_driver(cancel_jobs_code,
+                                                        require_outputs=True,
+                                                        stream_logs=False)
+    if not has_runtime:
+        logger.warning(
+            f'SkyPilot runtime venv missing on the head node '
+            f'({skypilot_runtime_dir}/'
+            f'{skylet_constants.SKY_REMOTE_PYTHON_ENV_NAME}); skipping job '
+            'cancellation before the snapshot.')
+    else:
+        subprocess_utils.handle_returncode(
+            rc,
+            cancel_jobs_code,
+            'Failed to cancel jobs before snapshotting the Slurm container.',
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
     _drain_slurm_workload_steps(client, job_id)
 
-    skypilot_runtime_dir = _resolve_skypilot_runtime_dir(
-        client, provider_config, cluster_name_on_cloud)
-    _run_on_login_node(
-        login_node_runner,
-        _srun_on_node(job_id, nodes[0],
-                      _stop_skylet_script(skypilot_runtime_dir)),
-        'Failed to stop Skylet before snapshotting the Slurm container.')
+    if not inside_slurm_cluster:
+        # A skylet executing an inside-cluster stop would kill itself here.
+        # Host-side skylet writes never reach the exported rootfs, and the
+        # final scancel reaps skylet anyway.
+        _run_on_login_node(
+            login_node_runner,
+            _srun_on_node(job_id, nodes[0],
+                          _stop_skylet_script(skypilot_runtime_dir)),
+            'Failed to stop Skylet before snapshotting the Slurm container.')
 
     global_enroot_name = _enroot_container_name_global_scope(
         cluster_name_on_cloud)
@@ -1606,17 +1847,20 @@ enroot export -f -o {shlex.quote(staging_snapshot_path)} "$enroot_name"
             _snapshot_generation_dir(snapshot_dir,
                                      previous_manifest['generation']),
             'previous Slurm snapshot generation')
+    pre_batch_cancel = None
+    if not inside_slurm_cluster:
+        pre_batch_cancel = lambda: _cleanup_slurm_allocation(
+            client,
+            login_node_runner,
+            cluster_name_on_cloud,
+            provider_config,
+            job_id,
+            nodes,
+            preserve_logs=True)
     _cancel_slurm_job(client,
                       cluster_name_on_cloud,
-                      inside_slurm_cluster=False,
-                      pre_batch_cancel=lambda: _cleanup_slurm_allocation(
-                          client,
-                          login_node_runner,
-                          cluster_name_on_cloud,
-                          provider_config,
-                          job_id,
-                          nodes,
-                          preserve_logs=True))
+                      inside_slurm_cluster,
+                      pre_batch_cancel=pre_batch_cancel)
 
 
 def _drain_slurm_workload_steps(client: 'slurm.SlurmClient',
@@ -1690,9 +1934,48 @@ def _wait_for_job_states(client: 'slurm.SlurmClient', job_name: str,
         time.sleep(POLL_INTERVAL_SECONDS)
 
 
+# An NFS client can transiently serve stale file handles that make rm fail
+# partway through a directory. Retrying clears them once the client
+# revalidates; the sleep between attempts gives that time to happen.
+_SHARED_STATE_CLEANUP_ATTEMPTS = 3
+_SHARED_STATE_CLEANUP_RETRY_INTERVAL_SECONDS = 10
+
+
+def _remove_shared_state_script(sky_cluster_home_dir: str,
+                                preserve_logs: bool) -> str:
+    """Build a script that empties the shared cluster home on the login node.
+
+    A stop keeps the logs referenced by the jobs database that start restores;
+    teardown removes the whole home. The removal is verified and retried:
+    a stale-file-handle failure would otherwise leave a half-deleted home,
+    and the leftovers (e.g. a partially deleted uv-managed Python install)
+    break the next start's runtime setup.
+    """
+    home = shlex.quote(sky_cluster_home_dir)
+    if preserve_logs:
+        remove_cmd = (f'find {home} -mindepth 1 -maxdepth 1 '
+                      '! -name sky_logs '
+                      '-exec rm -rf -- {} +')
+        # GNU find exits 0 even when the invoked rm fails, so the result
+        # must be verified separately. The command substitution takes
+        # find's exit status (a stale handle makes find error out), so a
+        # find failure cannot be mistaken for an empty home.
+        verify_cmd = (f'leftovers="$(find {home} -mindepth 1 -maxdepth 1 '
+                      '! -name sky_logs -print -quit)" && '
+                      '[ -z "$leftovers" ]')
+    else:
+        remove_cmd = f'rm -rf -- {home}'
+        verify_cmd = f'[ ! -e {home} ]'
+    return (f'for attempt in $(seq {_SHARED_STATE_CLEANUP_ATTEMPTS}); do\n'
+            f'  {remove_cmd} && {verify_cmd} && exit 0\n'
+            f'  sleep {_SHARED_STATE_CLEANUP_RETRY_INTERVAL_SECONDS}\n'
+            'done\n'
+            'exit 1')
+
+
 def _cleanup_slurm_allocation(
     client: 'slurm.SlurmClient',
-    login_node_runner: 'command_runner.SlurmLoginNodeCommandRunner',
+    login_node_runner: command_runner.CommandRunner,
     cluster_name_on_cloud: str,
     provider_config: Dict[str, Any],
     job_id: str,
@@ -1750,18 +2033,10 @@ rm -rf -- {shlex.quote(skypilot_runtime_dir)}
         login_node_runner, cleanup_node_cmd,
         'Failed to clean up the Slurm allocation before cancellation.')
 
-    if preserve_logs:
-        # A stop keeps the logs referenced by the jobs database that start
-        # will restore.
-        remove_shared_state_cmd = (f'find {shlex.quote(sky_cluster_home_dir)} '
-                                   '-mindepth 1 -maxdepth 1 '
-                                   '! -name sky_logs '
-                                   '-exec rm -rf -- {} +')
-    else:
-        remove_shared_state_cmd = (
-            f'rm -rf -- {shlex.quote(sky_cluster_home_dir)}')
     _run_on_login_node(
-        login_node_runner, remove_shared_state_cmd,
+        login_node_runner,
+        _remove_shared_state_script(sky_cluster_home_dir,
+                                    preserve_logs=preserve_logs),
         'Failed to clean up shared Slurm cluster state before cancellation.')
 
 
@@ -1772,6 +2047,9 @@ def _cancel_slurm_job(
     pre_batch_cancel: Optional[Callable[[], None]] = None,
 ) -> None:
     """Cancel a Slurm virtual-instance allocation and verify it exits."""
+    assert not inside_slurm_cluster or pre_batch_cancel is None, (
+        'Inside-cluster cancellation must leave cleanup to the sbatch EXIT '
+        'trap.')
     jobs_state = client.get_jobs_state_by_name(cluster_name_on_cloud)
     if not jobs_state:
         logger.debug(f'Job for cluster {cluster_name_on_cloud} not found, '
@@ -1796,14 +2074,16 @@ def _cancel_slurm_job(
         logger.debug(
             f'Job for cluster {cluster_name_on_cloud} is already completing. '
             'No action needed.')
-    elif job_state not in _ESCALATION_JOB_STATES or inside_slurm_cluster:
-        # Transient states (e.g. STAGING_OUT, SIGNALING): the job is not
-        # holding a steady allocation; a graceful signal is sufficient.
-        # Autodown (running inside the cluster): the Skylet performing this
-        # teardown lives inside a job step's cgroup, so the step-level TERM
-        # below would kill the terminating process itself; and autodown only
-        # fires on idle clusters, which have no task steps that could block
-        # the batch script's cleanup.
+    elif inside_slurm_cluster:
+        # The sbatch EXIT trap performs cleanup after Slurm accepts the
+        # cancellation. A post-cancel wait cannot complete because scancel
+        # reaps the skylet performing this stop.
+        client.cancel_jobs_by_name(cluster_name_on_cloud,
+                                   signal='TERM',
+                                   full=True)
+    elif job_state not in _ESCALATION_JOB_STATES:
+        # Transient states (e.g. STAGING_OUT, SIGNALING) are not holding a
+        # steady allocation; a graceful signal is sufficient.
         client.cancel_jobs_by_name(cluster_name_on_cloud,
                                    signal='TERM',
                                    full=True)
@@ -1872,16 +2152,13 @@ def terminate_instances(
         return
 
     # Check if we are running inside a Slurm cluster (only happens with
-    # autodown, where the Skylet invokes terminate_instances on the remote
-    # cluster). In this case, use local execution instead of SSH.
+    # autostop or autodown, where the skylet invokes terminate_instances on
+    # the remote cluster). In this case, use local execution instead of SSH.
     # This assumes that the compute node is able to run scancel.
     # TODO(kevin): Validate this assumption.
     inside_slurm_cluster = slurm_utils.is_inside_slurm_cluster()
-    if inside_slurm_cluster:
-        logger.debug('Running inside a Slurm cluster, using local execution')
-        client = slurm.SlurmClient(is_inside_slurm_cluster=True)
-    else:
-        client = _make_slurm_client(provider_config)
+    client, login_node_runner = _make_client_and_login_runner(
+        provider_config, inside_slurm_cluster)
     pre_batch_cancel = None
     if not inside_slurm_cluster:
         running_jobs = client.query_jobs(cluster_name_on_cloud,
@@ -1892,7 +2169,6 @@ def terminate_instances(
         if len(running_jobs) == 1:
             job_id = running_jobs[0]
             nodes, _ = client.get_job_nodes(job_id)
-            login_node_runner = _make_login_node_runner(provider_config)
             pre_batch_cancel = lambda: _cleanup_slurm_allocation(
                 client, login_node_runner, cluster_name_on_cloud,
                 provider_config, job_id, nodes)
@@ -1906,7 +2182,7 @@ def terminate_instances(
         if os.path.exists(snapshot_dir):
             shutil.rmtree(snapshot_dir)
     else:
-        _run_on_login_node(_make_login_node_runner(provider_config),
+        _run_on_login_node(login_node_runner,
                            f'rm -rf -- {shlex.quote(snapshot_dir)}',
                            'Failed to remove Slurm container snapshot.')
 
@@ -2007,11 +2283,14 @@ def get_command_runners(
     sky_base_dir = _resolve_sky_base_dir(client, provider_config)
     sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
                                                  cluster_name_on_cloud)
-    container_marker = (
-        f'{sky_cluster_home_dir}/{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
-    has_container = client.check_file_exists(container_marker)
-    container_args = _build_pyxis_args(
-        cluster_name_on_cloud) if has_container else None
+    # Container-ness is persisted in the cluster config at launch
+    # (provider.container_image). It must not be probed over the shared
+    # filesystem: NFS attribute caching on the login node can hide the
+    # marker file right after the allocation wrote it, which would
+    # silently run a container cluster on the host as the login user.
+    container_image = provider_config.get('container_image')
+    container_args = (_build_pyxis_args(cluster_name_on_cloud)
+                      if container_image is not None else None)
 
     runners = [
         # Note: For Slurm, the external IP for all instances is the same,

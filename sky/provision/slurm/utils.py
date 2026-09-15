@@ -12,6 +12,7 @@ from paramiko.config import SSHConfig
 
 from sky import clouds
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
@@ -31,7 +32,6 @@ _VAR_PATTERN = re.compile(r'\$(\w+|\{[^}]*\})')
 _SLURM_USER_PATTERN = re.compile(r'^[a-z_][a-z0-9_.-]*$')
 
 SLURM_MARKER_FILE = '.sky_slurm_cluster'
-SLURM_CONTAINER_MARKER_FILE = '.sky_slurm_container'
 
 # Regex pattern for parsing GPU GRES strings.
 # Format: 'gpu[:acc_type]:acc_count(optional_extra_info)'
@@ -159,7 +159,31 @@ def get_submit_user(cluster_name: str) -> Optional[str]:
     if not enabled:
         return None
 
-    user_name = common_utils.get_current_user_name()
+    user = common_utils.get_current_user()
+    mapping = skypilot_config.get_nested(('slurm', 'username_map'),
+                                         default_value={})
+    cluster_config = skypilot_config.get_nested(
+        ('slurm', 'cluster_configs', cluster_name), default_value={})
+    cluster_mapping = cluster_config.get('username_map', {})
+    submit_user = cluster_mapping.get(user.name, mapping.get(user.name))
+    while submit_user is None and user.is_service_account():
+        creator = global_user_state.get_service_account_creator(user.id)
+        if creator is None:
+            raise ValueError(
+                f'Cannot find the creator of service account {user.name!r} '
+                f'on Slurm cluster {cluster_name!r}. Ask an administrator to '
+                'set slurm.username_map.')
+        user = creator
+        submit_user = cluster_mapping.get(user.name, mapping.get(user.name))
+    if submit_user is not None:
+        if _SLURM_USER_PATTERN.fullmatch(submit_user) is None:
+            raise ValueError(
+                f'Invalid Unix user {submit_user!r} configured for SkyPilot '
+                f'user {user.name!r} on Slurm cluster {cluster_name!r}.')
+        return submit_user
+
+    user_name = user.name
+    assert user_name is not None
     submit_user = user_name.split('@', 1)[0]
     if _SLURM_USER_PATTERN.fullmatch(submit_user) is None:
         raise ValueError(

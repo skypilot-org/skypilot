@@ -1,5 +1,6 @@
 """Unit tests for sky.provision.slurm.instance."""
 import json
+import os
 import shlex
 import subprocess
 from unittest import mock
@@ -9,6 +10,7 @@ import pytest
 from sky import exceptions
 from sky.provision.slurm import instance
 from sky.skylet import constants as skylet_constants
+from sky.utils import command_runner
 
 _CLUSTER = 'test-cluster'
 _PROVIDER_CONFIG = {
@@ -18,6 +20,11 @@ _PROVIDER_CONFIG = {
         'user': 'testuser',
         'private_key': '/path/to/key',
     }
+}
+_CONTAINER_IMAGE = 'ubuntu:24.04'
+_CONTAINER_PROVIDER_CONFIG = {
+    **_PROVIDER_CONFIG,
+    'container_image': _CONTAINER_IMAGE,
 }
 _SNAPSHOT_GENERATION = '0123456789abcdef0123456789abcdef'
 _NEW_SNAPSHOT_GENERATION = 'fedcba9876543210fedcba9876543210'
@@ -109,6 +116,23 @@ class TestSnapshotManifest:
             instance._validate_snapshot_files(
                 runner, '/home/test/.sky_snapshots/test-cluster', manifest)
 
+    def test_local_runner_publishes_without_rsync(self, tmp_path):
+        """Inside-cluster publication writes the manifest directly.
+
+        The head node's host is not guaranteed to have rsync, so the local
+        runner path must not go through it.
+        """
+        runner = command_runner.LocalProcessCommandRunner()
+        rsync = mock.MagicMock(wraps=runner.rsync)
+        runner.rsync = rsync
+        manifest = _snapshot_manifest()
+
+        instance._write_snapshot_manifest(runner, str(tmp_path), manifest)
+
+        rsync.assert_not_called()
+        published = json.loads((tmp_path / 'manifest.json').read_text())
+        assert published == manifest
+
 
 class TestResolveSkyBaseDir:
     """Tests persisted Slurm cluster state directory lookup."""
@@ -145,6 +169,28 @@ class TestResolveSkyBaseDir:
 
         assert result == '/current/shared/path'
         resolve.assert_called_once_with('test-slurm', client)
+
+
+class TestResolveSkyPilotRuntimeDir:
+    """Tests inside-cluster runtime directory lookup."""
+
+    def test_inside_cluster_requires_runtime_dir_env(self, monkeypatch):
+        monkeypatch.delenv(skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY,
+                           raising=False)
+        get_cluster = mock.MagicMock(
+            side_effect=AssertionError('config fallback must not run'))
+        monkeypatch.setattr(instance.slurm_utils,
+                            'get_slurm_cluster_from_config', get_cluster)
+        client = mock.MagicMock()
+
+        with pytest.raises(RuntimeError, match='SKY_RUNTIME_DIR is not set'):
+            instance._resolve_skypilot_runtime_dir(client,
+                                                   _PROVIDER_CONFIG,
+                                                   _CLUSTER,
+                                                   inside_slurm_cluster=True)
+
+        get_cluster.assert_not_called()
+        client.get_env.assert_not_called()
 
 
 @pytest.fixture
@@ -472,7 +518,7 @@ class TestStopInstances:
     """Tests Slurm container export and stop ordering."""
 
     @staticmethod
-    def _setup(monkeypatch, nodes):
+    def _setup(monkeypatch, nodes, inside=False):
         client = mock.MagicMock()
         client.query_jobs.return_value = ['123']
         client.get_job_nodes.return_value = (nodes, [
@@ -482,20 +528,36 @@ class TestStopInstances:
         login_runner = mock.MagicMock()
 
         def run(command, **kwargs):
-            del kwargs
-            if command.startswith('cat '):
-                return 0, 'ubuntu:24.04\n', ''
+            del command, kwargs
             return 0, '', ''
 
         login_runner.run.side_effect = run
         head_runner = mock.MagicMock()
         head_runner.run_driver.return_value = (0, '', '')
-        monkeypatch.setattr(instance, '_make_slurm_client',
-                            mock.MagicMock(return_value=client))
+        make_client = mock.MagicMock(return_value=client)
+        monkeypatch.setattr(instance, '_make_slurm_client', make_client)
         monkeypatch.setattr(instance, '_make_login_node_runner',
                             mock.MagicMock(return_value=login_runner))
         monkeypatch.setattr(instance, '_resolve_sky_base_dir',
                             mock.MagicMock(return_value='/home/test'))
+        if inside:
+            # Inside the cluster, stop runs from the head node's skylet: the
+            # factory must build the local client/runner instead of SSH ones.
+            monkeypatch.setattr(instance.slurm_utils, 'is_inside_slurm_cluster',
+                                mock.MagicMock(return_value=True))
+            slurm_client_factory = mock.MagicMock(return_value=client)
+            monkeypatch.setattr(instance.slurm, 'SlurmClient',
+                                slurm_client_factory)
+            monkeypatch.setattr(instance.command_runner,
+                                'LocalProcessCommandRunner',
+                                mock.MagicMock(return_value=login_runner))
+            monkeypatch.setenv(skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY,
+                               '/tmp/test-cluster')
+            client.test_slurm_client_factory = slurm_client_factory
+        else:
+            monkeypatch.setattr(instance.slurm_utils, 'is_inside_slurm_cluster',
+                                mock.MagicMock(return_value=False))
+        client.test_make_client = make_client
         read_manifest = mock.MagicMock(return_value=None)
         monkeypatch.setattr(instance, '_read_snapshot_manifest', read_manifest)
         new_uuid = mock.MagicMock()
@@ -534,7 +596,8 @@ class TestStopInstances:
 
         login_runner.run.side_effect = run
 
-        instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+        instance.stop_instances(_CLUSTER,
+                                provider_config=_CONTAINER_PROVIDER_CONFIG)
 
         assert events.index('cancel jobs') < events.index('drain steps')
         assert events.index('drain steps') < events.index('backup jobs db')
@@ -544,12 +607,17 @@ class TestStopInstances:
         _, login_runner, head_runner, write_manifest, cancel_slurm_job = (
             self._setup(monkeypatch, nodes))
 
-        instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+        instance.stop_instances(_CLUSTER,
+                                provider_config=_CONTAINER_PROVIDER_CONFIG)
 
-        head_runner.run_driver.assert_called_once()
+        driver_commands = [
+            call.args[0] for call in head_runner.run_driver.call_args_list
+        ]
+        assert len(driver_commands) == 2
+        assert driver_commands[0].startswith('test -f ')
+        assert driver_commands[0].endswith('/skypilot-runtime/bin/activate')
+        assert 'cancel_jobs_encoded_results' in driver_commands[1]
         head_runner.run.assert_not_called()
-        assert ('cancel_jobs_encoded_results'
-                in head_runner.run_driver.call_args.args[0])
         stop_skylet_commands = [
             call.args[0]
             for call in login_runner.run.call_args_list
@@ -617,8 +685,88 @@ class TestStopInstances:
                 in node_cleanup)
         assert 'rm -rf -- /tmp/test-cluster' in node_cleanup
         shared_cleanup = login_runner.run.call_args_list[1].args[0]
-        assert shared_cleanup == (
-            'rm -rf -- /home/test/.sky_clusters/test-cluster')
+        assert shared_cleanup == instance._remove_shared_state_script(
+            '/home/test/.sky_clusters/test-cluster', preserve_logs=False)
+
+    def test_remove_shared_state_script_preserves_logs(self):
+        script = instance._remove_shared_state_script(
+            '/home/test/.sky_clusters/test-cluster', preserve_logs=True)
+        assert '! -name sky_logs' in script
+        assert '-print -quit' in script
+        # The verification must fail when find itself errors (e.g. a stale
+        # file handle), not only when leftovers remain.
+        assert '[ -z "$leftovers" ]' in script
+
+    def test_remove_shared_state_script_retries_until_verified(self):
+        script = instance._remove_shared_state_script(
+            '/home/test/.sky_clusters/test-cluster', preserve_logs=False)
+        assert script.count('sleep') == 1
+        assert 'exit 0' in script
+        assert 'exit 1' in script
+
+    def test_cleanup_fails_after_exhausted_retries(self, monkeypatch, tmp_path):
+        # A removal that keeps failing must not be reported as success.
+        fake_bin = tmp_path / 'bin'
+        fake_bin.mkdir()
+        (fake_bin / 'rm').write_text('#!/bin/bash\nexit 1\n')
+        os.chmod(fake_bin / 'rm', 0o755)
+        home = tmp_path / '.sky_clusters' / _CLUSTER
+        (home / 'sky_workdir').mkdir(parents=True)
+        (home / 'sky_workdir' / 'file').write_text('state')
+        env = {**os.environ, 'PATH': f'{fake_bin}:{os.environ["PATH"]}'}
+        monkeypatch.setattr(instance,
+                            '_SHARED_STATE_CLEANUP_RETRY_INTERVAL_SECONDS', 0)
+        script = instance._remove_shared_state_script(str(home),
+                                                      preserve_logs=False)
+
+        result = subprocess.run(['/bin/bash', '-c', script],
+                                check=False,
+                                capture_output=True,
+                                text=True,
+                                env=env)
+
+        assert result.returncode == 1
+        assert (home / 'sky_workdir' / 'file').exists()
+
+    def test_cleanup_retries_stale_removal(self, monkeypatch, tmp_path):
+        # A stale NFS handle fails the first rm and clears later: the cleanup
+        # script must retry instead of leaving a half-deleted home behind.
+        fake_bin = tmp_path / 'bin'
+        fake_bin.mkdir()
+        real_rm = subprocess.run(['/usr/bin/which', 'rm'],
+                                 check=True,
+                                 capture_output=True,
+                                 text=True).stdout.strip()
+        (fake_bin /
+         'rm').write_text('#!/bin/bash\n'
+                          'echo "$@" >> "$CLEANUP_LOG"\n'
+                          '[ "$(wc -l < "$CLEANUP_LOG")" -ge 2 ] && exec ' +
+                          real_rm + ' "$@"\n'
+                          'exit 1\n')
+        os.chmod(fake_bin / 'rm', 0o755)
+        home = tmp_path / '.sky_clusters' / _CLUSTER
+        (home / 'sky_workdir').mkdir(parents=True)
+        (home / 'sky_workdir' / 'file').write_text('state')
+        log_file = tmp_path / 'cleanup.log'
+        log_file.touch()
+        env = {
+            **os.environ, 'PATH': f'{fake_bin}:{os.environ["PATH"]}',
+            'CLEANUP_LOG': str(log_file)
+        }
+        monkeypatch.setattr(instance,
+                            '_SHARED_STATE_CLEANUP_RETRY_INTERVAL_SECONDS', 0)
+        script = instance._remove_shared_state_script(str(home),
+                                                      preserve_logs=False)
+
+        result = subprocess.run(['/bin/bash', '-c', script],
+                                check=False,
+                                capture_output=True,
+                                text=True,
+                                env=env)
+
+        assert result.returncode == 0, result.stderr
+        assert not home.exists()
+        assert len(log_file.read_text().splitlines()) == 2
 
     def test_cleanup_allocation_preserves_logs(self, monkeypatch, tmp_path):
         client = mock.MagicMock()
@@ -670,7 +818,8 @@ class TestStopInstances:
         monkeypatch.setattr(instance, '_cleanup_slurm_allocation',
                             cleanup_slurm_allocation)
 
-        instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+        instance.stop_instances(_CLUSTER,
+                                provider_config=_CONTAINER_PROVIDER_CONFIG)
         cleanup = cancel_slurm_job.call_args.kwargs['pre_batch_cancel']
         cleanup()
 
@@ -703,7 +852,8 @@ class TestStopInstances:
         warning = mock.MagicMock()
         monkeypatch.setattr(instance.logger, 'warning', warning)
 
-        instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+        instance.stop_instances(_CLUSTER,
+                                provider_config=_CONTAINER_PROVIDER_CONFIG)
 
         write_manifest.assert_called_once()
         cleanup.assert_called_once()
@@ -716,18 +866,64 @@ class TestStopInstances:
         warning.assert_called_once()
         assert 'cleanup failed' in warning.call_args.args[0]
 
-    def test_empty_container_marker_requires_relaunch(self, monkeypatch):
-        _, login_runner, head_runner, write_manifest, cancel_slurm_job = (
-            self._setup(monkeypatch, ['node-a']))
-        login_runner.run.side_effect = lambda command, **kwargs: (0, '', '')
+    def test_stop_without_container_image_is_rejected(self, monkeypatch):
+        _, _, head_runner, write_manifest, cancel_slurm_job = (self._setup(
+            monkeypatch, ['node-a']))
 
         with pytest.raises(exceptions.NotSupportedError,
-                           match='Relaunch the cluster before stopping it'):
+                           match='no container image'):
             instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
 
+        # Nothing that touches the allocation may run: the cluster cannot
+        # be snapshotted without persisted container metadata.
         head_runner.run_driver.assert_not_called()
         write_manifest.assert_not_called()
         cancel_slurm_job.assert_not_called()
+
+    def test_missing_runtime_venv_skips_job_cancellation(self, monkeypatch):
+        _, _, head_runner, write_manifest, cancel_slurm_job = (self._setup(
+            monkeypatch, ['node-a']))
+        head_runner.run_driver.side_effect = [(1, '', ''), (0, '', '')]
+        warning = mock.MagicMock()
+        monkeypatch.setattr(instance.logger, 'warning', warning)
+
+        instance.stop_instances(_CLUSTER,
+                                provider_config=_CONTAINER_PROVIDER_CONFIG)
+
+        # The venv check ran, the cancel itself was skipped, and the stop
+        # continued so the cluster can still be recovered.
+        head_runner.run_driver.assert_called_once()
+        assert head_runner.run_driver.call_args.args[0].startswith('test -f ')
+        warning.assert_called_once()
+        assert 'runtime venv missing' in warning.call_args.args[0]
+        write_manifest.assert_called_once()
+        cancel_slurm_job.assert_called_once()
+
+    def test_missing_runtime_venv_skips_local_cancel(self, monkeypatch):
+        _, local_runner, _, write_manifest, cancel_slurm_job = (self._setup(
+            monkeypatch, ['node-a'], inside=True))
+
+        def run(command, **kwargs):
+            del kwargs
+            if (command.startswith('test -f ') and
+                    '/skypilot-runtime/bin/activate' in command):
+                return 1, '', ''
+            return 0, '', ''
+
+        local_runner.run.side_effect = run
+        warning = mock.MagicMock()
+        monkeypatch.setattr(instance.logger, 'warning', warning)
+
+        instance.stop_instances(_CLUSTER,
+                                provider_config=_CONTAINER_PROVIDER_CONFIG)
+
+        commands = [call.args[0] for call in local_runner.run.call_args_list]
+        assert not any(
+            'cancel_jobs_encoded_results' in command for command in commands)
+        warning.assert_called_once()
+        assert 'runtime venv missing' in warning.call_args.args[0]
+        write_manifest.assert_called_once()
+        cancel_slurm_job.assert_called_once()
 
     def test_export_failure_preserves_previous_snapshot(self, monkeypatch):
         client, login_runner, _, write_manifest, cancel_slurm_job = self._setup(
@@ -744,7 +940,8 @@ class TestStopInstances:
         login_runner.run.side_effect = fail_rank_one
 
         with pytest.raises(exceptions.CommandError, match='rank 1'):
-            instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+            instance.stop_instances(_CLUSTER,
+                                    provider_config=_CONTAINER_PROVIDER_CONFIG)
 
         write_manifest.assert_not_called()
         cancel_slurm_job.assert_not_called()
@@ -778,7 +975,8 @@ class TestStopInstances:
         write_manifest.side_effect = lambda *args: events.append(
             'publish manifest')
 
-        instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+        instance.stop_instances(_CLUSTER,
+                                provider_config=_CONTAINER_PROVIDER_CONFIG)
 
         assert events == [
             'commit generation',
@@ -794,7 +992,8 @@ class TestStopInstances:
         write_manifest.side_effect = RuntimeError('publish failed')
 
         with pytest.raises(RuntimeError, match='publish failed'):
-            instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+            instance.stop_instances(_CLUSTER,
+                                    provider_config=_CONTAINER_PROVIDER_CONFIG)
 
         previous_generation_dir = instance._snapshot_generation_dir(
             '/home/test/.sky_snapshots/test-cluster',
@@ -826,7 +1025,8 @@ class TestStopInstances:
         login_runner.run.side_effect = fail_node_preflight
 
         with pytest.raises(exceptions.CommandError, match='node node-b'):
-            instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+            instance.stop_instances(_CLUSTER,
+                                    provider_config=_CONTAINER_PROVIDER_CONFIG)
 
         commands = [call.args[0] for call in login_runner.run.call_args_list]
         assert not any(
@@ -835,6 +1035,204 @@ class TestStopInstances:
             for command in commands)
         write_manifest.assert_not_called()
         cancel_slurm_job.assert_not_called()
+
+    def test_inside_cluster_uses_local_execution(self, monkeypatch):
+        (client, local_runner, head_runner, write_manifest,
+         cancel_slurm_job) = self._setup(monkeypatch, ['node-a'], inside=True)
+
+        instance.stop_instances(_CLUSTER,
+                                provider_config=_CONTAINER_PROVIDER_CONFIG)
+
+        # No SSH to the login node: the local client is built directly.
+        client.test_make_client.assert_not_called()
+        client.test_slurm_client_factory.assert_called_once_with(
+            is_inside_slurm_cluster=True)
+        # The job-driver cancel runs locally instead of via srun over SSH.
+        instance.get_command_runners.assert_not_called()
+        head_runner.run_driver.assert_not_called()
+        cancel_commands = [
+            call.args[0]
+            for call in local_runner.run.call_args_list
+            if 'cancel_jobs_encoded_results' in call.args[0]
+        ]
+        assert len(cancel_commands) == 1
+        assert cancel_commands[0].startswith(
+            f'export {skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}=/tmp/'
+            'test-cluster && ')
+        write_manifest.assert_called_once()
+        cancel_slurm_job.assert_called_once()
+        assert cancel_slurm_job.call_args.args[2] is True
+
+    def test_inside_cluster_skips_skylet_kill(self, monkeypatch):
+        _, local_runner, _, _, _ = self._setup(monkeypatch, ['node-a'],
+                                               inside=True)
+
+        instance.stop_instances(_CLUSTER,
+                                provider_config=_CONTAINER_PROVIDER_CONFIG)
+
+        # The skylet executing the stop is the process the skylet-kill step
+        # would stop, so the stop flow must not touch its keeper spec or pid.
+        commands = [call.args[0] for call in local_runner.run.call_args_list]
+        assert not any('skylet_pid' in command for command in commands)
+        assert not any('skylet_start' in command for command in commands)
+
+    def test_inside_cluster_cancels_after_manifest_without_precleanup(
+            self, monkeypatch):
+        cancel_slurm_job = instance._cancel_slurm_job
+        (client, local_runner, _, write_manifest, _) = self._setup(monkeypatch,
+                                                                   ['node-a'],
+                                                                   inside=True)
+        monkeypatch.setattr(instance, '_cancel_slurm_job', cancel_slurm_job)
+        client.get_jobs_state_by_name.return_value = ['RUNNING']
+        events = []
+        original_run = local_runner.run.side_effect
+
+        def run(command, **kwargs):
+            if 'cancel_jobs_encoded_results' in command:
+                events.append('cancel jobs')
+            if 'sqlite3.connect' in command:
+                events.append('backup jobs db')
+            if command.startswith('test ! -e ') and 'mv --' in command:
+                events.append('commit generation')
+            return original_run(command, **kwargs)
+
+        local_runner.run.side_effect = run
+        client.list_job_steps.side_effect = lambda job_id: (events.append(
+            'drain steps') or [])
+        write_manifest.side_effect = lambda *args: events.append(
+            'publish manifest')
+        cleanup = mock.MagicMock()
+        monkeypatch.setattr(instance, '_cleanup_slurm_allocation', cleanup)
+
+        def cancel(job_name, signal=None, full=False):
+            assert job_name == _CLUSTER
+            events.append(('cancel', signal, full))
+
+        client.cancel_jobs_by_name.side_effect = cancel
+
+        instance.stop_instances(_CLUSTER,
+                                provider_config=_CONTAINER_PROVIDER_CONFIG)
+
+        assert events == [
+            'cancel jobs',
+            'drain steps',
+            'backup jobs db',
+            'commit generation',
+            'publish manifest',
+            ('cancel', 'TERM', True),
+        ]
+        cleanup.assert_not_called()
+        # Fire-and-forget: the only state query is the pre-cancel one.
+        assert client.get_jobs_state_by_name.call_count == 1
+
+    def test_inside_cluster_cancel_failure_preserves_runtime_state(
+            self, monkeypatch):
+        cancel_slurm_job = instance._cancel_slurm_job
+        (client, local_runner, _, write_manifest, _) = self._setup(monkeypatch,
+                                                                   ['node-a'],
+                                                                   inside=True)
+        monkeypatch.setattr(instance, '_cancel_slurm_job', cancel_slurm_job)
+        client.get_jobs_state_by_name.return_value = ['RUNNING']
+        client.cancel_jobs_by_name.side_effect = RuntimeError('scancel failed')
+        cleanup = mock.MagicMock()
+        monkeypatch.setattr(instance, '_cleanup_slurm_allocation', cleanup)
+
+        with pytest.raises(RuntimeError, match='scancel failed'):
+            instance.stop_instances(_CLUSTER,
+                                    provider_config=_CONTAINER_PROVIDER_CONFIG)
+
+        write_manifest.assert_called_once()
+        cleanup.assert_not_called()
+        commands = [call.args[0] for call in local_runner.run.call_args_list]
+        assert not any(
+            command == 'rm -rf -- /tmp/test-cluster' for command in commands)
+
+
+class TestGetCommandRunners:
+    """Container-ness must come from persisted config, not a filesystem probe."""
+
+    @staticmethod
+    def _cluster_info(provider_config):
+        instance_info = instance.common.InstanceInfo(
+            instance_id='123,node-a',
+            internal_ip='10.0.0.1',
+            external_ip='login.example.com',
+            ssh_port=22,
+            tags={
+                instance.constants.TAG_SKYPILOT_CLUSTER_NAME: _CLUSTER,
+                'job_id': '123',
+                'node': 'node-a',
+            },
+            node_name='123,node-a')
+        return instance.common.ClusterInfo(
+            instances={'123,node-a': [instance_info]},
+            head_instance_id='123,node-a',
+            provider_name='slurm',
+            provider_config=provider_config,
+        )
+
+    @staticmethod
+    def _resolve_paths(monkeypatch, client):
+        monkeypatch.setattr(instance.slurm, 'SlurmClient',
+                            mock.MagicMock(return_value=client))
+        monkeypatch.setattr(instance, '_resolve_sky_base_dir',
+                            mock.MagicMock(return_value='/home/test'))
+        monkeypatch.setattr(instance.skypilot_config,
+                            'get_effective_region_config',
+                            mock.MagicMock(return_value=None))
+        monkeypatch.setattr(instance.slurm_utils,
+                            'get_slurm_cluster_from_config',
+                            mock.MagicMock(return_value='test-slurm'))
+
+    @staticmethod
+    def _provider_config(tmp_path, container: bool) -> dict:
+        key = tmp_path / 'key'
+        key.write_text('')
+        config = {
+            **_PROVIDER_CONFIG,
+            'ssh': {
+                **_PROVIDER_CONFIG['ssh'],
+                'private_key': str(key),
+            },
+        }
+        if container:
+            config['container_image'] = _CONTAINER_IMAGE
+        return config
+
+    def test_container_cluster_gets_container_runners(self, monkeypatch,
+                                                      tmp_path):
+        self._resolve_paths(monkeypatch, mock.MagicMock())
+
+        runners = instance.get_command_runners(
+            self._cluster_info(self._provider_config(tmp_path, container=True)))
+
+        assert len(runners) == 1
+        assert runners[0].container_args is not None
+        assert ':exec' in runners[0].container_args
+
+    def test_non_container_cluster_runs_on_host(self, monkeypatch, tmp_path):
+        self._resolve_paths(monkeypatch, mock.MagicMock())
+
+        runners = instance.get_command_runners(
+            self._cluster_info(self._provider_config(tmp_path,
+                                                     container=False)))
+
+        assert len(runners) == 1
+        assert runners[0].container_args is None
+
+    def test_false_filesystem_probe_does_not_cause_host_execution(
+            self, monkeypatch, tmp_path):
+        # A stale NFS lookup previously made this check return False for a
+        # running container cluster, silently executing it on the host.
+        client = mock.MagicMock()
+        client.check_file_exists.return_value = False
+        self._resolve_paths(monkeypatch, client)
+
+        runners = instance.get_command_runners(
+            self._cluster_info(self._provider_config(tmp_path, container=True)))
+
+        client.check_file_exists.assert_not_called()
+        assert runners[0].container_args is not None
 
 
 class TestQueryInstances:
@@ -855,6 +1253,8 @@ class TestQueryInstances:
         manifest = _snapshot_manifest(num_nodes=2)
         read_manifest = mock.MagicMock(return_value=manifest)
         monkeypatch.setattr(instance, '_read_snapshot_manifest', read_manifest)
+        sleep = mock.MagicMock()
+        monkeypatch.setattr(instance.time, 'sleep', sleep)
         provider_config = {
             **_PROVIDER_CONFIG,
             'sky_base_dir': '/home/test',
@@ -862,7 +1262,8 @@ class TestQueryInstances:
 
         statuses = instance.query_instances('test-cluster',
                                             _CLUSTER,
-                                            provider_config=provider_config)
+                                            provider_config=provider_config,
+                                            retry_if_missing=True)
 
         assert statuses == {
             'snapshot-rank-0':
@@ -872,6 +1273,8 @@ class TestQueryInstances:
         }
         read_manifest.assert_called_once_with(
             login_runner, '/home/test/.sky_snapshots/test-cluster')
+        assert client.query_jobs.call_count == 7
+        sleep.assert_not_called()
         get_config.assert_not_called()
 
     def test_running_job_ignores_recent_terminal_allocation(self, monkeypatch):
@@ -903,3 +1306,293 @@ class TestQueryInstances:
                 (instance.status_lib.ClusterStatus.UP, None)
         }
         read_manifest.assert_not_called()
+
+    def test_retries_missing_job(self, mock_client, monkeypatch):
+        running_queries = 0
+
+        def query_jobs(job_name, state_filters):
+            nonlocal running_queries
+            assert job_name == _CLUSTER
+            if state_filters == ['running']:
+                running_queries += 1
+                if running_queries == 2:
+                    return ['386700']
+            return []
+
+        mock_client.query_jobs.side_effect = query_jobs
+        mock_client.get_job_nodes.return_value = (['node-a'], None)
+        monkeypatch.setattr(instance, '_read_snapshot_manifest',
+                            mock.MagicMock(return_value=None))
+        sleep = mock.MagicMock()
+        monkeypatch.setattr(instance.time, 'sleep', sleep)
+
+        result = instance.query_instances(_CLUSTER,
+                                          _CLUSTER,
+                                          provider_config=_PROVIDER_CONFIG,
+                                          retry_if_missing=True)
+
+        assert result == {
+            'job386700-node-a': (instance.status_lib.ClusterStatus.UP, None)
+        }
+        assert running_queries == 2
+        sleep.assert_called_once_with(
+            instance._QUERY_INSTANCES_RETRY_INTERVAL_SECONDS)
+
+    def test_does_not_retry_when_terminal_job_is_found(self, mock_client,
+                                                       monkeypatch):
+
+        def query_jobs(job_name, state_filters):
+            assert job_name == _CLUSTER
+            if state_filters == ['completed']:
+                return ['386700']
+            return []
+
+        mock_client.query_jobs.side_effect = query_jobs
+        mock_client.get_job_reason.return_value = 'Completed'
+        read_manifest = mock.MagicMock(return_value=None)
+        monkeypatch.setattr(instance, '_read_snapshot_manifest', read_manifest)
+        sleep = mock.MagicMock()
+        monkeypatch.setattr(instance.time, 'sleep', sleep)
+
+        result = instance.query_instances(_CLUSTER,
+                                          _CLUSTER,
+                                          provider_config=_PROVIDER_CONFIG,
+                                          retry_if_missing=True)
+
+        assert not result
+        assert mock_client.query_jobs.call_count == 7
+        mock_client.get_job_reason.assert_called_once_with('386700')
+        read_manifest.assert_called_once()
+        sleep.assert_not_called()
+
+    def test_does_not_retry_by_default(self, mock_client, monkeypatch):
+        mock_client.query_jobs.return_value = []
+        monkeypatch.setattr(instance, '_read_snapshot_manifest',
+                            mock.MagicMock(return_value=None))
+        sleep = mock.MagicMock()
+        monkeypatch.setattr(instance.time, 'sleep', sleep)
+
+        result = instance.query_instances(_CLUSTER,
+                                          _CLUSTER,
+                                          provider_config=_PROVIDER_CONFIG,
+                                          retry_if_missing=False)
+
+        assert not result
+        assert mock_client.query_jobs.call_count == 7
+        sleep.assert_not_called()
+
+    def test_retry_exhaustion_returns_empty(self, mock_client, monkeypatch):
+        mock_client.query_jobs.return_value = []
+        read_manifest = mock.MagicMock(return_value=None)
+        monkeypatch.setattr(instance, '_read_snapshot_manifest', read_manifest)
+        monkeypatch.setattr(instance.time, 'sleep', mock.MagicMock())
+
+        result = instance.query_instances(_CLUSTER,
+                                          _CLUSTER,
+                                          provider_config=_PROVIDER_CONFIG,
+                                          retry_if_missing=True)
+
+        assert not result
+        expected_rounds = 1 + instance._MAX_QUERY_INSTANCES_RETRIES
+        assert mock_client.query_jobs.call_count == 7 * expected_rounds
+        read_manifest.assert_called_once()
+
+
+class TestRecordPendingReason:
+    """The squeue pending reason is persisted as a launch-progress event."""
+
+    def test_records_reason_with_dedup(self):
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event') as add_event:
+            instance._record_pending_reason(_CLUSTER, 'QOSGrpGRES', 'h200')
+        add_event.assert_called_once_with(
+            _CLUSTER,
+            new_status=None,
+            reason='Launching (pending: QOSGrpGRES; partition: h200)',
+            event_type=instance.global_user_state.ClusterEventType.
+            LAUNCH_PROGRESS,
+            nop_if_duplicate=True,
+        )
+
+    def test_records_without_a_partition(self):
+        """The partition is optional: a reader has to cope with the shape that
+        carries no partition, since events written before this existed do
+        not."""
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event') as add_event:
+            instance._record_pending_reason(_CLUSTER, 'Resources', None)
+        assert (add_event.call_args.kwargs['reason'] ==
+                'Launching (pending: Resources)')
+
+    @pytest.mark.parametrize('reason', [None, ''])
+    def test_skips_empty_reason(self, reason):
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event') as add_event:
+            instance._record_pending_reason(_CLUSTER, reason, 'h200')
+        add_event.assert_not_called()
+
+    def test_swallows_db_errors(self):
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event',
+                               side_effect=RuntimeError('db down')):
+            instance._record_pending_reason(_CLUSTER, 'Resources', 'h200')
+
+
+class TestPendingCallback:
+    """The pending callback records the reason and gates repeated polls."""
+
+    def test_records_once_per_distinct_reason(self):
+        on_pending = instance._make_pending_callback(_CLUSTER)
+        with mock.patch.object(instance, '_record_pending_reason') as record, \
+             mock.patch.object(instance.rich_utils, 'force_update_status'):
+            # Same reason, moving pending count: one record, several spinner
+            # updates.
+            on_pending('PENDING', 'Resources', 3)
+            on_pending('PENDING', 'Resources', 2)
+            on_pending('PENDING', 'Resources', None)
+            assert record.call_args_list == [
+                mock.call(_CLUSTER, 'Resources', None)
+            ]
+            # A new reason records again.
+            on_pending('PENDING', 'Priority', None)
+            assert record.call_args_list[-1] == mock.call(
+                _CLUSTER, 'Priority', None)
+            assert record.call_count == 2
+
+    def test_spinner_reflects_reason_and_count(self):
+        on_pending = instance._make_pending_callback(_CLUSTER)
+        with mock.patch.object(instance, '_record_pending_reason'), \
+             mock.patch.object(instance.rich_utils,
+                               'force_update_status') as spinner:
+            on_pending('PENDING', 'Resources', 2)
+            on_pending('CONFIGURING', None, None)
+        msgs = [call.args[0] for call in spinner.call_args_list]
+        assert 'pending: Resources' in msgs[0] and '2 others pending' in msgs[0]
+        assert 'Launching' in msgs[1] and 'pending:' not in msgs[1]
+
+    def test_reasonless_polls_never_touch_the_db(self):
+        # squeue reports no reason yet: the callback starts out remembering
+        # None, so nothing is recorded at all.
+        on_pending = instance._make_pending_callback(_CLUSTER)
+        with mock.patch.object(instance, '_record_pending_reason') as record, \
+             mock.patch.object(instance.rich_utils, 'force_update_status'):
+            on_pending('PENDING', None, 0)
+            on_pending('CONFIGURING', None, None)
+            record.assert_not_called()
+            # A reason appearing later is recorded, and going back to no
+            # reason records that transition once.
+            on_pending('PENDING', 'Resources', None)
+            on_pending('PENDING', None, None)
+        assert record.call_args_list == [
+            mock.call(_CLUSTER, 'Resources', None),
+            mock.call(_CLUSTER, None, None),
+        ]
+
+
+class TestRecordAllocation:
+    """Which Slurm allocation backs a cluster, persisted as an event.
+
+    The cluster row carries the same facts, but teardown removes it while
+    cluster events outlive it -- and reading a job's accounting history is
+    exactly what you want *after* the job is over.
+    """
+
+    def test_records_the_id_and_the_cluster(self):
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event') as add_event:
+            instance._record_allocation(_CLUSTER, 'hyperpod-slurm', '17269')
+        add_event.assert_called_once_with(
+            _CLUSTER,
+            new_status=None,
+            reason='Slurm allocation 17269 on hyperpod-slurm',
+            event_type=instance.global_user_state.ClusterEventType.DEBUG,
+            nop_if_duplicate=True,
+        )
+
+    def test_the_identity_is_not_a_launch_progress_event(self):
+        """It used to be, and it was written in the same second as the first
+        pending reason -- so which of the two `details` showed came down to
+        the database's text collation, which orders them the other way round
+        under a locale collation than under SQLite's binary one.
+        """
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event') as add_event:
+            instance._record_allocation(_CLUSTER, 'hyperpod-slurm', '17269')
+            instance._record_pending_reason(_CLUSTER, 'Resources', 'dev')
+        types = [c.kwargs['event_type'] for c in add_event.call_args_list]
+        progress = instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+        assert types == [
+            instance.global_user_state.ClusterEventType.DEBUG, progress
+        ]
+
+    def test_the_nodes_are_granted_as_launch_progress(self):
+        """The progress half, written once the wait returns: later than any
+        pending reason, so recency alone settles which one a reader sees.
+        """
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event') as add_event:
+            instance._record_nodes_allocated(_CLUSTER, 'hyperpod-slurm',
+                                             '17269')
+        add_event.assert_called_once_with(
+            _CLUSTER,
+            new_status=None,
+            reason=('Launching (nodes allocated; Slurm job 17269 '
+                    'on hyperpod-slurm)'),
+            event_type=instance.global_user_state.ClusterEventType.
+            LAUNCH_PROGRESS,
+            nop_if_duplicate=True,
+        )
+
+    def test_the_text_does_not_collide_with_a_pending_reason(self):
+        """A reader of the timeline tells the rows apart by their text."""
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event') as add_event:
+            instance._record_allocation(_CLUSTER, 'hyperpod-slurm', '17269')
+            allocation = add_event.call_args.kwargs['reason']
+            instance._record_nodes_allocated(_CLUSTER, 'hyperpod-slurm',
+                                             '17269')
+            granted = add_event.call_args.kwargs['reason']
+            instance._record_pending_reason(_CLUSTER, 'Resources', 'dev')
+            pending = add_event.call_args.kwargs['reason']
+        assert len({allocation, granted, pending}) == 3
+        assert 'pending:' not in allocation and 'pending:' not in granted
+        assert 'Slurm job' not in pending
+
+    def test_swallows_db_errors(self):
+        """Provisioning must not fail because an event could not be written."""
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event',
+                               side_effect=RuntimeError('db is down')):
+            instance._record_allocation(_CLUSTER, 'hyperpod-slurm', '17269')
+            instance._record_nodes_allocated(_CLUSTER, 'hyperpod-slurm',
+                                             '17269')
+
+
+class TestWaitForJobNodes:
+    """The wait loop's ordering, which decides what shares a second."""
+
+    def test_no_pending_reason_is_recorded_once_the_nodes_are_granted(self):
+        """The state read can say CONFIGURING while the nodes land in the same
+        iteration. Recording a reason then would put it in the same whole
+        second as the caller's node-allocated event, leaving the two to be
+        separated by the database's collation alone.
+        """
+        client = mock.MagicMock()
+        client.get_job_state.return_value = 'CONFIGURING'
+        client.check_job_has_nodes.return_value = True
+        on_pending = mock.MagicMock()
+        instance._wait_for_job_nodes(client, '17269', 60, 'dev', on_pending)
+        on_pending.assert_not_called()
+        client.get_job_reason.assert_not_called()
+
+    def test_a_pending_job_still_reports_its_reason(self):
+        """The mirror: the reorder must not silence the wait it is about."""
+        client = mock.MagicMock()
+        client.get_job_state.return_value = 'PENDING'
+        client.check_job_has_nodes.side_effect = [False, True]
+        client.get_job_reason.return_value = 'Resources'
+        client.get_pending_job_count.return_value = 2
+        on_pending = mock.MagicMock()
+        with mock.patch.object(instance.time, 'sleep'):
+            instance._wait_for_job_nodes(client, '17269', 60, 'dev', on_pending)
+        on_pending.assert_called_once_with('PENDING', 'Resources', 2)

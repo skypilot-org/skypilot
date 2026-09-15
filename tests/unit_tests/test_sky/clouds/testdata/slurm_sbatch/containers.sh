@@ -113,7 +113,6 @@ echo "[container] ERROR: Container is not running as $global_target or $job_targ
 exit 1
 ' || exit 1
 echo "[container] Ready in $((SECONDS - CONTAINER_START))s"
-printf '%s\n' nvcr.io/nvidia/pytorch:24.01-py3 > /home/testuser/.sky_clusters/test-cluster/.sky_slurm_container
 touch /home/testuser/.sky_clusters/test-cluster/.sky_sbatch_ready
 
 # Host-side keeper step that starts skylet and restarts it if it dies.

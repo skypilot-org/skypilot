@@ -16,6 +16,7 @@ def test_request_body_env_vars_includes_expected_keys(monkeypatch):
     monkeypatch.setenv(skypilot_config.ENV_VAR_PROJECT_CONFIG,
                        '/tmp/project.yaml')
     monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI, 'db-uri')
+    monkeypatch.setenv(constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS, '1000000')
 
     monkeypatch.setattr(payloads.common, 'is_api_server_local', lambda: True)
     local_env = payloads.request_body_env_vars()
@@ -23,6 +24,9 @@ def test_request_body_env_vars_includes_expected_keys(monkeypatch):
     assert local_env[
         skypilot_config.ENV_VAR_SKYPILOT_CONFIG] == '/tmp/config.yaml'
     assert constants.ENV_VAR_DB_CONNECTION_URI not in local_env
+    # Server-side setting: the server derives the timeouts on its own users
+    # upsert from it, so a client must never supply it.
+    assert constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS not in local_env
     assert skypilot_config.ENV_VAR_GLOBAL_CONFIG not in local_env
     assert skypilot_config.ENV_VAR_PROJECT_CONFIG not in local_env
 
@@ -33,6 +37,7 @@ def test_request_body_env_vars_includes_expected_keys(monkeypatch):
     assert skypilot_config.ENV_VAR_GLOBAL_CONFIG not in remote_env
     assert skypilot_config.ENV_VAR_PROJECT_CONFIG not in remote_env
     assert constants.CLIENT_USER_HASH_ENV_VAR not in remote_env
+    assert constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS not in remote_env
 
 
 def test_request_body_env_vars_client_user_hash_with_basic_auth(monkeypatch):
