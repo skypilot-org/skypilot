@@ -51,7 +51,7 @@ import signal
 import sys
 import time
 import typing
-from typing import List, Optional, Set
+from typing import Callable, List, Optional, Set
 import uuid
 
 import filelock
@@ -90,6 +90,18 @@ JOB_CONTROLLER_ENV_PATH = runtime_utils.expanduser('~/.sky/job_controller_env')
 CURRENT_HASH = os.path.expanduser('~/.sky/wheels/current_sky_wheel_hash')
 
 _CONTROLLER_START_INTERVAL_SECONDS = 0.5
+
+
+class ControllerPoolNotOwnedError(Exception):
+    """Raised when the caller stopped owning the pool mid-start."""
+
+
+def _check_pool_still_owned(still_owned: Optional[Callable[[], bool]],
+                            started: int) -> None:
+    if still_owned is not None and not still_owned():
+        raise ControllerPoolNotOwnedError(
+            f'Stopped owning the controller pool after starting {started} '
+            'controller(s); aborting the rest of the pool start.')
 
 
 def _parse_controller_pid_entry(
@@ -232,12 +244,21 @@ def kill_local_job_controllers(sig: int = signal.SIGTERM) -> int:
     return signaled
 
 
-def maybe_start_controllers(from_scheduler: bool = False) -> None:
+def maybe_start_controllers(
+        from_scheduler: bool = False,
+        still_owned: Optional[Callable[[], bool]] = None) -> None:
     """Start the job controller process.
 
     If the process is already running, it will not start a new one.
     Will also add the job_id, dag_yaml_path, and env_file_path to the
     controllers list of processes.
+
+    Args:
+        still_owned: re-checked between starts and once before returning;
+            raises ControllerPoolNotOwnedError when it goes False. Starting the
+            pool spans tens of seconds, so a caller whose right to own the pool
+            is a lease (the consolidation leader's advisory lock) must not
+            assume a check made before the call still holds.
     """
     if from_scheduler and managed_job_utils.is_consolidation_mode():
         # In consolidation mode the controller pool is owned exclusively by the
@@ -319,12 +340,14 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
             while alive + started < wanted:
                 if started:
                     time.sleep(_CONTROLLER_START_INTERVAL_SECONDS)
+                    _check_pool_still_owned(still_owned, started)
                 start_controller()
                 started += 1
 
             if started > 0:
                 spread = (started - 1) * _CONTROLLER_START_INTERVAL_SECONDS
                 logger.info(f'Started {started} controllers over {spread:.1f}s')
+                _check_pool_still_owned(still_owned, started)
 
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock

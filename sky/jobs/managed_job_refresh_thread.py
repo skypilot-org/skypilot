@@ -133,7 +133,8 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
             return
 
         try:
-            managed_job_utils.ha_recovery_for_consolidation_mode()
+            managed_job_utils.ha_recovery_for_consolidation_mode(
+                still_leader=self._lock_still_held)
         finally:
             signal_file.unlink(missing_ok=True)
 

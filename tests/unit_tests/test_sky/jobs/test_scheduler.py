@@ -113,9 +113,12 @@ class TestKillLocalConsolidationControllers:
         kill_mock.assert_called_once_with(101, signal.SIGKILL)
 
 
-def _start_calls(alive: int, wanted: int):
-    """Runs maybe_start_controllers, returning an ordered start/sleep log."""
-    calls = []
+def _start_calls(alive: int, wanted: int, still_owned=None, calls=None):
+    """Runs maybe_start_controllers, returning an ordered start/sleep log.
+
+    Pass `calls` to inspect the log of a run that is expected to raise.
+    """
+    calls = [] if calls is None else calls
     fake_time = mock.MagicMock()
     fake_time.sleep.side_effect = lambda s: calls.append(('sleep', s))
 
@@ -130,7 +133,7 @@ def _start_calls(alive: int, wanted: int):
                               'start_controller',
                               side_effect=lambda: calls.append('start')), \
             mock.patch.object(scheduler, 'time', fake_time):
-        scheduler.maybe_start_controllers()
+        scheduler.maybe_start_controllers(still_owned=still_owned)
     return calls
 
 
@@ -175,3 +178,57 @@ class TestMaybeStartControllersStagger:
             assert len(sleeps) == wanted - 1
             assert sum(s for _, s in sleeps) == pytest.approx(
                 (wanted - 1) * interval)
+
+
+class TestMaybeStartControllersOwnership:
+    """Ownership of the pool is re-checked while it starts.
+
+    The consolidation leader holds the pool by a lease (a Postgres advisory
+    lock) and checks it once before recovery, which starts the pool before
+    recovering jobs. Spreading the starts over tens of seconds makes that one
+    check stale: a replica that silently lost the lease would keep starting
+    controllers while the new leader recovers the same jobs, leaving two
+    controllers on one job.
+    """
+
+    def test_aborts_mid_start_when_ownership_is_lost(self):
+        """The rest of the pool is not started once the lease is gone."""
+        calls = []
+        still_owned = mock.Mock(side_effect=[True, False])
+        with pytest.raises(scheduler.ControllerPoolNotOwnedError):
+            _start_calls(alive=0,
+                         wanted=5,
+                         still_owned=still_owned,
+                         calls=calls)
+        assert calls.count('start') == 2
+        assert still_owned.call_count == 2
+
+    def test_checks_once_more_after_the_last_start(self):
+        """Recovery runs straight after, so the last sleep must not go
+        unchecked."""
+        calls = []
+        still_owned = mock.Mock(side_effect=[True, False])
+        with pytest.raises(scheduler.ControllerPoolNotOwnedError):
+            _start_calls(alive=0,
+                         wanted=2,
+                         still_owned=still_owned,
+                         calls=calls)
+        assert calls.count('start') == 2
+        assert still_owned.call_count == 2
+
+    def test_single_start_is_checked_too(self):
+        still_owned = mock.Mock(return_value=False)
+        with pytest.raises(scheduler.ControllerPoolNotOwnedError):
+            _start_calls(alive=30, wanted=31, still_owned=still_owned)
+
+    def test_full_pool_does_not_check(self):
+        still_owned = mock.Mock(return_value=False)
+        assert _start_calls(alive=31, wanted=31, still_owned=still_owned) == []
+        still_owned.assert_not_called()
+
+    def test_owned_throughout_starts_the_whole_pool(self):
+        still_owned = mock.Mock(return_value=True)
+        calls = _start_calls(alive=0, wanted=4, still_owned=still_owned)
+        assert calls.count('start') == 4
+        # Three between starts, one after the last.
+        assert still_owned.call_count == 4
