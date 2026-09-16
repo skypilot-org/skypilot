@@ -3401,6 +3401,7 @@ def get_managed_job_queue(
                                    submitted_before, page, limit)
         # Resolve once. The three state queries below take the roots and do
         # not resolve ids themselves.
+        assert job_ids is not None  # _reject_tree_lookup_extras checked.
         tree_root_ids = managed_job_state.get_tree_root_ids(job_ids)
         job_ids = None
     cluster_handle_required = True
