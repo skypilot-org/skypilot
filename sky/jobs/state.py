@@ -1766,14 +1766,18 @@ def get_managed_jobs_highest_priority() -> int:
 #
 # A request answers three questions, in this order:
 #
-# 1. Scope: which jobs. Decided by ``job_ids`` and ``include_tree`` only.
-#      no job_ids                 every job (the list page, the CLI)
+# 1. Scope: which jobs. In this module, decided by ``job_ids`` and
+#    ``tree_root_ids``:
+#      neither                    every job (the list page, the CLI)
 #      job_ids                    exactly those jobs' rows (id lookups)
-#      job_ids + include_tree     every row of the trees those jobs belong to
+#      tree_root_ids              every row of the trees rooted at those ids
 #                                 (the job detail pages)
-#    ``include_tree`` changes nothing else. Without ``job_ids`` it is an error.
-#    It cannot be combined with pagination or the explicit filters below;
-#    ``core.queue_v2`` and ``get_managed_jobs_with_filters`` both reject that.
+#    ``tree_root_ids`` must be tree roots. The API flag ``include_tree`` is
+#    turned into them one layer up, in ``utils.get_managed_job_queue``, by
+#    calling ``get_tree_root_ids`` once; the functions here do not resolve
+#    ids themselves. ``include_tree`` requires ``job_ids`` and cannot be
+#    combined with pagination or the explicit filters below; ``core.queue_v2``
+#    and ``get_managed_job_queue`` both reject that.
 #
 # 2. Filters: which of those rows pass. Visibility (``accessible_workspaces``,
 #    ``user_hashes``) and the explicit filters (name, pool, workspace, infra,
@@ -2089,16 +2093,13 @@ def get_status_count_with_filters(
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
     status_expr: Optional['sqlalchemy.ColumnElement'] = None,
-    include_tree: bool = False,
+    tree_root_ids: Optional[List[int]] = None,
 ) -> Dict[str, int]:
     """Get the status count of the managed jobs with filters.
 
     status_expr, when provided, replaces the raw ``spot.status`` column as the
     grouping key, so counts are bucketed by the refined user-facing status.
     """
-    tree_root_ids = None
-    if include_tree:
-        job_ids, tree_root_ids = _tree_scope(job_ids)
     query = build_managed_jobs_with_filters_no_status_query(
         fields=fields,
         job_ids=job_ids,
@@ -2138,7 +2139,7 @@ def get_infra_options_with_filters(
     skip_finished: bool = False,
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
-    include_tree: bool = False,
+    tree_root_ids: Optional[List[int]] = None,
 ) -> List[str]:
     """The distinct `--infra` specs of the jobs a filter set selects.
 
@@ -2156,9 +2157,6 @@ def get_infra_options_with_filters(
     would only narrow what the option already selects. A job that never got
     placed has no cloud and contributes nothing.
     """
-    tree_root_ids = None
-    if include_tree:
-        job_ids, tree_root_ids = _tree_scope(job_ids)
     query = build_managed_jobs_with_filters_no_status_query(
         job_ids=job_ids,
         tree_root_ids=tree_root_ids,
@@ -2440,90 +2438,6 @@ def _load_job_rows(engine: sqlalchemy.engine.Engine,
     return jobs
 
 
-def _tree_scope(job_ids: Optional[List[int]]) -> Tuple[None, List[int]]:
-    """The tree lookup's scope: the roots of the trees ``job_ids`` belong to.
-
-    Returns ``(None, roots)`` so callers can pass ``job_ids=None,
-    tree_root_ids=roots`` to the builder. Raises if no job ids were given;
-    ``include_tree`` means nothing without them.
-    """
-    if job_ids is None:
-        raise ValueError('include_tree requires job_ids.')
-    return None, get_tree_root_ids(job_ids)
-
-
-def _reject_tree_lookup_extras(job_ids, workspace_match, name_match, pool_match,
-                               infra_match, statuses, skip_finished,
-                               submitted_after, submitted_before, page,
-                               limit) -> None:
-    """The tree lookup takes job ids and nothing else.
-
-    Whether a filter should test the named jobs, their roots, or every row
-    of the tree is undecided (SKY-7163), so a request that combines them is
-    refused instead of answered one way. Pagination is refused for the same
-    reason. Visibility (accessible_workspaces, user_hashes) is not a filter
-    the caller chose and still applies.
-    """
-    if job_ids is None:
-        raise ValueError('include_tree requires job_ids.')
-    if page is not None or limit is not None:
-        raise ValueError('include_tree cannot be combined with pagination.')
-    extras = {
-        'workspace_match': workspace_match,
-        'name_match': name_match,
-        'pool_match': pool_match,
-        'infra_match': infra_match,
-        'statuses': statuses,
-        'submitted_after': submitted_after,
-        'submitted_before': submitted_before,
-    }
-    if skip_finished:
-        extras['skip_finished'] = True
-    given = sorted(k for k, v in extras.items() if v is not None)
-    if given:
-        raise ValueError('include_tree cannot be combined with filters; '
-                         f'got {", ".join(given)}.')
-
-
-def _get_job_trees(
-    job_ids: Optional[List[int]],
-    fields: Optional[List[str]],
-    accessible_workspaces: Optional[List[str]],
-    user_hashes: Optional[List[Optional[str]]],
-    sort_by: Optional[str],
-    sort_order: Optional[str],
-    status_expr: Optional['sqlalchemy.ColumnElement'],
-) -> Tuple[List[Dict[str, Any]], int]:
-    """Every row of the trees ``job_ids`` belong to, as visible to the caller.
-
-    Steps: resolve the ids to their tree roots (ids from one tree give one
-    root); count the trees the caller can see; fetch every row of those trees
-    the caller can see; order for display. ``total`` is the number of trees.
-    """
-    _, roots = _tree_scope(job_ids)
-    engine = _db_manager.get_engine()
-    count_query = build_managed_jobs_with_filters_query(
-        fields=None,
-        tree_root_ids=roots,
-        accessible_workspaces=accessible_workspaces,
-        user_hashes=user_hashes,
-        count_unique_jobs=True,
-        status_expr=status_expr,
-    )
-    with orm.Session(engine) as session:
-        total = session.execute(count_query).fetchone()[0]
-    query = build_managed_jobs_with_filters_query(
-        fields=fields,
-        tree_root_ids=roots,
-        accessible_workspaces=accessible_workspaces,
-        user_hashes=user_hashes,
-        status_expr=status_expr,
-    )
-    query = _order_for_display(query, sort_by, sort_order,
-                               _sort_field_map(status_expr))
-    return _load_job_rows(engine, query), total
-
-
 def get_managed_jobs_with_filters(
     fields: Optional[List[str]] = None,
     job_ids: Optional[List[int]] = None,
@@ -2542,7 +2456,7 @@ def get_managed_jobs_with_filters(
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
     status_expr: Optional['sqlalchemy.ColumnElement'] = None,
-    include_tree: bool = False,
+    tree_root_ids: Optional[List[int]] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
     """Get managed jobs from the database with filters.
 
@@ -2559,9 +2473,14 @@ def get_managed_jobs_with_filters(
 
     Args:
         job_ids: Only these jobs' rows.
-        include_tree: With job_ids, every row of the trees those jobs belong
-            to instead (see ``_get_job_trees``). Requires job_ids; cannot be
-            combined with pagination or the explicit filters.
+        tree_root_ids: Every row of the trees rooted at these ids: the roots'
+            tasks and every job launched under them. The ids must be tree
+            roots, resolved by the caller with ``get_tree_root_ids``; a
+            member id passed here matches only its own rows. This is how
+            ``include_tree`` reaches this function (see
+            ``utils.get_managed_job_queue``). If a caller ever needs to pass
+            unresolved ids, resolve them here when they are not roots rather
+            than trusting them.
         sort_by: Field to sort by. Valid values: 'job_id', 'id', 'job_name',
             'name', 'submitted_at', 'status', 'job_duration', 'duration',
             'recovery_count', 'recoveries', 'resources', 'user_hash', 'user',
@@ -2573,16 +2492,6 @@ def get_managed_jobs_with_filters(
          - the list of managed jobs (all tasks for the paginated jobs)
          - the total number of unique jobs (not tasks)
     """
-    if include_tree:
-        # The tree lookup is its own path: no filters besides visibility, no
-        # pagination. The list path below never sees include_tree.
-        _reject_tree_lookup_extras(job_ids, workspace_match, name_match,
-                                   pool_match, infra_match, statuses,
-                                   skip_finished, submitted_after,
-                                   submitted_before, page, limit)
-        return _get_job_trees(job_ids, fields, accessible_workspaces,
-                              user_hashes, sort_by, sort_order, status_expr)
-
     sort_field_map = _sort_field_map(status_expr)
 
     engine = _db_manager.get_engine()
@@ -2591,6 +2500,7 @@ def get_managed_jobs_with_filters(
     count_query = build_managed_jobs_with_filters_query(
         fields=None,
         job_ids=job_ids,
+        tree_root_ids=tree_root_ids,
         accessible_workspaces=accessible_workspaces,
         workspace_match=workspace_match,
         name_match=name_match,
@@ -2621,6 +2531,7 @@ def get_managed_jobs_with_filters(
         job_ids_subquery = build_managed_jobs_with_filters_query(
             fields=None,
             job_ids=job_ids,
+            tree_root_ids=tree_root_ids,
             accessible_workspaces=accessible_workspaces,
             workspace_match=workspace_match,
             name_match=name_match,
@@ -2669,7 +2580,9 @@ def get_managed_jobs_with_filters(
         query = build_managed_jobs_with_filters_query(
             fields=fields,
             job_ids=job_ids,
-            tree_root_ids=paginated_root_ids,  # Only the paginated trees
+            # The page's roots were chosen from the caller's scope above, so
+            # this is the only tree constraint the final query needs.
+            tree_root_ids=paginated_root_ids,
             accessible_workspaces=accessible_workspaces,
             workspace_match=workspace_match,
             name_match=name_match,
@@ -2685,6 +2598,7 @@ def get_managed_jobs_with_filters(
         query = build_managed_jobs_with_filters_query(
             fields=fields,
             job_ids=job_ids,
+            tree_root_ids=tree_root_ids,
             accessible_workspaces=accessible_workspaces,
             workspace_match=workspace_match,
             name_match=name_match,

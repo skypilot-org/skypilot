@@ -813,6 +813,76 @@ class TestQueue:
         jobs_core.queue_v2(refresh=False, job_ids=[1], include_tree=True)
 
 
+class TestGetManagedJobQueueIncludeTree:
+    """`get_managed_job_queue` turns `include_tree` into resolved tree roots
+    once, and refuses the combinations whose meaning is undecided."""
+
+    def _patch(self, monkeypatch, roots):
+        seen = {}
+
+        def fake_roots(job_ids):
+            seen['resolved'] = seen.get('resolved', 0) + 1
+            seen['job_ids'] = list(job_ids)
+            return roots
+
+        def fake_infra(**kw):
+            seen['infra'] = kw
+            return []
+
+        def fake_status(**kw):
+            seen['status'] = kw
+            return {}
+
+        def fake_jobs(**kw):
+            seen['jobs'] = kw
+            return [], 0
+
+        st = jobs_utils.managed_job_state
+        monkeypatch.setattr(st, 'get_tree_root_ids', fake_roots)
+        monkeypatch.setattr(st, 'get_infra_options_with_filters', fake_infra)
+        monkeypatch.setattr(st, 'get_status_count_with_filters', fake_status)
+        monkeypatch.setattr(st, 'get_managed_jobs_with_filters', fake_jobs)
+        monkeypatch.setattr(st, 'get_managed_jobs_total', lambda: 0)
+        return seen
+
+    def test_resolves_roots_once_and_passes_them_to_all_three(
+            self, monkeypatch):
+        seen = self._patch(monkeypatch, roots=[3])
+        jobs_utils.get_managed_job_queue(job_ids=[5, 4], include_tree=True)
+        assert seen['resolved'] == 1
+        assert seen['job_ids'] == [5, 4]
+        for key in ('infra', 'status', 'jobs'):
+            assert seen[key]['tree_root_ids'] == [3], key
+            assert seen[key]['job_ids'] is None, key
+
+    def test_without_include_tree_passes_ids_through(self, monkeypatch):
+        seen = self._patch(monkeypatch, roots=[3])
+        jobs_utils.get_managed_job_queue(job_ids=[5])
+        assert 'resolved' not in seen
+        for key in ('infra', 'status', 'jobs'):
+            assert seen[key]['job_ids'] == [5], key
+            assert seen[key]['tree_root_ids'] is None, key
+
+    def test_refuses_include_tree_without_ids_or_with_extras(self, monkeypatch):
+        self._patch(monkeypatch, roots=[3])
+        with pytest.raises(ValueError, match='requires job_ids'):
+            jobs_utils.get_managed_job_queue(include_tree=True)
+        with pytest.raises(ValueError, match='pagination'):
+            jobs_utils.get_managed_job_queue(job_ids=[5],
+                                             include_tree=True,
+                                             page=1,
+                                             limit=1)
+        with pytest.raises(ValueError, match='name_match, statuses'):
+            jobs_utils.get_managed_job_queue(job_ids=[5],
+                                             include_tree=True,
+                                             name_match='x',
+                                             statuses=['PENDING'])
+        with pytest.raises(ValueError, match='skip_finished'):
+            jobs_utils.get_managed_job_queue(job_ids=[5],
+                                             include_tree=True,
+                                             skip_finished=True)
+
+
 def test_queue_v2_body_carries_include_tree():
     # The HTTP handler hands the body to queue_v2_api as kwargs, so the field
     # has to round-trip; an old client that never sends it gets False.
@@ -884,7 +954,7 @@ class TestDumpManagedJobQueue:
                                                infra_match,
                                                page,
                                                limit,
-                                               include_tree=False,
+                                               tree_root_ids=None,
                                                sort_by=None,
                                                sort_order=None,
                                                submitted_after=None,
@@ -913,7 +983,7 @@ class TestDumpManagedJobQueue:
                                                pool_match,
                                                user_hashes,
                                                skip_finished,
-                                               include_tree=False,
+                                               tree_root_ids=None,
                                                infra_match=None,
                                                submitted_after=None,
                                                submitted_before=None,

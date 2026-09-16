@@ -3308,6 +3308,41 @@ def _populate_job_record_from_handle(
     job['internal_services'] = internal_services
 
 
+def _reject_tree_lookup_extras(job_ids, workspace_match, name_match, pool_match,
+                               infra_match, statuses, skip_finished,
+                               submitted_after, submitted_before, page,
+                               limit) -> None:
+    """The tree lookup takes job ids and nothing else.
+
+    Whether a filter should test the named jobs, their roots, or every row
+    of the tree is undecided (SKY-7163), so a request that combines them is
+    refused instead of answered one way. Pagination is refused for the same
+    reason. Visibility (accessible_workspaces, user_hashes) is not a filter
+    the caller chose and still applies. ``core.queue_v2`` runs the same check
+    on the API server; this one covers callers that reach the controller
+    function directly.
+    """
+    if job_ids is None:
+        raise ValueError('include_tree requires job_ids.')
+    if page is not None or limit is not None:
+        raise ValueError('include_tree cannot be combined with pagination.')
+    extras = {
+        'workspace_match': workspace_match,
+        'name_match': name_match,
+        'pool_match': pool_match,
+        'infra_match': infra_match,
+        'statuses': statuses,
+        'submitted_after': submitted_after,
+        'submitted_before': submitted_before,
+    }
+    if skip_finished:
+        extras['skip_finished'] = True
+    given = sorted(k for k, v in extras.items() if v is not None)
+    if given:
+        raise ValueError('include_tree cannot be combined with filters; '
+                         f'got {", ".join(given)}.')
+
+
 def get_managed_job_queue(
     skip_finished: bool = False,
     accessible_workspaces: Optional[List[str]] = None,
@@ -3358,6 +3393,16 @@ def get_managed_job_queue(
     Returns:
         A dictionary containing the managed job queue.
     """
+    tree_root_ids: Optional[List[int]] = None
+    if include_tree:
+        _reject_tree_lookup_extras(job_ids, workspace_match, name_match,
+                                   pool_match, infra_match, statuses,
+                                   skip_finished, submitted_after,
+                                   submitted_before, page, limit)
+        # Resolve once. The three state queries below take the roots and do
+        # not resolve ids themselves.
+        tree_root_ids = managed_job_state.get_tree_root_ids(job_ids)
+        job_ids = None
     cluster_handle_required = True
     updated_fields = None
     # The caller only need to specify the fields in the
@@ -3375,7 +3420,7 @@ def get_managed_job_queue(
     # does not hide the others. See `get_infra_options_with_filters`.
     infra_options = managed_job_state.get_infra_options_with_filters(
         job_ids=job_ids,
-        include_tree=include_tree,
+        tree_root_ids=tree_root_ids,
         accessible_workspaces=accessible_workspaces,
         workspace_match=workspace_match,
         name_match=name_match,
@@ -3389,7 +3434,7 @@ def get_managed_job_queue(
     status_counts = managed_job_state.get_status_count_with_filters(
         fields=fields,
         job_ids=job_ids,
-        include_tree=include_tree,
+        tree_root_ids=tree_root_ids,
         accessible_workspaces=accessible_workspaces,
         workspace_match=workspace_match,
         name_match=name_match,
@@ -3405,7 +3450,7 @@ def get_managed_job_queue(
     jobs, total = managed_job_state.get_managed_jobs_with_filters(
         fields=updated_fields,
         job_ids=job_ids,
-        include_tree=include_tree,
+        tree_root_ids=tree_root_ids,
         accessible_workspaces=accessible_workspaces,
         workspace_match=workspace_match,
         name_match=name_match,
