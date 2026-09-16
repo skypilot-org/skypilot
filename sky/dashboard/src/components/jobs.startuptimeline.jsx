@@ -91,6 +91,50 @@ function readTimeline(jobData) {
   return null;
 }
 
+/**
+ * Whole seconds for each phase that still add up to the whole seconds of the
+ * total.
+ *
+ * formatDuration floors, so formatting each phase on its own loses up to a
+ * second per phase against a total that is floored once: a 62.4s job split
+ * five ways printed 10s + 1s + 49s + 0s + 0s beside a headline of 1m 2s, and a
+ * breakdown whose parts visibly do not make the whole is not believed, however
+ * exactly the underlying numbers sum.
+ *
+ * Largest remainder: floor everything, then hand the seconds that were lost to
+ * the phases that lost the most of one. The bar itself is drawn from the raw
+ * values and is unaffected.
+ */
+function apportionSeconds(values, total) {
+  const floors = values.map((value) => Math.floor(value));
+  const out = floors.slice();
+  let left = Math.floor(total) - floors.reduce((sum, v) => sum + v, 0);
+  const byRemainder = values
+    .map((value, index) => ({ index, part: value - Math.floor(value) }))
+    .sort((a, b) => b.part - a.part);
+  // The phases sum to the total, so `left` is normally in [0, phases). It is
+  // still handled in both directions: the settled columns are stored
+  // separately and nothing forces them to agree to the last float.
+  for (let i = 0; left > 0 && i < byRemainder.length; i++, left--) {
+    out[byRemainder[i].index] += 1;
+  }
+  for (let i = byRemainder.length - 1; left < 0 && i >= 0; i--) {
+    if (out[byRemainder[i].index] > 0) {
+      out[byRemainder[i].index] -= 1;
+      left++;
+    }
+  }
+  return out;
+}
+
+// A phase too short to show a second of its own. Not "0s": the panel drops
+// phases that really are zero, so a zero here would read as one of those --
+// and it is the shape of the bar, not the number, that says it was brief.
+function label(seconds, open) {
+  const text = seconds === 0 ? '<1s' : formatDuration(seconds);
+  return open ? `${text} so far` : text;
+}
+
 export function JobStartupTimeline({ jobData }) {
   const timeline = readTimeline(jobData);
   // Absent for jobs that never started, and for those launched before the
@@ -106,11 +150,19 @@ export function JobStartupTimeline({ jobData }) {
   const from = jobData?.eligible_at;
   const to = jobData?.started_at ?? jobData?.start_at;
 
-  const segments = PHASES.map((phase) => ({
+  const measured = PHASES.map((phase) => ({
     ...phase,
     seconds: timeline.seconds(phase.key),
     open: phase.key === openPhase,
   })).filter((segment) => segment.seconds > 0);
+  const shown = apportionSeconds(
+    measured.map((segment) => segment.seconds),
+    total
+  );
+  const segments = measured.map((segment, index) => ({
+    ...segment,
+    shown: shown[index],
+  }));
 
   if (segments.length === 0) {
     return null;
@@ -169,7 +221,9 @@ export function JobStartupTimeline({ jobData }) {
                   }
                 : {}),
             }}
-            title={`${segment.label}: ${formatDuration(segment.seconds)}${
+            // The tooltip carries the measurement itself, to a tenth, since
+            // the legend shows whole seconds that have been apportioned.
+            title={`${segment.label}: ${segment.seconds.toFixed(1)}s${
               segment.open ? ' so far' : ''
             } — ${segment.hint}`}
             data-testid={`startup-segment-${segment.key}`}
@@ -186,8 +240,7 @@ export function JobStartupTimeline({ jobData }) {
             />
             <span className="text-gray-600">{segment.label}</span>
             <span className="ml-1.5 text-gray-900">
-              {formatDuration(segment.seconds)}
-              {segment.open ? ' so far' : ''}
+              {label(segment.shown, segment.open)}
             </span>
           </div>
         ))}

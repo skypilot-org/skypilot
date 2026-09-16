@@ -25,6 +25,7 @@ from sky.jobs import utils as managed_job_utils
 from sky.metrics import launch_phases
 from sky.schemas.api import responses
 from sky.schemas.generated import managed_jobsv1_pb2
+from sky.skylet import constants as skylet_constants
 
 # What the recorder writes, as the recorder itself defines it. Derived rather
 # than restated: a list retyped here would drift from the one that matters.
@@ -166,6 +167,39 @@ def test_the_message_and_its_json_form_agree_on_the_field_names():
 
     assert 't_queue_wait' in as_json
     assert 'tQueueWait' not in as_json
+
+
+def test_the_versioned_field_list_matches_the_columns_it_stands_for():
+    """`TIMELINE_QUEUE_FIELDS` is what a too-old controller is not asked for.
+    Retyped rather than derived, so this is the check that keeps it honest: a
+    phase added to the recorder and not added there would be requested from a
+    controller whose table has no such column, and the SQL error fails the
+    whole queue rather than the panel."""
+    assert managed_job_utils.TIMELINE_QUEUE_FIELDS == set(TIMELINE_COLUMNS) | {
+        'created_at', 'eligible_at'
+    }
+
+
+def test_the_controller_fields_are_gated_on_the_version_that_added_them():
+    """Two things have to move together or an upgraded API server talks to a
+    controller that cannot answer: the skylet has to be restarted (which only
+    happens when SKYLET_VERSION changes), and the fields have to be registered
+    so an older one is not asked for them."""
+    gated = managed_job_utils._JOB_FIELDS_BY_MIN_CONTROLLER_VERSION
+    version = int(skylet_constants.SKYLET_VERSION)
+
+    assert managed_job_utils.TIMELINE_QUEUE_FIELDS in gated.values(), (
+        'the timeline fields are not registered against any controller '
+        'version, so an old controller will be asked for columns it lacks')
+    added_at = next(v for v, fields in gated.items()
+                    if fields is managed_job_utils.TIMELINE_QUEUE_FIELDS)
+    assert added_at <= version, (
+        f'the timeline fields are gated on controller version {added_at} but '
+        f'SKYLET_VERSION is {version}, so no controller will ever be asked')
+    # And a field list naming one of them has to trigger the version lookup,
+    # or the gate above is never consulted.
+    assert managed_job_utils.queue_fields_need_controller_version(
+        ['t_queue_wait'])
 
 
 def _open_attempt(requested=None, admitted=None, outcome=None):

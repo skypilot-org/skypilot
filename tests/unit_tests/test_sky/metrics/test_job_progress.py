@@ -13,7 +13,10 @@ _ORIGIN = 0.0
 _SUBMITTED = 10.0
 
 
-def _task(eligible_at=_ORIGIN, submitted_at=_SUBMITTED, start_at=None):
+def _task(eligible_at=_ORIGIN,
+          submitted_at=_SUBMITTED,
+          start_at=None,
+          end_at=None):
     return {
         'job_id': 1,
         'task_id': 0,
@@ -21,6 +24,7 @@ def _task(eligible_at=_ORIGIN, submitted_at=_SUBMITTED, start_at=None):
         'eligible_at': eligible_at,
         'submitted_at': submitted_at,
         'start_at': start_at,
+        'end_at': end_at,
     }
 
 
@@ -150,6 +154,49 @@ def test_a_job_that_has_started_is_left_to_the_settled_breakdown():
     that window a live number would keep growing past the wait it measures."""
     assert launch_phases.compute_job_progress(_task(start_at=1000.0),
                                               [_attempt()], 1200.0) is None
+
+
+def test_a_job_that_died_before_running_is_not_still_starting():
+    """Failed prechecks, found no resources, or cancelled while starting: it
+    has an origin and no start_at, so the start_at guard alone lets it through
+    and the page reports a job that died an hour ago as 'Starting, 1h so far',
+    growing for as long as anyone looks at it."""
+    dead = _task(start_at=None, end_at=300.0)
+
+    assert launch_phases.compute_job_progress(dead, [_attempt()],
+                                              4000.0) is None
+
+
+def test_a_cloud_with_no_request_step_still_leaves_preparation():
+    """Some provisioners never stamp instances_requested. Reading its absence
+    as 'the request has not happened yet' is only right while nothing after it
+    is set -- an admission proves it did happen, and without the fallback every
+    later milestone reads as more preparation."""
+    attempts = [
+        _attempt(instances_requested=None, admitted=100.0, queue='eng-lq')
+    ]
+
+    progress = launch_phases.compute_job_progress(_task(), attempts, 160.0)
+
+    assert progress.open_phase == launch_phases.NODE_STARTUP
+    # Measured from the start of provisioning, the same fallback the settled
+    # path takes: 20 -> 100 is the wait, and 10 -> 20 the preparation.
+    assert progress.phases[launch_phases.QUEUE_WAIT] == 80.0
+    assert progress.phases[launch_phases.PROVISION_SETUP] == 10.0
+
+
+def test_instances_up_with_nothing_gating_them_closes_node_startup():
+    """No admission milestone at all, but the instances are ready: the job is
+    setting itself up, not still waiting for nodes."""
+    attempts = [
+        _attempt(instances_requested=30.0, admitted=None, instances_ready=90.0)
+    ]
+
+    progress = launch_phases.compute_job_progress(_task(), attempts, 100.0)
+
+    assert progress.open_phase == launch_phases.RUNTIME_SETUP
+    assert progress.phases[launch_phases.NODE_STARTUP] == 60.0
+    assert launch_phases.QUEUE_WAIT not in progress.phases
 
 
 def test_a_job_with_no_origin_gets_no_breakdown_rather_than_a_guess():

@@ -332,6 +332,15 @@ def compute_job_progress(task: Dict[str, Any], attempts: List[Any],
         # minute before the daemon writes it: measuring to `now` there would
         # keep growing after the wait had ended.
         return None
+    if task.get('end_at') is not None:
+        # Finished without ever running -- failed prechecks, found no
+        # resources, or was cancelled while starting. It is not waiting for
+        # anything, so measuring to `now` would report a job that died an hour
+        # ago as "starting, 1h so far", growing for as long as anyone looks at
+        # it. This is exactly the complement of the case above: between them
+        # they are the two halves the recorder already splits on, `start_at`
+        # and `end_at`.
+        return None
     total = now - origin
     if total <= 0:
         return None
@@ -358,18 +367,33 @@ def compute_job_progress(task: Dict[str, Any], attempts: List[Any],
         else:
             retry = last.provision_start - attempts[0].provision_start
             closed[RETRY_OVERHEAD] = retry
-            if last.instances_requested is not None:
-                closed[PROVISION_SETUP] = (last.instances_requested -
-                                           submitted - retry)
+            # Where provisioning stops preparing and starts waiting on the
+            # cloud. Absent means one of two different things, and which one is
+            # decidable from the milestones after it: with none of them set the
+            # request has not happened yet, but an admission or a readiness
+            # proves it did, on a cloud with no separate request step. Falling
+            # back only in the second case is what keeps those clouds from
+            # reporting every later milestone as more preparation -- the
+            # settled path takes the same fallback unconditionally, because by
+            # then there is no "not yet".
+            boundary = last.instances_requested
+            if boundary is None and (last.admitted is not None or
+                                     last.instances_ready is not None):
+                boundary = last.provision_start
+            if boundary is not None:
+                closed[PROVISION_SETUP] = boundary - submitted - retry
                 if last.admitted is not None:
-                    closed[QUEUE_WAIT] = (last.admitted -
-                                          last.instances_requested)
+                    closed[QUEUE_WAIT] = last.admitted - boundary
                     if last.instances_ready is not None:
                         closed[NODE_STARTUP] = (last.instances_ready -
                                                 last.admitted)
                         open_phase = RUNTIME_SETUP
                     else:
                         open_phase = NODE_STARTUP
+                elif last.instances_ready is not None:
+                    # Nothing gated it, and the instances are already up.
+                    closed[NODE_STARTUP] = last.instances_ready - boundary
+                    open_phase = RUNTIME_SETUP
                 else:
                     # An external scheduler names its queue when the workload
                     # is submitted to it, not when it is admitted, precisely so

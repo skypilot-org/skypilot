@@ -182,6 +182,60 @@ describe('JobStartupTimeline', () => {
     expect(screen.queryByText(/so far/)).not.toBeInTheDocument();
   });
 
+  it('shows phases that add up to the total beside them', () => {
+    // Reported from the tenant: a 62.4s job printed 10s + 1s + 49s + 0s + 0s
+    // under a headline of "1m 2s". Each phase was floored on its own, so five
+    // of them lost two whole seconds against a total floored once -- and a
+    // breakdown whose parts visibly do not make the whole is not believed,
+    // however exactly the underlying numbers sum.
+    render(
+      <JobStartupTimeline
+        jobData={{
+          t_time_to_running: 62.4,
+          t_controller_queue: 10.4,
+          t_provision_setup: 1.6,
+          t_queue_wait: 49.7,
+          t_node_startup: 0.4,
+          t_runtime_setup: 0.3,
+        }}
+      />
+    );
+
+    const legend = screen
+      .getAllByText(/^(<1s|\d+m \d+s|\d+s)$/)
+      .map((el) => el.textContent);
+    const seconds = legend.map((text) => {
+      if (text === '<1s') return 0;
+      const m = text.match(/(?:(\d+)m )?(\d+)s/);
+      return Number(m[1] || 0) * 60 + Number(m[2]);
+    });
+    // The header is one of these; the rest are the phases.
+    const total = Math.max(...seconds);
+    const parts = seconds.filter((v) => v !== total);
+    expect(total).toBe(62);
+    expect(parts.reduce((a, b) => a + b, 0)).toBe(62);
+  });
+
+  it('calls a sub-second phase short rather than zero', () => {
+    // The panel drops phases that really are zero, so "0s" on a phase that did
+    // happen reads as one of those -- and it sat next to a visible sliver of
+    // colour, which is the contradiction the tenant spotted.
+    render(
+      <JobStartupTimeline
+        jobData={{
+          t_time_to_running: 62.4,
+          t_controller_queue: 10.4,
+          t_provision_setup: 1.6,
+          t_queue_wait: 49.7,
+          t_node_startup: 0.4,
+          t_runtime_setup: 0.3,
+        }}
+      />
+    );
+
+    expect(screen.queryByText('0s')).not.toBeInTheDocument();
+  });
+
   it('renders nothing for a job with no recorded timeline', () => {
     // Jobs that never started, and jobs launched before the timeline existed.
     // An empty bar would read as "started instantly".

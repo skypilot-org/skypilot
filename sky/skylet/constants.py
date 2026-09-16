@@ -196,7 +196,7 @@ ROOT_JOB_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}ROOT_JOB_ID'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '42'  # managed job table carries dynamic_task_index.
+SKYLET_VERSION = '43'  # managed job table carries the start-up breakdown.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.

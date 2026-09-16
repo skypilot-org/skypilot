@@ -1506,9 +1506,27 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
 # rejects a request naming it, so the server strips them before asking over
 # gRPC (the legacy codegen path does the same on the controller itself, keyed
 # on MANAGED_JOBS_VERSION).
+# The start-up breakdown and the two timestamps it is measured between. Named
+# here rather than derived from launch_phases, which would import the metrics
+# package into the controller's own module; the wire-format suite asserts the
+# two lists agree.
+TIMELINE_QUEUE_FIELDS = frozenset({
+    'created_at',
+    'eligible_at',
+    't_time_to_running',
+    't_controller_queue',
+    't_retry_overhead',
+    't_unattributed',
+    't_provision_setup',
+    't_queue_wait',
+    't_node_startup',
+    't_runtime_setup',
+})
+
 _JOB_FIELDS_BY_MIN_CONTROLLER_VERSION = {
     41: frozenset({'root_job_id', 'parent_job_id', 'parent_task_id'}),
     42: frozenset({'dynamic_task_index'}),
+    43: TIMELINE_QUEUE_FIELDS,
 }
 
 
@@ -4432,6 +4450,13 @@ class ManagedJobCodeGen:
         # Filter out the dynamic task index for older controllers (< 26)
         if managed_job_version < 26 and _fields is not None:
             _fields = [f for f in _fields if f != 'dynamic_task_index']
+        # Filter out the start-up breakdown for older controllers (< 27).
+        # These are columns as well as fields: a controller whose spot table
+        # predates them answers a request that names one with a SQL error,
+        # which fails the whole queue rather than the panel.
+        _TIMELINE_FIELDS = {sorted(TIMELINE_QUEUE_FIELDS)!r}
+        if managed_job_version < 27 and _fields is not None:
+            _fields = [f for f in _fields if f not in _TIMELINE_FIELDS]
         if managed_job_version < 9:
             # For backward compatibility, since filtering is not supported
             # before #6652.
