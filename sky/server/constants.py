@@ -206,3 +206,8 @@ MAX_UPLOAD_TOTAL_BYTES_ENV_VAR = 'SKYPILOT_MAX_UPLOAD_TOTAL_BYTES'
 # that leak (e.g., due to controller crash mid-cleanup) are eventually
 # removed once their TTL has passed.
 EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS = 3600  # 1 hour
+
+# How often finished launch attempts are turned into phase metrics. Short
+# enough that a launch shows up on the dashboard while someone is still
+# watching it, long enough that the sweep is negligible next to provisioning.
+LAUNCH_METRICS_DAEMON_INTERVAL_SECONDS = 60

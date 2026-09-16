@@ -511,10 +511,15 @@ def _maybe_submit_job_locally(
                 is_primary_in_job_group = (dag.primary_tasks is None or
                                            task.name in dag.primary_tasks)
             assert task.name is not None, 'task must have a name'
+            # A job group's tasks all start waiting now; so does task 0 of
+            # anything. A pipeline's later tasks are waiting on the task before
+            # them, not on us, so their origin is written at the handoff.
+            eligible_at = (time.time()
+                           if task_id == 0 or dag.is_job_group() else None)
             managed_job_state.set_pending(consolidation_mode_job_id, task_id,
                                           task.name, resources_str,
                                           task.metadata_json,
-                                          is_primary_in_job_group)
+                                          is_primary_in_job_group, eligible_at)
         job_ids.append(consolidation_mode_job_id)
     return job_ids
 

@@ -4347,6 +4347,24 @@ if __name__ == '__main__':
     permission.permission_service.initialize()
     logger.info('Permission service initialized')
 
+    # Nothing can legitimately be provisioning yet, so any launch attempt
+    # still open belongs to a process that died mid-launch. Closing them here
+    # keeps a new launch of the same cluster from stamping milestones onto a
+    # dead attempt, and makes the measurements that were lost countable.
+    #
+    # Guarded because this is startup: tidying measurement rows must not be
+    # able to stop the server from coming up. The daemon that also runs this
+    # catches for the same reason, and the next tick of it will sweep whatever
+    # was missed here.
+    try:
+        stranded = global_user_state.sweep_abandoned_launch_attempts()
+        if stranded:
+            logger.info(f'Closed {stranded} launch attempt(s) abandoned by a '
+                        'previous server process.')
+    except Exception as sweep_error:  # pylint: disable=broad-except
+        logger.warning(f'Could not sweep abandoned launch attempts at '
+                       f'startup: {sweep_error}')
+
     max_db_connections = global_user_state.get_max_db_connections()
     logger.info(f'Max db connections: {max_db_connections}')
 
