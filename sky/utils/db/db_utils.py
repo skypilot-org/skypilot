@@ -503,6 +503,70 @@ def get_max_connections():
     return _max_connections
 
 
+def get_db_connection_pool_size() -> int:
+    """Persistent state-DB connections this process pools, 0 to not pool.
+
+    ``constants.ENV_VAR_SERVER_DB_CONNECTION_POOL_SIZE`` when it is set,
+    otherwise the budget the process was given via ``set_max_connections()``.
+    See that constant for why a deployment may want to state the size itself,
+    and for how to size it.
+
+    The environment is read on each call rather than captured at import time
+    or in ``set_max_connections()``, so the override also covers engines built
+    before the process sets its budget -- ``skypilot_config`` reads the server
+    config from the state DB while it is being imported, long before any
+    server process calls ``set_max_connections()``, and ``get_engine()``
+    caches that engine for the life of the process.
+
+    Raises:
+        ValueError: if the variable is set but is not a non-negative integer.
+    """
+    return _read_connection_count_env(
+        constants.ENV_VAR_SERVER_DB_CONNECTION_POOL_SIZE,
+        default=_max_connections)
+
+
+def get_db_connection_pool_max_overflow(pool_size: int) -> int:
+    """Burst connections this process may open beyond the pooled ones.
+
+    ``constants.ENV_VAR_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW`` when it is
+    set, otherwise whatever it takes to reach
+    ``constants.DEFAULT_DB_CONNECTION_POOL_MAX_CONCURRENCY`` concurrent
+    connections -- which is 0 once the pool alone is that wide.
+
+    Raises:
+        ValueError: if the variable is set but is not a non-negative integer.
+    """
+    return _read_connection_count_env(
+        constants.ENV_VAR_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW,
+        default=max(
+            0,
+            constants.DEFAULT_DB_CONNECTION_POOL_MAX_CONCURRENCY - pool_size))
+
+
+def _read_connection_count_env(env_var: str, default: int) -> int:
+    """A number of connections read from ``env_var``, ``default`` if unset.
+
+    Raises:
+        ValueError: if the variable is set but is not a non-negative integer.
+            A misconfigured pool is refused loudly rather than silently
+            ignored, since falling back would quietly give a deployment a
+            connection profile it asked not to have.
+    """
+    raw = os.environ.get(env_var)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        count = int(raw)
+    except ValueError:
+        raise ValueError(f'{env_var}={raw!r} is not an integer number of '
+                         'connections.') from None
+    if count < 0:
+        raise ValueError(f'{env_var}={raw!r} must be a non-negative number of '
+                         'connections.')
+    return count
+
+
 def _make_asyncpg_creator(dsn: str) -> Callable[[], Any]:
     """Build a SQLAlchemy ``async_creator`` that hands asyncpg a libpq DSN.
 
@@ -822,9 +886,10 @@ def get_engine(
         with _db_creation_lock:
             if cache_key not in _postgres_engine_cache:
                 engine_type = 'sync' if not async_engine else 'async'
+                pool_size = get_db_connection_pool_size()
                 logger.debug(
                     f'Creating a new postgres {engine_type} engine with '
-                    f'maximum {_max_connections} connections')
+                    f'maximum {pool_size} connections')
                 # The engine role that labels this engine's metrics. Derived
                 # from the same conditions as the cache key, so one cached
                 # engine always carries one role: when `direct` resolves to
@@ -858,7 +923,7 @@ def get_engine(
                             'postgresql+asyncpg://',
                             poolclass=sqlalchemy.NullPool,
                             async_creator=_make_asyncpg_creator(conn_string)))
-                elif _max_connections == 0 or (direct and _pooler_configured()):
+                elif pool_size == 0 or (direct and _pooler_configured()):
                     if direct and _pooler_configured():
                         role = sql_metrics.DB_STATE_DIRECT
                     # NullPool: no persistent connections. Used when no pool
@@ -880,8 +945,9 @@ def get_engine(
                         sqlalchemy.create_engine(
                             conn_string,
                             poolclass=sqlalchemy.pool.QueuePool,
-                            pool_size=_max_connections,
-                            max_overflow=max(0, 5 - _max_connections),
+                            pool_size=pool_size,
+                            max_overflow=get_db_connection_pool_max_overflow(
+                                pool_size),
                             pool_pre_ping=True,
                             pool_recycle=1800))
                 sql_metrics.install(_postgres_engine_cache[cache_key], role)
