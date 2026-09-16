@@ -235,6 +235,84 @@ def test_concurrency_group_marker():
         test_file.unlink(missing_ok=True)
 
 
+def _k_selected(args):
+    """Return the test names the generator selects for `args`."""
+    env = dict(os.environ)
+    env['PYTHONPATH'] = f"{pathlib.Path.cwd()}/tests:{env.get('PYTHONPATH', '')}"
+    pipeline_path = pathlib.Path('.buildkite/pipeline_smoke_tests_release.yaml')
+    pipeline_path.unlink(missing_ok=True)
+    subprocess.run([
+        'python', '.buildkite/generate_pipeline.py', '--args', args,
+        '--file_pattern', 'test_k_expression_tmp'
+    ],
+                   env=env,
+                   check=True)
+    # Not _extract_test_names_from_pipeline: that one assumes a flat step
+    # list, and the release pipeline nests its steps under a group.
+    return {
+        step['command'].split('::')[-1].split()[0]
+        for step in _extract_steps_from_pipeline(pipeline_path)
+    }
+
+
+def test_k_expression_is_pytests_own():
+    """`-k` selects what pytest would select, operators included.
+
+    The generator used to apply `-k` itself, as a substring test against the
+    test function name and the file path. That could not express `or` / `and`
+    / `not`: a compound expression matched nothing and the build died on an
+    empty pipeline. It also saw less than pytest does -- pytest matches each
+    test's parents and its markers as well as its own name.
+    """
+    test_file = pathlib.Path('tests/smoke_tests/test_k_expression_tmp.py')
+    # A throwaway file rather than real tests, so the assertions below cannot
+    # be broken by an unrelated rename. `no_hyperbolic` is a cloud-exclusion
+    # marker: it is inert under --kubernetes, so it only serves as a keyword
+    # here.
+    test_file.write_text('import pytest\n'
+                         '\n'
+                         '\n'
+                         '@pytest.mark.no_hyperbolic\n'
+                         'def test_kexpr_alpha():\n'
+                         '    pass\n'
+                         '\n'
+                         '\n'
+                         'def test_kexpr_beta():\n'
+                         '    pass\n'
+                         '\n'
+                         '\n'
+                         'def test_kexpr_gamma():\n'
+                         '    pass\n')
+    try:
+        alpha, beta, gamma = ('test_kexpr_alpha', 'test_kexpr_beta',
+                              'test_kexpr_gamma')
+
+        # A bare substring keeps working, so every existing -k in CI keeps
+        # selecting what it selects today.
+        assert _k_selected('--kubernetes -k test_kexpr_alpha') == {alpha}
+
+        # The operators, which is what this is for.
+        assert _k_selected(f'--kubernetes -k "{alpha} or {gamma}"') == {
+            alpha, gamma
+        }
+        assert _k_selected(f'--kubernetes -k "test_kexpr and not {beta}"') == {
+            alpha, gamma
+        }
+
+        # A parent's name counts: naming the module takes the whole file,
+        # which is how `-k cli` picks up all of test_cli.py.
+        assert _k_selected('--kubernetes -k test_k_expression_tmp') == {
+            alpha, beta, gamma
+        }
+
+        # So does a marker's name -- the one place this selects more than the
+        # old substring test did, since `no_hyperbolic` appears in neither the
+        # function name nor the path.
+        assert _k_selected('--kubernetes -k no_hyperbolic') == {alpha}
+    finally:
+        test_file.unlink(missing_ok=True)
+
+
 @pytest.mark.parametrize('args', [
     '',
     '--aws',
