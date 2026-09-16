@@ -561,6 +561,12 @@ def _supports_returning() -> bool:
     Only SQLite needs asking, and only about its own version: RETURNING there
     arrived in 3.35, and SQLAlchemy exposes it from 2.0, which
     `dependencies.py` already requires.
+
+    True for anything else because `SQLAlchemyDialect` models exactly two
+    backends -- not because not-SQLite implies RETURNING. A third would fail
+    loudly here, with a CompileError out of the claim, and would have to be
+    taught the other dialect branches in this module first; this is one of the
+    places to look when adding one.
     """
     engine = _db_manager.get_engine()
     if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:

@@ -140,6 +140,30 @@ def _active_workspace() -> Optional[str]:
         return None
 
 
+def _existing_cluster_hash(cluster_name: str) -> Optional[str]:
+    """Which incarnation of this cluster the attempt belongs to, if any.
+
+    Best-effort for the same reason as `_active_workspace`, and it has to be
+    its own function to be so: this is evaluated as an *argument* to
+    `open_launch_attempt`, and an argument is evaluated in the caller's frame
+    before the call -- so the `_best_effort` guard on that function, which
+    wraps its body, never sees it.
+
+    Unguarded it is worse than losing a label. It reads the clusters table,
+    and the raise would land in the handler below that runs `teardown_cluster`
+    with `terminate = not prev_cluster_ever_up`: relaunching onto a cluster
+    that is already up, a transient database error here would *stop that
+    running cluster* before failing the launch -- to fill one column on a
+    measurement row.
+    """
+    try:
+        return global_user_state.get_cluster_hash(cluster_name)
+    except Exception:  # pylint: disable=broad-except
+        logger.debug('Could not resolve the cluster hash for the launch '
+                     'attempt record.')
+        return None
+
+
 def bulk_provision(
     cloud: clouds.Cloud,
     region: clouds.Region,
@@ -198,8 +222,7 @@ def bulk_provision(
             provision_start = time.time()
             attempt_id = global_user_state.open_launch_attempt(
                 cluster_name=cluster_name.display_name,
-                cluster_hash=global_user_state.get_cluster_hash(
-                    cluster_name.display_name),
+                cluster_hash=_existing_cluster_hash(cluster_name.display_name),
                 request_id=request_id,
                 provision_start=provision_start,
                 cluster_name_on_cloud=cluster_name.name_on_cloud,

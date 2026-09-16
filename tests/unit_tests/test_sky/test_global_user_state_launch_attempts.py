@@ -11,6 +11,7 @@ import time
 import pytest
 
 from sky import global_user_state
+from sky.provision import provisioner
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils.db import db_utils
@@ -534,3 +535,31 @@ def test_claiming_is_exactly_once_on_both_backends(tmp_path, monkeypatch,
     # The second call is the exactly-once assertion: a replica running a tick
     # later must come away with nothing, not with the same rows again.
     assert global_user_state.claim_unobserved_launch_attempts() == []
+
+
+def test_opening_an_attempt_survives_its_own_arguments_failing(monkeypatch):
+    """The guard wraps a function body; arguments are evaluated before it.
+
+    `bulk_provision` calls open_launch_attempt with two computed arguments,
+    and both read state that can be unavailable. An exception there is raised
+    in the caller's frame, so `_best_effort` on the callee never sees it -- it
+    lands in the handler that runs teardown_cluster with
+    `terminate = not prev_cluster_ever_up`, which for a relaunch onto a
+    running cluster *stops that cluster* to fill one column on a measurement
+    row.
+
+    Asserted on the helpers rather than by driving bulk_provision, which would
+    need a cloud: each has to absorb its own failure, because there is nowhere
+    later that can.
+    """
+
+    def unavailable(*args, **kwargs):
+        raise RuntimeError('database is unavailable')
+
+    monkeypatch.setattr(provisioner.global_user_state, 'get_cluster_hash',
+                        unavailable)
+    monkeypatch.setattr(provisioner.skypilot_config, 'get_active_workspace',
+                        unavailable)
+
+    assert provisioner._existing_cluster_hash('some-cluster') is None
+    assert provisioner._active_workspace() is None
