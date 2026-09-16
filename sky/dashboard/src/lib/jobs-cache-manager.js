@@ -23,13 +23,17 @@ function getPluginFetch() {
  * keys external rows by task_job_id everywhere (row keys, job grouping, the
  * expanded details row), so a row without one would share the key undefined
  * with every other such row. The producer sets the field today. This is the
- * single fallback for a producer that omits it. The fallback is unique per
- * id, not per cluster.
+ * single fallback for a producer that omits it. The key is built from the
+ * cluster and the job id, because a Slurm job id is unique only within its
+ * cluster.
  */
 export function withExternalRowKeys(rows) {
   return rows.map((job) =>
     job.is_external && job.task_job_id == null
-      ? { ...job, task_job_id: `external:${job.id}` }
+      ? {
+          ...job,
+          task_job_id: `external:${job.external_cluster ?? ''}:${job.external_job_id ?? job.id}`,
+        }
       : job
   );
 }

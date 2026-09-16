@@ -45,13 +45,17 @@ describe('JobsCacheManager._groupTasksByJob', () => {
 describe('withExternalRowKeys', () => {
   test('backfills task_job_id on an external row that lacks one', () => {
     const rows = withExternalRowKeys([
-      { id: '41', is_external: true },
+      { id: '41', is_external: true, external_cluster: 'alpha' },
+      { id: '41', is_external: true, external_cluster: 'beta' },
       { id: '52', is_external: true, task_job_id: 'slurm-a-52' },
+      { id: '9', is_external: true },
       { id: 7 },
     ]);
     expect(rows.map((r) => r.task_job_id)).toEqual([
-      'external:41',
+      'external:alpha:41',
+      'external:beta:41',
       'slurm-a-52',
+      'external::9',
       undefined,
     ]);
   });
