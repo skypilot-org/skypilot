@@ -512,34 +512,51 @@ function ActiveTab({
                   {isHistoricalCluster ? 'Cloud' : 'Infra'}
                 </div>
                 <div className="text-base mt-1">
-                  {isHistoricalCluster ? (
-                    clusterData.cloud || 'N/A'
-                  ) : clusterData.infra ? (
-                    <NonCapitalizedTooltip
-                      content={clusterData.full_infra || clusterData.infra}
-                      className="text-sm text-muted-foreground"
-                    >
-                      <span>
-                        <Link
-                          href="/infra"
-                          className="text-blue-600 hover:underline"
-                        >
-                          {clusterData.cloud ||
-                            clusterData.infra.split('(')[0].trim()}
-                        </Link>
-                        {clusterData.infra.includes('(') && (
-                          <span>
-                            {' ' +
-                              clusterData.infra.substring(
-                                clusterData.infra.indexOf('(')
-                              )}
-                          </span>
-                        )}
-                      </span>
-                    </NonCapitalizedTooltip>
-                  ) : (
-                    'N/A'
-                  )}
+                  {(() => {
+                    // The default rendering, also handed to the plugin slot
+                    // as `defaultContent` so a plugin that only changes how
+                    // *some* clusters read can return it unchanged for the
+                    // rest. `fallback` keeps the no-plugin case identical.
+                    const infraContent = isHistoricalCluster ? (
+                      clusterData.cloud || 'N/A'
+                    ) : clusterData.infra ? (
+                      <NonCapitalizedTooltip
+                        content={clusterData.full_infra || clusterData.infra}
+                        className="text-sm text-muted-foreground"
+                      >
+                        <span>
+                          <Link
+                            href="/infra"
+                            className="text-blue-600 hover:underline"
+                          >
+                            {clusterData.cloud ||
+                              clusterData.infra.split('(')[0].trim()}
+                          </Link>
+                          {clusterData.infra.includes('(') && (
+                            <span>
+                              {' ' +
+                                clusterData.infra.substring(
+                                  clusterData.infra.indexOf('(')
+                                )}
+                            </span>
+                          )}
+                        </span>
+                      </NonCapitalizedTooltip>
+                    ) : (
+                      'N/A'
+                    );
+                    return (
+                      <PluginSlot
+                        name="clusters.detail.infra"
+                        context={{
+                          cluster: clusterData,
+                          isHistorical: isHistoricalCluster,
+                          defaultContent: infraContent,
+                        }}
+                        fallback={infraContent}
+                      />
+                    );
+                  })()}
                 </div>
               </div>
               <div>

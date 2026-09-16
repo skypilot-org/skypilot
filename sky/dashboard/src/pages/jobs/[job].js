@@ -1808,25 +1808,39 @@ function JobDetailsContent({
       <div>
         <div className="text-gray-600 font-medium text-base">Infra</div>
         <div className="text-base mt-1">
-          {jobData.infra ? (
-            <NonCapitalizedTooltip
-              content={jobData.full_infra || jobData.infra}
-              className="text-sm text-muted-foreground"
-            >
-              <span>
-                <Link href="/infra" className="text-blue-600 hover:underline">
-                  {jobData.cloud || jobData.infra.split('(')[0].trim()}
-                </Link>
-                {jobData.infra.includes('(') && (
-                  <span>
-                    {' ' + jobData.infra.substring(jobData.infra.indexOf('('))}
-                  </span>
-                )}
-              </span>
-            </NonCapitalizedTooltip>
-          ) : (
-            '-'
-          )}
+          {(() => {
+            // The default rendering, also handed to the plugin slot as
+            // `defaultContent` so a plugin that only changes how *some* jobs
+            // read can return it unchanged for the rest. `fallback` keeps the
+            // no-plugin case identical.
+            const infraContent = jobData.infra ? (
+              <NonCapitalizedTooltip
+                content={jobData.full_infra || jobData.infra}
+                className="text-sm text-muted-foreground"
+              >
+                <span>
+                  <Link href="/infra" className="text-blue-600 hover:underline">
+                    {jobData.cloud || jobData.infra.split('(')[0].trim()}
+                  </Link>
+                  {jobData.infra.includes('(') && (
+                    <span>
+                      {' ' +
+                        jobData.infra.substring(jobData.infra.indexOf('('))}
+                    </span>
+                  )}
+                </span>
+              </NonCapitalizedTooltip>
+            ) : (
+              '-'
+            );
+            return (
+              <PluginSlot
+                name="jobs.detail.infra"
+                context={{ job: jobData, defaultContent: infraContent }}
+                fallback={infraContent}
+              />
+            );
+          })()}
         </div>
       </div>
       {/* Slurm schedules onto a partition (its zone); it is how quota and
