@@ -135,6 +135,24 @@ function label(seconds, open) {
   return open ? `${text} so far` : text;
 }
 
+/**
+ * Whether the *job* page draws the bar, as opposed to the task page.
+ *
+ * Every field the job page shows comes from its first task, and for a pipeline
+ * that is one task of several measured from its own handoff rather than from
+ * the job's submission -- so task 0's bar under the job's name would be one
+ * task's number presented as the job's. Those get the panel per task instead.
+ *
+ * A job group is the exception the task count cannot see: its tasks all become
+ * eligible at the same moment, so task 0's bar really is the job's.
+ *
+ * Here rather than inline in the page so it can be tested without rendering
+ * the page, which is the only reason the condition had no test beside it.
+ */
+export function jobPageShowsTimeline(taskCount, jobData) {
+  return taskCount <= 1 || Boolean(jobData?.is_job_group);
+}
+
 export function JobStartupTimeline({ jobData }) {
   const timeline = readTimeline(jobData);
   // Absent for jobs that never started, and for those launched before the

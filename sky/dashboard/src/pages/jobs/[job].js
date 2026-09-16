@@ -50,7 +50,10 @@ import {
   streamManagedJobLogs,
   downloadManagedJobLogs,
 } from '@/data/connectors/jobs';
-import { JobStartupTimeline } from '@/components/jobs.startuptimeline';
+import {
+  JobStartupTimeline,
+  jobPageShowsTimeline,
+} from '@/components/jobs.startuptimeline';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { DynamicBadge } from '@/components/elements/DynamicBadge';
 import { PrimaryBadge } from '@/components/elements/PrimaryBadge';
@@ -1611,17 +1614,10 @@ function JobDetailsContent({
     <div className="grid grid-cols-2 gap-6">
       {/* Spans both columns: the bar is only readable at full width.
        *
-       * Every field in this block comes from allTasks[0], which for a
-       * pipeline is one task of several -- and a pipeline's later tasks are
-       * measured from their own handoff, not from the job's submission, so
-       * drawing task 0's bar here would put one task's number under the job's
-       * name. Those get the panel on each task's own page instead.
-       *
-       * A job group is the exception that the task count alone cannot see:
-       * its tasks all become eligible at the same moment, so task 0's bar is
-       * the job's. Excluding it cost the panel on a shape it describes
-       * perfectly well. */}
-      {(allTasks.length <= 1 || jobData?.is_job_group) && (
+       * Which shapes qualify is jobPageShowsTimeline, next to the component
+       * -- it needs a test, and testing it here would mean rendering the
+       * whole page to assert one boolean. */}
+      {jobPageShowsTimeline(allTasks.length, jobData) && (
         <div className="col-span-2">
           <JobStartupTimeline jobData={jobData} />
         </div>

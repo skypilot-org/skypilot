@@ -2,7 +2,33 @@ import '@testing-library/jest-dom';
 import { render, screen } from '@testing-library/react';
 import React from 'react';
 
-import { JobStartupTimeline } from './jobs.startuptimeline';
+import {
+  JobStartupTimeline,
+  jobPageShowsTimeline,
+} from './jobs.startuptimeline';
+
+describe('which shapes the job page draws the bar for', () => {
+  it('draws a single-task job', () => {
+    expect(jobPageShowsTimeline(1, {})).toBe(true);
+  });
+
+  it('leaves a pipeline to its task pages', () => {
+    // Task 0 of a pipeline is measured from its own handoff, so its bar under
+    // the job's name would be one task's number presented as the job's.
+    expect(jobPageShowsTimeline(3, { is_job_group: false })).toBe(false);
+  });
+
+  it('draws a job group, which the task count alone cannot tell apart', () => {
+    // Its tasks all become eligible together, so task 0's bar really is the
+    // job's -- the one multi-task shape the page can show correctly.
+    expect(jobPageShowsTimeline(3, { is_job_group: true })).toBe(true);
+  });
+
+  it('does not throw before the job has loaded', () => {
+    expect(jobPageShowsTimeline(0, null)).toBe(true);
+    expect(jobPageShowsTimeline(3, undefined)).toBe(false);
+  });
+});
 
 const GATED_JOB = {
   t_time_to_running: 1000,

@@ -339,11 +339,18 @@ def compute_job_progress(task: Dict[str, Any], attempts: List[Any],
         # ago as "starting, 1h so far", growing for as long as anyone looks at
         # it. These two are the halves the recorder already splits on.
         #
-        # They do not cover every terminal job: one path leaves both NULL. That
-        # check needs the status, whose type differs by queue path, so it lives
-        # with the caller that knows the shape of these rows -- see
-        # `_still_starting`. Not moved here to join the others, because this
-        # module deliberately does not import the job state.
+        # They do not cover every terminal job: `set_pending_cancelled` writes
+        # the status alone, so a job cancelled while PENDING has neither. That
+        # check is `_still_starting`, at the caller, and belongs there rather
+        # than here for three reasons -- none of them an import cycle, which
+        # there is not one of: the status arrives as an enum on one queue path
+        # and as the raw column on the other, and which one you are holding is
+        # a property of the seam rather than of a function that takes a plain
+        # dict from anywhere; `compute_job_timeline` is status-free and its
+        # live sibling should stay symmetric with it; and `sky.metrics` is a
+        # leaf that `global_user_state` depends on, so reaching up into the
+        # jobs package would invert the layering even where the interpreter
+        # allows it.
         return None
     total = now - origin
     if total <= 0:
