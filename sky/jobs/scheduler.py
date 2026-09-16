@@ -49,6 +49,7 @@ import pathlib
 import shutil
 import signal
 import sys
+import time
 import typing
 from typing import List, Optional, Set
 import uuid
@@ -87,6 +88,12 @@ JOB_CONTROLLER_PID_PATH = runtime_utils.expanduser('~/.sky/job_controller_pid')
 JOB_CONTROLLER_ENV_PATH = runtime_utils.expanduser('~/.sky/job_controller_env')
 
 CURRENT_HASH = os.path.expanduser('~/.sky/wheels/current_sky_wheel_hash')
+
+# Minimum spacing between consecutive controller starts. Starting the whole
+# pool at once makes a transaction-mode pooler open one server connection per
+# concurrent client and hold them until its idle timeout. Spacing the starts
+# keeps that open rate flat as the pool size grows with API server memory.
+_CONTROLLER_START_INTERVAL_SECONDS = 0.3
 
 
 def _parse_controller_pid_entry(
@@ -314,11 +321,14 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
             started = 0
 
             while alive + started < wanted:
+                if started:
+                    time.sleep(_CONTROLLER_START_INTERVAL_SECONDS)
                 start_controller()
                 started += 1
 
             if started > 0:
-                logger.info(f'Started {started} controllers')
+                spread = (started - 1) * _CONTROLLER_START_INTERVAL_SECONDS
+                logger.info(f'Started {started} controllers over {spread:.1f}s')
 
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock

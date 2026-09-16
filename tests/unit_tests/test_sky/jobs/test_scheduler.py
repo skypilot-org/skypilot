@@ -1,13 +1,8 @@
-"""Unit tests for sky.jobs.scheduler.kill_local_job_controllers.
-
-Used during shutdown (lock-loss suicide and uvicorn graceful shutdown) to
-prevent split-brain: this replica's controllers must not outlive the
-moment another replica's refresh daemon could acquire the consolidation
-lock. The helper must be best-effort — it runs on shutdown paths where
-raising would either prevent SIGTERM or stall drain.
-"""
+"""Unit tests for sky.jobs.scheduler controller process management."""
 import signal
 from unittest import mock
+
+import pytest
 
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
@@ -18,6 +13,12 @@ def _record(pid: int, started_at: float = 0.0):
 
 
 class TestKillLocalConsolidationControllers:
+    """Used during shutdown (lock-loss suicide and uvicorn graceful shutdown)
+    to prevent split-brain: this replica's controllers must not outlive the
+    moment another replica's refresh daemon could acquire the consolidation
+    lock. The helper must be best-effort -- it runs on shutdown paths where
+    raising would either prevent SIGTERM or stall drain.
+    """
 
     def test_no_pid_file_returns_zero(self):
         with mock.patch.object(scheduler,
@@ -110,3 +111,67 @@ class TestKillLocalConsolidationControllers:
                 mock.patch.object(scheduler.os, 'kill') as kill_mock:
             scheduler.kill_local_job_controllers(sig=signal.SIGKILL)
         kill_mock.assert_called_once_with(101, signal.SIGKILL)
+
+
+def _start_calls(alive: int, wanted: int):
+    """Runs maybe_start_controllers, returning an ordered start/sleep log."""
+    calls = []
+    fake_time = mock.MagicMock()
+    fake_time.sleep.side_effect = lambda s: calls.append(('sleep', s))
+
+    with mock.patch.object(scheduler.filelock, 'FileLock'), \
+            mock.patch.object(scheduler,
+                              'get_alive_controllers',
+                              return_value=alive), \
+            mock.patch.object(scheduler.controller_utils,
+                              'get_number_of_jobs_controllers',
+                              return_value=wanted), \
+            mock.patch.object(scheduler,
+                              'start_controller',
+                              side_effect=lambda: calls.append('start')), \
+            mock.patch.object(scheduler, 'time', fake_time):
+        scheduler.maybe_start_controllers()
+    return calls
+
+
+class TestMaybeStartControllersStagger:
+    """Controller starts are spaced instead of fanned out at once.
+
+    Every controller opens its own state-DB connections as it starts, so
+    starting the whole pool at once makes a transaction-mode pooler open one
+    server connection per concurrent client. The spacing is a fixed interval
+    rather than a fixed total window, because the pool size scales with API
+    server memory -- a fixed window would compress more starts into the same
+    time on a larger server.
+    """
+
+    def test_first_start_is_immediate(self):
+        interval = scheduler._CONTROLLER_START_INTERVAL_SECONDS
+        assert _start_calls(alive=0, wanted=3) == [
+            'start',
+            ('sleep', interval),
+            'start',
+            ('sleep', interval),
+            'start',
+        ]
+
+    def test_topping_up_one_controller_does_not_sleep(self):
+        assert _start_calls(alive=30, wanted=31) == ['start']
+
+    def test_full_pool_starts_nothing(self):
+        assert _start_calls(alive=31, wanted=31) == []
+
+    def test_spread_scales_with_pool_size(self):
+        """A bigger API server takes proportionally longer, not the same time.
+
+        That keeps the start rate -- and so the pooler's connection-open rate
+        -- identical across API server sizes.
+        """
+        interval = scheduler._CONTROLLER_START_INTERVAL_SECONDS
+        for wanted in (8, 31, 64):
+            calls = _start_calls(alive=0, wanted=wanted)
+            sleeps = [c for c in calls if c != 'start']
+            assert calls.count('start') == wanted
+            assert len(sleeps) == wanted - 1
+            assert sum(s for _, s in sleeps) == pytest.approx(
+                (wanted - 1) * interval)
