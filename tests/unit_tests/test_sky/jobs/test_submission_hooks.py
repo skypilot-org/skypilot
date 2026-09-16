@@ -8,6 +8,7 @@ from sky import dag as dag_lib
 from sky import task as task_lib
 from sky.jobs.server import core as jobs_core
 from sky.server import plugin_hooks
+from sky.utils import controller_utils
 
 
 @pytest.fixture(autouse=True)
@@ -42,8 +43,9 @@ def test_registration_during_dispatch():
 @pytest.mark.parametrize('consolidation', [True, False])
 @pytest.mark.parametrize('blob_id', ['uploaded-blob', None])
 @pytest.mark.parametrize('raises', [False, True])
-def test_launch_fires_submission_hooks(consolidation, blob_id, raises,
-                                       tmp_path):
+@pytest.mark.parametrize('translate_workdir', [False, True])
+def test_launch_fires_submission_hooks(consolidation, blob_id, raises, tmp_path,
+                                       translate_workdir):
     task = task_lib.Task(name='train', run='echo hello')
     task.workdir = str(tmp_path)
     dag = mock.Mock(spec=dag_lib.Dag)
@@ -61,10 +63,17 @@ def test_launch_fires_submission_hooks(consolidation, blob_id, raises,
 
     def finish(*_args, **_kwargs):
         # Hooks run before controller startup, once for the entire sweep.
-        hook.assert_called_once_with(job_ids, dag, blob_id, 'request-user')
-        following_hook.assert_called_once_with(job_ids, dag, blob_id,
+        hook.assert_called_once()
+        submitted_dag = hook.call_args.args[1]
+        assert submitted_dag is not dag
+        assert hook.call_args.args == (job_ids, submitted_dag, blob_id,
+                                       'request-user')
+        following_hook.assert_called_once_with(job_ids, submitted_dag, blob_id,
                                                'request-user')
-        assert dag.tasks[0].workdir == str(tmp_path)
+        assert submitted_dag.tasks[0].workdir == str(tmp_path)
+        assert submitted_dag.pool is None
+        assert dag.tasks[0].workdir == (None
+                                        if translate_workdir else str(tmp_path))
         return job_ids, None
 
     with contextlib.ExitStack() as stack:
@@ -87,7 +96,16 @@ def test_launch_fires_submission_hooks(consolidation, blob_id, raises,
               'cluster_with_name_exists',
               return_value=False)
         patch(jobs_core, '_warn_file_mounts_rolling_update')
-        patch(jobs_core, '_upload_files_to_controller', return_value={})
+
+        def stage_workdirs(dag_to_stage):
+            if translate_workdir:
+                return controller_utils.translate_local_file_mounts_to_two_hop(
+                    dag_to_stage.tasks[0])
+            return {}
+
+        patch(jobs_core,
+              '_upload_files_to_controller',
+              side_effect=stage_workdirs)
         patch(jobs_core.controller_utils,
               'get_controller_resources',
               return_value=task.resources)
