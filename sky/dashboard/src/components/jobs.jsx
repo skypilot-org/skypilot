@@ -2334,17 +2334,33 @@ export function ManagedJobsTable({
         );
       },
       renderCell: (item, ctx) => {
+        // The key this row's ExpandedDetailsRow checks against. See
+        // detailsRowId. A plugin Details cell may store either this key or
+        // item.id; item.id is translated here, per row, so a plugin never
+        // needs to know which rows are keyed by task_job_id.
+        const rowId = detailsRowId(item, ctx?.renderMode);
         // Merge job group context with plugin context
         const context = {
           item,
           shouldShowWorkspace,
           shouldShowPool,
-          expandedRowId,
-          setExpandedRowId,
+          rowId,
+          // What the plugin compares against item.id or rowId to decide
+          // whether this row is expanded. Equals item.id only when this row
+          // is the expanded one. A stored key that happens to equal this
+          // row's item.id but is another row's key is hidden, so a plugin
+          // comparing against item.id does not flip on the wrong row.
+          expandedRowId:
+            expandedRowId === rowId
+              ? item.id
+              : expandedRowId === item.id
+                ? undefined
+                : expandedRowId,
+          // Stores this row's key when the plugin passes item.id or rowId.
+          // null (collapse) and anything else pass through.
+          setExpandedRowId: (value) =>
+            setExpandedRowId(value === item.id ? rowId : value),
           expandedRowRef,
-          // The key a plugin Details column must store in setExpandedRowId
-          // for the expanded row under this row to open. See detailsRowId.
-          rowId: detailsRowId(item, ctx?.renderMode),
           // Forward job group context for plugins that need it
           ...(ctx || {}),
         };

@@ -216,6 +216,44 @@ describe('a plugin Details column', () => {
     expect(screen.getByText('Full Details')).toBeTruthy();
   });
 
+  it('opens the right row when it stores item.id and two clusters share a Slurm id', async () => {
+    mockPluginColumns.list = [pluginDetailsColumn((item) => item.id)];
+    renderRows([
+      baseRow({
+        id: '41',
+        name: 'alpha-job',
+        task_job_id: 'slurm-alpha-41',
+        is_external: true,
+        region: 'alpha',
+      }),
+      baseRow({
+        id: '41',
+        name: 'beta-job',
+        task_job_id: 'slurm-beta-41',
+        is_external: true,
+        region: 'beta',
+      }),
+    ]);
+    const toggles = await screen.findAllByText('plugin toggle');
+    expect(toggles).toHaveLength(2);
+    fireEvent.click(toggles[1]);
+    // Exactly one expanded row, and it sits under the second job.
+    expect(screen.getAllByText('Full Details')).toHaveLength(1);
+    const rowsAfterBeta = [...document.querySelectorAll('tbody tr')];
+    const betaIndex = rowsAfterBeta.findIndex((r) =>
+      r.textContent.includes('Full Details')
+    );
+    expect(rowsAfterBeta[betaIndex - 1].textContent).toContain('beta-job');
+    // Clicking the first job moves the single expanded row under it.
+    fireEvent.click(toggles[0]);
+    expect(screen.getAllByText('Full Details')).toHaveLength(1);
+    const rowsAfterAlpha = [...document.querySelectorAll('tbody tr')];
+    const alphaIndex = rowsAfterAlpha.findIndex((r) =>
+      r.textContent.includes('Full Details')
+    );
+    expect(rowsAfterAlpha[alphaIndex - 1].textContent).toContain('alpha-job');
+  });
+
   it('receives the plain id as context.rowId for a managed job', async () => {
     const seen = [];
     mockPluginColumns.list = [
