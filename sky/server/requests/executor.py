@@ -1326,6 +1326,15 @@ async def schedule_request_async(
                                                schedule_type,
                                                is_skypilot_system,
                                                auth_user=auth_user)
+    if (request_name == request_names.RequestName.CLUSTER_LAUNCH and
+            request_cluster_name is not None):
+        # A newer launch for the same cluster supersedes older launches, so
+        # retries and controller re-entries cannot leave duplicates queued or
+        # running concurrently. Best-effort by contract; run off the event
+        # loop because the kill path can block on cross-replica calls.
+        await asyncio.to_thread(api_requests.supersede_cluster_requests,
+                                request_cluster_name, request_task.name,
+                                request_task)
     await schedule_prepared_request(request_task, ignore_return_value,
                                     precondition, retryable)
 

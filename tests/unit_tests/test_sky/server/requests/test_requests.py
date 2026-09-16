@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import pathlib
+import signal
 import time
 from typing import List, Optional
 import unittest.mock as mock
@@ -2485,3 +2486,172 @@ async def test_kill_requests_unscoped_cancels_all(isolated_database):
     cancelled = requests.kill_requests(request_ids=['shutdown-a', 'shutdown-b'],
                                        user_id=None)
     assert set(cancelled) == {'shutdown-a', 'shutdown-b'}
+
+
+def _supersede_request(request_id: str,
+                       *,
+                       name: str = 'sky.launch',
+                       cluster_name: str = 'supersede-cluster',
+                       status: RequestStatus = RequestStatus.PENDING,
+                       created_at: float = 0.0,
+                       pid: Optional[int] = None) -> requests.Request:
+    return requests.Request(request_id=request_id,
+                            name=name,
+                            entrypoint=dummy,
+                            request_body=payloads.RequestBody(),
+                            status=status,
+                            created_at=created_at,
+                            pid=pid,
+                            cluster_name=cluster_name,
+                            user_id='test-user')
+
+
+@pytest.mark.asyncio
+async def test_supersede_cluster_requests_cancels_only_older_launches(
+        isolated_database):
+    """A newer launch cancels older launches for the same cluster only."""
+    older = _supersede_request('supersede-old', created_at=1.0)
+    new = _supersede_request('supersede-new', created_at=2.0)
+    other_cluster = _supersede_request('supersede-other-cluster',
+                                       cluster_name='other-cluster',
+                                       created_at=1.0)
+    other_name = _supersede_request('supersede-other-name',
+                                    name='sky.exec',
+                                    created_at=1.0)
+    for request in (older, new, other_cluster, other_name):
+        await requests.create_if_not_exists_async(request)
+
+    cancelled = requests.supersede_cluster_requests('supersede-cluster',
+                                                    'sky.launch', new)
+
+    assert cancelled == ['supersede-old']
+    assert requests.get_request(
+        'supersede-old').status == RequestStatus.CANCELLED
+    # The new request itself, other clusters, and other request names are
+    # untouched.
+    assert requests.get_request('supersede-new').status == RequestStatus.PENDING
+    assert requests.get_request(
+        'supersede-other-cluster').status == RequestStatus.PENDING
+    assert requests.get_request(
+        'supersede-other-name').status == RequestStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_supersede_cluster_requests_covers_active_statuses(
+        isolated_database):
+    """PENDING, WAITING and RUNNING rivals are superseded; terminal ones are
+    left alone."""
+    waiting = _supersede_request('supersede-waiting',
+                                 status=RequestStatus.WAITING,
+                                 created_at=1.0)
+    running = _supersede_request('supersede-running',
+                                 status=RequestStatus.RUNNING,
+                                 created_at=1.5)
+    succeeded = _supersede_request('supersede-succeeded',
+                                   status=RequestStatus.SUCCEEDED,
+                                   created_at=0.5)
+    succeeded.finished_at = 0.6
+    new = _supersede_request('supersede-active-new', created_at=2.0)
+    for request in (waiting, running, succeeded, new):
+        await requests.create_if_not_exists_async(request)
+
+    cancelled = requests.supersede_cluster_requests('supersede-cluster',
+                                                    'sky.launch', new)
+
+    assert set(cancelled) == {'supersede-waiting', 'supersede-running'}
+    assert requests.get_request(
+        'supersede-waiting').status == RequestStatus.CANCELLED
+    assert requests.get_request(
+        'supersede-running').status == RequestStatus.CANCELLED
+    assert requests.get_request(
+        'supersede-succeeded').status == RequestStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_supersede_cluster_requests_sigterms_running_rival(
+        isolated_database):
+    """A running rival's worker gets SIGTERM, not just a status flip."""
+    running = _supersede_request('supersede-sigterm',
+                                 status=RequestStatus.RUNNING,
+                                 created_at=1.0,
+                                 pid=4242)
+    new = _supersede_request('supersede-sigterm-new', created_at=2.0)
+    await requests.create_if_not_exists_async(running)
+    await requests.create_if_not_exists_async(new)
+
+    with mock.patch('os.kill') as mock_kill:
+        cancelled = requests.supersede_cluster_requests('supersede-cluster',
+                                                        'sky.launch', new)
+
+    assert cancelled == ['supersede-sigterm']
+    mock_kill.assert_called_once_with(4242, signal.SIGTERM)
+    assert requests.get_request(
+        'supersede-sigterm').status == RequestStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_supersede_cluster_requests_orders_by_created_at_then_id(
+        isolated_database):
+    """Same created_at: the request_id is the deterministic tie-breaker."""
+    older_id = _supersede_request('aaa-rival', created_at=5.0)
+    newer_id = _supersede_request('zzzz-rival', created_at=5.0)
+    new = _supersede_request('zzz-new', created_at=5.0)
+    for request in (older_id, newer_id, new):
+        await requests.create_if_not_exists_async(request)
+
+    cancelled = requests.supersede_cluster_requests('supersede-cluster',
+                                                    'sky.launch', new)
+
+    assert cancelled == ['aaa-rival']
+    assert requests.get_request('aaa-rival').status == RequestStatus.CANCELLED
+    assert requests.get_request('zzzz-rival').status == RequestStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_supersede_cluster_requests_newer_rivals_untouched(
+        isolated_database):
+    """A newer rival is never cancelled by an older request."""
+    newer = _supersede_request('supersede-newer-rival', created_at=3.0)
+    new = _supersede_request('supersede-older-new', created_at=2.0)
+    await requests.create_if_not_exists_async(newer)
+    await requests.create_if_not_exists_async(new)
+
+    cancelled = requests.supersede_cluster_requests('supersede-cluster',
+                                                    'sky.launch', new)
+
+    assert cancelled == []
+    assert requests.get_request(
+        'supersede-newer-rival').status == RequestStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_supersede_cluster_requests_no_rivals(isolated_database):
+    """No active rivals: nothing to cancel."""
+    new = _supersede_request('supersede-alone', created_at=1.0)
+    await requests.create_if_not_exists_async(new)
+
+    assert requests.supersede_cluster_requests('supersede-cluster',
+                                               'sky.launch', new) == []
+    assert requests.get_request(
+        'supersede-alone').status == RequestStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_supersede_cluster_requests_is_best_effort(isolated_database):
+    """A failing kill is swallowed: the new request must never be blocked."""
+    older = _supersede_request('supersede-failing-old', created_at=1.0)
+    new = _supersede_request('supersede-failing-new', created_at=2.0)
+    await requests.create_if_not_exists_async(older)
+    await requests.create_if_not_exists_async(new)
+
+    with mock.patch.object(requests,
+                           '_kill_requests',
+                           side_effect=RuntimeError('boom')):
+        cancelled = requests.supersede_cluster_requests('supersede-cluster',
+                                                        'sky.launch', new)
+
+    assert cancelled == []
+    assert requests.get_request(
+        'supersede-failing-old').status == RequestStatus.PENDING
+    assert requests.get_request(
+        'supersede-failing-new').status == RequestStatus.PENDING
