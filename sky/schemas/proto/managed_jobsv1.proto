@@ -99,6 +99,11 @@ message GetJobTableRequest {
   // that predates it ignores this field, so the response reports back whether
   // it was honoured rather than leaving the caller to assume it was.
   optional string infra_match = 17;
+  // With `job_ids`, also return the rest of each job's tree: the jobs
+  // launched under it, at any depth. Added in ManagedJobsService v27. A server
+  // that predates it ignores this field and returns only the requested jobs'
+  // rows, so the response reports whether the field was applied.
+  optional bool include_tree = 18;
 }
 
 message ManagedJobInfo {
@@ -193,6 +198,10 @@ message GetJobTableResponse {
   // which is not an error the way a dropped `infra_match` is: the caller falls
   // back to deriving the options from the rows on the page.
   repeated string infra_options = 6;
+  // Whether `include_tree` was applied. Added in ManagedJobsService v27. A
+  // server that predates the field leaves it false. The caller needs this
+  // because a root-only answer and a tree answer look alike.
+  bool include_tree_applied = 7;
 }
 
 message GetAllJobIdsByNameRequest {
