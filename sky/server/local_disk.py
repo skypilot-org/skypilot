@@ -347,6 +347,19 @@ def available_for_path(path: str) -> Optional[int]:
     return min(bounds)
 
 
+def used_for_path(path: str) -> Optional[int]:
+    """Bytes in use on the filesystem holding *path*, or None if unknown.
+
+    Everything on that filesystem counts, not only what the caller put
+    there. Reserved blocks count as used.
+    """
+    filesystems = _filesystem_usage([_nearest_existing(path)])
+    if not filesystems:
+        return None
+    filesystem = next(iter(filesystems.values()))
+    return max(filesystem.size_bytes - filesystem.avail_bytes, 0)
+
+
 def _count_unreadable(error: OSError) -> int:
     """Returns 1 if *error* hides bytes from the walk, 0 if it does not."""
     return 0 if error.errno == errno.ENOENT else 1

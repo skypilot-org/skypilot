@@ -205,6 +205,12 @@ UPLOAD_CHUNK_BYTES = 95 * 1000 * 1000
 # at extraction time cannot be known while its chunks arrive.
 MAX_UPLOAD_TOTAL_BYTES_ENV_VAR = 'SKYPILOT_MAX_UPLOAD_TOTAL_BYTES'
 
+# Ceiling on the storage the blob backend keeps file mounts on, as an
+# integer number of bytes. Unset or non-positive means no limit. Bounds
+# what the server holds across uploads, where MAX_UPLOAD_TOTAL_BYTES
+# bounds any one of them.
+MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR = 'SKYPILOT_MAX_STORED_FILE_MOUNTS_BYTES'
+
 # Interval for the daemon that sweeps expired managed-job API access tokens
 # from the service_account_tokens table. These tokens are normally revoked
 # by the jobs controller on completion, but the daemon ensures any tokens

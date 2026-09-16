@@ -1841,19 +1841,28 @@ def _gb(num_bytes: int) -> str:
     return f'{num_bytes / 1000 ** 3:.1f} GB'
 
 
-def _max_upload_total_bytes() -> Optional[int]:
-    """The configured cap on one upload, or None when uncapped."""
-    raw = os.environ.get(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR)
+def _byte_limit_env(name: str) -> Optional[int]:
+    """The byte limit *name* declares, or None when it declares none."""
+    raw = os.environ.get(name)
     if not raw:
         return None
     try:
         value = int(raw)
     except ValueError:
-        logger.warning(
-            'Ignoring unparseable '
-            f'{server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR}={raw!r}')
+        logger.warning(f'Ignoring unparseable {name}={raw!r}')
         return None
     return value if value > 0 else None
+
+
+def _max_upload_total_bytes() -> Optional[int]:
+    """The configured cap on one upload, or None when uncapped."""
+    return _byte_limit_env(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR)
+
+
+def _max_stored_file_mounts_bytes() -> Optional[int]:
+    """The configured cap on the stored file mounts, or None when uncapped."""
+    return _byte_limit_env(
+        server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR)
 
 
 def _upload_too_large(num_bytes: int, limit: int) -> fastapi.HTTPException:
@@ -1861,6 +1870,15 @@ def _upload_too_large(num_bytes: int, limit: int) -> fastapi.HTTPException:
         status_code=413,
         detail=(f'Upload of {_gb(num_bytes)} exceeds the {_gb(limit)} limit '
                 'on a single upload. Upload fewer or smaller files.'))
+
+
+def _file_mounts_storage_full(stored: int, limit: int) -> fastapi.HTTPException:
+    return fastapi.HTTPException(
+        status_code=507,
+        detail=(f'The storage holding file mounts is at {_gb(stored)}, the '
+                f'{_gb(limit)} this server keeps. Read large inputs from a '
+                'bucket or a volume instead of uploading them, or retry once '
+                'the workloads using the current ones have finished.'))
 
 
 def _stored_bytes(directory: Optional[pathlib.Path]) -> int:
@@ -1908,6 +1926,24 @@ def _admit_extraction(members: List[zipfile.ZipInfo], target_dir: pathlib.Path):
                     'available there. Upload fewer or smaller files.'))
     with local_disk.reserve(needed):
         yield
+
+
+async def _admit_stored_file_mounts(blobs_dir: pathlib.Path) -> None:
+    """Refuses a chunk once the blob store's filesystem is full.
+
+    The limit bounds that filesystem, not one user's uploads: anything
+    else mounted there competes for the same space and counts too.
+
+    An upload already under way runs to the end, and chunks in flight
+    together are admitted against the same reading, so the limit can be
+    passed by at most what the cap on one upload allows.
+    """
+    limit = _max_stored_file_mounts_bytes()
+    if limit is None:
+        return
+    stored = await asyncio.to_thread(local_disk.used_for_path, str(blobs_dir))
+    if stored is not None and stored >= limit:
+        raise _file_mounts_storage_full(stored, limit)
 
 
 async def _receive_and_assemble_chunks(
@@ -2156,6 +2192,7 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
     # Note that we skip assemble and extract here since cocurrent chunk
     # uploads will race, and we do finalize with the upload_lock instead.
     staging_dir = storage.get_staging_dir(user_id, upload_id)
+    await _admit_stored_file_mounts(storage.blobs_dir(user_id))
     result = await _receive_and_assemble_chunks(base_dir=staging_dir,
                                                 zip_name='staging',
                                                 request=request,
