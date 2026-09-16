@@ -245,9 +245,35 @@ describe('useSingleManagedJob tree in one fetch', () => {
 
     // Remembered: the next job goes straight to the two calls.
     jest.clearAllMocks();
-    renderHook(() => useSingleManagedJob('56165', 0));
+    const { rerender } = renderHook(
+      ({ trigger }) => useSingleManagedJob('56165', trigger),
+      { initialProps: { trigger: 0 } }
+    );
     await waitFor(() => expect(dashboardCache.get).toHaveBeenCalledTimes(2));
     expect(dashboardCache.get).not.toHaveBeenCalledWith(
+      getManagedJobs,
+      expect.arrayContaining([expect.objectContaining({ includeTree: true })])
+    );
+
+    // An explicit Refresh tries the tree again (the controller may have
+    // upgraded). It succeeds here, so the flag clears and later loads use
+    // the tree fetch.
+    jest.clearAllMocks();
+    dashboardCache.get.mockResolvedValue({
+      jobs: treeRows,
+      controllerStopped: false,
+    });
+    rerender({ trigger: 1 });
+    await waitFor(() =>
+      expect(dashboardCache.get).toHaveBeenCalledWith(
+        getManagedJobs,
+        expect.arrayContaining([expect.objectContaining({ includeTree: true })])
+      )
+    );
+    jest.clearAllMocks();
+    renderHook(() => useSingleManagedJob('56166', 0));
+    await waitFor(() => expect(dashboardCache.get).toHaveBeenCalledTimes(1));
+    expect(dashboardCache.get).toHaveBeenCalledWith(
       getManagedJobs,
       expect.arrayContaining([expect.objectContaining({ includeTree: true })])
     );

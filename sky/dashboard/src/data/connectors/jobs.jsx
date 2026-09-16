@@ -652,7 +652,9 @@ const JOB_TREE_MEMBER_FIELDS = [
 
 // Set once a jobs controller refuses `include_tree` because it predates the
 // field (it updates itself on the next managed job launch). After that,
-// job pages skip the refused request and go straight to the fallback.
+// job pages skip the refused request and go straight to the fallback. An
+// explicit Refresh tries the tree fetch again, so an upgraded controller is
+// picked up without reloading the dashboard.
 let treeFetchUnsupported = false;
 
 // The one queue call a job's detail page makes. It returns the job's own
@@ -770,11 +772,12 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0, options = {}) {
       try {
         setLoadingJobData(true);
         let tree;
-        if (treeFetchUnsupported) {
+        if (treeFetchUnsupported && !refreshed) {
           tree = await fetchTreeLegacy();
         } else {
           try {
             tree = await fetchTree();
+            treeFetchUnsupported = false;
           } catch (error) {
             if (!error?.includeTreeUnsupported) throw error;
             treeFetchUnsupported = true;
