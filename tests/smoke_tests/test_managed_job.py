@@ -3123,7 +3123,7 @@ def test_job_group_networking(generic_cloud: str):
         # Ubuntu base image - no sudo installed by default
         'docker:ubuntu:22.04',
         # Miniconda image - commonly used, has Python, no sudo
-        'docker:continuumio/miniconda3:24.1.2-0',
+        'docker:continuumio/miniconda3:25.3.1-1',
     ])
 def test_job_group_networking_custom_image(generic_cloud: str, image_id: str):
     """Test JobGroup networking with custom images that have no sudo installed.
