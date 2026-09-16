@@ -282,6 +282,147 @@ def timeline_columns(phases: Dict[str, float],
     return columns
 
 
+# --- The same job, before it has started -------------------------------------
+#
+# Everything above is written once, from the moment a job first runs, so it
+# says nothing about a job that has not got there yet -- which is exactly the
+# job someone opens the detail page to look at. The milestones can answer that
+# live: which phases have closed, and which one the job is sitting in now.
+#
+# Deliberately not written to the t_* columns. Those mean "this is what the
+# wait was", and a growing number under that name would be read as a finished
+# one wherever it is shown -- the jobs list especially, which is a scan of
+# settled work.
+
+
+@dataclasses.dataclass
+class JobProgress:
+    """How far into starting a job is, for one that has not started yet."""
+    # Seconds since the job became eligible to start. Growing.
+    total: float
+    # Every phase so far, including the open one. They sum to `total`.
+    phases: Dict[str, float]
+    # The phase the job is in right now. Its entry in `phases` is still
+    # growing, so a reader must render it as open rather than as a measurement.
+    open_phase: str
+
+
+def compute_job_progress(task: Dict[str, Any], attempts: List[Any],
+                         now: float) -> Optional[JobProgress]:
+    """Split the wait so far of a job that has not started yet.
+
+    Where ``compute_job_timeline`` closes every phase against ``start_at``,
+    here one phase is still open and is whatever ``total`` has left over. That
+    is not only shorter: it makes the phases sum to the elapsed time by
+    construction, so the bar this draws cannot disagree with the total beside
+    it whichever milestone the job has reached.
+
+    The branches test each milestone for NULL instead of falling back to the
+    previous one as the settled path does, because in flight the two cases are
+    genuinely different: a missing ``instances_requested`` there means a cloud
+    with no request step, and here it means the request has not happened yet.
+
+    Returns None when nothing truthful can be said -- no origin, or milestones
+    that do not fit inside the elapsed time.
+    """
+    origin = task.get('eligible_at')
+    submitted = task.get('submitted_at')
+    if origin is None or task.get('start_at') is not None:
+        # A job that has started belongs to the settled breakdown, even in the
+        # minute before the daemon writes it: measuring to `now` there would
+        # keep growing after the wait had ended.
+        return None
+    if task.get('end_at') is not None:
+        # Finished without ever running -- failed prechecks, found no
+        # resources, or was cancelled while starting. It is not waiting for
+        # anything, so measuring to `now` would report a job that died an hour
+        # ago as "starting, 1h so far", growing for as long as anyone looks at
+        # it. These two are the halves the recorder already splits on.
+        #
+        # They do not cover every terminal job: `set_pending_cancelled` writes
+        # the status alone, so a job cancelled while PENDING has neither. That
+        # check is `_still_starting`, at the caller, and belongs there rather
+        # than here for three reasons -- none of them an import cycle, which
+        # there is not one of: the status arrives as an enum on one queue path
+        # and as the raw column on the other, and which one you are holding is
+        # a property of the seam rather than of a function that takes a plain
+        # dict from anywhere; `compute_job_timeline` is status-free and its
+        # live sibling should stay symmetric with it; and `sky.metrics` is a
+        # leaf that `global_user_state` depends on, so reaching up into the
+        # jobs package would invert the layering even where the interpreter
+        # allows it.
+        return None
+    total = now - origin
+    if total <= 0:
+        return None
+    if submitted is None:
+        # Not claimed by a controller yet, so there is exactly one phase and
+        # it is the one still running.
+        return JobProgress(total, {CONTROLLER_QUEUE: total}, CONTROLLER_QUEUE)
+
+    closed: Dict[str, float] = {CONTROLLER_QUEUE: submitted - origin}
+    # Claimed but not provisioning yet: the preparation before the instances
+    # are asked for is provision_setup wherever it happens, so it is charged
+    # there rather than given a phase of its own that the settled breakdown
+    # does not have.
+    open_phase = PROVISION_SETUP
+
+    if attempts:
+        last = attempts[-1]
+        if last.outcome is not None and last.outcome != _OUTCOME_SUCCEEDED:
+            # Between attempts. The next one has not opened a row yet, so the
+            # backoff is only visible as the gap since the last one started --
+            # which is what retry_overhead measures once it closes.
+            closed[PROVISION_SETUP] = (attempts[0].provision_start - submitted)
+            open_phase = RETRY_OVERHEAD
+        else:
+            retry = last.provision_start - attempts[0].provision_start
+            closed[RETRY_OVERHEAD] = retry
+            # Where provisioning stops preparing and starts waiting on the
+            # cloud. Absent means one of two different things, and which one is
+            # decidable from the milestones after it: with none of them set the
+            # request has not happened yet, but an admission or a readiness
+            # proves it did, on a cloud with no separate request step. Falling
+            # back only in the second case is what keeps those clouds from
+            # reporting every later milestone as more preparation -- the
+            # settled path takes the same fallback unconditionally, because by
+            # then there is no "not yet".
+            boundary = last.instances_requested
+            if boundary is None and (last.admitted is not None or
+                                     last.instances_ready is not None):
+                boundary = last.provision_start
+            if boundary is not None:
+                closed[PROVISION_SETUP] = boundary - submitted - retry
+                if last.admitted is not None:
+                    closed[QUEUE_WAIT] = last.admitted - boundary
+                    if last.instances_ready is not None:
+                        closed[NODE_STARTUP] = (last.instances_ready -
+                                                last.admitted)
+                        open_phase = RUNTIME_SETUP
+                    else:
+                        open_phase = NODE_STARTUP
+                elif last.instances_ready is not None:
+                    # Nothing gated it, and the instances are already up.
+                    closed[NODE_STARTUP] = last.instances_ready - boundary
+                    open_phase = RUNTIME_SETUP
+                else:
+                    # An external scheduler names its queue when the workload
+                    # is submitted to it, not when it is admitted, precisely so
+                    # that a launch still waiting is attributable. Without one,
+                    # nothing is gating this launch and the time is scale-up.
+                    open_phase = QUEUE_WAIT if last.queue else NODE_STARTUP
+
+    phases = {phase: max(0.0, value) for phase, value in closed.items()}
+    remaining = total - sum(phases.values())
+    if remaining < 0:
+        # The milestones do not fit inside the elapsed time, so at least one of
+        # them is wrong. Drawing the bar anyway would misattribute a phase; the
+        # page falls back to showing no breakdown.
+        return None
+    phases[open_phase] = remaining
+    return JobProgress(total, phases, open_phase)
+
+
 def observe_job_timeline(workspace: Optional[str], total: float,
                          phases: Dict[str, float], on_pool: bool) -> None:
     """Emit the metrics for one job's submission-to-running time."""

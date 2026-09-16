@@ -681,6 +681,14 @@ class JobsQueueV2Body(RequestBody):
     # Time-range filter on submitted_at (epoch seconds).
     submitted_after: Optional[float] = None
     submitted_before: Optional[float] = None
+    # Compute the startup breakdown of each returned job that has not started
+    # yet (`startup_progress` on the response). Off by default and asked for
+    # explicitly, because it costs a read of this server's launch attempts per
+    # job and only the job detail page draws it. A server too old to know the
+    # field ignores it and answers without the breakdown, which costs the
+    # panel and nothing else -- unlike `infra_match` above, where a dropped
+    # field would return rows the caller believes were filtered.
+    include_startup_progress: bool = False
 
 
 class JobsCancelBody(RequestBody):

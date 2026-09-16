@@ -50,6 +50,10 @@ import {
   streamManagedJobLogs,
   downloadManagedJobLogs,
 } from '@/data/connectors/jobs';
+import {
+  JobStartupTimeline,
+  jobPageShowsTimeline,
+} from '@/components/jobs.startuptimeline';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { DynamicBadge } from '@/components/elements/DynamicBadge';
 import { PrimaryBadge } from '@/components/elements/PrimaryBadge';
@@ -1608,6 +1612,16 @@ function JobDetailsContent({
   // Default 'info' tab content
   return (
     <div className="grid grid-cols-2 gap-6">
+      {/* Spans both columns: the bar is only readable at full width.
+       *
+       * Which shapes qualify is jobPageShowsTimeline, next to the component
+       * -- it needs a test, and testing it here would mean rendering the
+       * whole page to assert one boolean. */}
+      {jobPageShowsTimeline(allTasks.length, jobData) && (
+        <div className="col-span-2">
+          <JobStartupTimeline jobData={jobData} />
+        </div>
+      )}
       <div>
         <div className="text-gray-600 font-medium text-base">
           {taskContext ? 'Task' : 'Job ID (Name)'}

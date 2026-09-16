@@ -19,7 +19,17 @@ import { useSingleManagedJob, getManagedJobs } from '@/data/connectors/jobs';
 
 describe('useSingleManagedJob manual-refresh cache invalidation', () => {
   const jobId = '56164';
-  const expectedArgs = [{ allUsers: true, allFields: true, jobIDs: [jobId] }];
+  // Every option the hook fetches with, startupProgress included: the cache
+  // key is the argument list, so a key that omits one clears a different
+  // entry than the one the refetch fills.
+  const expectedArgs = [
+    {
+      allUsers: true,
+      allFields: true,
+      jobIDs: [jobId],
+      startupProgress: true,
+    },
+  ];
 
   beforeEach(() => {
     jest.clearAllMocks();

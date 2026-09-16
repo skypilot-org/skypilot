@@ -37,6 +37,7 @@ from sky.jobs import constants as managed_job_constants
 from sky.jobs import runner as managed_job_runner
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
+from sky.metrics import launch_phases
 from sky.metrics import utils as metrics_lib
 from sky.provision import common as provision_common
 from sky.schemas.api import responses
@@ -1469,6 +1470,83 @@ def queue(refresh: bool,
     return jobs
 
 
+def _still_starting(job: Dict[str, Any]) -> bool:
+    """Whether this job can still reach RUNNING.
+
+    The status rather than the timestamps, because one terminal path leaves
+    both of them NULL: ``set_pending_cancelled`` updates ``status`` alone, so a
+    job cancelled while PENDING has no ``start_at`` and no ``end_at`` and would
+    otherwise be measured from its origin to now -- reporting a job cancelled
+    yesterday as "Starting, 1d so far", growing on every page open.
+
+    Accepts the enum or its value: the gRPC path decodes the proto into a
+    ``ManagedJobStatus`` and the consolidation path hands back the raw column.
+    A status that is neither is treated as terminal -- the panel is worth less
+    than the risk of a number that grows forever.
+    """
+    status = job.get('status')
+    if isinstance(status, managed_job_state.ManagedJobStatus):
+        return not status.is_terminal()
+    try:
+        return not managed_job_state.ManagedJobStatus(status).is_terminal()
+    except ValueError:
+        return False
+
+
+def _attach_startup_progress(jobs: List[Dict[str, Any]]) -> None:
+    """Attach the live startup breakdown to each job that has not started yet.
+
+    The ``t_*`` columns are written once the job first runs, so the job someone
+    opens the detail page to look at -- one that is still starting -- has none
+    of them. The milestones it does have are in ``launch_attempts``, so the
+    breakdown can be computed here without the controller knowing anything
+    about it.
+
+    Only where that table is this server's. The milestones are written by the
+    provisioner, which for a managed job runs on the controller, so the two
+    coincide only in consolidation mode -- the same condition the managed-jobs
+    metrics collector already refuses to run without. Elsewhere the lookup
+    returns nothing, and an empty result is not a signal this can act on: it is
+    also the honest early state of a job that has been claimed but has not
+    begun provisioning. So the mode is the discriminator, not the rows.
+
+    Getting that wrong is worse than showing nothing. With no attempts the
+    split has only the controller wait to name, and everything after it falls
+    into the phase that follows -- so a job parked in a scheduler queue for an
+    hour would read "Preparing the launch, 59m so far". Naming the wrong owner
+    of a wait is the misdiagnosis this whole breakdown exists to prevent.
+
+    Best effort in both directions: a job with nothing to say simply gets no
+    key, and a failure to read the attempts costs the breakdown rather than the
+    queue the caller actually asked for.
+    """
+    if not managed_job_utils.is_consolidation_mode():
+        return
+    now = time.time()
+    for job in jobs:
+        # A pool task's cluster is shared across jobs, so its attempts are not
+        # this job's -- the same exclusion the event lookup makes.
+        if (job.get('start_at') is not None or job.get('eligible_at') is None or
+                job.get('pool') is not None or not job.get('task_name') or
+                not _still_starting(job)):
+            continue
+        try:
+            attempts = global_user_state.get_launch_attempts_for_cluster(
+                managed_job_utils.generate_managed_job_cluster_name(
+                    job['task_name'], job['job_id']))
+            progress = launch_phases.compute_job_progress(job, attempts, now)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Could not compute the startup progress of job '
+                         f'{job.get("job_id")}: {e}')
+            continue
+        if progress is not None:
+            job['startup_progress'] = {
+                'total': progress.total,
+                'phases': progress.phases,
+                'open_phase': progress.open_phase,
+            }
+
+
 @usage_lib.entrypoint
 def queue_v2_api(
     refresh: bool,
@@ -1488,6 +1566,7 @@ def queue_v2_api(
     sort_order: Optional[str] = None,
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
+    include_startup_progress: bool = False,
 ) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int,
            List[str]]:
     """Gets statuses of managed jobs and parse the
@@ -1510,6 +1589,12 @@ def queue_v2_api(
         sort_order=sort_order,
         submitted_after=submitted_after,
         submitted_before=submitted_before)
+    if include_startup_progress:
+        # Asked for, rather than inferred from the shape of the request. It
+        # costs a read of this server's attempts per job, and only the job
+        # detail page draws it -- the jobs list shows settled numbers only, on
+        # purpose, because a growing one in a column reads as final.
+        _attach_startup_progress(jobs)
     if fields:
         # The queue records carry every known column (None for the ones the
         # query didn't select). Callers that pass ``fields`` have declared
@@ -1520,7 +1605,10 @@ def queue_v2_api(
         # of thousands of jobs). ``job_id``, ``task_id`` and ``status`` are
         # always kept: the server force-selects them (see _update_fields)
         # and clients key records on them.
-        keep = set(fields) | {'job_id', 'task_id', 'status'}
+        # ``startup_progress`` is computed here rather than selected, so it is
+        # kept too -- a caller that named the timestamp fields would otherwise
+        # lose the thing they were read for.
+        keep = set(fields) | {'job_id', 'task_id', 'status', 'startup_progress'}
         jobs = [{k: v for k, v in job.items() if k in keep} for job in jobs]
     return ([responses.ManagedJobRecord(**job) for job in jobs], total,
             status_counts, total_no_filter, infra_options)

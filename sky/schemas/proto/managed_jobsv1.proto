@@ -168,6 +168,39 @@ message ManagedJobInfo {
   // A dynamic task's ordinal within its root's tree (unset for top-level
   // jobs); `<root_job_id>-<dynamic_task_index>` names it on the CLI.
   optional int64 dynamic_task_index = 44;
+  // The startup breakdown, added in ManagedJobsService v27. All unset
+  // until the job first reaches RUNNING, on jobs that never run, and on
+  // jobs that predate the breakdown -- the dashboard draws nothing rather
+  // than a bar of zero width.
+  // the whole submission-to-running wait
+  optional double t_time_to_running = 45;
+  // waiting for a controller to claim the job
+  optional double t_controller_queue = 46;
+  // launch attempts thrown away, plus their backoff
+  optional double t_retry_overhead = 47;
+  // time no phase claims
+  optional double t_unattributed = 48;
+  // preparing the launch, up to asking for instances
+  optional double t_provision_setup = 49;
+  // parked in an external scheduler queue
+  optional double t_queue_wait = 50;
+  // instances asked for, until they are running
+  optional double t_node_startup = 51;
+  // instances up, until the job is running
+  optional double t_runtime_setup = 52;
+  // When the job was accepted -- the moment the breakdown above measures
+  // from. Distinct from submitted_at, which is when a controller claimed it;
+  // the gap between the two is t_controller_queue, and a page showing only
+  // submitted_at invites subtracting two visible timestamps and getting a
+  // third number. Unset on jobs that predate the breakdown, which are also
+  // the jobs with no t_* at all.
+  optional double created_at = 53;
+  // When this task could first have started, and what the breakdown above is
+  // measured from. Equal to created_at for a single task and for every task
+  // of a job group; for a pipeline's task N it is when task N-1 finished, so
+  // the two are not interchangeable and the page shows this one beside the
+  // bar. Unset on jobs that predate the breakdown.
+  optional double eligible_at = 54;
 }
 
 // A pair of internal and external IP addresses

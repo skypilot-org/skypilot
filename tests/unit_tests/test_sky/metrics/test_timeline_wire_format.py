@@ -1,0 +1,241 @@
+"""The startup breakdown has to survive every hop to the page that draws it.
+
+Four independent allowlists sit between the column and the screen, and each one
+names its fields by hand: the job dict the controller builds, the protobuf
+message `GetJobTable` fills in, the response model the API serializes through,
+and the dashboard connector's row mapping. A phase missing from any of them is
+invisible everywhere downstream, with nothing failing -- the panel simply
+renders nothing, exactly as it does for a job that never ran.
+
+That is not hypothetical; it has happened at three of the four. The last was
+the first hop, which this file described from the start and did not check: the
+message, the model and the connector all carried the breakdown, and the API
+still answered without it, because the dict every queue path is built from had
+never been given the columns.
+
+So this asserts the chain rather than any one link, driven off the canonical
+phase list so a phase added later has to be carried everywhere or go red here.
+"""
+import types
+
+from google.protobuf import json_format
+
+from sky.jobs import state as managed_job_state
+from sky.jobs import utils as managed_job_utils
+from sky.metrics import launch_phases
+from sky.schemas.api import responses
+from sky.schemas.generated import managed_jobsv1_pb2
+from sky.skylet import constants as skylet_constants
+
+# What the recorder writes, as the recorder itself defines it. Derived rather
+# than restated: a list retyped here would drift from the one that matters.
+TIMELINE_COLUMNS = sorted(
+    set(launch_phases._JOB_PHASE_COLUMNS.values()) | {'t_time_to_running'})
+
+
+def test_the_dict_the_controller_builds_carries_the_breakdown():
+    """The first hop, and the one this suite described but did not check.
+
+    `_get_jobs_dict` names every key by hand, and both queue paths go through
+    it -- the protobuf reads it with `job.get(...)`, and a consolidation-mode
+    server returns it as-is. A column missing here is therefore missing from
+    both, however correct every hop below is. It shipped that way: the fields
+    were on the message and on the response model, the panel drew from
+    hand-built data in its own tests, and the API answered without them.
+    """
+    row = {column.name: 1.5 for column in managed_job_state.spot_table.columns}
+
+    built = managed_job_state._get_jobs_dict(row)
+
+    missing = [
+        c for c in TIMELINE_COLUMNS + ['created_at', 'eligible_at']
+        if built.get(c) is None
+    ]
+    assert not missing, (
+        f'{missing} are on the spot table but not in the dict the controller '
+        f'builds, so no queue path can return them')
+
+
+def test_every_phase_column_crosses_the_controller_boundary():
+    """The protobuf must carry each column the breakdown writes.
+
+    `GetJobTable` builds ManagedJobInfo field by field, so a column with no
+    field on the message never leaves the jobs controller -- and the API
+    server, the dashboard and the operator all see a job with no breakdown.
+    """
+    fields = {
+        f.name for f in managed_jobsv1_pb2.ManagedJobInfo.DESCRIPTOR.fields
+    }
+
+    missing = [c for c in TIMELINE_COLUMNS if c not in fields]
+    assert not missing, (
+        f'{missing} are recorded but have no field on ManagedJobInfo, so they '
+        f'stop at the jobs controller')
+
+
+def test_every_phase_column_is_declared_on_the_response_model():
+    """The API serializes through `ManagedJobRecord`, which drops what it does
+    not declare.
+
+    This is the link that was still broken after the protobuf was fixed: the
+    fields crossed the controller boundary and were then discarded on their way
+    out of the API, so the payload the dashboard received had no trace of them.
+    """
+    declared = set(responses.ManagedJobRecord.model_fields)
+
+    missing = [c for c in TIMELINE_COLUMNS if c not in declared]
+    assert not missing, (
+        f'{missing} cross the controller boundary but are not declared on '
+        f'ManagedJobRecord, so the API drops them on the way out')
+
+
+def test_the_response_model_keeps_the_values_it_is_given():
+    """Declared is not the same as carried: a wrong type would coerce or
+    raise, and either way the page would not get the number it draws."""
+    recorded = {c: 1.5 + i for i, c in enumerate(TIMELINE_COLUMNS)}
+
+    record = responses.ManagedJobRecord(job_id=1, task_id=0, **recorded)
+
+    for column, value in recorded.items():
+        assert getattr(record, column) == value, column
+
+
+def test_the_columns_the_recorder_writes_are_the_ones_the_readers_expect():
+    """One list, four readers.
+
+    `timeline_columns` is what the daemon actually writes to the spot table.
+    Every hop below is asserted against it rather than against a list retyped
+    per test, so a phase added to the recorder cannot quietly stop at any of
+    them.
+    """
+    # Every phase at once. No single job records all of them -- unattributed
+    # is what a job gets *instead* of a breakdown -- but this asks which
+    # columns can exist, not which co-occur.
+    written = set(
+        launch_phases.timeline_columns(
+            {phase: 1.0 for phase in launch_phases._JOB_PHASE_COLUMNS}, 15.0))
+
+    assert written == set(TIMELINE_COLUMNS), (
+        'the recorder and this suite disagree about which columns exist; '
+        'update TIMELINE_COLUMNS and check every hop below')
+    # And the spot table actually has them, or nothing upstream matters.
+    columns = {c.name for c in managed_job_state.spot_table.columns}
+    assert not (written - columns)
+
+
+def test_the_values_survive_the_round_trip():
+    """Set on the message, read back with the values intact.
+
+    The reverse conversion walks the descriptor rather than naming fields, so
+    this is really guarding the encoding: a double that comes back as a string,
+    or a zero that comes back absent, both break the panel quietly.
+    """
+    recorded = {c: 1.5 + i for i, c in enumerate(TIMELINE_COLUMNS)}
+    proto = managed_jobsv1_pb2.ManagedJobInfo(**recorded)
+
+    out = managed_job_utils._job_proto_to_dict(proto)
+
+    for column, value in recorded.items():
+        assert out[column] == value, (column, out.get(column))
+
+
+def test_a_job_with_no_breakdown_comes_back_as_none_not_zero():
+    """Absent has to stay absent across the wire.
+
+    The panel's guard is `!total`, so a 0 substituted for an unset field would
+    render an empty bar reading as "started instantly" -- worse than the blank
+    the guard is there to produce. This is also what a controller too old to
+    send these fields looks like.
+    """
+    proto = managed_jobsv1_pb2.ManagedJobInfo()
+
+    out = managed_job_utils._job_proto_to_dict(proto)
+
+    for column in TIMELINE_COLUMNS:
+        assert out[column] is None, (column, out.get(column))
+
+
+def test_the_message_and_its_json_form_agree_on_the_field_names():
+    """The dashboard reads snake_case names off the JSON payload.
+
+    MessageToDict would otherwise hand it camelCase, and every lookup on the
+    page would miss -- the same blank panel, from the other direction.
+    """
+    proto = managed_jobsv1_pb2.ManagedJobInfo(t_queue_wait=185.0)
+
+    as_json = json_format.MessageToDict(proto, preserving_proto_field_name=True)
+
+    assert 't_queue_wait' in as_json
+    assert 'tQueueWait' not in as_json
+
+
+def test_the_versioned_field_list_matches_the_columns_it_stands_for():
+    """`TIMELINE_QUEUE_FIELDS` is what a too-old controller is not asked for.
+    Retyped rather than derived, so this is the check that keeps it honest: a
+    phase added to the recorder and not added there would be requested from a
+    controller whose table has no such column, and the SQL error fails the
+    whole queue rather than the panel."""
+    assert managed_job_utils.TIMELINE_QUEUE_FIELDS == set(TIMELINE_COLUMNS) | {
+        'created_at', 'eligible_at'
+    }
+
+
+def test_the_controller_fields_are_gated_on_the_version_that_added_them():
+    """Two things have to move together or an upgraded API server talks to a
+    controller that cannot answer: the skylet has to be restarted (which only
+    happens when SKYLET_VERSION changes), and the fields have to be registered
+    so an older one is not asked for them."""
+    gated = managed_job_utils._JOB_FIELDS_BY_MIN_CONTROLLER_VERSION
+    version = int(skylet_constants.SKYLET_VERSION)
+
+    assert managed_job_utils.TIMELINE_QUEUE_FIELDS in gated.values(), (
+        'the timeline fields are not registered against any controller '
+        'version, so an old controller will be asked for columns it lacks')
+    added_at = next(v for v, fields in gated.items()
+                    if fields is managed_job_utils.TIMELINE_QUEUE_FIELDS)
+    assert added_at <= version, (
+        f'the timeline fields are gated on controller version {added_at} but '
+        f'SKYLET_VERSION is {version}, so no controller will ever be asked')
+    # And a field list naming one of them has to trigger the version lookup,
+    # or the gate above is never consulted.
+    assert managed_job_utils.queue_fields_need_controller_version(
+        ['t_queue_wait'])
+
+
+def _open_attempt(requested=None, admitted=None, outcome=None):
+    return types.SimpleNamespace(provision_start=20.0,
+                                 instances_requested=requested,
+                                 admitted=admitted,
+                                 instances_ready=None,
+                                 outcome=outcome,
+                                 queue='eng-lq')
+
+
+def test_the_column_of_a_phase_is_its_name_under_t():
+    """The panel keys its phases by name and reads the settled column as
+    `t_<name>`, so one copy of the mapping serves both sources. Breaking the
+    convention here empties the settled bar while the live one still draws,
+    and nothing in the JS can catch that."""
+    assert launch_phases._JOB_PHASE_COLUMNS == {
+        phase: f't_{phase}' for phase in launch_phases._JOB_PHASE_COLUMNS
+    }
+
+
+def test_the_live_breakdown_names_the_same_phases_as_the_stored_one():
+    """One panel draws both. A phase the live path can open but the canonical
+    list does not contain gets neither a segment nor a legend entry, so the
+    bar stops summing to the total shown beside it."""
+    task = {'eligible_at': 0.0, 'submitted_at': 10.0, 'start_at': None}
+    known = set(launch_phases._JOB_PHASE_COLUMNS)
+    # One per milestone the job can be sitting at, so every branch is walked.
+    ladder = [
+        [],
+        [_open_attempt()],
+        [_open_attempt(requested=30.0)],
+        [_open_attempt(requested=30.0, admitted=60.0)],
+        [_open_attempt(outcome='failed')],
+    ]
+    for attempts in ladder:
+        progress = launch_phases.compute_job_progress(task, attempts, 1000.0)
+        assert set(progress.phases) <= known
+        assert progress.open_phase in known

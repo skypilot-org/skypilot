@@ -156,6 +156,7 @@ export async function getManagedJobs(options = {}) {
       statuses,
       fields,
       jobIDs,
+      startupProgress = false,
     } = options;
 
     const body = {
@@ -175,6 +176,11 @@ export async function getManagedJobs(options = {}) {
     const resolvedJobIDs = jobIdMatch ? [jobIdMatch] : jobIDs;
     if (resolvedJobIDs !== undefined && resolvedJobIDs.length > 0)
       body.job_ids = resolvedJobIDs;
+    // The live startup breakdown of jobs that have not started yet. Asked for
+    // only by the detail page: the server pays a read per job for it, and the
+    // list deliberately shows settled numbers only. Servers that do not know
+    // the field ignore it and answer without the breakdown.
+    if (startupProgress) body.include_startup_progress = true;
     if (!allFields) {
       if (fields && fields.length > 0) {
         body.fields = fields;
@@ -383,6 +389,27 @@ export async function getManagedJobs(options = {}) {
         // Batch progress
         batch_total_batches: job.batch_total_batches,
         batch_completed_batches: job.batch_completed_batches,
+        // When the job was accepted. Shown beside submitted_at, which is the
+        // later moment a controller claimed it -- the page used to show only
+        // the latter, so subtracting the two visible timestamps disagreed with
+        // the bar by exactly t_controller_queue.
+        created_at: job.created_at ? new Date(job.created_at * 1000) : null,
+        eligible_at: job.eligible_at ? new Date(job.eligible_at * 1000) : null,
+        // Startup breakdown, drawn by JobStartupTimeline. Undefined on jobs
+        // that never ran and on those that predate the breakdown; the panel
+        // renders nothing rather than an empty bar.
+        t_time_to_running: job.t_time_to_running,
+        t_controller_queue: job.t_controller_queue,
+        t_retry_overhead: job.t_retry_overhead,
+        t_unattributed: job.t_unattributed,
+        t_provision_setup: job.t_provision_setup,
+        t_queue_wait: job.t_queue_wait,
+        t_node_startup: job.t_node_startup,
+        t_runtime_setup: job.t_runtime_setup,
+        // The same breakdown for a job that has not started yet, computed per
+        // request rather than stored. Only the detail page asks for it, and
+        // one of its phases is still growing -- see JobStartupTimeline.
+        startup_progress: job.startup_progress ?? null,
       };
     });
 
@@ -625,7 +652,12 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
 
         // Fetch the specific job by ID with all fields for complete data.
         const cacheArgs = [
-          { allUsers: true, allFields: true, jobIDs: [jobId] },
+          {
+            allUsers: true,
+            allFields: true,
+            jobIDs: [jobId],
+            startupProgress: true,
+          },
         ];
         // Drop the cached entry only when the refresh trigger actually
         // increments (a manual refresh), so the click fetches fresh data.

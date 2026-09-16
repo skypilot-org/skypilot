@@ -37,6 +37,7 @@ import { checkGrafanaAvailability } from '@/utils/grafana';
 import { TelemetrySection } from '@/components/TelemetrySection';
 import { hasAccelerator } from '@/utils/gpuUtils';
 import { trackJobAction } from '@/lib/analytics';
+import { JobStartupTimeline } from '@/components/jobs.startuptimeline';
 
 function TaskDetails() {
   const router = useRouter();
@@ -353,6 +354,17 @@ function TaskDetails() {
 function TaskDetailsContent({ taskData, taskIndex, poolsData }) {
   return (
     <div className="grid grid-cols-2 gap-6">
+      {/* Spans both columns: the bar is only readable at full width.
+       *
+       * This is the task page, and the breakdown is per task -- a pipeline's
+       * later tasks are measured from their own handoff rather than from the
+       * job's submission, so their numbers mean something different from
+       * task 0's. Drawing one of them under the job's name, as the job page
+       * would for a multi-task job, puts one task's figure where a reader
+       * expects the job's. */}
+      <div className="col-span-2">
+        <JobStartupTimeline jobData={taskData} />
+      </div>
       <div>
         <div className="text-gray-600 font-medium text-base">Task</div>
         <div className="text-base mt-1">
