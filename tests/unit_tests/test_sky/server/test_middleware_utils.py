@@ -243,11 +243,13 @@ def _sample(counter, **labels) -> float:
 def clear_rejection_counters():
     for counter in (
             metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
+            metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL,
             metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL):
         counter.clear()
     yield
     for counter in (
             metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
+            metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL,
             metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL):
         counter.clear()
 
@@ -309,6 +311,11 @@ async def test_a_refused_handshake_is_counted_and_the_close_frame_is_unchanged(
         outcome=outcome) == 1.0
     assert _sample(
         metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL) == 1.0
+    # A refused handshake is an attempt too, by design: the outcome split
+    # reads off these two counters.
+    assert _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL,
+        path='/kubernetes-pod-ssh-proxy') == 1.0
 
 
 @pytest.mark.asyncio
@@ -326,15 +333,18 @@ async def test_a_refused_handshake_with_a_stamped_reason_is_attributed():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('behavior', ['unauthorized', 'forbidden', 'error'])
+@pytest.mark.parametrize('behavior', ['unauthorized', 'forbidden'])
 async def test_a_refused_handshake_without_a_reason_is_not_attributed(behavior):
+    """A plain 401/403 with no stamped reason is counted by decision only.
+    (The `error` behavior is not here: a crash in dispatch stamps
+    `unhandled_exception`, which is attributed -- see below.)"""
     middleware = _make_middleware(lambda *a: None, behavior=behavior)
     await _run(middleware, _make_websocket_scope())
     assert _sample(metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL) == 0.0
 
 
 @pytest.mark.asyncio
-async def test_an_accepted_handshake_is_not_counted_as_refused():
+async def test_an_accepted_handshake_is_counted_as_an_attempt():
 
     async def app(scope, receive, send):
         del scope, receive
@@ -345,6 +355,73 @@ async def test_an_accepted_handshake_is_not_counted_as_refused():
     assert sent == [{'type': 'websocket.accept'}]
     assert _sample(
         metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL) == 0.0
+    # The attempt is counted, by bounded path; with no refusal and no
+    # handler-side close, it is the accepted volume.
+    assert _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL,
+        path='other') == 1.0
+
+
+@pytest.mark.asyncio
+async def test_a_handshake_attempt_is_counted_once_through_the_stack():
+    """Every websocket_aware middleware in the stack sees the same
+    connection scope; the attempt must still be counted once."""
+
+    async def app(scope, receive, send):
+        del scope, receive
+        await send({'type': 'websocket.accept'})
+
+    inner = middleware_utils.websocket_aware(RecordingMiddleware)
+    outer = middleware_utils.websocket_aware(RecordingMiddleware)
+    middleware = outer(inner(app, behavior='accept'), behavior='accept')
+    sent = await _run(middleware, _make_websocket_scope())
+    assert sent == [{'type': 'websocket.accept'}]
+    assert _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL) == 1.0
+
+
+@pytest.mark.asyncio
+async def test_a_handshake_closed_by_the_handler_is_still_an_attempt():
+    """The count is the attempt, not the verdict: a handler that closes
+    the connection before accepting is counted here and nowhere else
+    today (no such path exists in this repository; until one does,
+    accepted = attempts - refusals)."""
+
+    async def app(scope, receive, send):
+        del scope, receive
+        await send({'type': 'websocket.close', 'code': 1000})
+
+    middleware = _make_middleware(app, behavior='accept')
+    sent = await _run(middleware, _make_websocket_scope())
+    assert sent == [{'type': 'websocket.close', 'code': 1000}]
+    assert _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL) == 1.0
+    assert _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL) == 0.0
+
+
+@pytest.mark.asyncio
+async def test_a_crash_judging_a_handshake_is_attributed():
+    """A middleware exception while judging the handshake is stamped
+    `unhandled_exception`, so the reason counter says what the `error`
+    outcome was instead of leaving it unexplained. The client still gets
+    the 1011 close."""
+    middleware = _make_middleware(lambda *a: None, behavior='error')
+    sent = await _run(middleware, _make_websocket_scope())
+    assert sent == [{
+        'type': 'websocket.close',
+        'code': 1011,
+        'reason': 'Internal Server Error',
+    }]
+    assert _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL) == 1.0
+    assert _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
+        outcome='error') == 1.0
+    assert _sample(metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL,
+                   reason=middleware_utils.REJECT_REASON_UNHANDLED_EXCEPTION,
+                   status='500',
+                   kind='websocket') == 1.0
 
 
 @pytest.mark.asyncio
