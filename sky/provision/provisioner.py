@@ -8,7 +8,7 @@ import socket
 import subprocess
 import time
 import traceback
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import colorama
 
@@ -50,6 +50,60 @@ logger = sky_logging.init_logger('sky.provisioner')
 # teardown instances when provisioning fails.
 _MAX_RETRY = 3
 _TITLE = '\n\n' + '=' * 20 + ' {} ' + '=' * 20 + '\n'
+
+# Hooks that report where a provider actually placed a cluster's instances,
+# for providers that submit work to one control plane and then execute it on
+# another -- the submission target names the control plane, so on its own it
+# does not say where the instances ended up.
+#
+# Each hook is called with ``(provider_name, region_name,
+# cluster_name_on_cloud)`` and returns the name of the execution target, or
+# None when it does not apply to that provider or the instances run where they
+# were submitted. ``provider_name`` is the canonical lower-case name the
+# provision registry dispatches on (``kubernetes``), not the cloud's display
+# repr -- a hook comparing against the canonical name is what works. Purely
+# descriptive: the answer is used for user-facing reporting and never to
+# address the cluster. Empty by default -- nothing in core registers one.
+ExecutionTargetResolver = Callable[[str, str, str], Optional[str]]
+EXECUTION_TARGET_RESOLVERS: List[ExecutionTargetResolver] = []
+
+
+def register_execution_target_resolver(
+        resolver: ExecutionTargetResolver) -> None:
+    """Register a hook reporting where a provider placed its instances.
+
+    Idempotent, so a module that registers on import keeps one registration
+    across the several process contexts that may import it.
+    """
+    if resolver not in EXECUTION_TARGET_RESOLVERS:
+        EXECUTION_TARGET_RESOLVERS.append(resolver)
+
+
+def _resolve_execution_target(provider_name: str, region_name: str,
+                              cluster_name_on_cloud: str) -> Optional[str]:
+    """The execution target for this cluster, if it differs from ``region``.
+
+    Never raises: a hook that fails leaves the caller reporting the
+    submission target alone, which is what it reported before any hook
+    existed. ``BaseException`` and not ``Exception`` because this runs after
+    the instances are already up -- ``bulk_provision`` reads SystemExit and
+    KeyboardInterrupt as user cancellation and records nothing, so a resolver
+    raising either would file a live cluster as cancelled. Delaying a
+    cancellation by one cache read is the lesser harm.
+    """
+    for resolver in EXECUTION_TARGET_RESOLVERS:
+        try:
+            target = resolver(provider_name, region_name, cluster_name_on_cloud)
+        except BaseException:  # pylint: disable=broad-except
+            logger.debug(
+                'Execution target resolver %r failed; reporting the '
+                'submission target only.',
+                resolver,
+                exc_info=True)
+            continue
+        if target is not None and target != region_name:
+            return target
+    return None
 
 
 def _bulk_provision(
@@ -117,10 +171,23 @@ def _bulk_provision(
         f'\nProvisioning {cluster_name!r} took {time.time() - start:.2f} '
         f'seconds.')
 
-    # Add cluster event for provisioning completion.
+    # Add cluster event for provisioning completion. ``region.name`` rather
+    # than the dataclass repr, to match the 'Provisioning on ...' event that
+    # precedes it. When the provider executed the instances somewhere other
+    # than where they were submitted, name both -- otherwise the event reports
+    # the control plane and silently implies the work runs there.
+    # ``provider_name`` is ``repr(cloud)``, which is display-cased
+    # ('Kubernetes'); hooks match on the canonical name the provision registry
+    # dispatches on, so normalize the same way ``_route_to_cloud_impl`` does.
+    execution_target = _resolve_execution_target(provider_name.lower(),
+                                                 region_name,
+                                                 cluster_name.name_on_cloud)
+    launched_on = f'{cloud.display_name()} in {region.name}'
+    if execution_target is not None:
+        launched_on += f', running on {execution_target}'
     global_user_state.add_cluster_event(
         str(cluster_name), status_lib.ClusterStatus.INIT,
-        f'Instances launched on {cloud.display_name()} in {region}',
+        f'Instances launched on {launched_on}',
         global_user_state.ClusterEventType.STATUS_CHANGE)
 
     return provision_record

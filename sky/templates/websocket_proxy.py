@@ -126,7 +126,12 @@ async def latency_monitor(websocket: ClientConnection,
                 # We are not getting responses, clear the dictionary so
                 # as not to grow unbounded.
                 last_ping_time_dict.clear()
-            ping_time = time.time()
+            # monotonic(), not time(): both ends of this interval are read in
+            # this process, and the wall clock can step (NTP) or jump (laptop
+            # suspend/resume) mid-window. A step charges the adjustment to SSH
+            # latency; a backwards step makes the interval negative, which
+            # wraps when packed into the unsigned '!Q' below.
+            ping_time = time.monotonic()
             next_id += 1
             last_ping_time_dict[next_id] = ping_time
             message_header_bytes = struct.pack('!BI',
@@ -206,7 +211,7 @@ async def websocket_to_stdout(websocket: ClientConnection,
                         raise ValueError(
                             f'Invalid PONG message length: {len(message)}')
                     pong_id = struct.unpack('!I', message[1:5])[0]
-                    pong_time = time.time()
+                    pong_time = time.monotonic()
 
                     ping_time = last_ping_time_dict.pop(pong_id, None)
 
