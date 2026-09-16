@@ -34,14 +34,30 @@ jest.mock('@/plugins/PluginSlot', () => ({
   __esModule: true,
   PluginSlot: () => null,
 }));
+// Plugin column definitions a test installs on the jobs table. The mock
+// below runs them through the page's own transformPluginColumn, so the
+// context a plugin cell receives is the real one.
+const mockPluginColumns = { list: [] };
 jest.mock('@/plugins/PluginProvider', () => ({
   __esModule: true,
   usePluginComponents: () => [],
   useTableColumns: () => [],
-  useMergedTableColumns: (page, baseColumns, context = {}) =>
-    baseColumns.filter((col) =>
-      col.conditional ? !!context.shouldShowColumn?.(col.id) : true
-    ),
+  useMergedTableColumns: (
+    page,
+    baseColumns,
+    context = {},
+    transformPluginColumn
+  ) => {
+    const plugin = mockPluginColumns.list.map(transformPluginColumn);
+    const replaced = new Set(plugin.map((c) => c.id));
+    return baseColumns
+      .filter((col) => !replaced.has(col.id))
+      .filter((col) =>
+        col.conditional ? !!context.shouldShowColumn?.(col.id) : true
+      )
+      .concat(plugin)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  },
   usePluginTableFilters: (() => {
     const empty = [];
     return () => empty;
@@ -86,7 +102,7 @@ jest.mock('@/lib/jobs-cache-manager', () => ({
   },
 }));
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { ManagedJobsTable, detailsRowId } from '@/components/jobs';
 
 const LONG_DETAILS =
@@ -154,6 +170,63 @@ describe('details show-more on the managed jobs table', () => {
   it('opens the expanded row for a managed job', async () => {
     renderRows([baseRow({ id: 7, task_job_id: 7, cloud: 'Kubernetes' })]);
     fireEvent.click(await screen.findByText('... show more'));
+    expect(screen.getByText('Full Details')).toBeTruthy();
+  });
+});
+
+// A plugin that replaces the Details column (the Kueue plugin does) cannot
+// import detailsRowId. The table hands it the key as context.rowId.
+describe('a plugin Details column', () => {
+  afterEach(() => {
+    mockPluginColumns.list = [];
+  });
+
+  const pluginDetailsColumn = (pickRowId) => ({
+    id: 'details',
+    table: 'jobs',
+    header: { label: 'Details', order: 10 },
+    cell: {
+      render: (item, context) => (
+        <button
+          type="button"
+          onClick={() =>
+            context.setExpandedRowId(
+              context.expandedRowId === pickRowId(item, context)
+                ? null
+                : pickRowId(item, context)
+            )
+          }
+        >
+          plugin toggle
+        </button>
+      ),
+    },
+  });
+
+  it('opens the expanded row for an external job when it stores context.rowId', async () => {
+    mockPluginColumns.list = [pluginDetailsColumn((item, ctx) => ctx.rowId)];
+    renderRows([
+      baseRow({
+        id: '565700',
+        task_job_id: 'slurm-prod-gpu-565700',
+        is_external: true,
+      }),
+    ]);
+    fireEvent.click(await screen.findByText('plugin toggle'));
+    expect(screen.getByText('Full Details')).toBeTruthy();
+  });
+
+  it('receives the plain id as context.rowId for a managed job', async () => {
+    const seen = [];
+    mockPluginColumns.list = [
+      pluginDetailsColumn((item, ctx) => {
+        seen.push(ctx.rowId);
+        return ctx.rowId;
+      }),
+    ];
+    renderRows([baseRow({ id: 7, task_job_id: 70, cloud: 'Kubernetes' })]);
+    fireEvent.click(await screen.findByText('plugin toggle'));
+    expect(seen).toContain(7);
     expect(screen.getByText('Full Details')).toBeTruthy();
   });
 });

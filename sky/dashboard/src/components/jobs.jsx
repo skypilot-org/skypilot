@@ -166,10 +166,12 @@ const STATUS_PRIORITY = {
 
 /**
  * Returns the key that marks a row as expanded. The Details cell's show-more
- * toggle stores this key, and the row renderer compares against it, so both
- * must call this function. Group children and external rows use task_job_id.
- * A group child shares its parent's id. An external row's id is the Slurm
- * cluster's id, which can equal another cluster's id or a managed job id.
+ * toggle stores this key and the row renderer compares against it. The base
+ * Details column calls this directly. A plugin Details column receives the
+ * same value as context.rowId, because the plugin bundle cannot import this
+ * function. Group children and external rows use task_job_id. A group child
+ * shares its parent's id. An external row's id is the Slurm cluster's id,
+ * which can equal another cluster's id or a managed job id.
  */
 export function detailsRowId(item, renderMode) {
   return renderMode === 'groupChild' || item.is_external
@@ -194,13 +196,13 @@ export function detailsRowId(item, renderMode) {
  *
  * External rows never form job groups; they are keyed by their globally
  * unique task_job_id so equal Slurm ids across clusters (or a Slurm id
- * matching a managed id) can't collapse into one group, with a prefixed id
- * as a fallback if a producer ever omits task_job_id.
+ * matching a managed id) can't collapse into one group. The jobs cache
+ * manager guarantees task_job_id on every external row before rows reach
+ * this page.
  */
 export function groupJobRowsByTree(rows) {
   const groups = new Map();
-  const ownKey = (job) =>
-    job.is_external ? (job.task_job_id ?? `external:${job.id}`) : job.id;
+  const ownKey = (job) => (job.is_external ? job.task_job_id : job.id);
   const isMember = (job) =>
     !job.is_external && job.root_job_id != null && job.root_job_id !== job.id;
   // Top-level jobs and their declared tasks first, so every group starts with
@@ -2340,6 +2342,9 @@ export function ManagedJobsTable({
           expandedRowId,
           setExpandedRowId,
           expandedRowRef,
+          // The key a plugin Details column must store in setExpandedRowId
+          // for the expanded row under this row to open. See detailsRowId.
+          rowId: detailsRowId(item, ctx?.renderMode),
           // Forward job group context for plugins that need it
           ...(ctx || {}),
         };
