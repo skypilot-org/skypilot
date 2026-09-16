@@ -2041,3 +2041,78 @@ def test_an_unusable_cap_means_no_cap(monkeypatch, raw):
 def test_a_configured_cap_is_read_as_bytes(monkeypatch):
     monkeypatch.setenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR, '12345')
     assert server._max_upload_total_bytes() == 12345
+
+
+_STORE_CAP = 200 * 1000 * 1000
+
+
+@pytest.fixture
+def store_cap(monkeypatch):
+    """The store's cap is off unless a deployment sets it."""
+    monkeypatch.setenv(server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR,
+                       str(_STORE_CAP))
+    return _STORE_CAP
+
+
+def _store_holding(monkeypatch, used_bytes):
+    """Makes the store's filesystem report *used_bytes* in use."""
+    monkeypatch.setattr(server.local_disk, 'used_for_path',
+                        lambda path: used_bytes)
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_is_refused_once_the_store_is_full(
+        tmp_path, monkeypatch, store_cap):
+    """The cap covers what the store holds, across uploads."""
+    _store_holding(monkeypatch, store_cap)
+
+    with pytest.raises(fastapi.HTTPException) as exc_info:
+        await server._admit_stored_file_mounts(tmp_path)
+
+    assert exc_info.value.status_code == 507
+    assert 'bucket' in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_is_admitted_while_the_store_has_room(
+        tmp_path, monkeypatch, store_cap):
+    _store_holding(monkeypatch, store_cap - 1)
+
+    await server._admit_stored_file_mounts(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_the_store_has_no_cap_unless_one_is_configured(
+        tmp_path, monkeypatch):
+    """The cap is opt-in, so an unset deployment uploads as before."""
+    monkeypatch.delenv(server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR,
+                       raising=False)
+    measured = []
+    monkeypatch.setattr(server.local_disk, 'used_for_path',
+                        lambda path: measured.append(path) or 0)
+
+    await server._admit_stored_file_mounts(tmp_path)
+
+    assert measured == []
+
+
+@pytest.mark.asyncio
+async def test_an_unmeasurable_store_is_not_enforced_against(
+        tmp_path, monkeypatch, store_cap):
+    """Refusing every upload is the wrong answer to not being able to tell."""
+    _store_holding(monkeypatch, None)
+
+    await server._admit_stored_file_mounts(tmp_path)
+
+
+@pytest.mark.parametrize('raw', ['', 'not-a-number', '0', '-1'])
+def test_an_unusable_store_cap_means_no_cap(monkeypatch, raw):
+    monkeypatch.setenv(server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR,
+                       raw)
+    assert server._max_stored_file_mounts_bytes() is None
+
+
+def test_a_configured_store_cap_is_read_as_bytes(monkeypatch):
+    monkeypatch.setenv(server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR,
+                       '12345')
+    assert server._max_stored_file_mounts_bytes() == 12345
