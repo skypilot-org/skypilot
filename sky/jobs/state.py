@@ -71,6 +71,24 @@ Base = declarative.declarative_base()
 # to identify the job.
 # TODO(zhwu): schema migration may be needed.
 
+# The daemon's two "not processed yet" predicates, used by both the index
+# definitions and the migration so an index cannot drift from the query it
+# exists to serve.
+#
+# Both are built from _MEASURABLE rather than spelled out, because the first
+# version of this spelled them out and the second one lost a clause: without
+# the origin columns the never-ran index kept every pre-upgrade row forever --
+# 1078 unmatchable rows against 0 real candidates on the tenant it was measured
+# on, which is the very thing partial indexes were introduced here to stop.
+#
+# Each predicate must stay implied by its query's WHERE or the planner cannot
+# use the index. Every clause here is one the corresponding query already has.
+_MEASURABLE = 'created_at IS NOT NULL AND eligible_at IS NOT NULL'
+
+PENDING_TIMELINE_PREDICATE = f't_time_to_running IS NULL AND {_MEASURABLE}'
+NEVER_RAN_PREDICATE = (f't_controller_queue IS NULL AND start_at IS NULL AND '
+                       f'{_MEASURABLE}')
+
 spot_table = sqlalchemy.Table(
     'spot',
     Base.metadata,
@@ -131,6 +149,113 @@ spot_table = sqlalchemy.Table(
     # PENDING while it waits in an external scheduler queue) without altering
     # the underlying job lifecycle. NULL means "no override".
     sqlalchemy.Column('status_override', sqlalchemy.Text, server_default=None),
+    # When the job was accepted, as epoch seconds. T0 of the launch timeline.
+    #
+    # A separate column rather than reusing the PENDING job_events row, whose
+    # timestamp is written as a naive local datetime while every other
+    # timestamp here is time.time(). Subtracting the two is wrong by the UTC
+    # offset on any non-UTC deployment and can come out negative -- and a
+    # negative observation lands silently in a histogram's lowest bucket, so
+    # the metric would look healthy while being wrong.
+    sqlalchemy.Column('created_at', sqlalchemy.Float, server_default=None),
+    # When this task could first have started, as epoch seconds. The origin the
+    # startup breakdown is measured from.
+    #
+    # Equal to created_at for a single task and for every task of a job group,
+    # whose tasks all begin waiting together. A pipeline runs its tasks one
+    # after another, so task N is not waiting on anything of ours until task
+    # N-1 finishes -- measuring from submission would fold every upstream
+    # task's runtime into t_controller_queue, which claims to mean "the
+    # scheduler was saturated". Unbounded, and indistinguishable downstream:
+    # the histogram is labelled by workspace only.
+    #
+    # Recording the moment rather than special-casing the formula keeps one
+    # meaning for every task.
+    #
+    # Written on the consolidation path only: of the three set_pending callers,
+    # just the one in jobs/server/core.py passes it -- the skylet service and
+    # the generated remote-controller code do not. So on a remote controller
+    # this is NULL for every task and the correction above does not apply
+    # there. Deliberate rather than overlooked: that path keeps its own
+    # database, the metrics daemon never reads these rows, and the breakdown is
+    # scoped to consolidation. Readers require it NOT NULL, so a row without it
+    # is skipped rather than measured from the wrong origin.
+    sqlalchemy.Column('eligible_at', sqlalchemy.Float, server_default=None),
+    # The launch timeline, denormalized once the job first reaches RUNNING, so
+    # the jobs list renders from one indexed row read instead of a per-job scan
+    # of launch_attempts.
+    #
+    # Only two of these are read today. t_time_to_running and
+    # t_controller_queue are the conditional-UPDATE targets that make recording
+    # exactly-once across replicas, one for a task that ran and one for a task
+    # that never did. The other six have no reader: the Prometheus series are
+    # observed from the in-memory breakdown in the same call that computes it,
+    # not from these columns. They are stored for the job-detail view, which
+    # lands separately -- so if that view is dropped, these should go with it
+    # rather than linger as a table that nothing consults.
+    #
+    # Write-once: they describe how long the job took to
+    # start, which a preemption three hours later does not redefine.
+    #
+    # Together they partition the wall clock from created_at to RUNNING:
+    #   controller_queue  accepted -> a controller claimed the job
+    #   retry_overhead    launch attempts that were thrown away, plus backoff
+    #   provision_setup   the final attempt's provision start -> instances asked
+    #   queue_wait        asked for -> admitted by an external scheduler
+    #   node_startup      admitted -> instances up
+    #   runtime_setup     instances up -> the job is RUNNING
+    sqlalchemy.Column('t_controller_queue',
+                      sqlalchemy.Float,
+                      server_default=None),
+    sqlalchemy.Column('t_retry_overhead', sqlalchemy.Float,
+                      server_default=None),
+    # Time that belongs to no phase we can name: a job placed on a warm pool
+    # never provisions, and one launched before these milestones has no
+    # attempt to break down. Kept apart from retry_overhead so such a job does
+    # not read as "99% retried launches", which is the misdiagnosis this
+    # breakdown exists to prevent.
+    sqlalchemy.Column('t_unattributed', sqlalchemy.Float, server_default=None),
+    sqlalchemy.Column('t_provision_setup',
+                      sqlalchemy.Float,
+                      server_default=None),
+    sqlalchemy.Column('t_queue_wait', sqlalchemy.Float, server_default=None),
+    sqlalchemy.Column('t_node_startup', sqlalchemy.Float, server_default=None),
+    sqlalchemy.Column('t_runtime_setup', sqlalchemy.Float, server_default=None),
+    # The headline: accepted -> RUNNING. Measured directly rather than summed,
+    # because histogram quantiles are not additive.
+    sqlalchemy.Column('t_time_to_running',
+                      sqlalchemy.Float,
+                      server_default=None),
+    # The metrics daemon's pending-timeline query, once a minute. Without it
+    # that query full-scans spot and sorts the result to return the handful of
+    # jobs that just started -- and in the steady state, to return nothing.
+    # The predicate selects the rows without a timeline; start_at then serves
+    # the ordering from the index rather than a temp b-tree.
+    #
+    # Partial, and that is the whole point rather than a refinement. A full
+    # index stores one entry per task ever run and keeps it forever: a
+    # pre-upgrade row has no created_at, so it can never satisfy the query,
+    # is never given a timeline, and never leaves the unprocessed group it
+    # sorts to the front of. Every tick then walks the entire history to reach
+    # the few rows with work in them -- 9156 dead entries against 9 live ones
+    # on the dev tenant this was measured on. Restricted to what the query can
+    # return, the index holds the pending work instead, and a row drops out of
+    # it the moment its timeline is recorded.
+    #
+    # Safe to restrict because the marker column is only ever asked IS NULL --
+    # both selects and both conditional updates -- so no query wants the rows
+    # this leaves out. The predicates must keep matching those queries or the
+    # planner will quietly stop using the index, which is what the EXPLAIN
+    # tests are for.
+    sqlalchemy.Index(
+        'ix_spot_pending_timeline',
+        'start_at',
+        postgresql_where=sqlalchemy.text(PENDING_TIMELINE_PREDICATE),
+        sqlite_where=sqlalchemy.text(PENDING_TIMELINE_PREDICATE)),
+    sqlalchemy.Index('ix_spot_never_ran',
+                     'end_at',
+                     postgresql_where=sqlalchemy.text(NEVER_RAN_PREDICATE),
+                     sqlite_where=sqlalchemy.text(NEVER_RAN_PREDICATE)),
 )
 
 job_info_table = sqlalchemy.Table(
@@ -1070,8 +1195,15 @@ def set_pending(
     resources_str: str,
     metadata: str,
     is_primary_in_job_group: Optional[bool] = None,
+    eligible_at: Optional[float] = None,
 ):
-    """Set the task to pending state."""
+    """Set the task to pending state.
+
+    ``eligible_at`` is when this task could first have started. The caller
+    passes the submission instant for a task that is waiting from now -- task 0
+    of anything, and every task of a job group -- and None for a pipeline's
+    later tasks, whose origin is not known yet and is written at the handoff.
+    """
     add_job_event(job_id, task_id, ManagedJobStatus.PENDING,
                   'Job submitted to queue')
 
@@ -1086,6 +1218,8 @@ def set_pending(
                 metadata=metadata,
                 status=ManagedJobStatus.PENDING.value,
                 is_primary_in_job_group=is_primary_in_job_group,
+                created_at=time.time(),
+                eligible_at=eligible_at,
             ))
         session.commit()
 
@@ -3374,6 +3508,44 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
     await callback_func('STARTED')
 
 
+async def set_eligible_at_async(job_id: int, task_id: int,
+                                eligible_at: float) -> None:
+    """Record when a pipeline's task became able to start.
+
+    Called at the handoff, once the task before this one has finished. Only
+    a pipeline needs it: task 0 and every task of a job group are waiting from
+    submission, and the submission path writes theirs.
+
+    Write-once. A controller that restarts mid-pipeline re-enters the loop and
+    would otherwise stamp the restart instead of the handoff, shrinking every
+    phase measured from it. Best-effort besides: this is a measurement, and it
+    must not be able to fail the task it is measuring.
+    """
+
+    async def _op(session: sql_async.AsyncSession) -> int:
+        result = await session.execute(
+            sqlalchemy.update(spot_table).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id,
+                    spot_table.c.eligible_at.is_(None),
+                )).values({spot_table.c.eligible_at: eligible_at}))
+        # _retry_session opens the session and closes it; it does not commit.
+        # Without this the UPDATE is rolled back on exit, the row keeps a NULL
+        # origin, and -- because the queries require one -- the task silently
+        # gets no timeline at all. Every other caller of _retry_session commits
+        # inside its own _op for the same reason.
+        await session.commit()
+        return result.rowcount
+
+    try:
+        await _retry_session(_op)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Could not record when job {job_id} task {task_id} '
+                       f'became eligible to start; its breakdown will fall '
+                       f'back to the job submission time: {e}')
+
+
 def get_job_status_with_task_id(job_id: int,
                                 task_id: int) -> Optional[ManagedJobStatus]:
     engine = _db_manager.get_engine()
@@ -4665,3 +4837,172 @@ async def job_event_retention_daemon():
             logger.error(f'Error running job event retention daemon: {e}')
 
         await asyncio.sleep(JOB_EVENT_DAEMON_INTERVAL_SECONDS)
+
+
+# --- Launch timeline ---------------------------------------------------------
+#
+# See the spot table's t_* columns for what these durations mean and why they
+# are denormalized here.
+
+
+@db_retries.retry
+def get_jobs_pending_launch_timeline(limit: int = 200) -> List[Dict[str, Any]]:
+    """Tasks that have first reached RUNNING but have no timeline recorded yet.
+
+    A task that never reaches RUNNING is deliberately not returned: it has no
+    time-to-running to report, and its individual launch attempts are already
+    accounted for on their own. Leaving it out also means no extra marker is
+    needed to avoid rescanning it forever -- there simply is no timeline to
+    write.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(
+                spot_table.c.spot_job_id,
+                spot_table.c.task_id,
+                spot_table.c.task_name,
+                spot_table.c.created_at,
+                # Where this task's clock starts.
+                spot_table.c.eligible_at,
+                spot_table.c.submitted_at,
+                spot_table.c.start_at,
+                job_info_table.c.workspace,
+                # Distinguishes a job placed on a warm pool, which skips
+                # provisioning, from one that provisioned its own cluster.
+                job_info_table.c.pool,
+            ).select_from(
+                spot_table.join(
+                    job_info_table,
+                    spot_table.c.spot_job_id == job_info_table.c.spot_job_id,
+                    isouter=True)).
+            where(
+                sqlalchemy.and_(
+                    spot_table.c.start_at.is_not(None),
+                    # Implied by the eligible_at guard below -- set_pending
+                    # writes created_at on every row -- and kept because the
+                    # two are independent columns whose writers could diverge.
+                    spot_table.c.created_at.is_not(None),
+                    # Every timestamp the breakdown subtracts, so the
+                    # computation cannot meet a NULL. Without this the
+                    # row still gets counted -- the caller parks a
+                    # total-only timeline when the split raises -- but
+                    # it reports its whole wait as unattributed, which
+                    # is the misdiagnosis this breakdown exists to
+                    # prevent. The sibling query for jobs that never
+                    # ran already guards it.
+                    #
+                    # The trade, chosen rather than inherited: such a
+                    # task is then returned by neither query -- the
+                    # other one wants start_at IS NULL -- so it drops
+                    # out of the counts too, which is the very thing
+                    # those counts exist to prevent. Accepted because a
+                    # task that started without a submission time
+                    # should not exist, and if one does, losing it
+                    # moves no distribution while a fabricated
+                    # all-unattributed breakdown moves two. Counting it
+                    # would mean widening the never-ran query, whose
+                    # whole shape says otherwise.
+                    spot_table.c.submitted_at.is_not(None),
+                    # Not coalesced to created_at, which would look like the
+                    # forgiving choice and is the harmful one. A task reaches
+                    # here without an origin only when its best-effort write
+                    # failed, and that is a pipeline's later task -- for which
+                    # created_at is the submission of the whole job, so the
+                    # fallback would charge every upstream task's runtime to
+                    # this one's controller wait. That is the distortion this
+                    # column was added to remove, reappearing on the failure
+                    # path. Same rule as the guard above: skip it.
+                    #
+                    # It cannot be NULL merely for being old -- 027 adds this
+                    # column and created_at together, so a pre-column row has
+                    # neither and is already excluded.
+                    spot_table.c.eligible_at.is_not(None),
+                    spot_table.c.t_time_to_running.is_(None),
+                )).order_by(spot_table.c.start_at).limit(limit)).all()
+        return [dict(row._mapping) for row in rows]  # pylint: disable=protected-access
+
+
+@db_retries.retry
+def record_launch_timeline(job_id: int, task_id: int,
+                           durations: Dict[str, float]) -> bool:
+    """Write a task's launch timeline, once.
+
+    Returns whether this writer was the one that recorded it. The update is
+    conditional on the timeline still being absent, so concurrent API server
+    replicas write it exactly once and only the winner emits the metrics --
+    otherwise every rate would be multiplied by the replica count.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(spot_table.update().where(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.t_time_to_running.is_(None),
+            )).values({
+                spot_table.c[name]: value for name, value in durations.items()
+            }))
+        session.commit()
+        return bool(result.rowcount)
+
+
+@db_retries.retry
+def get_jobs_that_never_ran(limit: int = 200) -> List[Dict[str, Any]]:
+    """Finished tasks that never reached RUNNING and are not yet accounted for.
+
+    They have no time-to-running, but leaving them out of the counts entirely
+    is how a fleet that mostly fails to start comes to look fast. They did wait
+    for a controller, so that phase is still a real measurement -- and having
+    written it is what marks the task as counted.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(
+                spot_table.c.spot_job_id,
+                spot_table.c.task_id,
+                spot_table.c.created_at,
+                spot_table.c.eligible_at,
+                spot_table.c.submitted_at,
+                job_info_table.c.workspace,
+                job_info_table.c.pool,
+            ).select_from(
+                spot_table.join(
+                    job_info_table,
+                    spot_table.c.spot_job_id == job_info_table.c.spot_job_id,
+                    isouter=True)).
+            where(
+                sqlalchemy.and_(
+                    spot_table.c.end_at.is_not(None),
+                    spot_table.c.start_at.is_(None),
+                    spot_table.c.created_at.is_not(None),
+                    spot_table.c.submitted_at.is_not(None),
+                    # See the sibling query: an absent origin is a
+                    # failed write, not an old row, and measuring from
+                    # created_at would be wrong rather than merely
+                    # imprecise.
+                    spot_table.c.eligible_at.is_not(None),
+                    spot_table.c.t_controller_queue.is_(None),
+                )).order_by(spot_table.c.end_at).limit(limit)).all()
+        return [dict(row._mapping) for row in rows]  # pylint: disable=protected-access
+
+
+@db_retries.retry
+def record_controller_queue_only(job_id: int, task_id: int,
+                                 duration: float) -> bool:
+    """Record the controller wait of a task that never ran, once.
+
+    Returns whether this writer recorded it, so concurrent replicas count the
+    task exactly once.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(spot_table.update().where(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.t_controller_queue.is_(None),
+            )).values({spot_table.c.t_controller_queue: duration}))
+        session.commit()
+        return bool(result.rowcount)
