@@ -615,6 +615,21 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'run_timestamp': r.get('run_timestamp'),
         'start_at': r.get('start_at'),
         'end_at': r.get('end_at'),
+        # When the job was accepted, and when this task could first have
+        # started -- the same moment except for a pipeline's later tasks. The
+        # startup breakdown is measured from the second and the detail page
+        # draws both ends of its bar from them.
+        'created_at': r.get('created_at'),
+        'eligible_at': r.get('eligible_at'),
+        # The startup breakdown itself. All None until the job first runs.
+        't_time_to_running': r.get('t_time_to_running'),
+        't_controller_queue': r.get('t_controller_queue'),
+        't_retry_overhead': r.get('t_retry_overhead'),
+        't_unattributed': r.get('t_unattributed'),
+        't_provision_setup': r.get('t_provision_setup'),
+        't_queue_wait': r.get('t_queue_wait'),
+        't_node_startup': r.get('t_node_startup'),
+        't_runtime_setup': r.get('t_runtime_setup'),
         'last_recovered_at': r.get('last_recovered_at'),
         'recovery_count': r.get('recovery_count'),
         'job_duration': r.get('job_duration'),

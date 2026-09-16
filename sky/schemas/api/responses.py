@@ -217,8 +217,40 @@ class ManagedJobRecord(ResponseBaseModel):
     user_name: Optional[str] = None
     user_hash: Optional[str] = None
     submitted_at: Optional[float] = None
+    # When the job was accepted, which is what the breakdown below measures
+    # from. `submitted_at` is a later moment -- when a controller claimed it --
+    # and the gap between them is t_controller_queue. Both are shown so that
+    # subtracting the two timestamps on the page agrees with the bar; with only
+    # submitted_at visible it did not.
+    created_at: Optional[float] = None
+    # What the breakdown is measured from, and not the same moment as
+    # created_at for a pipeline's later tasks -- there it is when the
+    # previous task finished. Shown as the bar's own start, so the two
+    # timestamps beside the bar close over it without the reader
+    # subtracting anything from the grid above.
+    eligible_at: Optional[float] = None
     start_at: Optional[float] = None
     end_at: Optional[float] = None
+    # The startup breakdown. All None until the job first reaches RUNNING, on
+    # jobs that never run, and on jobs that predate it -- the dashboard draws
+    # nothing rather than a bar of zero width. Undeclared fields are dropped by
+    # the response model, so a phase missing here is invisible on the page with
+    # nothing failing anywhere.
+    t_time_to_running: Optional[float] = None
+    t_controller_queue: Optional[float] = None
+    t_retry_overhead: Optional[float] = None
+    t_unattributed: Optional[float] = None
+    t_provision_setup: Optional[float] = None
+    t_queue_wait: Optional[float] = None
+    t_node_startup: Optional[float] = None
+    t_runtime_setup: Optional[float] = None
+    # The same breakdown for a job that has not started yet, where every t_*
+    # above is still None. Computed per request from the launch attempts rather
+    # than stored, and deliberately under its own name: one of its phases is
+    # still running, so these numbers are growing and must not be read as the
+    # settled ones. Shape: {'total': float, 'phases': {name: seconds},
+    # 'open_phase': name}.
+    startup_progress: Optional[Dict[str, Any]] = None
     user_yaml: Optional[str] = None
     entrypoint: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None

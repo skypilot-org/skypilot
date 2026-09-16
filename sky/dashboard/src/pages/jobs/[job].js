@@ -50,6 +50,7 @@ import {
   streamManagedJobLogs,
   downloadManagedJobLogs,
 } from '@/data/connectors/jobs';
+import { JobStartupTimeline } from '@/components/jobs.startuptimeline';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { DynamicBadge } from '@/components/elements/DynamicBadge';
 import { PrimaryBadge } from '@/components/elements/PrimaryBadge';
@@ -1608,6 +1609,19 @@ function JobDetailsContent({
   // Default 'info' tab content
   return (
     <div className="grid grid-cols-2 gap-6">
+      {/* Spans both columns: the bar is only readable at full width.
+       *
+       * Single-task jobs only. Every field in this block comes from
+       * allTasks[0], which for a pipeline is one task of several -- and a
+       * pipeline's later tasks are measured from their own handoff, not from
+       * the job's submission, so drawing task 0's bar here would put one
+       * task's number under the job's name. Multi-task jobs get the panel on
+       * each task's own page instead. */}
+      {allTasks.length <= 1 && (
+        <div className="col-span-2">
+          <JobStartupTimeline jobData={jobData} />
+        </div>
+      )}
       <div>
         <div className="text-gray-600 font-medium text-base">
           {taskContext ? 'Task' : 'Job ID (Name)'}
