@@ -443,6 +443,15 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
             if param:
                 label += f' with param {param}'
                 command += f' -k {param}'
+            elif k_value is not None:
+                # No per-parameter step was generated for this function, so
+                # the node id alone does not say which items were selected:
+                # pytest would re-collect every parameter of the function and
+                # run them all. Carry the caller's expression so the step runs
+                # what `pytest -k` would. Functions that DID get split already
+                # name a single parameter above, and a second -k would
+                # override the first.
+                command += f' -k {shlex.quote(k_value)}'
             if extra_args:
                 command += f' {" ".join(extra_args)}'
             if label in generated_steps_set:

@@ -313,6 +313,51 @@ def test_k_expression_is_pytests_own():
         test_file.unlink(missing_ok=True)
 
 
+def test_k_expression_reaches_unsplit_steps():
+    """A step that was not split per parameter still carries the -k.
+
+    Most parametrized functions get one step per parameter, each naming that
+    parameter with its own -k. `test_mount_and_storage` is excluded from that
+    split, so its node id alone does not say which parameters were selected --
+    without the caller's expression the step re-collects the whole function
+    and runs every parameter, which is not what `pytest -k` would do.
+    """
+    # The exclusion is keyed on the path containing `test_mount_and_storage`,
+    # so the throwaway file has to be named into it.
+    test_file = pathlib.Path(
+        'tests/smoke_tests/test_mount_and_storage_kexpr_tmp.py')
+    test_file.write_text(
+        'import pytest\n'
+        '\n'
+        '\n'
+        "@pytest.mark.parametrize('store', ['ALPHA', 'BETA'])\n"
+        'def test_kexpr_store(store):\n'
+        '    pass\n')
+    try:
+        env = dict(os.environ)
+        env['PYTHONPATH'] = (f"{pathlib.Path.cwd()}/tests:"
+                             f"{env.get('PYTHONPATH', '')}")
+        pipeline_path = pathlib.Path(
+            '.buildkite/pipeline_smoke_tests_release.yaml')
+        pipeline_path.unlink(missing_ok=True)
+        subprocess.run([
+            'python', '.buildkite/generate_pipeline.py', '--args',
+            '--kubernetes -k alpha', '--file_pattern',
+            'test_mount_and_storage_kexpr_tmp'
+        ],
+                       env=env,
+                       check=True)
+        steps = _extract_steps_from_pipeline(pipeline_path)
+        assert len(steps) == 1, f'expected one unsplit step, got {steps}'
+        command = steps[0]['command']
+        # Lowercase `alpha` against the `ALPHA` id: pytest's -k is
+        # case-insensitive, and the step has to select the same way.
+        assert '-k alpha' in command, \
+            f'the step dropped the -k, so it would run every parameter: {command}'
+    finally:
+        test_file.unlink(missing_ok=True)
+
+
 @pytest.mark.parametrize('args', [
     '',
     '--aws',
