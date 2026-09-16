@@ -277,6 +277,32 @@ const formatSlurmPartitions = (partitionField) => {
   return partitions.length > 0 ? partitions.map((p) => p.name).join(', ') : '-';
 };
 
+// Aggregate GPU availability only across the contexts shown in one section.
+// A GPU type can exist in both SSH and Kubernetes contexts, so filtering a
+// global aggregate by GPU name would repeat the combined total in both cards.
+export function aggregateGPUsForContexts(perContextGPUs, contexts) {
+  const selectedContexts = new Set(contexts);
+  const gpuSummary = new Map();
+
+  perContextGPUs.forEach((gpu) => {
+    if (!selectedContexts.has(gpu.context)) return;
+
+    const gpuName = canonicalizeGpuName(gpu.gpu_name);
+    const summary = gpuSummary.get(gpuName) || {
+      gpu_name: gpuName,
+      gpu_total: 0,
+      gpu_free: 0,
+      gpu_not_ready: 0,
+    };
+    summary.gpu_total += gpu.gpu_total || 0;
+    summary.gpu_free += gpu.gpu_free || 0;
+    summary.gpu_not_ready += gpu.gpu_not_ready || 0;
+    gpuSummary.set(gpuName, summary);
+  });
+
+  return Array.from(gpuSummary.values());
+}
+
 // The GPU quantities a Slurm node can be asked for, mirroring what
 // `slurm_catalog.list_accelerators_realtime` derives per node: powers of two up
 // to the node's GPU count, plus the count itself when it is not a power of two.
@@ -2756,7 +2782,6 @@ export function GPUs() {
   const router = useRouter();
 
   const [allKubeContextNames, setAllKubeContextNames] = useState([]);
-  const [allGPUs, setAllGPUs] = useState([]);
   const [perContextGPUs, setPerContextGPUs] = useState([]);
   const [perNodeGPUs, setPerNodeGPUs] = useState([]);
   // Track which contexts have had their GPU/node data loaded (for progressive loading)
@@ -2881,7 +2906,6 @@ export function GPUs() {
         // On error, we should still mark data as loaded but with empty values
         setWorkspaceInfrastructure({});
         setAllKubeContextNames([]);
-        setAllGPUs([]);
         setPerContextGPUs([]);
         setPerNodeGPUs([]);
         setContextStats({});
@@ -2946,7 +2970,6 @@ export function GPUs() {
       if (!contextsData) {
         setWorkspaceInfrastructure({});
         setAllKubeContextNames([]);
-        setAllGPUs([]);
         setPerContextGPUs([]);
         setPerNodeGPUs([]);
         setContextWorkspaceMap({});
@@ -2985,7 +3008,6 @@ export function GPUs() {
         // No contexts to fetch GPU data for
         // Only clear data during initial/manual refresh, not interval refresh
         if (showLoadingIndicators) {
-          setAllGPUs([]);
           setPerContextGPUs([]);
           setPerNodeGPUs([]);
           setContextErrors({});
@@ -3030,8 +3052,6 @@ export function GPUs() {
               return [...filtered, ...gpuData.perNodeGPUs];
             });
 
-            // Note: allGPUs is computed via useEffect when perContextGPUs changes
-
             // Update context errors if there was an error
             if (gpuData.error) {
               setContextErrors((prev) => ({
@@ -3063,7 +3083,6 @@ export function GPUs() {
       console.error('Error in fetchKubernetesData:', error);
       setWorkspaceInfrastructure({});
       setAllKubeContextNames([]);
-      setAllGPUs([]);
       setPerContextGPUs([]);
       setPerNodeGPUs([]);
       setContextWorkspaceMap({});
@@ -3313,27 +3332,6 @@ export function GPUs() {
     refreshDataRef.current = fetchData;
   }, [fetchData]);
 
-  // Compute allGPUs (aggregated totals) whenever perContextGPUs changes
-  useEffect(() => {
-    const gpuSummary = {};
-    perContextGPUs.forEach((gpu) => {
-      const gpuName = canonicalizeGpuName(gpu.gpu_name);
-      if (gpuName in gpuSummary) {
-        gpuSummary[gpuName].gpu_total += gpu.gpu_total || 0;
-        gpuSummary[gpuName].gpu_free += gpu.gpu_free || 0;
-        gpuSummary[gpuName].gpu_not_ready += gpu.gpu_not_ready || 0;
-      } else {
-        gpuSummary[gpuName] = {
-          gpu_name: gpuName,
-          gpu_total: gpu.gpu_total || 0,
-          gpu_free: gpu.gpu_free || 0,
-          gpu_not_ready: gpu.gpu_not_ready || 0,
-        };
-      }
-    });
-    setAllGPUs(Object.values(gpuSummary));
-  }, [perContextGPUs]);
-
   // Effect for initial load.
   useEffect(() => {
     // This calls the fetchData version defined when isInitialLoad is true.
@@ -3457,17 +3455,6 @@ export function GPUs() {
       window.removeEventListener('skydashboard:infra:refresh', onRefreshEvent);
     };
   }, [handleRefresh]);
-
-  // Calculate summary data
-  const totalGpuTypes = (allGPUs || []).length;
-  const grandTotalGPUs = (allGPUs || []).reduce(
-    (sum, gpu) => sum + gpu.gpu_total,
-    0
-  );
-  const grandTotalFreeGPUs = (allGPUs || []).reduce(
-    (sum, gpu) => sum + gpu.gpu_free,
-    0
-  );
 
   // Group perContextGPUs by context (already flattened from the backend)
   const groupedPerContextGPUs = React.useMemo(() => {
@@ -3609,36 +3596,15 @@ export function GPUs() {
     return rows;
   }, [extraInfraRows, allKubeContextNames]);
 
-  // Filter GPUs by context type (SSH vs Kubernetes)
-  const sshGPUs = React.useMemo(() => {
-    if (!perContextGPUs || !allGPUs) return [];
+  const sshGPUs = React.useMemo(
+    () => aggregateGPUsForContexts(perContextGPUs, sshContexts),
+    [perContextGPUs, sshContexts]
+  );
 
-    // Create a map of GPU names from SSH contexts
-    const sshGpuNames = new Set();
-    perContextGPUs.forEach((gpu) => {
-      if (gpu.context.startsWith('ssh-')) {
-        sshGpuNames.add(canonicalizeGpuName(gpu.gpu_name));
-      }
-    });
-
-    // Filter allGPUs based on whether they appear in SSH contexts
-    return allGPUs.filter((gpu) => sshGpuNames.has(gpu.gpu_name));
-  }, [allGPUs, perContextGPUs]);
-
-  const kubeGPUs = React.useMemo(() => {
-    if (!perContextGPUs || !allGPUs) return [];
-
-    // Create a map of GPU names from Kubernetes contexts
-    const kubeGpuNames = new Set();
-    perContextGPUs.forEach((gpu) => {
-      if (!gpu.context.startsWith('ssh-')) {
-        kubeGpuNames.add(canonicalizeGpuName(gpu.gpu_name));
-      }
-    });
-
-    // Filter allGPUs based on whether they appear in Kubernetes contexts
-    return allGPUs.filter((gpu) => kubeGpuNames.has(gpu.gpu_name));
-  }, [allGPUs, perContextGPUs]);
+  const kubeGPUs = React.useMemo(
+    () => aggregateGPUsForContexts(perContextGPUs, kubeContexts),
+    [perContextGPUs, kubeContexts]
+  );
 
   // Extract Slurm cluster names. Union three sources, because each on its own
   // omits clusters the section should still list:
