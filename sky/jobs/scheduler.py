@@ -89,11 +89,7 @@ JOB_CONTROLLER_ENV_PATH = runtime_utils.expanduser('~/.sky/job_controller_env')
 
 CURRENT_HASH = os.path.expanduser('~/.sky/wheels/current_sky_wheel_hash')
 
-# Minimum spacing between consecutive controller starts. Starting the whole
-# pool at once makes a transaction-mode pooler open one server connection per
-# concurrent client and hold them until its idle timeout. Spacing the starts
-# keeps that open rate flat as the pool size grows with API server memory.
-_CONTROLLER_START_INTERVAL_SECONDS = 0.3
+_CONTROLLER_START_INTERVAL_SECONDS = 0.5
 
 
 def _parse_controller_pid_entry(
