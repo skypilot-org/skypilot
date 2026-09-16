@@ -3541,9 +3541,17 @@ async def set_eligible_at_async(job_id: int, task_id: int,
     try:
         await _retry_session(_op)
     except Exception as e:  # pylint: disable=broad-except
+        # Logged with the consequence, because it is not a loss of precision.
+        # Both timeline queries require an origin, so a task without one is
+        # selected by neither: it gets no breakdown *and* does not appear in
+        # the never-ran counts. This warning is the only trace it leaves. An
+        # earlier version of this message promised a fallback to the
+        # submission time -- that fallback was removed, precisely because
+        # measuring a pipeline's later task from submission folds every
+        # upstream task's runtime into its controller-queue wait.
         logger.warning(f'Could not record when job {job_id} task {task_id} '
-                       f'became eligible to start; its breakdown will fall '
-                       f'back to the job submission time: {e}')
+                       f'became eligible to start, so it will have no '
+                       f'start-up breakdown and will not be counted: {e}')
 
 
 def get_job_status_with_task_id(job_id: int,
