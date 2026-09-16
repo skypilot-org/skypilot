@@ -159,10 +159,20 @@ function TaskDetails() {
           };
         }
       }
+      // The member's rows are already in the tree fetched above. Hand them
+      // down so the task page does not fetch the same job again by id.
+      const memberRows = treeMembers.filter(
+        (m) => String(m.id) === String(member.id)
+      );
       return (
         <JobDetails
           key={`dynamic-${member.id}`}
           overrideJobId={String(member.id)}
+          preloaded={{
+            jobs: memberRows,
+            controllerStopped: jobData?.controllerStopped || false,
+          }}
+          onRefresh={handleManualRefresh}
           taskContext={{
             rootId: jobId,
             rootName: jobName,

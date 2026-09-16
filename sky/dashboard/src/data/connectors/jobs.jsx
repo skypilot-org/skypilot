@@ -687,8 +687,15 @@ const LEGACY_TREE_CACHE_ARGS = [
  * seconds later.
  *
  * `membersLoaded` tells "no members" apart from "not fetched yet".
+ *
+ * `options.preloaded` is `{ jobs, controllerStopped }` for a job whose rows
+ * the caller already has, from a tree it fetched. The hook then fetches
+ * nothing and returns those rows: the dynamic task page renders a member
+ * out of the group's tree instead of fetching it again by id. A member is
+ * never the top of its tree, so `members` is empty there.
  */
-export function useSingleManagedJob(jobId, refreshTrigger = 0) {
+export function useSingleManagedJob(jobId, refreshTrigger = 0, options = {}) {
+  const { preloaded = null } = options;
   const [jobData, setJobData] = useState(null);
   const [members, setMembers] = useState([]);
   const [membersLoaded, setMembersLoaded] = useState(false);
@@ -699,6 +706,7 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
   const loading = loadingJobData;
 
   useEffect(() => {
+    if (preloaded) return undefined;
     let cancelled = false;
 
     // Drop the cached entries only when the refresh trigger actually
@@ -795,8 +803,16 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
     return () => {
       cancelled = true;
     };
-  }, [jobId, refreshTrigger]);
+  }, [jobId, refreshTrigger, preloaded]);
 
+  if (preloaded) {
+    return {
+      jobData: preloaded,
+      loading: false,
+      members: [],
+      membersLoaded: true,
+    };
+  }
   return { jobData, loading, members, membersLoaded };
 }
 

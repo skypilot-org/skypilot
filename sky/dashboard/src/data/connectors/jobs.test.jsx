@@ -192,6 +192,24 @@ describe('useSingleManagedJob tree in one fetch', () => {
     expect(result.current.membersLoaded).toBe(true);
   });
 
+  it('fetches nothing when the rows are preloaded from a tree', async () => {
+    // The dynamic task page renders a member out of the group's tree.
+    const preloaded = {
+      jobs: [{ id: root + 1, task_id: 0, root_job_id: root }],
+      controllerStopped: false,
+    };
+    const { result } = renderHook(() =>
+      useSingleManagedJob(String(root + 1), 0, { preloaded })
+    );
+    expect(result.current.loading).toBe(false);
+    expect(result.current.jobData).toBe(preloaded);
+    expect(result.current.members).toEqual([]);
+    expect(result.current.membersLoaded).toBe(true);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(dashboardCache.get).not.toHaveBeenCalled();
+    expect(dashboardCache.invalidate).not.toHaveBeenCalled();
+  });
+
   // Last: the fallback is remembered for the rest of the module's life, so
   // tests after this one would skip the tree fetch.
   it('falls back to the two-call path when the controller refuses include_tree', async () => {
