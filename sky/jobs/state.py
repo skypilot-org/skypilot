@@ -1805,17 +1805,29 @@ def _rows_in_trees_of(root_ids: List[int]) -> 'sqlalchemy.ColumnElement':
     roots' own rows and the rows of every job launched under them, at any
     depth.
 
-    ``root_ids`` must be tree roots (see ``get_tree_root_ids``). The test is
-    "the row's job is one of the roots, or has one of them as root_job_id".
-    A member id passed here would match only its own rows.
+    ``root_ids`` must be tree roots (see ``get_tree_root_ids``). A member id
+    passed here would match only its own rows.
 
-    Written as two IN tests instead of ``COALESCE(root_job_id, spot_job_id)
-    IN (...)`` because PostgreSQL can use the primary key and the root_job_id
-    index for the two tests and cannot for the COALESCE. The dashboard runs
-    this on every poll.
+    Written as one membership test on ``spot.spot_job_id`` against the union
+    of the root ids (looked up in spot, so a legacy job without a job_info
+    row still matches itself) and the member ids (looked up in job_info by
+    root_job_id). PostgreSQL serves both lookups from indexes and joins the
+    small result to spot by index. The earlier form,
+    ``spot.spot_job_id IN roots OR job_info.root_job_id IN roots``, spans two
+    tables, which PostgreSQL cannot serve from indexes: on staging (70k rows)
+    it hash-joined both tables and filtered, 42 ms against 0.1 ms for this
+    form. The dashboard runs this on every poll.
     """
-    return sqlalchemy.or_(spot_table.c.spot_job_id.in_(root_ids),
-                          job_info_table.c.root_job_id.in_(root_ids))
+    # Aliases so the subqueries do not correlate with the outer query's own
+    # spot and job_info tables.
+    root_rows = spot_table.alias('tree_root_rows')
+    member_rows = job_info_table.alias('tree_member_rows')
+    roots = sqlalchemy.select(root_rows.c.spot_job_id).where(
+        root_rows.c.spot_job_id.in_(root_ids))
+    members = sqlalchemy.select(member_rows.c.spot_job_id).where(
+        member_rows.c.root_job_id.in_(root_ids))
+    tree_job_ids = sqlalchemy.union_all(roots, members)
+    return spot_table.c.spot_job_id.in_(tree_job_ids)
 
 
 def get_tree_root_ids(job_ids: List[int]) -> List[int]:
