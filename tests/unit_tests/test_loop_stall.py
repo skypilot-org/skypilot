@@ -197,15 +197,18 @@ def test_gzip_stall_names_the_compression_call_site(stall_logs):
 
     _run_with_watchdog(compress_on_loop, threshold=0.2, recover=0.6)
 
-    gzip_stalls = _messages_matching(stall_logs, 'gzip:write')
+    gzip_stalls = [
+        detail for detail in _details(stall_logs)
+        if detail['source'].startswith('gzip:')
+    ]
     assert gzip_stalls, ('gzip stall not attributed, got: '
                          f'{[r.getMessage() for r in stall_logs]}')
-    message = gzip_stalls[0]
+    detail = gzip_stalls[0]
     # gzip is not framework plumbing, so it is named directly rather than
     # being collapsed into its caller.
-    assert 'gzip.py:' in message
+    assert 'gzip.py:' in detail['blocking']
     # The chain back to the code that chose to compress on the loop is kept.
-    assert 'in compress_on_loop' in message
+    assert any('in compress_on_loop' in frame for frame in detail['frames'])
 
 
 def test_long_stall_is_sampled_more_than_once(stall_logs):
