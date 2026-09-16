@@ -222,17 +222,25 @@ def bulk_provision(
                 # lost.
                 raise
             except BaseException:
-                global_user_state.close_launch_attempt(
-                    attempt_id, global_user_state.LaunchOutcome.FAILED)
+                if attempt_id is not None:
+                    global_user_state.close_launch_attempt(
+                        attempt_id, global_user_state.LaunchOutcome.FAILED)
                 metrics_utils.observe_provision_duration(
                     repr(cloud), 'failure',
                     time.time() - provision_start)
                 raise
-            global_user_state.record_launch_milestone(
-                attempt_id, global_user_state.LaunchMilestone.INSTANCES_READY,
-                time.time())
-            global_user_state.close_launch_attempt(
-                attempt_id, global_user_state.LaunchOutcome.SUCCEEDED)
+            # Past the point of success. Nothing below may raise: the handler
+            # further down tears the cluster down and fails over, so an
+            # exception here would destroy the cluster that was just
+            # provisioned. The two state calls are `_best_effort` and the
+            # metric swallows its own failures.
+            if attempt_id is not None:
+                global_user_state.record_launch_milestone(
+                    attempt_id,
+                    global_user_state.LaunchMilestone.INSTANCES_READY,
+                    time.time())
+                global_user_state.close_launch_attempt(
+                    attempt_id, global_user_state.LaunchOutcome.SUCCEEDED)
             metrics_utils.observe_provision_duration(
                 repr(cloud), 'success',
                 time.time() - provision_start)

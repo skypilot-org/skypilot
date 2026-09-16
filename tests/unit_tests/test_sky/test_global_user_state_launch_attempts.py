@@ -8,6 +8,8 @@ never be adopted by a later one.
 
 import time
 
+import pytest
+
 from sky import global_user_state
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
@@ -42,12 +44,17 @@ def _rows():
                 global_user_state.launch_attempt_table.c.attempt_seq)).all()
 
 
-def _open(cluster='c', chash='h1', request='req-1', start=100.0, **kw):
-    return global_user_state.open_launch_attempt(cluster_name=cluster,
-                                                 cluster_hash=chash,
-                                                 request_id=request,
-                                                 provision_start=start,
-                                                 **kw)
+def _open(cluster='c', chash='h1', request='req-1', start=100.0, **kw) -> str:
+    attempt_id = global_user_state.open_launch_attempt(cluster_name=cluster,
+                                                       cluster_hash=chash,
+                                                       request_id=request,
+                                                       provision_start=start,
+                                                       **kw)
+    # None means the write failed, which `_best_effort` allows in production
+    # and no test here is about. Asserting it keeps the rest of the file typed
+    # against a str, and turns a silently-skipped write into a failure.
+    assert attempt_id is not None, 'opening the attempt did not write a row'
+    return attempt_id
 
 
 def test_pause_resume_continues_one_attempt(tmp_path, monkeypatch):
@@ -455,3 +462,75 @@ def test_retention_holds_attempts_the_daemon_left_unclaimed(
     remaining = {r.attempt_id for r in _rows()}
     assert held in remaining
     assert ancient not in remaining
+
+
+def test_recording_a_launch_attempt_cannot_raise(monkeypatch):
+    """A measurement must never be able to fail the thing it measures.
+
+    These writes run on the user's launch path, inside the `try` in
+    `bulk_provision` whose handler tears the cluster down and fails over. Left
+    unguarded, a database blip in the two calls that run *after* a successful
+    provision did not merely lose a measurement: it raised past the return,
+    landed in that handler, and destroyed a working cluster.
+
+    Asserted on every writer rather than on the pair that was noticed, since
+    the next call site added is the one nobody thinks about.
+    """
+
+    class _Unavailable:
+
+        def get_engine(self):
+            raise RuntimeError('database is unavailable')
+
+    monkeypatch.setattr(global_user_state, '_db_manager', _Unavailable())
+
+    # Returns None rather than an id; the caller skips the milestones.
+    assert global_user_state.open_launch_attempt(
+        cluster_name='c',
+        cluster_hash=None,
+        request_id='r',
+        provision_start=time.time()) is None
+
+    # The rest are pure side effects, so returning at all is the assertion.
+    global_user_state.record_launch_milestone('some-attempt',
+                                              _MILESTONE.INSTANCES_READY,
+                                              time.time())
+    global_user_state.record_launch_milestone_for_cluster(
+        'c', _MILESTONE.INSTANCES_REQUESTED, time.time())
+    global_user_state.record_launch_queue_for_cluster('c', 'some-queue')
+    global_user_state.close_launch_attempt('some-attempt', _OPEN.SUCCEEDED)
+
+
+@pytest.mark.parametrize('returning', [True, False])
+def test_claiming_is_exactly_once_on_both_backends(tmp_path, monkeypatch,
+                                                   returning):
+    """The claim returns the rows it won, however the backend hands them back.
+
+    Two paths: RETURNING where the backend has it (PostgreSQL always, SQLite
+    from 3.35), and a read-back by token where it does not. Parametrized
+    because this machine's SQLite is new enough that the fallback would
+    otherwise never run here -- and the fallback is the one that only old
+    deployments exercise, so nobody would notice it rotting.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(global_user_state, '_supports_returning',
+                        lambda: returning)
+
+    now = time.time()
+    closed = [
+        _open(cluster=f'c{i}', chash=f'h{i}', request=f'r{i}', start=now - i)
+        for i in range(3)
+    ]
+    for attempt in closed:
+        global_user_state.close_launch_attempt(attempt, _OPEN.SUCCEEDED)
+    # One still in flight: it has segments that have not happened yet.
+    _open(cluster='live', chash='hl', request='rl', start=now)
+
+    first = global_user_state.claim_unobserved_launch_attempts()
+    assert {r.attempt_id for r in first} == set(closed), (
+        'the claim must return every closed, unobserved attempt and no '
+        'in-flight one')
+
+    # The second call is the exactly-once assertion: a replica running a tick
+    # later must come away with nothing, not with the same rows again.
+    assert global_user_state.claim_unobserved_launch_attempts() == []

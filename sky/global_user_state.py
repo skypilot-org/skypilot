@@ -8,6 +8,7 @@ Concepts:
 """
 import asyncio
 import enum
+import functools
 import json
 import os
 import pickle
@@ -319,6 +320,15 @@ cluster_event_table = sqlalchemy.Table(
 # attempt_id is minted per real provisioning attempt (one per failover
 # iteration). A pause/resume continues the existing row -- the resources are
 # kept, not torn down, so it is one attempt.
+
+# Attempts the metrics daemon still has to turn into observations: finished,
+# and not yet claimed. Written once and used twice -- as the claim query's
+# WHERE and as its index's predicate -- because PostgreSQL matches a partial
+# index only when the two agree, and two hand-kept copies of a predicate are
+# how they come to disagree.
+UNOBSERVED_ATTEMPT_PREDICATE = ('outcome IS NOT NULL AND '
+                                'metrics_observed_at IS NULL')
+
 launch_attempt_table = sqlalchemy.Table(
     'launch_attempts',
     Base.metadata,
@@ -395,6 +405,21 @@ launch_attempt_table = sqlalchemy.Table(
     # rows, once a minute, inside a write transaction that blocks other
     # writers for its duration.
     sqlalchemy.Index('ix_launch_attempts_open', 'outcome', 'provision_start'),
+    # The metrics daemon's claim, also once a minute. Its predicate is
+    # "closed but not yet observed", and `ix_launch_attempts_open` serves only
+    # the first half: leading on `outcome IS NOT NULL` is nearly the whole
+    # table in the steady state, every row of which is then filtered on
+    # metrics_observed_at.
+    #
+    # Partial, and that is the point: rows leave this index as they are
+    # observed, so in the steady state it holds only the last minute's work
+    # rather than the job history. The predicate has to be repeated in the
+    # index for PostgreSQL to match it to the query.
+    sqlalchemy.Index(
+        'ix_launch_attempts_unobserved',
+        'provision_start',
+        postgresql_where=sqlalchemy.text(UNOBSERVED_ATTEMPT_PREDICATE),
+        sqlite_where=sqlalchemy.text(UNOBSERVED_ATTEMPT_PREDICATE)),
 )
 
 ssh_key_table = sqlalchemy.Table(
@@ -521,6 +546,26 @@ def _sqlite_supports_returning() -> bool:
             f'Invalid version string: {version_str}'
         major, minor = int(version_parts[0]), int(version_parts[1])
         return (major > 3) or (major == 3 and minor >= 35)
+
+
+@annotations.lru_cache(scope='global', maxsize=1)
+def _supports_returning() -> bool:
+    """Whether this backend can return the rows a statement just changed.
+
+    Not the same question as `_sqlite_supports_returning`, which answers "is
+    this SQLite, and new enough" and so returns False on PostgreSQL -- where
+    RETURNING has existed since 8.2. Asking that one here would send every
+    PostgreSQL deployment, the ones with the tables large enough for this to
+    matter, down the fallback.
+
+    Only SQLite needs asking, and only about its own version: RETURNING there
+    arrived in 3.35, and SQLAlchemy exposes it from 2.0, which
+    `dependencies.py` already requires.
+    """
+    engine = _db_manager.get_engine()
+    if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
+        return _sqlite_supports_returning()
+    return True
 
 
 _db_manager = db_utils.DatabaseManager(
@@ -4144,6 +4189,43 @@ def get_cluster_hash(cluster_name: str) -> Optional[str]:
     return _get_hash_for_existing_cluster(cluster_name)
 
 
+def _best_effort(func):
+    """Swallow a failure in a write whose caller must not fail because of it.
+
+    For side observations that run on a user-facing path: the caller is doing
+    something else, and this write is a note about it. Returns None when the
+    write fails, so only wrap functions whose callers can read None as "it did
+    not happen" -- not one returning a list a caller iterates.
+
+    What it is for, concretely: the launch-attempt writes run inside the `try`
+    in `bulk_provision` whose `except` tears the cluster down and fails over.
+    A database blip in the two that run after a *successful* provision did not
+    merely lose a measurement -- it raised past the return, landed in that
+    handler, and destroyed a working cluster. `db_retries.retry` does not
+    prevent that; it raises once retries are spent.
+
+    Applied at the definition rather than at each call site on purpose: the
+    guarantee has to hold for the call site somebody adds later.
+
+    Not for background work. A daemon that raises gets logged with a traceback
+    and retried on the next tick, which is strictly better than continuing as
+    though there had been nothing to do.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Ignoring a failure in {func.__name__}, which is '
+                           f'best-effort: {e}. Its caller carries on without '
+                           f'it; what was being recorded is lost.')
+            return None
+
+    return wrapper
+
+
+@_best_effort
 @db_retries.retry
 def open_launch_attempt(
     cluster_name: str,
@@ -4154,7 +4236,9 @@ def open_launch_attempt(
     provision_start: float,
     cluster_name_on_cloud: Optional[str] = None,
     workspace: Optional[str] = None,
-) -> str:
+    # None when the row could not be written -- see `_best_effort`. The caller
+    # carries that through by skipping the milestones instead of failing.
+) -> Optional[str]:
     """Open a provisioning attempt, or resume the one already in flight.
 
     Returns the attempt_id to record milestones against.
@@ -4227,6 +4311,7 @@ def open_launch_attempt(
     return attempt_id
 
 
+@_best_effort
 @db_retries.retry
 def record_launch_milestone(attempt_id: str, milestone: LaunchMilestone,
                             timestamp: float) -> None:
@@ -4279,33 +4364,47 @@ def claim_unobserved_launch_attempts(limit: int = 500) -> List[Any]:
     not happened yet.
     """
     engine = _db_manager.get_engine()
-    # The claim is one UPDATE, and the timestamp doubles as its token: rows
-    # carrying it are exactly the ones this call won. A row-at-a-time loop
-    # would instead hold write locks for its whole length, so a second replica
-    # would block for the length of the batch rather than for one statement.
-    # It still comes away with nothing this tick -- its UPDATE re-checks
-    # metrics_observed_at IS NULL and matches none -- which is the point: the
-    # observation happens exactly once, not once per replica.
+    # The claim is one UPDATE. A row-at-a-time loop would instead hold write
+    # locks for its whole length, so a second replica would block for the
+    # length of the batch rather than for one statement. It still comes away
+    # with nothing this tick -- its UPDATE re-checks metrics_observed_at IS
+    # NULL and matches none -- which is the point: the observation happens
+    # exactly once, not once per replica.
     #
-    # Recovering the rows by equality against a float is exact here because
-    # the column is double precision on both SQLite and Postgres. A NUMERIC
-    # column would round it and silently return nothing.
+    # Which rows this call won comes from RETURNING where the backend has it,
+    # so the claim is a single statement. The timestamp is still written, but
+    # it is no longer read back as a token: doing that needed a third query on
+    # an unindexable predicate, which scanned the table every minute.
     now = time.time()
     with orm.Session(engine) as session:
         candidates = sqlalchemy.select(launch_attempt_table.c.attempt_id).where(
             sqlalchemy.and_(
-                launch_attempt_table.c.outcome.is_not(None),
-                launch_attempt_table.c.metrics_observed_at.is_(None),
-            )).order_by(launch_attempt_table.c.provision_start).limit(limit)
-        session.execute(launch_attempt_table.update().where(
+                # Spelled as the index's own predicate, not restated: a
+                # PostgreSQL partial index is matched to a query only when the
+                # planner can prove the two agree, so an edit to one that
+                # misses the other silently drops back to a scan.
+                sqlalchemy.text(UNOBSERVED_ATTEMPT_PREDICATE),)).order_by(
+                    launch_attempt_table.c.provision_start).limit(limit)
+        claim = launch_attempt_table.update().where(
             sqlalchemy.and_(
                 launch_attempt_table.c.attempt_id.in_(
                     candidates.scalar_subquery()),
                 launch_attempt_table.c.metrics_observed_at.is_(None),
-            )).values({launch_attempt_table.c.metrics_observed_at: now}))
-        claimed = session.execute(
-            sqlalchemy.select(launch_attempt_table).where(
-                launch_attempt_table.c.metrics_observed_at == now)).all()
+            )).values({launch_attempt_table.c.metrics_observed_at: now})
+        if _supports_returning():
+            # One statement: the UPDATE hands back the rows it matched.
+            claimed = session.execute(
+                claim.returning(*launch_attempt_table.c)).all()
+        else:
+            # The fallback reads the rows back by the token. No index can
+            # serve that -- the partial index above covers unobserved rows,
+            # and these have just stopped being unobserved -- so it scans the
+            # table once a minute, growing with the retention window. Kept
+            # only for SQLite older than 3.35, where RETURNING does not exist.
+            session.execute(claim)
+            claimed = session.execute(
+                sqlalchemy.select(launch_attempt_table).where(
+                    launch_attempt_table.c.metrics_observed_at == now)).all()
         session.commit()
     return list(claimed)
 
@@ -4344,6 +4443,7 @@ def sweep_abandoned_launch_attempts(
         return result.rowcount
 
 
+@_best_effort
 @db_retries.retry
 def record_launch_queue_for_cluster(cluster_name: str, queue: str) -> None:
     """Note which external scheduler queue this launch was submitted to.
@@ -4378,6 +4478,7 @@ def record_launch_queue_for_cluster(cluster_name: str, queue: str) -> None:
         session.commit()
 
 
+@_best_effort
 @db_retries.retry
 def record_launch_milestone_for_cluster(cluster_name: str,
                                         milestone: LaunchMilestone,
@@ -4421,6 +4522,7 @@ def record_launch_milestone_for_cluster(cluster_name: str,
         session.commit()
 
 
+@_best_effort
 @db_retries.retry
 def close_launch_attempt(attempt_id: str, outcome: LaunchOutcome) -> None:
     """Mark an attempt terminal. No-op if it is already closed."""
