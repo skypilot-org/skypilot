@@ -164,6 +164,19 @@ const STATUS_PRIORITY = {
   FAILED_CONTROLLER: 12,
 };
 
+/**
+ * Returns the key that marks a row as expanded. The Details cell's show-more
+ * toggle stores this key, and the row renderer compares against it, so both
+ * must call this function. Group children and external rows use task_job_id.
+ * A group child shares its parent's id. An external row's id is the Slurm
+ * cluster's id, which can equal another cluster's id or a managed job id.
+ */
+export function detailsRowId(item, renderMode) {
+  return renderMode === 'groupChild' || item.is_external
+    ? item.task_job_id
+    : item.id;
+}
+
 // Helper function to aggregate status for a job group
 // Returns the "worst" status based on priority
 // For job groups with primary/auxiliary tasks, status is determined only by primary tasks
@@ -2222,14 +2235,7 @@ export function ManagedJobsTable({
             return <TableCell>-</TableCell>;
           }
 
-          // Use task_job_id for group children to avoid conflicts, and for
-          // external rows always: their raw id is the Slurm cluster's id
-          // space, so equal ids across clusters (or against a managed id)
-          // would co-expand on plain item.id.
-          const rowId =
-            ctx?.renderMode === 'groupChild' || item.is_external
-              ? item.task_job_id
-              : item.id;
+          const rowId = detailsRowId(item, renderMode);
 
           return (
             <TableCell>
@@ -2798,7 +2804,7 @@ export function ManagedJobsTable({
                                 : null;
                             })}
                           </TableRow>
-                          {expandedRowId === item.id && (
+                          {expandedRowId === detailsRowId(item, 'single') && (
                             <ExpandedDetailsRow
                               text={item.details}
                               colSpan={totalColSpan}
