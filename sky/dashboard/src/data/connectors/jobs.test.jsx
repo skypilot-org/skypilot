@@ -69,6 +69,40 @@ describe('useSingleManagedJob manual-refresh cache invalidation', () => {
     );
   });
 
+  it("does not invalidate the next job when its predecessor's refreshed fetch is still in flight", async () => {
+    // Refresh on job A, then navigate to job B before A's fetch settles. The
+    // ref must already record the trigger, or B sees "1 > 0" and drops its
+    // own entry on its first load.
+    let settleA;
+    dashboardCache.get.mockImplementationOnce(
+      () => new Promise((resolve) => (settleA = resolve))
+    );
+    const { rerender } = renderHook(
+      ({ id, trigger }) => useSingleManagedJob(id, trigger),
+      { initialProps: { id: jobId, trigger: 0 } }
+    );
+    await waitFor(() => expect(dashboardCache.get).toHaveBeenCalledTimes(1));
+    settleA({ jobs: [{ id: Number(jobId) }], controllerStopped: false });
+    await waitFor(() => expect(dashboardCache.get).toHaveBeenCalledTimes(1));
+
+    // Refresh: A is invalidated and refetched, and this fetch stays pending.
+    dashboardCache.get.mockImplementationOnce(() => new Promise(() => {}));
+    rerender({ id: jobId, trigger: 1 });
+    await waitFor(() =>
+      expect(dashboardCache.invalidate).toHaveBeenCalledTimes(1)
+    );
+    dashboardCache.invalidate.mockClear();
+
+    // Navigate to B while A's fetch is still pending.
+    dashboardCache.get.mockResolvedValue({
+      jobs: [{ id: 56165 }],
+      controllerStopped: false,
+    });
+    rerender({ id: '56165', trigger: 1 });
+    await waitFor(() => expect(dashboardCache.get).toHaveBeenCalledTimes(3));
+    expect(dashboardCache.invalidate).not.toHaveBeenCalled();
+  });
+
   it('does not invalidate when navigating to a new job while refreshTrigger stays elevated', async () => {
     // The parent keeps refreshTrigger state across jobId changes, so after a
     // refresh the trigger remains > 0. Navigating to a different job must NOT

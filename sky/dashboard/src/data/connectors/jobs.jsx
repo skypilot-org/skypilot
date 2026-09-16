@@ -707,8 +707,15 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
     // when navigating between jobs while the trigger stays elevated (the
     // parent keeps refreshTrigger state across jobId changes), defeating
     // the cache on initial load.
+    //
+    // Decided once, and the ref is updated here, before any await: a later
+    // effect run (navigating to another job while this fetch is in flight)
+    // must see the trigger as already handled. Both fetch paths below read
+    // the same answer.
+    const refreshed = refreshTrigger > prevRefreshTriggerRef.current;
+    prevRefreshTriggerRef.current = refreshTrigger;
     function invalidateIfRefreshed(cacheArgsList) {
-      if (refreshTrigger > prevRefreshTriggerRef.current) {
+      if (refreshed) {
         cacheArgsList.forEach((args) =>
           dashboardCache.invalidate(getManagedJobs, args)
         );
@@ -778,7 +785,6 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
         setJobData({ jobs: [], controllerStopped: false });
         setMembers([]);
       } finally {
-        prevRefreshTriggerRef.current = refreshTrigger;
         if (!cancelled) {
           setMembersLoaded(true);
           setLoadingJobData(false);
