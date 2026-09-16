@@ -150,11 +150,16 @@ export function JobStartupTimeline({ jobData }) {
   const from = jobData?.eligible_at;
   const to = jobData?.started_at ?? jobData?.start_at;
 
+  // Phases that did not happen are dropped -- a zero-width "Retried launches"
+  // would say the job retried. The open phase is kept even at zero: the header
+  // says "Starting", and the one thing a reader wants from it is which phase
+  // that means, which would otherwise vanish for as long as the phase has yet
+  // to accumulate a measurable moment.
   const measured = PHASES.map((phase) => ({
     ...phase,
     seconds: timeline.seconds(phase.key),
     open: phase.key === openPhase,
-  })).filter((segment) => segment.seconds > 0);
+  })).filter((segment) => segment.seconds > 0 || segment.open);
   const shown = apportionSeconds(
     measured.map((segment) => segment.seconds),
     total

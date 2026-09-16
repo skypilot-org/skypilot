@@ -236,6 +236,27 @@ describe('JobStartupTimeline', () => {
     expect(screen.queryByText('0s')).not.toBeInTheDocument();
   });
 
+  it('still names the phase a job is in before it has accumulated a second', () => {
+    // The header says "Starting" and the one thing a reader wants from it is
+    // which phase that means. Filtering on seconds > 0 alone made that vanish
+    // for as long as the open phase had no measurable width -- saying a job
+    // was starting while refusing to say at what.
+    render(
+      <JobStartupTimeline
+        jobData={{
+          startup_progress: {
+            total: 12,
+            phases: { controller_queue: 12, provision_setup: 0 },
+            open_phase: 'provision_setup',
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText('Preparing the launch')).toBeInTheDocument();
+    expect(screen.getByText('<1s so far')).toBeInTheDocument();
+  });
+
   it('renders nothing for a job with no recorded timeline', () => {
     // Jobs that never started, and jobs launched before the timeline existed.
     // An empty bar would read as "started instantly".

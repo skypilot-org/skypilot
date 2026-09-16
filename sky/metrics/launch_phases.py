@@ -337,9 +337,13 @@ def compute_job_progress(task: Dict[str, Any], attempts: List[Any],
         # resources, or was cancelled while starting. It is not waiting for
         # anything, so measuring to `now` would report a job that died an hour
         # ago as "starting, 1h so far", growing for as long as anyone looks at
-        # it. This is exactly the complement of the case above: between them
-        # they are the two halves the recorder already splits on, `start_at`
-        # and `end_at`.
+        # it. These two are the halves the recorder already splits on.
+        #
+        # They do not cover every terminal job: one path leaves both NULL. That
+        # check needs the status, whose type differs by queue path, so it lives
+        # with the caller that knows the shape of these rows -- see
+        # `_still_starting`. Not moved here to join the others, because this
+        # module deliberately does not import the job state.
         return None
     total = now - origin
     if total <= 0:

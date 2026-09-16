@@ -9,6 +9,7 @@ import types
 
 import pytest
 
+from sky.jobs import state as managed_job_state
 from sky.jobs.server import core
 from sky.metrics import launch_phases
 from sky.server.requests import payloads
@@ -31,10 +32,21 @@ def _job(**overrides):
         'eligible_at': 0.0,
         'submitted_at': 10.0,
         'start_at': None,
+        'end_at': None,
         'pool': None,
+        'status': managed_job_state.ManagedJobStatus.STARTING,
     }
     job.update(overrides)
     return job
+
+
+@pytest.fixture(autouse=True)
+def _consolidation_mode(monkeypatch):
+    """Every case below assumes the attempts are readable here, which is only
+    true in consolidation mode; `test_without_consolidation_mode...` turns it
+    off explicitly."""
+    monkeypatch.setattr(core.managed_job_utils, 'is_consolidation_mode',
+                        lambda: True)
 
 
 @pytest.fixture(name='one_attempt')
@@ -85,6 +97,86 @@ def test_a_pool_job_is_not_given_another_jobs_attempts(one_attempt):
 
     assert 'startup_progress' not in jobs[0]
     assert one_attempt == []
+
+
+def test_without_consolidation_mode_nothing_is_read_or_reported(
+        monkeypatch, one_attempt):
+    """The milestones are written by the provisioner, which for a managed job
+    runs on the controller -- the same database only in consolidation mode.
+
+    Elsewhere the lookup finds nothing, and with no attempts the split has only
+    the controller wait to name: everything after it lands in the phase that
+    follows. A job parked in a scheduler queue for an hour would read
+    "Preparing the launch, 59m so far", which is the misdiagnosis the whole
+    breakdown exists to prevent. Showing nothing is the honest degradation, and
+    the one the settled path already makes."""
+    monkeypatch.setattr(core.managed_job_utils, 'is_consolidation_mode',
+                        lambda: False)
+    jobs = [_job()]
+
+    core._attach_startup_progress(jobs)
+
+    assert 'startup_progress' not in jobs[0]
+    assert one_attempt == []
+
+
+def test_an_empty_attempt_list_is_not_the_discriminator(one_attempt,
+                                                        monkeypatch):
+    """In consolidation mode no attempts yet is the honest early state of a
+    job that has been claimed but has not begun provisioning, so it must still
+    report -- which is why the mode, not the rows, decides."""
+    monkeypatch.setattr(core.global_user_state,
+                        'get_launch_attempts_for_cluster', lambda name: [])
+    jobs = [_job()]
+
+    core._attach_startup_progress(jobs)
+
+    assert jobs[0]['startup_progress']['open_phase'] == (
+        launch_phases.PROVISION_SETUP)
+
+
+@pytest.mark.parametrize('status', [
+    managed_job_state.ManagedJobStatus.CANCELLED,
+    managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
+    managed_job_state.ManagedJobStatus.FAILED_PRECHECKS,
+])
+def test_a_terminal_job_is_not_still_starting(one_attempt, status):
+    """`set_pending_cancelled` updates the status alone, so a job cancelled
+    while PENDING has neither start_at nor end_at -- the two timestamp guards
+    both miss it, and it reports "Starting, 1d so far" a day later, growing on
+    every page open. The tenant query behind this feature's design found nine
+    rows of exactly that shape."""
+    jobs = [_job(status=status, start_at=None, end_at=None)]
+
+    core._attach_startup_progress(jobs)
+
+    assert 'startup_progress' not in jobs[0]
+    assert one_attempt == []
+
+
+def test_the_status_may_arrive_as_the_raw_column(one_attempt):
+    """The gRPC path decodes the proto into a ManagedJobStatus; the
+    consolidation path hands back the string the database holds. Reading only
+    one of them would let the other through unchecked."""
+    jobs = [
+        _job(status=managed_job_state.ManagedJobStatus.CANCELLED.value),
+        _job(job_id=8,
+             status=managed_job_state.ManagedJobStatus.STARTING.value),
+    ]
+
+    core._attach_startup_progress(jobs)
+
+    assert 'startup_progress' not in jobs[0]
+    assert 'startup_progress' in jobs[1]
+
+
+def test_an_unreadable_status_is_treated_as_terminal(one_attempt):
+    """A number that grows forever is worse than a missing panel."""
+    jobs = [_job(status='not-a-status')]
+
+    core._attach_startup_progress(jobs)
+
+    assert 'startup_progress' not in jobs[0]
 
 
 def test_a_job_with_no_origin_is_skipped_without_a_lookup(one_attempt):
