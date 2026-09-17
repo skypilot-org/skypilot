@@ -2,9 +2,52 @@
 
 import asyncio
 import functools
+import os
+import random
 from typing import Set
 
+from sky import sky_logging
+
+logger = sky_logging.init_logger(__name__)
+
 _background_tasks: Set[asyncio.Task] = set()
+
+# Upper bound on the random delay applied before a periodic housekeeping
+# daemon runs its first pass. See sleep_startup_jitter().
+DEFAULT_STARTUP_JITTER_SECONDS = 1800
+
+
+async def sleep_startup_jitter(
+        name: str, max_seconds: float = DEFAULT_STARTUP_JITTER_SECONDS) -> None:
+    """Sleep a random offset before a periodic daemon's first pass.
+
+    Periodic housekeeping daemons are written as::
+
+        while True:
+            do_the_pass()
+            await asyncio.sleep(interval)
+
+    so the first pass runs at t=0 of the process. That is fine for a single
+    server, but it means every API server that boots at the same moment also
+    starts its housekeeping at the same moment, and the passes stay aligned
+    from then on: a fleet that is restarted together (a rolling upgrade, a
+    node drain, an eviction) has its daily retention sweeps permanently
+    phase-locked, so they all land on the shared database at once.
+
+    Sleeping a random offset in [0, max_seconds) before entering the loop
+    spreads those first passes out, and because the interval is unchanged the
+    offset persists for the lifetime of the process.
+
+    Only safe for work that is pure housekeeping -- nothing whose result is
+    needed for the server to start serving correctly.
+    """
+    if max_seconds <= 0:
+        return
+    delay = random.uniform(0, max_seconds)
+    logger.debug(
+        '%s: delaying first pass by %.0fs to avoid a synchronized '
+        'startup burst across servers', name, delay)
+    await asyncio.sleep(delay)
 
 
 def shield(func):
@@ -76,3 +119,99 @@ def shield(func):
             raise
 
     return async_wrapper
+
+
+# Bytes read from the pipe per readiness callback in NonOwningPipeReader.
+_PIPE_READ_CHUNK = 65536
+
+
+class NonOwningPipeReader:
+    """Line reader for a pipe fd that never takes ownership of the fd.
+
+    Feeds an `asyncio.StreamReader` from `loop.add_reader()` readiness
+    callbacks. The caller keeps owning the fd (typically through
+    `subprocess.Popen.stdout`) and must close it exactly once, after `stop()`.
+
+    Why not `loop.connect_read_pipe(protocol_factory, pipe)`: it hands the
+    loop a file object that owns the fd. asyncio's pipe transport closes that
+    object once. uvloop's pipe transport closes the fd number twice: once
+    through libuv (`uv_close`) and once through `pipe.close()`; whichever
+    runs second gets EBADF, which is swallowed. The order depends on whether
+    the transport is closed explicitly or torn down by the cyclic GC. CPython
+    releases the GIL around its close(), so an fd allocated by another thread
+    in that window takes the freed number and is then closed under its owner:
+    a DB socket, a /proc file, another pipe. `add_reader()` /
+    `remove_reader()` never close the fd on either loop (asyncio selectors;
+    libuv `uv_poll`), so with this class the fd has exactly one owner.
+
+    `start()` switches the fd to non-blocking mode. Do not read it through the
+    owning file object while the reader is active.
+    """
+
+    def __init__(self, loop: asyncio.AbstractEventLoop, fd: int):
+        self._loop = loop
+        self._fd = fd
+        self._reader = asyncio.StreamReader(loop=loop)
+        self._watching = False
+
+    @property
+    def fd(self) -> int:
+        return self._fd
+
+    def start(self) -> None:
+        """Start watching the fd for readable data."""
+        os.set_blocking(self._fd, False)
+        self._loop.add_reader(self._fd, self._on_readable)
+        self._watching = True
+
+    def stop(self) -> None:
+        """Stop watching the fd. Idempotent.
+
+        Must be called before the owner closes the fd: closing a watched fd
+        leaves the loop with a watcher for a number the next pipe or socket
+        can reuse.
+        """
+        if self._watching:
+            self._watching = False
+            self._loop.remove_reader(self._fd)
+
+    def _on_readable(self) -> None:
+        try:
+            data = os.read(self._fd, _PIPE_READ_CHUNK)
+        except (BlockingIOError, InterruptedError):
+            return
+        except OSError as e:
+            self.stop()
+            self._reader.set_exception(e)
+            return
+        if data:
+            self._reader.feed_data(data)
+        else:
+            self.stop()
+            self._reader.feed_eof()
+
+    async def readline(self) -> bytes:
+        """Read one line. Returns b'' at EOF (the writer closed the pipe)."""
+        return await self._reader.readline()
+
+    def drain(self, max_bytes: int = _PIPE_READ_CHUNK) -> bytes:
+        """Return what the pipe holds right now, without blocking.
+
+        Stops watching first. Meant for logging leftover output after the
+        writer has exited; bytes already consumed by `readline()` are not
+        included.
+        """
+        self.stop()
+        chunks = []
+        total = 0
+        while total < max_bytes:
+            try:
+                data = os.read(self._fd, min(_PIPE_READ_CHUNK,
+                                             max_bytes - total))
+            except OSError:
+                break
+            if not data:
+                break
+            chunks.append(data)
+            total += len(data)
+        return b''.join(chunks)

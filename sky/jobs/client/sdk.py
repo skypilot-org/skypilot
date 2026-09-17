@@ -1,14 +1,17 @@
 """SDK functions for managed jobs."""
+import dataclasses
 import json
+import os
 import pathlib
 import threading
 import typing
-from typing import (Any, Dict, Iterator, List, Literal, Optional, Sequence,
+from typing import (Any, Dict, Iterator, List, Literal, Optional, Sequence, Set,
                     Tuple, Union)
 import zlib
 
 import click
 
+from sky import exceptions
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.client import common as client_common
@@ -29,6 +32,7 @@ from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import dag_utils
 from sky.utils import rich_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import io
@@ -40,6 +44,117 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 
+class _AutoJobGroup:
+    """Sentinel for ``launch(job_group=...)``: attach to the surrounding job
+    group when launched from inside one, otherwise launch a top-level job."""
+
+    def __repr__(self) -> str:
+        return 'AUTO_JOB_GROUP'
+
+
+AUTO_JOB_GROUP = _AutoJobGroup()
+
+
+@dataclasses.dataclass(frozen=True)
+class _JobGroupAttachment:
+    """Where a new managed job attaches, as resolved from ``job_group``.
+
+    All ids None: launch a top-level job. ``auto`` is True when the values
+    came from the in-job-group default (the env the controller set on this
+    task) rather than from an explicit ``job_group`` argument. It only
+    matters when the server is too old to record an attachment: an automatic
+    one is dropped with a debug log, an explicit one is an error.
+    """
+    parent_job_id: Optional[int] = None
+    parent_task_id: Optional[int] = None
+    auto: bool = False
+
+    @property
+    def attaches(self) -> bool:
+        return self.parent_job_id is not None
+
+
+def _resolve_job_group(
+    requested_job_group: Union[int, str, None, _AutoJobGroup]
+) -> _JobGroupAttachment:
+    """Turn the ``job_group`` argument into a ``_JobGroupAttachment``.
+
+    Resolution failures (an id with no record, a name matching zero or
+    several running jobs) raise here. Whether the server can accept the
+    attachment is the caller's check.
+
+    - ``AUTO_JOB_GROUP``: attach when running inside a job that is part of
+      a tree, which the controller marks by setting ``SKYPILOT_ROOT_JOB_ID``
+      on the task (a job group's tasks, and a dynamic member's tasks; never a
+      plain top-level job, whose nested launches keep today's behavior). The
+      parent is ``SKYPILOT_MANAGED_JOB_ID`` and the launching task index the
+      ``-<task_id>`` suffix of ``SKYPILOT_TASK_ID``. The tree's root is the
+      server's to work out from the parent's row.
+    - ``None``: never attach.
+    - ``int``: attach to that managed job (the server validates it).
+    - ``str``: a managed job name, resolved to exactly one running job in the
+      workspace (or a decimal job id).
+    """
+    if requested_job_group is None:
+        return _JobGroupAttachment()
+    if isinstance(requested_job_group, _AutoJobGroup):
+        parent_str = os.environ.get(constants.MANAGED_JOB_ID_ENV_VAR, '')
+        root_str = os.environ.get(constants.ROOT_JOB_ID_ENV_VAR, '')
+        if not parent_str.isdigit() or not root_str.isdigit():
+            # Not inside a managed job, or inside one that is not part of a
+            # tree (no root marker): launch top-level.
+            return _JobGroupAttachment(auto=True)
+        parent_job_id = int(parent_str)
+        parent_task_id: Optional[int] = None
+        task_id_str = os.environ.get(constants.TASK_ID_ENV_VAR, '')
+        # Format: <timestamp>_<name>_<job_id>-<task_id>; the task suffix is
+        # only present for managed jobs (see common_utils.get_global_job_id).
+        suffix = task_id_str.rsplit('-', 1)[-1] if '-' in task_id_str else ''
+        if suffix.isdigit():
+            parent_task_id = int(suffix)
+        return _JobGroupAttachment(parent_job_id=parent_job_id,
+                                   parent_task_id=parent_task_id,
+                                   auto=True)
+    if isinstance(requested_job_group, bool):
+        raise ValueError('job_group must be a job id, a job name, None or '
+                         'AUTO_JOB_GROUP.')
+    if isinstance(requested_job_group, int) or requested_job_group.isdigit():
+        # A job id (int, or a decimal string from the CLI). Nothing to look
+        # up: the server validates the job and works out its tree.
+        return _JobGroupAttachment(parent_job_id=int(requested_job_group))
+    if isinstance(requested_job_group, str):
+        # A job name. Ask the server for running jobs whose name contains it
+        # (the only name filter the queue has), then require exactly one
+        # exact match: names are not unique across a job's lifetime. Every
+        # user's jobs count: the server's rule for attaching is the
+        # workspace, not the user, and a teammate's group is a valid target.
+        request_id = queue_v2(refresh=False,
+                              skip_finished=True,
+                              all_users=True,
+                              name_match=requested_job_group,
+                              fields=['job_id', 'job_name'])
+        jobs, _, _, _ = sdk.get(request_id)
+        matching: Set[int] = set()
+        for record in jobs:
+            if (record.job_name == requested_job_group and
+                    record.job_id is not None):
+                matching.add(record.job_id)
+        if not matching:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'No running managed job named '
+                                 f'{requested_job_group!r} to attach to. Pass '
+                                 'the job id instead.')
+        if len(matching) > 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'{len(matching)} running managed jobs are '
+                                 f'named {requested_job_group!r} '
+                                 f'({sorted(matching)}). Pass the job id '
+                                 'instead.')
+        (matched_job_id,) = matching
+        return _JobGroupAttachment(parent_job_id=matched_job_id)
+    raise ValueError(f'Unsupported job_group value: {requested_job_group!r}')
+
+
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
@@ -48,6 +163,7 @@ def launch(
     name: Optional[str] = None,
     pool: Optional[str] = None,
     num_jobs: Optional[int] = None,
+    job_group: Union[int, str, None, _AutoJobGroup] = AUTO_JOB_GROUP,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -61,6 +177,12 @@ def launch(
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
             managed job.
         name: Name of the managed job.
+        job_group: Managed job to attach this job to as a dynamic member: it
+            is shown under that job and cancelled with it. Defaults to the
+            surrounding job group when called from inside one (and to no
+            attachment otherwise). Pass ``None`` to launch a top-level job
+            even from inside a job group, or a job id / unique running job
+            name to attach explicitly.
         _need_confirmation: (Internal only) Whether to show a confirmation
             prompt before launching the job.
 
@@ -87,6 +209,27 @@ def launch(
 
     if name is not None:
         dag.name = name
+
+    attachment = _resolve_job_group(job_group)
+    server_supports_attach = (
+        remote_api_version is not None and
+        remote_api_version >= server_constants.MIN_JOBS_PARENT_LINK_API_VERSION)
+    if attachment.attaches and not server_supports_attach:
+        # The server cannot record the attachment, so either way the job
+        # launches top-level. If the user asked for the attachment, stop and
+        # say so rather than hand them an unattached job. If it came from
+        # the in-job-group default, they asked for nothing: a top-level job
+        # is exactly what an older client would have launched.
+        if not attachment.auto:
+            raise click.UsageError(
+                'Attaching a job to a job group is not supported by your API '
+                'server. Please upgrade to a newer API server.')
+        logger.debug(
+            'Not attaching to job group %s: API server version too '
+            'old (need >= %s, got %s).', attachment.parent_job_id,
+            server_constants.MIN_JOBS_PARENT_LINK_API_VERSION,
+            remote_api_version)
+        attachment = _JobGroupAttachment(auto=True)
 
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag,
@@ -154,6 +297,9 @@ def launch(
             pool=pool,
             num_jobs=num_jobs,
             file_mounts_blob_id=file_mounts_blob_id,
+            parent_job_id=attachment.parent_job_id,
+            parent_task_id=attachment.parent_task_id,
+            job_group_explicit=attachment.attaches and not attachment.auto,
         )
         response = server_common.make_authenticated_request(
             'POST',
@@ -179,6 +325,9 @@ def queue_v2(
     statuses: Optional[List[str]] = None,
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
+    infra_match: Optional[str] = None,
+    name_match: Optional[str] = None,
+    include_tree: bool = False,
 ) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
         str, int], int]]:
     """Gets statuses of managed jobs.
@@ -203,6 +352,14 @@ def queue_v2(
             (seconds).
         submitted_before: Only show jobs submitted at or before this epoch
             time (seconds).
+        infra_match: Only show jobs on this infra, as an ``--infra`` spec:
+            ``cloud``, ``cloud/region`` or ``cloud/region/zone``, with ``*``
+            for any component (e.g. ``k8s/my-context``, ``aws/us-east-1``).
+        include_tree: With ``job_ids``, also return the rest of each job's
+            tree: the jobs launched under it (a job group's dynamic tasks),
+            at any depth. Ids from the same tree return that tree once.
+            Requires an API server of version
+            ``MIN_JOBS_INCLUDE_TREE_API_VERSION`` or newer.
 
     Returns:
         The request ID of the queue request.
@@ -245,6 +402,10 @@ def queue_v2(
     version_to_fields = {
         31: {'is_primary_in_job_group'},
         49: {'batch_total_batches', 'batch_completed_batches'},
+        60: {'root_job_id', 'parent_job_id', 'parent_task_id'},
+        server_constants.MIN_JOBS_DYNAMIC_TASK_INDEX_API_VERSION: {
+            'dynamic_task_index'
+        },
     }
     if fields is not None:
         remote_api_version = versions.get_remote_api_version()
@@ -260,12 +421,32 @@ def queue_v2(
             'Filtering managed jobs by submission time is not supported in '
             'your API server; the server will ignore it and show all jobs. '
             'Please upgrade the API server to enable it.')
+    if (infra_match is not None and remote_api_version is not None and
+            remote_api_version <
+            server_constants.MIN_JOBS_INFRA_FILTER_API_VERSION):
+        # An error, not a warning like the window filter above: a server that
+        # drops this field answers with jobs on other infra, which reads as a
+        # filtered list and is not one.
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Filtering managed jobs by infra is not supported by your API '
+                'server. Please upgrade the API server to enable it.')
+    if (include_tree and remote_api_version is not None and remote_api_version <
+            server_constants.MIN_JOBS_INCLUDE_TREE_API_VERSION):
+        # Same reason: an old server ignores the field and returns only the
+        # requested jobs' rows, and the caller cannot tell.
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Loading a managed job together with the jobs launched under '
+                'it (include_tree) is not supported by your API server. '
+                'Please upgrade the API server to enable it.')
 
     body = payloads.JobsQueueV2Body(
         refresh=refresh,
         skip_finished=skip_finished,
         all_users=all_users,
         job_ids=job_ids,
+        include_tree=include_tree,
         limit=limit,
         fields=list(fields) if fields is not None else None,
         sort_by=sort_by,
@@ -273,6 +454,10 @@ def queue_v2(
         statuses=statuses,
         submitted_after=submitted_after,
         submitted_before=submitted_before,
+        infra_match=infra_match,
+        # Server-side substring match on the job name (the dashboard's
+        # search box uses the same filter).
+        name_match=name_match,
     )
     path = '/jobs/queue/v2'
     response = server_common.make_authenticated_request(
@@ -383,6 +568,7 @@ def cancel(
     pool: Optional[str] = None,
     graceful: bool = False,
     graceful_timeout: Optional[int] = None,
+    task: Optional[Union[str, int]] = None,
 ) -> server_common.RequestId[None]:
     """Cancels managed jobs.
 
@@ -391,6 +577,10 @@ def cancel(
     Args:
         name: Name of the managed job to cancel.
         job_ids: IDs of the managed jobs to cancel.
+        task: With exactly one job id, cancel only this dynamic task of it
+            (a job launched from inside it), by the index shown in the queue
+            (int) or by name (str). One of the job's declared tasks cannot be
+            cancelled alone.
         all: Whether to cancel all managed jobs.
         all_users: Whether to cancel all managed jobs from all users.
         pool: Pool name to cancel.
@@ -418,6 +608,12 @@ def cancel(
     if graceful and pool is not None:
         logger.warning('Pools are not cleaned up after job cancel, so '
                        '`--graceful` is ignored.')
+    if task is not None and (
+            remote_api_version is None or remote_api_version <
+            server_constants.MIN_JOBS_DYNAMIC_TASK_INDEX_API_VERSION):
+        raise click.UsageError(
+            'Cancelling one task of a job is not supported by your API '
+            'server. Please upgrade to a newer API server.')
     body = payloads.JobsCancelBody(
         name=name,
         job_ids=job_ids,
@@ -426,6 +622,7 @@ def cancel(
         pool=pool,
         graceful=graceful,
         graceful_timeout=graceful_timeout,
+        task=task,
     )
     response = server_common.make_authenticated_request(
         'POST',

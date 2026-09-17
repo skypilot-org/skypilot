@@ -232,7 +232,13 @@ _WAIT_UNTIL_VOLUME_IS_NOT_FOUND = (
     'start_time=$SECONDS; '
     'while true; do '
     'vols=$(sky volumes ls); '
-    'if ! echo "$vols" | grep -q "{volume_name}"; then '
+    # Matched on the whole first field, as the readiness wait is, so that a
+    # longer name containing this one -- another test's, or the same test's in
+    # a concurrent run -- cannot hold the wait open. `{awk_match}` widens that
+    # to a prefix, for a caller waiting on every volume of one cluster.
+    'found=$(echo "$vols" | awk -v n="{volume_name}" '
+    '\'{awk_match} {{print $1; exit}}\'); '
+    'if [ -z "$found" ]; then '
     '  echo "Volume {volume_name} successfully removed."; break; '
     'fi; '
     'if (( $SECONDS - $start_time > {timeout} )); then '
@@ -246,9 +252,19 @@ _WAIT_UNTIL_VOLUME_IS_NOT_FOUND = (
 
 
 def get_cmd_wait_until_volume_is_not_found(volume_name: str,
-                                           timeout: int = 120):
+                                           timeout: int = 120,
+                                           match_prefix: bool = False):
+    """Blocks until no volume named `volume_name` is listed.
+
+    With `match_prefix`, until no volume whose name *starts with* it is: the
+    volumes a launch creates for a task's inline `volumes:` entries are named
+    after the cluster, one per mount path, so that is how a caller waits for
+    all of them.
+    """
+    awk_match = 'index($1, n) == 1' if match_prefix else '$1 == n'
     return _WAIT_UNTIL_VOLUME_IS_NOT_FOUND.format(volume_name=volume_name,
-                                                  timeout=timeout)
+                                                  timeout=timeout,
+                                                  awk_match=awk_match)
 
 
 _WAIT_UNTIL_VOLUME_IS_READY = (
@@ -797,6 +813,14 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
     if test.env:
         env_dict.update(test.env)
 
+    # The test's overall exit status. Tracked separately from any single
+    # `proc` because a command may be a callable, which has no process
+    # behind it: a test whose first command is a callable would otherwise
+    # reach the reporting block below with `proc` unbound and die with
+    # `UnboundLocalError`, masking the real failure in the pytest summary.
+    returncode = 0
+    command = None
+
     with override_sky_config(test, env_dict, config_dict=test.config_dict):
         for command in test.commands:
             if callable(command):
@@ -812,7 +836,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                     test.echo(error_in_callable)
                     write(error_in_callable + '\n')
                     flush()
-                    proc.returncode = 1
+                    returncode = 1
                     break
                 continue
             write(f'+ {command}\n')
@@ -835,18 +859,18 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                 flush()
                 # Kill the current process.
                 proc.terminate()
-                proc.returncode = 1  # None if we don't set it.
+                returncode = 1  # proc.returncode is None if we don't set it.
                 break
 
-            if proc.returncode:
+            returncode = proc.returncode
+            if returncode:
                 break
 
         style = colorama.Style
         fore = colorama.Fore
-        outcome = (
-            f'{fore.RED}Failed{style.RESET_ALL} (returned {proc.returncode})'
-            if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
-        reason = f'\nReason: {command}' if proc.returncode else ''
+        outcome = (f'{fore.RED}Failed{style.RESET_ALL} (returned {returncode})'
+                   if returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
+        reason = f'\nReason: {command}' if returncode else ''
         msg = (f'{outcome}.'
                f'{reason}')
         if log_to_stdout:
@@ -856,7 +880,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
             test.echo(msg)
             write(msg)
 
-        if proc.returncode:
+        if returncode:
             # Fetch controller logs for failed jobs
             script_path = os.path.join(os.path.dirname(__file__), 'scripts',
                                        'fetch_failed_job_logs.sh')
@@ -901,7 +925,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                     write(f'Server log file not found: {log_path}')
                 write('=== End of Sky API Server Log ===')
 
-        if (proc.returncode == 0 or
+        if (returncode == 0 or
                 pytest.terminate_on_failure) and test.teardown is not None:
             subprocess_utils.run(
                 test.teardown,
@@ -912,7 +936,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                 env=env_dict,
             )
 
-        if proc.returncode:
+        if returncode:
             if log_to_stdout:
                 raise Exception(f'test failed')
             else:
@@ -1359,7 +1383,14 @@ def services_account_token_configured_in_env_file() -> bool:
     if file_path is not None:
         with open(file_path, 'r') as f:
             content = f.read()
-            print(content, file=sys.stderr, flush=True)
+            # Which env-file config a run picked up is worth seeing in the
+            # log, but the file is a client config: it carries
+            # api_server.service_account_token in plaintext. Print it through
+            # the same redaction the config dumps use, never raw.
+            print(config_utils.dump_redacted_yaml(
+                yaml_utils.safe_load(content)),
+                  file=sys.stderr,
+                  flush=True)
             return 'service_account_token' in content
     return False
 

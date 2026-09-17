@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { PaginationControls } from '@/components/elements/PaginationControls';
+import { DynamicBadge } from '@/components/elements/DynamicBadge';
 import { SegmentedToggle } from '@/components/elements/SegmentedToggle';
 import { CircularProgress } from '@mui/material';
 import { Button } from '@/components/ui/button';
@@ -82,6 +83,7 @@ import {
   useTableColumns,
   usePluginComponents,
   useMergedTableColumns,
+  usePluginTableFilters,
 } from '@/plugins/PluginProvider';
 import {
   FilterDropdown,
@@ -166,6 +168,63 @@ const STATUS_PRIORITY = {
 // Returns the "worst" status based on priority
 // For job groups with primary/auxiliary tasks, status is determined only by primary tasks
 // Uses is_primary_in_job_group per task: null (non-group), true (primary), false (auxiliary)
+/**
+ * Group table rows into the jobs they are shown under, in row order.
+ *
+ * A job's declared tasks share its id. A job launched from inside another managed
+ * job (a dynamic job group member) carries root_job_id and is shown under
+ * that top-level job when it is in the listing, after the job's declared tasks
+ * and in attach order (its dynamic_task_index, assigned by the server so it
+ * numbers on from the group's declared tasks); a member whose root is not listed
+ * is shown as its own job, since there is nothing on this page to nest it
+ * under.
+ *
+ * External rows never form job groups; they are keyed by their globally
+ * unique task_job_id so equal Slurm ids across clusters (or a Slurm id
+ * matching a managed id) can't collapse into one group, with a prefixed id
+ * as a fallback if a producer ever omits task_job_id.
+ */
+export function groupJobRowsByTree(rows) {
+  const groups = new Map();
+  const ownKey = (job) =>
+    job.is_external ? (job.task_job_id ?? `external:${job.id}`) : job.id;
+  const isMember = (job) =>
+    !job.is_external && job.root_job_id != null && job.root_job_id !== job.id;
+  // Top-level jobs and their declared tasks first, so every group starts with
+  // the job it is named after.
+  rows.forEach((job) => {
+    if (isMember(job)) return;
+    const key = ownKey(job);
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key).push(job);
+  });
+  // Then the launched jobs, under their root when it is listed.
+  rows.forEach((job) => {
+    if (!isMember(job)) return;
+    const key = groups.has(job.root_job_id) ? job.root_job_id : job.id;
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key).push(job);
+  });
+  // Members in attach order: by dynamic_task_index, else ascending job id
+  // (the listing is newest first); each member's task rows keep input order.
+  groups.forEach((rows, key) => {
+    const own = rows.filter((r) => r.id === key);
+    if (own.length === rows.length) return;
+    const members = rows.filter((r) => r.id !== key);
+    const orderKey = (r) =>
+      r.dynamic_task_index != null
+        ? Number(r.dynamic_task_index)
+        : Number(r.id);
+    members.sort((a, b) => orderKey(a) - orderKey(b));
+    groups.set(key, own.concat(members));
+  });
+  return groups;
+}
+
 export function getAggregatedStatus(tasks) {
   if (!tasks || tasks.length === 0) return 'PENDING';
   if (tasks.length === 1) return tasks[0].status;
@@ -211,6 +270,7 @@ export const JOB_FILTER_SCHEMA = [
   { key: 'user', label: 'User', kind: 'text' },
   { key: 'workspace', label: 'Workspace', kind: 'text' },
   { key: 'pool', label: 'Pool', kind: 'text' },
+  { key: 'infra', label: 'Infra', kind: 'text' },
   { key: 'labels', label: 'Labels', kind: 'kv', multi: 'repeat' },
 ];
 
@@ -226,6 +286,31 @@ const JOB_VIEW_SCHEMA = [
   { key: 'owner', default: 'mine' },
   { key: 'status', default: '' },
 ];
+
+// The `--infra` spec for a job row, i.e. what the Infra filter box has to be
+// submitted as.
+//
+// The box is parsed server-side by `InfraInfo.from_str`, so a suggestion has
+// to be in that syntax. The string the Infra column renders (`AWS
+// (us-east-1)`) is not: it parses to a cloud named `aws (us-east-1)`, which
+// matches no job, so offering it would hand back a filter that empties the
+// table. Mirrors `InfraInfo.to_str()` -- cloud lowercased, and the `ssh-`
+// prefix dropped from an SSH node pool's context, which `from_str` puts back.
+export function jobInfraSpec(job) {
+  const cloud = (job?.cloud || '').trim();
+  if (!cloud) {
+    return null;
+  }
+  const cloudSpec = cloud.toLowerCase();
+  let region = (job?.region || '').trim();
+  if (!region || region === '-') {
+    return cloudSpec;
+  }
+  if (cloudSpec === 'ssh' && region.startsWith('ssh-')) {
+    region = region.slice('ssh-'.length);
+  }
+  return `${cloudSpec}/${region}`;
+}
 
 const STATUS_GROUP_NAMES = Object.keys(statusGroups);
 
@@ -250,11 +335,6 @@ export function deriveStatusView(statusParam) {
     activeTab: statusGroupName || (selectedStatuses.length > 0 ? null : 'all'),
   };
 }
-
-const PROPERTY_OPTIONS = JOB_FILTER_SCHEMA.map(({ key, label }) => ({
-  label,
-  value: key,
-}));
 
 // Properties that may hold several chips; the rest replace, so the page can
 // never show more filters than the URL is able to carry.
@@ -346,9 +426,17 @@ export function ManagedJobs() {
   const jobsRefreshRef = React.useRef(null);
   const poolsRefreshRef = React.useRef(null);
   const [poolsData, setPoolsData] = useState([]);
+  // Plugins may register extra filter properties for this table (e.g. the
+  // pagination plugin's Slurm Account/QOS filters) — registration is
+  // reactive, typically arriving with the plugin's first data response.
+  const pluginFilterProps = usePluginTableFilters('jobs');
+  const filterSchema = React.useMemo(
+    () => [...JOB_FILTER_SCHEMA, ...pluginFilterProps],
+    [pluginFilterProps]
+  );
   // Filters and the shareable view state both live in the URL, keyed by name.
   const { filters, setFilters, view, setView } = useUrlFilterState(
-    JOB_FILTER_SCHEMA,
+    filterSchema,
     JOB_VIEW_SCHEMA
   );
   const [valueList, setValueList] = useState({
@@ -356,6 +444,7 @@ export function ManagedJobs() {
     user: [],
     workspace: [],
     pool: [],
+    infra: [],
     labels: [],
   });
   const [preloadingComplete, setPreloadingComplete] = useState(false);
@@ -463,7 +552,10 @@ export function ManagedJobs() {
         />
         <div className="w-full sm:w-auto max-w-xl">
           <FilterDropdown
-            propertyList={PROPERTY_OPTIONS}
+            propertyList={filterSchema.map(({ key, label }) => ({
+              label,
+              value: key,
+            }))}
             valueList={valueList}
             setFilters={setFilters}
             addFilter={addFilter}
@@ -499,6 +591,11 @@ export function ManagedJobs() {
           refreshDataRef={poolsRefreshRef}
         />
       </div>
+
+      {/* Extension point for jobs not managed by SkyPilot (e.g. foreign
+          Slurm jobs surfaced by the GPU Manager plugin). Renders nothing
+          when no plugin fills it. */}
+      <PluginSlot name="jobs.page.external-section" />
     </>
   );
 }
@@ -526,13 +623,47 @@ function BatchProgressBar({ completed, total }) {
   );
 }
 
+// External (non-managed) rows merged in by the server carry
+// is_external + external_cluster/external_job_id; their detail pages
+// live under /slurm-jobs instead of /jobs.
+function externalJobHref(item) {
+  return `/slurm-jobs/${encodeURIComponent(item.external_cluster)}/${encodeURIComponent(item.external_job_id)}`;
+}
+
+function ExternalPill() {
+  return (
+    <span
+      className="inline-flex items-center flex-shrink-0 ml-2 px-2 rounded-full border border-gray-200 bg-gray-100 text-gray-600 text-xs font-medium"
+      style={{ paddingTop: 1, paddingBottom: 1, lineHeight: 1.4 }}
+      title="This workload is launched and managed outside of SkyPilot"
+    >
+      External
+    </span>
+  );
+}
+
+// A Slurm job id lives in the CLUSTER's id space, not SkyPilot's — the raw
+// number can collide with a managed job id in the same column. Muted so the
+// two id spaces cannot be conflated; the tooltip names the owner.
+function ExternalJobId({ item, href }) {
+  return (
+    <NonCapitalizedTooltip
+      content={`External ID managed by Slurm cluster ${item.external_cluster}`}
+    >
+      <Link href={href} className="text-gray-400 underline decoration-dotted">
+        {item.external_job_id}
+      </Link>
+    </NonCapitalizedTooltip>
+  );
+}
+
 function JobNameLink({ href, name }) {
+  // max-w (not fixed w): the box shrinks to the name so a trailing badge
+  // sits next to the text instead of parking at the 240px edge after a
+  // short name; long names still truncate at 240px.
   return (
     <NonCapitalizedTooltip content={name}>
-      <Link
-        href={href}
-        className="text-blue-600 block min-w-[200px] max-w-[240px] truncate"
-      >
+      <Link href={href} className="text-blue-600 block max-w-[240px] truncate">
         {name}
       </Link>
     </NonCapitalizedTooltip>
@@ -558,6 +689,9 @@ export function ManagedJobsTable({
     key: 'id',
     direction: 'descending',
   });
+  // Plugin-registered filter properties (see ManagedJobs): their values are
+  // forwarded to the data provider verbatim as {property: key, value}.
+  const pluginFilterProps = usePluginTableFilters('jobs');
   const [loading, setLocalLoading] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [currentPage, setCurrentPage] = useState(() => {
@@ -601,6 +735,10 @@ export function ManagedJobsTable({
     [setView]
   );
   const [statusCounts, setStatusCounts] = useState({});
+  // Per-cluster failures from the external (Slurm) jobs sweep; non-empty
+  // means external rows may be incomplete or stale. Dismissible warning.
+  const [externalFetchErrors, setExternalFetchErrors] = useState([]);
+  const [externalErrorsDismissed, setExternalErrorsDismissed] = useState('');
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const moreMenuRef = useRef(null);
   const [controllerStopped, setControllerStopped] = useState(false);
@@ -657,6 +795,14 @@ export function ManagedJobsTable({
 
   // Local state for jobs data (replacing useJobsData hook)
   const [data, setData] = useState([]);
+  // The Infra values the server computed across everything the other filters
+  // select. Empty when it did not send any (an older API server or jobs
+  // controller), and the page then falls back to the rows it has.
+  const [serverInfraOptions, setServerInfraOptions] = useState([]);
+  // Set when the jobs controller refused the infra filter because it is too
+  // old to apply it. The server errors rather than answering unfiltered, so
+  // there are no rows to show and the page has to say why.
+  const [infraFilterUnsupported, setInfraFilterUnsupported] = useState(null);
   const [totalCount, setTotalCount] = useState(0);
   const [totalNoFilter, setTotalNoFilter] = useState(0);
   const [hookControllerStopped, setHookControllerStopped] = useState(false);
@@ -761,6 +907,18 @@ export function ManagedJobsTable({
           userMatch: effectiveUserMatch,
           workspaceMatch: getFilterValue('workspace'),
           poolMatch: getFilterValue('pool'),
+          // Matched server-side, against the cloud/region/zone columns on the
+          // job table, so `total`, the page count and the status counts all
+          // describe the filtered set.
+          infraMatch: getFilterValue('infra'),
+          // Values of plugin-registered filter properties, keyed by their
+          // schema key — the plugin's fetch function interprets them.
+          pluginFilters: pluginFilterProps
+            .map((f) => {
+              const value = getFilterValue(f.label.toLowerCase());
+              return value ? { property: f.key, value } : null;
+            })
+            .filter(Boolean),
           statuses: computedStatuses.length > 0 ? computedStatuses : undefined,
           page: currentPage,
           limit: pageSize,
@@ -779,15 +937,26 @@ export function ManagedJobsTable({
           if (response.controllerStopped) {
             setHookControllerStopped(true);
             setData([]);
+            setServerInfraOptions([]);
+            // The table is empty because the controller is down, not because a
+            // filter was refused. Leaving the refusal up would explain the
+            // empty table with a reason that no longer applies.
+            setInfraFilterUnsupported(null);
             setTotalCount(0);
             setTotalNoFilter(0);
             setStatusCounts({});
+            // No rows are shown, so a Slurm-sweep failure banner from a
+            // previous fetch would hang over an empty table.
+            setExternalFetchErrors([]);
           } else {
             setHookControllerStopped(false);
+            setInfraFilterUnsupported(null);
             setData(response.jobs || []);
+            setServerInfraOptions(response.infraOptions || []);
             setTotalCount(response.total || 0);
             setTotalNoFilter(response.totalNoFilter || response.total || 0);
             setStatusCounts(response.statusCounts || {});
+            setExternalFetchErrors(response.externalFetchErrors || []);
             // Controller is reachable: clear any stale banner state from a
             // previous fetch and skip the cluster-status lookup below.
             setControllerStopped(false);
@@ -852,6 +1021,10 @@ export function ManagedJobsTable({
           setTotalNoFilter(0);
           setStatusCounts({});
           setControllerStopped(false);
+          setExternalFetchErrors([]);
+          setInfraFilterUnsupported(
+            err?.infraFilterUnsupported ? err.message : null
+          );
           setIsInitialLoad(false);
         }
       } finally {
@@ -871,6 +1044,7 @@ export function ManagedJobsTable({
       sortOrder,
       userScope,
       currentUser,
+      pluginFilterProps,
     ]
   );
 
@@ -1030,6 +1204,7 @@ export function ManagedJobsTable({
     const users = new Set();
     const workspaces = new Set();
     const pools = new Set();
+    const infras = new Set();
     const labels = new Set();
 
     data.forEach((job) => {
@@ -1037,6 +1212,11 @@ export function ManagedJobsTable({
       if (job.user) users.add(job.user);
       if (job.workspace) workspaces.add(job.workspace);
       if (job.pool) pools.add(job.pool);
+      // An `--infra` spec, not the rendered `infra` / `full_infra` cell:
+      // the box is matched server-side by `InfraInfo.from_str`, and a
+      // display string does not parse. See `jobInfraSpec`.
+      const infraSpec = jobInfraSpec(job);
+      if (infraSpec) infras.add(infraSpec);
 
       // Extract labels - add only key:value pairs
       const jobLabels = job.labels || {};
@@ -1079,6 +1259,12 @@ export function ManagedJobsTable({
       user: Array.from(users).sort(),
       workspace: Array.from(workspaces).sort(),
       pool: Array.from(pools).sort(),
+      // The server's list covers the whole filtered queue; the page-derived
+      // one only covers the current page, and is the fallback for a server
+      // that does not send one.
+      infra: serverInfraOptions.length
+        ? [...serverInfraOptions].sort()
+        : Array.from(infras).sort(),
       labels: Array.from(labels).sort(),
     });
 
@@ -1101,7 +1287,7 @@ export function ManagedJobsTable({
           : prev.workspace,
       }));
     });
-  }, [data, poolsData, setValueList]);
+  }, [data, poolsData, serverInfraOptions, setValueList]);
 
   const requestSort = React.useCallback(
     (key) => {
@@ -1206,23 +1392,25 @@ export function ManagedJobsTable({
   const totalPages = totalCount > 0 ? Math.ceil(totalCount / pageSize) : 0;
 
   // Group jobs by job_id for expandable row functionality
-  const groupedJobs = React.useMemo(() => {
-    const groups = new Map();
-    paginatedData.forEach((job) => {
-      const jobId = job.id;
-      if (!groups.has(jobId)) {
-        groups.set(jobId, []);
-      }
-      groups.get(jobId).push(job);
-    });
-    return groups;
-  }, [paginatedData]);
+  const groupedJobs = React.useMemo(
+    () => groupJobRowsByTree(paginatedData),
+    [paginatedData]
+  );
 
   // Pre-compute aggregated data for job groups to avoid inline computations during render
   const jobGroupAggregates = React.useMemo(() => {
     const aggregates = new Map();
-    groupedJobs.forEach((tasks, jobId) => {
-      if (tasks.length > 1) {
+    groupedJobs.forEach((rows, jobId) => {
+      if (rows.length > 1) {
+        // The group's declared tasks aggregate. Jobs launched from it (dynamic
+        // members, each with its own job id) are listed in the tooltip but
+        // never change the group's status, duration or recovery count,
+        // matching the CLI's format_job_table.
+        const memberRows = rows.filter((t) => t.id !== jobId);
+        const tasks = memberRows.length
+          ? rows.filter((t) => t.id === jobId)
+          : rows;
+
         // Check if this job group has auxiliary tasks (is_primary_in_job_group=false)
         const hasAuxiliaryTasks = tasks.some(
           (t) => t.is_primary_in_job_group === false
@@ -1233,7 +1421,7 @@ export function ManagedJobsTable({
 
         // Compute status tooltip showing all task statuses
         // Also indicate which tasks are primary with a star marker
-        const statusTooltip = hasAuxiliaryTasks
+        const ownStatusTooltip = hasAuxiliaryTasks
           ? `Task statuses:\n${tasks
               .map((t, i) => {
                 const isPrimary = t.is_primary_in_job_group === true;
@@ -1241,6 +1429,15 @@ export function ManagedJobsTable({
               })
               .join('\n')}\n\n★ = Primary task`
           : `Task statuses:\n${tasks.map((t, i) => `Task ${i}: ${t.status}`).join('\n')}`;
+        const statusTooltip = memberRows.length
+          ? `${ownStatusTooltip}\n\nDynamic tasks (launched from this job):\n${memberRows
+              .map(
+                (t) =>
+                  `Task ${t.dynamic_task_index ?? `job ${t.id}`}: ${t.name}` +
+                  `${t.task ? ` / ${t.task}` : ''} (job ${t.id}): ${t.status}`
+              )
+              .join('\n')}`
+          : ownStatusTooltip;
 
         // Compute aggregated resources
         const resourcesList = tasks
@@ -1264,12 +1461,22 @@ export function ManagedJobsTable({
           0
         );
 
+        // Compute total duration across all tasks, matching the CLI's
+        // aggregated row in format_job_table. A task that has not started
+        // yet contributes 0; one that has started keeps accruing, so a
+        // group with work still in flight ticks up.
+        const totalDuration = tasks.reduce(
+          (sum, t) => sum + (t.job_duration || 0),
+          0
+        );
+
         aggregates.set(jobId, {
           aggregatedStatus,
           statusTooltip,
           resourcesDisplay,
           resourcesTooltip,
           totalRecoveries,
+          totalDuration,
         });
       }
     });
@@ -1436,6 +1643,9 @@ export function ManagedJobsTable({
   // - item: The task data
   // - renderMode: 'single' | 'groupParent' | 'groupChild'
   // - jobId, tasks, taskIndex, aggregates (for job groups)
+  // - declaredTasks, memberTasks: the group's declared tasks and the jobs launched
+  //   from it (dynamic members, own job ids); isMember, memberIsMultiTask
+  //   on a groupChild row that belongs to a launched job
   // - isExpanded, toggleJobGroup, hasAnyJobGroups (for job group UI)
   const baseColumns = React.useMemo(
     () => [
@@ -1458,6 +1668,8 @@ export function ManagedJobsTable({
             isExpanded,
             toggleJobGroup,
             hasAnyJobGroups,
+            isMember,
+            memberIsMultiTask,
           } = ctx || {};
 
           if (renderMode === 'groupParent') {
@@ -1486,25 +1698,57 @@ export function ManagedJobsTable({
             return (
               <TableCell className="whitespace-nowrap relative">
                 <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-300"></div>
-                <span className="text-gray-500 pl-6">{taskIndex}</span>
+                {isMember && item.dynamic_task_index != null ? (
+                  // A dynamic task (a job launched from this group) reads
+                  // like one of the group's tasks: its server-assigned index
+                  // numbers on from the declared tasks, and `<group>-<index>`
+                  // addresses it on the CLI. A multi-task member appends its
+                  // declared task index. The job id is in the tooltip and behind
+                  // the name link.
+                  <span
+                    className="text-gray-500 pl-6"
+                    title={`Dynamic task ${item.dynamic_task_index} of this job (job ${item.id}): sky jobs cancel ${jobId} --task ${item.dynamic_task_index}`}
+                  >
+                    {item.dynamic_task_index}
+                    {memberIsMultiTask ? `.${taskIndex}` : ''}
+                  </span>
+                ) : isMember ? (
+                  // A member from before indices existed: its job id.
+                  <span className="pl-6">
+                    <span className="text-gray-500">↳ </span>
+                    <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                      {item.id}
+                    </Link>
+                  </span>
+                ) : (
+                  <span className="text-gray-500 pl-6">{taskIndex}</span>
+                )}
               </TableCell>
             );
           }
 
-          // Single task
+          // Single task. A row may carry its own detail link; external
+          // rows without one derive it from their identity fields, and
+          // everything else links to the managed-job detail page.
+          const detailHref =
+            item.detail_href ||
+            (item.is_external ? externalJobHref(item) : `/jobs/${item.id}`);
+          const idLink = item.is_external ? (
+            <ExternalJobId item={item} href={detailHref} />
+          ) : (
+            <Link href={detailHref} className="text-blue-600">
+              {item.id}
+            </Link>
+          );
           return (
             <TableCell>
               {hasAnyJobGroups ? (
                 <div className="flex items-center">
                   <span className="w-6 mr-1" aria-hidden="true" />
-                  <Link href={`/jobs/${item.id}`} className="text-blue-600">
-                    {item.id}
-                  </Link>
+                  {idLink}
                 </div>
               ) : (
-                <Link href={`/jobs/${item.id}`} className="text-blue-600">
-                  {item.id}
-                </Link>
+                idLink
               )}
             </TableCell>
           );
@@ -1522,14 +1766,37 @@ export function ManagedJobsTable({
           </TableHead>
         ),
         renderCell: (item, ctx) => {
-          const { renderMode, jobId, tasks, taskIndex, toggleJobGroup } =
-            ctx || {};
+          const {
+            renderMode,
+            jobId,
+            tasks,
+            declaredTasks,
+            memberTasks,
+            taskIndex,
+            toggleJobGroup,
+            isMember,
+            memberIsMultiTask,
+          } = ctx || {};
 
           // Detect batch job via is_batch field or batch_total_batches presence
           const isBatch =
             item.is_batch === true || item.batch_total_batches != null;
 
           if (renderMode === 'groupParent') {
+            // The badge counts the group's declared tasks and, separately, the
+            // jobs launched from it (dynamic members).
+            const own = declaredTasks || tasks;
+            const launchedJobs = new Set((memberTasks || []).map((t) => t.id))
+              .size;
+            // One task count: the group's declared tasks plus the jobs
+            // launched from it (dynamic members; own id, own logs,
+            // cancellable alone, no effect on the group's status). The
+            // dynamic ones are marked in the task list, not in this badge —
+            // fewer distinct concepts at the group level.
+            const totalTasks = own.length + launchedJobs;
+            const badgeLabel = `${totalTasks} task${totalTasks === 1 ? '' : 's'}`;
+            const badgeKind =
+              own.length > 1 || item.is_job_group ? 'JobGroup' : 'Job';
             return (
               <TableCell className="whitespace-nowrap">
                 <div className="flex items-center">
@@ -1539,16 +1806,55 @@ export function ManagedJobsTable({
                     onClick={() => toggleJobGroup(jobId)}
                     className="ml-2 text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 px-1.5 py-0.5 rounded cursor-pointer whitespace-nowrap"
                   >
-                    JobGroup: {tasks.length} tasks
+                    {badgeKind}: {badgeLabel}
                   </button>
                 </div>
               </TableCell>
             );
           }
 
+          if (renderMode === 'groupChild' && isMember) {
+            // A job launched from this group: its own name, linking to its
+            // own detail page (to the task's page if it has several).
+            // A dynamic task is addressed as task <index> of its group.
+            const href =
+              item.dynamic_task_index != null
+                ? `/jobs/${jobId}/${item.dynamic_task_index}`
+                : memberIsMultiTask
+                  ? `/jobs/${item.id}/${taskIndex}`
+                  : `/jobs/${item.id}`;
+            // Same Dynamic pill as the job page's task list: hover names the
+            // launching task, or says the member was attached from outside.
+            const launchedFrom =
+              item.parent_task_id != null
+                ? `task ${item.parent_task_id} of ${
+                    String(item.parent_job_id) === String(jobId)
+                      ? 'this job'
+                      : `job ${item.parent_job_id}`
+                  }`
+                : null;
+            return (
+              <TableCell className="whitespace-nowrap">
+                <Link href={href} className="text-blue-600 hover:underline">
+                  {item.name || `Job ${item.id}`}
+                  {memberIsMultiTask && (
+                    <span className="text-gray-500">
+                      {`: ${item.task || `Task ${taskIndex}`}`}
+                    </span>
+                  )}
+                </Link>
+                {item.dynamic_task_index != null && (
+                  <span className="ml-1.5">
+                    <DynamicBadge launchedFrom={launchedFrom} />
+                  </span>
+                )}
+              </TableCell>
+            );
+          }
+
           if (renderMode === 'groupChild') {
             // Check if this job group has auxiliary tasks
-            const hasAuxiliaryTasks = tasks.some(
+            const hasAuxiliaryTasks = (declaredTasks || tasks).some(
               (t) => t.is_primary_in_job_group === false
             );
             return (
@@ -1568,11 +1874,16 @@ export function ManagedJobsTable({
             );
           }
 
-          // Single task
+          // Single task. Same link resolution as the ID column: a
+          // row-provided detail link wins, external rows derive theirs.
+          const detailHref =
+            item.detail_href ||
+            (item.is_external ? externalJobHref(item) : `/jobs/${item.id}`);
           return (
             <TableCell className="whitespace-nowrap">
               <div className="flex items-center">
-                <JobNameLink href={`/jobs/${item.id}`} name={item.name} />
+                <JobNameLink href={detailHref} name={item.name} />
+                {item.is_external && <ExternalPill />}
                 {isBatch && <BatchBadge className="ml-2" />}
               </div>
             </TableCell>
@@ -1616,12 +1927,16 @@ export function ManagedJobsTable({
         renderCell: (item) =>
           shouldShowWorkspace ? (
             <TableCell>
-              <Link
-                href="/workspaces"
-                className="text-gray-700 hover:text-blue-600 hover:underline"
-              >
-                {item.workspace || 'default'}
-              </Link>
+              {item.is_external ? (
+                <span className="text-gray-400">—</span>
+              ) : (
+                <Link
+                  href="/workspaces"
+                  className="text-gray-700 hover:text-blue-600 hover:underline"
+                >
+                  {item.workspace || 'default'}
+                </Link>
+              )}
             </TableCell>
           ) : null,
       },
@@ -1651,9 +1966,17 @@ export function ManagedJobsTable({
             Duration{getSortDirection('job_duration')}
           </TableHead>
         ),
-        renderCell: (item) => (
-          <TableCell>{formatDuration(item.job_duration)}</TableCell>
-        ),
+        renderCell: (item, ctx) => {
+          const { renderMode, aggregates } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return (
+              <TableCell>{formatDuration(aggregates?.totalDuration)}</TableCell>
+            );
+          }
+
+          return <TableCell>{formatDuration(item.job_duration)}</TableCell>;
+        },
       },
       {
         id: 'status',
@@ -1730,14 +2053,29 @@ export function ManagedJobsTable({
         renderCell: (item, ctx) => {
           const { renderMode } = ctx || {};
 
+          // Both branches below hand their default rendering to the plugin
+          // slot as `defaultContent`, so a plugin that only changes how
+          // *some* jobs read can return it unchanged for the rest instead of
+          // reimplementing this markup (including the region truncation).
+          // `fallback` keeps the no-plugin case identical.
+          const slotted = (defaultContent) => (
+            <PluginSlot
+              name="jobs.table.infra"
+              context={{ job: item, renderMode, defaultContent }}
+              fallback={defaultContent}
+            />
+          );
+
           // For group parent, show simplified infra (no tooltip with region details)
           if (renderMode === 'groupParent') {
             return (
-              <TableCell>
-                {item.infra && item.infra !== '-' ? (
-                  <span>{item.cloud || item.infra.split('(')[0].trim()}</span>
-                ) : (
-                  <span>-</span>
+              <TableCell className="whitespace-nowrap">
+                {slotted(
+                  item.infra && item.infra !== '-' ? (
+                    <span>{item.cloud || item.infra.split('(')[0].trim()}</span>
+                  ) : (
+                    <span>-</span>
+                  )
                 )}
               </TableCell>
             );
@@ -1745,44 +2083,48 @@ export function ManagedJobsTable({
 
           // Single task or group child - show full infra with tooltip
           return (
-            <TableCell>
-              {item.infra && item.infra !== '-' ? (
-                <NonCapitalizedTooltip
-                  content={item.full_infra || item.infra}
-                  className="text-sm text-muted-foreground"
-                >
-                  <span>
-                    <Link
-                      href="/infra"
-                      className="text-blue-600 hover:underline"
-                    >
-                      {item.cloud || item.infra.split('(')[0].trim()}
-                    </Link>
-                    {item.infra.includes('(') && (
-                      <span>
-                        {' ' +
-                          (() => {
-                            const NAME_TRUNCATE_LENGTH =
-                              UI_CONFIG.NAME_TRUNCATE_LENGTH;
-                            const fullRegionPart = item.infra.substring(
-                              item.infra.indexOf('(')
-                            );
-                            const regionContent = fullRegionPart.substring(
-                              1,
-                              fullRegionPart.length - 1
-                            );
-                            if (regionContent.length <= NAME_TRUNCATE_LENGTH) {
-                              return fullRegionPart;
-                            }
-                            const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
-                            return `(${truncatedRegion})`;
-                          })()}
-                      </span>
-                    )}
-                  </span>
-                </NonCapitalizedTooltip>
-              ) : (
-                <span>{item.infra || '-'}</span>
+            <TableCell className="whitespace-nowrap">
+              {slotted(
+                item.infra && item.infra !== '-' ? (
+                  <NonCapitalizedTooltip
+                    content={item.full_infra || item.infra}
+                    className="text-sm text-muted-foreground"
+                  >
+                    <span>
+                      <Link
+                        href="/infra"
+                        className="text-blue-600 hover:underline"
+                      >
+                        {item.cloud || item.infra.split('(')[0].trim()}
+                      </Link>
+                      {item.infra.includes('(') && (
+                        <span>
+                          {' ' +
+                            (() => {
+                              const NAME_TRUNCATE_LENGTH =
+                                UI_CONFIG.NAME_TRUNCATE_LENGTH;
+                              const fullRegionPart = item.infra.substring(
+                                item.infra.indexOf('(')
+                              );
+                              const regionContent = fullRegionPart.substring(
+                                1,
+                                fullRegionPart.length - 1
+                              );
+                              if (
+                                regionContent.length <= NAME_TRUNCATE_LENGTH
+                              ) {
+                                return fullRegionPart;
+                              }
+                              const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
+                              return `(${truncatedRegion})`;
+                            })()}
+                        </span>
+                      )}
+                    </span>
+                  </NonCapitalizedTooltip>
+                ) : (
+                  <span>{item.infra || '-'}</span>
+                )
               )}
             </TableCell>
           );
@@ -1796,7 +2138,7 @@ export function ManagedJobsTable({
             className="sortable whitespace-nowrap"
             onClick={() => requestSort('cluster')}
           >
-            Requested Resources{getSortDirection('cluster')}
+            Resources{getSortDirection('cluster')}
           </TableHead>
         ),
         renderCell: (item, ctx) => {
@@ -1899,9 +2241,14 @@ export function ManagedJobsTable({
             return <TableCell>-</TableCell>;
           }
 
-          // Use task_job_id for group children to avoid conflicts
+          // Use task_job_id for group children to avoid conflicts, and for
+          // external rows always: their raw id is the Slurm cluster's id
+          // space, so equal ids across clusters (or against a managed id)
+          // would co-expand on plain item.id.
           const rowId =
-            ctx?.renderMode === 'groupChild' ? item.task_job_id : item.id;
+            ctx?.renderMode === 'groupChild' || item.is_external
+              ? item.task_job_id
+              : item.id;
 
           return (
             <TableCell>
@@ -1925,6 +2272,23 @@ export function ManagedJobsTable({
         renderHeader: () => <TableHead>Logs</TableHead>,
         renderCell: (item, ctx) => {
           const { renderMode, jobId } = ctx || {};
+
+          if (item.is_external) {
+            // External Slurm rows: logs live on their detail page.
+            return (
+              <TableCell>
+                <div className="flex items-center space-x-2">
+                  <Link
+                    href={externalJobHref(item)}
+                    title="View logs"
+                    className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+                  >
+                    <FileSearchIcon className="w-4 h-4" />
+                  </Link>
+                </div>
+              </TableCell>
+            );
+          }
 
           // For group parent, use jobId; otherwise use item.id
           const logJobId = renderMode === 'groupParent' ? jobId : item.id;
@@ -2293,6 +2657,44 @@ export function ManagedJobsTable({
         </div>
       </div>
 
+      {/* Slurm sweep failures: external rows may be incomplete or stale.
+          Dismiss is keyed on the message text so a NEW failure re-surfaces
+          the warning while the same one stays dismissed. */}
+      {externalFetchErrors.length > 0 &&
+        (() => {
+          const errorText = externalFetchErrors
+            .map((f) => `${f.cluster}: ${f.error}`)
+            .join(' · ');
+          if (errorText === externalErrorsDismissed) return null;
+          return (
+            <div className="mb-3 flex items-start justify-between rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <div>
+                <div>
+                  Failed to fetch Slurm jobs from{' '}
+                  {externalFetchErrors.length === 1 ? 'cluster' : 'clusters'}{' '}
+                  {externalFetchErrors.map((f) => f.cluster).join(', ')} — their
+                  jobs may be missing or stale.
+                </div>
+                {externalFetchErrors.map((f) => (
+                  <div
+                    key={f.cluster}
+                    className="mt-1 font-mono text-xs text-amber-700"
+                  >
+                    {f.cluster}: {f.error}
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => setExternalErrorsDismissed(errorText)}
+                className="ml-3 flex-shrink-0 font-medium text-amber-800 hover:text-amber-900"
+                title="Dismiss"
+              >
+                ×
+              </button>
+            </div>
+          );
+        })()}
+
       {/* Mobile-specific controller stopped message outside table */}
       {isMobile &&
         controllerStopped &&
@@ -2328,6 +2730,12 @@ export function ManagedJobsTable({
             </div>
           </div>
         )}
+
+      {infraFilterUnsupported && (
+        <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {infraFilterUnsupported}
+        </div>
+      )}
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto relative">
@@ -2377,6 +2785,20 @@ export function ManagedJobsTable({
                     const isMultiTask = tasks.length > 1;
                     const isExpanded = isJobGroupExpanded(jobId);
                     const firstTask = tasks[0];
+                    // The group's declared tasks come first (see
+                    // groupJobRowsByTree), then the jobs launched from it,
+                    // each with its own job id and possibly several rows.
+                    const memberTasks = tasks.filter((t) => t.id !== jobId);
+                    const declaredTasks = memberTasks.length
+                      ? tasks.filter((t) => t.id === jobId)
+                      : tasks;
+                    const memberRowCounts = new Map();
+                    memberTasks.forEach((t) =>
+                      memberRowCounts.set(
+                        t.id,
+                        (memberRowCounts.get(t.id) || 0) + 1
+                      )
+                    );
 
                     // For single-task jobs, render using plugin columns
                     if (!isMultiTask) {
@@ -2413,6 +2835,8 @@ export function ManagedJobsTable({
                       renderMode: 'groupParent',
                       jobId,
                       tasks,
+                      declaredTasks,
+                      memberTasks,
                       aggregates,
                       isExpanded,
                       toggleJobGroup,
@@ -2433,11 +2857,26 @@ export function ManagedJobsTable({
 
                         {/* Child task rows when expanded */}
                         {isExpanded &&
-                          tasks.map((task, taskIndex) => {
+                          tasks.map((task, rowIndex) => {
+                            const isMember = task.id !== jobId;
+                            // Task index within the row's own job: own
+                            // tasks lead the group, so their row index is
+                            // their task index; a launched job's rows are
+                            // indexed among themselves.
+                            const taskIndex = isMember
+                              ? memberTasks
+                                  .filter((t) => t.id === task.id)
+                                  .indexOf(task)
+                              : rowIndex;
                             const childCtx = {
                               renderMode: 'groupChild',
                               jobId,
                               tasks,
+                              declaredTasks,
+                              memberTasks,
+                              isMember,
+                              memberIsMultiTask:
+                                isMember && memberRowCounts.get(task.id) > 1,
                               taskIndex,
                               aggregates,
                               isExpanded,
@@ -2491,10 +2930,19 @@ export function ManagedJobsTable({
                       )}
                       {!controllerStopped &&
                         !controllerLaunching &&
-                        (userScope === 'mine' &&
-                        currentUser &&
-                        activeTab === 'all' &&
-                        everyoneTotal > 0 ? (
+                        (infraFilterUnsupported ? (
+                          <div className="flex flex-col items-center space-y-2 max-w-md text-center">
+                            <p className="text-gray-700">
+                              Cannot filter these jobs by infra.
+                            </p>
+                            <p className="text-sm text-gray-500">
+                              {infraFilterUnsupported}
+                            </p>
+                          </div>
+                        ) : userScope === 'mine' &&
+                          currentUser &&
+                          activeTab === 'all' &&
+                          everyoneTotal > 0 ? (
                           <div className="flex flex-col items-center space-y-2 max-w-md">
                             <p className="text-gray-700">
                               You haven&apos;t submitted any managed jobs yet.
@@ -3115,9 +3563,9 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
     return <SharedInfraBadges replicaInfo={replicaInfo} />;
   };
 
-  // Number of columns in the pools table header (Pool, Jobs, Workers,
+  // Number of columns in the pools table header (Pool, User, Jobs, Workers,
   // Worker Details, Worker Resources) — used for the empty-state colSpan.
-  const poolColumnCount = 5;
+  const poolColumnCount = 6;
 
   return (
     <Card>
@@ -3130,6 +3578,12 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                 onClick={() => requestSort('name')}
               >
                 Pool{getSortDirection('name')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap w-32"
+                onClick={() => requestSort('user')}
+              >
+                User{getSortDirection('user')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap w-40"
@@ -3156,7 +3610,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
             {loading && isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={5}
+                  colSpan={poolColumnCount}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -3175,6 +3629,16 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                     >
                       {pool.name}
                     </Link>
+                  </TableCell>
+                  <TableCell>
+                    {pool.user ? (
+                      <UserDisplay
+                        username={pool.user}
+                        userHash={pool.user_hash}
+                      />
+                    ) : (
+                      '-'
+                    )}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2 flex-wrap">

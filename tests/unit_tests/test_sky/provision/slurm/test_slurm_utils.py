@@ -804,3 +804,17 @@ class TestGetSlurmClusterInventory:
 
         with pytest.raises(RuntimeError, match='squeue failed'):
             utils.get_slurm_cluster_inventory('cluster-a')
+
+
+class TestRunOnLoginNode:
+
+    def test_delegates_to_the_inventory_client(self, monkeypatch):
+        client = mock.MagicMock()
+        client.run_command.return_value = (0, 'out\n', '')
+        monkeypatch.setattr(
+            utils, '_get_slurm_inventory_client', lambda name: client
+            if name == 'hpc' else pytest.fail(name))
+
+        assert utils.run_on_login_node('hpc', 'curl x',
+                                       timeout=9) == (0, 'out\n', '')
+        client.run_command.assert_called_once_with('curl x', timeout=9)

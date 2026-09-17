@@ -1,0 +1,45 @@
+# Transcribe a bucket of audio files into a bucket of transcripts,
+# using Hugging Face storage as the only storage layer.
+#
+# Usage:
+#   sky launch -c transcribe transcribe.yaml --env HF_USER=<your-hf-username> --secret HF_TOKEN
+#   sky down transcribe
+#
+# Same buckets, same script, any cloud: swap `--infra` and nothing else changes.
+name: hf-storage-transcription
+
+resources:
+  accelerators: {A10:1, L4:1, A100:1}   # any single 24GB+ GPU
+
+envs:
+  HF_USER:        # your Hugging Face username or org (owner of the two buckets)
+  LANGUAGE: en    # en, de, fr, it, es, pt, el, nl, pl, ar, vi, zh, ja, ko
+
+secrets:
+  HF_TOKEN:       # pass with `--secret HF_TOKEN`; the model is gated (auto-approved)
+
+file_mounts:
+  # Audio in: a bucket you filled earlier (see README). Mounted read-write, used read-only.
+  /input:
+    source: hf://buckets/${HF_USER}/skypilot-tutorial-audio
+    store: hf
+    mode: MOUNT
+  # Transcripts out: every .txt the script writes lands on the Hub as it is written.
+  /output:
+    source: hf://buckets/${HF_USER}/skypilot-tutorial-transcripts
+    store: hf
+    mode: MOUNT
+
+setup: |
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+
+run: |
+  set -euo pipefail
+  export PATH="$HOME/.local/bin:$PATH"
+  # The script is a self-contained uv script (PEP 723) hosted on the Hub;
+  # uv resolves its dependencies on first run. Pinned to a revision.
+  # --python 3.12: torch wheels lag new CPython releases; don't let uv pick the newest.
+  UV_TORCH_BACKEND=auto uv run --python 3.12 \
+    https://huggingface.co/datasets/uv-scripts/transcription/resolve/caa60d95d008741a5fb0a8b33a22eed6fbf1165a/cohere-transcribe.py \
+    /input /output --language ${LANGUAGE}
+  echo "Done. Transcripts: https://huggingface.co/buckets/${HF_USER}/skypilot-tutorial-transcripts"

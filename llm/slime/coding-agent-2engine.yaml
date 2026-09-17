@@ -17,6 +17,9 @@ name: coding-agent-rl-2eng
 execution: parallel
 primary_tasks: [trainer]
 termination_delay: 60s
+# In-group networking is required: the trainer discovers/health-gates the
+# engines by hostname, and engines dial the trainer back for weight sync.
+inter_connection: true
 ---
 name: sglang
 resources:

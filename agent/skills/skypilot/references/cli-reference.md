@@ -303,6 +303,7 @@ Cancel managed jobs.
 - `--name`, `-n` — Managed job name to cancel.
 - `--pool`, `-p` — Pool name to cancel.
 - `JOB_IDS` — integer
+- `--task` — Cancel one dynamic task of the job (a job launched from inside it), by the index shown in `sky jobs queue` or by name. A declared task cannot be cancelled alone.
 - `--graceful` — Wait for MOUNT_CACHED uploads to complete before stopping/terminating. Will cancel current jobs first.
 - `--graceful-timeout` — Timeout in seconds for `--graceful` flag. When not set, will wait for MOUNT_CACHED uploads until they are finished.
 - `--all`, `-a` — Cancel all managed jobs for the current user.
@@ -354,6 +355,8 @@ Launch a managed job from a YAML or a command.
 - `--detach-run`, `-d` — If True, as soon as a job is submitted, return from this call and do not stream execution logs.
 - `--pool`, `-p` — (Experimental; optional) Pool to use for jobs submission.
 - `--num-jobs` — Number of jobs to submit.
+- `--job-group` — Attach to an existing job group, by job id or unique running job name. The job is shown under it and cancelled with it. Defaults to the surrounding job group when launched from inside one.
+- `--no-job-group` — Launch a top-level job even when running inside a job group (do not attach to it).
 - `--git-url` — Git repository URL.
 - `--git-ref` — Git reference (branch, tag, or commit hash) to use.
 - `--workspace`, `-w` — Workspace to submit the managed job into. Shorthand for `--config active_workspace=<name>`.
@@ -467,6 +470,7 @@ Show statuses of managed jobs.
 - `--since` — Show only jobs submitted within this time window, relative to now (e.g. "30m", "48h", "7d", "2w"). A bare number is seconds. Mutually exclusive with --after.
 - `--after` — Show only jobs submitted at or after this absolute local time (e.g. "2026-01-13" or "2026-01-13 15:30:00"). Mutually exclusive with --since.
 - `--before` — Show only jobs submitted at or before this absolute local time (e.g. "2026-01-13" or "2026-01-13 15:30:00").
+- `--infra` — Show only jobs running on this infrastructure. Format: cloud, cloud/region, cloud/region/zone, k8s/context-name, or ssh/node-pool-name. Examples: aws, aws/us-east-1, aws/us-east-1/us-east-1a, aws/\*/u...
 - `--all-users`, `-u` — Show jobs from all users.
 - `--all`, `-a` — Show all jobs.
 - `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
@@ -649,8 +653,10 @@ List volumes managed by SkyPilot.
 **Options:**
 
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
+- `NAMES` — text
 - `--verbose`, `-v` — Show all information in full.
 - `--refresh`, `-r` — Refresh volume state from cloud APIs before listing. Without this flag, cached data is returned which is updated periodically by the background daemon.
+- `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
 
 ## API Server Commands
 

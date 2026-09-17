@@ -50,9 +50,8 @@ def request_owner_scope(request: fastapi.Request) -> Optional[str]:
     auth_user = getattr(request.state, 'auth_user', None)
     if auth_user is None:
         return None
-    # In-memory Casbin lookup (no DB roundtrip), matching `_is_viewer`.
-    enforcer = permission.permission_service._ensure_enforcer()  # pylint: disable=protected-access
-    roles = enforcer.get_roles_for_user(auth_user.id)
+    # In-memory lookup (no DB roundtrip), matching `_is_viewer`.
+    roles = permission.permission_service.roles_in_memory(auth_user.id)
     if rbac.RoleName.ADMIN.value in roles:
         return None
     return auth_user.id
@@ -91,8 +90,7 @@ def _is_viewer(request: fastapi.Request) -> bool:
         return False
     # Trust the in-memory grouping policy; same source the middleware
     # already consulted to gate this request to here.
-    enforcer = permission.permission_service._ensure_enforcer()  # pylint: disable=protected-access
-    roles = enforcer.get_roles_for_user(auth_user.id)
+    roles = permission.permission_service.roles_in_memory(auth_user.id)
     # Admin wins over viewer when both roles are present.
     return (rbac.RoleName.VIEWER.value in roles and
             rbac.RoleName.ADMIN.value not in roles)

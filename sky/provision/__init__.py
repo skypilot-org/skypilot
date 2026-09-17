@@ -307,13 +307,16 @@ def map_all_volumes_usedby(
 
 
 @_route_to_cloud_impl
-def get_all_volumes_errors(
+def get_all_volumes_state(
     provider_name: str, configs: List[models.VolumeConfig]
-) -> Tuple[Dict[str, Optional[str]], Set[str]]:
-    """Get error messages for all volumes.
+) -> Tuple[Dict[str, Optional[str]], Dict[str, models.ObservedVolumeState],
+           Set[str]]:
+    """Get the cloud's view of all volumes.
 
     Checks if volumes have errors (e.g., pending state due to
-    misconfiguration) and returns appropriate error messages.
+    misconfiguration), and reports the fields the cloud owns rather than the
+    stored config -- a volume's size can change on the cloud side long after
+    it was created.
 
     Args:
         provider_name: Name of the provider.
@@ -322,18 +325,21 @@ def get_all_volumes_errors(
     Returns:
         errors: Dict mapping volume name to an error message, or to None
           when the volume is healthy.
+        observed: Dict mapping volume name to the cloud-owned fields the
+          cloud reported for it. A volume may be absent, and any field may be
+          None: both mean "no answer", never "the recorded value is gone".
         failed_volume_names: Set of volume names whose status could not be
           determined because the cloud could not be queried. A volume listed
           here must keep its recorded status; absence from ``errors`` alone
           does not mean healthy.
 
         An implementation should place every input config in exactly one of
-        the two. A volume in neither means this provider does not check
-        volume errors, as with the default below.
+        errors and failed_volume_names. A volume in neither means this
+        provider does not check volume errors, as with the default below.
     """
     # Default implementation reports no errors (no error checking)
     del provider_name, configs
-    return {}, set()
+    return {}, {}, set()
 
 
 @_route_to_cloud_impl
