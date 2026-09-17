@@ -301,8 +301,11 @@ def _run_handler(loop, fake_kubectl, mode, proxy_stub):
 
     handle = mock.MagicMock()
     handle.head_ssh_port = 22
+    # argv[0] is the fake kubectl itself: `spawn_without_fork` resolves argv[0]
+    # and an absolute path is taken as given, so nothing inside the server
+    # needs to be patched to redirect the spawn.
     handle.get_command_runners.return_value[0].port_forward_command.\
-        return_value = ['kubectl', 'port-forward', 'pod/x', ':22', mode]
+        return_value = [fake_kubectl, 'port-forward', 'pod/x', ':22', mode]
     websocket = _make_websocket()
     websocket.accept = mock.AsyncMock()
 
@@ -316,8 +319,7 @@ def _run_handler(loop, fake_kubectl, mode, proxy_stub):
         return await proxy_stub(captured, read_from_backend, write_to_backend,
                                 close_backend)
 
-    with mock.patch.object(server, '_KUBECTL_PATH', fake_kubectl), \
-            mock.patch.object(server, '_validate_cluster_for_ssh_proxy_ws',
+    with mock.patch.object(server, '_validate_cluster_for_ssh_proxy_ws',
                               new=mock.AsyncMock(return_value=handle)), \
             mock.patch.object(server.websocket_utils, 'run_websocket_proxy',
                               new=stub), \

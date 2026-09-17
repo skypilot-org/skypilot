@@ -138,10 +138,22 @@ _SERVER_USER_HASH_KEY = 'server_user_hash'
 
 logger = sky_logging.init_logger(__name__)
 
-# Resolved once at import so `subprocess.Popen(executable=...)` gets an
-# absolute path — a required precondition for Python subprocess to route
-# through posix_spawn instead of fork_exec.
-_KUBECTL_PATH: Optional[str] = shutil.which('kubectl')
+# Grace period for srun to exit after SIGTERM before the Slurm ssh proxy
+# escalates to SIGKILL.
+_SRUN_REAP_TIMEOUT_SECONDS = 5
+
+
+def _reap_srun(proc: subprocess.Popen) -> None:
+    """Waits for srun to exit, escalating to SIGKILL. Runs in a thread."""
+    try:
+        proc.wait(timeout=_SRUN_REAP_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        logger.warning(f'srun did not exit within '
+                       f'{_SRUN_REAP_TIMEOUT_SECONDS}s of SIGTERM; sending '
+                       'SIGKILL.')
+        proc.kill()
+        proc.wait()
+
 
 # TODO(zhwu): Streaming requests, such log tailing after sky launch or sky logs,
 # need to be detached from the main requests queue. Otherwise, the streaming
@@ -3544,38 +3556,16 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
     head_ssh_port = handle.head_ssh_port or 22
     kubectl_cmd = handle.get_command_runners()[0].port_forward_command(
         port_forward=[(None, head_ssh_port)])
-    # Under uvloop, `asyncio.create_subprocess_exec` goes through libuv's
-    # `uv_spawn`, which on Linux always uses fork().
-    # The forked child runs `PyOS_AfterFork_Child` which tears down inherited
-    # Python objects; if any sqlite3 statement is in that set, its
-    # destructor calls `sqlite3_free → pthread_mutex_lock` on the sqlite3
+    # Must not fork. Beyond the stall `spawn_without_fork` documents, a child
+    # forked from this process runs `PyOS_AfterFork_Child`, which tears down
+    # inherited Python objects; if any sqlite3 statement is among them, its
+    # destructor calls `sqlite3_free -> pthread_mutex_lock` on the sqlite3
     # static allocator mutex. That mutex was held by another parent thread at
-    # the fork moment (aiosqlite worker), and the child only has one thread,
-    # so no one ever releases it. Child deadlocks before execv, leaks the
-    # parent's inherited fds (including every `.<request>.lock` flock), and
-    # the parent's event loop stall trips uvicorn's 5s ping-timeout →
-    # parent SIGKILL.
-    # Run `subprocess.Popen` in a worker thread to bypass uvloop's transport
-    # entirely.
-    if _KUBECTL_PATH is None or not os.path.isabs(_KUBECTL_PATH):
-        raise RuntimeError(
-            'kubectl not found on PATH with an absolute path; refusing to '
-            'fall back to fork-based spawn which risks the SQLite-mutex '
-            'ghost-worker deadlock.')
-    argv = [_KUBECTL_PATH] + list(kubectl_cmd[1:])
-
-    def _spawn_sync() -> subprocess.Popen:
-        return subprocess.Popen(
-            argv,
-            executable=_KUBECTL_PATH,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            close_fds=False,
-        )
-
+    # the fork moment (aiosqlite worker), and the child has only one thread,
+    # so nobody releases it. The child then deadlocks before execv and leaks
+    # every fd it inherited, including each `.<request>.lock` flock.
     loop = asyncio.get_running_loop()
-    proc = await loop.run_in_executor(None, _spawn_sync)
+    proc = await asyncio_utils.spawn_without_fork(kubectl_cmd)
     logger.info(f'Started kubectl port-forward with command: {kubectl_cmd}')
     assert proc.stdout is not None
 
@@ -3790,19 +3780,27 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
             ))
     ]
 
-    proc = await asyncio.create_subprocess_shell(
-        ' '.join(ssh_cmd),
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,  # Capture stderr separately for logging
+    loop = asyncio.get_running_loop()
+    # `/bin/sh -c` is what `asyncio.create_subprocess_shell` would run, minus
+    # the forking spawn that call carries under uvloop.
+    proc = await asyncio_utils.spawn_without_fork(
+        ['/bin/sh', '-c', ' '.join(ssh_cmd)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,  # Capture stderr separately for logging
     )
     assert proc.stdin is not None
     assert proc.stdout is not None
     assert proc.stderr is not None
 
-    stdin = proc.stdin
-    stdout = proc.stdout
-    stderr = proc.stderr
+    # Drive the three pipes without handing their fds to the loop; `proc`
+    # stays their single owner and closes each exactly once in the `finally`.
+    stdin = asyncio_utils.NonOwningPipeWriter(loop, proc.stdin.fileno())
+    stdout = asyncio_utils.NonOwningPipeReader(loop, proc.stdout.fileno())
+    stderr = asyncio_utils.NonOwningPipeReader(loop, proc.stderr.fileno())
+    stdin.start()
+    stdout.start()
+    stderr.start()
 
     async def log_stderr():
         while True:
@@ -3823,11 +3821,14 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
             path=websocket_utils.SSH_PATH_SLURM).inc()
 
         async def write_and_drain(data: bytes) -> None:
-            stdin.write(data)
-            await stdin.drain()
+            await stdin.write(data)
 
         async def close_stdin() -> None:
+            # Stop watching, then close the fd through its owner: srun reads
+            # EOF on stdin and shuts the session down.
             stdin.close()
+            assert proc.stdin is not None
+            proc.stdin.close()
 
         ssh_failed = await websocket_utils.run_websocket_proxy(
             websocket,
@@ -3843,10 +3844,11 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
     finally:
         conn_gauge.dec()
         reason = ''
-        try:
-            logger.info('Terminating srun process')
-            proc.terminate()
-        except ProcessLookupError:
+        logger.info('Terminating srun process')
+        # `subprocess.Popen.terminate()` is a no-op on a process that has
+        # already been reaped rather than raising ProcessLookupError, so ask
+        # for the exit status directly.
+        if proc.poll() is not None:
             stdout_data = await stdout.read()
             logger.error('srun process was terminated before the '
                          'ssh websocket connection was closed. Remaining '
@@ -3855,6 +3857,7 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
             metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
                 pid=os.getpid(), reason=reason).inc()
         else:
+            proc.terminate()
             if ssh_failed:
                 reason = 'SSHToSlurmJobDisconnected'
             else:
@@ -3870,6 +3873,22 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
                 await stderr_task
             except asyncio.CancelledError:
                 pass
+
+        # Every watcher has to come off its fd before the object that owns the
+        # fd closes it.
+        stdin.close()
+        stdout.stop()
+        stderr.stop()
+        for pipe in (proc.stdin, proc.stdout, proc.stderr):
+            if pipe is not None:
+                pipe.close()
+        # `subprocess.Popen` is outside asyncio's child watcher, so nothing
+        # else would ever wait() on srun. Hand the reap to a thread and do not
+        # await it: a client disconnect can already have cancelled this
+        # handler, and an await here would then be skipped along with the
+        # reap. Everything above this point is synchronous for the same
+        # reason.
+        loop.run_in_executor(None, _reap_srun, proc)
 
 
 @app.websocket('/ssh-interactive-auth')
