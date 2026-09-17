@@ -3725,7 +3725,6 @@ class TestStallExemptionHelpers:
         'FailedCreatePodSandBox',
         'CrashLoopBackOff',
         'OOMKilled',
-        'pod initialization',
     ])
     def test_non_exempt_reasons(self, reason):
         assert not instance._reason_is_exempt_from_stall(reason)
@@ -3737,11 +3736,6 @@ class TestStallExemptionHelpers:
                 in instance._STALL_EXEMPT_PENDING_REASONS)
         assert instance._PENDING_REASON_NORMAL_EVENT_ALLOWLIST.issubset(
             instance._STALL_EXEMPT_PENDING_REASONS)
-        # 'pod initialization' must stay clear of the init-container prefix:
-        # it was previously labelled 'init container running', which the
-        # prefix match swept up and left that hang unbounded.
-        assert not instance._POD_INITIALIZATION_REASON.startswith(
-            instance._INIT_CONTAINER_REASON_PREFIX)
 
     def test_mount_failures_keep_their_own_window(self):
         assert (instance._stall_timeout_seconds('FailedMount') ==
@@ -3770,8 +3764,9 @@ class TestWaitForPodsToRunStallEscalation:
         `init` selects the init phase the pod reports, mirroring the three
         states _check_init_containers distinguishes: 'running' (an init
         container is doing its own work), 'starting' (the kubelet has not
-        started it yet) and 'done' (they have all terminated successfully while
-        the kubelet has not moved on). None reports plain ContainerCreating.
+        started it yet) and 'done' (they have all terminated successfully and
+        the kubelet is creating the main containers, which it keeps reporting
+        as PodInitializing). None reports plain ContainerCreating.
         """
         from sky.provision import constants as prov_constants
         assert init in (None, 'running', 'starting', 'done'), init
@@ -3964,19 +3959,42 @@ class TestWaitForPodsToRunStallEscalation:
                        pending_reasons=[None],
                        healthy_after=200)
 
-    def test_stuck_after_init_containers_finished_raises(self, monkeypatch):
+    @pytest.mark.parametrize('pending_reason', [
+        pytest.param(None, id='no-event-falls-back-to-container-creation'),
+        pytest.param('Pulling', id='live-pulling-event'),
+    ])
+    def test_main_container_pull_after_init_never_raises(
+            self, monkeypatch, pending_reason):
         """PodInitializing with every init container already terminated
-        successfully: the init phase is over and the kubelet never started the
-        main containers. Nothing is legitimately slow here, so this must be
-        bounded -- it was previously labelled 'init container running', which
-        the prefix-based exemption swept up, leaving the launch hung forever.
+        successfully is not a stuck pod. Whenever a pod has init containers the
+        kubelet reports its main containers as PodInitializing, not
+        ContainerCreating, for the whole of their own image pull, so this state
+        gets the ContainerCreating handling: a live 'Pulling' event or the
+        'container creation' fallback, both exempt, for however long the pull
+        takes (200 iterations at 301s is ~16 simulated hours). It used to carry
+        its own non-exempt reason and fail the launch after 10 minutes, which
+        cut off every main image that took longer than that to pull.
+        """
+        self._run_wait(monkeypatch,
+                       pod=self._make_pending_pod(init='done'),
+                       pending_reasons=[pending_reason],
+                       healthy_after=200)
+
+    def test_a_live_warning_bounds_the_main_container_after_init(
+            self, monkeypatch):
+        """What the exemption gives up on a quiet pod it keeps for a failing
+        one: a kubelet Warning that leaves the main containers in
+        PodInitializing after init (here: a sandbox that cannot be created)
+        reaches the events tier and escalates exactly as it does for a pod
+        without init containers.
         """
         with pytest.raises(config_lib.KubernetesError) as exc_info:
             self._run_wait(monkeypatch,
                            pod=self._make_pending_pod(init='done'),
-                           pending_reasons=[None])
+                           pending_reasons=['FailedCreatePodSandBox'])
         msg = str(exc_info.value)
-        assert instance._POD_INITIALIZATION_REASON in msg
+        assert 'FailedCreatePodSandBox' in msg
+        assert self._EVENT_MSG in msg
         assert 'pod-0' in msg
 
     @pytest.mark.parametrize('warning_at,escalates', [
@@ -4473,9 +4491,9 @@ class TestInspectPodStatusInitContainerReason:
             _make_init_status_with_name(name='init-copy-home',
                                         terminated_exit_code=0),
         ],
-                     'pod initialization',
-                     False,
-                     id='init-done-kubelet-has-not-moved-on'),
+                     'container creation',
+                     True,
+                     id='init-done-main-containers-being-created'),
         pytest.param(lambda: [
             _make_init_status_with_name(name='init-setup-ssh',
                                         terminated_exit_code=0),
@@ -4506,13 +4524,15 @@ class TestInspectPodStatusInitContainerReason:
     def test_init_phase_states_are_distinguished(self, monkeypatch,
                                                  make_init_statuses,
                                                  expected_reason, exempt):
-        """_check_init_containers reports three different things, and the
-        no-progress deadline turns on telling them apart: an init container
-        running (arbitrary user work), one the kubelet is still creating (most
-        often pulling an image of its own), and neither -- the init phase is
-        over and the kubelet has not moved on to the main containers. Only the
-        last is bounded; it was previously labelled 'init container running'
-        too, and the prefix-based exemption swept it up.
+        """_check_init_containers reports three different things: an init
+        container running (arbitrary user work), one the kubelet is still
+        creating (most often pulling an image of its own), and neither -- the
+        init phase is over and the kubelet is creating the main containers,
+        which it keeps reporting as PodInitializing for their own image pull.
+        The first two get an init-container label; the last falls through to
+        the ContainerCreating handling and, with no event to consult here, the
+        'container creation' fallback. All three are exempt from the
+        no-progress deadline.
         """
         monkeypatch.setattr(instance, '_get_pod_pending_reason',
                             lambda *a, **kw: None)
