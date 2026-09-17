@@ -3844,38 +3844,23 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
         )
 
     finally:
+        # Nothing in this block may `await`: a cancellation delivered into one
+        # skips every statement after it, and this is the only code that takes
+        # the loop's watchers off the srun pipes before their owner closes
+        # them. A watcher left on a closed fd fires for whatever the kernel
+        # hands out next. `test_slurm_ssh_proxy_teardown_does_not_await`
+        # enforces this.
         conn_gauge.dec()
-        reason = ''
         logger.info('Terminating srun process')
         # `subprocess.Popen.terminate()` is a no-op on a process that has
         # already been reaped rather than raising ProcessLookupError, so ask
         # for the exit status directly.
-        if proc.poll() is not None:
-            stdout_data = await stdout.read()
-            logger.error('srun process was terminated before the '
-                         'ssh websocket connection was closed. Remaining '
-                         f'output: {str(stdout_data)}')
-            reason = 'SrunProcessExit'
-        else:
+        srun_exited = proc.poll() is not None
+        if not srun_exited:
             proc.terminate()
-            if ssh_failed:
-                reason = 'SSHToSlurmJobDisconnected'
-            else:
-                reason = 'ClientClosed'
-
-        # Counted once per session. The early-exit branch used to increment
-        # here as well as on its own, so one failed session reported two
-        # closures.
-        metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
-            pid=os.getpid(), reason=reason).inc()
-
-        # Cancel the stderr logging task if it's still running
-        if stderr_task is not None and not stderr_task.done():
-            stderr_task.cancel()
-            try:
-                await stderr_task
-            except asyncio.CancelledError:
-                pass
+        stderr_task.cancel()
+        # Reads the fd, so it has to run before the owner closes it below.
+        leftover = stdout.drain() if srun_exited else b''
 
         # Every watcher has to come off its fd before the object that owns the
         # fd closes it.
@@ -3886,12 +3871,24 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
             if pipe is not None:
                 pipe.close()
         # `subprocess.Popen` is outside asyncio's child watcher, so nothing
-        # else would ever wait() on srun. Hand the reap to a thread and do not
-        # await it: a client disconnect can already have cancelled this
-        # handler, and an await here would then be skipped along with the
-        # reap. Everything above this point is synchronous for the same
-        # reason.
+        # else would ever wait() on srun.
         loop.run_in_executor(None, _reap_srun, proc)
+
+        if srun_exited:
+            logger.error('srun process exited with returncode '
+                         f'{proc.returncode} before the ssh websocket '
+                         'connection was closed; its stderr is in the debug '
+                         f'log. Remaining output: {str(leftover)}')
+            reason = 'SrunProcessExit'
+        elif ssh_failed:
+            reason = 'SSHToSlurmJobDisconnected'
+        else:
+            reason = 'ClientClosed'
+        # Counted once per session. The early-exit branch used to increment
+        # here as well as on its own, so one failed session reported two
+        # closures.
+        metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
+            pid=os.getpid(), reason=reason).inc()
 
 
 @app.websocket('/ssh-interactive-auth')

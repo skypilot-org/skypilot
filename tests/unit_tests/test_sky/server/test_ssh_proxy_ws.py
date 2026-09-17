@@ -5,14 +5,17 @@ gracefully (rather than raising an HTTPException, which would surface as an
 unhandled RuntimeError traceback) when cluster validation fails.
 """
 
+import ast
 import asyncio
 import contextlib
 import gc
+import inspect
 import logging
 import os
 import shlex
 import subprocess
 import sys
+import textwrap
 from unittest import mock
 
 import fastapi
@@ -420,3 +423,35 @@ def test_ssh_proxy_kubectl_death_mid_session_logs_leftover(
     assert all(
         'lost connection to pod' in msg for msg in exit_messages), exit_messages
     _assert_pipe_fd_released(loop, proc)
+
+
+def test_slurm_ssh_proxy_teardown_does_not_await():
+    """`slurm_job_ssh_proxy` must not await inside its `finally`.
+
+    That block is the only code that takes the loop's watchers off the srun
+    pipes before `subprocess.Popen` closes them, and the only code that
+    dispatches the reap. A cancellation delivered into an await there skips
+    everything after it, leaving a watcher registered on an fd number the
+    kernel is then free to hand to another connection.
+    """
+    tree = ast.parse(
+        textwrap.dedent(inspect.getsource(server.slurm_job_ssh_proxy)))
+    func = tree.body[0]
+    assert isinstance(func, ast.AsyncFunctionDef)
+
+    finalbodies = [
+        node.finalbody
+        for node in ast.walk(func)
+        if isinstance(node, ast.Try) and node.finalbody
+    ]
+    assert finalbodies, 'expected a try/finally in slurm_job_ssh_proxy'
+
+    for finalbody in finalbodies:
+        for stmt in finalbody:
+            awaits = [
+                node for node in ast.walk(stmt) if isinstance(node, ast.Await)
+            ]
+            assert not awaits, (
+                'found `await` at line(s) '
+                f'{sorted(node.lineno for node in awaits)} of the function, '
+                'inside the `finally` of slurm_job_ssh_proxy')
