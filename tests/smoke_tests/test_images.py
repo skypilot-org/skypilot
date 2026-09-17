@@ -246,7 +246,7 @@ def test_gcp_image_id_dict_region():
         'gcp_image_id_dict_region',
         [
             # Use region to filter image_id dict.
-            f'sky launch -y -c {name} --infra gcp/us-east1 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/gcp_per_region_images.yaml && exit 1 || true',
+            f'sky launch -y -c {name} --infra gcp/us-west1 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/gcp_per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
             f'sky launch -y -c {name} --infra gcp/us-west3 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/gcp_per_region_images.yaml',
             # Should success because the image id match for the region.
@@ -317,9 +317,9 @@ def test_gcp_image_id_dict_zone():
         'gcp_image_id_dict_zone',
         [
             # Use zone to filter image_id dict.
-            f'sky launch -y -c {name} --infra */*/us-east1-a {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/gcp_per_region_images.yaml && exit 1 || true',
+            f'sky launch -y -c {name} --infra */*/us-west1-a {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/gcp_per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
-            f'sky launch -y -c {name} --infra */*/us-central1-a {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/gcp_per_region_images.yaml',
+            f'sky launch -y -c {name} --infra */*/us-east1-b {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/gcp_per_region_images.yaml',
             # Should success because the image id match for the zone.
             f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra gcp --image-id skypilot:cpu-debian-10 tests/test_yamls/minimal.yaml',
             f'sky exec {name} --infra gcp --image-id skypilot:cpu-debian-10 tests/test_yamls/minimal.yaml',
@@ -328,11 +328,11 @@ def test_gcp_image_id_dict_zone():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
-            f'sky status -v | grep {name} | grep us-central1',  # Ensure the zone is correct.
+            f'sky status -v | grep {name} | grep us-east1',  # Ensure the zone is correct.
             # Ensure exec works.
-            f'sky exec {name} --infra gcp/*/us-central1-a tests/test_yamls/gcp_per_region_images.yaml',
+            f'sky exec {name} --infra gcp/*/us-east1-b tests/test_yamls/gcp_per_region_images.yaml',
             f'sky exec {name} tests/test_yamls/gcp_per_region_images.yaml',
-            f'sky exec {name} --infra gcp/us-central1 "ls ~"',
+            f'sky exec {name} --infra gcp/us-east1 "ls ~"',
             f'sky exec {name} "ls ~"',
             f'sky logs {name} 4 --status',
             f'sky logs {name} 5 --status',
@@ -398,13 +398,13 @@ def test_clone_disk_gcp():
 def test_gcp_mig():
     name = smoke_tests_utils.get_cluster_name()
     region = 'us-central1'
-    zone = 'us-central1-a'
+    zone = 'us-east1-b'
     test = smoke_tests_utils.Test(
         'gcp_mig',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
             # Launch a CPU instance asynchronously.
-            f'sky launch -y -c {name}-cpu {smoke_tests_utils.LOW_RESOURCE_ARG} --infra gcp/*/us-central1-a --async tests/test_yamls/minimal.yaml',
+            f'sky launch -y -c {name}-cpu {smoke_tests_utils.LOW_RESOURCE_ARG} --infra gcp/*/{zone} --async tests/test_yamls/minimal.yaml',
             # Launch a GPU instance.
             f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --gpus l4 --num-nodes 2 --image-id skypilot:gpu-debian-10 --infra gcp/{region} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.

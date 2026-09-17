@@ -225,10 +225,10 @@ def test_gcp_zone():
     test = smoke_tests_utils.Test(
         'gcp_zone',
         [
-            f'sky launch -y -c {name} --infra gcp/*/us-central1-a {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
-            f'sky exec {name} --infra gcp/*/us-central1-a tests/test_yamls/minimal.yaml',
+            f'sky launch -y -c {name} --infra gcp/*/us-east1-b {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            f'sky exec {name} --infra gcp/*/us-east1-b tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status -v | grep {name} | grep us-central1-a',  # Ensure the zone is correct.
+            f'sky status -v | grep {name} | grep us-east1-b',  # Ensure the zone is correct.
         ],
         f'sky down -y {name}',
     )

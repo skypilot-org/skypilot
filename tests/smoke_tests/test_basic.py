@@ -1155,7 +1155,7 @@ def test_gcp_stale_job_manual_restart():
     name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, sky.GCP.max_cluster_name_length())
-    zone = 'us-central1-a'
+    zone = 'us-east1-b'
     query_cmd = (f'gcloud compute instances list --filter='
                  f'"(labels.ray-cluster-name={name_on_cloud})" '
                  f'--zones={zone} --format="value(name)"')
@@ -1165,7 +1165,7 @@ def test_gcp_stale_job_manual_restart():
         'gcp_stale_job_manual_restart',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
-            f'sky launch -y -c {name} --infra gcp/*/us-central1-a {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            f'sky launch -y -c {name} --infra gcp/*/{zone} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             # Stop the cluster manually.
             smoke_tests_utils.run_cloud_cmd_on_cluster(name, cmd=stop_cmd),

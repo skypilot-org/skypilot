@@ -1174,7 +1174,7 @@ def test_managed_jobs_recovery_multi_node_gcp():
     name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
-    zone = 'us-central1-a'
+    zone = 'us-east1-b'
     # Use ':' to match as the cluster name will contain the suffix with job id
     query_cmd = (
         f'gcloud compute instances list --filter='
@@ -1410,6 +1410,10 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
     for task_config in yaml_config:
         task_config['resources'] = task_config.get('resources', {})
         task_config['resources']['cloud'] = generic_cloud
+        if generic_cloud == 'gcp':
+            # us-central1 currently has no N4 capacity; pin to us-east1 so
+            # zone failover does not eat the log-streaming timeout.
+            task_config['resources']['region'] = 'us-east1'
 
     with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as yaml_file:
         yaml_utils.dump_yaml(yaml_file.name, yaml_config)
@@ -3415,6 +3419,18 @@ def test_job_group_task_logs_sdk(generic_cloud: str):
 
 
 # ---------- Testing JobGroup Primary/Auxiliary ----------
+def _job_group_infra(generic_cloud: str) -> str:
+    """Infra string for the job group smoke templates.
+
+    Azure eastus (the cheapest region, which the job group optimizer picks
+    and the controller then inherits) has had capacity restrictions for the
+    Standard_D4s_v5 controller VM; pin Azure to eastus2 instead.
+    """
+    if generic_cloud == 'azure':
+        return 'azure/eastus2'
+    return generic_cloud
+
+
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
@@ -3435,7 +3451,9 @@ def test_job_group_primary_auxiliary(generic_cloud: str):
     template_str = pathlib.Path(
         'tests/test_job_groups/smoke_primary_auxiliary.yaml').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(cloud=generic_cloud, name=name, delay=delay)
+    content = template.render(cloud=_job_group_infra(generic_cloud),
+                              name=name,
+                              delay=delay)
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
                                      delete=False) as f:
@@ -3493,7 +3511,7 @@ def test_job_group_primary_failure_immediate_termination(generic_cloud: str):
     template_str = pathlib.Path(
         'tests/test_job_groups/smoke_primary_failure.yaml').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(cloud=generic_cloud, name=name)
+    content = template.render(cloud=_job_group_infra(generic_cloud), name=name)
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
                                      delete=False) as f:

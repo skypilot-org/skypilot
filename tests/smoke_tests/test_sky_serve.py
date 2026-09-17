@@ -401,7 +401,7 @@ def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.serve
 def test_skyserve_spot_recovery():
     name = _get_service_name()
-    zone = 'us-central1-a'
+    zone = 'us-east1-b'
 
     test = smoke_tests_utils.Test(
         'test-skyserve-spot-recovery-gcp',
@@ -456,7 +456,7 @@ def test_skyserve_base_ondemand_fallback(generic_cloud: str):
 @pytest.mark.serve
 def test_skyserve_dynamic_ondemand_fallback():
     name = _get_service_name()
-    zone = 'us-central1-a'
+    zone = 'us-east1-b'
 
     test = smoke_tests_utils.Test(
         'test-skyserve-dynamic-ondemand-fallback',
@@ -598,7 +598,7 @@ def test_skyserve_load_balancer(generic_cloud: str):
 def test_skyserve_auto_restart():
     """Test skyserve with auto restart"""
     name = _get_service_name()
-    zone = 'us-central1-a'
+    zone = 'us-east1-b'
     test = smoke_tests_utils.Test(
         'test-skyserve-auto-restart',
         [
