@@ -47,8 +47,7 @@ _MEM_BUCKETS = [
 logger = sky_logging.init_logger(__name__)
 
 # Whether the metrics are enabled, cannot be changed at runtime.
-METRICS_ENABLED = os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED,
-                                 'false').lower() == 'true'
+METRICS_ENABLED = constants.server_metrics_enabled()
 
 # Default Prometheus deployment that each context's metrics are federated
 # from. Overridable via the `metrics.prometheus` server config section.

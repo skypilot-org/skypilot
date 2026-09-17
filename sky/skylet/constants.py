@@ -1,5 +1,6 @@
 """Constants for SkyPilot."""
 import enum
+import os
 from typing import List, Tuple
 
 from packaging import version
@@ -724,6 +725,21 @@ SERVE_OVERRIDE_CONCURRENT_LAUNCHES = (
 
 # Environment variable that is set to 'true' if metrics are enabled.
 ENV_VAR_SERVER_METRICS_ENABLED = 'SKY_API_SERVER_METRICS_ENABLED'
+
+
+def server_metrics_enabled() -> bool:
+    """Whether the API server's metrics machinery should run.
+
+    One predicate for every consumer, because there used to be four over the
+    same variable: two `== 'true'` comparisons and two bare truthiness
+    checks. `=1` therefore installed the metrics middleware and served
+    /metrics while every instrument behind it stayed off, and `=false`
+    installed them too. Spelled the way the rest of the repo spells a boolean
+    environment variable (`sky/utils/env_options.py`).
+    """
+    return os.environ.get(ENV_VAR_SERVER_METRICS_ENABLED,
+                          'false').lower() in ('true', '1')
+
 
 # If set, overrides the header that we can use to get the user name.
 ENV_VAR_SERVER_AUTH_USER_HEADER = f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_USER_HEADER'

@@ -32,12 +32,14 @@ from starlette.websockets import WebSocketDisconnect
 
 from sky import exceptions
 from sky.metrics import utils as metrics_utils
+from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import metrics
 from sky.server import middleware_utils
 from sky.server import server
 from sky.server.auth import db_lookup
 from sky.server.auth import oauth2_proxy
+from sky.skylet import constants
 
 _AUTH_HEADER = {'X-Auth-Request-Email': 'bob@example.com'}
 _PROXY_CONFIG = server_config.ExternalProxyConfig(
@@ -410,7 +412,20 @@ def test_the_real_server_registers_the_metrics_middleware_outermost():
     assert names.count('PrometheusMiddleware') == 1, names
 
 
-def test_importing_the_middleware_module_publishes_the_handshake_series():
+@pytest.mark.parametrize(
+    'setting, expect_published',
+    [
+        ('true', True),
+        # Enabled by a value the metrics endpoint itself accepts. Before the
+        # predicate was unified, this served /metrics with the instruments behind
+        # it switched off, so the series this change promises were absent.
+        ('1', True),
+        # The control arm, and a bug of its own before the unification: a bare
+        # truthiness check made this install the endpoint anyway.
+        ('false', False),
+    ])
+def test_importing_the_middleware_module_publishes_the_handshake_series(
+        setting, expect_published):
     """The production trigger for pre-initialisation, in a real process.
 
     Every in-process test calls `preinitialize_websocket_metrics()` itself,
@@ -433,7 +448,7 @@ def test_importing_the_middleware_module_publishes_the_handshake_series():
         '    if s.name.endswith("_handshake_attempts_total")\n'
         '    or s.name.endswith("_handshake_accepts_total")))')
     env = dict(os.environ)
-    env['SKY_API_SERVER_METRICS_ENABLED'] = 'true'
+    env['SKY_API_SERVER_METRICS_ENABLED'] = setting
     with tempfile.TemporaryDirectory() as multiproc_dir:
         env['PROMETHEUS_MULTIPROC_DIR'] = multiproc_dir
         out = subprocess.run([sys.executable, '-c', code],
@@ -449,12 +464,115 @@ def test_importing_the_middleware_module_publishes_the_handshake_series():
         '/slurm-job-ssh-proxy',
         '/ssh-interactive-auth',
         'other',
-    }
+    } if expect_published else set()
     for name in ('sky_apiserver_websocket_handshake_attempts_total',
                  'sky_apiserver_websocket_handshake_accepts_total'):
         assert {p for n, p, _ in published if n == name} == paths, published
     # Published, not incremented.
-    assert {v for _, _, v in published} == {0.0}, published
+    assert {v for _, _, v in published
+           } == ({0.0} if expect_published else set()), published
+
+
+@pytest.mark.parametrize('setting, enabled', [
+    ('true', True),
+    ('1', True),
+    ('false', False),
+    ('', False),
+])
+def test_one_predicate_decides_metrics_everywhere(setting, enabled):
+    """The endpoint and the instruments behind it agree, for every spelling.
+
+    They did not: the middleware gate and the metrics server used a bare
+    truthiness check while `METRICS_ENABLED` compared against the literal
+    `true`, so `=1` served /metrics with nothing recording into it and
+    `=false` served it too. Read in a subprocess because all three are
+    decided at import time.
+
+    Three of the four consumers are covered here and in the launcher test
+    below. The fourth, the metrics-server startup, sits inside
+    `if __name__ == '__main__'` and no test can reach it; it reads the same
+    `METRICS_ENABLED` this asserts.
+    """
+    code = ('from sky.metrics import db as metrics_db\n'
+            'from sky.metrics import utils as metrics_utils\n'
+            'from sky.server import server\n'
+            'installed = any(m.cls.__name__ == "PrometheusMiddleware"\n'
+            '                for m in server.app.user_middleware)\n'
+            'print(metrics_utils.METRICS_ENABLED, installed,\n'
+            '      metrics_db.ENABLED)')
+    env = dict(os.environ)
+    env['SKY_API_SERVER_METRICS_ENABLED'] = setting
+    out = subprocess.run([sys.executable, '-c', code],
+                         env=env,
+                         check=True,
+                         capture_output=True,
+                         text=True,
+                         timeout=300).stdout.strip().splitlines()[-1]
+
+    assert out == f'{enabled} {enabled} {enabled}', out
+
+
+@pytest.mark.parametrize(
+    'setting, enabled',
+    [
+        ('true', True),
+        # The worst of the old spellings. This site compared `== 'true'` with no
+        # `.lower()`, unlike the two that did, so `=TRUE` switched on the
+        # middleware and the metrics server while leaving the multiprocess
+        # directory unset -- and `/metrics` then serves the default registry:
+        # the main process only, no collectors, nothing from any worker.
+        ('TRUE', True),
+        ('1', True),
+        ('false', False),
+        # Previously truthy, because `os.environ.get` returns the string '0'.
+        ('0', False),
+        ('yes', False),
+        ('', False),
+    ])
+def test_the_launcher_sets_up_metrics_for_the_same_spellings(
+        setting, enabled, monkeypatch, tmp_path):
+    """The launcher decides whether PROMETHEUS_MULTIPROC_DIR exists at all.
+
+    Without it the metrics endpoint still serves, from the default registry,
+    which is a silently partial deployment rather than a broken one.
+    """
+    # The real function wipes and recreates <tmpdir>/metrics, which on a
+    # developer machine is a running server's multiprocess directory.
+    monkeypatch.setattr(server_common.tempfile, 'gettempdir',
+                        lambda: str(tmp_path))
+    monkeypatch.setenv('SKY_API_SERVER_METRICS_ENABLED', setting)
+    env: dict = {}
+
+    server_common._set_metrics_env_var(env, False, False)  # pylint: disable=protected-access
+
+    if enabled:
+        assert env.get('SKY_API_SERVER_METRICS_ENABLED') == 'true'
+        assert env.get('PROMETHEUS_MULTIPROC_DIR') == str(tmp_path / 'metrics')
+    else:
+        assert env == {}
+
+
+@pytest.mark.parametrize('value, enabled', [
+    ('true', True),
+    ('TRUE', True),
+    ('True', True),
+    ('1', True),
+    ('false', False),
+    ('0', False),
+    ('yes', False),
+    ('on', False),
+    ('', False),
+])
+def test_the_accepted_spellings_are_the_repo_convention(value, enabled,
+                                                        monkeypatch):
+    """The predicate itself, stated once.
+
+    `('true', '1')` is what `sky/utils/env_options.py` and
+    `common_utils.get_using_remote_api_server` accept; widening it here
+    without widening those would make one variable behave unlike the rest.
+    """
+    monkeypatch.setenv('SKY_API_SERVER_METRICS_ENABLED', value)
+    assert constants.server_metrics_enabled() is enabled
 
 
 def test_the_handshake_counters_keep_their_exported_names():

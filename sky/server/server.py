@@ -1330,7 +1330,7 @@ if __name__ == 'sky.server.server':
 # middleware added), none of those were counted and an authentication outage
 # showed up on dashboards as a drop in successful requests rather than as
 # errors. Use environment variable to make the metrics middleware optional.
-if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
+if metrics_utils.METRICS_ENABLED:
     app.add_middleware(metrics.PrometheusMiddleware)
 
 # The middleware stack is final here: plugins loaded above, the metrics layer
@@ -4390,7 +4390,7 @@ if __name__ == '__main__':
     global_tasks: List[asyncio.Task] = []
     try:
         background = uvloop.new_event_loop()
-        if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
+        if metrics_utils.METRICS_ENABLED:
             metrics.maybe_register_managed_jobs_collector()
             # Deliberately not on `background`: the scrape shares that
             # loop's anyio thread limiter with every daemon below, and the
