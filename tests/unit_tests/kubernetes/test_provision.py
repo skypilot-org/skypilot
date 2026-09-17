@@ -2546,6 +2546,89 @@ class TestInsufficientResourcesMsg:
         assert 'my-context' in msg
         assert 'OOMKilled' not in msg
 
+    def test_pods_scheduled_does_not_read_as_a_capacity_failure(self):
+        """A failure after every pod was bound to a node had its resources;
+        the lead sentence must not claim they could not be acquired."""
+        provisioner = self._make_provisioner()
+        k8s_resource = mock.MagicMock()
+        k8s_resource.zone = None
+        k8s_resource.region = 'my-context'
+        k8s_resource.cloud = clouds.Kubernetes()
+        requested = {k8s_resource}
+
+        msg = provisioner._insufficient_resources_msg(
+            k8s_resource,
+            requested,
+            None,
+            last_error_reason='Pod p-head failed: Preempted by Kueue',
+            pods_scheduled=True)
+        assert msg == (f'Pods were scheduled in context my-context for '
+                       f'{requested} but did not start.\n'
+                       'Reason: Pod p-head failed: Preempted by Kueue')
+
+    def test_pods_scheduled_drops_the_ssh_node_pool_capacity_remark(self):
+        """The SSH Node Pool remark speculates about capacity, which a
+        failure after scheduling has ruled out."""
+        provisioner = self._make_provisioner()
+        ssh_resource = mock.MagicMock()
+        ssh_resource.zone = None
+        ssh_resource.region = 'ssh-my-pool'
+        ssh_resource.cloud = clouds.SSH()
+        requested = {ssh_resource}
+
+        capacity = provisioner._insufficient_resources_msg(
+            ssh_resource, requested, None)
+        assert capacity == (
+            f'Failed to acquire resources in SSH Node Pool (my-pool) for '
+            f'{requested}. The SSH Node Pool may not have enough resources.')
+        scheduled = provisioner._insufficient_resources_msg(ssh_resource,
+                                                            requested,
+                                                            None,
+                                                            pods_scheduled=True)
+        assert scheduled == (f'Pods were scheduled in SSH Node Pool (my-pool) '
+                             f'for {requested} but did not start.')
+
+
+def test_kubernetes_error_pods_scheduled_defaults_to_false():
+    """The flag _create_pods sets on a failure after scheduling; everything
+    else raised as a KubernetesError is a capacity or config failure."""
+    assert config_lib.KubernetesError('boom').pods_scheduled is False
+    assert config_lib.KubernetesError('boom',
+                                      pods_scheduled=True).pods_scheduled
+
+
+class TestProvisionFailureSummary:
+    """Tests for _format_provision_failure_summary and the provisioner-side
+    record it is worded from."""
+
+    def test_capacity_failure_asks_to_relax_requirements(self):
+        msg = cloud_vm_ray_backend._format_provision_failure_summary(
+            2, 'Kubernetes(H100:8)', resources_acquired=False)
+        assert msg.endswith(
+            'Relax the task\'s resource requirements: 2x Kubernetes(H100:8)')
+
+    def test_failure_after_acquisition_withholds_that_advice(self):
+        msg = cloud_vm_ray_backend._format_provision_failure_summary(
+            2, 'Kubernetes(H100:8)', resources_acquired=True)
+        assert 'Relax the task' not in msg
+        assert 'Resources were acquired but the nodes did not start' in msg
+        assert msg.endswith('2x Kubernetes(H100:8)')
+
+    @pytest.mark.parametrize('record,expected', [
+        pytest.param({}, False, id='nothing-tried'),
+        pytest.param({'a': True}, True, id='one-candidate-after-acquisition'),
+        pytest.param({
+            'a': True,
+            'b': False
+        }, False, id='mixed-keeps-advice'),
+        pytest.param({'a': False}, False, id='capacity'),
+    ])
+    def test_all_failures_after_acquisition(self, record, expected):
+        provisioner = cloud_vm_ray_backend.RetryingVmProvisioner.__new__(
+            cloud_vm_ray_backend.RetryingVmProvisioner)
+        provisioner._resources_acquired = record
+        assert provisioner.all_failures_after_acquisition() is expected
+
 
 @pytest.fixture()
 def mock_format_resource(monkeypatch):

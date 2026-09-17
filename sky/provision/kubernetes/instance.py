@@ -2602,7 +2602,16 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     # fail early if there is an error
     logger.debug(f'run_instances: waiting for pods to be running: '
                  f'{[pod.metadata.name for pod in pods]}')
-    _wait_for_pods_to_run(namespace, context, cluster_name, pods)
+    try:
+        _wait_for_pods_to_run(namespace, context, cluster_name, pods)
+    except config_lib.KubernetesError as e:
+        # Every pod was bound to a node before this wait began, so whatever
+        # failed here -- a container that never started, a volume that would
+        # not mount, an eviction -- is not a capacity failure. Say so, so the
+        # failover summary does not tell the user to relax their resource
+        # requirements.
+        e.pods_scheduled = True
+        raise
     # Reset spinner message here because it might have hinted the reason
     # pods were pending.
     rich_utils.force_update_status(
