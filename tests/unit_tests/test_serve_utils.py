@@ -33,6 +33,15 @@ def test_redact_request_fields():
     }
 
 
+def test_redact_urls():
+    text = ('Request URL: https://user:password@example.com/generate?'
+            'api_key=query-secret&prompt=hello (retrying)')
+
+    assert serve_utils.redact_urls(text) == (
+        'Request URL: https://user:<redacted>@example.com/generate '
+        '(retrying)')
+
+
 def test_task_fits():
     # Test exact fit.
     task_resources = Resources(cpus=1, memory=1, cloud=clouds.AWS())
