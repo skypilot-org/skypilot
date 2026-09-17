@@ -14,6 +14,10 @@ from sky import core
 from sky import global_user_state
 from sky.metrics import launch_phases
 
+# Bound at import, before the `recorder` fixture replaces it with a stub: one
+# test needs the real emitter while using that fixture's fake session.
+_REAL_EMIT = global_user_state._record_admission_event
+
 
 class _Row(types.SimpleNamespace):
     """A stand-in for a SQLAlchemy Row, which the code reads both ways.
@@ -29,11 +33,17 @@ class _Row(types.SimpleNamespace):
         return tuple(vars(self).values())[index]
 
 
-def _attempt(queue='eng-lq', instances_requested=30.0, provision_start=20.0):
+def _attempt(queue='eng-lq',
+             instances_requested=30.0,
+             provision_start=20.0,
+             cluster_name='train-7'):
+    # Field order mirrors the recorder's SELECT, because `row[0]` is read
+    # positionally.
     return _Row(attempt_id='a1',
                 queue=queue,
                 instances_requested=instances_requested,
                 provision_start=provision_start,
+                cluster_name=cluster_name,
                 admitted=None,
                 instances_ready=None,
                 outcome=None)
@@ -57,7 +67,7 @@ def _events(monkeypatch):
 
 
 def test_the_row_names_the_queue_and_how_long_the_wait_was(events):
-    global_user_state._record_admission_event('train-7', _attempt(), 146.57)
+    global_user_state._record_admission_event(_attempt(), 146.57)
 
     assert len(events) == 1
     assert 'eng-lq' in events[0]['reason']
@@ -71,7 +81,7 @@ def test_it_is_not_launch_progress(events):
     column -- "what is this launch waiting on now". A row saying a wait has
     ended would sit there as a stale answer for the rest of the launch, which
     is worse than the silence it would replace."""
-    global_user_state._record_admission_event('train-7', _attempt(), 146.57)
+    global_user_state._record_admission_event(_attempt(), 146.57)
 
     assert events[0]['type'] == (
         global_user_state.ClusterEventType.LAUNCH_MILESTONE)
@@ -86,7 +96,7 @@ def test_the_duration_is_the_one_launch_phases_computes(events):
     clouds that fallback exists for."""
     attempt = _attempt(instances_requested=None, provision_start=20.0)
 
-    global_user_state._record_admission_event('train-7', attempt, 146.57)
+    global_user_state._record_admission_event(attempt, 146.57)
 
     # The fallback took provision_start, so the wait is longer than it would
     # have been measured from a request that never happened.
@@ -99,8 +109,7 @@ def test_an_attempt_with_no_boundary_says_nothing(events):
     one from the admission alone would measure from an instant that is not a
     boundary of anything."""
     global_user_state._record_admission_event(
-        'train-7', _attempt(instances_requested=None, provision_start=None),
-        146.57)
+        _attempt(instances_requested=None, provision_start=None), 146.57)
 
     assert events == []
 
@@ -109,8 +118,7 @@ def test_the_queue_name_is_optional(events):
     """`queue` is written by the scheduler plugin separately from the
     admission, so it can be absent while the admission is not. The row is
     still worth writing -- the wait is the number, the queue is the detail."""
-    global_user_state._record_admission_event('train-7', _attempt(queue=None),
-                                              146.57)
+    global_user_state._record_admission_event(_attempt(queue=None), 146.57)
 
     assert len(events) == 1
     assert 'queue' not in events[0]['reason']
@@ -200,6 +208,29 @@ def test_the_other_milestones_emit_nothing(recorder):
     global_user_state.record_launch_milestone_for_cluster(
         'train-7', global_user_state.LaunchMilestone.ADMITTED, 146.57)
     assert len(emitted) == 1
+
+
+def test_an_on_cloud_caller_still_files_the_event_under_the_display_name(
+        recorder, events):
+    """The recorder is reachable with either name -- pod labels carry the
+    on-cloud one, and the v1 launch-wait hook has only that. But the event
+    table is keyed by the display name at both ends: `add_cluster_event`
+    resolves the cluster by it, and the reader fetches by it. Filing under the
+    caller's argument drops the event for every such caller, silently, because
+    the resolve failure is a debug log and a return.
+    """
+    state, _ = recorder
+    state['row'] = _attempt(cluster_name='train-7')
+
+    # The real emitter, not the fixture's stub: the name it files under is the
+    # thing under test.
+    with mock.patch.object(global_user_state, '_record_admission_event',
+                           _REAL_EMIT):
+        global_user_state.record_launch_milestone_for_cluster(
+            'train-7-a1b2', global_user_state.LaunchMilestone.ADMITTED, 146.57)
+
+    assert len(events) == 1
+    assert events[0]['cluster'] == 'train-7'
 
 
 # --- the API's tolerance of a type it does not know ---------------------------

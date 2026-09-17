@@ -4523,11 +4523,14 @@ def record_launch_milestone_for_cluster(cluster_name: str,
         row = session.execute(
             sqlalchemy.select(
                 launch_attempt_table.c.attempt_id,
-                # For the admission event below: the queue it waited in, and
-                # the boundary the wait is measured from.
+                # For the admission event below: the queue it waited in, the
+                # boundary the wait is measured from, and the name to file the
+                # event under -- which is the display name even when this was
+                # called with the on-cloud one.
                 launch_attempt_table.c.queue,
                 launch_attempt_table.c.instances_requested,
                 launch_attempt_table.c.provision_start,
+                launch_attempt_table.c.cluster_name,
             ).where(
                 sqlalchemy.and_(
                     sqlalchemy.or_(
@@ -4558,11 +4561,10 @@ def record_launch_milestone_for_cluster(cluster_name: str,
     # external condition resumes into the *same* open row -- so the second
     # call matches nothing, and cannot announce the same admission twice.
     if stamped and milestone == LaunchMilestone.ADMITTED:
-        _record_admission_event(cluster_name, row, timestamp)
+        _record_admission_event(row, timestamp)
 
 
-def _record_admission_event(cluster_name: str, attempt: Any,
-                            admitted_at: float) -> None:
+def _record_admission_event(attempt: Any, admitted_at: float) -> None:
     """Note in the cluster's event log that a queued launch was admitted.
 
     The event table already says a launch is *waiting* on a queue -- with the
@@ -4577,14 +4579,19 @@ def _record_admission_event(cluster_name: str, attempt: Any,
     exists for.
     """
     waited_from = launch_phases.queue_wait_from(attempt)
-    if waited_from is None:
+    if waited_from is None or attempt.cluster_name is None:
         return
     where = f' by queue {attempt.queue}' if attempt.queue else ''
     waited = log_utils.readable_time_duration(waited_from,
                                               admitted_at,
                                               absolute=True)
     add_cluster_event(
-        cluster_name,
+        # The attempt's own display name, not the caller's argument: this is
+        # reachable with the on-cloud name (pod labels carry that one), and
+        # the event table is keyed by the display name at both ends -- so
+        # filing it under the caller's name would silently drop the event for
+        # every caller holding the other one.
+        attempt.cluster_name,
         new_status=None,
         reason=f'Admitted{where} after waiting {waited}',
         # Not LAUNCH_PROGRESS: that type is consumed latest-wins as a managed
