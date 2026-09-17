@@ -1061,14 +1061,10 @@ export function ManagedJobsTable({
     fetchDataRef.current = fetchData;
   }, [fetchData]);
 
-  // Prevent duplicate API requests on first load/page refresh
-  // Multiple useEffects below would normally all fire on mount with their default values,
-  // causing redundant requests to the same API server endpoints.
-  // This ref ensures only the initial fetch effect runs, and subsequent effects
-  // only trigger on actual user interactions (page change, filter change, etc.)
+  // Guard the initial URL page and the identity-lookup fallback timer.
   const isInitialFetch = React.useRef(true);
 
-  // Initial load - wait for the /users/role lookup to settle (real
+  // Initial load and query changes - wait for the /users/role lookup to settle (real
   // user, 'local' sentinel, or error) before firing the first jobs
   // fetch. Going Mine-first matters on tenants with tens of thousands
   // of finished jobs: the Everyone query is expensive (full count +
@@ -1077,12 +1073,14 @@ export function ManagedJobsTable({
   // With the shared cache warm this gate adds essentially zero latency;
   // cold loads pay a single ~200ms /users/role wait.
   React.useEffect(() => {
-    if (!isInitialFetch.current) return;
     if (!userResolved) return;
     fetchData({ includeStatus: true });
     isInitialFetch.current = false;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userResolved]);
+    // Foreground queries must not wait for unrelated page preloads. A scope
+    // switch can happen after Mine renders but before those preloads finish.
+    // fetchData already depends on scope, filters, page, size and sorting;
+    // one effect handles each query change without four duplicate fetches.
+  }, [userResolved, fetchData]);
 
   // Safety net: if /users/role somehow never resolves (network hang),
   // fall back to the unscoped fetch so the page still renders. Almost
@@ -1099,38 +1097,6 @@ export function ManagedJobsTable({
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Fetch on pagination (page) changes without status request
-  // Skip on initial fetch (page defaults to 1)
-  React.useEffect(() => {
-    if (!isInitialFetch.current && preloadingComplete) {
-      fetchData({ includeStatus: false });
-    }
-  }, [currentPage, fetchData, preloadingComplete]);
-
-  // Fetch on filters or page size changes with status request
-  // Skip on initial fetch (filters default to [] and pageSize to 10)
-  React.useEffect(() => {
-    if (!isInitialFetch.current && preloadingComplete) {
-      fetchData({ includeStatus: true });
-    }
-  }, [filters, pageSize, fetchData, preloadingComplete]);
-
-  // Fetch when the status selection changes.
-  // Skip on initial fetch (it has a default value)
-  React.useEffect(() => {
-    if (!isInitialFetch.current && preloadingComplete) {
-      fetchData({ includeStatus: true });
-    }
-  }, [statusParam, fetchData, preloadingComplete]);
-
-  // Fetch on sort config changes for server-side sorting
-  // Skip on initial fetch (sortConfig has default value)
-  React.useEffect(() => {
-    if (!isInitialFetch.current && preloadingComplete) {
-      fetchData({ includeStatus: false });
-    }
-  }, [sortConfig, fetchData, preloadingComplete]);
 
   // Use faster refresh when there are running batch jobs with incomplete progress
   const hasRunningBatches = React.useMemo(() => {
@@ -1185,13 +1151,18 @@ export function ManagedJobsTable({
   // Leaves `activeTab` alone — Active/All is orthogonal to ownership.
   const selectScope = React.useCallback(
     (scope) => {
+      if (scope === userScope && !statusParam && currentPage === 1) return;
+      // Invalidate the old scope before the transition commits. Neither its
+      // empty state nor a late response should render under the new heading.
+      requestSeqRef.current += 1;
+      setLocalLoading(true);
       React.startTransition(() => {
         setUserScope(scope);
         setSelectedStatuses([]);
         setCurrentPage(1);
       });
     },
-    [setUserScope, setSelectedStatuses]
+    [setUserScope, setSelectedStatuses, userScope, statusParam, currentPage]
   );
 
   // Populate valueList for filter dropdown
@@ -2756,12 +2727,14 @@ export function ManagedJobsTable({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(loading ||
+              {(isInitialLoad ||
+                loading ||
                 (userScope === 'mine' &&
                   currentUser &&
                   everyoneTotal === null)) &&
               paginatedData.length === 0 ? (
-                // Show the loading row both on initial fetch AND whenever
+                // Show loading from the first paint (including identity
+                // resolution before a request starts) AND whenever
                 // a refetch starts with an empty table (e.g. right after
                 // clicking "View all jobs" or flipping the My Jobs/All
                 // Jobs toggle from a zero-row scope). Also covers the
@@ -2955,13 +2928,7 @@ export function ManagedJobsTable({
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => {
-                                React.startTransition(() => {
-                                  setUserScope('all');
-                                  setSelectedStatuses([]);
-                                  setCurrentPage(1);
-                                });
-                              }}
+                              onClick={() => selectScope('all')}
                               className="text-sky-blue hover:text-sky-blue-bright"
                             >
                               View all jobs
