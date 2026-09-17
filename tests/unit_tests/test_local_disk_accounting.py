@@ -466,6 +466,36 @@ def test_availability_resolves_a_path_that_does_not_exist_yet(tmp_path):
         local_disk.available_for_path(str(tmp_path))
 
 
+def test_use_is_read_from_the_filesystem_holding_the_path(
+        tmp_path, monkeypatch):
+    """Whatever is on that filesystem counts, not only what we put there."""
+    monkeypatch.setattr(
+        local_disk, '_filesystem_usage', lambda paths: {
+            '/': local_disk.FilesystemUsage(mountpoint='/',
+                                            size_bytes=1000,
+                                            avail_bytes=250,
+                                            charged_to_ephemeral=False)
+        })
+
+    assert local_disk.used_for_path(str(tmp_path)) == 750
+
+
+def test_use_resolves_a_path_that_does_not_exist_yet(tmp_path):
+    """A store's directory is created on the first upload into it."""
+    missing = tmp_path / 'not' / 'created' / 'yet'
+
+    assert local_disk.used_for_path(str(missing)) == \
+        local_disk.used_for_path(str(tmp_path))
+
+
+def test_use_is_unknown_when_the_filesystem_cannot_be_measured(
+        tmp_path, monkeypatch):
+    """A caller must be able to tell "nothing used" from "cannot tell"."""
+    monkeypatch.setattr(local_disk, '_filesystem_usage', lambda paths: {})
+
+    assert local_disk.used_for_path(str(tmp_path)) is None
+
+
 def test_an_unwalked_root_is_not_walked_at_all(roots, monkeypatch):
     """The point of skipping it is to not touch the filesystem.
 
