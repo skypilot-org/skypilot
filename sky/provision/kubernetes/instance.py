@@ -3650,20 +3650,24 @@ def _get_pod_events(context: Optional[str], namespace: str,
 # while pod.status.phase is still 'Running' and status.reason/message lag.
 _FAILURE_EVENT_REASONS = ('Evicted',)
 
-# Substrings that already name a specific failure cause; when a status-derived
-# reason contains one, consulting events would add nothing. Every reason we
+# Tokens that already name a specific failure cause; when a status-derived
+# reason names one, consulting events would add nothing. Every reason we
 # carry a remediation hint for is specific by definition, so derive those from
 # the canonical hint table; add the few specific reasons that have no hint
 # (CrashLoopBackOff and the Kueue/disruption conditions).
-_SPECIFIC_FAILURE_REASON_SUBSTRINGS = tuple(
+_SPECIFIC_FAILURE_REASON_TOKENS = tuple(
     kubernetes_utils.get_failure_hint_reasons()) + ('CrashLoopBackOff',
                                                     'Preempted', 'Disrupted')
 
 
 def _reason_lacks_specific_cause(reason: Optional[str]) -> bool:
     """Whether `reason` does not already name a specific failure cause."""
-    return not reason or not any(s in reason
-                                 for s in _SPECIFIC_FAILURE_REASON_SUBSTRINGS)
+    # Matched as whole tokens, like the hint table these come from: a reason
+    # such as 'WorkloadEvictedDueToPodsReadyTimeout' contains 'Evicted' but
+    # does not name a kubelet eviction, and events may still have more to say.
+    return not reason or not any(
+        kubernetes_utils.reason_matches_failure_token(reason, token)
+        for token in _SPECIFIC_FAILURE_REASON_TOKENS)
 
 
 def _get_pod_failure_reason_from_events(context: Optional[str], namespace: str,

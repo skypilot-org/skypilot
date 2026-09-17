@@ -5362,6 +5362,43 @@ def test_match_kubernetes_failure_hint_generic_eviction():
         'The pod was evicted by the node under resource pressure.')
 
 
+def test_match_kubernetes_failure_hint_ignores_a_token_inside_a_longer_word():
+    """A queue controller's eviction must not trip the node-pressure hint.
+
+    A queue admission controller that evicts an admitted workload names the
+    eviction `WorkloadEvictedDueToPodsReadyTimeout`, which contains 'Evicted'
+    as part of a camelCase identifier. Matched as a substring, the provision
+    failure told the user to increase `resources.memory` / `resources.disk_size`
+    -- advice that cannot fix a workload a queue evicted.
+    """
+    pod_names = ['sky-cluster-head']
+    cluster = 'sky-cluster'
+    reason = (f'Pod(s) {pod_names} of cluster {cluster!r} were deleted while '
+              'SkyPilot was waiting for them to be scheduled: '
+              'sky-cluster-head: Preempted by Kueue: '
+              'WorkloadEvictedDueToPodsReadyTimeout (Exceeded the PodsReady '
+              'timeout default/sky-cluster).')
+    assert utils.match_kubernetes_failure_hint(reason) is None
+
+
+def test_reason_matches_failure_token_word_boundaries():
+    # Named as a word of its own, whatever punctuation surrounds it.
+    assert utils.reason_matches_failure_token('Evicted: low on memory',
+                                              'Evicted')
+    assert utils.reason_matches_failure_token('pod-0 (Evicted)', 'Evicted')
+    assert utils.reason_matches_failure_token('Evicted', 'Evicted')
+    # Buried in a longer word: not this failure.
+    assert not utils.reason_matches_failure_token(
+        'WorkloadEvictedDueToPodsReadyTimeout', 'Evicted')
+    assert not utils.reason_matches_failure_token('PodEvicted', 'Evicted')
+    assert not utils.reason_matches_failure_token('Evicted2', 'Evicted')
+    # Only alphanumeric edges are anchored, so a multi-word marker wrapped in
+    # punctuation still matches.
+    assert utils.reason_matches_failure_token(
+        f'OOMKilled (exit code 137, {utils.NO_MEMORY_LIMIT_MARKER})',
+        utils.NO_MEMORY_LIMIT_MARKER)
+
+
 def test_get_failure_hint_reasons_flattens_table():
     reasons = utils.get_failure_hint_reasons()
     # Every reason with a hint must report as a specific cause; otherwise each

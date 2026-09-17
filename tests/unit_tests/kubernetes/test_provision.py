@@ -2647,6 +2647,62 @@ class TestWaitForPodsToScheduleGonePods:
         assert 'Last known state' not in message
         assert 30.0 <= clock.now <= 32.0, clock.now
 
+    def test_a_queue_eviction_does_not_trip_the_node_pressure_hint(
+            self, monkeypatch):
+        """The eviction error must not pick up a remediation it contradicts.
+
+        `_format_provision_failure_blocks` appends the
+        KUBERNETES_FAILURE_HINTS hint whose token the failure reason names.
+        The eviction reason a queue controller writes,
+        `WorkloadEvictedDueToPodsReadyTimeout`, contains 'Evicted', and while
+        that matched as a bare substring the launch ended with "The pod was
+        evicted by the node under resource pressure. To fix: Increase the
+        relevant request (`resources.memory` or `resources.disk_size`)" --
+        which does nothing for a workload a queue evicted.
+        """
+        cluster = 'my-cluster'
+        present = self._make_pending_pod('pod-0', cluster)
+        terminating = self._make_terminating_pod(
+            'pod-0',
+            cluster,
+            reason='WorkloadEvictedDueToPodsReadyTimeout',
+            message='Exceeded the PodsReady timeout default/wl')
+        self._setup(monkeypatch,
+                    pod_timeline=[(0.0, present), (1.0, terminating)])
+
+        node = self._make_node('pod-0', cluster)
+        with pytest.raises(config_lib.KubernetesError) as exc_info:
+            self._wait(node)
+
+        message = str(exc_info.value)
+        assert 'WorkloadEvictedDueToPodsReadyTimeout' in message
+        assert kubernetes_utils.match_kubernetes_failure_hint(message) is None
+
+    def test_a_node_pressure_eviction_still_carries_its_hint(self, monkeypatch):
+        """The other direction: a pod the kubelet really did evict for disk
+        pressure must still reach the user with the remediation for it."""
+        cluster = 'my-cluster'
+        present = self._make_pending_pod('pod-0', cluster)
+        self._setup(monkeypatch,
+                    pod_timeline=[(0.0, present), (1.0, None)],
+                    pod_events=[
+                        self._make_event(
+                            'Evicted',
+                            'The node was low on resource: ephemeral-storage.',
+                            type_='Warning',
+                            at=10),
+                    ])
+
+        node = self._make_node('pod-0', cluster)
+        with pytest.raises(config_lib.KubernetesError) as exc_info:
+            self._wait(node)
+
+        message = str(exc_info.value)
+        assert 'ephemeral-storage' in message
+        hint = kubernetes_utils.match_kubernetes_failure_hint(message)
+        assert hint is not None
+        assert 'resources.disk_size' in hint
+
     def test_vanished_pod_without_events_says_so(self, monkeypatch):
         """With nothing to go on, say only what was established -- that no
         cause could be derived -- and name the plausible culprits, including
