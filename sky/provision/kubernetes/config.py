@@ -647,9 +647,23 @@ def _configure_services(namespace: str, context: Optional[str],
 
 
 class KubernetesError(Exception):
+    """A Kubernetes provisioning failure.
+
+    Args:
+        insufficent_resources: The resources the cluster ran short of, when
+            the failure is a capacity one (the pods could not be scheduled).
+        pods_scheduled: Whether every pod had already been bound to a node
+            when the failure happened. Such a failure -- a container that
+            never started, a volume that would not mount, an eviction -- is
+            not a capacity failure, and the failover summary words it
+            differently; see
+            RetryingVmProvisioner._insufficient_resources_msg.
+    """
 
     def __init__(self,
                  *args,
-                 insufficent_resources: Optional[List[str]] = None):
+                 insufficent_resources: Optional[List[str]] = None,
+                 pods_scheduled: bool = False):
         self.insufficent_resources = insufficent_resources
+        self.pods_scheduled = pods_scheduled
         super().__init__(*args)

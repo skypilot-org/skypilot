@@ -5362,6 +5362,19 @@ def test_match_kubernetes_failure_hint_generic_eviction():
         'The pod was evicted by the node under resource pressure.')
 
 
+def test_match_kubernetes_failure_hint_kueue_pods_ready_timeout():
+    # Kueue's eviction reason contains 'Evicted' too, but it is not a
+    # node-pressure eviction: Kueue admitted the pod and it never became
+    # ready. The more specific entry must win, or the user is told to add
+    # memory or disk to fix a slow image pull.
+    hint = utils.match_kubernetes_failure_hint(
+        'Preempted by Kueue: WorkloadEvictedDueToPodsReadyTimeout '
+        '(Exceeded the PodsReady timeout ns/my-workload)')
+    assert hint is not None
+    assert 'waitForPodsReady' in hint
+    assert 'node under resource pressure' not in hint
+
+
 def test_get_failure_hint_reasons_flattens_table():
     reasons = utils.get_failure_hint_reasons()
     # Every reason with a hint must report as a specific cause; otherwise each

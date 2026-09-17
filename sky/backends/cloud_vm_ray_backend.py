@@ -260,6 +260,26 @@ def _format_provision_failure_blocks(
     return '\n'.join(lines).rstrip() + '\n'
 
 
+def _format_provision_failure_summary(num_nodes: int, resources: Any,
+                                      resources_acquired: bool) -> str:
+    """The one-line summary printed when every candidate failed.
+
+    By default it tells the user to relax the task's resource requirements,
+    which is the right advice for a capacity failure. It is the wrong advice
+    when every candidate acquired its resources and failed after that (see
+    RetryingVmProvisioner.all_failures_after_acquisition): the requirements
+    were met, and the per-candidate reasons name the actual cause.
+    """
+    headline = (f'{colorama.Fore.RED}Failed to provision all possible '
+                f'launchable resources.{colorama.Style.RESET_ALL}')
+    requested = f'{num_nodes}x {resources}'
+    if resources_acquired:
+        return (f'{headline} Resources were acquired but the nodes did not '
+                'start, so relaxing the task\'s resource requirements will '
+                f'not help: {requested}')
+    return f'{headline} Relax the task\'s resource requirements: {requested}'
+
+
 # Number of seconds to wait locking the cluster before communicating with user.
 _CLUSTER_LOCK_TIMEOUT = 5.0
 
@@ -846,6 +866,23 @@ class RetryingVmProvisioner(object):
         self._is_managed = is_managed
         self._extra_launch_context: Dict[str, Any] = extra_launch_context
         self._is_launched_by_jobs_controller = is_launched_by_jobs_controller
+        # For each candidate _retry_zones gave up on, whether it had acquired
+        # its resources -- on Kubernetes, every pod bound to a node -- before
+        # failing. Read back by all_failures_after_acquisition to word the
+        # final summary. Kept here rather than on the raised exception so the
+        # exception's serialized form, which older clients rebuild by passing
+        # every attribute to the constructor, does not change.
+        self._resources_acquired: Dict[resources_lib.Resources, bool] = {}
+
+    def all_failures_after_acquisition(self) -> bool:
+        """Whether every candidate given up on had acquired its resources.
+
+        True only when at least one candidate was tried and each of them
+        failed after its resources were acquired. False for an empty record:
+        with nothing tried, nothing says the requirements were not the problem.
+        """
+        return (bool(self._resources_acquired) and
+                all(self._resources_acquired.values()))
 
     def _yield_zones(
             self, to_provision: resources_lib.Resources, num_nodes: int,
@@ -981,29 +1018,43 @@ class RetryingVmProvisioner(object):
         requested_resources: Set[resources_lib.Resources],
         insufficient_resources: Optional[List[str]],
         last_error_reason: Optional[str] = None,
+        pods_scheduled: bool = False,
     ) -> str:
+        """The message for a candidate that failed to provision.
+
+        Leads with 'Failed to acquire resources' -- a capacity failure --
+        unless pods_scheduled says every pod had already been bound to a node
+        when the failure happened (Kubernetes only, see
+        config_lib.KubernetesError). Then the resources were there, and the
+        lead says what actually happened instead.
+        """
         insufficent_resource_msg = ('' if insufficient_resources is None else
                                     f' ({", ".join(insufficient_resources)})')
-        message = f'Failed to acquire resources{insufficent_resource_msg} '
+        # Where the attempt was made, and any remark that only makes sense
+        # for a capacity failure there.
+        capacity_remark = ''
         if to_provision.zone is not None:
-            message += (f'in {to_provision.zone} for {requested_resources}. ')
+            where = f'in {to_provision.zone}'
         elif to_provision.region is not None and to_provision.cloud is not None:
             # For public clouds, provision.region is always set.
             if clouds.SSH().is_same_cloud(to_provision.cloud):
                 ssh_node_pool_name = common_utils.removeprefix(
                     to_provision.region, 'ssh-')
-                message += (
-                    f'in SSH Node Pool ({ssh_node_pool_name}) '
-                    f'for {requested_resources}. The SSH Node Pool may not '
-                    'have enough resources.')
+                where = f'in SSH Node Pool ({ssh_node_pool_name})'
+                capacity_remark = ('The SSH Node Pool may not have enough '
+                                   'resources.')
             elif clouds.Kubernetes().is_same_cloud(to_provision.cloud):
-                message += (f'in context {to_provision.region} for '
-                            f'{requested_resources}. ')
+                where = f'in context {to_provision.region}'
             else:
-                message += (f'in all zones in {to_provision.region} for '
-                            f'{requested_resources}. ')
+                where = f'in all zones in {to_provision.region}'
         else:
-            message += (f'{to_provision.cloud} for {requested_resources}. ')
+            where = f'{to_provision.cloud}'
+        if pods_scheduled:
+            message = (f'Pods were scheduled {where} for {requested_resources} '
+                       'but did not start.')
+        else:
+            message = (f'Failed to acquire resources{insufficent_resource_msg} '
+                       f'{where} for {requested_resources}. {capacity_remark}')
         if last_error_reason:
             message = message.rstrip() + f'\nReason: {last_error_reason}'
         return message
@@ -1089,6 +1140,11 @@ class RetryingVmProvisioner(object):
 
         insufficient_resources = None
         last_error_reason: Optional[str] = None
+        # Whether the failure behind last_error_reason happened after every
+        # pod was bound to a node (Kubernetes only). Such a failure is not a
+        # capacity one and is worded differently; see
+        # _insufficient_resources_msg.
+        last_error_pods_scheduled = False
         for zones in self._yield_zones(to_provision, num_nodes, cluster_name,
                                        prev_cluster_status,
                                        prev_cluster_ever_up):
@@ -1351,6 +1407,7 @@ class RetryingVmProvisioner(object):
                         # down what was created and let the caller decide
                         # whether another candidate might serve it.
                         last_error_reason = str(e)
+                        last_error_pods_scheduled = False
                         CloudVmRayBackend().post_teardown_cleanup(
                             handle,
                             terminate=not prev_cluster_ever_up,
@@ -1363,6 +1420,7 @@ class RetryingVmProvisioner(object):
                         if e.insufficent_resources:
                             insufficient_resources = e.insufficent_resources
                         last_error_reason = str(e)
+                        last_error_pods_scheduled = e.pods_scheduled
                         # NOTE: We try to cleanup the cluster even if the previous
                         # cluster does not exist. Also we are fast at
                         # cleaning up clusters now if there is no existing node.
@@ -1386,6 +1444,7 @@ class RetryingVmProvisioner(object):
                             # "relax the task's resource requirements", which
                             # no amount of relaxing can fix.
                             last_error_reason = str(e)
+                            last_error_pods_scheduled = False
                         # NOTE: We try to cleanup the cluster even if the previous
                         # cluster does not exist. Also we are fast at
                         # cleaning up clusters now if there is no existing node..
@@ -1520,7 +1579,9 @@ class RetryingVmProvisioner(object):
             to_provision,
             requested_resources,
             insufficient_resources,
-            last_error_reason=last_error_reason)
+            last_error_reason=last_error_reason,
+            pods_scheduled=last_error_pods_scheduled)
+        self._resources_acquired[to_provision] = last_error_pods_scheduled
         # Do not failover to other locations if the cluster was ever up, since
         # the user can have some data on the cluster.
         raise exceptions.ResourcesUnavailableError(
@@ -3605,12 +3666,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 except exceptions.ResourcesUnavailableError as e:
                     log_path = retry_provisioner.log_dir + '/provision.log'
 
-                    error_message = (
-                        f'{colorama.Fore.RED}Failed to provision all '
-                        f'possible launchable resources.'
-                        f'{colorama.Style.RESET_ALL}'
-                        ' Relax the task\'s resource requirements: '
-                        f'{task.num_nodes}x {list(task.resources)[0]}')
+                    error_message = _format_provision_failure_summary(
+                        task.num_nodes,
+                        list(task.resources)[0],
+                        resources_acquired=(
+                            retry_provisioner.all_failures_after_acquisition()))
                     if e.no_failover:
                         error_message = str(e)
 
