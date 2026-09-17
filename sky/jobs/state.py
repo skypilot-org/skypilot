@@ -1394,9 +1394,15 @@ def set_pending_cancelled(job_id: int) -> bool:
     never both. For an INACTIVE job (mid-submission), the schedule_state is
     left as INACTIVE: the in-flight submission will overwrite it to WAITING
     regardless (scheduler_set_waiting has no state guard), so writing DONE
-    here would be undone and strand a cancelled job in WAITING. Instead the
-    submission proceeds as today and the claiming controller immediately
-    finalizes the already-terminal job.
+    here would be undone and strand a cancelled job in WAITING. The
+    submission proceeds as today and a controller claims the job afterwards.
+
+    Cancelling an INACTIVE job only covers the task rows that exist at the
+    time. They are inserted one transaction at a time, so for a multi-task
+    DAG a cancel landing between two inserts cancels the rows written so far
+    while the later ones stay PENDING for the claiming controller to run.
+    Before the first insert there are no task rows, so the caller reads no
+    status and never gets here; a single-task job is therefore unaffected.
 
     Returns:
         True if the job was cancelled, False otherwise.
