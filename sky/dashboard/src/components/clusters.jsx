@@ -1124,8 +1124,13 @@ export function ClusterTable({
           Infra{getSortDirection('infra')}
         </TableHead>
       ),
-      renderCell: (item) => (
-        <TableCell>
+      renderCell: (item) => {
+        // The default rendering, also handed to the plugin slot below as
+        // `defaultContent`: a plugin that only wants to change how *some*
+        // clusters read can return it unchanged for the rest, instead of
+        // reimplementing this markup. `fallback` keeps the no-plugin case
+        // byte-identical.
+        const infraContent = (
           <NonCapitalizedTooltip
             content={item.full_infra || item.infra}
             className="text-sm text-muted-foreground"
@@ -1141,8 +1146,17 @@ export function ClusterTable({
               )}
             </span>
           </NonCapitalizedTooltip>
-        </TableCell>
-      ),
+        );
+        return (
+          <TableCell>
+            <PluginSlot
+              name="clusters.table.infra"
+              context={{ cluster: item, defaultContent: infraContent }}
+              fallback={infraContent}
+            />
+          </TableCell>
+        );
+      },
     },
     {
       id: 'resources',

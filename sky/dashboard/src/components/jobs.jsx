@@ -2053,14 +2053,29 @@ export function ManagedJobsTable({
         renderCell: (item, ctx) => {
           const { renderMode } = ctx || {};
 
+          // Both branches below hand their default rendering to the plugin
+          // slot as `defaultContent`, so a plugin that only changes how
+          // *some* jobs read can return it unchanged for the rest instead of
+          // reimplementing this markup (including the region truncation).
+          // `fallback` keeps the no-plugin case identical.
+          const slotted = (defaultContent) => (
+            <PluginSlot
+              name="jobs.table.infra"
+              context={{ job: item, renderMode, defaultContent }}
+              fallback={defaultContent}
+            />
+          );
+
           // For group parent, show simplified infra (no tooltip with region details)
           if (renderMode === 'groupParent') {
             return (
               <TableCell className="whitespace-nowrap">
-                {item.infra && item.infra !== '-' ? (
-                  <span>{item.cloud || item.infra.split('(')[0].trim()}</span>
-                ) : (
-                  <span>-</span>
+                {slotted(
+                  item.infra && item.infra !== '-' ? (
+                    <span>{item.cloud || item.infra.split('(')[0].trim()}</span>
+                  ) : (
+                    <span>-</span>
+                  )
                 )}
               </TableCell>
             );
@@ -2069,43 +2084,47 @@ export function ManagedJobsTable({
           // Single task or group child - show full infra with tooltip
           return (
             <TableCell className="whitespace-nowrap">
-              {item.infra && item.infra !== '-' ? (
-                <NonCapitalizedTooltip
-                  content={item.full_infra || item.infra}
-                  className="text-sm text-muted-foreground"
-                >
-                  <span>
-                    <Link
-                      href="/infra"
-                      className="text-blue-600 hover:underline"
-                    >
-                      {item.cloud || item.infra.split('(')[0].trim()}
-                    </Link>
-                    {item.infra.includes('(') && (
-                      <span>
-                        {' ' +
-                          (() => {
-                            const NAME_TRUNCATE_LENGTH =
-                              UI_CONFIG.NAME_TRUNCATE_LENGTH;
-                            const fullRegionPart = item.infra.substring(
-                              item.infra.indexOf('(')
-                            );
-                            const regionContent = fullRegionPart.substring(
-                              1,
-                              fullRegionPart.length - 1
-                            );
-                            if (regionContent.length <= NAME_TRUNCATE_LENGTH) {
-                              return fullRegionPart;
-                            }
-                            const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
-                            return `(${truncatedRegion})`;
-                          })()}
-                      </span>
-                    )}
-                  </span>
-                </NonCapitalizedTooltip>
-              ) : (
-                <span>{item.infra || '-'}</span>
+              {slotted(
+                item.infra && item.infra !== '-' ? (
+                  <NonCapitalizedTooltip
+                    content={item.full_infra || item.infra}
+                    className="text-sm text-muted-foreground"
+                  >
+                    <span>
+                      <Link
+                        href="/infra"
+                        className="text-blue-600 hover:underline"
+                      >
+                        {item.cloud || item.infra.split('(')[0].trim()}
+                      </Link>
+                      {item.infra.includes('(') && (
+                        <span>
+                          {' ' +
+                            (() => {
+                              const NAME_TRUNCATE_LENGTH =
+                                UI_CONFIG.NAME_TRUNCATE_LENGTH;
+                              const fullRegionPart = item.infra.substring(
+                                item.infra.indexOf('(')
+                              );
+                              const regionContent = fullRegionPart.substring(
+                                1,
+                                fullRegionPart.length - 1
+                              );
+                              if (
+                                regionContent.length <= NAME_TRUNCATE_LENGTH
+                              ) {
+                                return fullRegionPart;
+                              }
+                              const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
+                              return `(${truncatedRegion})`;
+                            })()}
+                        </span>
+                      )}
+                    </span>
+                  </NonCapitalizedTooltip>
+                ) : (
+                  <span>{item.infra || '-'}</span>
+                )
               )}
             </TableCell>
           );

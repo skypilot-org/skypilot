@@ -2535,6 +2535,16 @@ class JobController:
                                         f'{len(self._dag.tasks)-1}: '
                                         f'{task.name}')
                             task_start = time.time()
+                            if task_id > 0:
+                                # The task before this one has just finished,
+                                # so this is the moment this task could first
+                                # have started -- the origin its startup
+                                # breakdown is measured from. Written once: a
+                                # controller that restarts mid-pipeline
+                                # re-enters here, and the first value is the
+                                # true one.
+                                await (managed_job_state.set_eligible_at_async(
+                                    self._job_id, task_id, task_start))
                             succeeded = await self._run_one_task(task_id, task)
                             task_time = time.time() - task_start
                             logger.info(

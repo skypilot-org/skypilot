@@ -50,6 +50,37 @@ def test_queue_v2_fields_none_requests_all_fields():
     assert body['fields'] is None
 
 
+def test_queue_v2_sends_include_tree():
+    body = _call_raw_queue_v2(refresh=False, job_ids=[7], include_tree=True)
+    assert body['job_ids'] == [7]
+    assert body['include_tree'] is True
+    body = _call_raw_queue_v2(refresh=False, job_ids=[7])
+    assert body['include_tree'] is False
+
+
+def test_queue_v2_include_tree_refuses_an_old_server():
+    # An older server drops the field and answers with the roots alone, which
+    # reads as the whole tree and is not -- so refuse rather than mislabel.
+    from sky import exceptions
+    from sky.server import constants as server_constants
+    raw_queue_v2 = _unwrap(jobs_sdk.queue_v2)
+    too_old = server_constants.MIN_JOBS_INCLUDE_TREE_API_VERSION - 1
+    with mock.patch.object(jobs_sdk.versions,
+                           'get_remote_api_version',
+                           return_value=too_old), \
+         mock.patch.object(jobs_sdk.server_common,
+                           'make_authenticated_request') as mock_request:
+        with pytest.raises(exceptions.NotSupportedError, match='include_tree'):
+            raw_queue_v2(refresh=False, job_ids=[7], include_tree=True)
+        mock_request.assert_not_called()
+        # Not asking for the tree is fine on that server.
+        with mock.patch.object(jobs_sdk.server_common,
+                               'get_request_id',
+                               return_value='request-id'):
+            raw_queue_v2(refresh=False, job_ids=[7])
+        mock_request.assert_called_once()
+
+
 def test_queue_version_2_dispatches_to_queue_v2():
     raw_queue = jobs_sdk.queue.__wrapped__.__wrapped__
 

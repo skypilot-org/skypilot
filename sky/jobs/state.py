@@ -71,6 +71,24 @@ Base = declarative.declarative_base()
 # to identify the job.
 # TODO(zhwu): schema migration may be needed.
 
+# The daemon's two "not processed yet" predicates, used by both the index
+# definitions and the migration so an index cannot drift from the query it
+# exists to serve.
+#
+# Both are built from _MEASURABLE rather than spelled out, because the first
+# version of this spelled them out and the second one lost a clause: without
+# the origin columns the never-ran index kept every pre-upgrade row forever --
+# 1078 unmatchable rows against 0 real candidates on the tenant it was measured
+# on, which is the very thing partial indexes were introduced here to stop.
+#
+# Each predicate must stay implied by its query's WHERE or the planner cannot
+# use the index. Every clause here is one the corresponding query already has.
+_MEASURABLE = 'created_at IS NOT NULL AND eligible_at IS NOT NULL'
+
+PENDING_TIMELINE_PREDICATE = f't_time_to_running IS NULL AND {_MEASURABLE}'
+NEVER_RAN_PREDICATE = (f't_controller_queue IS NULL AND start_at IS NULL AND '
+                       f'{_MEASURABLE}')
+
 spot_table = sqlalchemy.Table(
     'spot',
     Base.metadata,
@@ -131,6 +149,113 @@ spot_table = sqlalchemy.Table(
     # PENDING while it waits in an external scheduler queue) without altering
     # the underlying job lifecycle. NULL means "no override".
     sqlalchemy.Column('status_override', sqlalchemy.Text, server_default=None),
+    # When the job was accepted, as epoch seconds. T0 of the launch timeline.
+    #
+    # A separate column rather than reusing the PENDING job_events row, whose
+    # timestamp is written as a naive local datetime while every other
+    # timestamp here is time.time(). Subtracting the two is wrong by the UTC
+    # offset on any non-UTC deployment and can come out negative -- and a
+    # negative observation lands silently in a histogram's lowest bucket, so
+    # the metric would look healthy while being wrong.
+    sqlalchemy.Column('created_at', sqlalchemy.Float, server_default=None),
+    # When this task could first have started, as epoch seconds. The origin the
+    # startup breakdown is measured from.
+    #
+    # Equal to created_at for a single task and for every task of a job group,
+    # whose tasks all begin waiting together. A pipeline runs its tasks one
+    # after another, so task N is not waiting on anything of ours until task
+    # N-1 finishes -- measuring from submission would fold every upstream
+    # task's runtime into t_controller_queue, which claims to mean "the
+    # scheduler was saturated". Unbounded, and indistinguishable downstream:
+    # the histogram is labelled by workspace only.
+    #
+    # Recording the moment rather than special-casing the formula keeps one
+    # meaning for every task.
+    #
+    # Written on the consolidation path only: of the three set_pending callers,
+    # just the one in jobs/server/core.py passes it -- the skylet service and
+    # the generated remote-controller code do not. So on a remote controller
+    # this is NULL for every task and the correction above does not apply
+    # there. Deliberate rather than overlooked: that path keeps its own
+    # database, the metrics daemon never reads these rows, and the breakdown is
+    # scoped to consolidation. Readers require it NOT NULL, so a row without it
+    # is skipped rather than measured from the wrong origin.
+    sqlalchemy.Column('eligible_at', sqlalchemy.Float, server_default=None),
+    # The launch timeline, denormalized once the job first reaches RUNNING, so
+    # the jobs list renders from one indexed row read instead of a per-job scan
+    # of launch_attempts.
+    #
+    # Only two of these are read today. t_time_to_running and
+    # t_controller_queue are the conditional-UPDATE targets that make recording
+    # exactly-once across replicas, one for a task that ran and one for a task
+    # that never did. The other six have no reader: the Prometheus series are
+    # observed from the in-memory breakdown in the same call that computes it,
+    # not from these columns. They are stored for the job-detail view, which
+    # lands separately -- so if that view is dropped, these should go with it
+    # rather than linger as a table that nothing consults.
+    #
+    # Write-once: they describe how long the job took to
+    # start, which a preemption three hours later does not redefine.
+    #
+    # Together they partition the wall clock from created_at to RUNNING:
+    #   controller_queue  accepted -> a controller claimed the job
+    #   retry_overhead    launch attempts that were thrown away, plus backoff
+    #   provision_setup   the final attempt's provision start -> instances asked
+    #   queue_wait        asked for -> admitted by an external scheduler
+    #   node_startup      admitted -> instances up
+    #   runtime_setup     instances up -> the job is RUNNING
+    sqlalchemy.Column('t_controller_queue',
+                      sqlalchemy.Float,
+                      server_default=None),
+    sqlalchemy.Column('t_retry_overhead', sqlalchemy.Float,
+                      server_default=None),
+    # Time that belongs to no phase we can name: a job placed on a warm pool
+    # never provisions, and one launched before these milestones has no
+    # attempt to break down. Kept apart from retry_overhead so such a job does
+    # not read as "99% retried launches", which is the misdiagnosis this
+    # breakdown exists to prevent.
+    sqlalchemy.Column('t_unattributed', sqlalchemy.Float, server_default=None),
+    sqlalchemy.Column('t_provision_setup',
+                      sqlalchemy.Float,
+                      server_default=None),
+    sqlalchemy.Column('t_queue_wait', sqlalchemy.Float, server_default=None),
+    sqlalchemy.Column('t_node_startup', sqlalchemy.Float, server_default=None),
+    sqlalchemy.Column('t_runtime_setup', sqlalchemy.Float, server_default=None),
+    # The headline: accepted -> RUNNING. Measured directly rather than summed,
+    # because histogram quantiles are not additive.
+    sqlalchemy.Column('t_time_to_running',
+                      sqlalchemy.Float,
+                      server_default=None),
+    # The metrics daemon's pending-timeline query, once a minute. Without it
+    # that query full-scans spot and sorts the result to return the handful of
+    # jobs that just started -- and in the steady state, to return nothing.
+    # The predicate selects the rows without a timeline; start_at then serves
+    # the ordering from the index rather than a temp b-tree.
+    #
+    # Partial, and that is the whole point rather than a refinement. A full
+    # index stores one entry per task ever run and keeps it forever: a
+    # pre-upgrade row has no created_at, so it can never satisfy the query,
+    # is never given a timeline, and never leaves the unprocessed group it
+    # sorts to the front of. Every tick then walks the entire history to reach
+    # the few rows with work in them -- 9156 dead entries against 9 live ones
+    # on the dev tenant this was measured on. Restricted to what the query can
+    # return, the index holds the pending work instead, and a row drops out of
+    # it the moment its timeline is recorded.
+    #
+    # Safe to restrict because the marker column is only ever asked IS NULL --
+    # both selects and both conditional updates -- so no query wants the rows
+    # this leaves out. The predicates must keep matching those queries or the
+    # planner will quietly stop using the index, which is what the EXPLAIN
+    # tests are for.
+    sqlalchemy.Index(
+        'ix_spot_pending_timeline',
+        'start_at',
+        postgresql_where=sqlalchemy.text(PENDING_TIMELINE_PREDICATE),
+        sqlite_where=sqlalchemy.text(PENDING_TIMELINE_PREDICATE)),
+    sqlalchemy.Index('ix_spot_never_ran',
+                     'end_at',
+                     postgresql_where=sqlalchemy.text(NEVER_RAN_PREDICATE),
+                     sqlite_where=sqlalchemy.text(NEVER_RAN_PREDICATE)),
 )
 
 job_info_table = sqlalchemy.Table(
@@ -1070,8 +1195,15 @@ def set_pending(
     resources_str: str,
     metadata: str,
     is_primary_in_job_group: Optional[bool] = None,
+    eligible_at: Optional[float] = None,
 ):
-    """Set the task to pending state."""
+    """Set the task to pending state.
+
+    ``eligible_at`` is when this task could first have started. The caller
+    passes the submission instant for a task that is waiting from now -- task 0
+    of anything, and every task of a job group -- and None for a pipeline's
+    later tasks, whose origin is not known yet and is written at the handoff.
+    """
     add_job_event(job_id, task_id, ManagedJobStatus.PENDING,
                   'Job submitted to queue')
 
@@ -1086,6 +1218,8 @@ def set_pending(
                 metadata=metadata,
                 status=ManagedJobStatus.PENDING.value,
                 is_primary_in_job_group=is_primary_in_job_group,
+                created_at=time.time(),
+                eligible_at=eligible_at,
             ))
         session.commit()
 
@@ -1757,6 +1891,41 @@ def get_managed_jobs_highest_priority() -> int:
             0] is not None else constants.MIN_PRIORITY
 
 
+# How a managed jobs queue request selects rows
+# ------------------------------------------------
+# A managed job is one or more rows in ``spot`` (one per task) plus one row in
+# ``job_info``. A dynamic task is a managed job whose ``job_info.root_job_id``
+# is set. A tree is a top-level job (root_job_id NULL) plus every job whose
+# root_job_id is that job. A tree is addressed by its root's id.
+#
+# A request answers three questions, in this order:
+#
+# 1. Scope: which jobs. In this module, decided by ``job_ids`` and
+#    ``tree_root_ids``:
+#      neither                    every job (the list page, the CLI)
+#      job_ids                    exactly those jobs' rows (id lookups)
+#      tree_root_ids              every row of the trees rooted at those ids
+#                                 (the job detail pages)
+#    ``tree_root_ids`` must be tree roots. The API flag ``include_tree`` is
+#    turned into them one layer up, in ``utils.get_managed_job_queue``, by
+#    calling ``get_tree_root_ids`` once; the functions here do not resolve
+#    ids themselves. ``include_tree`` requires ``job_ids`` and cannot be
+#    combined with pagination or the explicit filters below; ``core.queue_v2``
+#    and ``get_managed_job_queue`` both reject that.
+#
+# 2. Filters: which of those rows pass. Visibility (``accessible_workspaces``,
+#    ``user_hashes``) and the explicit filters (name, pool, workspace, infra,
+#    status, skip_finished, submitted window). Each is tested on the row's own
+#    job or task; a dynamic task is its own job here (SKY-7163 tracks moving
+#    the job-level filters to the tree root).
+#
+# 3. Slice: which page. The pagination unit is the tree, so a group and its
+#    dynamic tasks always share a page. ``total`` counts trees. Paging takes
+#    two queries: the roots of the trees with a matching row, sorted, sliced;
+#    then every matching row of those trees. This has been the shape since
+#    #10725 and is independent of scope.
+
+
 def _tree_root_expr() -> 'sqlalchemy.ColumnElement':
     """The top-level job of a row's tree: its root_job_id, else itself.
 
@@ -1767,6 +1936,68 @@ def _tree_root_expr() -> 'sqlalchemy.ColumnElement':
     """
     return sqlalchemy.func.coalesce(job_info_table.c.root_job_id,
                                     spot_table.c.spot_job_id)
+
+
+def _rows_in_trees_of(root_ids: List[int]) -> 'sqlalchemy.ColumnElement':
+    """Filter that matches every row of the trees rooted at ``root_ids``: the
+    roots' own rows and the rows of every job launched under them, at any
+    depth.
+
+    ``root_ids`` must be tree roots (see ``get_tree_root_ids``). A member id
+    passed here would match only its own rows.
+
+    Written as one membership test on ``spot.spot_job_id`` against the union
+    of the root ids (looked up in spot, so a legacy job without a job_info
+    row still matches itself) and the member ids (looked up in job_info by
+    root_job_id). PostgreSQL serves both lookups from indexes and joins the
+    small result to spot by index. The earlier form,
+    ``spot.spot_job_id IN roots OR job_info.root_job_id IN roots``, spans two
+    tables, which PostgreSQL cannot serve from indexes: on staging (70k rows)
+    it hash-joined both tables and filtered, 42 ms against 0.1 ms for this
+    form. The dashboard runs this on every poll.
+    """
+    # Aliases so the subqueries do not correlate with the outer query's own
+    # spot and job_info tables.
+    root_rows = spot_table.alias('tree_root_rows')
+    member_rows = job_info_table.alias('tree_member_rows')
+    roots = sqlalchemy.select(root_rows.c.spot_job_id).where(
+        root_rows.c.spot_job_id.in_(root_ids))
+    members = sqlalchemy.select(member_rows.c.spot_job_id).where(
+        member_rows.c.root_job_id.in_(root_ids))
+    tree_job_ids = sqlalchemy.union_all(roots, members)
+    return spot_table.c.spot_job_id.in_(tree_job_ids)
+
+
+def get_tree_root_ids(job_ids: List[int]) -> List[int]:
+    """Return the tree root of each given job: its ``root_job_id``, or the
+    job's own id when ``root_job_id`` is NULL.
+
+    The result is the distinct root ids, sorted. Ids that belong to the same
+    tree produce that root once. Ids that match no job are dropped. One query.
+    """
+    if not job_ids:
+        return []
+    engine = _db_manager.get_engine()
+
+    # Every spot row (one per task), widened with the job's job_info row when
+    # it has one. This is a LEFT OUTER join from spot: a spot row with no
+    # job_info row (a job from before job_info existed) is kept, with NULL in
+    # every job_info column. An inner join would drop it.
+    spot_with_job_info = spot_table.outerjoin(
+        job_info_table,
+        spot_table.c.spot_job_id == job_info_table.c.spot_job_id)
+
+    # A row's tree root: job_info.root_job_id when set, else the job's own
+    # id. The fallback covers a tree root (root_job_id is NULL) and a legacy
+    # job (no job_info row, so root_job_id is NULL from the outer join).
+    tree_root = _tree_root_expr()
+
+    # Filter on spot's id: the column every job has. DISTINCT because a job
+    # has one spot row per task, and requested jobs can share a root.
+    query = sqlalchemy.select(tree_root).select_from(spot_with_job_info).where(
+        spot_table.c.spot_job_id.in_(job_ids)).distinct().order_by(tree_root)
+    with orm.Session(engine) as session:
+        return [row[0] for row in session.execute(query).fetchall()]
 
 
 def build_managed_jobs_with_filters_no_status_query(
@@ -1795,6 +2026,13 @@ def build_managed_jobs_with_filters_no_status_query(
     status-count grouping column). It lets a caller surface a refined status
     (e.g. a plugin override) without changing the underlying column. When None,
     the raw ``spot.status`` column is used.
+
+    job_ids keeps only those jobs' own rows. tree_root_ids keeps only the
+    rows of the trees rooted at those ids (the roots' tasks and every job
+    launched under them). The ids must be tree roots; see
+    ``get_tree_root_ids``. Pagination passes the roots on the current page,
+    and the tree lookup (``include_tree``) passes the requested jobs' roots.
+    See the module comment above ``_tree_root_expr`` for the whole picture.
 
     submitted_after / submitted_before are epoch seconds (matching the
     ``submitted_at`` column) and restrict the result to jobs submitted within
@@ -1866,15 +2104,7 @@ def build_managed_jobs_with_filters_no_status_query(
     if job_ids is not None:
         query = query.where(spot_table.c.spot_job_id.in_(job_ids))
     if tree_root_ids is not None:
-        # Every row in these trees: the roots' declared tasks and the jobs
-        # launched under them, at any depth. Spelled as two indexed
-        # membership tests rather than COALESCE(...) IN (...): PostgreSQL
-        # cannot use the primary key or the root_job_id index through the
-        # COALESCE, and this runs on every page fetch the dashboard polls.
-        # (A member's own id is never a tree root, so the OR is exact.)
-        query = query.where(
-            sqlalchemy.or_(spot_table.c.spot_job_id.in_(tree_root_ids),
-                           job_info_table.c.root_job_id.in_(tree_root_ids)))
+        query = query.where(_rows_in_trees_of(tree_root_ids))
     if accessible_workspaces is not None:
         query = query.where(
             job_info_table.c.workspace.in_(accessible_workspaces))
@@ -1997,6 +2227,7 @@ def get_status_count_with_filters(
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
     status_expr: Optional['sqlalchemy.ColumnElement'] = None,
+    tree_root_ids: Optional[List[int]] = None,
 ) -> Dict[str, int]:
     """Get the status count of the managed jobs with filters.
 
@@ -2006,6 +2237,7 @@ def get_status_count_with_filters(
     query = build_managed_jobs_with_filters_no_status_query(
         fields=fields,
         job_ids=job_ids,
+        tree_root_ids=tree_root_ids,
         accessible_workspaces=accessible_workspaces,
         workspace_match=workspace_match,
         name_match=name_match,
@@ -2041,6 +2273,7 @@ def get_infra_options_with_filters(
     skip_finished: bool = False,
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
+    tree_root_ids: Optional[List[int]] = None,
 ) -> List[str]:
     """The distinct `--infra` specs of the jobs a filter set selects.
 
@@ -2060,6 +2293,7 @@ def get_infra_options_with_filters(
     """
     query = build_managed_jobs_with_filters_no_status_query(
         job_ids=job_ids,
+        tree_root_ids=tree_root_ids,
         accessible_workspaces=accessible_workspaces,
         workspace_match=workspace_match,
         name_match=name_match,
@@ -2238,52 +2472,10 @@ def get_active_emergency_recovery_episodes(
     return [(int(row[0]), row[1], row[2], int(row[3])) for row in rows]
 
 
-def get_managed_jobs_with_filters(
-    fields: Optional[List[str]] = None,
-    job_ids: Optional[List[int]] = None,
-    accessible_workspaces: Optional[List[str]] = None,
-    workspace_match: Optional[str] = None,
-    name_match: Optional[str] = None,
-    pool_match: Optional[str] = None,
-    infra_match: Optional[str] = None,
-    user_hashes: Optional[List[Optional[str]]] = None,
-    statuses: Optional[List[str]] = None,
-    skip_finished: bool = False,
-    submitted_after: Optional[float] = None,
-    submitted_before: Optional[float] = None,
-    page: Optional[int] = None,
-    limit: Optional[int] = None,
-    sort_by: Optional[str] = None,
-    sort_order: Optional[str] = None,
-    status_expr: Optional['sqlalchemy.ColumnElement'] = None,
-) -> Tuple[List[Dict[str, Any]], int]:
-    """Get managed jobs from the database with filters.
-
-    status_expr, when provided, is used to match the ``statuses`` filter
-    against a refined user-facing status instead of the raw ``spot.status``
-    column (see build_managed_jobs_with_filters_no_status_query). The returned
-    rows still carry the raw ``status``; callers that want the refined value in
-    the result should surface it separately.
-
-    Pagination is by top-level job (tree root), not by tasks and not by the
-    jobs launched from inside another job: page 1 with limit 10 is every
-    task of 10 top-level jobs plus every job launched under them, at any
-    depth, so a job group and its members are always on the same page.
-
-    Args:
-        sort_by: Field to sort by. Valid values: 'job_id', 'id', 'job_name',
-            'name', 'submitted_at', 'status', 'job_duration', 'duration',
-            'recovery_count', 'recoveries', 'resources', 'user_hash', 'user',
-            'cloud', 'infra'.
-        sort_order: Sort direction, 'asc' or 'desc'. Defaults to 'desc'.
-
-    Returns:
-        A tuple containing
-         - the list of managed jobs (all tasks for the paginated jobs)
-         - the total number of unique jobs (not tasks)
-    """
-    # Column mapping for sorting
-    sort_field_map = {
+def _sort_field_map(
+        status_expr: Optional['sqlalchemy.ColumnElement']) -> Dict[str, Any]:
+    """Sort keys accepted by the queue, mapped to their columns."""
+    return {
         'job_id': spot_table.c.spot_job_id,
         'id': spot_table.c.spot_job_id,
         'job_name': spot_table.c.job_name,
@@ -2304,12 +2496,145 @@ def get_managed_jobs_with_filters(
         'infra': job_info_table.c.cloud,  # Sort by cloud for infra
     }
 
+
+def _order_for_display(query: sqlalchemy.Select, sort_by: Optional[str],
+                       sort_order: Optional[str],
+                       sort_field_map: Dict[str, Any]) -> sqlalchemy.Select:
+    """Order rows the way every surface shows them.
+
+    Trees stay together and sort by the requested column (their root's id for
+    an id sort). Within a tree: the root's declared tasks by task id, then the
+    jobs launched under it by dynamic task index, then rows without an index
+    by id.
+    """
+    within_tree = [
+        sqlalchemy.case((job_info_table.c.root_job_id.is_(None), 0),
+                        else_=1).asc(),
+        sqlalchemy.case((job_info_table.c.dynamic_task_index.is_(None), 1),
+                        else_=0).asc(),
+        job_info_table.c.dynamic_task_index.asc(),
+        spot_table.c.spot_job_id.desc(),
+        spot_table.c.task_id.asc(),
+    ]
+    if sort_by and sort_by in sort_field_map:
+        sort_column = sort_field_map[sort_by]
+        if sort_column == spot_table.c.spot_job_id:
+            # A tree's id is its root's id, so an id sort keeps each tree
+            # together (the members' own, higher ids do not pull them out).
+            sort_column = _tree_root_expr()
+        if sort_order == 'asc':
+            query = query.order_by(sort_column.asc(), *within_tree)
+        else:
+            query = query.order_by(sort_column.desc(), *within_tree)
+    else:
+        # Default sort: newest tree first (a tree sorts by its root's id).
+        query = query.order_by(_tree_root_expr().desc(), *within_tree)
+    return query
+
+
+def _load_job_rows(engine: sqlalchemy.engine.Engine,
+                   query: sqlalchemy.Select) -> List[Dict[str, Any]]:
+    """Run the query and convert each row to the queue's job dict."""
+    with orm.Session(engine) as session:
+        rows = session.execute(query).fetchall()
+    jobs: List[Dict[str, Any]] = []
+    for row in rows:
+        job_dict = _get_jobs_dict(row._mapping)  # pylint: disable=protected-access
+        if job_dict.get('status') is not None:
+            job_dict['status'] = ManagedJobStatus(job_dict['status'])
+        if job_dict.get('schedule_state') is not None:
+            job_dict['schedule_state'] = ManagedJobScheduleState(
+                job_dict['schedule_state'])
+        if job_dict.get('job_name') is None:
+            job_dict['job_name'] = job_dict.get('task_name')
+        if job_dict.get('metadata') is not None:
+            job_dict['metadata'] = json.loads(job_dict['metadata'])
+
+        # Add user YAML content for managed jobs.
+        job_dict['user_yaml'] = job_dict.get('original_user_yaml_content')
+        if job_dict['user_yaml'] is None:
+            # Backwards compatibility - try to read from file path
+            yaml_path = job_dict.get('original_user_yaml_path')
+            if yaml_path:
+                try:
+                    with open(yaml_path, 'r', encoding='utf-8') as f:
+                        job_dict['user_yaml'] = f.read()
+                except (FileNotFoundError, IOError, OSError) as e:
+                    job_id = job_dict.get('job_id')
+                    if job_id is not None:
+                        logger.debug('Failed to read original user YAML for '
+                                     f'job {job_id} from {yaml_path}: {e}')
+                    else:
+                        logger.debug('Failed to read original user YAML from '
+                                     f'{yaml_path}: {e}')
+
+        jobs.append(job_dict)
+    return jobs
+
+
+def get_managed_jobs_with_filters(
+    fields: Optional[List[str]] = None,
+    job_ids: Optional[List[int]] = None,
+    accessible_workspaces: Optional[List[str]] = None,
+    workspace_match: Optional[str] = None,
+    name_match: Optional[str] = None,
+    pool_match: Optional[str] = None,
+    infra_match: Optional[str] = None,
+    user_hashes: Optional[List[Optional[str]]] = None,
+    statuses: Optional[List[str]] = None,
+    skip_finished: bool = False,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
+    page: Optional[int] = None,
+    limit: Optional[int] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
+    status_expr: Optional['sqlalchemy.ColumnElement'] = None,
+    tree_root_ids: Optional[List[int]] = None,
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Get managed jobs from the database with filters.
+
+    status_expr, when provided, is used to match the ``statuses`` filter
+    against a refined user-facing status instead of the raw ``spot.status``
+    column (see build_managed_jobs_with_filters_no_status_query). The returned
+    rows still carry the raw ``status``; callers that want the refined value in
+    the result should surface it separately.
+
+    Pagination is by top-level job (tree root), not by tasks and not by the
+    jobs launched from inside another job: page 1 with limit 10 is every
+    task of 10 top-level jobs plus every job launched under them, at any
+    depth, so a job group and its members are always on the same page.
+
+    Args:
+        job_ids: Only these jobs' rows.
+        tree_root_ids: Every row of the trees rooted at these ids: the roots'
+            tasks and every job launched under them. The ids must be tree
+            roots, resolved by the caller with ``get_tree_root_ids``; a
+            member id passed here matches only its own rows. This is how
+            ``include_tree`` reaches this function (see
+            ``utils.get_managed_job_queue``). If a caller ever needs to pass
+            unresolved ids, resolve them here when they are not roots rather
+            than trusting them.
+        sort_by: Field to sort by. Valid values: 'job_id', 'id', 'job_name',
+            'name', 'submitted_at', 'status', 'job_duration', 'duration',
+            'recovery_count', 'recoveries', 'resources', 'user_hash', 'user',
+            'cloud', 'infra'.
+        sort_order: Sort direction, 'asc' or 'desc'. Defaults to 'desc'.
+
+    Returns:
+        A tuple containing
+         - the list of managed jobs (all tasks for the paginated jobs)
+         - the total number of unique jobs (not tasks)
+    """
+    sort_field_map = _sort_field_map(status_expr)
+
     engine = _db_manager.get_engine()
 
     # Count unique top-level jobs (tree roots), not tasks
     count_query = build_managed_jobs_with_filters_query(
         fields=None,
         job_ids=job_ids,
+        tree_root_ids=tree_root_ids,
         accessible_workspaces=accessible_workspaces,
         workspace_match=workspace_match,
         name_match=name_match,
@@ -2326,18 +2651,21 @@ def get_managed_jobs_with_filters(
     with orm.Session(engine) as session:
         total = session.execute(count_query).fetchone()[0]
 
-    # For pagination, first get the tree roots for the current page, then
-    # fetch every row in those trees (the roots' tasks and the jobs launched
-    # under them).
+    # Pagination pages by tree so a group and its dynamic tasks share a page.
+    # Two queries: the roots of the trees with a matching row, sorted and
+    # sliced; then every matching row of those trees. Independent of scope.
     if page is not None and limit is not None:
         # Get paginated unique root ids with ordering
         # Use GROUP BY instead of DISTINCT to allow ORDER BY on different
         # columns (PostgreSQL requires ORDER BY columns to be in SELECT list
         # when using DISTINCT).
+        # The builder gives task rows. Keep only each row's tree root, group
+        # so each tree is one unit, sort, slice: the page is a slice of trees.
         tree_root = _tree_root_expr()
         job_ids_subquery = build_managed_jobs_with_filters_query(
             fields=None,
             job_ids=job_ids,
+            tree_root_ids=tree_root_ids,
             accessible_workspaces=accessible_workspaces,
             workspace_match=workspace_match,
             name_match=name_match,
@@ -2386,7 +2714,9 @@ def get_managed_jobs_with_filters(
         query = build_managed_jobs_with_filters_query(
             fields=fields,
             job_ids=job_ids,
-            tree_root_ids=paginated_root_ids,  # Only the paginated trees
+            # The page's roots were chosen from the caller's scope above, so
+            # this is the only tree constraint the final query needs.
+            tree_root_ids=paginated_root_ids,
             accessible_workspaces=accessible_workspaces,
             workspace_match=workspace_match,
             name_match=name_match,
@@ -2402,6 +2732,7 @@ def get_managed_jobs_with_filters(
         query = build_managed_jobs_with_filters_query(
             fields=fields,
             job_ids=job_ids,
+            tree_root_ids=tree_root_ids,
             accessible_workspaces=accessible_workspaces,
             workspace_match=workspace_match,
             name_match=name_match,
@@ -2415,67 +2746,8 @@ def get_managed_jobs_with_filters(
             status_expr=status_expr,
         )
 
-    # Apply sorting. Within a tree the rows always read the way the table
-    # shows them: the root's declared tasks first, then the jobs launched under
-    # it by dynamic task index (rows from before the index existed last),
-    # then task id. Every surface (CLI, dashboard, API) gets this order.
-    within_tree = [
-        sqlalchemy.case((job_info_table.c.root_job_id.is_(None), 0),
-                        else_=1).asc(),
-        sqlalchemy.case((job_info_table.c.dynamic_task_index.is_(None), 1),
-                        else_=0).asc(),
-        job_info_table.c.dynamic_task_index.asc(),
-        spot_table.c.spot_job_id.desc(),
-        spot_table.c.task_id.asc(),
-    ]
-    if sort_by and sort_by in sort_field_map:
-        sort_column = sort_field_map[sort_by]
-        if sort_column == spot_table.c.spot_job_id:
-            # A tree's id is its root's id, so an id sort keeps each tree
-            # together (the members' own, higher ids do not pull them out).
-            sort_column = _tree_root_expr()
-        if sort_order == 'asc':
-            query = query.order_by(sort_column.asc(), *within_tree)
-        else:
-            query = query.order_by(sort_column.desc(), *within_tree)
-    else:
-        # Default sort: newest tree first (a tree sorts by its root's id).
-        query = query.order_by(_tree_root_expr().desc(), *within_tree)
-    rows = None
-    with orm.Session(engine) as session:
-        rows = session.execute(query).fetchall()
-    jobs = []
-    for row in rows:
-        job_dict = _get_jobs_dict(row._mapping)  # pylint: disable=protected-access
-        if job_dict.get('status') is not None:
-            job_dict['status'] = ManagedJobStatus(job_dict['status'])
-        if job_dict.get('schedule_state') is not None:
-            job_dict['schedule_state'] = ManagedJobScheduleState(
-                job_dict['schedule_state'])
-        if job_dict.get('job_name') is None:
-            job_dict['job_name'] = job_dict.get('task_name')
-        if job_dict.get('metadata') is not None:
-            job_dict['metadata'] = json.loads(job_dict['metadata'])
-
-        # Add user YAML content for managed jobs.
-        job_dict['user_yaml'] = job_dict.get('original_user_yaml_content')
-        if job_dict['user_yaml'] is None:
-            # Backwards compatibility - try to read from file path
-            yaml_path = job_dict.get('original_user_yaml_path')
-            if yaml_path:
-                try:
-                    with open(yaml_path, 'r', encoding='utf-8') as f:
-                        job_dict['user_yaml'] = f.read()
-                except (FileNotFoundError, IOError, OSError) as e:
-                    job_id = job_dict.get('job_id')
-                    if job_id is not None:
-                        logger.debug('Failed to read original user YAML for '
-                                     f'job {job_id} from {yaml_path}: {e}')
-                    else:
-                        logger.debug('Failed to read original user YAML from '
-                                     f'{yaml_path}: {e}')
-
-        jobs.append(job_dict)
+    query = _order_for_display(query, sort_by, sort_order, sort_field_map)
+    jobs = _load_job_rows(engine, query)
     return jobs, total
 
 
@@ -3372,6 +3644,52 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
     await _retry_task_status_update(job_id, task_id, ManagedJobStatus.RUNNING,
                                     _op, 'Failed to set the task to started.')
     await callback_func('STARTED')
+
+
+async def set_eligible_at_async(job_id: int, task_id: int,
+                                eligible_at: float) -> None:
+    """Record when a pipeline's task became able to start.
+
+    Called at the handoff, once the task before this one has finished. Only
+    a pipeline needs it: task 0 and every task of a job group are waiting from
+    submission, and the submission path writes theirs.
+
+    Write-once. A controller that restarts mid-pipeline re-enters the loop and
+    would otherwise stamp the restart instead of the handoff, shrinking every
+    phase measured from it. Best-effort besides: this is a measurement, and it
+    must not be able to fail the task it is measuring.
+    """
+
+    async def _op(session: sql_async.AsyncSession) -> int:
+        result = await session.execute(
+            sqlalchemy.update(spot_table).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id,
+                    spot_table.c.eligible_at.is_(None),
+                )).values({spot_table.c.eligible_at: eligible_at}))
+        # _retry_session opens the session and closes it; it does not commit.
+        # Without this the UPDATE is rolled back on exit, the row keeps a NULL
+        # origin, and -- because the queries require one -- the task silently
+        # gets no timeline at all. Every other caller of _retry_session commits
+        # inside its own _op for the same reason.
+        await session.commit()
+        return result.rowcount
+
+    try:
+        await _retry_session(_op)
+    except Exception as e:  # pylint: disable=broad-except
+        # Logged with the consequence, because it is not a loss of precision.
+        # Both timeline queries require an origin, so a task without one is
+        # selected by neither: it gets no breakdown *and* does not appear in
+        # the never-ran counts. This warning is the only trace it leaves. An
+        # earlier version of this message promised a fallback to the
+        # submission time -- that fallback was removed, precisely because
+        # measuring a pipeline's later task from submission folds every
+        # upstream task's runtime into its controller-queue wait.
+        logger.warning(f'Could not record when job {job_id} task {task_id} '
+                       f'became eligible to start, so it will have no '
+                       f'start-up breakdown and will not be counted: {e}')
 
 
 def get_job_status_with_task_id(job_id: int,
@@ -4665,3 +4983,172 @@ async def job_event_retention_daemon():
             logger.error(f'Error running job event retention daemon: {e}')
 
         await asyncio.sleep(JOB_EVENT_DAEMON_INTERVAL_SECONDS)
+
+
+# --- Launch timeline ---------------------------------------------------------
+#
+# See the spot table's t_* columns for what these durations mean and why they
+# are denormalized here.
+
+
+@db_retries.retry
+def get_jobs_pending_launch_timeline(limit: int = 200) -> List[Dict[str, Any]]:
+    """Tasks that have first reached RUNNING but have no timeline recorded yet.
+
+    A task that never reaches RUNNING is deliberately not returned: it has no
+    time-to-running to report, and its individual launch attempts are already
+    accounted for on their own. Leaving it out also means no extra marker is
+    needed to avoid rescanning it forever -- there simply is no timeline to
+    write.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(
+                spot_table.c.spot_job_id,
+                spot_table.c.task_id,
+                spot_table.c.task_name,
+                spot_table.c.created_at,
+                # Where this task's clock starts.
+                spot_table.c.eligible_at,
+                spot_table.c.submitted_at,
+                spot_table.c.start_at,
+                job_info_table.c.workspace,
+                # Distinguishes a job placed on a warm pool, which skips
+                # provisioning, from one that provisioned its own cluster.
+                job_info_table.c.pool,
+            ).select_from(
+                spot_table.join(
+                    job_info_table,
+                    spot_table.c.spot_job_id == job_info_table.c.spot_job_id,
+                    isouter=True)).
+            where(
+                sqlalchemy.and_(
+                    spot_table.c.start_at.is_not(None),
+                    # Implied by the eligible_at guard below -- set_pending
+                    # writes created_at on every row -- and kept because the
+                    # two are independent columns whose writers could diverge.
+                    spot_table.c.created_at.is_not(None),
+                    # Every timestamp the breakdown subtracts, so the
+                    # computation cannot meet a NULL. Without this the
+                    # row still gets counted -- the caller parks a
+                    # total-only timeline when the split raises -- but
+                    # it reports its whole wait as unattributed, which
+                    # is the misdiagnosis this breakdown exists to
+                    # prevent. The sibling query for jobs that never
+                    # ran already guards it.
+                    #
+                    # The trade, chosen rather than inherited: such a
+                    # task is then returned by neither query -- the
+                    # other one wants start_at IS NULL -- so it drops
+                    # out of the counts too, which is the very thing
+                    # those counts exist to prevent. Accepted because a
+                    # task that started without a submission time
+                    # should not exist, and if one does, losing it
+                    # moves no distribution while a fabricated
+                    # all-unattributed breakdown moves two. Counting it
+                    # would mean widening the never-ran query, whose
+                    # whole shape says otherwise.
+                    spot_table.c.submitted_at.is_not(None),
+                    # Not coalesced to created_at, which would look like the
+                    # forgiving choice and is the harmful one. A task reaches
+                    # here without an origin only when its best-effort write
+                    # failed, and that is a pipeline's later task -- for which
+                    # created_at is the submission of the whole job, so the
+                    # fallback would charge every upstream task's runtime to
+                    # this one's controller wait. That is the distortion this
+                    # column was added to remove, reappearing on the failure
+                    # path. Same rule as the guard above: skip it.
+                    #
+                    # It cannot be NULL merely for being old -- 027 adds this
+                    # column and created_at together, so a pre-column row has
+                    # neither and is already excluded.
+                    spot_table.c.eligible_at.is_not(None),
+                    spot_table.c.t_time_to_running.is_(None),
+                )).order_by(spot_table.c.start_at).limit(limit)).all()
+        return [dict(row._mapping) for row in rows]  # pylint: disable=protected-access
+
+
+@db_retries.retry
+def record_launch_timeline(job_id: int, task_id: int,
+                           durations: Dict[str, float]) -> bool:
+    """Write a task's launch timeline, once.
+
+    Returns whether this writer was the one that recorded it. The update is
+    conditional on the timeline still being absent, so concurrent API server
+    replicas write it exactly once and only the winner emits the metrics --
+    otherwise every rate would be multiplied by the replica count.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(spot_table.update().where(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.t_time_to_running.is_(None),
+            )).values({
+                spot_table.c[name]: value for name, value in durations.items()
+            }))
+        session.commit()
+        return bool(result.rowcount)
+
+
+@db_retries.retry
+def get_jobs_that_never_ran(limit: int = 200) -> List[Dict[str, Any]]:
+    """Finished tasks that never reached RUNNING and are not yet accounted for.
+
+    They have no time-to-running, but leaving them out of the counts entirely
+    is how a fleet that mostly fails to start comes to look fast. They did wait
+    for a controller, so that phase is still a real measurement -- and having
+    written it is what marks the task as counted.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(
+                spot_table.c.spot_job_id,
+                spot_table.c.task_id,
+                spot_table.c.created_at,
+                spot_table.c.eligible_at,
+                spot_table.c.submitted_at,
+                job_info_table.c.workspace,
+                job_info_table.c.pool,
+            ).select_from(
+                spot_table.join(
+                    job_info_table,
+                    spot_table.c.spot_job_id == job_info_table.c.spot_job_id,
+                    isouter=True)).
+            where(
+                sqlalchemy.and_(
+                    spot_table.c.end_at.is_not(None),
+                    spot_table.c.start_at.is_(None),
+                    spot_table.c.created_at.is_not(None),
+                    spot_table.c.submitted_at.is_not(None),
+                    # See the sibling query: an absent origin is a
+                    # failed write, not an old row, and measuring from
+                    # created_at would be wrong rather than merely
+                    # imprecise.
+                    spot_table.c.eligible_at.is_not(None),
+                    spot_table.c.t_controller_queue.is_(None),
+                )).order_by(spot_table.c.end_at).limit(limit)).all()
+        return [dict(row._mapping) for row in rows]  # pylint: disable=protected-access
+
+
+@db_retries.retry
+def record_controller_queue_only(job_id: int, task_id: int,
+                                 duration: float) -> bool:
+    """Record the controller wait of a task that never ran, once.
+
+    Returns whether this writer recorded it, so concurrent replicas count the
+    task exactly once.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(spot_table.update().where(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.t_controller_queue.is_(None),
+            )).values({spot_table.c.t_controller_queue: duration}))
+        session.commit()
+        return bool(result.rowcount)
