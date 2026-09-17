@@ -29,12 +29,14 @@ from sqlalchemy.ext import declarative
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.metrics import launch_phases
 from sky.metrics import utils as metrics_lib
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import asyncio_utils
 from sky.utils import common_utils
 from sky.utils import context_utils
+from sky.utils import log_utils
 from sky.utils import registry
 from sky.utils import status_lib
 from sky.utils import yaml_utils
@@ -270,6 +272,40 @@ class ClusterEventType(enum.Enum):
     # LAUNCHING-state badge tooltip on the dashboard.
     LAUNCH_PROGRESS = 'LAUNCH_PROGRESS'
 
+    # A boundary of a launch that has been passed, carrying how long the phase
+    # it closes took. Kept apart from LAUNCH_PROGRESS above, which is consumed
+    # latest-wins as a managed job's `details` column -- "what is this launch
+    # waiting on *now*". A row saying a wait has ended is by construction not
+    # that, and would sit in that column as a stale answer for the rest of the
+    # launch.
+    LAUNCH_MILESTONE = 'LAUNCH_MILESTONE'
+
+
+# Which retention window each event type is swept under.
+#
+# The sweep is per type -- `cleanup_cluster_events_with_retention` takes one --
+# so a type with no entry here is never swept and its rows are retained
+# forever. That failure is silent: no error, no red test, just a table that
+# grows. Listing the types here rather than as calls in the daemon lets
+# `test_every_event_type_has_a_retention_window` assert the mapping covers the
+# enum, so the next type added cannot be missed the way LAUNCH_MILESTONE nearly
+# was.
+#
+# Keys are the config option each window is read from; see
+# `cluster_event_retention_daemon`.
+CLUSTER_EVENT_RETENTION_GROUPS: Dict[str, Tuple['ClusterEventType', ...]] = {
+    'cluster_event_retention_hours': (ClusterEventType.STATUS_CHANGE,),
+    # Short-lived observability, of no business-record value once the launch is
+    # over. LAUNCH_MILESTONE shares the window rather than the meaning: it is a
+    # record of a boundary, but only useful for as long as anyone is looking at
+    # that launch.
+    'cluster_debug_event_retention_hours': (
+        ClusterEventType.DEBUG,
+        ClusterEventType.LAUNCH_PROGRESS,
+        ClusterEventType.LAUNCH_MILESTONE,
+    ),
+    'cluster_terminal_event_retention_hours': (ClusterEventType.TERMINAL,),
+}
 
 # Prefix of the STATUS_CHANGE event reason recorded when a cluster is flipped
 # to INIT because a status refresh found it in an abnormal state -- e.g. a node
@@ -1587,28 +1623,20 @@ async def cluster_event_retention_daemon():
         terminal_retention_hours = skypilot_config.get_nested(
             ('api_server', 'cluster_terminal_event_retention_hours'),
             TERMINAL_CLUSTER_EVENT_RETENTION_HOURS)
+        windows = {
+            'cluster_event_retention_hours': retention_hours,
+            'cluster_debug_event_retention_hours': debug_retention_hours,
+            'cluster_terminal_event_retention_hours': terminal_retention_hours,
+        }
         try:
-            if retention_hours >= 0:
-                logger.debug('Cleaning up cluster events with retention '
-                             f'{retention_hours} hours.')
-                cleanup_cluster_events_with_retention(
-                    retention_hours, ClusterEventType.STATUS_CHANGE)
-            if debug_retention_hours >= 0:
-                logger.debug('Cleaning up debug cluster events with retention '
-                             f'{debug_retention_hours} hours.')
-                cleanup_cluster_events_with_retention(debug_retention_hours,
-                                                      ClusterEventType.DEBUG)
-                # LAUNCH_PROGRESS shares debug retention semantics: short-lived
-                # observability info, no business-record value once the launch
-                # is over.
-                cleanup_cluster_events_with_retention(
-                    debug_retention_hours, ClusterEventType.LAUNCH_PROGRESS)
-            if terminal_retention_hours >= 0:
-                logger.debug(
-                    'Cleaning up terminal cluster events with retention '
-                    f'{terminal_retention_hours} hours.')
-                cleanup_cluster_events_with_retention(terminal_retention_hours,
-                                                      ClusterEventType.TERMINAL)
+            for option, types in CLUSTER_EVENT_RETENTION_GROUPS.items():
+                hours = windows[option]
+                if hours < 0:
+                    continue
+                logger.debug(f'Cleaning up {option} cluster events with '
+                             f'retention {hours} hours.')
+                for event_type in types:
+                    cleanup_cluster_events_with_retention(hours, event_type)
             launch_retention_hours = skypilot_config.get_nested(
                 ('api_server', 'launch_attempt_retention_hours'),
                 DEFAULT_LAUNCH_ATTEMPT_RETENTION_HOURS)
@@ -4506,7 +4534,17 @@ def record_launch_milestone_for_cluster(cluster_name: str,
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         row = session.execute(
-            sqlalchemy.select(launch_attempt_table.c.attempt_id).where(
+            sqlalchemy.select(
+                launch_attempt_table.c.attempt_id,
+                # For the admission event below: the queue it waited in, the
+                # boundary the wait is measured from, and the name to file the
+                # event under -- which is the display name even when this was
+                # called with the on-cloud one.
+                launch_attempt_table.c.queue,
+                launch_attempt_table.c.instances_requested,
+                launch_attempt_table.c.provision_start,
+                launch_attempt_table.c.cluster_name,
+            ).where(
                 sqlalchemy.and_(
                     sqlalchemy.or_(
                         launch_attempt_table.c.cluster_name == cluster_name,
@@ -4520,12 +4558,62 @@ def record_launch_milestone_for_cluster(cluster_name: str,
         if row is None:
             return
         column = launch_attempt_table.c[milestone.value]
-        session.execute(launch_attempt_table.update().where(
+        result = session.execute(launch_attempt_table.update().where(
             sqlalchemy.and_(
                 launch_attempt_table.c.attempt_id == row[0],
                 column.is_(None),
             )).values({column: timestamp}))
         session.commit()
+        stamped = bool(result.rowcount)
+
+    # Outside the session: add_cluster_event opens its own, and an event
+    # written before the commit above could outlive a rolled-back timestamp.
+    #
+    # Gated on `stamped`, which is what makes this emit-once. The UPDATE is
+    # conditional on the column being NULL, and a launch that parks on an
+    # external condition resumes into the *same* open row -- so the second
+    # call matches nothing, and cannot announce the same admission twice.
+    if stamped and milestone == LaunchMilestone.ADMITTED:
+        _record_admission_event(row, timestamp)
+
+
+def _record_admission_event(attempt: Any, admitted_at: float) -> None:
+    """Note in the cluster's event log that a queued launch was admitted.
+
+    The event table already says a launch is *waiting* on a queue -- with the
+    queue's name and the position in it -- and never says when that stopped.
+    For a gated job the admission wait is routinely most of the start-up, so
+    its end is the one boundary a reader cannot otherwise place.
+
+    The duration comes from `launch_phases`, not from subtracting here: the
+    wait is measured from `instances_requested` where the cloud stamps it and
+    from `provision_start` where it does not, and a number computed by hand
+    would disagree with `t_queue_wait` on exactly the clouds that fallback
+    exists for.
+    """
+    waited_from = launch_phases.queue_wait_from(attempt)
+    if waited_from is None or attempt.cluster_name is None:
+        return
+    where = f' by queue {attempt.queue}' if attempt.queue else ''
+    waited = log_utils.readable_time_duration(waited_from,
+                                              admitted_at,
+                                              absolute=True)
+    add_cluster_event(
+        # The attempt's own display name, not the caller's argument: this is
+        # reachable with the on-cloud name (pod labels carry that one), and
+        # the event table is keyed by the display name at both ends -- so
+        # filing it under the caller's name would silently drop the event for
+        # every caller holding the other one.
+        attempt.cluster_name,
+        new_status=None,
+        reason=f'Admitted{where} after waiting {waited}',
+        # Not LAUNCH_PROGRESS: that type is consumed latest-wins as a managed
+        # job's `details` column, answering "what is this launch waiting on
+        # now". This row says a wait has ended, so it would sit there as a
+        # stale answer for the rest of the launch.
+        event_type=ClusterEventType.LAUNCH_MILESTONE,
+        transitioned_at=int(admitted_at),
+    )
 
 
 @_best_effort

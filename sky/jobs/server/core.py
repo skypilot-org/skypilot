@@ -2465,6 +2465,11 @@ def _job_events(
     event_types = [
         global_user_state.ClusterEventType.STATUS_CHANGE,
         global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+        # Boundaries that have been passed, with how long the phase they close
+        # took. Today that is the end of an admission wait, which is the one
+        # moment of a gated launch the rest of this list never marks -- and
+        # routinely most of the job's start-up.
+        global_user_state.ClusterEventType.LAUNCH_MILESTONE,
     ]
     # (event, task_id) so each merged row keeps the task it belongs to.
     cluster_events: List[Tuple[Dict[str, Any], Optional[int]]] = []
