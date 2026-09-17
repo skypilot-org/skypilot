@@ -136,11 +136,12 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         try:
             managed_job_utils.ha_recovery_for_consolidation_mode(
                 still_leader=self._lock_still_held)
-        except managed_job_scheduler.ControllerPoolNotOwnedError:
+        except managed_job_scheduler.ControllerPoolNotOwnedError as e:
             # Same rule as the pre-recovery check above: a step-down leaves the
             # gate file in place, because _suicide_on_lock_loss relies on it to
             # keep controllers gated through the shutdown drain. Every other
             # outcome unlinks it, as before.
+            logger.error(f'Consolidation leadership lost during recovery: {e}')
             stepped_down = True
         finally:
             if not stepped_down:

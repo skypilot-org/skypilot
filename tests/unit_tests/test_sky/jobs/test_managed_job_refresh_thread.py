@@ -420,17 +420,23 @@ class TestBecomeLeaderOrdering:
         lock.is_session_alive.return_value = True
         thread._lock = lock
 
-        lost = mjrt.managed_job_scheduler.ControllerPoolNotOwnedError('lost')
+        lost = mjrt.managed_job_scheduler.ControllerPoolNotOwnedError(
+            'Stopped owning the controller pool after starting 8 controller(s)')
         with mock.patch.object(mjrt.time, 'sleep'), \
                 mock.patch.object(mjrt.managed_job_utils,
                                   'ha_recovery_for_consolidation_mode',
                                   side_effect=lost), \
+                mock.patch.object(mjrt, 'logger') as log, \
                 mock.patch.object(mjrt.ManagedJobRefreshDaemonThread,
                                   '_suicide_on_lock_loss') as suicide:
             thread._become_leader_and_run()
 
         suicide.assert_called_once()
         assert signal_file.exists()
+        # How far the pool got before the abort is the operator's only clue to
+        # how many controllers this replica left behind; it must reach the log.
+        assert any('after starting 8 controller(s)' in str(c)
+                   for c in log.error.call_args_list)
 
     def test_recovery_gets_the_leadership_probe(self, tmp_path, monkeypatch):
         """Recovery starts the controller pool, which spans tens of seconds.
