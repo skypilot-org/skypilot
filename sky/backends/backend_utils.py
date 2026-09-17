@@ -4535,11 +4535,19 @@ def get_endpoints(cluster: str,
                              f'for {cluster!r} on {cloud}.') from None
 
     config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
+    provider_config = config['provider']
+    # Mirror CloudVmRayBackend._open_ports: the overrides that selected where
+    # the ports were opened must also be in scope when we resolve the
+    # endpoints they are reachable on.
+    cluster_config_overrides = (
+        handle.launched_resources.cluster_config_overrides)
+    if cluster_config_overrides:
+        provider_config['cluster_config_overrides'] = cluster_config_overrides
     port_details = provision_lib.query_ports(repr(cloud),
                                              handle.cluster_name_on_cloud,
                                              handle.launched_resources.ports,
                                              head_ip=handle.head_ip,
-                                             provider_config=config['provider'])
+                                             provider_config=provider_config)
 
     launched_resources = handle.launched_resources.assert_launchable()
     # Validation before returning the endpoints
