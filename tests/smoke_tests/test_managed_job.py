@@ -766,8 +766,8 @@ def test_managed_jobs_recovery_aws(aws_config_region):
 def test_managed_jobs_recovery_gcp():
     """Test managed job recovery."""
     name = smoke_tests_utils.get_cluster_name()
-    name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+    name_on_cloud = (
+        smoke_tests_utils.get_managed_job_cluster_name_prefix_on_gcp(name))
     zone = 'us-east4-b'
     query_cmd = (
         f'gcloud compute instances list --filter='
@@ -1172,10 +1172,11 @@ def test_managed_jobs_recovery_multi_node_aws(aws_config_region):
 def test_managed_jobs_recovery_multi_node_gcp():
     """Test managed job recovery."""
     name = smoke_tests_utils.get_cluster_name()
-    name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+    name_on_cloud = (
+        smoke_tests_utils.get_managed_job_cluster_name_prefix_on_gcp(name))
     zone = 'us-central1-a'
-    # Use ':' to match as the cluster name will contain the suffix with job id
+    # ':' is a prefix match; the cluster name on GCP is the truncated job
+    # name plus hashes (see get_managed_job_cluster_name_prefix_on_gcp).
     query_cmd = (
         f'gcloud compute instances list --filter='
         f'"(labels.ray-cluster-name:{name_on_cloud} AND '
@@ -1321,8 +1322,8 @@ def test_managed_jobs_cancellation_gcp():
     # Reduce the name length further to avoid cluster name to be truncated twice
     # after adding the suffix '-3'.
     name_3 = name.replace('-jobs', '-j') + '-3'
-    name_3_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name_3, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+    name_3_on_cloud = (
+        smoke_tests_utils.get_managed_job_cluster_name_prefix_on_gcp(name_3))
     zone = 'us-west3-b'
     query_state_cmd = (
         'gcloud compute instances list '
