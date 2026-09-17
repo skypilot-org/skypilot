@@ -115,9 +115,14 @@ def test_an_attempt_with_no_boundary_says_nothing(events):
 
 
 def test_the_queue_name_is_optional(events):
-    """`queue` is written by the scheduler plugin separately from the
-    admission, so it can be absent while the admission is not. The row is
-    still worth writing -- the wait is the number, the queue is the detail."""
+    """A short gated wait is admitted before anything records its queue.
+
+    The queue name comes from the scheduler integration's throttled polls; the
+    admission has an extra unthrottled backstop that exists for exactly the
+    case where no poll ran after admission -- which is also the case where no
+    poll recorded the queue. So this is a real path, not defensive coding, and
+    the row is still worth writing: the wait is the number a reader cannot
+    reconstruct, the queue is the detail."""
     global_user_state._record_admission_event(_attempt(queue=None), 146.57)
 
     assert len(events) == 1
