@@ -724,6 +724,56 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     _kill_requests(request_ids)
 
 
+def supersede_cluster_requests(cluster_name: str, request_name: str,
+                               new_request: Request) -> List[str]:
+    """Cancel active requests on a cluster that a newer request supersedes.
+
+    A rival is an active request on the same cluster with the same name that
+    is strictly older than ``new_request`` by ``(created_at, request_id)``
+    order. The strict older-than predicate keeps concurrent schedules safe:
+    the newest request always wins, and two rivals never cancel each other.
+    A request retried by re-enqueueing the same row never supersedes itself.
+
+    Best-effort: any failure is logged and swallowed, never raised, so a
+    failed supersede cannot block the new request.
+
+    Args:
+        cluster_name: the name of the cluster.
+        request_name: the full request name to supersede, e.g. ``sky.launch``.
+        new_request: the request that supersedes older rivals.
+
+    Returns:
+        The request ids that were cancelled.
+    """
+    try:
+        storage = request_storage.get_request_backend()
+        rivals = storage.query_requests(
+            req_filter=RequestTaskFilter(status=RequestStatus.active_statuses(),
+                                         cluster_names=[cluster_name],
+                                         include_request_names=[request_name],
+                                         fields=['request_id', 'created_at']))
+        new_key = (new_request.created_at, new_request.request_id)
+        older_ids = [
+            rival.request_id
+            for rival in rivals
+            if rival.request_id != new_request.request_id and
+            (rival.created_at, rival.request_id) < new_key
+        ]
+        if not older_ids:
+            return []
+        cancelled = _kill_requests(older_ids)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(
+            f'Failed to supersede older {request_name} requests for cluster '
+            f'{cluster_name}: {common_utils.format_exception(e)}')
+        return []
+    for request_id in cancelled:
+        logger.info(f'Superseded {request_name} request {request_id} for '
+                    f'cluster {cluster_name} (replaced by '
+                    f'{new_request.request_id})')
+    return cancelled
+
+
 def kill_requests(request_ids: Optional[List[str]] = None,
                   user_id: Optional[str] = None) -> List[str]:
     """Kill requests with a given request ID prefix."""
