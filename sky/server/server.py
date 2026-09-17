@@ -3809,9 +3809,11 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
                 break
             logger.debug(f'srun stderr: {line.decode().rstrip()}')
 
-    stderr_task = None
-    if env_options.Options.SHOW_DEBUG_INFO.get():
-        stderr_task = asyncio.create_task(log_stderr())
+    # Drain stderr for the life of the session, not only under SKYPILOT_DEBUG:
+    # the reader empties the OS pipe as soon as srun writes, so an unconsumed
+    # stderr grows the buffer it feeds instead of filling the pipe. `logger`
+    # drops the lines itself when debug logging is off.
+    stderr_task = asyncio.create_task(log_stderr())
     conn_gauge = metrics_utils.SKY_APISERVER_WEBSOCKET_CONNECTIONS.labels(
         pid=os.getpid())
     ssh_failed = False
@@ -3854,8 +3856,6 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
                          'ssh websocket connection was closed. Remaining '
                          f'output: {str(stdout_data)}')
             reason = 'SrunProcessExit'
-            metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
-                pid=os.getpid(), reason=reason).inc()
         else:
             proc.terminate()
             if ssh_failed:
@@ -3863,6 +3863,9 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
             else:
                 reason = 'ClientClosed'
 
+        # Counted once per session. The early-exit branch used to increment
+        # here as well as on its own, so one failed session reported two
+        # closures.
         metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
             pid=os.getpid(), reason=reason).inc()
 

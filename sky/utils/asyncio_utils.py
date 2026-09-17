@@ -287,6 +287,25 @@ class NonOwningPipeWriter:
         self._waiter = None
 
 
+@functools.lru_cache(maxsize=1)
+def _warn_once_if_spawn_still_forks() -> None:
+    """Warns when CPython cannot give us a fork-free spawn on this platform.
+
+    `subprocess` routes through `posix_spawn()` only where it considers it
+    safe (on Linux, glibc >= 2.24). Everywhere else the arguments below are
+    honoured but the spawn is still a fork, so the caller does not get what
+    this module's name promises and the stall is back. Not fatal -- a server
+    on such a platform should still run -- but it must not be silent.
+    """
+    if getattr(subprocess, '_USE_POSIX_SPAWN', False):
+        return
+    logger.warning(
+        'CPython will not use posix_spawn() on this platform, so subprocess '
+        'spawns fall back to fork(). On an event loop that serves requests, '
+        'each spawn then blocks the whole process for as long as the fork '
+        'takes.')
+
+
 def _resolve_executable(argv0: str) -> str:
     """Absolute path for argv[0]; required for the posix_spawn() fast path."""
     if os.path.isabs(argv0):
@@ -353,6 +372,7 @@ async def spawn_without_fork(
     Raises RuntimeError if argv[0] cannot be resolved to an absolute path,
     rather than silently falling back to a forking spawn.
     """
+    _warn_once_if_spawn_still_forks()
     executable = _resolve_executable(argv[0])
     args = [executable] + list(argv[1:])
 
