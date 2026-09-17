@@ -233,6 +233,24 @@ def test_an_on_cloud_caller_still_files_the_event_under_the_display_name(
     assert events[0]['cluster'] == 'train-7'
 
 
+# --- retention ----------------------------------------------------------------
+
+
+def test_every_event_type_has_a_retention_window():
+    """A type the sweep has no entry for is retained forever, silently.
+
+    `cleanup_cluster_events_with_retention` takes one type, so the daemon can
+    only sweep what it is told about. Nothing errors when a type is missing --
+    the rows just accumulate -- so this is what stands between a newly added
+    type and an unbounded table.
+    """
+    covered = set()
+    for types in global_user_state.CLUSTER_EVENT_RETENTION_GROUPS.values():
+        covered.update(types)
+
+    assert covered == set(global_user_state.ClusterEventType)
+
+
 # --- the API's tolerance of a type it does not know ---------------------------
 #
 # The cluster event list is rendered by a dashboard shipped separately from the

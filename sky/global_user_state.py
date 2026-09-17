@@ -281,6 +281,32 @@ class ClusterEventType(enum.Enum):
     LAUNCH_MILESTONE = 'LAUNCH_MILESTONE'
 
 
+# Which retention window each event type is swept under.
+#
+# The sweep is per type -- `cleanup_cluster_events_with_retention` takes one --
+# so a type with no entry here is never swept and its rows are retained
+# forever. That failure is silent: no error, no red test, just a table that
+# grows. Listing the types here rather than as calls in the daemon lets
+# `test_every_event_type_has_a_retention_window` assert the mapping covers the
+# enum, so the next type added cannot be missed the way LAUNCH_MILESTONE nearly
+# was.
+#
+# Keys are the config option each window is read from; see
+# `cluster_event_retention_daemon`.
+CLUSTER_EVENT_RETENTION_GROUPS: Dict[str, Tuple['ClusterEventType', ...]] = {
+    'cluster_event_retention_hours': (ClusterEventType.STATUS_CHANGE,),
+    # Short-lived observability, of no business-record value once the launch is
+    # over. LAUNCH_MILESTONE shares the window rather than the meaning: it is a
+    # record of a boundary, but only useful for as long as anyone is looking at
+    # that launch.
+    'cluster_debug_event_retention_hours': (
+        ClusterEventType.DEBUG,
+        ClusterEventType.LAUNCH_PROGRESS,
+        ClusterEventType.LAUNCH_MILESTONE,
+    ),
+    'cluster_terminal_event_retention_hours': (ClusterEventType.TERMINAL,),
+}
+
 # Prefix of the STATUS_CHANGE event reason recorded when a cluster is flipped
 # to INIT because a status refresh found it in an abnormal state -- e.g. a node
 # terminated/preempted, the ray cluster is unhealthy, or a pod is OOMKilled
@@ -1597,33 +1623,20 @@ async def cluster_event_retention_daemon():
         terminal_retention_hours = skypilot_config.get_nested(
             ('api_server', 'cluster_terminal_event_retention_hours'),
             TERMINAL_CLUSTER_EVENT_RETENTION_HOURS)
+        windows = {
+            'cluster_event_retention_hours': retention_hours,
+            'cluster_debug_event_retention_hours': debug_retention_hours,
+            'cluster_terminal_event_retention_hours': terminal_retention_hours,
+        }
         try:
-            if retention_hours >= 0:
-                logger.debug('Cleaning up cluster events with retention '
-                             f'{retention_hours} hours.')
-                cleanup_cluster_events_with_retention(
-                    retention_hours, ClusterEventType.STATUS_CHANGE)
-            if debug_retention_hours >= 0:
-                logger.debug('Cleaning up debug cluster events with retention '
-                             f'{debug_retention_hours} hours.')
-                cleanup_cluster_events_with_retention(debug_retention_hours,
-                                                      ClusterEventType.DEBUG)
-                # LAUNCH_PROGRESS shares debug retention semantics: short-lived
-                # observability info, no business-record value once the launch
-                # is over.
-                cleanup_cluster_events_with_retention(
-                    debug_retention_hours, ClusterEventType.LAUNCH_PROGRESS)
-                # So does LAUNCH_MILESTONE, and it needs its own call: this
-                # sweep is per type, not a generic one, so an event type with
-                # no branch here is retained forever.
-                cleanup_cluster_events_with_retention(
-                    debug_retention_hours, ClusterEventType.LAUNCH_MILESTONE)
-            if terminal_retention_hours >= 0:
-                logger.debug(
-                    'Cleaning up terminal cluster events with retention '
-                    f'{terminal_retention_hours} hours.')
-                cleanup_cluster_events_with_retention(terminal_retention_hours,
-                                                      ClusterEventType.TERMINAL)
+            for option, types in CLUSTER_EVENT_RETENTION_GROUPS.items():
+                hours = windows[option]
+                if hours < 0:
+                    continue
+                logger.debug(f'Cleaning up {option} cluster events with '
+                             f'retention {hours} hours.')
+                for event_type in types:
+                    cleanup_cluster_events_with_retention(hours, event_type)
             launch_retention_hours = skypilot_config.get_nested(
                 ('api_server', 'launch_attempt_retention_hours'),
                 DEFAULT_LAUNCH_ATTEMPT_RETENTION_HOURS)
