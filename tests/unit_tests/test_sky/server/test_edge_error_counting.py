@@ -457,6 +457,34 @@ def test_importing_the_middleware_module_publishes_the_handshake_series():
     assert {v for _, _, v in published} == {0.0}, published
 
 
+def test_the_handshake_counters_keep_their_exported_names():
+    """A metric name is an API, and renaming one fails silently.
+
+    Nothing in a rule or a dashboard errors when the series it reads stops
+    existing: a ratio guarded with `or 0 * <denominator>` -- the standard way
+    to write one that tolerates older servers -- reads zero instead, forever,
+    and the alert simply never fires again.
+
+    The three handshake counters had asymmetric protection before this test:
+    renaming attempts or accepts turned one test red, as a byproduct of the
+    pre-initialisation test reading published series by name, while renaming
+    the rejections counter left the whole suite green. It is not
+    pre-initialised, by design -- its `status` domain is open -- so it
+    inherited no name pin at all.
+    """
+    expected = {
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL: 'sky_apiserver_websocket_handshake_attempts_total',
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL: 'sky_apiserver_websocket_handshake_accepts_total',
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL: 'sky_apiserver_websocket_handshake_rejections_total',
+        metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL: 'sky_apiserver_request_rejections_total',
+    }
+    for counter, series in expected.items():
+        # The family name, plus the suffix the client library appends: what a
+        # PromQL rule actually types.
+        families = [family.name for family in counter.collect()]
+        assert families == [series[:-len('_total')]], (families, series)
+
+
 def test_the_bounded_path_labels_match_the_registered_websocket_routes():
     """`WEBSOCKET_ROUTE_PATHS` is load-bearing twice: it bounds the label and
     it decides which series are published at zero. A new ws route missing
