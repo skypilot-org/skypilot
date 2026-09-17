@@ -174,9 +174,6 @@ class TestPermissionService:
             constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
             rbac.RoleName.VIEWER.value)
 
-        # Verify policy was saved
-        mock_enforcer.save_policy.assert_called()
-
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.PermissionService._get_plugin_rbac_rules')
     @mock.patch('sky.users.rbac.get_workspace_policy_permissions')
@@ -239,9 +236,6 @@ class TestPermissionService:
 
         # Verify no new policies were added (since they already exist)
         mock_enforcer.add_policy.assert_not_called()
-        # save_policy should not be called if no updates were made
-        # (users already have roles, policies already exist)
-        mock_enforcer.save_policy.assert_not_called()
 
     def test_add_user_if_not_exists_new_user(self):
         """Test adding a new user that doesn't exist."""
@@ -297,7 +291,6 @@ class TestPermissionService:
             0, 'user1')
         mock_enforcer.add_grouping_policy.assert_called_once_with(
             'user1', 'admin')
-        mock_enforcer.save_policy.assert_called_once()
 
     @mock.patch('sky.users.permission._policy_lock')
     def test_update_role_no_existing_roles(self, mock_policy_lock):
@@ -317,10 +310,9 @@ class TestPermissionService:
 
         # Verify no removal was attempted (no existing role to remove)
         mock_enforcer.remove_grouping_policy.assert_not_called()
-        # Verify new role was added and policy saved
+        # Verify the new role was added
         mock_enforcer.add_grouping_policy.assert_called_once_with(
             'user1', 'user')
-        mock_enforcer.save_policy.assert_called_once()
 
     @mock.patch('sky.users.permission._policy_lock')
     def test_update_role_same_role(self, mock_policy_lock):
@@ -341,21 +333,25 @@ class TestPermissionService:
         # Verify no changes were made
         mock_enforcer.remove_grouping_policy.assert_not_called()
         mock_enforcer.add_grouping_policy.assert_not_called()
-        mock_enforcer.save_policy.assert_not_called()
 
     @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
-    def test_update_role_invalidates_cache_after_save(self, mock_policy_lock,
-                                                      mock_kv_cache):
-        """Test that update_role invalidates cache after save_policy."""
+    def test_update_role_invalidates_cache_after_the_write(
+            self, mock_policy_lock, mock_kv_cache):
+        """The cache must not be cleared before the new role is persisted.
+
+        Clearing first opens a window where a reader repopulates it from the
+        old role and the entry survives the update.
+        """
         mock_policy_lock.return_value.__enter__ = mock.Mock()
         mock_policy_lock.return_value.__exit__ = mock.Mock()
 
         call_order = []
         mock_enforcer = mock.Mock()
         mock_enforcer.get_roles_for_user.return_value = ['user']
-        mock_enforcer.save_policy.side_effect = (
-            lambda: call_order.append('save_policy'))
+        # Auto-save persists inside the mutator, so that is the write.
+        mock_enforcer.add_grouping_policy.side_effect = (
+            lambda *a: call_order.append('add_grouping_policy'))
         mock_kv_cache.delete_cache_entries_by_prefix_suffix.side_effect = (
             lambda *a, **kw: call_order.append('invalidate'))
 
@@ -365,12 +361,12 @@ class TestPermissionService:
 
         service.update_role('user1', 'admin')
 
-        # Verify cache invalidation was called after save_policy
+        # Verify cache invalidation was called after the write
         mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_called_once()
         call_kwargs = (
             mock_kv_cache.delete_cache_entries_by_prefix_suffix.call_args[1])
         assert 'user1' in call_kwargs['suffix']
-        assert call_order == ['save_policy', 'invalidate']
+        assert call_order == ['add_grouping_policy', 'invalidate']
 
     @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
@@ -395,7 +391,6 @@ class TestPermissionService:
 
         mock_enforcer.add_grouping_policy.assert_called_once_with(
             'user1', 'user')
-        mock_enforcer.save_policy.assert_called_once()
         # Cache must be invalidated even for first role assignment
         mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_called_once()
         call_kwargs = (
@@ -625,7 +620,6 @@ class TestPermissionService:
         # Verify policies were added for each user
         mock_enforcer.add_policy.assert_any_call('user1', 'test-workspace', '*')
         mock_enforcer.add_policy.assert_any_call('user2', 'test-workspace', '*')
-        mock_enforcer.save_policy.assert_called_once()
 
     @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
@@ -690,7 +684,6 @@ class TestPermissionService:
         # Verify enforcer policy removal
         mock_enforcer.remove_filtered_policy.assert_called_once_with(
             1, 'test-workspace')
-        mock_enforcer.save_policy.assert_called_once()
         # Verify cache invalidation was called
         mock_kv_cache.delete_cache_entries_by_prefix.assert_called_once()
         prefix_arg = mock_kv_cache.delete_cache_entries_by_prefix.call_args[0][
@@ -751,7 +744,6 @@ class TestPermissionService:
 
             mock_enforcer.remove_filtered_grouping_policy.assert_called_once_with(
                 0, 'user1')
-            mock_enforcer.save_policy.assert_called_once()
             # Verify cache invalidation
             mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_called_once(
             )
@@ -777,7 +769,6 @@ class TestPermissionService:
 
             mock_enforcer.remove_filtered_grouping_policy.assert_called_once_with(
                 0, 'user2')
-            mock_enforcer.save_policy.assert_not_called()
             # No cache invalidation for user without role (early return)
             mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called(
             )
@@ -905,7 +896,6 @@ class TestPermissionService:
 
         mock_enforcer = mock.Mock()
         mock_enforcer.add_grouping_policy.return_value = True
-        mock_enforcer.save_policy.return_value = True
 
         service = permission.PermissionService()
         service.enforcer = mock_enforcer
@@ -919,8 +909,6 @@ class TestPermissionService:
         assert call_args.password == 'password123'
         # Verify admin role was assigned
         mock_enforcer.add_grouping_policy.assert_called_once()
-        # Verify policy was saved
-        mock_enforcer.save_policy.assert_called_once()
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.global_user_state.get_user')
@@ -948,7 +936,6 @@ class TestPermissionService:
 
         # Verify no new user was created and no role was assigned
         mock_enforcer.add_grouping_policy.assert_not_called()
-        mock_enforcer.save_policy.assert_not_called()
 
     @mock.patch('sky.users.permission._policy_lock')
     def test_maybe_initialize_basic_auth_user_no_env_var(
@@ -970,7 +957,6 @@ class TestPermissionService:
 
         # Verify nothing was called
         mock_enforcer.add_grouping_policy.assert_not_called()
-        mock_enforcer.save_policy.assert_not_called()
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.PermissionService._get_plugin_rbac_rules')
@@ -1098,10 +1084,10 @@ class TestPermissionService:
     @mock.patch('sky.users.rbac.get_workspace_policy_permissions')
     @mock.patch('sky.users.rbac.get_role_permissions')
     @mock.patch('sky.global_user_state.get_all_users')
-    def test_maybe_initialize_policies_no_save_when_no_changes(
+    def test_maybe_initialize_policies_writes_nothing_when_in_sync(
             self, mock_get_users, mock_get_role_perms, mock_get_workspace_perms,
             mock_get_plugin_rules, mock_policy_lock, mock_users):
-        """Test that save_policy is not called when no changes are made."""
+        """A boot that finds the policy already correct must not write."""
         mock_policy_lock.return_value.__enter__ = mock.Mock()
         mock_policy_lock.return_value.__exit__ = mock.Mock()
 
@@ -1142,8 +1128,6 @@ class TestPermissionService:
         # Verify no policies were added or removed
         mock_enforcer.add_policy.assert_not_called()
         mock_enforcer.remove_policy.assert_not_called()
-        # Verify save_policy was NOT called since no changes were made
-        mock_enforcer.save_policy.assert_not_called()
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.PermissionService._get_plugin_rbac_rules')
@@ -1201,8 +1185,6 @@ class TestPermissionService:
         # Verify redundant policy was removed
         mock_enforcer.remove_policy.assert_called_once_with(
             'user-to-be-removed', 'some-workspace', '*')
-        # Verify save_policy was called
-        mock_enforcer.save_policy.assert_called()
 
     def test_cache_key_format(self):
         """Test that cache keys use the expected prefix and separator."""
@@ -1505,7 +1487,6 @@ class TestPermissionServiceMultiProcess:
         # Mock enforcer
         mock_enforcer = mock.Mock()
         mock_enforcer.add_policy.return_value = True
-        mock_enforcer.save_policy.return_value = True
 
         service = permission.PermissionService()
         service.enforcer = mock_enforcer
@@ -1682,7 +1663,6 @@ class TestResyncWorkspacePoliciesForNewUser:
         mock_reload.assert_called_once()
         mock_enforcer.add_policy.assert_called_once_with(
             'u-alice', 'private-ws', '*')
-        mock_enforcer.save_policy.assert_called_once()
         # The user's cached (stale) denial must be invalidated.
         mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_called_once()
         call_kwargs = (
@@ -1722,7 +1702,6 @@ class TestResyncWorkspacePoliciesForNewUser:
         mock_reload.assert_called_once()
         mock_enforcer.add_policy.assert_called_once_with(
             'u-alice', 'private-ws', '*')
-        mock_enforcer.save_policy.assert_called_once()
 
     @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
@@ -1752,7 +1731,6 @@ class TestResyncWorkspacePoliciesForNewUser:
         service.resync_workspace_policies_for_new_user('u-bob')
 
         mock_enforcer.add_policy.assert_not_called()
-        mock_enforcer.save_policy.assert_not_called()
         mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
 
     @mock.patch('sky.users.permission.kv_cache')
@@ -1782,7 +1760,6 @@ class TestResyncWorkspacePoliciesForNewUser:
         service.resync_workspace_policies_for_new_user('u-alice')
 
         mock_enforcer.add_policy.assert_not_called()
-        mock_enforcer.save_policy.assert_not_called()
 
     @mock.patch('sky.users.permission.skypilot_config.reload_config')
     @mock.patch('sky.users.permission.skypilot_config.get_skypilot_config_lock')
@@ -1818,8 +1795,7 @@ class TestResyncWorkspacePoliciesForNewUser:
         mock_reload.assert_called_once()
         mock_enforcer.add_policy.assert_called_once_with(
             'u-alice', 'private-ws', '*')
-        # Nothing changed, so no persist and no invalidation.
-        mock_enforcer.save_policy.assert_not_called()
+        # Nothing changed, so no invalidation.
         mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
 
     @mock.patch('sky.users.permission.skypilot_config.reload_config')
@@ -1871,7 +1847,6 @@ class TestResyncWorkspacePoliciesForNewUser:
         mock_reload.assert_called_once()
         assert mock_get_nested.call_count == 2
         mock_enforcer.add_policy.assert_not_called()
-        mock_enforcer.save_policy.assert_not_called()
         mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
 
     @mock.patch('sky.users.permission.skypilot_config.reload_config')
@@ -2216,8 +2191,9 @@ class TestStalePolicyWrites:
 
         worker_b.remove_workspace_policy('ws_victim')
 
-        # save_policy() rewrites the whole table from the caller's model, so
-        # without the reload this also erases everything A just wrote.
+        # Without the reload, B's `remove_filtered_policy` runs against a
+        # model that predates A's writes -- and casbin skips the adapter for
+        # rows its model does not have, so B would also report success.
         worker_a.enforcer.load_policy()
         remaining = worker_a.enforcer.get_policy()
         assert ['alice', 'ws_keep', '*'] in remaining
@@ -2355,7 +2331,6 @@ class TestRolelessPrincipalIsDenied:
         worker, writer = policy_db(), policy_db()
         worker.enforcer.load_policy()  # stale from here on
         writer.enforcer.add_grouping_policy('fresh_admin', 'admin')
-        writer.enforcer.save_policy()
 
         assert not worker.check_endpoint_permission('fresh_admin',
                                                     '/users/export', 'GET')
@@ -2393,7 +2368,6 @@ class TestRoleSeedMissing:
         worker, writer = policy_db(), policy_db()
         worker.enforcer.load_policy()
         writer.enforcer.add_grouping_policy('elsewhere', 'user')
-        writer.enforcer.save_policy()
 
         assert not worker.role_seed_missing('elsewhere')
 
@@ -2902,3 +2876,94 @@ class TestDefaultRoleCasing:
         with mock.patch('sky.users.rbac.skypilot_config.get_nested',
                         return_value=configured):
             assert rbac.get_default_role() == expected
+
+
+class TestWritesPersistWithoutSavePolicy:
+    """Every write path must reach the database on the mutator alone.
+
+    Casbin's auto-save calls the adapter from inside `add_policy` /
+    `remove_filtered_policy` / etc., so the `save_policy()` rewrite that used to
+    follow each mutation was persisting what had already been persisted. These
+    read back through a *second* service over the same database -- what one
+    service holds in memory proves nothing about what reached storage.
+    """
+
+    @staticmethod
+    def _reader(policy_db):
+        reader = policy_db()
+        reader.enforcer.load_policy()
+        return reader
+
+    def test_a_role_assignment_persists(self, policy_db):
+        writer = policy_db()
+        writer.enforcer.load_policy()
+        writer.update_role('u1', 'admin')
+
+        assert _grouping_rows(self._reader(policy_db), 'u1') == ['admin']
+
+    def test_a_role_replacement_persists(self, policy_db):
+        writer = policy_db()
+        writer.enforcer.load_policy()
+        writer.update_role('u1', 'admin')
+        writer.update_role('u1', 'viewer')
+
+        # Both halves have to have landed: the removal as well as the add, or
+        # the user keeps admin alongside viewer and admin wins.
+        assert _grouping_rows(self._reader(policy_db), 'u1') == ['viewer']
+
+    def test_a_workspace_grant_persists(self, policy_db):
+        writer = policy_db()
+        writer.enforcer.load_policy()
+        writer.add_workspace_policy('ws', ['u1'])
+
+        grants = self._reader(policy_db).enforcer.get_policy()
+        assert ['u1', 'ws', '*'] in grants
+
+    def test_a_workspace_removal_persists(self, policy_db):
+        writer = policy_db()
+        writer.enforcer.load_policy()
+        writer.add_workspace_policy('ws', ['u1'])
+        # Confirm it landed before removing it. Otherwise a broken *add* also
+        # satisfies the assertion below, and the test passes for the one reason
+        # it exists to rule out.
+        before = self._reader(policy_db).enforcer.get_policy()
+        assert ['u1', 'ws', '*'] in before
+
+        writer.remove_workspace_policy('ws')
+
+        after = self._reader(policy_db).enforcer.get_policy()
+        assert ['u1', 'ws', '*'] not in after
+
+    def test_a_user_deletion_persists(self, policy_db):
+        writer = policy_db()
+        writer.enforcer.load_policy()
+        writer.update_role('u1', 'admin')
+        writer.add_workspace_policy('ws', ['u1'])
+        seeded = self._reader(policy_db)
+        assert _grouping_rows(seeded, 'u1') == ['admin']
+        assert ['u1', 'ws', '*'] in seeded.enforcer.get_policy()
+
+        writer.delete_user('u1')
+
+        reader = self._reader(policy_db)
+        assert _grouping_rows(reader, 'u1') == []
+        assert ['u1', 'ws', '*'] not in reader.enforcer.get_policy()
+
+    def test_no_write_path_calls_save_policy(self, policy_db):
+        """The rewrite is gone, not merely unnecessary.
+
+        Without this, someone re-adding one `save_policy()` for symmetry would
+        pass every test above -- they assert the row is there, and a rewrite
+        also puts it there.
+        """
+        writer = policy_db()
+        writer.enforcer.load_policy()
+        with mock.patch.object(writer.enforcer,
+                               'save_policy',
+                               side_effect=AssertionError(
+                                   'save_policy() is back on a write path')):
+            writer.update_role('u1', 'admin')
+            writer.add_workspace_policy('ws', ['u1'])
+            writer.update_workspace_policy('ws', ['u2'])
+            writer.remove_workspace_policy('ws')
+            writer.delete_user('u1')

@@ -15,10 +15,12 @@ from sky.adaptors import kubernetes
 from sky.backends import cloud_vm_ray_backend
 from sky.provision import common as provision_common
 from sky.provision.kubernetes import config as config_lib
+from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import instance
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.instance import logger
 from sky.utils import subprocess_utils
+from sky.utils import volume as volume_utils
 
 
 def _remove_colorama_escape_codes(error_output):
@@ -128,6 +130,60 @@ def test_create_pods_raises_on_more_pods_than_requested(monkeypatch):
     config = _make_provision_config(count=2)
     with pytest.raises(RuntimeError, match='resource leak'):
         instance._create_pods('us', cluster_on_cloud, cluster_on_cloud, config)
+
+
+def test_inject_ephemeral_volumes():
+    pod_spec = {
+        'spec': {
+            'containers': [{
+                'name': 'ray-node',
+                'volumeMounts': [{
+                    'name': 'config',
+                    'mountPath': '/etc/config',
+                }],
+            }],
+            'volumes': [{
+                'name': 'config',
+                'configMap': {
+                    'name': 'config',
+                },
+            }],
+        },
+    }
+    volume_info = volume_utils.VolumeInfo(
+        name='scratch',
+        path='/scratch',
+        volume_name_on_cloud='scratch-pvc',
+        volume_id_on_cloud='pvc-id',
+    )
+
+    instance.inject_ephemeral_volumes(pod_spec, [volume_info])
+    instance.inject_ephemeral_volumes(pod_spec, [volume_info])
+
+    assert pod_spec['spec']['volumes'] == [
+        {
+            'name': 'config',
+            'configMap': {
+                'name': 'config',
+            },
+        },
+        {
+            'name': 'scratch',
+            'persistentVolumeClaim': {
+                'claimName': 'scratch-pvc',
+            },
+        },
+    ]
+    assert pod_spec['spec']['containers'][0]['volumeMounts'] == [
+        {
+            'name': 'config',
+            'mountPath': '/etc/config',
+        },
+        {
+            'name': 'scratch',
+            'mountPath': '/scratch',
+        },
+    ]
 
 
 def test_out_of_cpus(monkeypatch):
@@ -1835,6 +1891,46 @@ class TestWaitForPodsToScheduleQueueGating:
         ]
         assert len(queue_events) == 1
 
+    def test_admission_is_recorded_as_launch_progress(self, monkeypatch):
+        """Once the gates come off, a LAUNCH_PROGRESS event records the
+        admission. The serve/pool controller surfaces a replica's latest
+        LAUNCH_PROGRESS event as its status detail, so without this event an
+        admitted replica would keep reading 'waiting for queue admission'
+        until it is scheduled."""
+        cluster = 'my-cluster'
+        gated = self._add_gate(self._make_pending_pod('pod-0', cluster))
+        ungated = self._make_pending_pod('pod-0', cluster)
+        scheduled = self._make_pending_pod('pod-0', cluster)
+        scheduled.status.phase = 'Running'
+        _, _, add_event = self._setup(monkeypatch,
+                                      pod_timeline=[(0.0, gated),
+                                                    (20.0, ungated),
+                                                    (40.0, scheduled)])
+
+        node = self._make_node('pod-0', cluster)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        instance._wait_for_pods_to_schedule(
+            namespace='ns',
+            context='test-context',
+            new_nodes=[node],
+            timeout=60,
+            cluster_name='cn',
+            create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        reasons = [
+            call.kwargs.get('reason', '') for call in add_event.call_args_list
+        ]
+        queue_idx = [
+            i for i, r in enumerate(reasons)
+            if 'waiting for queue admission' in r
+        ]
+        admitted_idx = [
+            i for i, r in enumerate(reasons) if 'admitted by queue' in r
+        ]
+        assert len(queue_idx) == 1 and len(admitted_idx) == 1, reasons
+        assert queue_idx[0] < admitted_idx[0], reasons
+
     def test_spinner_message_updates_while_gated(self, monkeypatch):
         """The per-poll spinner update must keep running while pods are
         gated. The gated branch sets a status message once, on entry; the
@@ -1898,6 +1994,35 @@ class TestWaitForPodsToScheduleQueueGating:
             f'provision_timeout must start at admission (t=50) and expire '
             f'at t>=55, but the loop exited at {clock.now}s.')
         assert raise_errors.called
+
+    def test_admission_timeout_from_cluster_yaml_wins(self, monkeypatch):
+        """The provider config carries the admission timeout resolved at
+        launch time (task config overrides, workspace scope); when present
+        it takes precedence over the request config lookup."""
+        cluster = 'my-cluster'
+        gated = self._add_gate(self._make_pending_pod('pod-0', cluster))
+        # Request config would allow a long wait; the cluster YAML bounds it
+        # to 20s.
+        clock, _, _ = self._setup(monkeypatch,
+                                  pod_timeline=[(0.0, gated)],
+                                  admission_timeout=10_000)
+
+        node = self._make_node('pod-0', cluster)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError, match='queue admission'):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=5,
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc),
+                admission_timeout=20)
+
+        assert 20.0 <= clock.now < 100.0, (
+            f'Expected the 20s cluster-YAML bound to apply, but the loop '
+            f'exited at {clock.now}s.')
 
     def test_admission_wait_is_bounded(self, monkeypatch):
         """A pod gated forever fails with a queue-admission error once the
@@ -3600,7 +3725,6 @@ class TestStallExemptionHelpers:
         'FailedCreatePodSandBox',
         'CrashLoopBackOff',
         'OOMKilled',
-        'pod initialization',
     ])
     def test_non_exempt_reasons(self, reason):
         assert not instance._reason_is_exempt_from_stall(reason)
@@ -3612,11 +3736,6 @@ class TestStallExemptionHelpers:
                 in instance._STALL_EXEMPT_PENDING_REASONS)
         assert instance._PENDING_REASON_NORMAL_EVENT_ALLOWLIST.issubset(
             instance._STALL_EXEMPT_PENDING_REASONS)
-        # 'pod initialization' must stay clear of the init-container prefix:
-        # it was previously labelled 'init container running', which the
-        # prefix match swept up and left that hang unbounded.
-        assert not instance._POD_INITIALIZATION_REASON.startswith(
-            instance._INIT_CONTAINER_REASON_PREFIX)
 
     def test_mount_failures_keep_their_own_window(self):
         assert (instance._stall_timeout_seconds('FailedMount') ==
@@ -3645,8 +3764,9 @@ class TestWaitForPodsToRunStallEscalation:
         `init` selects the init phase the pod reports, mirroring the three
         states _check_init_containers distinguishes: 'running' (an init
         container is doing its own work), 'starting' (the kubelet has not
-        started it yet) and 'done' (they have all terminated successfully while
-        the kubelet has not moved on). None reports plain ContainerCreating.
+        started it yet) and 'done' (they have all terminated successfully and
+        the kubelet is creating the main containers, which it keeps reporting
+        as PodInitializing). None reports plain ContainerCreating.
         """
         from sky.provision import constants as prov_constants
         assert init in (None, 'running', 'starting', 'done'), init
@@ -3839,19 +3959,42 @@ class TestWaitForPodsToRunStallEscalation:
                        pending_reasons=[None],
                        healthy_after=200)
 
-    def test_stuck_after_init_containers_finished_raises(self, monkeypatch):
+    @pytest.mark.parametrize('pending_reason', [
+        pytest.param(None, id='no-event-falls-back-to-container-creation'),
+        pytest.param('Pulling', id='live-pulling-event'),
+    ])
+    def test_main_container_pull_after_init_never_raises(
+            self, monkeypatch, pending_reason):
         """PodInitializing with every init container already terminated
-        successfully: the init phase is over and the kubelet never started the
-        main containers. Nothing is legitimately slow here, so this must be
-        bounded -- it was previously labelled 'init container running', which
-        the prefix-based exemption swept up, leaving the launch hung forever.
+        successfully is not a stuck pod. Whenever a pod has init containers the
+        kubelet reports its main containers as PodInitializing, not
+        ContainerCreating, for the whole of their own image pull, so this state
+        gets the ContainerCreating handling: a live 'Pulling' event or the
+        'container creation' fallback, both exempt, for however long the pull
+        takes (200 iterations at 301s is ~16 simulated hours). It used to carry
+        its own non-exempt reason and fail the launch after 10 minutes, which
+        cut off every main image that took longer than that to pull.
+        """
+        self._run_wait(monkeypatch,
+                       pod=self._make_pending_pod(init='done'),
+                       pending_reasons=[pending_reason],
+                       healthy_after=200)
+
+    def test_a_live_warning_bounds_the_main_container_after_init(
+            self, monkeypatch):
+        """What the exemption gives up on a quiet pod it keeps for a failing
+        one: a kubelet Warning that leaves the main containers in
+        PodInitializing after init (here: a sandbox that cannot be created)
+        reaches the events tier and escalates exactly as it does for a pod
+        without init containers.
         """
         with pytest.raises(config_lib.KubernetesError) as exc_info:
             self._run_wait(monkeypatch,
                            pod=self._make_pending_pod(init='done'),
-                           pending_reasons=[None])
+                           pending_reasons=['FailedCreatePodSandBox'])
         msg = str(exc_info.value)
-        assert instance._POD_INITIALIZATION_REASON in msg
+        assert 'FailedCreatePodSandBox' in msg
+        assert self._EVENT_MSG in msg
         assert 'pod-0' in msg
 
     @pytest.mark.parametrize('warning_at,escalates', [
@@ -4348,9 +4491,9 @@ class TestInspectPodStatusInitContainerReason:
             _make_init_status_with_name(name='init-copy-home',
                                         terminated_exit_code=0),
         ],
-                     'pod initialization',
-                     False,
-                     id='init-done-kubelet-has-not-moved-on'),
+                     'container creation',
+                     True,
+                     id='init-done-main-containers-being-created'),
         pytest.param(lambda: [
             _make_init_status_with_name(name='init-setup-ssh',
                                         terminated_exit_code=0),
@@ -4381,13 +4524,15 @@ class TestInspectPodStatusInitContainerReason:
     def test_init_phase_states_are_distinguished(self, monkeypatch,
                                                  make_init_statuses,
                                                  expected_reason, exempt):
-        """_check_init_containers reports three different things, and the
-        no-progress deadline turns on telling them apart: an init container
-        running (arbitrary user work), one the kubelet is still creating (most
-        often pulling an image of its own), and neither -- the init phase is
-        over and the kubelet has not moved on to the main containers. Only the
-        last is bounded; it was previously labelled 'init container running'
-        too, and the prefix-based exemption swept it up.
+        """_check_init_containers reports three different things: an init
+        container running (arbitrary user work), one the kubelet is still
+        creating (most often pulling an image of its own), and neither -- the
+        init phase is over and the kubelet is creating the main containers,
+        which it keeps reporting as PodInitializing for their own image pull.
+        The first two get an init-container label; the last falls through to
+        the ContainerCreating handling and, with no event to consult here, the
+        'container creation' fallback. All three are exempt from the
+        no-progress deadline.
         """
         monkeypatch.setattr(instance, '_get_pod_pending_reason',
                             lambda *a, **kw: None)
@@ -4901,3 +5046,153 @@ class TestGetMissingNodeReason:
 
     def test_unexpected_error_is_swallowed(self):
         assert self._reason({'node-1': RuntimeError('boom')}) is None
+
+
+def _cluster_info_with(provider_config):
+    """A ClusterInfo with one head pod, enough to drive get_command_runners."""
+    return provision_common.ClusterInfo(
+        instances={
+            'pod-head': [
+                provision_common.InstanceInfo(instance_id='pod-head',
+                                              internal_ip='10.0.0.1',
+                                              external_ip=None,
+                                              tags={})
+            ]
+        },
+        head_instance_id='pod-head',
+        provider_name='kubernetes',
+        provider_config=provider_config,
+    )
+
+
+def test_command_runners_target_the_execution_context():
+    """`kubectl exec` has to reach the pod that is actually running, so a
+    recorded placement -- not the context the cluster was submitted to --
+    is what the runners address."""
+    runners = instance.get_command_runners(
+        _cluster_info_with({
+            'context': 'ctx-manager',
+            'namespace': 'ns',
+            k8s_constants.PROVIDER_EXECUTION_CONTEXT_KEY: 'ctx-worker',
+        }))
+    assert [r.context for r in runners] == ['ctx-worker']
+
+
+def test_command_runners_fall_back_to_the_submitting_context():
+    """With nothing recorded -- every cluster today -- the runners address
+    the context the cluster was provisioned against, exactly as before."""
+    runners = instance.get_command_runners(
+        _cluster_info_with({
+            'context': 'ctx-a',
+            'namespace': 'ns',
+        }))
+    assert [r.context for r in runners] == ['ctx-a']
+
+
+def _mock_core_api(monkeypatch):
+    """Point instance.py's core_api() at one mock, and skip sleeps."""
+    api = mock.MagicMock()
+    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                        lambda *a, **kw: api)
+    monkeypatch.setattr('time.sleep', lambda *args: None)
+    return api
+
+
+def _not_found():
+    return kubernetes.api_exception()(status=404)
+
+
+@pytest.mark.parametrize(('resource_claims', 'expected'), [
+    ([mock.MagicMock()], True),
+    ([], False),
+    (None, False),
+])
+def test_pod_has_resource_claims(resource_claims, expected):
+    pod = mock.MagicMock()
+    pod.spec.resource_claims = resource_claims
+    assert instance._pod_has_resource_claims(pod) is expected
+
+
+def test_pod_has_resource_claims_without_dra_aware_client():
+    """Older kubernetes clients do not model spec.resourceClaims at all."""
+    pod = mock.MagicMock()
+    del pod.spec.resource_claims
+    assert instance._pod_has_resource_claims(pod) is False
+
+
+def test_delete_pod_force_deletes_pod_without_claims(monkeypatch):
+    api = _mock_core_api(monkeypatch)
+
+    instance._delete_pod('default', 'ctx', 'pod', graceful=False)
+
+    api.delete_namespaced_pod.assert_called_once()
+    assert api.delete_namespaced_pod.call_args.kwargs[
+        'grace_period_seconds'] == 0
+    # No point waiting for a pod we just removed from the API server.
+    api.read_namespaced_pod.assert_not_called()
+
+
+def test_delete_pod_graceful_waits_for_pod_to_go_away(monkeypatch):
+    api = _mock_core_api(monkeypatch)
+    # Still there for the first two polls, gone on the third.
+    api.read_namespaced_pod.side_effect = [
+        mock.MagicMock(), mock.MagicMock(),
+        _not_found()
+    ]
+
+    instance._delete_pod('default', 'ctx', 'pod', graceful=True)
+
+    # Deleted with the pod's own terminationGracePeriodSeconds, i.e. without
+    # overriding the grace period to 0.
+    api.delete_namespaced_pod.assert_called_once()
+    assert ('grace_period_seconds'
+            not in api.delete_namespaced_pod.call_args.kwargs)
+    assert api.read_namespaced_pod.call_count == 3
+
+
+def test_delete_pod_graceful_force_deletes_on_timeout(monkeypatch):
+    api = _mock_core_api(monkeypatch)
+    monkeypatch.setattr(instance, '_TIMEOUT_FOR_POD_TERMINATION', 0)
+
+    instance._delete_pod('default', 'ctx', 'pod', graceful=True)
+
+    assert api.delete_namespaced_pod.call_count == 2
+    first, second = api.delete_namespaced_pod.call_args_list
+    assert 'grace_period_seconds' not in first.kwargs
+    assert second.kwargs['grace_period_seconds'] == 0
+
+
+def test_delete_pod_graceful_keeps_polling_through_transient_errors(
+        monkeypatch):
+    api = _mock_core_api(monkeypatch)
+    api.read_namespaced_pod.side_effect = [
+        kubernetes.api_exception()(status=500),
+        _not_found(),
+    ]
+
+    instance._delete_pod('default', 'ctx', 'pod', graceful=True)
+
+    # A 500 must not be mistaken for "gone" nor escalate to a force delete.
+    assert api.read_namespaced_pod.call_count == 2
+    api.delete_namespaced_pod.assert_called_once()
+
+
+@pytest.mark.parametrize(('has_resource_claims', 'expected_graceful'), [
+    (True, True),
+    (False, False),
+])
+def test_terminate_node_passes_claim_state_to_delete(monkeypatch,
+                                                     has_resource_claims,
+                                                     expected_graceful):
+    monkeypatch.setattr(instance, '_delete_services', lambda *a, **kw: None)
+    recorded = {}
+    monkeypatch.setattr(
+        instance, '_delete_pod',
+        lambda *a, **kw: recorded.update(graceful=kw['graceful']))
+
+    instance._terminate_node('default',
+                             'ctx',
+                             'pod',
+                             has_resource_claims=has_resource_claims)
+
+    assert recorded['graceful'] is expected_graceful

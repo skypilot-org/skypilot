@@ -489,12 +489,16 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 skip_finished=request.skip_finished,
                 accessible_workspaces=accessible_workspaces,
                 job_ids=job_ids,
+                include_tree=(request.include_tree
+                              if request.HasField('include_tree') else False),
                 workspace_match=request.workspace_match
                 if request.HasField('workspace_match') else None,
                 name_match=request.name_match
                 if request.HasField('name_match') else None,
                 pool_match=request.pool_match
                 if request.HasField('pool_match') else None,
+                infra_match=request.infra_match
+                if request.HasField('infra_match') else None,
                 page=request.page if request.HasField('page') else None,
                 limit=request.limit if request.HasField('limit') else None,
                 user_hashes=user_hashes,
@@ -509,6 +513,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
             total = job_queue['total']
             total_no_filter = job_queue['total_no_filter']
             status_counts = job_queue['status_counts']
+            infra_options = job_queue['infra_options']
 
             jobs_info = []
             for job in jobs:
@@ -573,14 +578,27 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     # Batch progress fields
                     is_batch=job.get('is_batch'),
                     batch_total_batches=job.get('batch_total_batches'),
-                    batch_completed_batches=job.get('batch_completed_batches'))
+                    batch_completed_batches=job.get('batch_completed_batches'),
+                    # Parent links (None for top-level jobs)
+                    root_job_id=job.get('root_job_id'),
+                    parent_job_id=job.get('parent_job_id'),
+                    parent_task_id=job.get('parent_task_id'),
+                    dynamic_task_index=job.get('dynamic_task_index'))
                 jobs_info.append(job_info)
 
             return managed_jobsv1_pb2.GetJobTableResponse(
                 jobs=jobs_info,
                 total=total,
                 total_no_filter=total_no_filter,
-                status_counts=status_counts)
+                status_counts=status_counts,
+                # Tell the caller the infra filter was honoured. A server that
+                # predates the field leaves it false, which is how the caller
+                # tells an empty result apart from an unfiltered one.
+                infra_match_applied=True,
+                infra_options=infra_options,
+                # Same for include_tree: the caller cannot otherwise tell a
+                # tree answer from a root-only one.
+                include_tree_applied=True)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(e, exc_info=True)
             context.abort(grpc.StatusCode.INTERNAL, str(e))

@@ -12,6 +12,7 @@ import {
   PlayIcon,
   ChevronRightIcon,
   ChevronDownIcon,
+  InfoIcon,
 } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
 import { useUrlFilterState } from '@/hooks/useUrlFilterState';
@@ -39,6 +40,9 @@ import {
   getContextJobs,
   getContextClusters,
   getSlurmInfrastructure,
+  getSlurmClusterNames,
+  getSlurmClusterInfrastructure,
+  aggregateSlurmGPUsByType,
 } from '@/data/connectors/infra';
 import {
   CLOUDS_LIST,
@@ -111,6 +115,13 @@ const INFRA_PAGE_SIZE_STORAGE_KEY = 'skypilot-infra-page-size';
 // The unified infra table's Name column is wide; allow much longer names
 // before middle-ellipsis truncation kicks in (full name stays in the tooltip).
 const INFRA_NAME_TRUNCATE_LENGTH = 45;
+
+// Middle-ellipsis a long infra name so both the provider prefix and the
+// distinguishing suffix stay readable; the full name lives in the tooltip.
+const truncateInfraName = (name) =>
+  name.length > INFRA_NAME_TRUNCATE_LENGTH
+    ? `${name.substring(0, Math.floor((INFRA_NAME_TRUNCATE_LENGTH - 3) / 2))}...${name.substring(name.length - Math.ceil((INFRA_NAME_TRUNCATE_LENGTH - 3) / 2))}`
+    : name;
 
 // Non-filter state that belongs in a shared link. `all` is the default and
 // stays out of the URL. The selected context is already a route segment
@@ -336,6 +347,52 @@ const aggregateSlurmPartitions = (nodes) => {
     });
 };
 
+// A Slurm node whose sinfo state carries a '~' suffix is a powered-down cloud
+// node (POWER_SAVE) with no backing instance — Slurm's dynamic capacity that
+// only materializes when a job needs it (the scheduler still places jobs on
+// such nodes and powers them up on demand). Count only "up" nodes so the infra
+// total reflects the nodes that exist right now, and report the powered-down
+// tally for a tooltip.
+export function countUpSlurmNodes(nodes) {
+  let poweredDown = 0;
+  for (const node of nodes || []) {
+    const state = node?.node_state;
+    if (typeof state === 'string' && state.includes('~')) {
+      poweredDown += 1;
+    }
+  }
+  return { up: (nodes?.length || 0) - poweredDown, poweredDown };
+}
+
+// Info icon whose tooltip explains the power-saved nodes folded out of a
+// Slurm node count. Shared by the infra table cell and the context detail
+// page so both surfaces tell the same story.
+function PowerSavedNodesHint({ poweredDown }) {
+  return (
+    <NonCapitalizedTooltip
+      content={`${poweredDown.toLocaleString()} power-saved`}
+      className="text-sm text-muted-foreground"
+    >
+      <InfoIcon className="w-3.5 h-3.5 text-gray-400 flex-shrink-0 cursor-help" />
+    </NonCapitalizedTooltip>
+  );
+}
+
+// The "Nodes" cell for a Slurm cluster: the up-node count, plus an info icon
+// whose tooltip explains the power-saved nodes folded out of it.
+function SlurmNodesCell({ nodes }) {
+  const { up, poweredDown } = countUpSlurmNodes(nodes);
+  if (poweredDown === 0) {
+    return up;
+  }
+  return (
+    <span className="inline-flex items-center gap-1">
+      {up}
+      <PowerSavedNodesHint poweredDown={poweredDown} />
+    </span>
+  );
+}
+
 // Reusable component for infrastructure sections (SSH Node Pool or Kubernetes)
 export function InfrastructureSection({
   title,
@@ -359,10 +416,22 @@ export function InfrastructureSection({
   loadedContexts = new Set(), // Set of contexts that have had their GPU data loaded
   isInitialLoad = true, // Controls panel-level loading spinner (not cell spinners)
   statusByKey = null, // Map<`${kind}:${id}`, Status> from plugin data providers
+  inactiveContexts = [], // [{name, note?}] rows listed without capacity data
 }) {
   // Add defensive check for contexts (memoized so downstream useMemos don't
   // recompute on every render when `contexts` is nullish)
   const safeContexts = React.useMemo(() => contexts || [], [contexts]);
+
+  // Contexts registered with the server but not enabled for compute (e.g.
+  // Kubernetes contexts excluded by `kubernetes.allowed_contexts`),
+  // contributed by plugin data providers. Rendered as name-only rows: they
+  // are never probed, so every capacity cell is a dash rather than a
+  // skeleton, and they take no part in the section's loading / refreshing
+  // states (an unprobed context must not pin the table in its shimmer).
+  const safeInactive = React.useMemo(
+    () => inactiveContexts || [],
+    [inactiveContexts]
+  );
 
   const contextDisplayName = useCallback(
     (context) => (isSSH ? context.replace(/^ssh-/, '') : context),
@@ -370,6 +439,7 @@ export function InfrastructureSection({
   );
 
   const contextNoun = isSSH ? 'pool' : isSlurm ? 'cluster' : 'context';
+  const sectionRowKind = isSSH ? 'ssh' : isSlurm ? 'slurm' : 'k8s';
 
   // Slurm clusters with more than one partition start collapsed on their
   // cluster-wide totals; expanding swaps in the per-partition rows.
@@ -439,9 +509,9 @@ export function InfrastructureSection({
     const contextStatsKey = buildContextStatsKey(context, { isSSH, isSlurm });
     const stats = contextStats[contextStatsKey] || { clusters: 0, jobs: 0 };
 
-    // Kubernetes uses progressive per-context loading; Slurm/SSH load all at once.
-    const hasGpuData =
-      isSlurm || isSSH ? !isLoading : loadedContexts.has(context);
+    // Kubernetes and Slurm use progressive per-context loading (each
+    // context/cluster settles independently); SSH loads all at once.
+    const hasGpuData = isSSH ? !isLoading : loadedContexts.has(context);
     const hasNodeData = hasGpuData;
 
     const aggregatedCpu = calculateAggregatedResource(nodes, 'cpu_count', true);
@@ -480,7 +550,7 @@ export function InfrastructureSection({
 
   // Only show "no data" message after data has been loaded and confirmed empty
   // Check this FIRST so that during refresh, we keep showing the message instead of a spinner
-  if (isDataLoaded && safeContexts.length === 0) {
+  if (isDataLoaded && safeContexts.length === 0 && safeInactive.length === 0) {
     return (
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
@@ -518,17 +588,19 @@ export function InfrastructureSection({
   }
 
   // Determine if table should show refreshing state
-  // For K8s: show during loading or when contexts haven't all loaded yet
-  // For SSH/Slurm: only show during loading
+  // For K8s/Slurm: show during loading or when contexts haven't all loaded
+  // For SSH: only show during loading
   const isTableRefreshing =
     !isInitialLoad &&
     (isLoading ||
-      (!(isSlurm || isSSH) &&
+      (!isSSH &&
         safeContexts.length > 0 &&
         !safeContexts.every((c) => loadedContexts.has(c))));
 
-  // Show table if we have contexts to display, even if some data is still loading
-  if (safeContexts.length > 0) {
+  // Show table if we have contexts to display, even if some data is still
+  // loading. Inactive rows count: a section whose only contexts are
+  // not-enabled ones still has something to show (and an action to offer).
+  if (safeContexts.length > 0 || safeInactive.length > 0) {
     return (
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
@@ -539,6 +611,11 @@ export function InfrastructureSection({
                 {safeContexts.length}{' '}
                 {safeContexts.length === 1 ? contextNoun : `${contextNoun}s`}
               </span>
+              {safeInactive.length > 0 && (
+                <span className="ml-2 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs font-medium">
+                  {safeInactive.length} not enabled
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-4">
               {actionButton}
@@ -629,9 +706,16 @@ export function InfrastructureSection({
                     isExpandable && expandedContexts.has(context);
                   // Expanding appends the partition breakdown under the
                   // cluster's own totals, so the aggregate stays on screen and
-                  // the toggle keeps its place.
+                  // the toggle keeps its place. When the cluster has no GPU
+                  // type rows (e.g. its node query failed), a null
+                  // summary row stands in — otherwise every expanded row would
+                  // be a partition row, and the toggle cell (the only way to
+                  // collapse) would never render again.
                   const subRows = isExpanded
-                    ? [...typeRows, ...partitionRows]
+                    ? [
+                        ...(typeRows.length ? typeRows : [null]),
+                        ...partitionRows,
+                      ]
                     : typeRows;
                   const summaryRowCount = Math.max(1, typeRows.length);
 
@@ -822,9 +906,7 @@ export function InfrastructureSection({
                                 className="text-blue-600 hover:underline cursor-pointer font-medium"
                                 onClick={() => handleContextClick(context)}
                               >
-                                {displayName.length > INFRA_NAME_TRUNCATE_LENGTH
-                                  ? `${displayName.substring(0, Math.floor((INFRA_NAME_TRUNCATE_LENGTH - 3) / 2))}...${displayName.substring(displayName.length - Math.ceil((INFRA_NAME_TRUNCATE_LENGTH - 3) / 2))}`
-                                  : displayName}
+                                {truncateInfraName(displayName)}
                               </span>
                             </NonCapitalizedTooltip>
                             {/* allowed_nodes filter badge (#10092): lived
@@ -855,7 +937,13 @@ export function InfrastructureSection({
                           className={`${sharedCellClass} text-gray-500 tabular-nums whitespace-nowrap`}
                           rowSpan={subRowCount}
                         >
-                          {!hasNodeData ? <SkeletonBadge /> : nodes.length}
+                          {!hasNodeData ? (
+                            <SkeletonBadge />
+                          ) : isSlurm ? (
+                            <SlurmNodesCell nodes={nodes} />
+                          ) : (
+                            nodes.length
+                          )}
                         </td>
                         {!isSlurm && (
                           <td
@@ -903,6 +991,69 @@ export function InfrastructureSection({
                     </React.Fragment>
                   );
                 })}
+                {/* Name-only rows for contexts the server knows about but
+                    has not enabled for compute. The name navigates to the
+                    context detail page like any other row — that is where a
+                    plugin can explain the state and offer remediation — and
+                    the namePrefix / actions slots stay live for a status
+                    dot; capacity cells stay dashes (never probed). */}
+                {safeInactive.map((row) => (
+                  <tr key={`inactive-${row.name}`}>
+                    <td className="w-0 px-0 py-3 align-top">
+                      <div className="flex h-5 items-center pl-3 empty:hidden">
+                        <PluginSlot
+                          name="infra.row.namePrefix"
+                          context={{
+                            id: row.name,
+                            kind: sectionRowKind,
+                            status: statusByKey?.get(
+                              `${sectionRowKind}:${row.name}`
+                            ),
+                          }}
+                        />
+                      </div>
+                    </td>
+                    <td className="p-3">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <NonCapitalizedTooltip
+                          content={row.name}
+                          className="text-sm text-muted-foreground"
+                        >
+                          <span
+                            className="text-blue-600 hover:underline cursor-pointer font-medium"
+                            onClick={() => handleContextClick(row.name)}
+                          >
+                            {truncateInfraName(row.name)}
+                          </span>
+                        </NonCapitalizedTooltip>
+                        <NonCapitalizedTooltip
+                          content={row.note || 'Not enabled for compute'}
+                          className="text-sm text-muted-foreground"
+                        >
+                          <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium cursor-help">
+                            Not enabled
+                          </span>
+                        </NonCapitalizedTooltip>
+                      </div>
+                    </td>
+                    {/* Nodes + (Partition | CPU + Memory) + GPU Type + GPUs +
+                        Utilization: an unprobed context has no data for any
+                        of these, so a dash in each. */}
+                    {Array.from({ length: isSlurm ? 5 : 6 }).map(
+                      (_, cellIndex) => (
+                        <td key={cellIndex} className="p-3 text-gray-400">
+                          -
+                        </td>
+                      )
+                    )}
+                    <td className="w-0 p-0 whitespace-nowrap text-right align-top">
+                      <PluginSlot
+                        name="infra.row.actions"
+                        context={{ id: row.name, kind: sectionRowKind }}
+                      />
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -938,7 +1089,11 @@ export function InfrastructureSection({
                   loading: isJobsDataLoading,
                   value: jobsData[contextStatsKey]?.jobs || 0,
                 },
-                { label: 'Nodes', loading: !hasNodeData, value: nodes.length },
+                {
+                  label: 'Nodes',
+                  loading: !hasNodeData,
+                  value: isSlurm ? countUpSlurmNodes(nodes).up : nodes.length,
+                },
                 ...(!isSlurm
                   ? [
                       {
@@ -1037,6 +1192,45 @@ export function InfrastructureSection({
                 </div>
               );
             })}
+            {safeInactive.map((row) => (
+              <div
+                key={`inactive-${row.name}`}
+                className="rounded-lg border border-gray-200 bg-card shadow-sm p-3"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex h-5 items-center flex-shrink-0 empty:hidden">
+                      <PluginSlot
+                        name="infra.row.namePrefix"
+                        context={{
+                          id: row.name,
+                          kind: sectionRowKind,
+                          status: statusByKey?.get(
+                            `${sectionRowKind}:${row.name}`
+                          ),
+                        }}
+                      />
+                    </div>
+                    <span
+                      className="text-blue-600 hover:underline cursor-pointer font-medium truncate"
+                      onClick={() => handleContextClick(row.name)}
+                    >
+                      {row.name}
+                    </span>
+                    <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium flex-shrink-0">
+                      Not enabled
+                    </span>
+                  </div>
+                  <PluginSlot
+                    name="infra.row.actions"
+                    context={{ id: row.name, kind: sectionRowKind }}
+                  />
+                </div>
+                {row.note && (
+                  <div className="text-xs text-gray-500 mt-1.5">{row.note}</div>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -1058,6 +1252,21 @@ export function ContextDetails({
   const isSSHContext = contextName.startsWith('ssh-');
   const displayTitle = isSSHContext ? 'Node Pool' : 'Context';
 
+  // Slurm exposes power-saved (POWER_SAVE, `~`-state) cloud nodes with no
+  // backing instance; fold them out of the node table so it lists only nodes
+  // that are actually up, and surface the hidden tally in a badge next to the
+  // total. `visibleNodes` stays === nodesInContext for every other case.
+  const slurmPoweredDown = isSlurm
+    ? countUpSlurmNodes(nodesInContext).poweredDown
+    : 0;
+  const visibleNodes =
+    slurmPoweredDown > 0
+      ? nodesInContext.filter(
+          (n) =>
+            !(typeof n?.node_state === 'string' && n.node_state.includes('~'))
+        )
+      : nodesInContext;
+
   // Pagination for the node table — contexts can have hundreds of nodes.
   const [nodesCurrentPage, setNodesCurrentPage] = useState(1);
   const [nodesPageSize, setNodesPageSize] = useState(() =>
@@ -1067,13 +1276,13 @@ export function ContextDetails({
       10
     )
   );
-  const nodesTotalPages = Math.ceil(nodesInContext.length / nodesPageSize);
+  const nodesTotalPages = Math.ceil(visibleNodes.length / nodesPageSize);
   const nodesStartIndex = (nodesCurrentPage - 1) * nodesPageSize;
   const nodesEndIndex = Math.min(
     nodesStartIndex + nodesPageSize,
-    nodesInContext.length
+    visibleNodes.length
   );
-  const paginatedNodes = nodesInContext.slice(nodesStartIndex, nodesEndIndex);
+  const paginatedNodes = visibleNodes.slice(nodesStartIndex, nodesEndIndex);
 
   // Reset to the first page when switching contexts; clamp when the node
   // list shrinks under the current page (e.g. on a data refresh).
@@ -1279,17 +1488,21 @@ export function ContextDetails({
             </div>
           )}
 
-          {nodesInContext.length === 0 && (
+          {visibleNodes.length === 0 && (
             <div className="rounded-md border border-gray-200 shadow-sm">
               <EmptyState
                 icon={<ServerIcon className="w-5 h-5" />}
                 title="No nodes found"
-                description="No nodes are available in this context"
+                description={
+                  slurmPoweredDown > 0
+                    ? `No nodes are up in this context (${slurmPoweredDown.toLocaleString()} power-saved)`
+                    : 'No nodes are available in this context'
+                }
               />
             </div>
           )}
 
-          {nodesInContext.length > 0 && (
+          {visibleNodes.length > 0 && (
             <div className="rounded-md border border-gray-200 shadow-sm">
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
@@ -1476,11 +1689,11 @@ export function ContextDetails({
                   </tbody>
                 </table>
               </div>
-              {nodesInContext.length > nodesPageSize && (
+              {visibleNodes.length > nodesPageSize && (
                 <PaginationControls
                   currentPage={nodesCurrentPage}
                   totalPages={nodesTotalPages}
-                  totalCount={nodesInContext.length}
+                  totalCount={visibleNodes.length}
                   startIndex={nodesStartIndex}
                   endIndex={nodesEndIndex}
                   onPageChange={setNodesCurrentPage}
@@ -2548,9 +2761,11 @@ export function GPUs() {
   const [perNodeGPUs, setPerNodeGPUs] = useState([]);
   // Track which contexts have had their GPU/node data loaded (for progressive loading)
   const [loadedContexts, setLoadedContexts] = useState(new Set());
-  const [allSlurmGPUs, setAllSlurmGPUs] = useState([]);
   const [perClusterSlurmGPUs, setPerClusterSlurmGPUs] = useState([]);
   const [perNodeSlurmGPUs, setPerNodeSlurmGPUs] = useState([]);
+  // Slurm clusters whose GPU/node queries have settled — the Slurm
+  // counterpart of loadedContexts, driving per-cluster skeleton cells.
+  const [slurmLoadedClusters, setSlurmLoadedClusters] = useState(new Set());
   // Slurm clusters from ~/.slurm/config, independent of whether they answer a
   // query right now.
   const [configuredSlurmClusters, setConfiguredSlurmClusters] = useState([]);
@@ -2652,7 +2867,7 @@ export function GPUs() {
           fetchCloudData(forceRefresh),
           fetchManagedJobsData(),
           fetchClusterStatsData(),
-          fetchSlurmData(),
+          fetchSlurmData(forceRefresh, showLoadingIndicators),
         ]);
 
         // Mark main fetch as done, check if we can set isFetching = false
@@ -2685,9 +2900,9 @@ export function GPUs() {
         setSshLoading(false);
         setSlurmLoading(false);
         setConfiguredSlurmClusters([]);
-        setAllSlurmGPUs([]);
         setPerClusterSlurmGPUs([]);
         setPerNodeSlurmGPUs([]);
+        setSlurmLoadedClusters(new Set());
         setSshAndKubeJobsData({});
         setSshAndKubeJobsDataLoading(false);
 
@@ -2916,24 +3131,77 @@ export function GPUs() {
     }
   };
 
-  // Fetch Slurm data separately for parallel loading with Kubernetes/SSH
-  const fetchSlurmData = async () => {
+  // Fetch Slurm data with per-cluster settlement, mirroring the Kubernetes
+  // section's progressive per-context loading: the configured cluster names
+  // (answered without contacting any login node) render the rows
+  // immediately, then each cluster's GPU/node queries fill its row in as
+  // they land — one slow or unreachable cluster can neither blank nor delay
+  // the other clusters' rendering.
+  const fetchSlurmData = async (forceRefresh, showLoadingIndicators = true) => {
     try {
-      const slurmData = await dashboardCache.get(getSlurmInfrastructure);
-      if (slurmData) {
-        setConfiguredSlurmClusters(slurmData.slurmClusterNames || []);
-        setAllSlurmGPUs(slurmData.allSlurmGPUs || []);
-        setPerClusterSlurmGPUs(slurmData.perClusterSlurmGPUs || []);
-        setPerNodeSlurmGPUs(slurmData.perNodeSlurmGPUs || []);
-      }
+      const clusterNames = forceRefresh
+        ? await getSlurmClusterNames()
+        : await dashboardCache.get(getSlurmClusterNames);
+      const validClusters = (clusterNames || []).filter(
+        (name) => name && typeof name === 'string'
+      );
+      setConfiguredSlurmClusters(validClusters);
+      // Names are enough to render the section (rows show skeleton cells
+      // until their own data lands), so clear the panel-level loading state
+      // now rather than after the slowest cluster.
       setSlurmDataLoaded(true);
       setSlurmLoading(false);
+
+      if (validClusters.length === 0) {
+        if (showLoadingIndicators) {
+          setPerClusterSlurmGPUs([]);
+          setPerNodeSlurmGPUs([]);
+          setSlurmLoadedClusters(new Set());
+        }
+        return;
+      }
+
+      // Reset loaded-cluster tracking so cells show skeletons during a
+      // foreground refresh, but keep existing data on screen (progressive
+      // overwrite, like the Kubernetes path).
+      if (showLoadingIndicators) {
+        setSlurmLoadedClusters(new Set());
+      }
+
+      await Promise.allSettled(
+        validClusters.map(async (clusterName) => {
+          try {
+            const data = forceRefresh
+              ? await getSlurmClusterInfrastructure(clusterName)
+              : await dashboardCache.get(getSlurmClusterInfrastructure, [
+                  clusterName,
+                ]);
+            setPerClusterSlurmGPUs((prev) => [
+              ...(prev || []).filter((gpu) => gpu.cluster !== clusterName),
+              ...(data?.perClusterGPUs || []),
+            ]);
+            setPerNodeSlurmGPUs((prev) => [
+              ...(prev || []).filter((node) => node.cluster !== clusterName),
+              ...(data?.perNodeGPUs || []),
+            ]);
+          } catch (error) {
+            console.error(
+              `Error fetching Slurm cluster ${clusterName}:`,
+              error
+            );
+          } finally {
+            // Mark the cluster loaded even on error so its row settles to
+            // empty cells instead of shimmering forever.
+            setSlurmLoadedClusters((prev) => new Set([...prev, clusterName]));
+          }
+        })
+      );
     } catch (error) {
       console.error('Error in fetchSlurmData:', error);
       setConfiguredSlurmClusters([]);
-      setAllSlurmGPUs([]);
       setPerClusterSlurmGPUs([]);
       setPerNodeSlurmGPUs([]);
+      setSlurmLoadedClusters(new Set());
       setSlurmDataLoaded(true);
       setSlurmLoading(false);
     }
@@ -3140,6 +3408,9 @@ export function GPUs() {
     dashboardCache.invalidate(getCloudInfrastructure, [false]); // Keep for backwards compatibility
     dashboardCache.invalidate(getSSHNodePools);
     dashboardCache.invalidate(getSlurmInfrastructure);
+    dashboardCache.invalidate(getSlurmClusterNames);
+    // One cache entry per cluster; invalidateFunction clears every variant.
+    dashboardCache.invalidateFunction(getSlurmClusterInfrastructure);
 
     // Increment GPU metrics refresh trigger to force iframe reload
     setGpuMetricsRefreshTrigger((prev) => prev + 1);
@@ -3316,6 +3587,28 @@ export function GPUs() {
     return filterContextsByWorkspace(contexts);
   }, [allKubeContextNames, filterContextsByWorkspace]);
 
+  // Plugin-contributed Kubernetes contexts that exist on the server but are
+  // not enabled for compute — rows a data provider marked
+  // `notEnabled: true` (e.g. kubeconfig contexts excluded by
+  // `kubernetes.allowed_contexts`). Deduped against the full,
+  // workspace-UNfiltered context list: a context that is merely hidden by
+  // the current workspace filter is enabled, and must not be misreported
+  // as a disabled row.
+  const inactiveKubeContexts = React.useMemo(() => {
+    const enabled = new Set(allKubeContextNames || []);
+    const seen = new Set();
+    const rows = [];
+    for (const row of extraInfraRows) {
+      if (row.kind !== 'k8s' || row.notEnabled !== true) continue;
+      const name = row.id;
+      if (!name || enabled.has(name) || seen.has(name)) continue;
+      seen.add(name);
+      rows.push({ name, note: row.note });
+    }
+    rows.sort((a, b) => a.name.localeCompare(b.name));
+    return rows;
+  }, [extraInfraRows, allKubeContextNames]);
+
   // Filter GPUs by context type (SSH vs Kubernetes)
   const sshGPUs = React.useMemo(() => {
     if (!perContextGPUs || !allGPUs) return [];
@@ -3377,19 +3670,6 @@ export function GPUs() {
     return [...clusterSet].sort();
   }, [configuredSlurmClusters, perClusterSlurmGPUs, perNodeSlurmGPUs]);
 
-  // Group perClusterSlurmGPUs by cluster
-  const groupedPerClusterSlurmGPUs = React.useMemo(() => {
-    if (!perClusterSlurmGPUs) return {};
-    return perClusterSlurmGPUs.reduce((acc, gpu) => {
-      const { cluster } = gpu;
-      if (!acc[cluster]) {
-        acc[cluster] = [];
-      }
-      acc[cluster].push(gpu);
-      return acc;
-    }, {});
-  }, [perClusterSlurmGPUs]);
-
   // Group perNodeSlurmGPUs by cluster
   const groupedPerNodeSlurmGPUs = React.useMemo(() => {
     if (!perNodeSlurmGPUs) return {};
@@ -3402,6 +3682,29 @@ export function GPUs() {
       return acc;
     }, {});
   }, [perNodeSlurmGPUs]);
+
+  // Group perClusterSlurmGPUs by cluster. These entries are derived from the
+  // node feed (see slurmClusterGPUsFromNodes in the connector), so the
+  // cluster-level GPU cells and the partition breakdown below them always
+  // agree — they read one source.
+  const groupedPerClusterSlurmGPUs = React.useMemo(() => {
+    if (!perClusterSlurmGPUs) return {};
+    return perClusterSlurmGPUs.reduce((acc, gpu) => {
+      const { cluster } = gpu;
+      if (!acc[cluster]) {
+        acc[cluster] = [];
+      }
+      acc[cluster].push(gpu);
+      return acc;
+    }, {});
+  }, [perClusterSlurmGPUs]);
+
+  // Fleet-wide Slurm GPU totals, derived from the per-cluster data so the
+  // summary strip fills in as each cluster's data streams in.
+  const allSlurmGPUs = React.useMemo(
+    () => aggregateSlurmGPUsByType(perClusterSlurmGPUs),
+    [perClusterSlurmGPUs]
+  );
 
   // Group perNodeGPUs by context
   const groupedPerNodeGPUs = React.useMemo(() => {
@@ -3431,10 +3734,15 @@ export function GPUs() {
       return false; // Still loading, don't show hint
     }
 
-    // Check all infrastructure types
+    // Check all infrastructure types. Not-enabled contexts count as
+    // Kubernetes presence: a server whose ONLY context is one that
+    // `allowed_contexts` excludes must render the Kubernetes section (that
+    // row and its enable action are the way out of the empty state), not
+    // just the setup hint.
     const noCloud = filteredEnabledCloudsCount === 0;
     const noSSH = sshContexts.length === 0;
-    const noKubernetes = kubeContexts.length === 0;
+    const noKubernetes =
+      kubeContexts.length === 0 && inactiveKubeContexts.length === 0;
     const noSlurm = slurmClusters.length === 0;
 
     return noCloud && noSSH && noKubernetes && noSlurm;
@@ -3758,6 +4066,7 @@ export function GPUs() {
         loadedContexts={loadedContexts}
         isInitialLoad={isInitialLoad}
         statusByKey={extraStatusByKey}
+        inactiveContexts={inactiveKubeContexts}
       />
     );
   };
@@ -3780,6 +4089,7 @@ export function GPUs() {
         isSSH={false}
         isSlurm={true}
         contextWorkspaceMap={{}}
+        loadedContexts={slurmLoadedClusters}
         isInitialLoad={isInitialLoad}
         statusByKey={extraStatusByKey}
       />

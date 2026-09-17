@@ -450,21 +450,37 @@ html[data-mode=""] .theme-switch-button span[data-mode=auto] {
    and "Search" label centered together. The keyboard binding still
    works; pydata's Cmd+K / Ctrl+K listener doesn't depend on the
    indicator. Scoped to the navbar so the hidden search modal in
-   .bd-search is left alone. */
+   .bd-search is left alone.
+
+   The width pin is desktop-only. Below 960px the theme renders a second
+   copy of the button in .navbar-persistent--mobile and hides its label, so
+   it is meant to collapse to just the magnifying glass; pinning that copy
+   to 183px keeps it full-width and pushes it over the logo. */
 .navbar-header-items__end .search-button__kbd-shortcut,
 .navbar-persistent--mobile .search-button__kbd-shortcut {
   display: none;
 }
-.navbar-header-items__end .search-button-field,
-.navbar-persistent--mobile .search-button-field {
+.navbar-header-items__end .search-button-field {
   min-width: 183px;
   justify-content: center;
 }
 /* Match the visual weight of the navbar nav-links — the pill background
    makes the default 16px feel heavier than its peers. */
-.navbar-header-items__end .search-button-field .search-button__default-text,
-.navbar-persistent--mobile .search-button-field .search-button__default-text {
+.navbar-header-items__end .search-button-field .search-button__default-text {
   font-size: 0.875rem;
+}
+/* On mobile the label is gone, so the pill chrome around a lone icon reads as
+   an empty text field. Drop the fill and border and show just the magnifying
+   glass, sized to match the hamburger and sidebar toggles either side of it.
+   The border is made transparent rather than removed so the button keeps its
+   38px tap target. */
+.navbar-persistent--mobile .search-button-field {
+  background-color: transparent;
+  border-color: transparent;
+}
+.navbar-persistent--mobile .search-button-field i,
+.navbar-persistent--mobile .search-button-field svg {
+  font-size: 1.25rem;
 }
 
 /* (c) Lock every FontAwesome icon to a fixed-width box regardless of

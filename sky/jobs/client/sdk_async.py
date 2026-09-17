@@ -37,10 +37,16 @@ async def launch(
     _need_confirmation: bool = False,
     stream_logs: Optional[
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
+    job_group: Union[int, str, None, sdk._AutoJobGroup] = sdk.AUTO_JOB_GROUP,  # pylint: disable=protected-access
 ) -> Tuple[Optional[List[int]], Optional[backends.ResourceHandle]]:
     """Async version of launch() that launches a managed job."""
-    request_id = await asyncio.to_thread(sdk.launch, task, name, pool, num_jobs,
-                                         _need_confirmation)
+    request_id = await asyncio.to_thread(sdk.launch,
+                                         task,
+                                         name,
+                                         pool,
+                                         num_jobs,
+                                         job_group=job_group,
+                                         _need_confirmation=_need_confirmation)
     if stream_logs is not None:
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:
@@ -57,11 +63,18 @@ async def queue_v2(
     fields: Optional[
         Sequence[str]] = managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS,
     stream_logs: Optional[
-        sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG
+        sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
+    include_tree: bool = False,
 ) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]:
     """Async version of queue_v2() that gets statuses of managed jobs."""
-    request_id = await asyncio.to_thread(sdk.queue_v2, refresh, skip_finished,
-                                         all_users, job_ids, limit, fields)
+    request_id = await asyncio.to_thread(sdk.queue_v2,
+                                         refresh,
+                                         skip_finished,
+                                         all_users,
+                                         job_ids,
+                                         limit,
+                                         fields,
+                                         include_tree=include_tree)
     if stream_logs is not None:
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:

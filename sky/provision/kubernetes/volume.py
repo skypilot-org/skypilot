@@ -5,6 +5,7 @@ import re
 import time as time_module
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from sky import clouds
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
@@ -60,6 +61,21 @@ _TERMINAL_GRPC_CODES = ('InvalidArgument', 'AlreadyExists', 'OutOfRange',
 _IN_PROGRESS_GRPC_CODES = ('Canceled', 'DeadlineExceeded', 'Unavailable',
                            'Aborted')
 
+# Every resize state a claim reports on its conditions, and what each means
+# for the volume. This is the only place the claim explains itself in words,
+# so it is also where the state is read from -- see `_pvc_resize_state`.
+#
+# Ordered, because a claim holds several at once: one waiting to be mounted is
+# still `Resizing` too. Reading them in list order would report the wrong one,
+# so they are read worst-first: a failure to look at, then work that cannot
+# proceed, then work that is proceeding.
+_RESIZE_CONDITIONS = (
+    ('ControllerResizeError', models.VolumeResizeStatus.FAILED),
+    ('NodeResizeError', models.VolumeResizeStatus.FAILED),
+    ('FileSystemResizePending', models.VolumeResizeStatus.PENDING_ON_NODE),
+    ('Resizing', models.VolumeResizeStatus.IN_PROGRESS),
+)
+
 
 class PvcFailure(enum.Enum):
     """What a failure reported on a PVC says about waiting any longer."""
@@ -111,10 +127,64 @@ def _is_rbac_permission_error(e: Exception) -> bool:
     return getattr(e, 'status', None) in (401, 403)
 
 
-def _get_context_namespace(config: models.VolumeConfig) -> Tuple[str, str]:
-    """Gets the context and namespace of a volume."""
+def _resolve_context_for_new_volume() -> Optional[str]:
+    """The context to create a volume on when its config names none.
+
+    A Kubernetes volume's `region` is its kubeconfig context. When the user
+    leaves it unset (e.g. `sky volumes apply --infra k8s`), the context has to
+    be chosen -- and the choice has to agree with where workloads actually
+    run, or the PVC is created on a cluster no pod can ever mount it from.
+
+    The kubeconfig's `current-context` alone is not that answer on a server
+    with several contexts: `allowed_contexts` may exclude it entirely, in
+    which case every pod lands somewhere else. So resolve through
+    `Kubernetes.existing_allowed_contexts()`, the same list the scheduling
+    path uses, and keep `current-context` only when it is actually allowed --
+    which preserves the existing behavior for the ordinary single-cluster
+    case.
+
+    Only for volumes being created. Looking up a volume that already exists
+    is a different question -- see `_get_context_namespace`.
+    """
+    current_context = kubernetes_utils.get_current_kube_config_context_name()
+    allowed_contexts = clouds.Kubernetes.existing_allowed_contexts(silent=True)
+    if not allowed_contexts:
+        # Nothing to cross-check against: no kubeconfig, or Kubernetes is not
+        # enabled. Fall back to the previous behavior rather than failing
+        # here -- the K8s API call that follows raises a clearer error.
+        return current_context
+    if current_context in allowed_contexts:
+        return current_context
+    context = allowed_contexts[0]
+    logger.info(
+        f'Volume does not specify a context and the kubeconfig\'s current '
+        f'context {current_context!r} is not in allowed_contexts; using '
+        f'{context!r}. Set the volume\'s infra to a specific context '
+        f'(e.g. `--infra k8s/<context>`) to choose explicitly.')
+    return context
+
+
+def _get_context_namespace(config: models.VolumeConfig,
+                           creating: bool = False) -> Tuple[Optional[str], str]:
+    """Gets the context and namespace of a volume.
+
+    `creating` separates the two questions this answers for a config with no
+    `region`. Creating a volume *chooses* a context, and the choice has to
+    agree with where workloads run. Every other caller is *looking up* a
+    volume that already exists somewhere -- and for a volume predating the
+    region pinning below (`refresh_volume_config` repairs those only under
+    in-cluster auth, so elsewhere they stay region-less), the only honest
+    guess is the one its own creation made: the kubeconfig's current context.
+    Re-deciding that on a lookup would point at a different cluster and
+    report a perfectly healthy volume as deleted.
+
+    The context is None only when no context could be resolved at all (no
+    kubeconfig and no in-cluster auth); the K8s adaptor treats that as "use
+    whatever config loading finds", which is the pre-existing behavior.
+    """
     if config.region is None:
-        context = kubernetes_utils.get_current_kube_config_context_name()
+        context = (_resolve_context_for_new_volume() if creating else
+                   kubernetes_utils.get_current_kube_config_context_name())
         config.region = context
     else:
         context = config.region
@@ -225,7 +295,7 @@ def _validate_explicit_storage_class(context: Optional[str],
 
 def _apply_pvc_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     """Creates or registers a PVC volume."""
-    context, namespace = _get_context_namespace(config)
+    context, namespace = _get_context_namespace(config, creating=True)
     pvc_spec = _get_pvc_spec(namespace, config)
     # use_existing volumes look up an existing PVC; no new provisioning
     # happens. Storage-class validation (either the explicit-name check
@@ -540,7 +610,7 @@ def refresh_volume_config(
 
 def get_all_volumes_usedby(
     configs: List[models.VolumeConfig],
-) -> Tuple[Dict[str, Any], Dict[str, Any], Set[str]]:
+) -> Tuple[Dict[Optional[str], Any], Dict[Optional[str], Any], Set[str]]:
     """Gets the usedby resources of all volumes.
 
     Args:
@@ -560,9 +630,9 @@ def get_all_volumes_usedby(
         for phase in k8s_constants.PVC_NOT_HOLD_POD_PHASES
     ])
     label_selector = 'parent=skypilot'
-    context_to_namespaces: Dict[str, Set[str]] = {}
+    context_to_namespaces: Dict[Optional[str], Set[str]] = {}
     pvc_names = set()
-    original_volume_names: Dict[str, Dict[str, List[str]]] = {}
+    original_volume_names: Dict[Optional[str], Dict[str, List[str]]] = {}
     for config in configs:
         # Skip hostPath volumes — they have no PVC to track
         if config.type == volume_lib.VolumeType.HOSTPATH.value:
@@ -575,8 +645,8 @@ def get_all_volumes_usedby(
         pvc_names.add(config.name_on_cloud)
     cloud_to_name_map = _get_cluster_name_on_cloud_to_cluster_name_map()
     # Get all pods in the namespace
-    used_by_pods: Dict[str, Dict[str, Dict[str, List[str]]]] = {}
-    used_by_clusters: Dict[str, Dict[str, Dict[str, List[str]]]] = {}
+    used_by_pods: Dict[Optional[str], Dict[str, Dict[str, List[str]]]] = {}
+    used_by_clusters: Dict[Optional[str], Dict[str, Dict[str, List[str]]]] = {}
     failed_volume_names: Set[str] = set()
     for context, namespaces in context_to_namespaces.items():
         used_by_pods[context] = {}
@@ -628,7 +698,8 @@ def get_all_volumes_usedby(
 
 
 def map_all_volumes_usedby(
-        used_by_pods: Dict[str, Any], used_by_clusters: Dict[str, Any],
+        used_by_pods: Dict[Optional[str],
+                           Any], used_by_clusters: Dict[Optional[str], Any],
         config: models.VolumeConfig) -> Tuple[List[str], List[str]]:
     """Maps the usedby resources of a volume."""
     context, namespace = _get_context_namespace(config)
@@ -741,8 +812,8 @@ def get_all_volumes_state(
     """
     # Keyed by (context, namespace): the same PVC name may exist in several
     # namespaces, and resolving it against the wrong one would mismatch.
-    configs_by_location: Dict[Tuple[str, str], Dict[str,
-                                                    models.VolumeConfig]] = {}
+    configs_by_location: Dict[Tuple[Optional[str], str],
+                              Dict[str, models.VolumeConfig]] = {}
 
     volume_errors: Dict[str, Optional[str]] = {}
     observed: Dict[str, models.ObservedVolumeState] = {}
@@ -962,6 +1033,62 @@ def _parse_pvc_size(size_quantity: Optional[str],
     return str(size)
 
 
+def _true_resize_conditions(status: Any) -> Dict[str, Optional[str]]:
+    """The claim's resize conditions that currently hold, and what they say."""
+    conditions = getattr(status, 'conditions', None)
+    held: Dict[str, Optional[str]] = {}
+    for condition in conditions if isinstance(conditions, list) else []:
+        if getattr(condition, 'status', None) != 'True':
+            continue
+        condition_type = getattr(condition, 'type', None)
+        if condition_type is not None:
+            held[condition_type] = getattr(condition, 'message', None)
+    return held
+
+
+def _pvc_resize_state(
+    pvc_obj: Any, pvc_name: str
+) -> Tuple[Optional[models.VolumeResizeStatus], Optional[str], Optional[str]]:
+    """Returns how far a resize of this claim has got, what it is heading for,
+    and how the claim explains itself.
+
+    All three are None when no resize is in flight, which is the normal case.
+
+    A claim's capacity only moves once the new space exists, so an expansion
+    that is still running -- or that is waiting to be mounted before the
+    filesystem can grow -- looks like nothing happened at all.
+
+    Read from the conditions rather than `status.allocatedResourceStatuses`,
+    even though the latter is the purpose-built field: the state and the words
+    describing it then come from the same place and cannot disagree, and every
+    cluster has conditions while only recent ones have that field. What it
+    would add -- telling a controller-stage resize from a node-stage one -- is
+    collapsed by VolumeResizeStatus anyway.
+    """
+    status = getattr(pvc_obj, 'status', None)
+    conditions = _true_resize_conditions(status)
+    resize_status = None
+    message = None
+    for condition_type, mapped in _RESIZE_CONDITIONS:
+        if condition_type in conditions:
+            resize_status = mapped
+            message = conditions[condition_type]
+            break
+    if resize_status is None:
+        return None, None, None
+
+    # What the resize is heading for: the capacity being allocated, or, before
+    # the backend has acknowledged anything, the request itself.
+    allocated = getattr(status, 'allocated_resources', None)
+    target = allocated.get('storage') if isinstance(allocated, dict) else None
+    if target is None:
+        requests = getattr(getattr(pvc_obj.spec, 'resources', None), 'requests',
+                           None)
+        if isinstance(requests, dict):
+            target = requests.get('storage')
+    return resize_status, _parse_pvc_size(target, pvc_name), message
+
+
 def _observed_volume_state(pvc_obj: Any) -> models.ObservedVolumeState:
     """Reads the fields of a PVC that the cluster, not our config, owns.
 
@@ -969,12 +1096,17 @@ def _observed_volume_state(pvc_obj: Any) -> models.ObservedVolumeState:
     a recorded config never clears a value it cannot see.
     """
     pvc_name = pvc_obj.metadata.name
+    resize_status, resize_target_size, resize_message = _pvc_resize_state(
+        pvc_obj, pvc_name)
     return models.ObservedVolumeState(
         size=_parse_pvc_size(_pvc_capacity(pvc_obj), pvc_name),
         # An empty storageClassName is the Kubernetes way of opting out of
         # dynamic provisioning, not a class name to record.
         storage_class_name=(getattr(pvc_obj.spec, 'storage_class_name', None) or
                             None),
+        resize_status=resize_status,
+        resize_target_size=resize_target_size,
+        resize_message=resize_message,
     )
 
 
@@ -1101,9 +1233,16 @@ def create_persistent_volume_claim(
             logger.debug(f'Found existing PVC {pvc.metadata.name} for volume '
                          f'{volume_name}')
             return
+        # Name the context and namespace searched. When the volume config
+        # carried no context of its own, `_resolve_context_for_new_volume`
+        # chose one, and "does not exist" on its own reads as "your PVC is
+        # gone" when the truth may be that it lives on a context
+        # `allowed_contexts` excludes.
         raise ValueError(
             f'PVC with name or label skypilot-name={volume_name} does not '
-            f'exist while use_existing is True.')
+            f'exist in namespace {namespace!r} on context {context!r} while '
+            f'use_existing is True. If the PVC lives on another cluster, '
+            f'name it explicitly with `--infra k8s/<context>`.')
 
     # Try to read PVC by name_on_cloud (for non-use_existing case)
     try:

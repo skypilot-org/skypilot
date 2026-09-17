@@ -23,6 +23,40 @@ from sky.skylet import constants
 from sky.utils import common as common_utils
 
 
+@pytest.fixture(autouse=True)
+def no_redirect_probe(monkeypatch: pytest.MonkeyPatch):
+    """Keeps `_detect_https_redirect`'s probe off the network.
+
+    `api_login` probes /api/health to detect an HTTP->HTTPS ingress redirect
+    before it writes the endpoint. Tests that mock `check_server_healthy` do
+    not mock that probe, so fail it by default; the redirect tests install a
+    response of their own.
+    """
+    monkeypatch.setattr(
+        'requests.get',
+        mock.Mock(
+            side_effect=requests.exceptions.ConnectionError('no network')))
+
+
+def _health_response(*urls: str) -> mock.Mock:
+    """A /api/health response whose redirect chain ends at `urls[-1]`."""
+    hops = []
+    for url in urls:
+        hop = mock.Mock(spec=requests.Response)
+        hop.url = url
+        hops.append(hop)
+    final = hops[-1]
+    final.history = hops[:-1]
+    return final
+
+
+def _stub_probe(monkeypatch: pytest.MonkeyPatch, *chain: str) -> mock.Mock:
+    """Answers the redirect probe with a chain of hops ending at `chain[-1]`."""
+    probe = mock.Mock(return_value=_health_response(*chain))
+    monkeypatch.setattr('requests.get', probe)
+    return probe
+
+
 @pytest.fixture
 def set_api_cookie_jar(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     # Create a temporary file with test cookie content
@@ -696,6 +730,174 @@ def test_api_logout_with_env_endpoint(monkeypatch: pytest.MonkeyPatch):
                        "http://env.skypilot.co")
     with pytest.raises(RuntimeError, match='Cannot logout of API server'):
         client_sdk.api_logout()
+
+
+@pytest.mark.parametrize(
+    ('endpoint', 'chain', 'expected'),
+    [
+        # No redirect: the endpoint is served over HTTP as configured.
+        ('http://test.skypilot.co',
+         ('http://test.skypilot.co/api/health',), None),
+        # The ingress force-redirects to HTTPS on the same host.
+        ('http://test.skypilot.co',
+         ('http://test.skypilot.co/api/health',
+          'https://test.skypilot.co/api/health'), 'https://test.skypilot.co'),
+        # Same, then on to an SSO login page: the first same-host HTTPS hop is
+        # the endpoint, the external one is not.
+        ('http://test.skypilot.co',
+         ('http://test.skypilot.co/api/health',
+          'https://test.skypilot.co/api/health',
+          'https://accounts.example.com/login'), 'https://test.skypilot.co'),
+        # Redirect straight out to another host: not an endpoint change.
+        ('http://test.skypilot.co',
+         ('http://test.skypilot.co/api/health',
+          'https://accounts.example.com/login'), None),
+        # A port change in the redirect target is carried over.
+        ('http://test.skypilot.co:8080',
+         ('http://test.skypilot.co:8080/api/health',
+          'https://test.skypilot.co/api/health'), 'https://test.skypilot.co'),
+        # Credentials embedded in the endpoint are dropped from the probe and
+        # restored on the result.
+        ('http://admin:pw@test.skypilot.co',
+         ('http://test.skypilot.co/api/health',
+          'https://test.skypilot.co/api/health'),
+         'https://admin:pw@test.skypilot.co'),
+        # Path-prefixed endpoint behind a shared ingress.
+        ('http://test.skypilot.co/sky',
+         ('http://test.skypilot.co/sky/api/health',
+          'https://test.skypilot.co/sky/api/health'),
+         'https://test.skypilot.co/sky'),
+    ],
+)
+def test_detect_https_redirect(monkeypatch: pytest.MonkeyPatch, endpoint: str,
+                               chain, expected):
+    _stub_probe(monkeypatch, *chain)
+    assert client_sdk._detect_https_redirect(endpoint) == expected
+
+
+def test_detect_https_redirect_skips_https_endpoint(
+        monkeypatch: pytest.MonkeyPatch):
+    """An HTTPS endpoint is left alone without probing the server."""
+    probe = _stub_probe(monkeypatch, 'https://test.skypilot.co/api/health')
+    assert client_sdk._detect_https_redirect('https://test.skypilot.co') is None
+    probe.assert_not_called()
+
+
+def test_detect_https_redirect_unreachable_server():
+    """An unreachable server leaves the endpoint to the regular health check."""
+    # The autouse fixture fails the probe with a ConnectionError.
+    assert client_sdk._detect_https_redirect('http://test.skypilot.co') is None
+
+
+def test_detect_https_redirect_probe_sends_no_credentials(
+        monkeypatch: pytest.MonkeyPatch):
+    """The probe authenticates with nothing at all.
+
+    It runs before `api_login` has settled which credential this login uses, so
+    anything it sends is a credential for whichever server was configured
+    before -- over cleartext HTTP, to a server the user has not authenticated
+    to yet. The OAuth path hides a residual token from its own requests for
+    exactly this reason.
+    """
+    monkeypatch.setenv(constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR,
+                       'sky_residual_token_for_another_server')
+    probe = _stub_probe(monkeypatch, 'http://test.skypilot.co/api/health',
+                        'https://test.skypilot.co/api/health')
+
+    assert (client_sdk._detect_https_redirect(
+        'http://admin:hunter2@test.skypilot.co') ==
+            'https://admin:hunter2@test.skypilot.co')
+
+    (probe_url,), kwargs = probe.call_args
+    # No bearer token, no cookie jar, and no basic-auth password on the wire.
+    assert probe_url == 'http://test.skypilot.co/api/health'
+    assert not kwargs.keys() & {'headers', 'cookies', 'auth'}
+
+
+def test_detect_https_redirect_does_not_prime_health_cache(
+        monkeypatch: pytest.MonkeyPatch):
+    """The probe must not answer the health check that validates a token.
+
+    `get_api_server_status_response` memoizes on the endpoint for 5s, so a
+    probe that populated it would hand its own pre-authentication response to
+    the health check `api_login` runs right after saving a newly supplied
+    service-account token.
+    """
+    endpoint = 'http://test.skypilot.co'
+    _stub_probe(monkeypatch, f'{endpoint}/api/health',
+                'https://test.skypilot.co/api/health')
+    health_calls = []
+
+    def _fake_request(method, url, **kwargs):
+        del method, kwargs
+        health_calls.append(url)
+        response = mock.Mock(spec=requests.Response)
+        response.status_code = 200
+        response.url = url
+        response.history = []
+        return response
+
+    monkeypatch.setattr('sky.server.rest.request', _fake_request)
+    server_common.get_api_server_status_response.cache_clear()
+    try:
+        client_sdk._detect_https_redirect(endpoint)
+        assert not health_calls, 'the probe went through the cached helper'
+        server_common.get_api_server_status_response(endpoint)
+        assert health_calls == [f'{endpoint}/api/health']
+    finally:
+        server_common.get_api_server_status_response.cache_clear()
+
+
+def test_api_login_saves_redirected_https_endpoint(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Logging in to an HTTP endpoint that redirects saves the HTTPS one."""
+    config_path = tmp_path / 'config.yaml'
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    monkeypatch.delenv(constants.SKY_API_SERVER_URL_ENV_VAR, raising=False)
+    _stub_probe(monkeypatch, 'http://test.skypilot.co/api/health',
+                'https://test.skypilot.co/api/health')
+
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login('http://test.skypilot.co')
+
+    config = skypilot_config.get_user_config()
+    assert config['api_server']['endpoint'] == 'https://test.skypilot.co'
+    # The health check runs against the corrected endpoint, never the
+    # configured one.
+    mock_check.assert_has_calls([mock.call('https://test.skypilot.co')])
+
+
+def test_api_login_env_var_endpoint_redirect_warns_only(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys):
+    """An endpoint from the env var is reported on, not silently rewritten."""
+    config_path = tmp_path / 'config.yaml'
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR,
+                       'http://test.skypilot.co')
+    _stub_probe(monkeypatch, 'http://test.skypilot.co/api/health',
+                'https://test.skypilot.co/api/health')
+
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login()
+
+    # Correcting it here would fix this login and nothing after it, since the
+    # variable outranks the config file for every command.
+    mock_check.assert_has_calls([mock.call('http://test.skypilot.co')])
+    out = capsys.readouterr().out
+    assert 'redirects to https://test.skypilot.co' in out
+    assert constants.SKY_API_SERVER_URL_ENV_VAR in out
 
 
 def test_api_login_user_hash_token(monkeypatch: pytest.MonkeyPatch,

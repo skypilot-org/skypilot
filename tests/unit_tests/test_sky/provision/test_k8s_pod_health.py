@@ -530,7 +530,7 @@ class TestGetClusterFailureReasonFromEvents:
     @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
     def test_returns_first_evicted(self, mock_events, mock_kutils):
         mock_kutils.get_namespace_from_config.return_value = 'ns'
-        mock_kutils.get_context_from_config.return_value = 'ctx'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
         mock_events.return_value = [
             _make_event(
                 'Evicted', 'Pod ephemeral local storage usage '
@@ -546,7 +546,7 @@ class TestGetClusterFailureReasonFromEvents:
     @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
     def test_none_when_no_failure_event(self, mock_events, mock_kutils):
         mock_kutils.get_namespace_from_config.return_value = 'ns'
-        mock_kutils.get_context_from_config.return_value = 'ctx'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
         mock_events.return_value = [_make_event('Scheduled', 'assigned')]
         assert k8s_instance.get_cluster_failure_reason_from_events(
             {}, ['pod-0', 'pod-1']) is None
@@ -566,7 +566,7 @@ class TestGetClusterFailureReasonFromPods:
     def test_returns_condensed_reason_for_abnormal_pod(self, mock_kutils,
                                                        mock_core_api):
         mock_kutils.get_namespace_from_config.return_value = 'ns'
-        mock_kutils.get_context_from_config.return_value = 'ctx'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
         mock_kutils.pod_terminated_abnormally.return_value = True
         mock_kutils.get_condensed_pod_reason.return_value = (
             'OOMKilled (exit code 137)')
@@ -578,7 +578,7 @@ class TestGetClusterFailureReasonFromPods:
     @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
     def test_none_when_no_pod_abnormal(self, mock_kutils, mock_core_api):
         mock_kutils.get_namespace_from_config.return_value = 'ns'
-        mock_kutils.get_context_from_config.return_value = 'ctx'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
         mock_kutils.pod_terminated_abnormally.return_value = False
         assert k8s_instance.get_cluster_failure_reason_from_pods(
             {}, ['pod-0', 'pod-1']) is None
@@ -587,7 +587,7 @@ class TestGetClusterFailureReasonFromPods:
     @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
     def test_skips_pod_read_errors(self, mock_kutils, mock_core_api):
         mock_kutils.get_namespace_from_config.return_value = 'ns'
-        mock_kutils.get_context_from_config.return_value = 'ctx'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
         # First pod read raises; the second pod is abnormal.
         mock_core_api.return_value.read_namespaced_pod.side_effect = [
             Exception('boom'),
@@ -598,3 +598,41 @@ class TestGetClusterFailureReasonFromPods:
         result = k8s_instance.get_cluster_failure_reason_from_pods(
             {}, ['pod-0', 'pod-1'])
         assert result == 'pod-1 is not ready (OOMKilled)'
+
+
+class TestPodReasonIdentifiesCause:
+    """A per-pod reason either names the cause, or only says "it is sick".
+
+    The distinction matters because a node that stops heartbeating leaves its
+    pods' status stale: a refresh during the outage can only say "not ready",
+    while a refresh after recovery names the real failure. Only the latter is
+    worth superseding an already-recorded reason with.
+    """
+
+    def test_bare_not_ready_does_not_identify_a_cause(self):
+        # kubelet never updated the pod, so the containers explain nothing.
+        assert not k8s_instance.pod_reason_identifies_cause(
+            'pod not ready (Unknown)')
+
+    def test_not_ready_with_container_detail_identifies_a_cause(self):
+        assert k8s_instance.pod_reason_identifies_cause(
+            'pod not ready (PodFailed); OOMKilled (exit code 137)')
+
+    def test_bare_termination_fallback_does_not_identify_a_cause(self):
+        assert not k8s_instance.pod_reason_identifies_cause(
+            'Terminated unexpectedly.\nLast known state: PodFailed.')
+
+    def test_termination_with_container_errors_identifies_a_cause(self):
+        # The fallback is only a *prefix* here -- the cause follows it, so a
+        # naive substring test on the fallback would get this backwards.
+        assert k8s_instance.pod_reason_identifies_cause(
+            'Terminated unexpectedly.\nLast known state: PodFailed.\n'
+            'Container errors: OOMKilled (no memory limit set)')
+
+    def test_kubelet_pod_status_reason_identifies_a_cause(self):
+        assert k8s_instance.pod_reason_identifies_cause(
+            'Evicted: The node was low on resource: memory')
+
+    def test_absent_reason_identifies_nothing(self):
+        assert not k8s_instance.pod_reason_identifies_cause(None)
+        assert not k8s_instance.pod_reason_identifies_cause('')
