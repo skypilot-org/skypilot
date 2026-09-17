@@ -357,14 +357,25 @@ def get_cluster_events(
             'transitioned_at' (unix timestamp) fields.
         Events are ordered from oldest to newest.
     """
-    event_type_enums = [
-        global_user_state.ClusterEventType(event_type_str.strip())
-        for event_type_str in event_type.split(',')
-        if event_type_str.strip()
-    ]
+    event_type_enums = []
+    for event_type_str in event_type.split(','):
+        name = event_type_str.strip()
+        if not name:
+            continue
+        try:
+            event_type_enums.append(global_user_state.ClusterEventType(name))
+        except ValueError:
+            # A name this server does not know is dropped, not fatal. The
+            # callers are dashboards shipped separately from the server, so a
+            # newer one routinely asks for a type an older server has no rows
+            # of -- and raising there fails the whole request, taking the
+            # types it *could* have answered with it. Dropping degrades to
+            # "no rows of that type", which is also the truth.
+            logger.debug(f'Ignoring unknown cluster event type {name!r}.')
     if not event_type_enums:
-        # Reject blank/empty input rather than silently matching nothing
-        # (an empty type list translates to `type IN ()`, i.e. no events).
+        # Nothing valid at all is still an error rather than a silent empty
+        # answer: an empty type list translates to `type IN ()`, i.e. no
+        # events, which a caller would read as "this cluster has no history".
         raise ValueError(f'No valid cluster event type in {event_type!r}.')
     return global_user_state.get_cluster_events(
         cluster_name=cluster_name,

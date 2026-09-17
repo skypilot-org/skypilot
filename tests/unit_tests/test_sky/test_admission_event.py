@@ -10,6 +10,7 @@ from unittest import mock
 
 import pytest
 
+from sky import core
 from sky import global_user_state
 from sky.metrics import launch_phases
 
@@ -199,3 +200,52 @@ def test_the_other_milestones_emit_nothing(recorder):
     global_user_state.record_launch_milestone_for_cluster(
         'train-7', global_user_state.LaunchMilestone.ADMITTED, 146.57)
     assert len(emitted) == 1
+
+
+# --- the API's tolerance of a type it does not know ---------------------------
+#
+# The cluster event list is rendered by a dashboard shipped separately from the
+# server, so a newer one routinely asks for a type an older server has no rows
+# of. Before this, that failed the whole request -- taking the types the server
+# *could* have answered with it.
+
+
+def _capture(monkeypatch):
+    seen = {}
+
+    def fake(cluster_name, cluster_hash, event_type, include_timestamps, limit):
+        seen['types'] = event_type
+        return []
+
+    monkeypatch.setattr(global_user_state, 'get_cluster_events', fake)
+    return seen
+
+
+def test_an_unknown_event_type_does_not_fail_the_request(monkeypatch):
+    seen = _capture(monkeypatch)
+
+    core.get_cluster_events(cluster_name='c',
+                            event_type='STATUS_CHANGE,NOT_A_REAL_TYPE')
+
+    assert seen['types'] == [global_user_state.ClusterEventType.STATUS_CHANGE]
+
+
+def test_a_request_of_only_unknown_types_is_still_an_error(monkeypatch):
+    """Dropping every name would translate to `type IN ()` -- no rows -- which
+    a caller reads as "this cluster has no history" rather than as a mistake.
+    """
+    _capture(monkeypatch)
+
+    with pytest.raises(ValueError):
+        core.get_cluster_events(cluster_name='c', event_type='NOT_A_REAL_TYPE')
+
+
+def test_the_new_type_is_accepted_here(monkeypatch):
+    """The positive arm: the two above pass just as well if the enum member
+    does not exist, which is exactly what the plugin is about to ask for."""
+    seen = _capture(monkeypatch)
+
+    core.get_cluster_events(cluster_name='c',
+                            event_type='STATUS_CHANGE,LAUNCH_MILESTONE')
+
+    assert global_user_state.ClusterEventType.LAUNCH_MILESTONE in seen['types']
