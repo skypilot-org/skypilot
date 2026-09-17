@@ -797,6 +797,9 @@ class TestControllerProcessAlive:
             def is_running(self):
                 return True
 
+            def status(self):
+                return jobs_utils.psutil.STATUS_RUNNING
+
         monkeypatch.setattr(jobs_utils.psutil, 'Process', _FakeProcess)
         record = managed_job_state.ControllerPidRecord(
             pid=expected_pid, started_at=expected_start)
@@ -821,6 +824,9 @@ class TestControllerProcessAlive:
 
             def is_running(self):
                 return True
+
+            def status(self):
+                return jobs_utils.psutil.STATUS_RUNNING
 
         monkeypatch.setattr(jobs_utils.psutil, 'Process', _FakeProcess)
         record = managed_job_state.ControllerPidRecord(
@@ -848,6 +854,9 @@ class TestControllerProcessAlive:
 
             def is_running(self):
                 return True
+
+            def status(self):
+                return jobs_utils.psutil.STATUS_RUNNING
 
         monkeypatch.setattr(jobs_utils.psutil, 'Process', _KeywordProcess)
         record = managed_job_state.ControllerPidRecord(pid=expected_pid,
