@@ -13,11 +13,13 @@ DB call the way the incident broke it (executor exhausted / deadline hit),
 and check that what the client sees is unchanged and that the counters now
 record it.
 """
+import ast
 import asyncio
 import http
 import os
 import subprocess
 import sys
+import tempfile
 from unittest import mock
 
 import fastapi
@@ -25,6 +27,7 @@ from fastapi.testclient import TestClient
 import pytest
 import starlette.middleware
 import starlette.middleware.base
+import starlette.routing
 from starlette.websockets import WebSocketDisconnect
 
 from sky import exceptions
@@ -45,6 +48,7 @@ _COUNTERS = (
     metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL,
     metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
     metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL,
+    metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL,
 )
 
 
@@ -69,15 +73,24 @@ def clear_metrics():
         counter.clear()
 
 
+# The ssh-proxy route with its required parameter supplied.
+_SSH_PROXY = '/kubernetes-pod-ssh-proxy?cluster_name=c'
+
+
 def _routes(app: fastapi.FastAPI) -> None:
 
     @app.get('/status')
     async def status():  # pylint: disable=unused-variable
         return {'ok': True}
 
+    # `cluster_name` is required, as it is on the two real ssh-proxy routes
+    # (`session_id` on the third). FastAPI validates it *after* the
+    # middlewares and closes the connection itself when it is missing, which
+    # is the one way a handshake ends up neither refused nor accepted.
     @app.websocket('/kubernetes-pod-ssh-proxy')
     async def ssh_proxy(  # pylint: disable=unused-variable
-            websocket: fastapi.WebSocket):
+            websocket: fastapi.WebSocket, cluster_name: str):
+        del cluster_name
         await websocket.accept()
         await websocket.send_text('hello')
         await websocket.close()
@@ -201,7 +214,7 @@ def test_a_refused_websocket_handshake_is_counted():
     failure = exceptions.ConcurrentWorkerExhaustedError('32 of 32')
     with _broken_auth(failure):
         with pytest.raises(WebSocketDisconnect) as refused:
-            with _client(app).websocket_connect('/kubernetes-pod-ssh-proxy',
+            with _client(app).websocket_connect(_SSH_PROXY,
                                                 headers=_AUTH_HEADER):
                 pass
 
@@ -220,6 +233,9 @@ def test_a_refused_websocket_handshake_is_counted():
     assert _sample(
         metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL,
         path='/kubernetes-pod-ssh-proxy') == 1.0
+    # Refused before any route ran, so nothing was accepted.
+    assert _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL) == 0.0
     # Handshakes are not HTTP requests: the request counter is untouched.
     assert _sample(metrics_utils.SKY_APISERVER_REQUESTS_TOTAL) == 0.0
 
@@ -227,17 +243,52 @@ def test_a_refused_websocket_handshake_is_counted():
 def test_an_accepted_websocket_handshake_is_counted():
     app = _app()
     with _healthy_auth():
-        with _client(app).websocket_connect('/kubernetes-pod-ssh-proxy',
+        with _client(app).websocket_connect(_SSH_PROXY,
                                             headers=_AUTH_HEADER) as websocket:
             assert websocket.receive_text() == 'hello'
     assert _sample(
         metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL) == 0.0
     assert _sample(metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL) == 0.0
-    # The attempt is counted by route, once; with no refusal it is the
-    # accepted volume.
+    # The attempt is counted by route, once, and so is the accept.
     assert _sample(
         metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL,
         path='/kubernetes-pod-ssh-proxy') == 1.0
+    assert _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL,
+        path='/kubernetes-pod-ssh-proxy') == 1.0
+
+
+def test_a_handshake_closed_by_route_validation_is_not_an_accept():
+    """The case subtraction gets wrong, and the reason accepts are counted.
+
+    Every real ssh route takes a required query parameter. FastAPI validates
+    it after the middleware stack and closes the connection itself, so no
+    middleware refuses the handshake and no handler accepts it. Counting the
+    accept off the wire is what tells this apart from a served session;
+    `attempts - refusals` cannot.
+    """
+    app = _app()
+    with _healthy_auth():
+        with pytest.raises(WebSocketDisconnect):
+            # No `cluster_name`.
+            with _client(app).websocket_connect('/kubernetes-pod-ssh-proxy',
+                                                headers=_AUTH_HEADER):
+                pass
+
+    attempts = _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL,
+        path='/kubernetes-pod-ssh-proxy')
+    refusals = _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL)
+    accepts = _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL)
+
+    assert attempts == 1.0, 'it did reach the middleware stack'
+    assert refusals == 0.0, 'no middleware refused it'
+    assert accepts == 0.0, 'and it was never accepted'
+    # Stated as the regression it is: the derived quantity says one accepted
+    # session here, and there was none.
+    assert attempts - refusals == 1.0
 
 
 def test_unauthenticated_scanner_paths_do_not_create_series():
@@ -357,6 +408,65 @@ def test_the_real_server_registers_the_metrics_middleware_outermost():
     assert names[0] == 'PrometheusMiddleware', names
     # ...and nothing else in the stack is a second copy of it.
     assert names.count('PrometheusMiddleware') == 1, names
+
+
+def test_importing_the_middleware_module_publishes_the_handshake_series():
+    """The production trigger for pre-initialisation, in a real process.
+
+    Every in-process test calls `preinitialize_websocket_metrics()` itself,
+    so deleting the module-level call leaves all of them green while the
+    mechanism is dead where it matters -- and the test environment has
+    metrics off, so nothing in-process can notice either. A fresh
+    interpreter with metrics enabled and a multiprocess directory is the
+    only form that exercises the real trigger.
+    """
+    code = (
+        'from prometheus_client import CollectorRegistry, multiprocess\n'
+        # The import IS the trigger; nothing here calls the function.
+        'from sky.server import middleware_utils\n'
+        'del middleware_utils\n'
+        'registry = CollectorRegistry()\n'
+        'multiprocess.MultiProcessCollector(registry)\n'
+        'print(sorted(\n'
+        '    (s.name, s.labels["path"], s.value)\n'
+        '    for m in registry.collect() for s in m.samples\n'
+        '    if s.name.endswith("_handshake_attempts_total")\n'
+        '    or s.name.endswith("_handshake_accepts_total")))')
+    env = dict(os.environ)
+    env['SKY_API_SERVER_METRICS_ENABLED'] = 'true'
+    with tempfile.TemporaryDirectory() as multiproc_dir:
+        env['PROMETHEUS_MULTIPROC_DIR'] = multiproc_dir
+        out = subprocess.run([sys.executable, '-c', code],
+                             env=env,
+                             check=True,
+                             capture_output=True,
+                             text=True,
+                             timeout=300).stdout.strip().splitlines()[-1]
+    published = ast.literal_eval(out)
+
+    paths = {
+        '/kubernetes-pod-ssh-proxy',
+        '/slurm-job-ssh-proxy',
+        '/ssh-interactive-auth',
+        'other',
+    }
+    for name in ('sky_apiserver_websocket_handshake_attempts_total',
+                 'sky_apiserver_websocket_handshake_accepts_total'):
+        assert {p for n, p, _ in published if n == name} == paths, published
+    # Published, not incremented.
+    assert {v for _, _, v in published} == {0.0}, published
+
+
+def test_the_bounded_path_labels_match_the_registered_websocket_routes():
+    """`WEBSOCKET_ROUTE_PATHS` is load-bearing twice: it bounds the label and
+    it decides which series are published at zero. A new ws route missing
+    from it lands in `other` with no pre-published series, silently."""
+    registered = {
+        route.path
+        for route in server.app.routes
+        if isinstance(route, starlette.routing.WebSocketRoute)
+    }
+    assert registered == set(middleware_utils.WEBSOCKET_ROUTE_PATHS)
 
 
 import starlette.middleware
@@ -703,3 +813,45 @@ class TestAuthProxyReasonsAreDistinct:
         assert response.status_code == int(http.HTTPStatus.IM_A_TEAPOT)
         assert middleware_utils.get_rejection_reason(request.scope) == (
             middleware_utils.REJECT_REASON_AUTH_PROXY_BAD_RESPONSE)
+
+
+@pytest.mark.parametrize('broken, expect_accept', [
+    ('sky.metrics.utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL.'
+     'labels', True),
+    ('sky.metrics.utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL.'
+     'labels', True),
+    ('sky.metrics.utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL.'
+     'labels', False),
+    ('sky.metrics.utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL.labels', False),
+])
+def test_a_recording_failure_never_reaches_a_handshake(broken, expect_accept,
+                                                       recording_log):
+    """The ws half of the matrix above: recording runs immediately before the
+    close frame is sent, so a fault there would leave the client with no
+    answer at all rather than the refusal it was owed.
+
+    `.labels()` is the boundary that matters: in multiprocess mode -- the mode
+    production runs in -- the first call for a label set opens a file under
+    `PROMETHEUS_MULTIPROC_DIR`, so a full or unwritable directory raises
+    exactly here.
+    """
+    app = _app()
+    failure = exceptions.ConcurrentWorkerExhaustedError('32 of 32')
+
+    with mock.patch.object(middleware_utils.logger, 'warning'):
+        with _break(broken):
+            if expect_accept:
+                with _healthy_auth():
+                    with _client(app).websocket_connect(
+                            _SSH_PROXY, headers=_AUTH_HEADER) as websocket:
+                        assert websocket.receive_text() == 'hello'
+            else:
+                with _broken_auth(failure):
+                    with pytest.raises(WebSocketDisconnect) as refused:
+                        with _client(app).websocket_connect(
+                                _SSH_PROXY, headers=_AUTH_HEADER):
+                            pass
+                # The same 1011 close as with recording healthy.
+                assert refused.value.code == 1011
+
+    assert recording_log.failures > 0, 'the failure was not even noticed'

@@ -96,6 +96,18 @@ def record_safely(what: str, record: Callable[..., Any], *args: Any,
         note_recording_failure(what, e)
 
 
+def increment(counter: Any, **labels: str) -> None:
+    """`counter.labels(**labels).inc()`, as one callable.
+
+    Exists so the whole recording -- the child lookup included -- can be
+    passed to `record_safely`. Written inline as
+    `record_safely(what, counter.labels(**labels).inc)`, the labels() call is
+    evaluated by the caller, outside the guard, and a label the client
+    library rejects raises straight through it.
+    """
+    counter.labels(**labels).inc()
+
+
 # Reasons a middleware answers a request itself instead of letting a route
 # handler run. Stamped on the request with `mark_rejection` by the code that
 # produces the response and read back by whoever records the response: the
@@ -143,10 +155,29 @@ WEBSOCKET_ROUTE_PATHS = frozenset((
 ))
 OTHER_WEBSOCKET_PATH_LABEL = 'other'
 
-# Key in `scope['state']` marking a handshake attempt as already counted:
-# every `websocket_aware` middleware in the stack sees the same connection
-# scope, so the first one stamps the shared state and the rest skip.
+# Keys in `scope['state']` marking a handshake attempt, and its accept, as
+# already counted: every `websocket_aware` middleware in the stack sees the
+# same connection scope -- and, for the accept, every one of their wrapped
+# `send` channels sees the same message -- so the first stamps the shared
+# state and the rest skip.
 _WS_ATTEMPT_COUNTED_KEY = 'websocket_attempt_counted'
+# Key in `scope['state']` marking the send channel as already wrapped. Unlike
+# the one above, this is not about counting twice -- it is about what the
+# wrapper costs. It stays installed for the life of the connection, so every
+# wrapper that wrapped it would sit on the path of every outbound SSH frame,
+# not just the handshake. One is enough. It is also what makes the accept
+# inherently counted once, with no second dedup: one wrapper sees the accept
+# message, and the count happens only after the send it wraps succeeded.
+_WS_SEND_WRAPPED_KEY = 'websocket_send_wrapped'
+
+
+def scope_state(scope: starlette.types.Scope) -> dict:
+    """The scope's `state` dict, created if the ASGI server did not send one.
+
+    Every middleware layer shares it (`request.state` is backed by it), which
+    is what lets one layer stamp a value another layer reads.
+    """
+    return scope.setdefault('state', {})
 
 
 def mark_rejection(request: fastapi.Request, reason: str) -> None:
@@ -198,7 +229,50 @@ def websocket_path_label(scope: starlette.types.Scope) -> str:
     return OTHER_WEBSOCKET_PATH_LABEL
 
 
+def preinitialize_websocket_metrics() -> None:
+    """Publish the attempt and accept series at zero, before any handshake.
+
+    A labelled counter does not exist until its first increment, so an
+    absent series and a quiet one are indistinguishable -- and worse,
+    `increase()` over a series that springs into existence at 1 returns no
+    sample, so "has anything happened" and "what is the rate" both read as
+    no data on the first event. The `path` domain here is closed (the
+    registered routes plus `other`), so every series can exist from process
+    start instead, which leaves absence to mean only one thing: the build
+    predates the counter.
+
+    Not done for the rejection counters: their `status` and `reason` domains
+    are open, so there is no finite set of series to publish.
+
+    Idempotent, and a no-op with metrics off, like every other instrument
+    outside the metrics middleware.
+    """
+    if not metrics_utils.METRICS_ENABLED:
+        return
+    for counter in (
+            metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL,
+            metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL):
+        for path in sorted(WEBSOCKET_ROUTE_PATHS) + [
+                OTHER_WEBSOCKET_PATH_LABEL
+        ]:
+            # Fail-open at import time for the same reason as on the request
+            # path: a monitoring fault must not keep the server from starting.
+            record_safely('a WebSocket handshake series',
+                          counter.labels,
+                          path=path)
+
+
+preinitialize_websocket_metrics()
+
+
 class WebSocketDecision(enum.Enum):
+    """How the middleware stack judged a handshake.
+
+    `ERROR` is every refusal that is not a 401 or a 403, so it is not a
+    server-error class: it also covers a middleware answering 2xx/3xx
+    without passing the handshake on. What separates those is the `status`
+    label on the rejection counter, not this value.
+    """
     ACCEPT = 'accept'
     UNAUTHORIZED = 'unauthorized'
     FORBIDDEN = 'forbidden'
@@ -215,8 +289,10 @@ def websocket_aware(
     a 4xx or 5xx status code.
 
     A refused handshake is counted in
-    `sky_apiserver_websocket_handshake_rejections_total{path,outcome}` and,
-    when the HTTP middleware stamped a reason (`mark_rejection`), in
+    `sky_apiserver_websocket_handshake_rejections_total{path,outcome,status}`
+    -- `status` being the one the HTTP middleware answered with, which
+    `outcome` does not determine (`error` covers everything that is not a
+    401 or a 403) -- and, when it stamped a reason (`mark_rejection`), in
     `sky_apiserver_request_rejections_total{kind="websocket"}` with the
     status the middleware answered with. Only the outermost middleware that
     refuses runs, so each refused handshake is counted once. What the client
@@ -225,16 +301,17 @@ def websocket_aware(
 
     Every connection scope is counted once in
     `sky_apiserver_websocket_handshake_attempts_total{path}`, at entry into
-    this wrapper: every wrapper in the stack sees the same scope, so the
-    first one counts and marks the shared scope state
-    (`_WS_ATTEMPT_COUNTED_KEY`). A refusal is therefore counted twice over,
-    by design -- as an attempt and as a rejection -- so the outcome split
-    reads as: refusals in `..._handshake_rejections_total`, and, while no
-    handler closes a handshake before accepting it, accepted = attempts -
-    refusals. (The metrics middleware cannot count these scopes itself:
-    `BaseHTTPMiddleware` passes non-HTTP scopes straight through.) A
-    middleware exception while judging a handshake is stamped
-    `unhandled_exception` and counted with a 500.
+    this wrapper, and every accept once in
+    `sky_apiserver_websocket_handshake_accepts_total{path}`, at the
+    `websocket.accept` message. Both dedup on the shared scope state, since
+    every wrapper in the stack sees the same scope and the same messages. A
+    refusal is counted twice over by design -- as an attempt and as a
+    rejection -- so attempts is the denominator and the outcomes are each
+    counted rather than subtracted; see the comment on the attempt counter
+    for why subtraction would over-count accepts. (The metrics middleware
+    cannot count these scopes itself: `BaseHTTPMiddleware` passes non-HTTP
+    scopes straight through.) A middleware exception while judging a
+    handshake is stamped `unhandled_exception` and counted with a 500.
 
     Note: for websocket connection, the mutation made by the underlying HTTP
     middleware on the request and response will be discarded.
@@ -270,7 +347,7 @@ def websocket_aware(
             self._count_attempt(scope)
             decision, response = await self._run_websocket_dispatch(scope)
             if decision == WebSocketDecision.ACCEPT:
-                await self.app(scope, receive, send)
+                await self.app(scope, receive, self._counting_send(scope, send))
                 return
             self._count_rejection(scope, decision, response)
             if decision == WebSocketDecision.UNAUTHORIZED:
@@ -292,6 +369,54 @@ def websocket_aware(
                     'reason': 'Internal Server Error',
                 })
 
+        def _counting_send(self, scope: starlette.types.Scope,
+                           send: starlette.types.Send) -> starlette.types.Send:
+            """`send`, with the accept counted where the accept happens.
+
+            Letting a handshake past every middleware is not the same as
+            accepting it: the router validates the route's required query
+            parameters *after* the middlewares and closes the connection
+            itself when one is missing, and a handler may close before
+            accepting. Neither shows up in any middleware's verdict, so the
+            accept is counted off the wire instead of inferred from it.
+
+            Wrapped once per connection, by the outermost wrapper to get
+            here. The wrapper is not removed after the handshake -- there is
+            no message that says "the handshake is over" -- so on an SSH
+            session it stays on the path of every outbound frame for the life
+            of the connection. With one wrapper that is a pointer call; with
+            one per middleware it is a dozen, for a count that happens once.
+            """
+            state = scope_state(scope)
+            if state.get(_WS_SEND_WRAPPED_KEY):
+                return send
+            state[_WS_SEND_WRAPPED_KEY] = True
+
+            async def counting_send(message: starlette.types.Message) -> None:
+                await send(message)
+                # Counted after the send, not before: if the transport
+                # raises -- a client that vanished mid-handshake -- nothing
+                # was accepted, and the count must not say otherwise.
+                if message.get('type') == 'websocket.accept':
+                    self._count_accept(scope)
+
+            return counting_send
+
+        @staticmethod
+        def _count_accept(scope: starlette.types.Scope) -> None:
+            """Count the accept.
+
+            Once per handshake without a dedup of its own: `_counting_send`
+            wraps the channel once, and an ASGI server rejects a second
+            `websocket.accept`, so the `await send(...)` this runs after
+            would raise rather than reach here twice.
+            """
+            record_safely(
+                'an accepted WebSocket handshake',
+                increment,
+                metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL,
+                path=websocket_path_label(scope))
+
         @staticmethod
         def _count_attempt(scope: starlette.types.Scope) -> None:
             """Count the handshake attempt, once, before anyone judges it.
@@ -303,31 +428,51 @@ def websocket_aware(
             without accepting (no such path exists today). Recording is
             fail-open (`record_safely`), like the metrics middleware.
             """
-            state = scope.setdefault('state', {})
+            state = scope_state(scope)
             if state.get(_WS_ATTEMPT_COUNTED_KEY):
                 return
             state[_WS_ATTEMPT_COUNTED_KEY] = True
             record_safely(
-                'WebSocket handshake attempt',
-                metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL.
-                labels(path=websocket_path_label(scope)).inc)
+                'a WebSocket handshake attempt',
+                increment,
+                metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL,
+                path=websocket_path_label(scope))
 
         @staticmethod
         def _count_rejection(scope: starlette.types.Scope,
                              decision: WebSocketDecision,
                              response: Optional[fastapi.Response]) -> None:
-            """Count a refused handshake; the client's answer is unchanged."""
-            metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL \
-                .labels(path=websocket_path_label(scope),
-                        outcome=decision.value).inc()
+            """Count a refused handshake; the client's answer is unchanged.
+
+            Both recordings are fail-open. This runs immediately before the
+            close frame is sent, so an exception here would leave the client
+            with no close frame at all -- a monitoring fault turning into a
+            failure on the path the counters exist to watch. The HTTP side
+            has always had this: the metrics middleware records through
+            `record_safely` (sky/server/metrics.py), and `record_rejection`
+            is called from inside it.
+            """
             # The status the HTTP middleware answered with (e.g. 503 for an
             # exhausted auth executor), not the 403 the client sees. A crash
             # in dispatch has no response; the `unhandled_exception` stamp it
-            # leaves is counted with a 500. A no-op when nothing stamped a
-            # reason.
-            status_code = (response.status_code if response is not None else
-                           int(http.HTTPStatus.INTERNAL_SERVER_ERROR))
-            record_rejection(scope, status_code, REJECTION_KIND_WEBSOCKET)
+            # leaves is counted with a 500.
+            #
+            # int() first: a response built with an `http.HTTPStatus` member
+            # would otherwise label the series `HTTPStatus.SERVICE_UNAVAILABLE`
+            # on Python < 3.11, where that is what str() of an IntEnum gives.
+            status_code = int(response.status_code if response is not None else
+                              http.HTTPStatus.INTERNAL_SERVER_ERROR)
+            record_safely('a refused WebSocket handshake',
+                          increment,
+                          metrics_utils.
+                          SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
+                          path=websocket_path_label(scope),
+                          outcome=decision.value,
+                          status=str(status_code))
+            # A no-op when nothing stamped a reason.
+            record_safely('the reason a WebSocket handshake was refused',
+                          record_rejection, scope, status_code,
+                          REJECTION_KIND_WEBSOCKET)
 
         async def _run_websocket_dispatch(
             self, scope: starlette.types.Scope
@@ -357,6 +502,9 @@ def websocket_aware(
             except Exception as e:  # pylint: disable=broad-except
                 logger.error('Exception occurred in middleware dispatch for '
                              f'WebSocket scope: {e}')
+                # Replaces any reason already stamped: a middleware that
+                # stamped one and then raised did not produce the response it
+                # was about to, and the crash is what this handshake ended on.
                 mark_rejection(request, REJECT_REASON_UNHANDLED_EXCEPTION)
                 return WebSocketDecision.ERROR, None
 
@@ -376,7 +524,7 @@ def websocket_aware(
         @staticmethod
         def _build_http_scope(
                 scope: starlette.types.Scope) -> starlette.types.Scope:
-            state = scope.setdefault('state', {})
+            state = scope_state(scope)
             scheme = scope.get('scheme', 'ws')
             if scheme == 'ws':
                 http_scheme = 'http'
