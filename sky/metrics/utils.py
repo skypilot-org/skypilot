@@ -47,8 +47,7 @@ _MEM_BUCKETS = [
 logger = sky_logging.init_logger(__name__)
 
 # Whether the metrics are enabled, cannot be changed at runtime.
-METRICS_ENABLED = os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED,
-                                 'false').lower() == 'true'
+METRICS_ENABLED = constants.server_metrics_enabled()
 
 # Default Prometheus deployment that each context's metrics are federated
 # from. Overridable via the `metrics.prometheus` server config section.
@@ -282,10 +281,66 @@ SKY_APISERVER_REQUEST_REJECTIONS_TOTAL = prom.Counter(
 # the request counter's point of view, so without this counter a storm of
 # refused handshakes is invisible: it only shows up as fewer connections.
 # `path` is restricted to the registered WebSocket routes, else `other`.
+#
+# `status` is the status the middleware answered with, and it is not
+# derivable from `outcome`: `error` is every refusal that is not a 401 or a
+# 403, which covers a 503 (drain, saturated auth pool), a 500 (a middleware
+# crash), a 400 (client API version) and a middleware that answers 2xx/3xx
+# without passing the handshake on. Only the status separates the server's
+# own failures from the client's, which is what an error-ratio alert is
+# about, so without it such an alert has to treat all of those alike.
+# `outcome` stays: it is what the client actually got, the close code.
 SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL = prom.Counter(
     'sky_apiserver_websocket_handshake_rejections_total',
-    'WebSocket handshakes refused by a middleware, by decision',
-    ['path', 'outcome'],
+    'WebSocket handshakes refused by a middleware, by decision and status',
+    ['path', 'outcome', 'status'],
+)
+
+# WebSocket connection scopes that reached the middleware stack, by route:
+# the attempt volume, and the denominator of any handshake ratio. Counted
+# inside `middleware_utils.websocket_aware`, at scope entry, once per
+# handshake.
+#
+# The outcomes are each counted, not derived: refusals above, accepts below.
+# Deriving accepts as attempts - refusals would over-count, because passing
+# every middleware is not the same as being accepted -- FastAPI validates a
+# route's required query parameters after the middlewares and closes the
+# connection itself when one is missing, so nothing refuses that handshake
+# and nothing accepts it. What is left over, attempts - refusals - accepts,
+# is exactly that class: closed before the accept, by the router or by a
+# handler.
+#
+# Published at zero for every `path` value from process start, by
+# `middleware_utils.preinitialize_websocket_metrics()`: a labelled counter
+# does not exist until its first increment, and `increase()` over a series
+# that springs into existence at 1 returns no sample at all, so a rule using
+# this as a denominator would read no data rather than zero. With the series
+# pre-published, `absent()` on it means the build predates the counter --
+# build drift -- rather than "nobody has used ssh".
+#
+# Two notes for anyone reading this alongside the SSH metrics below. `path`
+# here is the route, while `sky_apiserver_ssh_sessions_total`'s `path` is the
+# transport the session was served over, so the two must never be joined on
+# it. And that counter is incremented once a session is actually being served
+# -- only from the two ssh-proxy routes, after the accept and after cluster
+# validation -- so the accepts counter below bounds it from above, and the
+# gap is handshakes accepted and then dropped before the session ran.
+SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL = prom.Counter(
+    'sky_apiserver_websocket_handshake_attempts_total',
+    'WebSocket handshake attempts reaching the middleware stack, by route',
+    ['path'],
+)
+
+# WebSocket handshakes this server accepted, by route, counted where it
+# happens: the `websocket.accept` message on its way out to the client.
+# Measured rather than inferred, for the reason in the comment above.
+#
+# Published at zero for every `path` value from process start, like the
+# attempt counter, so a ratio against it cannot read as no data.
+SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL = prom.Counter(
+    'sky_apiserver_websocket_handshake_accepts_total',
+    'WebSocket handshakes this server accepted, by route',
+    ['path'],
 )
 
 SKY_APISERVER_WEBSOCKET_CONNECTIONS = prom.Gauge(
