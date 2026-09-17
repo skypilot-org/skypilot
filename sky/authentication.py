@@ -34,6 +34,7 @@ import requests
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import runpod
@@ -203,23 +204,28 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             check=True,
             shell=True,
             stdout=subprocess.DEVNULL)
-        # Enable ssh port for all the instances
-        enable_ssh_cmd = ('gcloud compute firewall-rules create '
-                          'allow-ssh-ingress-from-iap '
-                          '--direction=INGRESS '
-                          '--action=allow '
-                          '--rules=tcp:22 '
-                          '--source-ranges=0.0.0.0/0')
-        proc = subprocess.run(enable_ssh_cmd,
-                              check=False,
-                              shell=True,
-                              stdout=subprocess.DEVNULL,
-                              stderr=subprocess.PIPE)
-        if proc.returncode != 0 and 'already exists' not in proc.stderr.decode(
-                'utf-8'):
-            subprocess_utils.handle_returncode(proc.returncode, enable_ssh_cmd,
-                                               'Failed to enable ssh port.',
-                                               proc.stderr.decode('utf-8'))
+        # Enable ssh port for all the instances.
+        # Skipped when gcp.managed_firewall_rules is False
+        # (e.g., org policy restricts # firewall rule creation).
+        managed_firewall_rules = skypilot_config.get_workspace_cloud('gcp').get(
+            'managed_firewall_rules', True)
+        if managed_firewall_rules:
+            enable_ssh_cmd = ('gcloud compute firewall-rules create '
+                              'allow-ssh-ingress-from-iap '
+                              '--direction=INGRESS '
+                              '--action=allow '
+                              '--rules=tcp:22 '
+                              '--source-ranges=0.0.0.0/0')
+            proc = subprocess.run(enable_ssh_cmd,
+                                  check=False,
+                                  shell=True,
+                                  stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.PIPE)
+            if (proc.returncode != 0) and ('already exists'
+                                           not in proc.stderr.decode('utf-8')):
+                subprocess_utils.handle_returncode(
+                    proc.returncode, enable_ssh_cmd,
+                    'Failed to enable ssh port.', proc.stderr.decode('utf-8'))
     return configure_ssh_info(config)
 
 
