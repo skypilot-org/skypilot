@@ -15,6 +15,24 @@ _SIGNAL_FILE_CONST = (
     'sky.jobs.constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE')
 
 
+def test_redact_request_fields():
+    fields = {
+        'Authorization': 'Bearer secret-token',
+        'X-Api-Key': 'secret-api-key',
+        'Cookie': 'session=secret-cookie',
+        'X-Request-ID': 'request-id',
+        'query': 'safe-value',
+    }
+
+    assert serve_utils.redact_request_fields(fields) == {
+        'Authorization': '<redacted>',
+        'X-Api-Key': '<redacted>',
+        'Cookie': '<redacted>',
+        'X-Request-ID': 'request-id',
+        'query': 'safe-value',
+    }
+
+
 def test_task_fits():
     # Test exact fit.
     task_resources = Resources(cpus=1, memory=1, cloud=clouds.AWS())
