@@ -1,0 +1,201 @@
+"""The one moment of a gated launch the event table never marked.
+
+A job parked on a scheduler queue already produces events saying it is waiting,
+with the queue's name and its position in it. Nothing said when that stopped --
+and for a gated job the wait is routinely most of the start-up. These cover the
+row that closes it.
+"""
+import types
+from unittest import mock
+
+import pytest
+
+from sky import global_user_state
+from sky.metrics import launch_phases
+
+
+class _Row(types.SimpleNamespace):
+    """A stand-in for a SQLAlchemy Row, which the code reads both ways.
+
+    `row[0]` for the attempt id and `row.queue` for the rest. A plain
+    SimpleNamespace supports only the second, and because the recorder is
+    wrapped in `@_best_effort` the resulting TypeError is swallowed -- the
+    test then fails as "nothing was emitted", which is indistinguishable from
+    the feature being switched off.
+    """
+
+    def __getitem__(self, index):
+        return tuple(vars(self).values())[index]
+
+
+def _attempt(queue='eng-lq', instances_requested=30.0, provision_start=20.0):
+    return _Row(attempt_id='a1',
+                queue=queue,
+                instances_requested=instances_requested,
+                provision_start=provision_start,
+                admitted=None,
+                instances_ready=None,
+                outcome=None)
+
+
+@pytest.fixture(name='events')
+def _events(monkeypatch):
+    """Capture what would be written to the cluster event log."""
+    written = []
+
+    def fake(cluster_name, new_status, reason, event_type, **kwargs):
+        written.append({
+            'cluster': cluster_name,
+            'reason': reason,
+            'type': event_type,
+            **kwargs,
+        })
+
+    monkeypatch.setattr(global_user_state, 'add_cluster_event', fake)
+    return written
+
+
+def test_the_row_names_the_queue_and_how_long_the_wait_was(events):
+    global_user_state._record_admission_event('train-7', _attempt(), 146.57)
+
+    assert len(events) == 1
+    assert 'eng-lq' in events[0]['reason']
+    # 30.0 -> 146.57 is the wait; the text must carry it, because the whole
+    # point of the row is that the reader cannot otherwise place its start.
+    assert '1m 56s' in events[0]['reason']
+
+
+def test_it_is_not_launch_progress(events):
+    """LAUNCH_PROGRESS is consumed latest-wins as a managed job's `details`
+    column -- "what is this launch waiting on now". A row saying a wait has
+    ended would sit there as a stale answer for the rest of the launch, which
+    is worse than the silence it would replace."""
+    global_user_state._record_admission_event('train-7', _attempt(), 146.57)
+
+    assert events[0]['type'] == (
+        global_user_state.ClusterEventType.LAUNCH_MILESTONE)
+    assert events[0]['type'] != (
+        global_user_state.ClusterEventType.LAUNCH_PROGRESS)
+
+
+def test_the_duration_is_the_one_launch_phases_computes(events):
+    """Not subtracted here. The wait is measured from `instances_requested`
+    where the cloud stamps it and from `provision_start` where it does not, so
+    a number computed by hand would disagree with `t_queue_wait` on exactly the
+    clouds that fallback exists for."""
+    attempt = _attempt(instances_requested=None, provision_start=20.0)
+
+    global_user_state._record_admission_event('train-7', attempt, 146.57)
+
+    # The fallback took provision_start, so the wait is longer than it would
+    # have been measured from a request that never happened.
+    assert launch_phases.queue_wait_from(attempt) == 20.0
+    assert '2m 6s' in events[0]['reason']
+
+
+def test_an_attempt_with_no_boundary_says_nothing(events):
+    """Neither milestone recorded: there is no wait to report, and inventing
+    one from the admission alone would measure from an instant that is not a
+    boundary of anything."""
+    global_user_state._record_admission_event(
+        'train-7', _attempt(instances_requested=None, provision_start=None),
+        146.57)
+
+    assert events == []
+
+
+def test_the_queue_name_is_optional(events):
+    """`queue` is written by the scheduler plugin separately from the
+    admission, so it can be absent while the admission is not. The row is
+    still worth writing -- the wait is the number, the queue is the detail."""
+    global_user_state._record_admission_event('train-7', _attempt(queue=None),
+                                              146.57)
+
+    assert len(events) == 1
+    assert 'queue' not in events[0]['reason']
+
+
+# --- the recorder that decides whether to emit at all ------------------------
+
+
+@pytest.fixture(name='recorder')
+def _recorder(monkeypatch):
+    """Drive record_launch_milestone_for_cluster with a fake database.
+
+    `stamped` controls whether the conditional UPDATE matched -- which is the
+    whole emit-once mechanism, so it is the thing worth being able to set.
+    """
+    state = {'stamped': True, 'row': _attempt()}
+    emitted = []
+
+    class _Result:
+
+        @property
+        def rowcount(self):
+            return 1 if state['stamped'] else 0
+
+    class _Session:
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, statement):
+            if str(statement).lstrip().upper().startswith('SELECT'):
+                return mock.Mock(fetchone=lambda: state['row'])
+            return _Result()
+
+        def commit(self):
+            pass
+
+    monkeypatch.setattr(global_user_state.orm, 'Session',
+                        lambda engine: _Session())
+    monkeypatch.setattr(global_user_state._db_manager, 'get_engine',
+                        lambda: mock.Mock())
+    monkeypatch.setattr(global_user_state, '_record_admission_event',
+                        lambda *a, **k: emitted.append(a))
+    return state, emitted
+
+
+def test_admission_emits_once(recorder):
+    state, emitted = recorder
+
+    global_user_state.record_launch_milestone_for_cluster(
+        'train-7', global_user_state.LaunchMilestone.ADMITTED, 146.57)
+
+    assert len(emitted) == 1
+
+
+def test_a_resumed_launch_does_not_announce_the_same_admission_twice(recorder):
+    """A launch that parks on an external condition resumes into the *same*
+    open attempt row, so the second call's UPDATE matches nothing. This is the
+    failure the provisioning event has -- it re-fires on resume and makes one
+    provisioning look like two -- asserted against the design that avoids it.
+    """
+    state, emitted = recorder
+    state['stamped'] = False
+
+    global_user_state.record_launch_milestone_for_cluster(
+        'train-7', global_user_state.LaunchMilestone.ADMITTED, 146.57)
+
+    assert emitted == []
+
+
+def test_the_other_milestones_emit_nothing(recorder):
+    """The positive case above passes just as well if nothing ever emits, so
+    this pair is only meaningful together: only ADMITTED writes a row, and
+    ADMITTED does."""
+    state, emitted = recorder
+
+    for milestone in (global_user_state.LaunchMilestone.INSTANCES_REQUESTED,
+                      global_user_state.LaunchMilestone.INSTANCES_READY):
+        global_user_state.record_launch_milestone_for_cluster(
+            'train-7', milestone, 146.57)
+
+    assert emitted == []
+
+    global_user_state.record_launch_milestone_for_cluster(
+        'train-7', global_user_state.LaunchMilestone.ADMITTED, 146.57)
+    assert len(emitted) == 1

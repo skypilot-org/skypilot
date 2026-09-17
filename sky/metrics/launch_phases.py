@@ -59,6 +59,21 @@ def _first_set(*values: Optional[float]) -> Optional[float]:
     return None
 
 
+def queue_wait_from(attempt: Any) -> Optional[float]:
+    """Where an admission wait is measured from.
+
+    Whichever boundary the cloud gave us: a cloud that stamps ``admitted`` but
+    has no separate request step would otherwise have the phase dropped in one
+    reader and reported in another -- two answers for one launch.
+
+    Named rather than inlined because three readers need the same answer: the
+    per-attempt phases, the job timeline, and the admission event, which sits
+    in another module and would otherwise carry a duration that disagrees with
+    `t_queue_wait` on exactly the clouds this fallback exists for.
+    """
+    return _first_set(attempt.instances_requested, attempt.provision_start)
+
+
 def compute_phases(row: Any) -> Tuple[List[PhaseSample], List[DroppedPhase]]:
     """Split one finished attempt into its phases.
 
@@ -92,11 +107,7 @@ def compute_phases(row: Any) -> Tuple[List[PhaseSample], List[DroppedPhase]]:
         samples.append(PhaseSample(phase, end - start))
 
     add(PROVISION_SETUP, row.provision_start, row.instances_requested)
-    # From whichever boundary the cloud gave us, the same fallback the job
-    # timeline uses: a cloud that stamps admitted but has no separate request
-    # step would otherwise have the phase dropped here and reported there, two
-    # answers for one launch.
-    queue_from = _first_set(row.instances_requested, row.provision_start)
+    queue_from = queue_wait_from(row)
     # Only where an external scheduler was involved at all. An abandoned
     # attempt counts a dropped phase, so without the queue check every
     # abandoned launch on a deployment with no scheduler would report losing a
@@ -242,7 +253,7 @@ def compute_job_timeline(task: Any,
     # start of provisioning where it does not -- on a cloud with no separate
     # request step the preparation still happened, and leaving it out would
     # drop it from the total rather than attribute it.
-    startup_from = _first_set(final.instances_requested, final.provision_start)
+    startup_from = queue_wait_from(final)
     phases[PROVISION_SETUP] = (startup_from - task['submitted_at'] -
                                retry_overhead)
     if final.admitted is not None:
