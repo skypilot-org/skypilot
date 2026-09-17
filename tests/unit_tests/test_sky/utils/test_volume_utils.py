@@ -382,6 +382,29 @@ class TestVolumeMount:
         assert 'not ready' in str(exc_info.value)
         assert 'Error: Storage quota exceeded' in str(exc_info.value)
 
+    @mock.patch('sky.global_user_state.get_volume_by_name')
+    def test_resolve_volume_still_being_provisioned(self, mock_get_volume):
+        """Being provisioned is not-ready, and is not a reason to refuse.
+
+        A class that binds Immediately provisions asynchronously, so a volume
+        reads not-ready for as long as its backend takes -- minutes, for a
+        network filesystem. Refusing here is what made creating such a volume
+        and using it two steps. Kept in step with the check that runs on every
+        launch, which lets the same reason through.
+        """
+        mock_get_volume.return_value = {
+            'name': 'test-volume',
+            'handle': None,
+            'status': status_lib.VolumeStatus.NOT_READY,
+            'error_message': f'{volume.PVC_PROVISIONING_MESSAGE} If this does '
+                             f'not resolve, the storage class may be '
+                             f'misconfigured.',
+        }
+
+        mount = volume.VolumeMount.resolve('/data', 'test-volume')
+
+        assert mount.volume_name == 'test-volume'
+
     def test_to_yaml_config_with_sub_path(self):
         """Test to_yaml_config includes sub_path when set."""
         volume_config = models.VolumeConfig(
@@ -524,6 +547,47 @@ class TestVolumeMount:
         assert volume_mount.volume_name == 'test-volume'
         assert volume_mount.volume_config == mock_volume_config
         assert volume_mount.is_ephemeral is False
+
+    @mock.patch('sky.global_user_state.update_volume')
+    def test_pre_mount_inline_host_path_skips_state_update(self, mock_update):
+        volume_config = models.VolumeConfig(name='',
+                                            type='',
+                                            cloud='slurm',
+                                            region=None,
+                                            zone=None,
+                                            name_on_cloud='/host/data',
+                                            size=None,
+                                            config={
+                                                'host_path': '/host/data',
+                                                'mode': 'ro',
+                                            })
+        volume_mount = volume.VolumeMount('/data', '', volume_config)
+
+        volume_mount.pre_mount()
+
+        mock_update.assert_not_called()
+
+    @mock.patch('sky.global_user_state.update_volume')
+    def test_pre_mount_named_host_path_updates_state(self, mock_update):
+        volume_config = models.VolumeConfig(name='host-volume',
+                                            type='k8s-hostpath',
+                                            cloud='kubernetes',
+                                            region=None,
+                                            zone=None,
+                                            name_on_cloud='host-volume',
+                                            size=None,
+                                            config={
+                                                'host_path': '/host/data',
+                                                'access_mode': 'ReadOnlyMany',
+                                            })
+        volume_mount = volume.VolumeMount('/data', 'host-volume', volume_config)
+
+        volume_mount.pre_mount()
+
+        mock_update.assert_called_once_with(
+            'host-volume',
+            last_attached_at=mock.ANY,
+            status=status_lib.VolumeStatus.IN_USE)
 
 
 PVC_TYPE = 'k8s-pvc'
@@ -705,3 +769,151 @@ class TestVolumeMountConflictChecker:
         identity = volume.VolumeMountConflictChecker._get_vol_source_identity(
             'runpod-network-volume')
         assert identity is None
+
+
+class TestAutoMountScope:
+    """Tests for auto_mount_in_scope."""
+
+    def test_global_applies_to_everyone(self):
+        assert volume.auto_mount_in_scope('global',
+                                          volume_user_hash='owner',
+                                          volume_workspace='ws-a',
+                                          current_user_hash='someone-else',
+                                          active_workspace='ws-b')
+
+    def test_personal_applies_to_owner(self):
+        assert volume.auto_mount_in_scope('personal',
+                                          volume_user_hash='owner',
+                                          volume_workspace='ws-a',
+                                          current_user_hash='owner',
+                                          active_workspace='ws-b')
+
+    def test_personal_skips_other_users(self):
+        assert not volume.auto_mount_in_scope('personal',
+                                              volume_user_hash='owner',
+                                              volume_workspace='ws-a',
+                                              current_user_hash='someone-else',
+                                              active_workspace='ws-a')
+
+    def test_personal_skips_when_owner_unknown(self):
+        """Volume records without user_hash never match personal scope."""
+        assert not volume.auto_mount_in_scope('personal',
+                                              volume_user_hash=None,
+                                              volume_workspace='ws-a',
+                                              current_user_hash=None,
+                                              active_workspace='ws-a')
+
+    def test_workspace_applies_within_workspace(self):
+        assert volume.auto_mount_in_scope('workspace',
+                                          volume_user_hash='owner',
+                                          volume_workspace='ws-a',
+                                          current_user_hash='someone-else',
+                                          active_workspace='ws-a')
+
+    def test_workspace_skips_other_workspaces(self):
+        assert not volume.auto_mount_in_scope('workspace',
+                                              volume_user_hash='owner',
+                                              volume_workspace='ws-a',
+                                              current_user_hash='owner',
+                                              active_workspace='ws-b')
+
+    def test_workspace_skips_when_workspace_unknown(self):
+        """Volume records without workspace never match workspace scope."""
+        assert not volume.auto_mount_in_scope('workspace',
+                                              volume_user_hash='owner',
+                                              volume_workspace=None,
+                                              current_user_hash='owner',
+                                              active_workspace=None)
+
+    def test_invalid_scope_raises(self):
+        with pytest.raises(ValueError, match='Invalid auto-mount scope'):
+            volume.auto_mount_in_scope('team',
+                                       volume_user_hash='owner',
+                                       volume_workspace='ws-a',
+                                       current_user_hash='owner',
+                                       active_workspace='ws-a')
+
+    def test_supported_scopes(self):
+        assert volume.AutoMountScope.supported_scopes() == [
+            'personal', 'workspace', 'global'
+        ]
+
+
+class TestResizeDisplayMessage:
+    """The one sentence shown about a resize, built in one place.
+
+    Kubernetes explains the state better than a message reconstructed from the
+    state name, but it explains it in its own terms -- a pod on a node, not a
+    SkyPilot cluster -- and it does not always say anything at all.
+    """
+
+    def test_no_resize_says_nothing(self):
+        assert volume.resize_display_message(None, None) is None
+
+    def test_the_clouds_own_words_are_kept(self):
+        message = volume.resize_display_message(
+            'pending_on_node',
+            'Waiting for user to (re-)start a pod to finish file system '
+            'resize of volume on node.')
+
+        assert message.startswith('Waiting for user to (re-)start a pod')
+
+    def test_and_what_to_do_about_it_is_added(self):
+        message = volume.resize_display_message('pending_on_node',
+                                                'k8s says so')
+
+        # The cloud says why; this says what to do in SkyPilot's terms.
+        assert 'k8s says so' in message
+        assert 'mounts the volume' in message
+
+    def test_a_cloud_with_nothing_to_say_still_gets_a_sentence(self):
+        message = volume.resize_display_message('pending_on_node', None)
+
+        assert 'filesystem' in message
+
+    def test_a_volume_in_use_is_not_sent_to_restart_first(self):
+        """Kubernetes usually grows the filesystem of a mounted volume itself.
+
+        Its own words say "(re-)start a pod" either way, which would send
+        someone to restart a job that is about to finish on its own. Restarting
+        is the fallback, since growing a mounted volume needs a driver that
+        supports it -- so it is offered, not led with.
+        """
+        message = volume.resize_display_message(
+            'pending_on_node',
+            'Waiting for user to (re-)start a pod to finish file system '
+            'resize of volume on node.',
+            known_in_use=True)
+
+        assert 'usually grows the filesystem without a restart' in message
+        # Kubernetes sets that message whether or not the volume is mounted, so
+        # keeping it would lead with the fallback.
+        assert '(re-)start a pod' not in message
+        # And the fallback is still reachable, conditioned on waiting failing.
+        assert 'If it stays this way, restart' in message
+
+    def test_a_volume_nothing_is_using_is_told_what_will_finish_it(self):
+        message = volume.resize_display_message('pending_on_node',
+                                                None,
+                                                known_in_use=False)
+
+        assert 'next time something mounts the volume' in message
+
+    def test_a_resize_in_progress_asks_for_nothing(self):
+        message = volume.resize_display_message('in_progress', None)
+
+        assert 'resizing' in message.lower()
+        assert 'Restart' not in message
+
+    def test_a_failed_resize_says_the_size_did_not_change(self):
+        message = volume.resize_display_message('failed', 'disk full')
+
+        assert 'disk full' in message
+        assert 'previous size' in message
+
+    def test_a_status_this_reader_does_not_know_is_still_reported(self):
+        """A half-upgraded deployment can have a newer writer than reader."""
+        assert volume.resize_display_message(
+            'from_the_future', 'the cloud said this') == 'the cloud said this'
+        assert 'from_the_future' in volume.resize_display_message(
+            'from_the_future', None)

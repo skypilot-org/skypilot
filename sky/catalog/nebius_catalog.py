@@ -235,17 +235,31 @@ def _fetch_user_catalog() -> Union[pd.DataFrame, common.LazyDataFrame]:
         return existing_catalog
 
     presets = []
+    total_presets = 0
     for region, project_id in _get_region_projects().items():
         platforms = fetch_nebius.fetch_platforms_for_project(project_id)
         if not platforms:
             continue
 
+        total_presets += sum(
+            len(platform.spec.presets) for platform in platforms)
         presets.extend(
             fetch_nebius.estimate_platforms(
                 platforms=platforms,
                 parent_id=project_id,
                 region=region,
                 offer_types=[billing().OfferType.OFFER_TYPE_CONTRACT_PRICE]))
+
+    # Unpriceable presets are skipped individually rather than raised, so a
+    # systemic failure (expired credentials, a billing outage) would otherwise
+    # write a mostly-empty personal catalog and cache it for
+    # _PULL_FREQUENCY_HOURS, silently replacing contract prices with the
+    # static list prices. Fail instead and let the caller fall back.
+    num_failed = total_presets - len(presets)
+    if not presets or num_failed * 2 > total_presets:
+        raise RuntimeError(
+            f'Failed to price {num_failed} out of {total_presets} Nebius '
+            'presets; refusing to write a mostly-empty personal catalog.')
 
     fetch_nebius.write_preset_prices(presets,
                                      common.get_catalog_path(catalog_file))

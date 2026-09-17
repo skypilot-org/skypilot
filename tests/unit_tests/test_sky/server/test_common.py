@@ -632,6 +632,7 @@ def test_process_mounts_removes_file_mounts_mapping(tmp_path, monkeypatch):
     task is submitted again (e.g., in jobs scenarios).
     """
     from sky.skylet import constants as skylet_constants
+    from sky.utils import dag_utils
     from sky.utils import yaml_utils
 
     # Mock the API_SERVER_CLIENT_DIR to use tmp_path
@@ -663,19 +664,8 @@ run: python /remote/script.py
                                                       env_vars=env_vars,
                                                       workdir_only=False)
 
-    # Find the translated YAML file
-    user_hash = 'test-user'
-    client_dir = api_server_dir / user_hash
-
-    # Find the translated file (it has _translated.yaml suffix)
-    translated_files = list(client_dir.glob('**/*_translated.yaml'))
-    assert len(translated_files) == 1, \
-        f'Expected 1 translated file, found {len(translated_files)}'
-
-    translated_file = translated_files[0]
-
-    # Read the translated YAML and verify file_mounts_mapping is removed
-    translated_configs = yaml_utils.read_yaml_all(str(translated_file))
+    translated_yaml = dag_utils.dump_dag_to_yaml_str(dag)
+    translated_configs = yaml_utils.read_yaml_all_str(translated_yaml)
 
     for task_config in translated_configs:
         if task_config is None:
@@ -701,6 +691,8 @@ run: python /remote/script.py
                     if isinstance(source, str):
                         assert 'uploaded/' in source, \
                             f'file_mount source should be translated: {source}'
+
+    assert not list(api_server_dir.rglob('*.yaml'))
 
 
 def test_process_mounts_without_mapping(tmp_path, monkeypatch):
@@ -733,6 +725,7 @@ run: echo "hello world"
     # Verify the dag was created successfully
     assert dag is not None
     assert len(dag.tasks) == 1
+    assert not list(api_server_dir.rglob('*.yaml'))
 
 
 def _fake_response(status_code, json_body=None, json_raises=False):
@@ -780,3 +773,52 @@ def test_handle_request_error_5xx_stays_httperror():
     resp = _fake_response(500, {'detail': 'server boom'})
     with pytest.raises(requests.exceptions.HTTPError):
         common.handle_request_error(resp)
+
+
+def test_redact_url_password_masks_password():
+    """The password is masked while the rest of the URL is preserved."""
+    redacted = common.redact_url_password(
+        'http://alice:s3cr3t@example.com:8080')
+    assert redacted == 'http://alice:<redacted>@example.com:8080'
+    # The real password must not survive anywhere in the output.
+    assert 's3cr3t' not in redacted
+
+
+def test_redact_url_password_preserves_path_and_query():
+    """Scheme, host, port, path and query are all kept intact."""
+    url = 'https://user:hunter2@host:443/api/v1?token=abc'
+    redacted = common.redact_url_password(url)
+    assert redacted == 'https://user:<redacted>@host:443/api/v1?token=abc'
+    assert 'hunter2' not in redacted
+
+
+def test_redact_url_password_without_password_is_unchanged():
+    # No credentials at all.
+    assert common.redact_url_password(
+        'http://example.com:46580') == 'http://example.com:46580'
+    # A username but no password should be left alone.
+    assert common.redact_url_password(
+        'http://alice@example.com') == 'http://alice@example.com'
+
+
+def test_redact_url_password_ipv6_keeps_brackets():
+    """IPv6 hosts must stay bracketed so the ':port' is unambiguous."""
+    redacted = common.redact_url_password('http://user:pw@[::1]:8080')
+    assert redacted == 'http://user:<redacted>@[::1]:8080'
+
+
+def test_redact_url_password_non_url_is_unchanged():
+    # Something that isn't a URL should pass through untouched.
+    assert common.redact_url_password('not-a-url') == 'not-a-url'
+    assert common.redact_url_password('') == ''
+
+
+def test_redact_url_password_bad_port_is_returned_unchanged():
+    """A malformed port must not raise, even with a password present.
+
+    urlsplit() accepts these, but SplitResult.port only validates when read,
+    so the read has to happen inside the guard. Otherwise `sky check` and
+    `sky api info` would abort instead of printing their summary line.
+    """
+    for url in ('http://user:pw@host:notaport', 'http://user:pw@host:99999'):
+        assert common.redact_url_password(url) == url

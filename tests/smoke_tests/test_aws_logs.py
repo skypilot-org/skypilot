@@ -89,6 +89,6 @@ def test_log_collection_to_aws_cloudwatch(generic_cloud: str):
                  f'{validate_logs_cmd}'),
             ],
             f'sky down -y {name}',
-            timeout=20 * 60,
+            timeout=smoke_tests_utils.LOG_STORE_CMD_TIMEOUT,
         )
         smoke_tests_utils.run_one_test(test)

@@ -1,6 +1,8 @@
 import contextlib
 import copy
 import importlib
+import io
+import logging
 import os
 import subprocess
 import sys
@@ -979,3 +981,42 @@ def test_add_volumes_policy_server_side_vs_client_side(add_volumes_policy_cls,
             server_mutated_request.task.volumes)
     assert client_mutated_request.task.volumes['/mnt/data0'] == 'pvc0'
     assert server_mutated_request.task.volumes['/mnt/data0'] == 'pvc0'
+
+
+def test_mutated_user_request_log_redacts_secrets(add_example_policy_paths,
+                                                  task, tmp_path):
+    """The mutated-request debug log must not carry the API server token.
+
+    MutatedUserRequest holds the whole SkyPilot config, so logging it renders
+    the config as a dict repr -- a different path from the YAML config dumps,
+    and one that leaked the token into CI logs until it was redacted too.
+    """
+    token = 'sky_eyJhbGciOiJIUzI1NiJ9.CANARYTOKENVALUE.sig'
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text('admin_policy: example_policy.AddLabelsPolicy\n'
+                           'api_server:\n'
+                           '  endpoint: https://api.example.com\n'
+                           f'  service_account_token: {token}\n')
+
+    # sky loggers do not propagate to root, so caplog cannot see them; attach
+    # a handler to the emitting logger directly.
+    emitter = logging.getLogger('sky.utils.admin_policy_utils')
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setLevel(logging.DEBUG)
+    previous_level = emitter.level
+    emitter.addHandler(handler)
+    emitter.setLevel(logging.DEBUG)
+    try:
+        _load_task_and_apply_policy(task, str(config_path))
+    finally:
+        emitter.removeHandler(handler)
+        emitter.setLevel(previous_level)
+
+    logged = stream.getvalue()
+    assert 'Mutated user request:' in logged, (
+        f'expected the debug line to be emitted, got: {logged!r}')
+    assert token not in logged, 'the API token reached a log line'
+    assert '<redacted>' in logged, (
+        'the token should be replaced, not dropped, so the log still shows '
+        'that the field was set')

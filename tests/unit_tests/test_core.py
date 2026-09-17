@@ -6,6 +6,7 @@ from sky import admin_policy as sky_admin_policy
 from sky import clouds
 from sky import core
 from sky import exceptions
+from sky import global_user_state
 from sky import models
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
 from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
@@ -699,6 +700,52 @@ def test_sdk_launch_no_resize_skips_version_guard(_stub_launch_preamble,
         sdk.launch(task, cluster_name='my-cluster', resize=False)
 
 
+@pytest.mark.parametrize('api_version', [None, 24, 56])
+def test_sdk_validate_slurm_host_path_errors_on_old_server(
+        api_version, monkeypatch):
+    """sdk.validate should error for host_path volumes if remote API
+    version < 57."""
+    import sky
+    from sky.client import sdk
+
+    monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
+                        lambda: api_version)
+    task = sky.Task(resources=sky.Resources(cloud=clouds.Slurm()),
+                    volumes={'/data': {
+                        'host_path': '/shared/data'
+                    }})
+    with sky.Dag() as dag:
+        dag.add(task)
+
+    with pytest.raises(exceptions.APINotSupportedError,
+                       match='Slurm host_path volumes'):
+        sdk.validate(dag)
+
+
+def test_sdk_validate_slurm_host_path_allowed_on_new_server(monkeypatch):
+    """sdk.validate should pass the guard for host_path volumes when remote
+    API version >= 57. We short-circuit the server request with a sentinel
+    so reaching it proves the guard didn't raise."""
+    import sky
+    from sky.client import sdk
+
+    monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
+                        lambda: 57)
+    sentinel = RuntimeError('reached server request')
+    monkeypatch.setattr(
+        'sky.client.sdk.server_common.make_authenticated_request',
+        mock.Mock(side_effect=sentinel))
+    task = sky.Task(resources=sky.Resources(cloud=clouds.Slurm()),
+                    volumes={'/data': {
+                        'host_path': '/shared/data'
+                    }})
+
+    with sky.Dag() as dag:
+        dag.add(task)
+    with pytest.raises(RuntimeError, match='reached server request'):
+        sdk.validate(dag)
+
+
 def test_launch_body_accepts_resize_field():
     """New server should accept resize=True in the request body."""
     from sky.server.requests import payloads
@@ -949,3 +996,34 @@ def test_tail_logs_reraises_when_reader_finds_nothing(
     with mock.patch('sky.logs.get_log_reader', return_value=reader):
         with pytest.raises(exceptions.ClusterDoesNotExist):
             core.tail_logs('test-cluster', job_id=7)
+
+
+def test_down_graceful_tolerates_missing_command_runners(monkeypatch) -> None:
+    """A graceful ``down`` must still tear the cluster down when the
+    provisioner cannot produce command runners.
+
+    Some provisioners have no exec access into the instances, so
+    ``get_command_runners()`` raises. If that propagates, ``down()`` aborts
+    before ``teardown()`` and the cluster's resources are leaked.
+    """
+    handle = mock.MagicMock(spec=CloudVmRayResourceHandle)
+    handle.get_command_runners.side_effect = RuntimeError(
+        'provisioner does not support command runners')
+    backend = mock.MagicMock(spec=CloudVmRayBackend)
+
+    monkeypatch.setattr(global_user_state, 'get_handle_from_cluster_name',
+                        lambda name: handle)
+    monkeypatch.setattr(core.backend_utils, 'get_backend_from_handle',
+                        lambda h: backend)
+    monkeypatch.setattr(core.usage_lib,
+                        'record_cluster_name_for_current_operation',
+                        lambda name: None)
+    monkeypatch.setattr(core, '_maybe_run_down_hooks',
+                        lambda *args, **kwargs: None)
+
+    core.down('test-cluster', graceful=True)
+
+    handle.get_command_runners.assert_called_once()
+    backend.teardown.assert_called_once_with(handle,
+                                             terminate=True,
+                                             purge=False)

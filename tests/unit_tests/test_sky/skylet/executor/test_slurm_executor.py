@@ -229,3 +229,36 @@ def test_barrier_leaves_the_done_directory_in_place(tmp_path, monkeypatch):
     assert exit_info.value.code == 0
     assert run_done_dir.is_dir(), 'the barrier directory was removed'
     assert sorted(p.name for p in run_done_dir.iterdir()) == ['0', '1']
+
+
+def test_failed_task_skips_barrier(tmp_path, monkeypatch):
+    cluster_home = tmp_path / 'cluster_home'
+    cluster_home.mkdir()
+    (cluster_home / constants.SLURM_PROCTRACK_TYPE_FILE).write_text('cgroup')
+    log_dir = tmp_path / 'logs'
+    log_dir.mkdir()
+
+    monkeypatch.setenv('SLURM_PROCID', '1')
+    monkeypatch.setenv('SLURM_NNODES', '3')
+    monkeypatch.setenv('SLURM_JOB_ID', '42')
+    monkeypatch.setenv('SLURM_STEP_ID', '7')
+    monkeypatch.setattr(slurm, '_get_ip_address', lambda: '10.0.0.2')
+    monkeypatch.setattr(slurm, '_get_job_node_ips',
+                        lambda: '10.0.0.1\n10.0.0.2\n10.0.0.3')
+    monkeypatch.setattr(slurm, 'run_bash_command_with_log', lambda *a, **kw: 1)
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError('failed task entered the completion barrier')
+
+    monkeypatch.setattr(slurm, '_wait_for_all_ranks', fail_if_called)
+    monkeypatch.setattr(sys, 'argv', [
+        'slurm.py', '--script', 'exit 1', '--log-dir',
+        str(log_dir), '--cluster-num-nodes', '3', '--cluster-ips',
+        '10.0.0.1,10.0.0.2,10.0.0.3', '--cluster-home-dir',
+        str(cluster_home)
+    ])
+
+    with pytest.raises(SystemExit) as exit_info:
+        slurm.main()
+
+    assert exit_info.value.code == 1

@@ -2,23 +2,28 @@
 
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 import pathlib
 import threading
 import time
 from unittest import mock
+import zipfile
 
 import fastapi
+import prometheus_client as prom
 import pytest
 import uvicorn
 
 from sky import models
+from sky.schemas.api import responses as api_responses
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import server
 from sky.server.requests import executor
 from sky.skylet import constants
+from sky.users import token_service
 from sky.utils import common_utils
 from sky.utils import config_utils
 
@@ -221,7 +226,8 @@ async def test_logs():
                                             mock_request_task.log_path,
                                             mock.ANY,
                                             polling_interval=1,
-                                            kill_request_on_disconnect=False)
+                                            kill_request_on_disconnect=False,
+                                            discard_log_after_stream=True)
 
 
 @mock.patch('sky.utils.context_utils.hijack_sys_attrs')
@@ -399,6 +405,76 @@ async def test_prepare_request_passes_auth_user():
         mock_prepare.assert_awaited_once()
         _, kwargs = mock_prepare.call_args
         assert kwargs['auth_user'] == auth_user
+
+
+@pytest.mark.asyncio
+async def test_hook_logs_keeps_its_request_log(tmp_path, monkeypatch):
+    """`/hook_logs` must not discard the request log it streams.
+
+    Its client, ``sky.client.sdk.tail_hook_logs``, does not read the body
+    this endpoint streams -- it re-reads the same log through
+    ``/api/stream``. So a log discarded when the first response ends leaves
+    that second read with nothing, and the hook output never reaches the
+    user.
+
+    ``stream_response_for_long_request`` is deliberately not mocked here: the
+    default it applies is the whole point of the test, so the real streaming
+    and log-discard path has to run. The log is placed where
+    ``log_provider.discard_log`` would look for it (it resolves the path from
+    the request id, not from ``log_path``), otherwise a discard would delete
+    some other file and the assertion below could not fail.
+    """
+    from sky.server.requests import log_provider
+    from sky.server.requests import payloads
+
+    request_id = 'hook-logs-request-id'
+    monkeypatch.setattr(server_constants, 'REQUEST_LOG_PATH_PREFIX',
+                        str(tmp_path))
+    log_path = log_provider.local_log_path(request_id,
+                                           log_provider.RequestLogType.REQUEST)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text('hook-marker\nEVENT=stop\n')
+
+    request = mock.MagicMock()
+    request.state = mock.MagicMock()
+    request.state.request_id = request_id
+    request.state.auth_user = None
+
+    request_task = mock.MagicMock()
+    request_task.request_id = request_id
+    request_task.log_path = log_path
+
+    hook_logs_body = payloads.HookLogsBody(cluster_name='test-cluster',
+                                           event='stop')
+    background_tasks = fastapi.BackgroundTasks()
+
+    async def _already_started(*args, **kwargs):
+        """The request has left PENDING; yield nothing and return."""
+        return
+        yield ''  # pragma: no cover -- makes this an async generator
+
+    with mock.patch('sky.server.requests.executor.prepare_request_async',
+                    new_callable=mock.AsyncMock,
+                    return_value=request_task), \
+         mock.patch('sky.server.requests.executor.execute_request_in_coroutine'
+                   ) as mock_execute, \
+         mock.patch('sky.server.stream_utils.wait_for_request_to_start',
+                    _already_started), \
+         mock.patch('sky.server.requests.requests.get_request_status_async',
+                    new_callable=mock.AsyncMock, return_value=None):
+        mock_execute.return_value = executor.CoroutineTask(
+            asyncio.create_task(asyncio.sleep(0)))
+
+        response = await server.hook_logs(request, hook_logs_body,
+                                          background_tasks)
+        streamed = ''.join([chunk async for chunk in response.body_iterator])
+
+    # The stream really ran -- without this the check below is vacuous.
+    assert 'hook-marker' in streamed, streamed
+    assert log_path.exists(), (
+        'the /hook_logs request log was discarded when its response ended; '
+        'sky.client.sdk.tail_hook_logs re-reads that log through /api/stream '
+        'and would show the user nothing')
 
 
 @pytest.mark.asyncio
@@ -1144,10 +1220,213 @@ def test_prune_sky_logs_removes_expired_file_upload_logs(
     assert fresh_log.exists()
 
 
+def test_prune_sky_logs_records_metrics(tmp_path, monkeypatch,
+                                        _no_provision_log_paths):
+    """A sweep publishes the entry population, its duration and what it removed.
+
+    The entry gauge counts every top-level entry the scandir loop walks, not
+    just the expired ones, since that population is what the sweep costs.
+    """
+    monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY', str(tmp_path))
+    monkeypatch.setattr(server.metrics_utils, 'METRICS_ENABLED', True)
+    now = 1_000_000.0
+    _touch_dir(tmp_path / 'sky-2020-01-01-00-00-00-000000', now - 10_000)
+    _touch_dir(tmp_path / 'sky-2020-01-02-00-00-00-000000', now - 100)
+    _touch_dir(tmp_path / 'api_server', now - 10_000)
+    pid = {'pid': str(os.getpid())}
+    pruned_before = prom.REGISTRY.get_sample_value(
+        'sky_apiserver_sky_logs_pruned_entries_total') or 0.0
+
+    removed = server._prune_sky_logs(cutoff=now - 5_000)
+
+    assert removed == 1
+    assert prom.REGISTRY.get_sample_value(
+        'sky_apiserver_sky_logs_top_level_entries', pid) == 3
+    assert prom.REGISTRY.get_sample_value(
+        'sky_apiserver_sky_logs_pruned_entries_total') - pruned_before == 1
+    assert prom.REGISTRY.get_sample_value(
+        'sky_apiserver_sky_logs_prune_duration_seconds', pid) >= 0
+    assert prom.REGISTRY.get_sample_value(
+        'sky_apiserver_sky_logs_fs_used_bytes', pid) > 0
+
+
+def test_prune_sky_logs_does_not_follow_symlinks(tmp_path, monkeypatch,
+                                                 _no_provision_log_paths):
+    """Symlinks are never traversed, so their targets are left untouched."""
+    monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY', str(tmp_path))
+    now = 1_000_000.0
+    outside = _touch_dir(tmp_path / 'outside' / 'target', now - 10_000)
+    (tmp_path / 'sky-2020-01-01-00-00-00-000000').symlink_to(outside)
+    outside_file = _touch_file(tmp_path / 'outside' / 'target.log',
+                               now - 10_000)
+    (tmp_path / 'file_uploads').mkdir()
+    (tmp_path / 'file_uploads' / 'sky-link.log').symlink_to(outside_file)
+
+    removed = server._prune_sky_logs(cutoff=now - 5_000)
+
+    assert removed == 0
+    assert outside.exists()
+    assert outside_file.exists()
+
+
 def test_prune_sky_logs_missing_dir_is_noop(tmp_path, monkeypatch):
     monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY',
                         str(tmp_path / 'does-not-exist'))
     assert server._prune_sky_logs(cutoff=1_000_000.0) == 0
+
+
+@pytest.mark.asyncio
+async def test_cleanup_sky_logs_reads_reloaded_retention_in_to_thread(
+        monkeypatch):
+    """A config swap done by reload_config inside asyncio.to_thread must be
+    visible to the subsequent get_nested on the loop thread.
+
+    cleanup_sky_logs runs the blocking reload off-loop with
+    `await asyncio.to_thread(skypilot_config.reload_config)` and then reads
+    retention_hours back on the loop thread. This guards the cross-thread
+    visibility the daemon relies on: a config swap performed in the
+    to_thread worker must reach the on-loop get_nested, or the daemon would
+    prune on a stale retention.
+
+    The real reload_config's source I/O (file read / DB SELECT) is stubbed
+    here to keep the unit test env/DB-free; its swap tail
+    (_set_loaded_config, the mechanism the real reload uses) and the real
+    get_nested read are exercised unchanged through the real cleanup_sky_logs
+    + real asyncio.to_thread.
+    """
+    from sky import skypilot_config
+
+    fresh_retention = 7
+    # Stale value (2) so a successful reload is observable: if the swap never
+    # reaches get_nested, the assertion below sees 2 instead of 7.
+    stale = config_utils.Config()
+    stale.set_nested(('api_server', 'logs_retention_hours'), 2)
+    # Swap in the stale config through the real accessor and let monkeypatch
+    # restore the original value at teardown: the loaded config is
+    # process-global, and leaving a swapped value behind would leak into
+    # later tests in this xdist worker (including when this test fails).
+    loaded_context = skypilot_config._get_config_context()
+    monkeypatch.setattr(loaded_context, 'config', stale)
+
+    def fake_reload():
+        # Mirrors the tail of the real _reload_config_as_server: build the
+        # new config and swap it in with _set_loaded_config. Runs from inside
+        # asyncio.to_thread, i.e. a worker thread.
+        cfg = config_utils.Config()
+        cfg.set_nested(('api_server', 'logs_retention_hours'), fresh_retention)
+        skypilot_config._set_loaded_config(cfg)
+
+    monkeypatch.setattr(server.skypilot_config, 'reload_config', fake_reload)
+
+    observed_cutoffs = []
+
+    def fake_prune(cutoff):
+        observed_cutoffs.append(cutoff)
+        return 0
+
+    monkeypatch.setattr(server, '_prune_sky_logs', fake_prune)
+
+    # asyncio.sleep is the while-True's last statement, outside the try/except,
+    # so raising a BaseException here exits cleanup_sky_logs after exactly one
+    # iteration; a BaseException subclass is chosen so the daemon's broad
+    # `except Exception` cannot swallow it.
+    class _StopLoop(BaseException):
+        pass
+
+    async def bail(_seconds):
+        raise _StopLoop
+
+    # No-op the daemon's startup jitter first: it awaits asyncio.sleep before
+    # the loop, so the patched sleep below would otherwise raise _StopLoop
+    # before a single iteration ran and the reload would never be exercised.
+    async def _noop_jitter(*_args, **_kwargs):
+        pass
+
+    monkeypatch.setattr(server.asyncio_utils, 'sleep_startup_jitter',
+                        _noop_jitter)
+    monkeypatch.setattr(server.asyncio, 'sleep', bail)
+
+    with pytest.raises(_StopLoop):
+        await server.cleanup_sky_logs()
+
+    # reload ran in a worker thread; get_nested ran on the loop thread.
+    assert skypilot_config.get_nested(('api_server', 'logs_retention_hours'),
+                                      -1) == fresh_retention
+    assert len(observed_cutoffs) == 1
+    expected_cutoff = time.time() - fresh_retention * 3600
+    assert abs(observed_cutoffs[0] - expected_cutoff) < 2
+
+
+# --- Tests for cleanup_clients_tmp (client tmp dir GC) ---
+
+
+def _set_download_tmp_base(monkeypatch, base) -> None:
+    storage = mock.Mock()
+    storage.download_tmp_base_dir.return_value = base
+    monkeypatch.setattr(server.bs, 'get_blob_storage', lambda: storage)
+
+
+async def _run_one_cleanup_pass(monkeypatch, daemon) -> None:
+    """Run a single pass of an hourly cleanup daemon, then stop it."""
+    sleeps = []
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+        if len(sleeps) > 1:
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr(server.asyncio, 'sleep', fake_sleep)
+    with pytest.raises(asyncio.CancelledError):
+        await daemon()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_clients_tmp_removes_expired_dirs(tmp_path, monkeypatch):
+    """Expired per-user entries go; fresh ones stay."""
+    tmp_base = tmp_path / 'clients'
+    _set_download_tmp_base(monkeypatch, str(tmp_base))
+    now = time.time()
+    logs = _touch_dir(tmp_base / 'user1' / 'sky_logs', now - 10_000)
+    # Legacy task YAMLs live in a dir, so they go with the dir sweep.
+    tasks = _touch_dir(tmp_base / 'user1' / 'tasks', now - 10_000)
+    fresh = _touch_dir(tmp_base / 'user1' / 'file_mounts', now - 10)
+
+    await _run_one_cleanup_pass(monkeypatch, server.cleanup_clients_tmp)
+
+    assert not logs.exists()
+    assert not tasks.exists()
+    assert fresh.exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_clients_tmp_removes_translated_yamls_of_any_age(
+        tmp_path, monkeypatch):
+    """*_translated.yaml is deprecated, so age does not matter."""
+    tmp_base = tmp_path / 'clients'
+    _set_download_tmp_base(monkeypatch, str(tmp_base))
+    now = time.time()
+    old = _touch_file(tmp_base / 'user1' / 'abc_translated.yaml', now - 10_000)
+    fresh = _touch_file(tmp_base / 'user1' / 'def_translated.yaml', now)
+    other = _touch_file(tmp_base / 'user1' / 'config.yaml', now - 10_000)
+
+    await _run_one_cleanup_pass(monkeypatch, server.cleanup_clients_tmp)
+
+    assert not old.exists()
+    assert not fresh.exists()
+    assert other.exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_clients_tmp_noop_without_download_tmp_base(
+        tmp_path, monkeypatch):
+    """Backends sharing the persistent log dir need no cleanup."""
+    _set_download_tmp_base(monkeypatch, None)
+    kept = _touch_file(tmp_path / 'user1' / 'abc_translated.yaml',
+                       time.time() - 10_000)
+
+    await _run_one_cleanup_pass(monkeypatch, server.cleanup_clients_tmp)
+
+    assert kept.exists()
 
 
 class _FakeTask:
@@ -1332,3 +1611,508 @@ def test_api_stream_log_path_admin_only(_request_authz_env, monkeypatch):
                       headers={
                           'user-agent': 'curl'
                       }).status_code == 404
+
+
+class TestServerUserHashBootstrap:
+    """The server user hash must not be clobbered by a racing replica.
+
+    Replicas apply the hash locally after writing it, so an overwriting write
+    leaves them disagreeing on the server id they have already applied.
+    """
+
+    def test_bootstrap_adopts_the_stored_hash(self):
+        with mock.patch('sky.global_user_state.get_system_config',
+                        return_value=None), \
+                mock.patch('sky.global_user_state.get_or_set_system_config',
+                           return_value='hash-from-the-other-replica') as m, \
+                mock.patch('sky.global_user_state.set_system_config') as m_set, \
+                mock.patch('sky.utils.common_utils.get_user_hash',
+                           return_value='our-own-hash'), \
+                mock.patch('sky.utils.common_utils.set_user_hash_locally') as m_apply, \
+                mock.patch('sky.utils.common.refresh_server_id'):
+
+            server._init_or_restore_server_user_hash()
+
+            m.assert_called_once()
+            # Never the overwriting variant.
+            m_set.assert_not_called()
+            # Applied locally: the winner's hash, not the one we generated.
+            m_apply.assert_called_once_with('hash-from-the-other-replica')
+
+    def test_existing_hash_is_reused_without_a_write(self):
+        with mock.patch('sky.global_user_state.get_system_config',
+                        return_value='existing-hash'), \
+                mock.patch('sky.global_user_state.get_or_set_system_config') as m, \
+                mock.patch('sky.utils.common_utils.set_user_hash_locally') as m_apply, \
+                mock.patch('sky.utils.common.refresh_server_id'):
+
+            server._init_or_restore_server_user_hash()
+
+            m.assert_not_called()
+            m_apply.assert_called_once_with('existing-hash')
+
+
+class TestJwtSecretStartupBootstrap:
+    """Pre-forking the secret is an optimisation, not a startup requirement.
+
+    Workers still load it lazily, so a corrupt row must not crashloop the whole
+    server and take the dashboard and every interactive user down with
+    service-account auth.
+    """
+
+    def test_a_failed_bootstrap_does_not_abort_startup(self):
+        """And says so. Swallowing it silently leaves service-account auth
+        degraded with nothing pointing at the corrupt row.
+        """
+        with mock.patch('sky.users.token_service.token_service'
+                       ) as mock_token_service, \
+                mock.patch.object(server, 'logger') as mock_logger:
+            mock_token_service.ensure_secret_loaded.side_effect = (
+                token_service.JWTSecretUnavailableError('corrupt row'))
+
+            server._bootstrap_jwt_secret()
+
+            mock_token_service.ensure_secret_loaded.assert_called_once()
+            mock_logger.error.assert_called_once()
+
+
+def _write_part(path: pathlib.Path) -> pathlib.Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b'data')
+    return path
+
+
+def test_publish_chunk_single_chunk_upload_has_nothing_to_wait_for(tmp_path):
+    tmp = _write_part(tmp_path / 'upload.tmp.deadbeef.zip')
+    final = tmp_path / 'upload.zip'
+
+    assert server._publish_chunk(tmp, final, None, 1) == set()
+    assert final.read_bytes() == b'data'
+    assert not tmp.exists()
+
+
+def test_publish_chunk_reports_chunks_not_published_yet(tmp_path):
+    chunk_dir = tmp_path / 'staging'
+    _write_part(chunk_dir / 'part0')
+    # A concurrent writer's in-flight tmp file must not count as published.
+    _write_part(chunk_dir / 'part2.tmp.deadbeef')
+    tmp = _write_part(chunk_dir / 'part1.tmp.cafe1234')
+
+    missing = server._publish_chunk(tmp, chunk_dir / 'part1', chunk_dir, 4)
+
+    assert missing == {'part2', 'part3'}
+    assert (chunk_dir / 'part1').read_bytes() == b'data'
+
+
+def test_publish_chunk_last_chunk_completes_the_upload(tmp_path):
+    chunk_dir = tmp_path / 'staging'
+    _write_part(chunk_dir / 'part0')
+    tmp = _write_part(chunk_dir / 'part1.tmp.cafe1234')
+
+    assert server._publish_chunk(tmp, chunk_dir / 'part1', chunk_dir,
+                                 2) == set()
+
+
+class _FakeUploadRequest:
+    """Minimal stand-in for the streaming request of an upload endpoint."""
+
+    def __init__(self, payload: bytes = b'chunk'):
+        self._payload = payload
+
+    async def stream(self):
+        yield self._payload
+
+
+@pytest.mark.asyncio
+async def test_receive_chunks_does_no_sync_fs_work_on_the_event_loop(
+        tmp_path, monkeypatch):
+    """The rename and the directory listing must not block the serving loop.
+
+    Both are synchronous calls that can take seconds on a shared filesystem,
+    and while either runs no other request on the same worker can proceed.
+    """
+    loop_thread = threading.get_ident()
+    calls = []
+
+    real_rename = os.rename
+    real_scandir = os.scandir
+
+    def tracking_rename(src, dst):
+        if str(tmp_path) in str(src):
+            calls.append(('rename', threading.get_ident()))
+        return real_rename(src, dst)
+
+    def tracking_scandir(path):
+        if str(tmp_path) in str(path):
+            calls.append(('scandir', threading.get_ident()))
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, 'rename', tracking_rename)
+    monkeypatch.setattr(os, 'scandir', tracking_scandir)
+
+    result = await server._receive_and_assemble_chunks(
+        base_dir=tmp_path,
+        zip_name='upload',
+        request=_FakeUploadRequest(),
+        chunk_index=0,
+        total_chunks=2,
+        extract=False,
+        assemble=False)
+
+    # Chunk 1 has not arrived, so the client is told to keep going.
+    assert result is not None
+    assert result.status == api_responses.UploadStatus.UPLOADING.value
+    assert {op for op, _ in calls} == {'rename', 'scandir'}
+    assert [ident for _, ident in calls if ident == loop_thread] == []
+
+
+@pytest.mark.asyncio
+async def test_receive_chunks_skips_the_directory_listing_for_one_chunk(
+        tmp_path, monkeypatch):
+    """A single-chunk upload has nothing to wait for, so it must not list."""
+    real_scandir = os.scandir
+    listed = []
+
+    def tracking_scandir(path):
+        if str(tmp_path) in str(path):
+            listed.append(str(path))
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, 'scandir', tracking_scandir)
+
+    result = await server._receive_and_assemble_chunks(
+        base_dir=tmp_path,
+        zip_name='upload',
+        request=_FakeUploadRequest(),
+        chunk_index=0,
+        total_chunks=1,
+        extract=False,
+        assemble=False)
+
+    assert result is None
+    assert listed == []
+    assert (tmp_path / 'upload.zip').read_bytes() == b'chunk'
+
+
+def _chunks_for(total_bytes: int) -> int:
+    """Chunk count a client would declare for an upload of *total_bytes*."""
+    return -(-total_bytes // server_constants.UPLOAD_CHUNK_BYTES)
+
+
+_CAP = 100 * 1000 * 1000 * 1000
+
+
+@pytest.fixture
+def upload_cap(monkeypatch):
+    """The cap is off unless a deployment sets it."""
+    monkeypatch.setenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR,
+                       str(_CAP))
+    return _CAP
+
+
+@pytest.mark.asyncio
+async def test_receive_chunks_rejects_a_chunk_group_over_the_total_cap(
+        tmp_path, upload_cap):
+    """The cap is checked from the declared chunk count, before any write.
+
+    The upload and its extraction are not synchronous, so the space free at
+    extraction time cannot be known here; the cap is absolute.
+    """
+    over_cap = _chunks_for(upload_cap) + 1
+
+    with pytest.raises(fastapi.HTTPException) as exc_info:
+        await server._receive_and_assemble_chunks(base_dir=tmp_path,
+                                                  zip_name='upload',
+                                                  request=_FakeUploadRequest(),
+                                                  chunk_index=0,
+                                                  total_chunks=over_cap,
+                                                  extract=False,
+                                                  assemble=False)
+
+    assert exc_info.value.status_code == 413
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_receive_chunks_accepts_a_chunk_group_at_the_total_cap(
+        tmp_path, upload_cap):
+    at_cap = upload_cap // server_constants.UPLOAD_CHUNK_BYTES
+
+    result = await server._receive_and_assemble_chunks(
+        base_dir=tmp_path,
+        zip_name='upload',
+        request=_FakeUploadRequest(),
+        chunk_index=0,
+        total_chunks=at_cap,
+        extract=False,
+        assemble=False)
+
+    assert result is not None
+    assert result.status == api_responses.UploadStatus.UPLOADING.value
+
+
+def _write_zip(path: pathlib.Path, member_bytes: int) -> None:
+    with zipfile.ZipFile(path, 'w') as zipf:
+        zipf.writestr('payload.bin', b'\0' * member_bytes)
+
+
+@pytest.mark.asyncio
+async def test_unzip_refuses_an_extraction_that_would_not_fit(
+        tmp_path, monkeypatch):
+    zip_path = tmp_path / 'upload.zip'
+    _write_zip(zip_path, 4096)
+    monkeypatch.setattr(server.local_disk, 'available_for_path',
+                        lambda path: 1024)
+    target = tmp_path / 'out'
+    target.mkdir()
+
+    with pytest.raises(fastapi.HTTPException) as exc_info:
+        await server.unzip_file(zip_path, target)
+
+    assert exc_info.value.status_code == 507
+    assert list(target.iterdir()) == []
+    # The zip is garbage once refused, and the existing cleanup removes it.
+    assert not zip_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_unzip_proceeds_when_the_extraction_fits(tmp_path, monkeypatch):
+    zip_path = tmp_path / 'upload.zip'
+    _write_zip(zip_path, 4096)
+    monkeypatch.setattr(server.local_disk, 'available_for_path',
+                        lambda path: 1024**3)
+    target = tmp_path / 'out'
+    target.mkdir()
+
+    await server.unzip_file(zip_path, target)
+
+    assert (target / 'payload.bin').stat().st_size == 4096
+
+
+@pytest.mark.asyncio
+async def test_unzip_proceeds_when_no_budget_is_declared(tmp_path, monkeypatch):
+    """With no budget exposed there is nothing to check against."""
+    zip_path = tmp_path / 'upload.zip'
+    _write_zip(zip_path, 4096)
+    monkeypatch.setattr(server.local_disk, 'available_for_path',
+                        lambda path: None)
+    target = tmp_path / 'out'
+    target.mkdir()
+
+    await server.unzip_file(zip_path, target)
+
+    assert (target / 'payload.bin').stat().st_size == 4096
+
+
+@pytest.mark.asyncio
+async def test_receive_chunks_bounds_the_bytes_actually_streamed(
+        tmp_path, monkeypatch):
+    """A client may stream a chunk of any size, whatever it declared.
+
+    The declared chunk count is only a claim, so the cap has to be
+    enforced against the bytes that reach disk.
+    """
+    monkeypatch.setenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR, '8')
+
+    with pytest.raises(fastapi.HTTPException) as exc_info:
+        await server._receive_and_assemble_chunks(
+            base_dir=tmp_path,
+            zip_name='upload',
+            request=_FakeUploadRequest(payload=b'0123456789'),
+            chunk_index=0,
+            total_chunks=1,
+            extract=False,
+            assemble=False)
+
+    assert exc_info.value.status_code == 413
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_receive_chunks_counts_the_chunks_already_stored(
+        tmp_path, monkeypatch):
+    """The cap covers one upload's chunks together, not each in turn."""
+    monkeypatch.setenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR, '8')
+    chunk_dir = tmp_path / 'upload'
+    chunk_dir.mkdir()
+    (chunk_dir / 'part0').write_bytes(b'12345')
+
+    with pytest.raises(fastapi.HTTPException) as exc_info:
+        await server._receive_and_assemble_chunks(
+            base_dir=tmp_path,
+            zip_name='upload',
+            request=_FakeUploadRequest(payload=b'6789'),
+            chunk_index=1,
+            total_chunks=2,
+            extract=False,
+            assemble=False)
+
+    assert exc_info.value.status_code == 413
+    # The refused chunk leaves nothing behind; part0 is untouched.
+    assert [p.name for p in chunk_dir.iterdir()] == ['part0']
+
+
+def test_on_disk_size_rounds_each_member_up_to_a_block():
+    """Many tiny files cost far more than the sum of their sizes."""
+    tiny = [zipfile.ZipInfo('f') for _ in range(1000)]
+    for member in tiny:
+        member.file_size = 1
+
+    assert server._on_disk_bytes(tiny) == 1000 * server._EXTRACT_BLOCK_BYTES
+    # An empty member still occupies a block.
+    empty = zipfile.ZipInfo('d/')
+    assert server._on_disk_bytes([empty]) == server._EXTRACT_BLOCK_BYTES
+
+
+@pytest.mark.asyncio
+async def test_unzip_refuses_an_archive_of_tiny_files_that_would_not_fit(
+        tmp_path, monkeypatch):
+    zip_path = tmp_path / 'upload.zip'
+    with zipfile.ZipFile(zip_path, 'w') as zipf:
+        for i in range(64):
+            zipf.writestr(f'f{i}', b'x')
+    target = tmp_path / 'out'
+    target.mkdir()
+    # Well above the 64 apparent bytes, well below the 64 blocks on disk.
+    monkeypatch.setattr(server.local_disk, 'available_for_path',
+                        lambda path: 16 * 1024)
+
+    with pytest.raises(fastapi.HTTPException) as exc_info:
+        await server.unzip_file(zip_path, target)
+
+    assert exc_info.value.status_code == 507
+
+
+@pytest.mark.asyncio
+async def test_unzip_holds_its_space_while_it_writes(tmp_path, monkeypatch):
+    """A concurrent extraction must measure against what is left."""
+    held = []
+    monkeypatch.setattr(server.local_disk, 'available_for_path',
+                        lambda path: 1024**3)
+    monkeypatch.setattr(server.local_disk, 'reserve',
+                        lambda n: held.append(n) or contextlib.nullcontext())
+    zip_path = tmp_path / 'upload.zip'
+    _write_zip(zip_path, 4096)
+    target = tmp_path / 'out'
+    target.mkdir()
+
+    await server.unzip_file(zip_path, target)
+
+    assert held == [server._EXTRACT_BLOCK_BYTES]
+    assert (target / 'payload.bin').stat().st_size == 4096
+
+
+@pytest.mark.asyncio
+async def test_receive_chunks_has_no_cap_unless_one_is_configured(
+        tmp_path, monkeypatch):
+    """The cap is opt-in, so an unset deployment uploads as before."""
+    monkeypatch.delenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR,
+                       raising=False)
+    scanned = []
+    real_scandir = os.scandir
+
+    def tracking_scandir(path):
+        scanned.append(str(path))
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, 'scandir', tracking_scandir)
+
+    result = await server._receive_and_assemble_chunks(
+        base_dir=tmp_path,
+        zip_name='upload',
+        request=_FakeUploadRequest(payload=b'0123456789'),
+        chunk_index=0,
+        total_chunks=1,
+        extract=False,
+        assemble=False)
+
+    assert result is None
+    assert (tmp_path / 'upload.zip').read_bytes() == b'0123456789'
+    # Nothing to enforce, so the stored-bytes scan is skipped too.
+    assert scanned == []
+
+
+@pytest.mark.parametrize('raw', ['', 'not-a-number', '0', '-1'])
+def test_an_unusable_cap_means_no_cap(monkeypatch, raw):
+    monkeypatch.setenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR, raw)
+    assert server._max_upload_total_bytes() is None
+
+
+def test_a_configured_cap_is_read_as_bytes(monkeypatch):
+    monkeypatch.setenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR, '12345')
+    assert server._max_upload_total_bytes() == 12345
+
+
+_STORE_CAP = 200 * 1000 * 1000
+
+
+@pytest.fixture
+def store_cap(monkeypatch):
+    """The store's cap is off unless a deployment sets it."""
+    monkeypatch.setenv(server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR,
+                       str(_STORE_CAP))
+    return _STORE_CAP
+
+
+def _store_holding(monkeypatch, used_bytes):
+    """Makes the store's filesystem report *used_bytes* in use."""
+    monkeypatch.setattr(server.local_disk, 'used_for_path',
+                        lambda path: used_bytes)
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_is_refused_once_the_store_is_full(
+        tmp_path, monkeypatch, store_cap):
+    """The cap covers what the store holds, across uploads."""
+    _store_holding(monkeypatch, store_cap)
+
+    with pytest.raises(fastapi.HTTPException) as exc_info:
+        await server._admit_stored_file_mounts(tmp_path)
+
+    assert exc_info.value.status_code == 507
+    assert 'bucket' in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_is_admitted_while_the_store_has_room(
+        tmp_path, monkeypatch, store_cap):
+    _store_holding(monkeypatch, store_cap - 1)
+
+    await server._admit_stored_file_mounts(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_the_store_has_no_cap_unless_one_is_configured(
+        tmp_path, monkeypatch):
+    """The cap is opt-in, so an unset deployment uploads as before."""
+    monkeypatch.delenv(server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR,
+                       raising=False)
+    measured = []
+    monkeypatch.setattr(server.local_disk, 'used_for_path',
+                        lambda path: measured.append(path) or 0)
+
+    await server._admit_stored_file_mounts(tmp_path)
+
+    assert measured == []
+
+
+@pytest.mark.asyncio
+async def test_an_unmeasurable_store_is_not_enforced_against(
+        tmp_path, monkeypatch, store_cap):
+    """Refusing every upload is the wrong answer to not being able to tell."""
+    _store_holding(monkeypatch, None)
+
+    await server._admit_stored_file_mounts(tmp_path)
+
+
+@pytest.mark.parametrize('raw', ['', 'not-a-number', '0', '-1'])
+def test_an_unusable_store_cap_means_no_cap(monkeypatch, raw):
+    monkeypatch.setenv(server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR,
+                       raw)
+    assert server._max_stored_file_mounts_bytes() is None
+
+
+def test_a_configured_store_cap_is_read_as_bytes(monkeypatch):
+    monkeypatch.setenv(server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR,
+                       '12345')
+    assert server._max_stored_file_mounts_bytes() == 12345

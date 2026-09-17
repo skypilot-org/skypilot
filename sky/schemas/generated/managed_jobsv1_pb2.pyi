@@ -101,7 +101,7 @@ class GetVersionResponse(_message.Message):
     def __init__(self, controller_version: _Optional[str] = ...) -> None: ...
 
 class GetJobTableRequest(_message.Message):
-    __slots__ = ("skip_finished", "accessible_workspaces", "job_ids", "workspace_match", "name_match", "pool_match", "page", "limit", "user_hashes", "statuses", "show_jobs_without_user_hash", "fields", "sort_by", "sort_order", "submitted_after", "submitted_before")
+    __slots__ = ("skip_finished", "accessible_workspaces", "job_ids", "workspace_match", "name_match", "pool_match", "page", "limit", "user_hashes", "statuses", "show_jobs_without_user_hash", "fields", "sort_by", "sort_order", "submitted_after", "submitted_before", "infra_match", "include_tree")
     SKIP_FINISHED_FIELD_NUMBER: _ClassVar[int]
     ACCESSIBLE_WORKSPACES_FIELD_NUMBER: _ClassVar[int]
     JOB_IDS_FIELD_NUMBER: _ClassVar[int]
@@ -118,6 +118,8 @@ class GetJobTableRequest(_message.Message):
     SORT_ORDER_FIELD_NUMBER: _ClassVar[int]
     SUBMITTED_AFTER_FIELD_NUMBER: _ClassVar[int]
     SUBMITTED_BEFORE_FIELD_NUMBER: _ClassVar[int]
+    INFRA_MATCH_FIELD_NUMBER: _ClassVar[int]
+    INCLUDE_TREE_FIELD_NUMBER: _ClassVar[int]
     skip_finished: bool
     accessible_workspaces: Workspaces
     job_ids: JobIds
@@ -134,10 +136,12 @@ class GetJobTableRequest(_message.Message):
     sort_order: str
     submitted_after: float
     submitted_before: float
-    def __init__(self, skip_finished: bool = ..., accessible_workspaces: _Optional[_Union[Workspaces, _Mapping]] = ..., job_ids: _Optional[_Union[JobIds, _Mapping]] = ..., workspace_match: _Optional[str] = ..., name_match: _Optional[str] = ..., pool_match: _Optional[str] = ..., page: _Optional[int] = ..., limit: _Optional[int] = ..., user_hashes: _Optional[_Union[UserHashes, _Mapping]] = ..., statuses: _Optional[_Union[Statuses, _Mapping]] = ..., show_jobs_without_user_hash: bool = ..., fields: _Optional[_Union[Fields, _Mapping]] = ..., sort_by: _Optional[str] = ..., sort_order: _Optional[str] = ..., submitted_after: _Optional[float] = ..., submitted_before: _Optional[float] = ...) -> None: ...
+    infra_match: str
+    include_tree: bool
+    def __init__(self, skip_finished: bool = ..., accessible_workspaces: _Optional[_Union[Workspaces, _Mapping]] = ..., job_ids: _Optional[_Union[JobIds, _Mapping]] = ..., workspace_match: _Optional[str] = ..., name_match: _Optional[str] = ..., pool_match: _Optional[str] = ..., page: _Optional[int] = ..., limit: _Optional[int] = ..., user_hashes: _Optional[_Union[UserHashes, _Mapping]] = ..., statuses: _Optional[_Union[Statuses, _Mapping]] = ..., show_jobs_without_user_hash: bool = ..., fields: _Optional[_Union[Fields, _Mapping]] = ..., sort_by: _Optional[str] = ..., sort_order: _Optional[str] = ..., submitted_after: _Optional[float] = ..., submitted_before: _Optional[float] = ..., infra_match: _Optional[str] = ..., include_tree: bool = ...) -> None: ...
 
 class ManagedJobInfo(_message.Message):
-    __slots__ = ("job_id", "task_id", "job_name", "task_name", "job_duration", "workspace", "status", "schedule_state", "resources", "cluster_resources", "cluster_resources_full", "cloud", "region", "infra", "accelerators", "recovery_count", "details", "failure_reason", "user_name", "user_hash", "submitted_at", "start_at", "end_at", "user_yaml", "entrypoint", "metadata", "pool", "pool_hash", "_job_id", "links", "is_primary_in_job_group", "zone", "labels", "cluster_name_on_cloud", "internal_external_ips", "internal_services", "priority_class", "is_batch", "batch_total_batches", "batch_completed_batches")
+    __slots__ = ("job_id", "task_id", "job_name", "task_name", "job_duration", "workspace", "status", "schedule_state", "resources", "cluster_resources", "cluster_resources_full", "cloud", "region", "infra", "accelerators", "recovery_count", "details", "failure_reason", "user_name", "user_hash", "submitted_at", "start_at", "end_at", "user_yaml", "entrypoint", "metadata", "pool", "pool_hash", "_job_id", "links", "is_primary_in_job_group", "zone", "labels", "cluster_name_on_cloud", "internal_external_ips", "internal_services", "priority_class", "is_batch", "batch_total_batches", "batch_completed_batches", "parent_job_id", "parent_task_id", "root_job_id", "dynamic_task_index")
     class AcceleratorsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -213,6 +217,10 @@ class ManagedJobInfo(_message.Message):
     IS_BATCH_FIELD_NUMBER: _ClassVar[int]
     BATCH_TOTAL_BATCHES_FIELD_NUMBER: _ClassVar[int]
     BATCH_COMPLETED_BATCHES_FIELD_NUMBER: _ClassVar[int]
+    PARENT_JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    PARENT_TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    ROOT_JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    DYNAMIC_TASK_INDEX_FIELD_NUMBER: _ClassVar[int]
     job_id: int
     task_id: int
     job_name: str
@@ -253,7 +261,11 @@ class ManagedJobInfo(_message.Message):
     is_batch: bool
     batch_total_batches: int
     batch_completed_batches: int
-    def __init__(self, job_id: _Optional[int] = ..., task_id: _Optional[int] = ..., job_name: _Optional[str] = ..., task_name: _Optional[str] = ..., job_duration: _Optional[float] = ..., workspace: _Optional[str] = ..., status: _Optional[_Union[ManagedJobStatus, str]] = ..., schedule_state: _Optional[_Union[ManagedJobScheduleState, str]] = ..., resources: _Optional[str] = ..., cluster_resources: _Optional[str] = ..., cluster_resources_full: _Optional[str] = ..., cloud: _Optional[str] = ..., region: _Optional[str] = ..., infra: _Optional[str] = ..., accelerators: _Optional[_Mapping[str, float]] = ..., recovery_count: _Optional[int] = ..., details: _Optional[str] = ..., failure_reason: _Optional[str] = ..., user_name: _Optional[str] = ..., user_hash: _Optional[str] = ..., submitted_at: _Optional[float] = ..., start_at: _Optional[float] = ..., end_at: _Optional[float] = ..., user_yaml: _Optional[str] = ..., entrypoint: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., pool: _Optional[str] = ..., pool_hash: _Optional[str] = ..., _job_id: _Optional[int] = ..., links: _Optional[_Mapping[str, str]] = ..., is_primary_in_job_group: bool = ..., zone: _Optional[str] = ..., labels: _Optional[_Mapping[str, str]] = ..., cluster_name_on_cloud: _Optional[str] = ..., internal_external_ips: _Optional[_Iterable[_Union[IpPair, _Mapping]]] = ..., internal_services: _Optional[_Mapping[str, str]] = ..., priority_class: _Optional[str] = ..., is_batch: bool = ..., batch_total_batches: _Optional[int] = ..., batch_completed_batches: _Optional[int] = ...) -> None: ...
+    parent_job_id: int
+    parent_task_id: int
+    root_job_id: int
+    dynamic_task_index: int
+    def __init__(self, job_id: _Optional[int] = ..., task_id: _Optional[int] = ..., job_name: _Optional[str] = ..., task_name: _Optional[str] = ..., job_duration: _Optional[float] = ..., workspace: _Optional[str] = ..., status: _Optional[_Union[ManagedJobStatus, str]] = ..., schedule_state: _Optional[_Union[ManagedJobScheduleState, str]] = ..., resources: _Optional[str] = ..., cluster_resources: _Optional[str] = ..., cluster_resources_full: _Optional[str] = ..., cloud: _Optional[str] = ..., region: _Optional[str] = ..., infra: _Optional[str] = ..., accelerators: _Optional[_Mapping[str, float]] = ..., recovery_count: _Optional[int] = ..., details: _Optional[str] = ..., failure_reason: _Optional[str] = ..., user_name: _Optional[str] = ..., user_hash: _Optional[str] = ..., submitted_at: _Optional[float] = ..., start_at: _Optional[float] = ..., end_at: _Optional[float] = ..., user_yaml: _Optional[str] = ..., entrypoint: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., pool: _Optional[str] = ..., pool_hash: _Optional[str] = ..., _job_id: _Optional[int] = ..., links: _Optional[_Mapping[str, str]] = ..., is_primary_in_job_group: bool = ..., zone: _Optional[str] = ..., labels: _Optional[_Mapping[str, str]] = ..., cluster_name_on_cloud: _Optional[str] = ..., internal_external_ips: _Optional[_Iterable[_Union[IpPair, _Mapping]]] = ..., internal_services: _Optional[_Mapping[str, str]] = ..., priority_class: _Optional[str] = ..., is_batch: bool = ..., batch_total_batches: _Optional[int] = ..., batch_completed_batches: _Optional[int] = ..., parent_job_id: _Optional[int] = ..., parent_task_id: _Optional[int] = ..., root_job_id: _Optional[int] = ..., dynamic_task_index: _Optional[int] = ...) -> None: ...
 
 class IpPair(_message.Message):
     __slots__ = ("internal_ip", "external_ip")
@@ -264,7 +276,7 @@ class IpPair(_message.Message):
     def __init__(self, internal_ip: _Optional[str] = ..., external_ip: _Optional[str] = ...) -> None: ...
 
 class GetJobTableResponse(_message.Message):
-    __slots__ = ("jobs", "total", "total_no_filter", "status_counts")
+    __slots__ = ("jobs", "total", "total_no_filter", "status_counts", "infra_match_applied", "infra_options", "include_tree_applied")
     class StatusCountsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -276,11 +288,17 @@ class GetJobTableResponse(_message.Message):
     TOTAL_FIELD_NUMBER: _ClassVar[int]
     TOTAL_NO_FILTER_FIELD_NUMBER: _ClassVar[int]
     STATUS_COUNTS_FIELD_NUMBER: _ClassVar[int]
+    INFRA_MATCH_APPLIED_FIELD_NUMBER: _ClassVar[int]
+    INFRA_OPTIONS_FIELD_NUMBER: _ClassVar[int]
+    INCLUDE_TREE_APPLIED_FIELD_NUMBER: _ClassVar[int]
     jobs: _containers.RepeatedCompositeFieldContainer[ManagedJobInfo]
     total: int
     total_no_filter: int
     status_counts: _containers.ScalarMap[str, int]
-    def __init__(self, jobs: _Optional[_Iterable[_Union[ManagedJobInfo, _Mapping]]] = ..., total: _Optional[int] = ..., total_no_filter: _Optional[int] = ..., status_counts: _Optional[_Mapping[str, int]] = ...) -> None: ...
+    infra_match_applied: bool
+    infra_options: _containers.RepeatedScalarFieldContainer[str]
+    include_tree_applied: bool
+    def __init__(self, jobs: _Optional[_Iterable[_Union[ManagedJobInfo, _Mapping]]] = ..., total: _Optional[int] = ..., total_no_filter: _Optional[int] = ..., status_counts: _Optional[_Mapping[str, int]] = ..., infra_match_applied: bool = ..., infra_options: _Optional[_Iterable[str]] = ..., include_tree_applied: bool = ...) -> None: ...
 
 class GetAllJobIdsByNameRequest(_message.Message):
     __slots__ = ("job_name",)

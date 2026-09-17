@@ -254,6 +254,23 @@ class ManagedJobRecord(ResponseBaseModel):
     # within a job group. NULL for non-job-group jobs (single jobs and
     # pipelines).
     is_primary_in_job_group: Optional[bool] = None
+    # Where this job came from, when launched from inside another managed
+    # job. All None for top-level jobs. root_job_id is the top-level job of
+    # the tree (the group it is shown under and shares a lifecycle with);
+    # parent_job_id/parent_task_id is the job and task that launched it.
+    root_job_id: Optional[int] = None
+    parent_job_id: Optional[int] = None
+    parent_task_id: Optional[int] = None
+    # A dynamic task's ordinal within its root's tree: the root's declared tasks
+    # are 0..n-1, dynamic tasks number on from n in attach order. None for
+    # top-level jobs.
+    dynamic_task_index: Optional[int] = None
+
+    @property
+    def group_job_id(self) -> Optional[int]:
+        """The job this record is grouped under: its root, else itself."""
+        return self.root_job_id if self.root_job_id is not None else self.job_id
+
     # Whether this job is a batch coordinator (ds.map())
     is_batch: Optional[bool] = None
     # Batch progress fields (NULL for non-batch jobs)
@@ -291,5 +308,18 @@ class VolumeRecord(ResponseBaseModel):
     # Error message for volume in ERROR state (e.g., PVC pending due to
     # access mode mismatch)
     error_message: Optional[str] = None
+    # Whether the error above is one the volume can still recover from, such as
+    # a network filesystem that takes minutes to provision. False for a volume
+    # that will never bind, and for a volume with no error at all.
+    error_may_resolve: bool = False
     # YAML configuration used to create the volume
     creation_yaml: Optional[str] = None
+    # Set only while the volume is being resized: `size` is the capacity it has
+    # now, and a resize can be in progress, or waiting for the workload using
+    # the volume to restart, for a long time. One of
+    # models.VolumeResizeStatus's values.
+    resize_status: Optional[str] = None
+    resize_target_size: Optional[str] = None
+    # What to show about the resize: the cloud's own account of it where there
+    # is one, plus what the user has to do next.
+    resize_message: Optional[str] = None

@@ -2,6 +2,7 @@
 import asyncio
 import contextlib
 import enum
+import math
 import os
 import pathlib
 import sqlite3
@@ -19,6 +20,7 @@ from sqlalchemy.ext import asyncio as sqlalchemy_async
 from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import runtime_utils
+from sky.utils.db import sql_metrics
 
 logger = sky_logging.init_logger(__name__)
 if typing.TYPE_CHECKING:
@@ -501,6 +503,70 @@ def get_max_connections():
     return _max_connections
 
 
+def get_db_connection_pool_size() -> int:
+    """Persistent state-DB connections this process pools, 0 to not pool.
+
+    ``constants.ENV_VAR_SERVER_DB_CONNECTION_POOL_SIZE`` when it is set,
+    otherwise the budget the process was given via ``set_max_connections()``.
+    See that constant for why a deployment may want to state the size itself,
+    and for how to size it.
+
+    The environment is read on each call rather than captured at import time
+    or in ``set_max_connections()``, so the override also covers engines built
+    before the process sets its budget -- ``skypilot_config`` reads the server
+    config from the state DB while it is being imported, long before any
+    server process calls ``set_max_connections()``, and ``get_engine()``
+    caches that engine for the life of the process.
+
+    Raises:
+        ValueError: if the variable is set but is not a non-negative integer.
+    """
+    return _read_connection_count_env(
+        constants.ENV_VAR_SERVER_DB_CONNECTION_POOL_SIZE,
+        default=_max_connections)
+
+
+def get_db_connection_pool_max_overflow(pool_size: int) -> int:
+    """Burst connections this process may open beyond the pooled ones.
+
+    ``constants.ENV_VAR_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW`` when it is
+    set, otherwise whatever it takes to reach
+    ``constants.DEFAULT_DB_CONNECTION_POOL_MAX_CONCURRENCY`` concurrent
+    connections -- which is 0 once the pool alone is that wide.
+
+    Raises:
+        ValueError: if the variable is set but is not a non-negative integer.
+    """
+    return _read_connection_count_env(
+        constants.ENV_VAR_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW,
+        default=max(
+            0,
+            constants.DEFAULT_DB_CONNECTION_POOL_MAX_CONCURRENCY - pool_size))
+
+
+def _read_connection_count_env(env_var: str, default: int) -> int:
+    """A number of connections read from ``env_var``, ``default`` if unset.
+
+    Raises:
+        ValueError: if the variable is set but is not a non-negative integer.
+            A misconfigured pool is refused loudly rather than silently
+            ignored, since falling back would quietly give a deployment a
+            connection profile it asked not to have.
+    """
+    raw = os.environ.get(env_var)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        count = int(raw)
+    except ValueError:
+        raise ValueError(f'{env_var}={raw!r} is not an integer number of '
+                         'connections.') from None
+    if count < 0:
+        raise ValueError(f'{env_var}={raw!r} must be a non-negative number of '
+                         'connections.')
+    return count
+
+
 def _make_asyncpg_creator(dsn: str) -> Callable[[], Any]:
     """Build a SQLAlchemy ``async_creator`` that hands asyncpg a libpq DSN.
 
@@ -545,14 +611,36 @@ def _rewrite_hostport(uri: str, hostport: str) -> str:
     percent-encoded password is not re-encoded. Non-PostgreSQL URIs are
     returned unchanged (only PostgreSQL URIs have a rewritable host:port
     netloc).
+
+    ``ENV_VAR_DB_POOL_HOSTPORT`` targets a plaintext loopback sidecar (e.g.
+    PgBouncer on 127.0.0.1) that typically does not terminate client TLS, so
+    every ``ssl*`` libpq query param carried by the direct URI (``sslmode``,
+    ``sslcert``, ``sslkey``, ``sslrootcert``, ``sslcrl``, ...) is dropped and
+    ``sslmode=disable`` is set explicitly — otherwise a direct URI with e.g.
+    ``?sslmode=require`` would demand TLS from the pooler and every pooled
+    connect would fail with "server does not support SSL, but SSL was
+    required". Setting ``disable`` explicitly (rather than merely stripping
+    the params) matters because URI params take precedence over libpq
+    environment variables such as ``PGSSLMODE``, making the pooled DSN
+    deterministic regardless of process environment. All non-ssl query params
+    are preserved. A TLS-terminating or remote pooler must be configured via
+    ``ENV_VAR_DB_POOL_CONNECTION_URI`` instead, which is used verbatim.
     """
     parts = urllib.parse.urlsplit(uri)
     if not parts.scheme.startswith('postgres'):
         return uri
     at = parts.netloc.rfind('@')
     userinfo = parts.netloc[:at + 1] if at != -1 else ''
-    return urllib.parse.urlunsplit((parts.scheme, userinfo + hostport,
-                                    parts.path, parts.query, parts.fragment))
+    # The pooler is a plaintext loopback sidecar: drop every ssl* libpq param
+    # and force sslmode=disable (see docstring).
+    query_params = [(key, value)
+                    for key, value in urllib.parse.parse_qsl(
+                        parts.query, keep_blank_values=True)
+                    if not key.lower().startswith('ssl')]
+    query_params.append(('sslmode', 'disable'))
+    query = urllib.parse.urlencode(query_params)
+    return urllib.parse.urlunsplit(
+        (parts.scheme, userinfo + hostport, parts.path, query, parts.fragment))
 
 
 def _resolve_conn_string(direct: bool) -> Optional[str]:
@@ -564,9 +652,11 @@ def _resolve_conn_string(direct: bool) -> Optional[str]:
     When ``direct`` is True, always returns the unpooled
     ``ENV_VAR_DB_CONNECTION_URI`` so session-scoped advisory locks keep a
     direct, session-pinned connection. When False, routes through a pooler if
-    one is configured (``ENV_VAR_DB_POOL_CONNECTION_URI`` wins, else a
-    host:port rewrite via ``ENV_VAR_DB_POOL_HOSTPORT``); otherwise returns the
-    direct URI unchanged, so deployments without a pooler are unaffected.
+    one is configured (``ENV_VAR_DB_POOL_CONNECTION_URI`` wins and is used
+    verbatim, else a host:port rewrite via ``ENV_VAR_DB_POOL_HOSTPORT`` that
+    also forces ``sslmode=disable`` for the plaintext loopback sidecar — see
+    ``_rewrite_hostport``); otherwise returns the direct URI unchanged, so
+    deployments without a pooler are unaffected.
     """
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
         return None
@@ -589,11 +679,154 @@ def _pooler_configured() -> bool:
         os.environ.get(constants.ENV_VAR_DB_POOL_HOSTPORT))
 
 
+# Postgres timeout settings (lock_timeout, statement_timeout,
+# idle_in_transaction_session_timeout) are 32-bit signed milliseconds, so the
+# largest deadline whose derived timeouts the database still accepts is
+# 2147483.647 s; anything above that would make every users upsert fail on
+# the SET LOCAL itself.
+AUTH_DB_TIMEOUT_MAX_SECONDS = 2147483
+
+
+def get_auth_db_timeout_seconds() -> float:
+    """The deadline on the API server's auth-path DB calls, in seconds.
+
+    Read from ``constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS`` (default
+    ``constants.DEFAULT_AUTH_DB_TIMEOUT_SECONDS``). This is the single
+    source for that value: ``sky.server.auth.db_lookup`` uses it as the
+    client-side ``asyncio.wait_for`` deadline on every auth DB lookup, and
+    ``sky.global_user_state.add_or_update_user`` derives the server-side
+    ``SET LOCAL`` timeouts on the users upsert from it, so the database
+    always gives up at or before the caller does. The environment is read
+    on each call (a cheap lookup) so tests can vary it; that read always
+    sees the server's own setting, because the variable is stripped from
+    client request payloads (`payloads.request_body_env_vars`) and again
+    from the per-request environment overlay on the server
+    (`executor.override_request_env_and_config`).
+
+    Raises:
+        ValueError: if the variable is set but is not a positive, finite
+            number of seconds no greater than
+            ``AUTH_DB_TIMEOUT_MAX_SECONDS``. A non-positive deadline would
+            fail every auth call client-side, and as a Postgres timeout
+            ``0`` means *disabled* (and a negative value is rejected), so
+            such a value is refused loudly rather than silently substituted;
+            a larger one would exceed Postgres' millisecond range.
+    """
+    raw = os.environ.get(constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS)
+    if raw is None:
+        return constants.DEFAULT_AUTH_DB_TIMEOUT_SECONDS
+    try:
+        seconds = float(raw)
+    except ValueError:
+        raise ValueError(
+            f'{constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS}={raw!r} is not a '
+            'number of seconds.') from None
+    if not (math.isfinite(seconds) and
+            0 < seconds <= AUTH_DB_TIMEOUT_MAX_SECONDS):
+        raise ValueError(
+            f'{constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS}={raw!r} must be a '
+            'positive, finite number of seconds, at most '
+            f'{AUTH_DB_TIMEOUT_MAX_SECONDS}.')
+    return seconds
+
+
 # Bound on the connect phase of a no_pool engine. Unlike a pooled checkout,
 # connection establishment is part of every operation on a NullPool engine,
 # and a server-side statement_timeout cannot bound it — an unresponsive
 # database would otherwise hang the caller for the OS default.
 _NO_POOL_CONNECT_TIMEOUT_SECONDS = 10
+
+# Server-side bound on how long one of our transactions may sit idle (no
+# statement in flight) before Postgres terminates the session, rolling the
+# transaction back and releasing every lock it held.
+#
+# Why: a client that opens a transaction and then never speaks again (a
+# thread parked forever on a dead socket, a process frozen mid-transaction)
+# leaves its backend `idle in transaction` holding its row locks until
+# something closes the session. Postgres' default for this timeout is 0
+# (never), and a transaction-mode pooler in front of the database never
+# touches a live-but-silent client either. Every later writer of the same
+# row then blocks on the lock; on a hot row (e.g. the per-request `users`
+# upsert) that turns one orphaned transaction into a stalled thread pool.
+#
+# Why 60 s: every transaction in this codebase runs DB statements with only
+# in-process Python between them, so legitimate idle-in-transaction time is
+# milliseconds — low seconds under GIL starvation on a saturated process.
+# Anything idle for a minute is a fault, and cutting it is the desired
+# outcome: the transaction is rolled back atomically and the caller sees an
+# OperationalError on its next statement (most writers retry via
+# db_retries). Only IDLE time counts: a long-running statement (a slow
+# query, a lock wait, a big DDL) never trips it, nor does a transaction
+# that keeps issuing statements. Session-scoped advisory locks (see
+# sky/utils/locks.py) are held on autocommit connections, which are `idle`,
+# not `idle in transaction`, so they are unaffected.
+#
+# Why per transaction (`SET LOCAL`) rather than a connection option: a
+# libpq startup `options=-c ...` is dropped or rejected by transaction-mode
+# poolers (PgBouncer ignores it when `options` is in
+# ignore_startup_parameters and refuses the connection otherwise), and a
+# plain `SET` on connect leaks onto whichever client next borrows that
+# server connection. `SET LOCAL` inside the transaction reaches the server
+# on a direct connection AND through a transaction-mode pooler, and is
+# scoped to that one transaction. Cost: one extra round trip per
+# transaction.
+#
+# Why "lower, never raise": the statement only applies the bound when the
+# value in effect is 0 (unbounded) or looser than ours, so a tighter bound
+# is always kept no matter where it came from or when it ran -- a stricter
+# server/role/database default set by a DBA, a caller's own tighter
+# `SET LOCAL` issued after this one (the usual case: the later `SET LOCAL`
+# wins anyway), and a caller's tighter `SET LOCAL` that ran BEFORE this
+# statement. The last case matters for event hooks: this listener's
+# statement is the first cursor execute of every transaction, so a hook that
+# prepends its own `SET LOCAL ...;` to "the first statement of the
+# transaction" (a `before_cursor_execute` listener with retval=True) attaches
+# them to this statement; a plain `SET LOCAL 60000` would then run last and
+# silently undo the tighter bound. The conditional form makes the ordering
+# irrelevant, so no coordination flag is needed between hooks.
+_IDLE_IN_TRANSACTION_TIMEOUT_MS = 60_000
+# `set_config(name, value, is_local => true)` is `SET LOCAL` in function
+# form. The guard reads the value in effect for this session and transaction
+# with `current_setting()`, a direct GUC lookup (microseconds). It must NOT
+# go through `pg_settings`: that view calls pg_show_all_settings(), which
+# formats every GUC (~360 rows) on each call -- measured 0.8 ms of server CPU
+# per transaction on Postgres 16, ~20x the statement's own cost. The GUC's
+# text form is always `0` or a number with one unit (`30s`, `90500ms`, `1d`),
+# which `::interval` parses, so the comparison is unit-safe.
+_IDLE_IN_TRANSACTION_TIMEOUT_SQL = (
+    'SELECT pg_catalog.set_config('
+    '\'idle_in_transaction_session_timeout\', '
+    f'\'{_IDLE_IN_TRANSACTION_TIMEOUT_MS}\', true) '
+    'WHERE pg_catalog.current_setting('
+    '\'idle_in_transaction_session_timeout\')::interval = interval \'0\' '
+    'OR pg_catalog.current_setting('
+    '\'idle_in_transaction_session_timeout\')::interval '
+    f'> interval \'{_IDLE_IN_TRANSACTION_TIMEOUT_MS} ms\'')
+
+
+def _install_idle_in_transaction_timeout(engine: Any) -> None:
+    """Bound idle_in_transaction_session_timeout on every transaction of a
+    Postgres engine (sync or async) to at most
+    ``_IDLE_IN_TRANSACTION_TIMEOUT_MS``. No-op for other dialects. See the
+    constant's comment for the rationale and the lower-never-raise rule."""
+    target = getattr(engine, 'sync_engine', engine)
+    if target.dialect.name != 'postgresql':
+        return
+
+    @sqlalchemy.event.listens_for(target, 'begin')
+    def _set_idle_in_transaction_timeout(conn):
+        # A transaction-local setting outside a transaction block is a no-op,
+        # and a connection in DBAPI autocommit mode (e.g. isolation_level=
+        # 'AUTOCOMMIT') never has one, so skip it there. Advisory-lock
+        # holders bypass SQLAlchemy Connections entirely
+        # (engine.raw_connection()) and never reach this listener.
+        if getattr(conn.connection.dbapi_connection, 'autocommit', False):
+            return
+        # Runs inside the connection's begin(): SQLAlchemy does not
+        # re-enter begin for statements issued from this event, and the
+        # driver sends its BEGIN before this statement, so the setting lands
+        # inside the transaction it bounds.
+        conn.exec_driver_sql(_IDLE_IN_TRANSACTION_TIMEOUT_SQL).close()
 
 
 @typing.overload
@@ -653,10 +886,18 @@ def get_engine(
         with _db_creation_lock:
             if cache_key not in _postgres_engine_cache:
                 engine_type = 'sync' if not async_engine else 'async'
+                pool_size = get_db_connection_pool_size()
                 logger.debug(
                     f'Creating a new postgres {engine_type} engine with '
-                    f'maximum {_max_connections} connections')
+                    f'maximum {pool_size} connections')
+                # The engine role that labels this engine's metrics. Derived
+                # from the same conditions as the cache key, so one cached
+                # engine always carries one role: when `direct` resolves to
+                # the same connection string as the pooled path (no pooler
+                # configured) it IS the same engine, and is labelled as such.
+                role = sql_metrics.DB_STATE
                 if no_pool and not async_engine:
+                    role = sql_metrics.DB_STATE_NOPOOL
                     # Isolated per-operation engine: never shares (or starves
                     # on) the default engine's pool. See the docstring.
                     engine_no_pool = sqlalchemy.create_engine(
@@ -667,6 +908,7 @@ def get_engine(
                         })
                     _postgres_engine_cache[cache_key] = engine_no_pool
                 elif async_engine:
+                    role = sql_metrics.DB_STATE_ASYNC
                     # Use NullPool for async engines to avoid event loop binding
                     # issues. asyncpg connection pools bind to the event loop on
                     # first use, which causes "Future attached to a different
@@ -681,7 +923,9 @@ def get_engine(
                             'postgresql+asyncpg://',
                             poolclass=sqlalchemy.NullPool,
                             async_creator=_make_asyncpg_creator(conn_string)))
-                elif _max_connections == 0 or (direct and _pooler_configured()):
+                elif pool_size == 0 or (direct and _pooler_configured()):
+                    if direct and _pooler_configured():
+                        role = sql_metrics.DB_STATE_DIRECT
                     # NullPool: no persistent connections. Used when no pool
                     # size is configured, and — crucially — for the direct
                     # engine when a pooler IS configured. The direct engine
@@ -701,10 +945,14 @@ def get_engine(
                         sqlalchemy.create_engine(
                             conn_string,
                             poolclass=sqlalchemy.pool.QueuePool,
-                            pool_size=_max_connections,
-                            max_overflow=max(0, 5 - _max_connections),
+                            pool_size=pool_size,
+                            max_overflow=get_db_connection_pool_max_overflow(
+                                pool_size),
                             pool_pre_ping=True,
                             pool_recycle=1800))
+                sql_metrics.install(_postgres_engine_cache[cache_key], role)
+                _install_idle_in_transaction_timeout(
+                    _postgres_engine_cache[cache_key])
             engine = _postgres_engine_cache[cache_key]
     else:
         assert db_name is not None, 'db_name must be provided for SQLite'
@@ -713,10 +961,14 @@ def get_engine(
         if async_engine:
             # This is an AsyncEngine, instead of a (normal, synchronous) Engine,
             # so we should not put it in the cache. Instead, just return.
-            return sqlalchemy_async.create_async_engine(
+            async_sqlite_engine = sqlalchemy_async.create_async_engine(
                 'sqlite+aiosqlite:///' + db_path, connect_args={'timeout': 30})
+            sql_metrics.install(async_sqlite_engine, f'sqlite_{db_name}')
+            return async_sqlite_engine
         if db_path not in _sqlite_engine_cache:
             _sqlite_engine_cache[db_path] = sqlalchemy.create_engine(
                 'sqlite:///' + db_path)
+            sql_metrics.install(_sqlite_engine_cache[db_path],
+                                f'sqlite_{db_name}')
         engine = _sqlite_engine_cache[db_path]
     return engine

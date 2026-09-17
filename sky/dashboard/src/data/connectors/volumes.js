@@ -39,7 +39,18 @@ export async function getVolumes() {
           usedby_clusters: volume.usedby_clusters,
           last_use: volume.last_use || null,
           error_message: volume.error_message || null,
+          // Whether the error above is one the volume can recover from. Servers
+          // older than this field report nothing, which reads as undefined --
+          // distinct from a definite false, so callers can tell "will not bind"
+          // from "cannot tell".
+          error_may_resolve: volume.error_may_resolve,
           creation_yaml: volume.creation_yaml || null,
+          // Only set while the volume is being resized: `size` above is the
+          // capacity it has now, which is not what was asked for until the
+          // resize lands. Servers older than these fields report nothing.
+          resize_status: volume.resize_status || null,
+          resize_target_size: volume.resize_target_size ?? null,
+          resize_message: volume.resize_message || null,
         };
       }) || [];
 

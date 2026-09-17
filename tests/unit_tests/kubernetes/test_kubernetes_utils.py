@@ -19,7 +19,9 @@ import yaml
 
 from sky import exceptions
 from sky import models
+from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.catalog import kubernetes_catalog
+from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils
 
 
@@ -31,6 +33,70 @@ def test_get_kubernetes_nodes():
             status=401)
         with pytest.raises(exceptions.KubeAPIUnreachableError):
             utils.get_kubernetes_nodes(context='test')
+
+
+def test_get_kubernetes_node_info_capacity_vs_allocatable():
+    """A device-plugin withdrawal must be visible in the node info.
+
+    When the device plugin marks devices unhealthy (e.g. after an XID error),
+    kubelet keeps them in status.capacity but drops them from
+    status.allocatable. `total` must report the physical count with
+    allocatable alongside — deriving total from allocatable would shrink the
+    node's reported size in lockstep with the failure, hiding it — and
+    `accelerators_available` must be measured against allocatable so
+    withdrawn devices never count as free.
+    """
+    node = mock.MagicMock()
+    node.metadata.name = 'degraded-node'
+    node.metadata.labels = {'skypilot.co/accelerator': 'h100'}
+    node.status.capacity = {'nvidia.com/gpu': '8'}
+    node.status.allocatable = {'nvidia.com/gpu': '5'}
+    node.is_ready.return_value = True
+    node.is_cordoned.return_value = False
+    node.get_taints.return_value = []
+
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                   return_value=[node]), \
+         mock.patch('sky.provision.kubernetes.utils.'
+                   'get_allocated_resources_by_node',
+                   return_value=({'degraded-node': 3}, {})), \
+         mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+                    return_value='nvidia.com/gpu'):
+        node_info = utils.get_kubernetes_node_info()
+
+    info = node_info.node_info_dict['degraded-node']
+    assert info.total['accelerator_count'] == 8
+    assert info.total['accelerator_allocatable'] == 5
+    # 5 allocatable - 3 requested; the 3 withdrawn devices are not free.
+    assert info.free['accelerators_available'] == 2
+
+
+def test_get_kubernetes_node_info_available_clamped_at_zero():
+    """Pods admitted before a withdrawal can hold more devices than remain
+    allocatable; available must clamp at 0 rather than go negative (a -1
+    would collide with the no-permission sentinel)."""
+    node = mock.MagicMock()
+    node.metadata.name = 'fully-withdrawn'
+    node.metadata.labels = {'skypilot.co/accelerator': 'h100'}
+    node.status.capacity = {'nvidia.com/gpu': '8'}
+    node.status.allocatable = {'nvidia.com/gpu': '0'}
+    node.is_ready.return_value = True
+    node.is_cordoned.return_value = False
+    node.get_taints.return_value = []
+
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                   return_value=[node]), \
+         mock.patch('sky.provision.kubernetes.utils.'
+                   'get_allocated_resources_by_node',
+                   return_value=({'fully-withdrawn': 3}, {})), \
+         mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+                    return_value='nvidia.com/gpu'):
+        node_info = utils.get_kubernetes_node_info()
+
+    info = node_info.node_info_dict['fully-withdrawn']
+    assert info.total['accelerator_count'] == 8
+    assert info.total['accelerator_allocatable'] == 0
+    assert info.free['accelerators_available'] == 0
 
 
 def test_get_kubernetes_node_info():
@@ -5417,6 +5483,27 @@ class TestOCINetworkEnvVars:
         assert env['NCCL_IB_HCA'] == 'mlx5_0,mlx5_1,mlx5_3,mlx5_4'
         assert env['NCCL_SOCKET_IFNAME'] == 'eth0'
 
+    def test_pod_local_rdma_widens_both_grace_profiles(self):
+        """A VF pod cannot see the PF names these two profiles enumerate.
+
+        The deploy-var tests cover GB300 only, so this is where the GB200
+        branch's widening is pinned. NCCL answers a list matching no device by
+        falling back to TCP, so getting this wrong costs bandwidth silently.
+        """
+        for acc in ('GB200', 'GB300'):
+            env = self._NET.get_network_env_vars(acc, pod_local_rdma=True)
+            assert env['NCCL_IB_HCA'] == 'mlx5', acc
+            # Everything else about the profile is unrelated to delivery.
+            assert env['NCCL_MNNVL_ENABLE'] == '1', acc
+
+    def test_pod_local_rdma_leaves_the_roce_profile_alone(self):
+        # The RoCEv2 shapes already match the family prefix, so the VF model
+        # changes nothing for them.
+        for acc in ('H100', 'H200', 'B200'):
+            assert self._NET.get_network_env_vars(
+                acc,
+                pod_local_rdma=True) == self._NET.get_network_env_vars(acc), acc
+
     def test_gb200_is_replacement_not_union(self):
         """GB200 must drop the RoCEv2-only knobs, not merge them in.
 
@@ -5445,6 +5532,43 @@ class TestOCINetworkEnvVars:
         assert env['NCCL_NET_GDR_C2C'] == '1'
         assert env['NCCL_DMABUF_ENABLE'] == '1'
         assert env['NCCL_IB_TIMEOUT'] == '22'
+
+    def test_gb300_widens_gdr_level(self):
+        """GB300 sets NCCL_NET_GDR_LEVEL=PHB, and only GB300.
+
+        With NET_GDR_C2C on, NCCL's GDR cutoff is PATH_P2C; a GPU whose NIC is
+        one PCIe host bridge away lands outside it and loses GDR silently. PHB
+        widens the cutoff by that one level. Scoped to GB300: the GB200 and
+        RoCEv2 profiles mirror OCI's published sets, which omit it.
+        """
+        assert self._NET.get_network_env_vars(
+            'GB300')['NCCL_NET_GDR_LEVEL'] == 'PHB'
+        assert 'NCCL_NET_GDR_LEVEL' not in self._NET.get_network_env_vars(
+            'GB200')
+        assert 'NCCL_NET_GDR_LEVEL' not in self._NET.get_network_env_vars(
+            'H100')
+
+    def test_gb300_still_mirrors_oci_published_values(self):
+        """The rest of the GB300 profile must stay OCI's published set.
+
+        Guards against widening the GDR level turning into a general licence
+        to deviate: these are the values OCI ships for BM.GPU.GB300.4, and the
+        two a customer was observed overriding (IB_SL=1, IB_TIMEOUT=19) are
+        deliberately *not* adopted -- 19 is a tightening, and defaults should
+        fail lenient.
+        """
+        env = self._NET.get_network_env_vars('GB300')
+        assert env['NCCL_IB_SL'] == '0'
+        assert env['NCCL_IB_TIMEOUT'] == '22'
+        assert env['NCCL_BUFFSIZE'] == '16777216'
+        assert env['NCCL_IB_SPLIT_DATA_ON_QPS'] == '0'
+        # Workload/framework knobs must never be injected:
+        # CUDA_DEVICE_MAX_CONNECTIONS=32 suits FSDP/expert-parallel overlap and
+        # is actively wrong for Megatron tensor-parallel overlap, which needs 1.
+        for absent in ('CUDA_DEVICE_MAX_CONNECTIONS',
+                       'TORCH_NCCL_HIGH_PRIORITY',
+                       'TORCH_NCCL_AVOID_RECORD_STREAMS', 'NCCL_SHM_DISABLE'):
+            assert absent not in env, absent
 
     def test_gb200_and_gb300_are_distinct(self):
         """The two GB profiles must not be identical (NET_PLUGIN differs)."""
@@ -5549,3 +5673,162 @@ class TestGetNodeAffinity:
             'requiredDuringSchedulingIgnoredDuringExecution',
             'preferredDuringSchedulingIgnoredDuringExecution',
         }
+
+
+def _make_pod_with_spec(*,
+                        container_name='c',
+                        memory_limit=None,
+                        container_statuses=None,
+                        phase='Failed'):
+    """A pod whose spec declares `container_name`, optionally with a limit."""
+    limits = {'memory': memory_limit} if memory_limit is not None else None
+    container = kubernetes.client.V1Container(
+        name=container_name,
+        resources=kubernetes.client.V1ResourceRequirements(
+            requests={'memory': '2Gi'}, limits=limits))
+    return kubernetes.client.V1Pod(
+        spec=kubernetes.client.V1PodSpec(containers=[container]),
+        status=kubernetes.client.V1PodStatus(
+            phase=phase, container_statuses=container_statuses))
+
+
+def test_is_unbounded_oom_only_when_limit_absent():
+    unbounded = _make_pod_with_spec()
+    bounded = _make_pod_with_spec(memory_limit='4Gi')
+    assert utils.is_unbounded_oom('OOMKilled', unbounded, 'c')
+    # A container that OOMed against its own limit is not a node-level OOM.
+    assert not utils.is_unbounded_oom('OOMKilled', bounded, 'c')
+    # Only OOM kills are classified.
+    assert not utils.is_unbounded_oom('Error', unbounded, 'c')
+
+
+def test_is_unbounded_oom_false_when_container_not_in_spec():
+    # We cannot confirm the container was unbounded, so we must not claim it
+    # was: a confidently wrong node-level hint is worse than the generic one.
+    pod = _make_pod_with_spec(container_name='other')
+    assert not utils.is_unbounded_oom('OOMKilled', pod, 'c')
+    assert utils.annotate_oom_reason('OOMKilled', pod, 'c') == 'OOMKilled'
+
+
+def test_annotate_oom_reason_tags_only_unbounded():
+    assert utils.annotate_oom_reason(
+        'OOMKilled', _make_pod_with_spec(),
+        'c') == f'OOMKilled ({utils.NO_MEMORY_LIMIT_MARKER})'
+    assert utils.annotate_oom_reason('OOMKilled',
+                                     _make_pod_with_spec(memory_limit='4Gi'),
+                                     'c') == 'OOMKilled'
+    assert utils.annotate_oom_reason('Evicted', _make_pod_with_spec(),
+                                     'c') == 'Evicted'
+
+
+def test_get_condensed_pod_reason_marks_unbounded_oom():
+    pod = _make_pod_with_spec(container_statuses=[
+        _make_container_status(terminated_reason='OOMKilled',
+                               terminated_exit_code=137)
+    ])
+    assert utils.get_condensed_pod_reason(pod) == (
+        f'OOMKilled (exit code 137, {utils.NO_MEMORY_LIMIT_MARKER})')
+
+
+def test_get_condensed_pod_reason_bounded_oom_unchanged():
+    # With a limit set the message must stay exactly as it was.
+    pod = _make_pod_with_spec(memory_limit='4Gi',
+                              container_statuses=[
+                                  _make_container_status(
+                                      terminated_reason='OOMKilled',
+                                      terminated_exit_code=137)
+                              ])
+    assert utils.get_condensed_pod_reason(pod) == 'OOMKilled (exit code 137)'
+
+
+def test_unbounded_oom_hint_recommends_set_pod_resource_limits():
+    hint = utils.match_kubernetes_failure_hint(
+        f'OOMKilled (exit code 137, {utils.NO_MEMORY_LIMIT_MARKER})')
+    assert hint is not None
+    assert 'set_pod_resource_limits' in hint
+    # The hint must link the docs section, not just name the config.
+    assert utils.SET_POD_RESOURCE_LIMITS_DOC_URL in hint
+    assert '#kubernetes-set-pod-resource-limits' in (
+        utils.SET_POD_RESOURCE_LIMITS_DOC_URL)
+
+
+def test_unbounded_oom_hint_precedes_plain_oomkilled():
+    # The unbounded reason contains 'OOMKilled' too, so ordering decides which
+    # hint wins; the node-level one is the specific (and correct) advice.
+    unbounded = utils.match_kubernetes_failure_hint(
+        f'OOMKilled (exit code 137, {utils.NO_MEMORY_LIMIT_MARKER})')
+    bounded = utils.match_kubernetes_failure_hint('OOMKilled (exit code 137)')
+    assert unbounded != bounded
+    assert 'no memory limit' in unbounded
+    assert bounded.startswith('The container ran out of memory.')
+
+
+# ---------------------------------------------------------------------------
+# Control vs. execution context
+# ---------------------------------------------------------------------------
+# The two are the same string for every cluster today. What these tests pin is
+# the shape that keeps it that way -- the fallback, and the in-cluster
+# handling -- so that the day a provisioner records a real placement, the
+# blast radius is one accessor and everything here still holds.
+
+_EXECUTION_KEY = k8s_constants.PROVIDER_EXECUTION_CONTEXT_KEY
+
+
+def test_control_and_execution_context_agree_by_default():
+    provider_config = {'context': 'ctx-a'}
+    assert utils.get_control_context_from_config(provider_config) == 'ctx-a'
+    assert utils.get_execution_context_from_config(provider_config) == 'ctx-a'
+
+
+def test_execution_context_falls_back_to_control_context():
+    """Every cluster provisioned before the key existed must still resolve."""
+    provider_config = {'context': 'ctx-a'}
+    assert _EXECUTION_KEY not in provider_config
+    assert utils.get_execution_context_from_config(provider_config) == 'ctx-a'
+
+
+def test_recorded_execution_context_wins():
+    """The one behaviour that matters once placements can differ: the
+    execution reader follows the recorded placement, and the control reader
+    keeps addressing the cluster the objects were submitted to."""
+    provider_config = {'context': 'ctx-manager', _EXECUTION_KEY: 'ctx-worker'}
+    assert utils.get_execution_context_from_config(
+        provider_config) == 'ctx-worker'
+    assert utils.get_control_context_from_config(
+        provider_config) == 'ctx-manager'
+
+
+def test_in_cluster_execution_context_resolves_to_none():
+    """A recorded in-cluster context has to be mapped to None just as
+    `provider.context` is -- it is not a kubeconfig entry, and passing it to
+    the client would defeat in-cluster auth."""
+    provider_config = {
+        'context': 'ctx-a',
+        _EXECUTION_KEY: kubernetes_adaptor.in_cluster_context_name(),
+    }
+    assert utils.get_execution_context_from_config(provider_config) is None
+
+
+def test_in_cluster_control_context_resolves_to_none():
+    provider_config = {'context': kubernetes_adaptor.in_cluster_context_name()}
+    assert utils.get_control_context_from_config(provider_config) is None
+    # ... and the fallback inherits that, rather than the raw name.
+    assert utils.get_execution_context_from_config(provider_config) is None
+
+
+def test_set_execution_context_records_alongside_the_control_context():
+    provider_config = {'context': 'ctx-a'}
+    utils.set_execution_context_in_config(provider_config, 'ctx-worker')
+    assert provider_config[_EXECUTION_KEY] == 'ctx-worker'
+    # `provider.context` is untouched: teardown, status and resource cleanup
+    # all read it and must keep pointing at the submitting cluster.
+    assert provider_config['context'] == 'ctx-a'
+
+
+def test_set_execution_context_ignores_none():
+    """Nothing to record for a cluster with no context: leaving the key out
+    keeps the fallback in charge rather than pinning a null placement."""
+    provider_config = {'context': 'ctx-a'}
+    utils.set_execution_context_in_config(provider_config, None)
+    assert _EXECUTION_KEY not in provider_config
+    assert utils.get_execution_context_from_config(provider_config) == 'ctx-a'

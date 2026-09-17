@@ -8,6 +8,7 @@ import asyncio
 import collections
 import concurrent.futures
 import contextlib
+import dataclasses
 from datetime import datetime
 import enum
 import json
@@ -46,6 +47,7 @@ from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
+from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -104,7 +106,13 @@ _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 _PROVISION_LOG_POLL_GAP_SECONDS = 1
 
 _JOB_STATUS_FETCH_TIMEOUT_SECONDS = 30
-JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = 60
+
+# Defaults for the transient status-check window; see
+# TransientStatusCheckWindow for why both a time and a retry budget are
+# needed. Both are overridable under `jobs.status_check` in
+# ~/.sky/config.yaml.
+JOB_STATUS_FETCH_MIN_ELAPSED_SECONDS = 60
+JOB_STATUS_FETCH_MIN_RETRIES = 5
 
 # Pattern matching the "From controller <UUID>" line that the controller
 # emits at job-claim time (see sky/jobs/controller.py: run_job). Used by
@@ -518,6 +526,106 @@ class JobStatusLogger:
         """
         self.flush()
         self._message = None
+
+
+class TransientStatusCheckWindow:
+    """Tracks a run of consecutive transient job-status-check failures.
+
+    The controller polls its job's status every
+    JOB_STATUS_CHECK_GAP_SECONDS. A check can fail for reasons that say
+    nothing about whether the job is alive: a transport error on the way to
+    the cluster, or a provider API error while refreshing cluster status. To
+    avoid tearing down a healthy job on such a blip, the controller retries
+    before escalating to recovery -- which cancels the job and relaunches it.
+
+    A run is only treated as the job being unhealthy once *both* budgets are
+    exhausted: at least ``min_elapsed_seconds`` have passed since the first
+    failure in the run, *and* at least ``min_retries`` retries have been
+    made. Requiring both is deliberate, because either alone is unreliable:
+
+    - Elapsed time alone: a single status-check round can itself take far
+      longer than the time budget, because the cluster-status refresh that
+      runs before recovery does its own retried probes of the cluster. The
+      budget can therefore be fully consumed within the round that opened
+      the window, and the job is torn down without ever being retried --
+      the retry exists on paper only.
+    - Retry count alone: a burst of failures that each return immediately
+      (a connection error, say) can exhaust a retry count in a couple of
+      seconds, long before a transient condition has had a chance to clear.
+
+    A successful status check ends the run; see ``reset()``.
+    """
+
+    def __init__(self,
+                 min_elapsed_seconds: Optional[float] = None,
+                 min_retries: Optional[int] = None) -> None:
+        if min_elapsed_seconds is None:
+            min_elapsed_seconds = skypilot_config.get_nested(
+                ('jobs', 'status_check', 'min_elapsed_seconds'),
+                JOB_STATUS_FETCH_MIN_ELAPSED_SECONDS)
+        if min_retries is None:
+            min_retries = skypilot_config.get_nested(
+                ('jobs', 'status_check', 'min_retries'),
+                JOB_STATUS_FETCH_MIN_RETRIES)
+        self._min_elapsed_seconds = min_elapsed_seconds
+        self._min_retries = min_retries
+        self._start_time: Optional[float] = None
+        self._retries = 0
+        self._backoff: Optional[common_utils.Backoff] = None
+
+    def record_failure(self) -> None:
+        """Opens the run if it is not already open."""
+        if self._start_time is None:
+            self._start_time = time.time()
+            self._backoff = common_utils.Backoff(initial_backoff=1,
+                                                 max_backoff_factor=5)
+
+    def reset(self) -> None:
+        """Ends the run, e.g. after a successful check or after a recovery."""
+        self._start_time = None
+        self._retries = 0
+        self._backoff = None
+
+    @property
+    def active(self) -> bool:
+        return self._start_time is not None
+
+    @property
+    def elapsed(self) -> float:
+        """Seconds since the first failure in the current run."""
+        if self._start_time is None:
+            return 0.0
+        return time.time() - self._start_time
+
+    @property
+    def retries(self) -> int:
+        """Retries made in the current run."""
+        return self._retries
+
+    @property
+    def exhausted(self) -> bool:
+        """Whether both budgets are spent, i.e. the job looks unhealthy."""
+        return (self.elapsed >= self._min_elapsed_seconds and
+                self._retries >= self._min_retries)
+
+    def next_backoff(self) -> float:
+        """Records a retry and returns how long to wait before making it."""
+        assert self._backoff is not None, (
+            'record_failure() must be called before next_backoff()')
+        self._retries += 1
+        backoff_time = self._backoff.current_backoff()
+        remaining = self._min_elapsed_seconds - self.elapsed
+        if remaining > 0:
+            # Do not sleep past the time budget: the retry budget may already
+            # be satisfied, in which case the run should be re-evaluated as
+            # soon as the time budget expires.
+            return min(backoff_time, remaining)
+        return backoff_time
+
+    def summary(self) -> str:
+        """Human-readable description of what has been spent so far."""
+        return (f'{self.elapsed:.1f} seconds and {self._retries} '
+                f'{"retry" if self._retries == 1 else "retries"}')
 
 
 async def get_job_status(
@@ -1393,15 +1501,202 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
     return f'{cluster_name}-{job_id}'
 
 
+# Managed-job queue fields by the controller SKYLET_VERSION that introduced
+# them. A remote controller older than that version has no such column and
+# rejects a request naming it, so the server strips them before asking over
+# gRPC (the legacy codegen path does the same on the controller itself, keyed
+# on MANAGED_JOBS_VERSION).
+_JOB_FIELDS_BY_MIN_CONTROLLER_VERSION = {
+    41: frozenset({'root_job_id', 'parent_job_id', 'parent_task_id'}),
+    42: frozenset({'dynamic_task_index'}),
+}
+
+
+def queue_fields_need_controller_version(fields: Optional[List[str]]) -> bool:
+    """Whether ``fields`` names any queue field some controller versions lack,
+    so the caller has to ask the controller's version before requesting them.
+    ``None`` (all fields) is interpreted by the controller itself and needs no
+    check."""
+    if fields is None:
+        return False
+    return any(f in versioned
+               for versioned in _JOB_FIELDS_BY_MIN_CONTROLLER_VERSION.values()
+               for f in fields)
+
+
+def fields_for_controller(
+        fields: Optional[List[str]],
+        controller_version: Optional[str]) -> Optional[List[str]]:
+    """Drop queue fields a remote controller of ``controller_version`` (its
+    SKYLET_VERSION string) does not know. Unknown/unparsable versions strip
+    nothing, so a newer controller is never under-asked."""
+    if fields is None or controller_version is None:
+        return fields
+    try:
+        version = int(controller_version)
+    except (TypeError, ValueError):
+        return fields
+    unsupported: set = set()
+    for min_version, new_fields in _JOB_FIELDS_BY_MIN_CONTROLLER_VERSION.items(
+    ):
+        if version < min_version:
+            unsupported |= new_fields
+    if not unsupported:
+        return fields
+    return [f for f in fields if f not in unsupported]
+
+
+@dataclasses.dataclass
+class CancelRequestInfo:
+    """Who asked for a cancellation, and under which API request.
+
+    Recorded in the job's event log so the events table tells a
+    user-requested cancel (and which user asked for it) apart from an
+    internal one, e.g. a job group tearing down its auxiliary jobs.
+
+    The fields are all optional because the identity is not always
+    knowable: an old client/controller does not send it, and a cancel that
+    does not originate from an API request has no requester at all.
+    """
+    user_hash: Optional[str] = None
+    user_name: Optional[str] = None
+    request_id: Optional[str] = None
+    # Why SkyPilot itself cancelled the job, when no user asked for it (e.g.
+    # a job group sweeping the jobs launched from it once its primary tasks
+    # finished). Appended to the event reason.
+    note: Optional[str] = None
+
+    @classmethod
+    def from_request_context(cls) -> Optional['CancelRequestInfo']:
+        """Build from the ambient API request context, or None if there is none.
+
+        Only a server-side request execution has a request context (see
+        ``common_utils.set_request_context``). On a controller -- where the
+        cancel arrives over gRPC or as generated code -- it is unset, and the
+        requester has to be passed in explicitly instead.
+        """
+        if not common_utils.is_in_request_context():
+            return None
+        user = common_utils.get_current_user()
+        return cls(user_hash=user.id,
+                   user_name=user.name,
+                   request_id=common_utils.get_current_request_id())
+
+    def event_reason(self) -> Optional[str]:
+        """The job-event reason for this cancel request.
+
+        None when nothing identifying is known, so the caller can skip
+        writing an event that would say nothing.
+        """
+        # The hash is the fallback identity: a user row (and so the display
+        # name) may be missing on the controller side.
+        who = self.user_name or self.user_hash
+        if who is None and self.request_id is None and self.note is None:
+            return None
+        # The queue finds this event by its prefix to surface the requester
+        # in the job's `details` (see
+        # managed_job_state.get_cancel_request_reasons).
+        prefix = managed_job_state.CANCEL_REQUESTED_EVENT_REASON_PREFIX
+        if who is not None:
+            reason = f'{prefix} by user {who}'
+        else:
+            reason = prefix
+        if self.request_id is not None:
+            reason += f' (request ID: {self.request_id})'
+        if self.note is not None:
+            reason += f' {self.note}'
+        return reason
+
+
+def _record_cancel_request_event(job_id: int, reason: Optional[str]) -> None:
+    """Append the cancel-request event to a job's event log, best-effort.
+
+    Written before the cancellation is acted on, so the events table
+    attributes the request even if the job reaches a terminal state (or the
+    signal write fails) immediately after. A failure to record must never
+    fail the cancellation itself -- this is an audit trail, not state.
+    """
+    if reason is None:
+        return
+    try:
+        managed_job_state.add_job_event(
+            job_id, None, managed_job_state.ManagedJobStatus.CANCELLING, reason)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to record the cancel request event for job '
+                       f'{job_id}: {common_utils.format_exception(e)}')
+
+
+@dataclasses.dataclass(frozen=True)
+class _LaunchedFrom:
+    """The jobs launched under a set of requested jobs, at any depth.
+
+    ``subtree_job_ids``: a FLAT list of every descendant of any requested
+    id (children, grandchildren, ...), parents before children, with the
+    requested ids themselves left out.
+
+    Per id in that list, for the event log of a cascaded cancel:
+    ``cancelled_with[id]``: the REQUESTED id whose subtree it is in (what the
+    user actually cancelled); ``direct_parent_of[id]``: the ONE job that
+    launched it. Neither is a children map.
+    """
+    subtree_job_ids: List[int]
+    cancelled_with: Dict[int, int]
+    direct_parent_of: Dict[int, int]
+
+
+def _jobs_launched_from(job_ids: List[int]) -> _LaunchedFrom:
+    """Every job launched under any of ``job_ids``, at any depth.
+
+    One query fetches the parent edges of the whole tree(s) the ids belong
+    to; the subtrees are then walked in memory, so depth never costs another
+    round trip.
+    """
+    children_of: Dict[int, List[int]] = collections.defaultdict(list)
+    for job_id, parent_job_id in managed_job_state.get_jobs_launched_from(
+            job_ids):
+        if parent_job_id is not None:
+            children_of[parent_job_id].append(job_id)
+    requested = set(job_ids)
+    subtree_job_ids: List[int] = []
+    cancelled_with: Dict[int, int] = {}
+    direct_parent_of: Dict[int, int] = {}
+    # (job, the requested id whose subtree we are walking)
+    frontier = [(job_id, job_id) for job_id in job_ids]
+    while frontier:
+        next_frontier: List[Tuple[int, int]] = []
+        for job_id, requested_root in frontier:
+            for child in children_of.get(job_id, []):
+                if child in requested or child in direct_parent_of:
+                    continue
+                direct_parent_of[child] = job_id
+                cancelled_with[child] = requested_root
+                subtree_job_ids.append(child)
+                next_frontier.append((child, requested_root))
+        frontier = next_frontier
+    return _LaunchedFrom(subtree_job_ids, cancelled_with, direct_parent_of)
+
+
 def cancel_jobs_by_id(job_ids: Optional[List[int]],
                       all_users: bool = False,
                       current_workspace: Optional[str] = None,
                       user_hash: Optional[str] = None,
                       graceful: bool = False,
-                      graceful_timeout: Optional[int] = None) -> str:
+                      graceful_timeout: Optional[int] = None,
+                      cancel_request_info: Optional[CancelRequestInfo] = None,
+                      cancel_launched_from: bool = True) -> str:
     """Cancel jobs by id.
 
     If job_ids is None, cancel all jobs.
+
+    Args:
+        cancel_request_info: who requested the cancellation, recorded in each
+            job's event log. Defaults to the ambient API request context,
+            which is only set when this runs in-process on the API server
+            (consolidation mode); a remote controller gets it passed in.
+        cancel_launched_from: also cancel every job launched under the given
+            ids, at any depth (the default: cancelling a job takes its
+            tree). False when the caller already holds the full list, e.g.
+            the controller sweep.
     """
     if job_ids is None:
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(
@@ -1411,6 +1706,55 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
         return 'No job to cancel.'
     if current_workspace is None:
         current_workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
+
+    # Cancelling a job takes every job launched under it, at any depth: a
+    # job launched from inside a managed job records that job as its parent
+    # (dynamic job group members). The requested ids come first so the
+    # result message leads with what the caller asked for. A parent that is
+    # already terminal is skipped below like any other terminal job, but its
+    # still-running descendants are cancelled all the same.
+    requested_job_ids = set(job_ids)
+    launched_from = _LaunchedFrom([], {}, {})
+    if cancel_launched_from:
+        # Expand only the requested jobs the caller may act on. Workspace is
+        # the authorization boundary; a job outside it is reported below by
+        # the id the caller supplied, and its tree must not be walked (the
+        # walk would surface its descendants' ids in that report).
+        expandable = [
+            job_id for job_id in job_ids
+            if managed_job_state.get_status(job_id) is not None and
+            (current_workspace is None or
+             managed_job_state.get_workspace(job_id) == current_workspace)
+        ]
+        if expandable:
+            launched_from = _jobs_launched_from(expandable)
+    descendant_job_ids = launched_from.subtree_job_ids
+    job_ids = job_ids + descendant_job_ids
+
+    if cancel_request_info is None:
+        cancel_request_info = CancelRequestInfo.from_request_context()
+    cancel_event_reason = (cancel_request_info.event_reason()
+                           if cancel_request_info is not None else None)
+
+    def _event_reason_for(job_id: int) -> Optional[str]:
+        """The requester's reason, plus which job a descendant went down with.
+
+        A cascaded cancel is always recorded, even when the requester is
+        unknown: the child's event log must say the cancel came from an
+        ancestor rather than look like a spontaneous CANCELLING. It names the
+        job the caller actually cancelled and, when different, the job that
+        launched this one.
+        """
+        if job_id in requested_job_ids:
+            return cancel_event_reason
+        base = (cancel_event_reason if cancel_event_reason is not None else
+                managed_job_state.CANCEL_REQUESTED_EVENT_REASON_PREFIX)
+        cancelled_job_id = launched_from.cancelled_with[job_id]
+        launcher_job_id = launched_from.direct_parent_of[job_id]
+        if launcher_job_id == cancelled_job_id:
+            return f'{base} (cancelled with job {cancelled_job_id})'
+        return (f'{base} (cancelled with job {cancelled_job_id}, launched '
+                f'from job {launcher_job_id})')
 
     cancelled_job_ids: List[int] = []
     wrong_workspace_job_ids: List[int] = []
@@ -1437,7 +1781,14 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             logger.info(f'Job {job_id} is already in terminal state '
                         f'{job_status.value}. Skipped.')
             continue
-        elif job_status == managed_job_state.ManagedJobStatus.PENDING:
+
+        # Attribute the cancellation in the job's event log. Done here, once
+        # the job is known to be cancellable and before any of the paths
+        # below act on it, so the audit entry precedes the resulting
+        # CANCELLING / CANCELLED events.
+        _record_cancel_request_event(job_id, _event_reason_for(job_id))
+
+        if job_status == managed_job_state.ManagedJobStatus.PENDING:
             # the "if PENDING" is a short circuit, this will be atomic.
             cancelled = managed_job_state.set_pending_cancelled(job_id)
             if cancelled:
@@ -1500,14 +1851,48 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
         cancelled_job_ids_str = ', '.join(map(str, cancelled_job_ids))
         identity_str = f'Jobs with IDs {cancelled_job_ids_str} are'
 
-    msg = f'{identity_str} scheduled to be cancelled.{wrong_workspace_job_str}'
+    cascade_str = ''
+    cancelled_descendants = [
+        job_id for job_id in cancelled_job_ids if job_id in descendant_job_ids
+    ]
+    if cancelled_descendants:
+        plural = 's' if len(cancelled_descendants) > 1 else ''
+        cascade_str = (f' This includes {len(cancelled_descendants)} job'
+                       f'{plural} launched from the cancelled job'
+                       f'{"s" if len(requested_job_ids) > 1 else ""}.')
+
+    msg = (f'{identity_str} scheduled to be cancelled.{cascade_str}'
+           f'{wrong_workspace_job_str}')
     return msg
 
 
-def cancel_job_by_name(job_name: str,
-                       current_workspace: Optional[str] = None,
-                       graceful: bool = False,
-                       graceful_timeout: Optional[int] = None) -> str:
+def cancel_descendant_jobs(job_id: int, note: str) -> str:
+    """Cancel every job launched (transitively) from ``job_id``, not the job.
+
+    Used by the controller when a job's primary tasks have all finished:
+    jobs launched from it are dynamic auxiliary members and are swept with
+    the declared auxiliaries (no termination delay). ``note`` says why, for
+    the descendants' event logs.
+    """
+    subtree_job_ids = _jobs_launched_from([job_id]).subtree_job_ids
+    if not subtree_job_ids:
+        return 'No job to cancel.'
+    # The whole subtree is already in hand, so cancel_jobs_by_id must not
+    # fetch and expand it again. Every swept job gets the same reason: it
+    # went down because the root finished.
+    return cancel_jobs_by_id(
+        subtree_job_ids,
+        current_workspace=managed_job_state.get_workspace(job_id),
+        cancel_request_info=CancelRequestInfo(note=note),
+        cancel_launched_from=False)
+
+
+def cancel_job_by_name(
+        job_name: str,
+        current_workspace: Optional[str] = None,
+        graceful: bool = False,
+        graceful_timeout: Optional[int] = None,
+        cancel_request_info: Optional[CancelRequestInfo] = None) -> str:
     """Cancel a job by name."""
     job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
     if not job_ids:
@@ -1519,17 +1904,22 @@ def cancel_job_by_name(job_name: str,
     msg = cancel_jobs_by_id(job_ids,
                             current_workspace=current_workspace,
                             graceful=graceful,
-                            graceful_timeout=graceful_timeout)
+                            graceful_timeout=graceful_timeout,
+                            cancel_request_info=cancel_request_info)
     return f'{job_name!r} {msg}'
 
 
-def cancel_jobs_by_pool(pool_name: str,
-                        current_workspace: Optional[str] = None) -> str:
+def cancel_jobs_by_pool(
+        pool_name: str,
+        current_workspace: Optional[str] = None,
+        cancel_request_info: Optional[CancelRequestInfo] = None) -> str:
     """Cancel all jobs in a pool."""
     job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(pool_name)
     if not job_ids:
         return f'No running job found in pool {pool_name!r}.'
-    return cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
+    return cancel_jobs_by_id(job_ids,
+                             current_workspace=current_workspace,
+                             cancel_request_info=cancel_request_info)
 
 
 def cancel_managed_jobs(
@@ -1543,6 +1933,7 @@ def cancel_managed_jobs(
     graceful_timeout: Optional[int] = None,
     current_workspace: Optional[str] = None,
     user_hash: Optional[str] = None,
+    cancel_request_info: Optional[CancelRequestInfo] = None,
 ) -> str:
     """Dispatch to the correct cancel variant based on selector args.
 
@@ -1567,6 +1958,7 @@ def cancel_managed_jobs(
             user_hash=user_hash,
             graceful=graceful,
             graceful_timeout=graceful_timeout,
+            cancel_request_info=cancel_request_info,
         )
     if name is not None:
         return cancel_job_by_name(
@@ -1574,11 +1966,13 @@ def cancel_managed_jobs(
             current_workspace=current_workspace,
             graceful=graceful,
             graceful_timeout=graceful_timeout,
+            cancel_request_info=cancel_request_info,
         )
     assert pool is not None, (job_ids, name, pool, all)
     return cancel_jobs_by_pool(
         pool,
         current_workspace=current_workspace,
+        cancel_request_info=cancel_request_info,
     )
 
 
@@ -1704,6 +2098,73 @@ def _provision_status_headline(provision_msg: str) -> Optional[str]:
         else:
             depth += 1
     return None
+
+
+def _parked_launch_reason(job_id: int, task_id: Optional[int]) -> Optional[str]:
+    """The status message of a parked cluster launch for this job, if any.
+
+    A launch that parks (``exceptions.ExecutionPausedError`` -- waiting on a
+    cluster lock, on queue admission, ...) ends its rich status, so the
+    provisioning headline relayed into the controller log goes away and the
+    waiting line loses the one explanation it had. The parked request keeps
+    carrying that explanation in its status message, so read it from there.
+
+    The request being read is co-located in both topologies, which is not
+    obvious: under consolidation the controller *is* the API server, and on a
+    dedicated controller this code runs on the controller host (the log stream
+    gets there via ``ManagedJobCodeGen.stream_logs`` + ``run_on_head``) while
+    the controller submits its launches to its own local API server -- see
+    ``recovery_strategy.ENV_VARS_TO_CLEAR``, which clears
+    ``SKY_API_SERVER_URL_ENV_VAR`` precisely so that a local server is used
+    there. So the launch request is in the store this reads, either way.
+
+    Best-effort regardless: any failure (no requests database in this context,
+    a schema difference, a concurrent write) returns None, which leaves the
+    caller showing exactly what it showed before.
+    """
+    try:
+        task_name = managed_job_state.get_task_name(job_id, task_id or 0)
+        if task_name is None:
+            return None
+        cluster_name = generate_managed_job_cluster_name(task_name, job_id)
+        parked = requests_lib.get_request_tasks(
+            requests_lib.RequestTaskFilter(
+                status=[requests_lib.RequestStatus.WAITING],
+                cluster_names=[cluster_name],
+                include_request_names=['sky.launch'],
+                fields=['status_msg', 'created_at'],
+                sort=True,
+                limit=1,
+            ))
+        if not parked:
+            return None
+        return parked[0].status_msg or None
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Could not read the parked launch reason for job '
+                     f'{job_id}: {e}')
+        return None
+
+
+def _live_headline(provision_msg: Optional[str]) -> Optional[str]:
+    """The headline of a relayed cluster-launch status, if it has one."""
+    if provision_msg is None:
+        return None
+    return _provision_status_headline(provision_msg)
+
+
+def _waiting_line_detail(provision_msg: Optional[str],
+                         parked_reason: Optional[str]) -> Optional[str]:
+    """The detail line shown under "Waiting for task to start", if any.
+
+    A live cluster-launch status wins: its headline is what the job is doing
+    right now. When there is none the launch may have parked -- which ends its
+    rich status, so nothing is relayed any more -- and then the parked request's
+    own message is the only thing that still says what the job waits for.
+    """
+    headline = _live_headline(provision_msg)
+    if headline is not None:
+        return headline
+    return parked_reason
 
 
 def stream_logs_by_id(
@@ -2003,6 +2464,20 @@ def stream_logs_by_id(
                             None,
                             follow=False,
                             tail=tail if tail is not None else 0)
+                        if returncode is None:
+                            # Not cluster-addressed: runtimes whose forwarded
+                            # records carry the managed-job identity instead of
+                            # an on-cluster job id (e.g. bare-pod runtimes with
+                            # no per-job log files) are read back directly by
+                            # (job_id, task_id). Readers without managed-job
+                            # addressing return None again and we fall through
+                            # to the terminal-state message.
+                            returncode = log_reader.read_managed_job_logs(
+                                job_id,
+                                task_id,
+                                task_name=task_name,
+                                follow=False,
+                                tail=tail if tail is not None else 0)
                     except Exception as e:  # pylint: disable=broad-except
                         # Surface the failure (streamed to the user via the
                         # request's stdout redirection) and fall through to the
@@ -2113,6 +2588,11 @@ def stream_logs_by_id(
                 logger.debug(
                     f'INFO: The log is not ready yet{status_str}. '
                     f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+                # Looked up lazily below: a normally provisioning job has a
+                # live headline and never needs it, and this runs once per
+                # status check per streaming client.
+                parked_reason: Optional[str] = None
+                parked_reason_read = False
                 # Poll the controller log frequently for provisioning spinner
                 # updates, but only re-check the (more expensive) managed job
                 # status every JOB_STATUS_CHECK_GAP_SECONDS.
@@ -2123,13 +2603,15 @@ def stream_logs_by_id(
                     # the live cluster-launch status, so it's clear the job is
                     # waiting on its cluster to be provisioned.
                     provision_msg = _latest_provision_status_msg()
-                    # Show only the blue headline of the cluster-launch status
-                    # as a secondary detail under the waiting line; show nothing
-                    # when there is no headline to display.
-                    headline = (None if provision_msg is None else
-                                _provision_status_headline(provision_msg))
-                    provision_str = (''
-                                     if headline is None else f'\n  {headline}')
+                    if (_live_headline(provision_msg) is None and
+                            not parked_reason_read):
+                        # Nothing live to show: read the parked reason, once per
+                        # status check rather than once per second like this
+                        # loop.
+                        parked_reason_read = True
+                        parked_reason = _parked_launch_reason(job_id, task_id)
+                    detail = _waiting_line_detail(provision_msg, parked_reason)
+                    provision_str = ('' if detail is None else f'\n  {detail}')
                     msg = _JOB_WAITING_STATUS_MESSAGE.format(
                         status_str=status_str,
                         provision_str=provision_str,
@@ -2516,6 +2998,7 @@ def dump_managed_job_queue(
     workspace_match: Optional[str] = None,
     name_match: Optional[str] = None,
     pool_match: Optional[str] = None,
+    infra_match: Optional[str] = None,
     page: Optional[int] = None,
     limit: Optional[int] = None,
     user_hashes: Optional[List[Optional[str]]] = None,
@@ -2525,12 +3008,29 @@ def dump_managed_job_queue(
     sort_order: Optional[str] = None,
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
+    include_tree: bool = False,
 ) -> str:
+    # Passed by name: this is called from generated code that pins the
+    # arguments it knows about, and the parameter list has outgrown the point
+    # where positional order is safe to extend.
     return message_utils.encode_payload(
-        get_managed_job_queue(skip_finished, accessible_workspaces, job_ids,
-                              workspace_match, name_match, pool_match, page,
-                              limit, user_hashes, statuses, fields, sort_by,
-                              sort_order, submitted_after, submitted_before))
+        get_managed_job_queue(skip_finished=skip_finished,
+                              accessible_workspaces=accessible_workspaces,
+                              job_ids=job_ids,
+                              include_tree=include_tree,
+                              workspace_match=workspace_match,
+                              name_match=name_match,
+                              pool_match=pool_match,
+                              infra_match=infra_match,
+                              page=page,
+                              limit=limit,
+                              user_hashes=user_hashes,
+                              statuses=statuses,
+                              fields=fields,
+                              sort_by=sort_by,
+                              sort_order=sort_order,
+                              submitted_after=submitted_after,
+                              submitted_before=submitted_before))
 
 
 def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
@@ -2575,6 +3075,20 @@ def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
             new_fields.append('priority')
         if 'failure_reason' not in new_fields:
             new_fields.append('failure_reason')
+        # Needed to derive the cluster name of STARTING jobs for the
+        # launch-progress reason lookup, key it per task, and ignore events
+        # left by an earlier attempt. Selected even when the caller (e.g. the
+        # dashboard) did not ask for them.
+        if 'task_name' not in new_fields:
+            new_fields.append('task_name')
+        if 'pool' not in new_fields:
+            new_fields.append('pool')
+        if 'task_id' not in new_fields:
+            new_fields.append('task_id')
+        if 'last_recovered_at' not in new_fields:
+            new_fields.append('last_recovered_at')
+        if 'submitted_at' not in new_fields:
+            new_fields.append('submitted_at')
     if 'user_yaml' in new_fields:
         if 'original_user_yaml_path' not in new_fields:
             new_fields.append('original_user_yaml_path')
@@ -2623,12 +3137,79 @@ def _cluster_handle_not_required(fields: List[str]) -> bool:
     return not any(field in fields for field in _CLUSTER_HANDLE_FIELDS)
 
 
+def _get_launch_reasons_by_task(
+        jobs: List[Dict[str, Any]]) -> Dict[Tuple[int, Optional[int]], str]:
+    """{(job_id, task_id): latest LAUNCH_PROGRESS reason} for STARTING tasks.
+
+    Keyed per task: in a job group each task launches its own cluster, and a
+    RUNNING sibling must not inherit a STARTING task's reason. The cluster
+    name is derived from the task name and job id the way the controller
+    names it; pool tasks share a cluster and are skipped, as in the
+    job-events merge.
+
+    A managed job's cluster name is reused across recovery attempts, and
+    launch-progress events are retained for days, so an event older than the
+    current attempt is dropped rather than shown as the current reason (e.g.
+    a stale image-pull reason after failover to a cloud that records no
+    launch progress). Best-effort: never raises.
+    """
+    cluster_name_by_task: Dict[Tuple[int, Optional[int]], str] = {}
+    attempt_start_by_task: Dict[Tuple[int, Optional[int]], float] = {}
+    for job in jobs:
+        if (job.get('status') !=
+                managed_job_state.ManagedJobStatus.STARTING.value or
+                job.get('pool') is not None or not job.get('task_name')):
+            continue
+        key = (job['job_id'], job.get('task_id'))
+        cluster_name_by_task[key] = generate_managed_job_cluster_name(
+            job['task_name'], job['job_id'])
+        # last_recovered_at is 0/None before the first recovery; fall back to
+        # submission time, and to 0 (no filtering) when neither is known.
+        attempt_start = job.get('last_recovered_at') or job.get('submitted_at')
+        attempt_start_by_task[key] = attempt_start or 0
+    if not cluster_name_by_task:
+        return {}
+    try:
+        events = global_user_state.get_latest_cluster_events(
+            list(dict.fromkeys(cluster_name_by_task.values())),
+            [global_user_state.ClusterEventType.LAUNCH_PROGRESS])
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to read launch-progress reasons: {e}')
+        return {}
+    reasons: Dict[Tuple[int, Optional[int]], str] = {}
+    for key, name in cluster_name_by_task.items():
+        event = events.get(name)
+        if event is None:
+            continue
+        reason, transitioned_at = event
+        if transitioned_at < attempt_start_by_task[key]:
+            continue
+        reasons[key] = reason
+    return reasons
+
+
 def _format_job_details(*,
                         job: Dict[str, Any],
                         highest_blocking_priority: int,
                         recovery_reason: Optional[str] = None,
-                        pending_reason: Optional[str] = None) -> None:
-    """Add details about schedule state / backoff / recovery / pending."""
+                        pending_reason: Optional[str] = None,
+                        cancel_reason: Optional[str] = None,
+                        launch_reason: Optional[str] = None) -> None:
+    """Add details about schedule state / backoff / recovery / pending /
+    who requested a cancellation / what a launch is waiting on."""
+    if cancel_reason:
+        # Surface who asked for the cancellation, and under which API
+        # request, e.g. 'Cancellation requested by user alice (request ID:
+        # ...)', so a CANCELLING/CANCELLED job's row and detail page answer
+        # "who cancelled this?" without opening the event table. Checked
+        # first: a job cancelled while in launch backoff or waiting to launch
+        # keeps that schedule state until the controller finishes cleaning
+        # up, and a job cancelled while recovering keeps the failure_reason
+        # of the preemption it was recovering from. Neither is why the job
+        # is ending; the cancel is.
+        job['details'] = cancel_reason
+        return
+
     state_details = None
     if job['schedule_state'] == 'ALIVE_BACKOFF':
         state_details = 'In backoff, waiting for resources'
@@ -2646,7 +3227,8 @@ def _format_job_details(*,
         job['details'] = state_details
     elif job['failure_reason']:
         job['details'] = f'Failure: {job["failure_reason"]}'
-    elif recovery_reason:
+    elif recovery_reason and job['status'] == (
+            managed_job_state.ManagedJobStatus.RECOVERING.value):
         # Surface why a job is recovering (e.g. an OOMKilled pod) so the
         # transient recovery cause is visible in the CLI and dashboard, not
         # just the controller logs. The reason (e.g. from
@@ -2665,13 +3247,19 @@ def _format_job_details(*,
             if hint is not None:
                 detail += f' ({hint})'
         job['details'] = detail
-    elif pending_reason:
+    elif pending_reason and job['status'] == (
+            managed_job_state.ManagedJobStatus.PENDING.value):
         # Surface why a job is still PENDING (e.g. it was submitted to the
         # controller queue or is in launch backoff) so the reason is visible
         # in the job details view, not just the event table. Collapse
         # whitespace so a multi-line reason renders on a single line in the
         # details column.
         job['details'] = ' '.join(pending_reason.split())
+    elif launch_reason:
+        # Surface what the job's cluster is waiting on while STARTING (e.g. a
+        # Slurm squeue pending reason or a Kubernetes image pull), taken from
+        # the cluster's latest LAUNCH_PROGRESS event.
+        job['details'] = ' '.join(launch_reason.split())
     else:
         job['details'] = None
 
@@ -2720,6 +3308,41 @@ def _populate_job_record_from_handle(
     job['internal_services'] = internal_services
 
 
+def _reject_tree_lookup_extras(job_ids, workspace_match, name_match, pool_match,
+                               infra_match, statuses, skip_finished,
+                               submitted_after, submitted_before, page,
+                               limit) -> None:
+    """The tree lookup takes job ids and nothing else.
+
+    Whether a filter should test the named jobs, their roots, or every row
+    of the tree is undecided (SKY-7163), so a request that combines them is
+    refused instead of answered one way. Pagination is refused for the same
+    reason. Visibility (accessible_workspaces, user_hashes) is not a filter
+    the caller chose and still applies. ``core.queue_v2`` runs the same check
+    on the API server; this one covers callers that reach the controller
+    function directly.
+    """
+    if job_ids is None:
+        raise ValueError('include_tree requires job_ids.')
+    if page is not None or limit is not None:
+        raise ValueError('include_tree cannot be combined with pagination.')
+    extras = {
+        'workspace_match': workspace_match,
+        'name_match': name_match,
+        'pool_match': pool_match,
+        'infra_match': infra_match,
+        'statuses': statuses,
+        'submitted_after': submitted_after,
+        'submitted_before': submitted_before,
+    }
+    if skip_finished:
+        extras['skip_finished'] = True
+    given = sorted(k for k, v in extras.items() if v is not None)
+    if given:
+        raise ValueError('include_tree cannot be combined with filters; '
+                         f'got {", ".join(given)}.')
+
+
 def get_managed_job_queue(
     skip_finished: bool = False,
     accessible_workspaces: Optional[List[str]] = None,
@@ -2727,6 +3350,7 @@ def get_managed_job_queue(
     workspace_match: Optional[str] = None,
     name_match: Optional[str] = None,
     pool_match: Optional[str] = None,
+    infra_match: Optional[str] = None,
     page: Optional[int] = None,
     limit: Optional[int] = None,
     user_hashes: Optional[List[Optional[str]]] = None,
@@ -2737,6 +3361,7 @@ def get_managed_job_queue(
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
     status_expr: Optional['sqlalchemy.ColumnElement'] = None,
+    include_tree: bool = False,
 ) -> Dict[str, Any]:
     """Get the managed job queue.
 
@@ -2747,6 +3372,8 @@ def get_managed_job_queue(
         workspace_match: The workspace name to match.
         name_match: The job name to match.
         pool_match: The pool name to match.
+        infra_match: The `--infra` spec to match (`cloud`, `cloud/region` or
+            `cloud/region/zone`, with `*` for any component).
         page: The page number.
         limit: The limit number.
         user_hashes: The user hashes.
@@ -2758,10 +3385,25 @@ def get_managed_job_queue(
             time (seconds).
         submitted_before: Only include jobs submitted at or before this epoch
             time (seconds).
+        include_tree: With job_ids, also return the rest of each job's tree:
+            the jobs launched under it, at any depth. The ids are resolved to
+            their tree roots first, so ids from the same tree return that
+            tree once. The total and the status counts cover the trees.
 
     Returns:
         A dictionary containing the managed job queue.
     """
+    tree_root_ids: Optional[List[int]] = None
+    if include_tree:
+        _reject_tree_lookup_extras(job_ids, workspace_match, name_match,
+                                   pool_match, infra_match, statuses,
+                                   skip_finished, submitted_after,
+                                   submitted_before, page, limit)
+        # Resolve once. The three state queries below take the roots and do
+        # not resolve ids themselves.
+        assert job_ids is not None  # _reject_tree_lookup_extras checked.
+        tree_root_ids = managed_job_state.get_tree_root_ids(job_ids)
+        job_ids = None
     cluster_handle_required = True
     updated_fields = None
     # The caller only need to specify the fields in the
@@ -2774,13 +3416,31 @@ def get_managed_job_queue(
 
     total_no_filter = managed_job_state.get_managed_jobs_total()
 
-    status_counts = managed_job_state.get_status_count_with_filters(
-        fields=fields,
+    # The values the dashboard's Infra filter offers. Computed over the same
+    # set the counts are, and without `infra_match`, so picking one option
+    # does not hide the others. See `get_infra_options_with_filters`.
+    infra_options = managed_job_state.get_infra_options_with_filters(
         job_ids=job_ids,
+        tree_root_ids=tree_root_ids,
         accessible_workspaces=accessible_workspaces,
         workspace_match=workspace_match,
         name_match=name_match,
         pool_match=pool_match,
+        user_hashes=user_hashes,
+        skip_finished=skip_finished,
+        submitted_after=submitted_after,
+        submitted_before=submitted_before,
+    )
+
+    status_counts = managed_job_state.get_status_count_with_filters(
+        fields=fields,
+        job_ids=job_ids,
+        tree_root_ids=tree_root_ids,
+        accessible_workspaces=accessible_workspaces,
+        workspace_match=workspace_match,
+        name_match=name_match,
+        pool_match=pool_match,
+        infra_match=infra_match,
         user_hashes=user_hashes,
         skip_finished=skip_finished,
         submitted_after=submitted_after,
@@ -2791,10 +3451,12 @@ def get_managed_job_queue(
     jobs, total = managed_job_state.get_managed_jobs_with_filters(
         fields=updated_fields,
         job_ids=job_ids,
+        tree_root_ids=tree_root_ids,
         accessible_workspaces=accessible_workspaces,
         workspace_match=workspace_match,
         name_match=name_match,
         pool_match=pool_match,
+        infra_match=infra_match,
         user_hashes=user_hashes,
         statuses=statuses,
         skip_finished=skip_finished,
@@ -2904,6 +3566,8 @@ def get_managed_job_queue(
     # an extra DB round trip. `job['status']` is already stringified above.
     recovery_reasons: Dict[int, str] = {}
     pending_reasons: Dict[int, str] = {}
+    cancel_reasons: Dict[int, str] = {}
+    launch_reasons: Dict[Tuple[int, Optional[int]], str] = {}
     if not fields or 'details' in fields:
         recovering_job_ids = [
             job['job_id'] for job in jobs if job['status'] ==
@@ -2914,9 +3578,32 @@ def get_managed_job_queue(
             for job in jobs
             if job['status'] == managed_job_state.ManagedJobStatus.PENDING.value
         ]
+        # Keyed by job id, not by task: in a job group every task shares the
+        # id, so a RECOVERING task's reason reaches its STARTING sibling's row
+        # too. `_format_job_details` therefore applies these two only to a row
+        # that is itself in that status -- the maps are built from rows in that
+        # status, so nothing else could have been meant by them. The
+        # cancellation below is deliberately not guarded that way: cancelling
+        # a job cancels every task in it, so it is the right answer on a
+        # sibling's row as well, and it is checked first for that reason.
         recovery_reasons, pending_reasons = (
             managed_job_state.get_latest_recovery_and_pending_reasons(
                 recovering_job_ids, pending_job_ids))
+        # Who requested the cancellation of each cancelled job (the
+        # attributed CANCELLING event written when the cancel request was
+        # handled), so the requester and request ID are visible in `details`
+        # rather than only in the event table.
+        cancelled_job_ids = list({
+            job['job_id'] for job in jobs if job['status'] in (
+                managed_job_state.ManagedJobStatus.CANCELLING.value,
+                managed_job_state.ManagedJobStatus.CANCELLED.value)
+        })
+        cancel_reasons = managed_job_state.get_cancel_request_reasons(
+            cancelled_job_ids)
+        # STARTING jobs: the latest launch-progress event of the cluster being
+        # provisioned (e.g. 'Launching (pending: QOSGrpGRES)' on Slurm), so
+        # `details` answers why the job has not started yet.
+        launch_reasons = _get_launch_reasons_by_task(jobs)
 
     for job in jobs:
         if not fields or 'details' in fields:
@@ -2924,7 +3611,10 @@ def get_managed_job_queue(
                 job=job,
                 highest_blocking_priority=highest_blocking_priority,
                 recovery_reason=recovery_reasons.get(job['job_id']),
-                pending_reason=pending_reasons.get(job['job_id']))
+                pending_reason=pending_reasons.get(job['job_id']),
+                cancel_reason=cancel_reasons.get(job['job_id']),
+                launch_reason=launch_reasons.get(
+                    (job['job_id'], job.get('task_id'))))
 
         # Derive is_job_group from execution column
         job['is_job_group'] = (
@@ -2934,7 +3624,8 @@ def get_managed_job_queue(
         'jobs': jobs,
         'total': total,
         'total_no_filter': total_no_filter,
-        'status_counts': status_counts
+        'status_counts': status_counts,
+        'infra_options': infra_options,
     }
 
 
@@ -3023,16 +3714,20 @@ def filter_jobs(
 def load_managed_job_queue(
     payload: str
 ) -> Tuple[List[Dict[str, Any]], int, ManagedJobQueueResultType, int, Dict[
-        str, int]]:
+        str, int], List[str]]:
     """Load job queue from json string."""
     result = message_utils.decode_payload(payload)
     result_type = ManagedJobQueueResultType.DICT
     status_counts: Dict[str, int] = {}
+    # Absent from a controller that predates the field, which is not an error:
+    # the caller falls back to deriving the options from the rows it has.
+    infra_options: List[str] = []
     if isinstance(result, dict):
         jobs: List[Dict[str, Any]] = result['jobs']
         total: int = result['total']
         status_counts = result.get('status_counts', {})
         total_no_filter: int = result.get('total_no_filter', total)
+        infra_options = result.get('infra_options', [])
     else:
         jobs = result
         total = len(jobs)
@@ -3047,7 +3742,8 @@ def load_managed_job_queue(
             # Skip jobs that do not have user_hash info.
             # TODO(cooperc): Remove check before 0.12.0.
             job['user_name'] = all_users_map.get(job['user_hash'])
-    return jobs, total, result_type, total_no_filter, status_counts
+    return jobs, total, result_type, total_no_filter, status_counts, \
+        infra_options
 
 
 def _get_job_status_from_tasks(
@@ -3164,7 +3860,9 @@ def format_job_table(
     Args:
         jobs: A list of managed jobs.
         show_all: Whether to show all columns.
-        max_jobs: The maximum number of jobs to show in the table.
+        max_jobs: The maximum number of jobs to show in the table. A job
+          counts once with all of its rows (its tasks, and the jobs launched
+          under it), so the table never shows part of a job.
         return_rows: If True, return the rows as a list of strings instead of
           all rows concatenated into a single string.
         pool_status: List of pool status dictionaries with replica_info.
@@ -3180,10 +3878,22 @@ def format_job_table(
     if max_jobs and tasks_have_k8s_user:
         raise ValueError('max_jobs is not supported when tasks have user info.')
 
+    # A job launched from inside another managed job (a dynamic job group
+    # member) is shown under the top-level job of its tree, like that job's
+    # declared tasks. Only when the root is in this listing, though: a member
+    # whose root was filtered out (or is gone) is shown as its own job.
+    listed_job_ids = {task['job_id'] for task in tasks}
+
+    def group_job_id(task) -> int:
+        root_job_id = task.get('root_job_id')
+        if root_job_id is not None and root_job_id in listed_job_ids:
+            return root_job_id
+        return task['job_id']
+
     def get_hash(task):
         if tasks_have_k8s_user:
-            return (task['user'], task['job_id'])
-        return task['job_id']
+            return (task['user'], group_job_id(task))
+        return group_job_id(task)
 
     def _get_job_id_to_worker_map(
             pool_status: Optional[List[Dict[str, Any]]]) -> Dict[int, int]:
@@ -3298,7 +4008,23 @@ def format_job_table(
 
     all_tasks = tasks
     if max_jobs is not None:
-        all_tasks = tasks[:max_jobs]
+        # Keep the first `max_jobs` jobs (trees), with every row of each.
+        # Cutting rows instead would drop the tail of a job: since a job's
+        # dynamic members (newer, higher ids) come before its declared-task
+        # rows, a
+        # group with more members than the budget would lose its declared-task
+        # rows
+        # and be rendered from the members alone, under a member's name and
+        # status.
+        kept_hashes: Dict[Any, None] = {}
+        all_tasks = []
+        for task in tasks:
+            task_hash = get_hash(task)
+            if task_hash not in kept_hashes:
+                if len(kept_hashes) >= max_jobs:
+                    continue
+                kept_hashes[task_hash] = None
+            all_tasks.append(task)
     jobs = collections.defaultdict(list)
     for task in all_tasks:
         # The tasks within the same job_id are already sorted
@@ -3334,7 +4060,18 @@ def format_job_table(
 
         return user_values
 
-    for job_hash, job_tasks in jobs.items():
+    for job_hash, group_tasks in jobs.items():
+        group_id = job_hash[1] if tasks_have_k8s_user else job_hash
+        # The top-level job's declared tasks, and the jobs launched under it
+        # (dynamic members, each with its own job id). The group row
+        # aggregates the former only: a dynamic member never changes the
+        # group's status, duration or recovery count.
+        job_tasks = [t for t in group_tasks if t['job_id'] == group_id]
+        member_tasks = [t for t in group_tasks if t['job_id'] != group_id]
+        if not job_tasks:
+            # Should not happen (the root is listed by construction of
+            # group_job_id); render the members as their own jobs.
+            job_tasks, member_tasks = member_tasks, []
         if show_all:
             schedule_state = job_tasks[0]['schedule_state']
         workspace = job_tasks[0].get('workspace',
@@ -3424,14 +4161,22 @@ def format_job_table(
         has_auxiliary_tasks = any(
             t.get('is_primary_in_job_group') is False for t in job_tasks)
 
-        for task in job_tasks:
+        # How many rows each dynamic member has, so a multi-task member
+        # shows its task ids and a single-task one shows '-', like top-level
+        # jobs do.
+        member_row_counts = collections.Counter(
+            t['job_id'] for t in member_tasks)
+
+        for task in job_tasks + member_tasks:
+            is_member = task['job_id'] != group_id
             # The job['job_duration'] is already calculated in
             # dump_managed_job_queue().
             job_duration = log_utils.readable_time_duration(
                 0, task['job_duration'], absolute=True)
             submitted = log_utils.readable_time_duration(task['submitted_at'])
             user_values = get_user_column_values(task)
-            task_workspace = '-' if len(job_tasks) > 1 else workspace
+            task_workspace = ('-'
+                              if len(job_tasks) > 1 or is_member else workspace)
             pool = task.get('pool')
             if pool is None:
                 pool = '-'
@@ -3443,12 +4188,38 @@ def format_job_table(
 
             # Add [P] marker for primary tasks in job groups with auxiliaries
             task_name = task['task_name']
-            if has_auxiliary_tasks and task.get('is_primary_in_job_group'):
+            if (not is_member and has_auxiliary_tasks and
+                    task.get('is_primary_in_job_group')):
                 task_name = f'{task_name} [P]'
 
+            if is_member:
+                # A dynamic task (a job launched from this group) reads like
+                # one of the group's tasks: its index numbers on from the
+                # declared tasks, and `sky jobs logs <group> <index>` / `sky
+                # jobs
+                # cancel <group> --task <index>` address it. A multi-task
+                # member shows `<index>.<task id>`. The member's own job id
+                # is shown with -v; rows from before the index existed
+                # always show it, in place of the index.
+                dynamic_index = task.get('dynamic_task_index')
+                if dynamic_index is None:
+                    id_cell: Any = f' \u21B3 {task["job_id"]}'
+                    task_cell: Any = (task['task_id']
+                                      if member_row_counts[task['job_id']] > 1
+                                      else '-')
+                else:
+                    id_cell = (f' \u21B3 {task["job_id"]}'
+                               if show_all else ' \u21B3')
+                    task_cell = (f'{dynamic_index}.{task["task_id"]}'
+                                 if member_row_counts[task['job_id']] > 1 else
+                                 dynamic_index)
+            else:
+                id_cell = task['job_id'] if len(job_tasks) == 1 else ' \u21B3'
+                task_cell = task['task_id'] if len(job_tasks) > 1 else '-'
+
             values = [
-                task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
-                task['task_id'] if len(job_tasks) > 1 else '-',
+                id_cell,
+                task_cell,
                 *([task_workspace] if show_workspace else []),
                 task_name,
                 *user_values,
@@ -3469,7 +4240,8 @@ def format_job_table(
                 # schedule_state is only set at the job level, so if we have
                 # more than one task, only display on the aggregated row.
                 schedule_state = (task['schedule_state']
-                                  if len(job_tasks) == 1 else '-')
+                                  if len(job_tasks) == 1 and not is_member else
+                                  '-')
                 infra_str = task.get('infra')
                 if infra_str is None:
                     cloud = task.get('cloud')
@@ -3620,6 +4392,36 @@ def parse_job_cancel_file(content: str) -> Tuple[bool, Optional[int]]:
     return graceful, graceful_timeout
 
 
+# Raised by the controller-side guard below when an infra filter reaches a
+# controller too old to apply it. The API server matches on this to turn the
+# generic non-zero exit into a clean, user-facing error.
+INFRA_FILTER_UNSUPPORTED_MARKER = 'SKYPILOT_INFRA_FILTER_UNSUPPORTED'
+
+# What the user is told when the filter reaches a controller too old to apply
+# it. Deliberately says nothing about versions: the number a controller runs is
+# not something a user can act on. What they can act on is that the controller
+# upgrades itself the next time a managed job is launched on it.
+INFRA_FILTER_UNSUPPORTED_MESSAGE = (
+    'The jobs controller does not support filtering managed jobs by infra. '
+    'Launching your next managed job updates the controller automatically; '
+    'try this filter again after that.')
+
+# The managed jobs version that first accepted `infra_match`.
+INFRA_FILTER_MANAGED_JOBS_VERSION = 24
+
+# Same for `include_tree`. A controller that predates it would ignore the
+# flag and return only the requested jobs' rows, and the caller could not
+# tell that the tree is missing. The generated code raises with this marker
+# instead.
+INCLUDE_TREE_UNSUPPORTED_MARKER = 'SKYPILOT_INCLUDE_TREE_UNSUPPORTED'
+INCLUDE_TREE_UNSUPPORTED_MESSAGE = (
+    'The jobs controller does not support loading a managed job together '
+    'with the jobs launched under it. Launching your next managed job '
+    'updates the controller automatically; try again after that.')
+# The managed jobs version that first accepted `include_tree`.
+INCLUDE_TREE_MANAGED_JOBS_VERSION = 27
+
+
 class ManagedJobCodeGen:
     """Code generator for managed job utility functions.
 
@@ -3661,6 +4463,7 @@ class ManagedJobCodeGen:
         workspace_match: Optional[str] = None,
         name_match: Optional[str] = None,
         pool_match: Optional[str] = None,
+        infra_match: Optional[str] = None,
         page: Optional[int] = None,
         limit: Optional[int] = None,
         user_hashes: Optional[List[Optional[str]]] = None,
@@ -3670,8 +4473,27 @@ class ManagedJobCodeGen:
         sort_order: Optional[str] = None,
         submitted_after: Optional[float] = None,
         submitted_before: Optional[float] = None,
+        include_tree: bool = False,
     ) -> str:
+        marker = INFRA_FILTER_UNSUPPORTED_MARKER
+        message = INFRA_FILTER_UNSUPPORTED_MESSAGE
+        infra_version = INFRA_FILTER_MANAGED_JOBS_VERSION
+        tree_marker = INCLUDE_TREE_UNSUPPORTED_MARKER
+        tree_message = INCLUDE_TREE_UNSUPPORTED_MESSAGE
+        tree_version = INCLUDE_TREE_MANAGED_JOBS_VERSION
         code = textwrap.dedent(f"""\
+        # An infra filter a controller cannot apply must be an error, not a
+        # silently wider answer: unlike every other filter here, dropping it
+        # returns jobs on *other* infra -- a result that looks right and is
+        # wrong. Checked on the controller, which is what knows its version.
+        _infra_match = {infra_match!r}
+        if _infra_match is not None and managed_job_version < {infra_version}:
+            raise RuntimeError('{marker}: {message}')
+        # Same for include_tree: an old controller would ignore it and return
+        # only the requested jobs' rows.
+        _include_tree = {include_tree!r}
+        if _include_tree and managed_job_version < {tree_version}:
+            raise RuntimeError('{tree_marker}: {tree_message}')
         # Filter out is_primary_in_job_group for older controllers (< 15)
         _fields = {fields!r}
         if managed_job_version < 15 and _fields is not None:
@@ -3680,6 +4502,13 @@ class ManagedJobCodeGen:
         _BATCH_FIELDS = {{'is_batch', 'batch_total_batches', 'batch_completed_batches'}}
         if managed_job_version < 18 and _fields is not None:
             _fields = [f for f in _fields if f not in _BATCH_FIELDS]
+        # Filter out parent-link fields for older controllers (< 25)
+        _PARENT_FIELDS = {{'root_job_id', 'parent_job_id', 'parent_task_id'}}
+        if managed_job_version < 25 and _fields is not None:
+            _fields = [f for f in _fields if f not in _PARENT_FIELDS]
+        # Filter out the dynamic task index for older controllers (< 26)
+        if managed_job_version < 26 and _fields is not None:
+            _fields = [f for f in _fields if f != 'dynamic_task_index']
         if managed_job_version < 9:
             # For backward compatibility, since filtering is not supported
             # before #6652.
@@ -3723,6 +4552,7 @@ class ManagedJobCodeGen:
                                 fields=_fields)
         elif managed_job_version < 22:
             job_table = utils.dump_managed_job_queue(
+
                                 skip_finished={skip_finished},
                                 accessible_workspaces={accessible_workspaces!r},
                                 job_ids={job_ids!r},
@@ -3736,7 +4566,7 @@ class ManagedJobCodeGen:
                                 fields=_fields,
                                 sort_by={sort_by!r},
                                 sort_order={sort_order!r})
-        else:
+        elif managed_job_version < {infra_version}:
             job_table = utils.dump_managed_job_queue(
                                 skip_finished={skip_finished},
                                 accessible_workspaces={accessible_workspaces!r},
@@ -3744,6 +4574,43 @@ class ManagedJobCodeGen:
                                 workspace_match={workspace_match!r},
                                 name_match={name_match!r},
                                 pool_match={pool_match!r},
+                                page={page!r},
+                                limit={limit!r},
+                                user_hashes={user_hashes!r},
+                                statuses={statuses!r},
+                                fields=_fields,
+                                sort_by={sort_by!r},
+                                sort_order={sort_order!r},
+                                submitted_after={submitted_after!r},
+                                submitted_before={submitted_before!r})
+        elif managed_job_version < {tree_version}:
+            job_table = utils.dump_managed_job_queue(
+                                skip_finished={skip_finished},
+                                accessible_workspaces={accessible_workspaces!r},
+                                job_ids={job_ids!r},
+                                workspace_match={workspace_match!r},
+                                name_match={name_match!r},
+                                pool_match={pool_match!r},
+                                infra_match={infra_match!r},
+                                page={page!r},
+                                limit={limit!r},
+                                user_hashes={user_hashes!r},
+                                statuses={statuses!r},
+                                fields=_fields,
+                                sort_by={sort_by!r},
+                                sort_order={sort_order!r},
+                                submitted_after={submitted_after!r},
+                                submitted_before={submitted_before!r})
+        else:
+            job_table = utils.dump_managed_job_queue(
+                                skip_finished={skip_finished},
+                                accessible_workspaces={accessible_workspaces!r},
+                                job_ids={job_ids!r},
+                                include_tree=_include_tree,
+                                workspace_match={workspace_match!r},
+                                name_match={name_match!r},
+                                pool_match={pool_match!r},
+                                infra_match={infra_match!r},
                                 page={page!r},
                                 limit={limit!r},
                                 user_hashes={user_hashes!r},
@@ -3778,8 +4645,16 @@ class ManagedJobCodeGen:
         targeted call to the underlying ``utils.cancel_jobs_by_id`` /
         ``cancel_job_by_name`` / ``cancel_jobs_by_pool`` chosen
         client-side based on the selector args.
+
+        The cancel requester (``cancel_request_info``) is only passed to
+        controllers running ``MANAGED_JOBS_VERSION >= 23``; older ones don't
+        have the parameter, and simply record an unattributed cancel.
         """
         active_workspace = skypilot_config.get_active_workspace()
+        # This runs on the API server, inside the request that asked for the
+        # cancellation, so the requester comes from the ambient context; the
+        # controller executing the generated code has no such context.
+        cancel_request_info = CancelRequestInfo.from_request_context()
 
         # ``user_hash`` is intentionally omitted below — the controller runs
         # the generated code under ``_build()``, which exports
@@ -3842,18 +4717,32 @@ class ManagedJobCodeGen:
             ]
 
         legacy_block = '\n'.join(f'    {line}' for line in legacy_call_lines)
+        dispatch_args = (f'        name={name!r},\n'
+                         f'        job_ids={job_ids!r},\n'
+                         f'        pool={pool!r},\n'
+                         f'        all={all!r},\n'
+                         f'        all_users={all_users!r},\n'
+                         f'        graceful={graceful!r},\n'
+                         f'        graceful_timeout={graceful_timeout!r},\n'
+                         f'        current_workspace={active_workspace!r},\n')
+        requester_arg = ''
+        if cancel_request_info is not None:
+            requester_arg = (
+                f'        cancel_request_info=utils.CancelRequestInfo(\n'
+                f'            user_hash={cancel_request_info.user_hash!r},\n'
+                f'            user_name={cancel_request_info.user_name!r},\n'
+                f'            request_id={cancel_request_info.request_id!r},\n'
+                f'        ),\n')
         code = (f'if managed_job_version < 19:\n'
                 f'{legacy_block}\n'
+                f'elif managed_job_version < 23:\n'
+                f'    msg = utils.cancel_managed_jobs(\n'
+                f'{dispatch_args}'
+                f'    )\n'
                 f'else:\n'
                 f'    msg = utils.cancel_managed_jobs(\n'
-                f'        name={name!r},\n'
-                f'        job_ids={job_ids!r},\n'
-                f'        pool={pool!r},\n'
-                f'        all={all!r},\n'
-                f'        all_users={all_users!r},\n'
-                f'        graceful={graceful!r},\n'
-                f'        graceful_timeout={graceful_timeout!r},\n'
-                f'        current_workspace={active_workspace!r},\n'
+                f'{dispatch_args}'
+                f'{requester_arg}'
                 f'    )\n'
                 f'print(msg, end="", flush=True)\n')
         return cls._build(code)

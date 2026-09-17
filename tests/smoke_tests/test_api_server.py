@@ -546,7 +546,9 @@ def test_api_server_start_stop(generic_cloud: str):
         'test_api_server_start_stop',
         [
             # To avoid interference with other tests, we launch a separate API server for this test.
-            f'sky launch -n {name} --cloud {generic_cloud} tests/test_yamls/apiserver-start-stop.yaml -y {smoke_tests_utils.LOW_RESOURCE_ARG}'
+            # No LOW_RESOURCE_ARG here: this case runs a full API server inside the
+            # cluster, which does not fit in 4GB. Sizing comes from the YAML.
+            f'sky launch -n {name} --cloud {generic_cloud} tests/test_yamls/apiserver-start-stop.yaml -y'
         ],
         f'sky down -y {name} || true',
         timeout=1800,

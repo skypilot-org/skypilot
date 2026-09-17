@@ -128,8 +128,7 @@ class TestCreateServiceAccountTokenRole:
         result = users_server.create_service_account_token(
             _fake_request(user_id='regular-user'), body)
         assert result['token'] == 'sky_x'
-        assert mock_perm.permission_service.update_role.call_args[0][
-            1] == 'user'
+        assert mock_perm.seed_new_user_role.call_args.kwargs['role'] == 'user'
 
     @mock.patch('sky.users.server.global_user_state')
     @mock.patch('sky.users.server.token_service')
@@ -150,17 +149,18 @@ class TestCreateServiceAccountTokenRole:
         result = users_server.create_service_account_token(
             _fake_request(), body)
         assert result['token'] == 'sky_x'
-        mock_perm.permission_service.update_role.assert_called_once()
-        assert mock_perm.permission_service.update_role.call_args[0][
-            1] == 'admin'
+        mock_perm.seed_new_user_role.assert_called_once()
+        assert mock_perm.seed_new_user_role.call_args.kwargs['role'] == 'admin'
 
+    @mock.patch('sky.users.rbac.get_default_role', return_value='user')
     @mock.patch('sky.users.server.global_user_state')
     @mock.patch('sky.users.server.token_service')
     @mock.patch('sky.users.server.permission')
-    def test_no_role_keeps_default_seed(self, mock_perm, mock_token_service,
-                                        mock_gus):
-        """Without a role, only the default seed runs (no update_role)."""
+    def test_no_role_uses_default(self, mock_perm, mock_token_service, mock_gus,
+                                  _mock_default):
+        """Without a role, the account is seeded with the configured default."""
         mock_gus.add_or_update_user.return_value = True
+        mock_perm.permission_service.get_user_roles.return_value = ['user']
         mock_token_service.token_service.create_token.return_value = {
             'token_id': 'tid',
             'token_hash': 'h',
@@ -170,5 +170,148 @@ class TestCreateServiceAccountTokenRole:
         body = payloads.ServiceAccountTokenCreateBody(token_name='sa_default',
                                                       expires_in_days=0)
         users_server.create_service_account_token(_fake_request(), body)
-        mock_perm.seed_new_user_role.assert_called_once()
+        assert mock_perm.seed_new_user_role.call_args.kwargs['role'] == 'user'
+
+
+class TestDefaultRoleClamp:
+    """`rbac.default_role` falls back to admin; an SA can't out-rank its creator.
+
+    Reachable whenever an operator leaves `rbac.default_role` unset and demotes
+    individual people -- omitting `role` would otherwise hand a non-admin an
+    admin-scoped token.
+    """
+
+    @staticmethod
+    def _create_as(mock_perm, mock_token_service, mock_gus, caller_roles):
+        mock_gus.add_or_update_user.return_value = True
+        mock_perm.permission_service.get_user_roles.return_value = caller_roles
+        mock_token_service.token_service.create_token.return_value = {
+            'token_id': 'tid',
+            'token_hash': 'h',
+            'token': 'sky_x',
+            'expires_at': None,
+        }
+        body = payloads.ServiceAccountTokenCreateBody(token_name='sa_clamp',
+                                                      expires_in_days=0)
+        users_server.create_service_account_token(
+            _fake_request(user_id='caller'), body)
+        return mock_perm.seed_new_user_role.call_args.kwargs['role']
+
+    # The multi-role cases are the point: `get_user_roles` does not order its
+    # result deterministically, so both orderings must land on `user`, and an
+    # unrecognized name must not be mistaken for a low-privilege one.
+    @pytest.mark.parametrize('caller_roles,expected', [
+        (['user'], 'user'),
+        (['viewer'], 'viewer'),
+        ([], 'viewer'),
+        (['user', 'admin'], 'user'),
+        (['admin', 'user'], 'user'),
+        (['viewer', 'admin'], 'viewer'),
+        (['admin', 'bogus'], 'admin'),
+        (['bogus'], 'viewer'),
+    ])
+    @mock.patch('sky.users.rbac.get_default_role', return_value='admin')
+    @mock.patch('sky.users.server.global_user_state')
+    @mock.patch('sky.users.server.token_service')
+    @mock.patch('sky.users.server.permission')
+    def test_non_admin_creator_clamps_admin_default(self, mock_perm,
+                                                    mock_token_service,
+                                                    mock_gus, _mock_default,
+                                                    caller_roles, expected):
+        assert self._create_as(mock_perm, mock_token_service, mock_gus,
+                               caller_roles) == expected
+
+    @mock.patch('sky.users.rbac.get_default_role', return_value='admin')
+    @mock.patch('sky.users.server.global_user_state')
+    @mock.patch('sky.users.server.token_service')
+    @mock.patch('sky.users.server.permission')
+    def test_admin_creator_keeps_admin_default(self, mock_perm,
+                                               mock_token_service, mock_gus,
+                                               _mock_default):
+        assert self._create_as(mock_perm, mock_token_service, mock_gus,
+                               ['admin']) == 'admin'
+
+
+def _update_role_body(role):
+    return payloads.ServiceAccountTokenUpdateRoleBody(token_id='tid', role=role)
+
+
+def _token_info(creator='regular-user'):
+    return {
+        'creator_user_hash': creator,
+        'service_account_user_id': 'sa-1234',
+    }
+
+
+class TestUpdateServiceAccountRole:
+    """Owning a service account does not entitle raising its role."""
+
+    # 'Admin' and '' are the same escalation as 'bogus': an unrecognized role
+    # has no Casbin policy, and the blocklist reads that as allow-everything.
+    @pytest.mark.parametrize('role', ['bogus', 'Admin', ''])
+    @mock.patch('sky.users.server.global_user_state')
+    @mock.patch('sky.users.server.permission')
+    def test_unsupported_role_rejected(self, mock_perm, mock_gus, role):
+        mock_gus.get_service_account_token.return_value = _token_info()
+        mock_perm.permission_service.get_user_roles.return_value = ['user']
+        with pytest.raises(fastapi.HTTPException) as exc:
+            users_server.update_service_account_role(
+                _fake_request(user_id='regular-user'), _update_role_body(role))
+        assert exc.value.status_code == 400
+        assert 'Invalid role' in exc.value.detail
         mock_perm.permission_service.update_role.assert_not_called()
+
+    @mock.patch('sky.users.server.global_user_state')
+    @mock.patch('sky.users.server.permission')
+    def test_non_admin_cannot_grant_admin(self, mock_perm, mock_gus):
+        mock_gus.get_service_account_token.return_value = _token_info()
+        mock_perm.permission_service.get_user_roles.return_value = ['user']
+        with pytest.raises(fastapi.HTTPException) as exc:
+            users_server.update_service_account_role(
+                _fake_request(user_id='regular-user'),
+                _update_role_body('admin'))
+        assert exc.value.status_code == 403
+        assert 'Only admins' in exc.value.detail
+        mock_perm.permission_service.update_role.assert_not_called()
+
+    @mock.patch('sky.users.server.global_user_state')
+    @mock.patch('sky.users.server.permission')
+    def test_residual_admin_role_does_not_grant(self, mock_perm, mock_gus):
+        """A leftover `admin` next to a restricted role is not admin.
+
+        `check_endpoint_permission` still applies the `user` blocklist to such
+        a caller, so treating them as admin here would be an escalation.
+        """
+        mock_gus.get_service_account_token.return_value = _token_info()
+        mock_perm.permission_service.get_user_roles.return_value = [
+            'user', 'admin'
+        ]
+        with pytest.raises(fastapi.HTTPException) as exc:
+            users_server.update_service_account_role(
+                _fake_request(user_id='regular-user'),
+                _update_role_body('admin'))
+        assert exc.value.status_code == 403
+        mock_perm.permission_service.update_role.assert_not_called()
+
+    @mock.patch('sky.users.server.global_user_state')
+    @mock.patch('sky.users.server.permission')
+    def test_non_admin_can_grant_non_admin(self, mock_perm, mock_gus):
+        mock_gus.get_service_account_token.return_value = _token_info()
+        mock_perm.permission_service.get_user_roles.return_value = ['user']
+        result = users_server.update_service_account_role(
+            _fake_request(user_id='regular-user'), _update_role_body('viewer'))
+        assert result['new_role'] == 'viewer'
+        assert mock_perm.permission_service.update_role.call_args[0] == (
+            'sa-1234', 'viewer')
+
+    @mock.patch('sky.users.server.global_user_state')
+    @mock.patch('sky.users.server.permission')
+    def test_admin_can_grant_admin(self, mock_perm, mock_gus):
+        mock_gus.get_service_account_token.return_value = _token_info(
+            creator='admin-user')
+        mock_perm.permission_service.get_user_roles.return_value = ['admin']
+        result = users_server.update_service_account_role(
+            _fake_request(), _update_role_body('admin'))
+        assert result['new_role'] == 'admin'
+        assert mock_perm.permission_service.update_role.call_args[0] == (
+            'sa-1234', 'admin')

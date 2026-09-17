@@ -289,12 +289,13 @@ def main():
                                            stream_logs=True,
                                            streaming_prefix=prefix)
 
-    # For multi-node Slurm jobs (one task per node), we need to wait for all
-    # tasks to complete before any task exits, because Slurm's proctrack/cgroup
-    # kills all processes in a task's cgroup when that task's main process
-    # exits. If one task exits early, child processes (e.g., Ray workers) get
-    # killed even while other tasks are still running.
-    # This ensures all tasks wait until every task has completed before exiting.
+    # For successful tasks in multi-node Slurm jobs (one task per node), wait
+    # for all tasks to complete before exiting, because Slurm's
+    # proctrack/cgroup kills all processes in a task's cgroup when that task's
+    # main process exits. If one task exits early, child processes (e.g., Ray
+    # workers) get killed even while other tasks are still running. Failed
+    # tasks must exit immediately so srun's --kill-on-bad-exit can terminate
+    # the other tasks.
     # Only needed when proctrack/cgroup is enabled.
     # https://slurm.schedmd.com/cgroups.html#proctrack
     # Use the shared filesystem home for cross-node coordination.
@@ -303,8 +304,8 @@ def main():
     shared_home = (args.cluster_home_dir
                    if args.cluster_home_dir else os.path.expanduser('~'))
 
-    if num_nodes > 1 and not args.is_setup and _is_proctrack_cgroup_enabled(
-            shared_home):
+    if (returncode == 0 and num_nodes > 1 and not args.is_setup and
+            _is_proctrack_cgroup_enabled(shared_home)):
         slurm_job_id = os.environ['SLURM_JOB_ID']
         slurm_step_id = os.environ['SLURM_STEP_ID']
         run_done_dir = os.path.join(

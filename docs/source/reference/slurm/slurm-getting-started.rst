@@ -279,7 +279,7 @@ Enable this behavior in the API server's configuration:
 
 Configure each Slurm host entry with the shared SSH user and private key. The
 SSH user must be ``root`` or have passwordless ``sudo`` permission to run
-``su``:
+``/bin/bash`` as the accounts SkyPilot submits for:
 
 .. code-block:: text
 
@@ -287,6 +287,33 @@ SSH user must be ``root`` or have passwordless ``sudo`` permission to run
         HostName login.mycluster.myorg.com
         User slurm-admin
         IdentityFile ~/.ssh/slurm_admin
+
+For a non-root SSH user, add a sudoers rule on each login node that scopes the
+grant to a group holding those accounts:
+
+.. code-block:: text
+
+    Runas_Alias SLURM_USERS = %slurm-users
+    Defaults>SLURM_USERS !requiretty
+    slurm-admin ALL=(SLURM_USERS) NOPASSWD: /bin/bash
+
+This limits impersonation to members of ``slurm-users`` and records each
+invocation according to the host's sudo logging configuration. It is not a
+per-command allowlist: SkyPilot runs job setup and run scripts, ``rsync``, and
+an interactive SSH helper as the submitting user.
+
+Treat membership in ``slurm-users`` as privileged access. Every member must be
+a workload account without ``sudo``, Slurm administrative privileges, or
+another escalation path. Any privileges available to a member are transitively
+available to the shared SSH user. Avoid ``(ALL, !root)``: it still allows
+impersonating the ``slurm`` account (Slurm's ``SlurmUser``), which is equivalent
+to controlling the scheduler.
+
+The ``Defaults>`` line disables ``requiretty`` for commands run as members of
+``SLURM_USERS`` while leaving it in force elsewhere. SkyPilot invokes sudo over
+SSH without allocating a terminal, so a global ``requiretty`` setting makes
+sudo refuse the command with ``sorry, you must have a tty to run sudo``. This
+also prevents file transfers and other job lifecycle operations from running.
 
 SkyPilot maps the authenticated username to the portion before ``@``. For
 example, ``alice@example.com`` maps to the Unix account ``alice``. The account
@@ -399,6 +426,46 @@ limited to Docker Hub, AWS ECR, GCP Artifact Registry, and NVIDIA NGC.
 
     Container support requires the `Pyxis <https://github.com/NVIDIA/pyxis>`_
     SPANK plugin to be installed on your Slurm cluster.
+
+Stopping and restarting containers
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Container clusters on Slurm support ``sky stop`` and ``sky start``. When a
+cluster stops, SkyPilot exports each node's container filesystem to shared
+storage and releases the Slurm allocation. Starting the cluster requests a new
+allocation and restores each node from its exported filesystem.
+
+Installed packages, files under ``/root``, and other changes to the container
+root filesystem are preserved. The user's home directory remains available
+through its existing shared-filesystem mount. Running processes and memory are
+not preserved, and ``/tmp`` and ``/run`` are recreated when the cluster starts.
+
+Before exporting the container filesystem, SkyPilot waits for the allocation's
+workload steps to exit. On clusters using ``proctrack/linuxproc``, a process
+that double-forks out of its Slurm step may remain alive after the step exits
+and cannot be detected by this drain. Workloads on these clusters should not
+detach processes from their Slurm steps before the cluster is stopped.
+``proctrack/cgroup`` tracks these descendants with the step.
+
+Snapshots are stored under
+``<workdir>/.sky_snapshots/<cluster-name-on-cloud>``. If ``workdir`` is not
+configured, SkyPilot uses the remote user's home directory. A snapshot uses
+approximately as much shared storage as the container root filesystem and
+continues to consume that storage while the cluster is stopped. ``sky down``
+deletes the snapshot.
+
+Stopping is available only when the cluster uses a container image and Pyxis
+is installed. Slurm clusters that run directly on the host cannot be stopped.
+
+Autostop on container clusters
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Container clusters support autostop: ``sky launch -i N``,
+``sky start -i N``, or ``sky autostop -i N`` schedules the cluster to stop
+after N idle minutes, and adding ``--down`` schedules it to terminate
+instead. Skylet, running on the allocation's head node, performs the same
+snapshot-and-release procedure as ``sky stop`` (or the full cleanup of
+``sky down``).
 
 Private registries
 ^^^^^^^^^^^^^^^^^^
@@ -531,7 +598,6 @@ Current limitations
 
 Slurm support in SkyPilot is under active development. The following features are not yet supported:
 
-* **Autostop**: Slurm clusters cannot be automatically terminated after idle time.
 * **SkyServe**: Serving deployments on Slurm is not yet supported.
 
 FAQs

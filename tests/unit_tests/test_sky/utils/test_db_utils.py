@@ -6,6 +6,7 @@ from unittest import mock
 import pytest
 import pytest_asyncio
 import sqlalchemy
+from sqlalchemy.ext import asyncio as sqlalchemy_async
 
 from sky.utils.db import db_utils
 
@@ -111,6 +112,10 @@ class TestGetEngine:
         monkeypatch.delenv('SKYPILOT_DB_CONNECTION_URI', raising=False)
         monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
         monkeypatch.delenv('SKYPILOT_DB_POOL_CONNECTION_URI', raising=False)
+        monkeypatch.delenv('SKYPILOT_SERVER_DB_CONNECTION_POOL_SIZE',
+                           raising=False)
+        monkeypatch.delenv('SKYPILOT_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW',
+                           raising=False)
 
     def test_sqlite_sync_engine_creation(self, tmp_path, monkeypatch):
         """Test SQLite sync engine is created correctly."""
@@ -489,7 +494,7 @@ class TestGetEngine:
             db_utils.get_engine(db_name='ignored')
 
             assert mock_create.call_args[0][0] == (
-                'postgresql://user:pass@127.0.0.1:6432/db')
+                'postgresql://user:pass@127.0.0.1:6432/db?sslmode=disable')
 
     def test_direct_bypasses_pooler(self, monkeypatch):
         """direct=True keeps the raw URI even when a pooler is configured."""
@@ -558,8 +563,9 @@ class TestGetEngine:
             db_utils.get_engine(db_name='ignored')  # pooled
             db_utils.get_engine(db_name='ignored', direct=True)  # direct
 
-        assert pools['postgresql://user:pass@127.0.0.1:6432/db'] == (
-            sqlalchemy.pool.QueuePool)
+        assert pools[
+            'postgresql://user:pass@127.0.0.1:6432/db?sslmode=disable'] == (
+                sqlalchemy.pool.QueuePool)
         assert pools['postgresql://user:pass@10.0.0.5:5432/db'] == (
             sqlalchemy.NullPool)
 
@@ -579,6 +585,154 @@ class TestGetEngine:
                 sqlalchemy.pool.QueuePool)
 
 
+class TestDbConnectionPoolSizeOverride:
+    """Tests for the SKYPILOT_SERVER_DB_CONNECTION_POOL_SIZE override."""
+
+    _ENV = 'SKYPILOT_SERVER_DB_CONNECTION_POOL_SIZE'
+    _OVERFLOW_ENV = 'SKYPILOT_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW'
+
+    @pytest.fixture(autouse=True)
+    def clear_state(self, monkeypatch):
+        db_utils._postgres_engine_cache.clear()
+        db_utils.set_max_connections(0)
+        monkeypatch.delenv(self._ENV, raising=False)
+        monkeypatch.delenv(self._OVERFLOW_ENV, raising=False)
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://user:pass@localhost/db')
+        monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
+        monkeypatch.delenv('SKYPILOT_DB_POOL_CONNECTION_URI', raising=False)
+        yield
+        db_utils._postgres_engine_cache.clear()
+        db_utils.set_max_connections(0)
+
+    @pytest.mark.parametrize('value', ['', '   '])
+    def test_unset_or_blank_defers_to_the_derived_budget(
+            self, monkeypatch, value):
+        db_utils.set_max_connections(3)
+        assert db_utils.get_db_connection_pool_size() == 3
+        monkeypatch.setenv(self._ENV, value)
+        assert db_utils.get_db_connection_pool_size() == 3
+
+    def test_override_wins_over_the_derived_budget(self, monkeypatch):
+        db_utils.set_max_connections(3)
+        monkeypatch.setenv(self._ENV, '7')
+        assert db_utils.get_db_connection_pool_size() == 7
+
+    def test_override_of_zero_disables_pooling(self, monkeypatch):
+        db_utils.set_max_connections(3)
+        monkeypatch.setenv(self._ENV, '0')
+        assert db_utils.get_db_connection_pool_size() == 0
+
+    @pytest.mark.parametrize('value', ['abc', '1.5', '2 connections'])
+    def test_non_integer_is_refused(self, monkeypatch, value):
+        monkeypatch.setenv(self._ENV, value)
+        with pytest.raises(ValueError, match='not an integer'):
+            db_utils.get_db_connection_pool_size()
+
+    def test_negative_is_refused(self, monkeypatch):
+        monkeypatch.setenv(self._ENV, '-1')
+        with pytest.raises(ValueError, match='non-negative'):
+            db_utils.get_db_connection_pool_size()
+
+    def test_engine_pools_without_the_process_setting_a_budget(
+            self, monkeypatch):
+        """The override applies to an engine built before the process sets
+        its budget -- the case the derived budget cannot reach, since
+        get_engine() caches that engine for the life of the process."""
+        monkeypatch.setenv(self._ENV, '4')
+
+        with mock.patch('sqlalchemy.create_engine') as mock_create:
+            mock_create.return_value = mock.MagicMock()
+            db_utils.get_engine(db_name='ignored')
+
+        call_kwargs = mock_create.call_args[1]
+        assert call_kwargs['poolclass'] == sqlalchemy.pool.QueuePool
+        assert call_kwargs['pool_size'] == 4
+        assert call_kwargs['max_overflow'] == 1  # max(0, 5-4)
+
+    def test_engine_stays_unpooled_when_the_override_is_zero(self, monkeypatch):
+        """An explicit 0 keeps NullPool even where the derived budget asked
+        for a pool."""
+        db_utils.set_max_connections(3)
+        monkeypatch.setenv(self._ENV, '0')
+
+        with mock.patch('sqlalchemy.create_engine') as mock_create:
+            mock_create.return_value = mock.MagicMock()
+            db_utils.get_engine(db_name='ignored')
+
+        assert mock_create.call_args[1]['poolclass'] == sqlalchemy.NullPool
+
+    @pytest.mark.parametrize('pool_size,expected_overflow', [(1, 4), (4, 1),
+                                                             (5, 0), (8, 0)])
+    def test_burst_defaults_to_topping_up_to_the_default_concurrency(
+            self, pool_size, expected_overflow):
+        assert db_utils.get_db_connection_pool_max_overflow(
+            pool_size) == expected_overflow
+
+    def test_burst_override_wins_over_the_default(self, monkeypatch):
+        """A wide pool can still be given burst room, which the default
+        (top up to the default concurrency) would have left at 0."""
+        monkeypatch.setenv(self._OVERFLOW_ENV, '20')
+        assert db_utils.get_db_connection_pool_max_overflow(8) == 20
+
+    def test_burst_override_of_zero_caps_the_process_at_the_pool(
+            self, monkeypatch):
+        monkeypatch.setenv(self._OVERFLOW_ENV, '0')
+        assert db_utils.get_db_connection_pool_max_overflow(1) == 0
+
+    @pytest.mark.parametrize('value', ['abc', '-1'])
+    def test_invalid_burst_is_refused(self, monkeypatch, value):
+        monkeypatch.setenv(self._OVERFLOW_ENV, value)
+        with pytest.raises(ValueError, match='connections'):
+            db_utils.get_db_connection_pool_max_overflow(1)
+
+    def test_engine_takes_both_the_pool_size_and_the_burst(self, monkeypatch):
+        monkeypatch.setenv(self._ENV, '2')
+        monkeypatch.setenv(self._OVERFLOW_ENV, '20')
+
+        with mock.patch('sqlalchemy.create_engine') as mock_create:
+            mock_create.return_value = mock.MagicMock()
+            db_utils.get_engine(db_name='ignored')
+
+        call_kwargs = mock_create.call_args[1]
+        assert call_kwargs['poolclass'] == sqlalchemy.pool.QueuePool
+        assert call_kwargs['pool_size'] == 2
+        assert call_kwargs['max_overflow'] == 20
+
+    def test_burst_alone_leaves_the_derived_budget_in_charge(self, monkeypatch):
+        """The burst override sizes the pool the derived budget asked for; it
+        does not turn pooling on by itself."""
+        monkeypatch.setenv(self._OVERFLOW_ENV, '20')
+
+        with mock.patch('sqlalchemy.create_engine') as mock_create:
+            mock_create.return_value = mock.MagicMock()
+            db_utils.get_engine(db_name='ignored')
+
+        assert mock_create.call_args[1]['poolclass'] == sqlalchemy.NullPool
+
+    def test_direct_engine_stays_unpooled_behind_a_pooler(self, monkeypatch):
+        """The override sizes the pooled engine; it does not put a reuse pool
+        on the direct engine, which would pin an idle backend per process."""
+        monkeypatch.setenv('SKYPILOT_DB_POOL_HOSTPORT', '127.0.0.1:6432')
+        monkeypatch.setenv(self._ENV, '4')
+
+        pools = {}
+
+        def rec(conn, **kwargs):
+            pools[conn] = kwargs.get('poolclass')
+            return mock.MagicMock()
+
+        with mock.patch('sqlalchemy.create_engine', side_effect=rec):
+            db_utils.get_engine(db_name='ignored')
+            db_utils.get_engine(db_name='ignored', direct=True)
+
+        assert pools['postgresql://user:pass@127.0.0.1:6432/db?'
+                     'sslmode=disable'] == sqlalchemy.pool.QueuePool
+        assert pools['postgresql://user:pass@localhost/db'] == (
+            sqlalchemy.NullPool)
+
+
 class TestConnStringResolution:
     """Tests for _rewrite_hostport and _resolve_conn_string."""
 
@@ -589,22 +743,48 @@ class TestConnStringResolution:
         monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
         monkeypatch.delenv('SKYPILOT_DB_POOL_CONNECTION_URI', raising=False)
 
-    def test_rewrite_preserves_userinfo_dbname_query(self):
+    def test_rewrite_preserves_userinfo_and_dbname(self):
         out = db_utils._rewrite_hostport(
-            'postgresql://u:p%40ss@10.0.0.5:5432/staging-db?sslmode=require',
-            '127.0.0.1:6432')
+            'postgresql://u:p%40ss@10.0.0.5:5432/staging-db', '127.0.0.1:6432')
         assert out == (
-            'postgresql://u:p%40ss@127.0.0.1:6432/staging-db?sslmode=require')
+            'postgresql://u:p%40ss@127.0.0.1:6432/staging-db?sslmode=disable')
 
     def test_rewrite_no_userinfo(self):
         out = db_utils._rewrite_hostport('postgresql://10.0.0.5:5432/db',
                                          '127.0.0.1:6432')
-        assert out == 'postgresql://127.0.0.1:6432/db'
+        assert out == 'postgresql://127.0.0.1:6432/db?sslmode=disable'
 
     def test_rewrite_no_explicit_port(self):
         out = db_utils._rewrite_hostport('postgresql://u:p@host/db',
                                          '127.0.0.1:6432')
-        assert out == 'postgresql://u:p@127.0.0.1:6432/db'
+        assert out == 'postgresql://u:p@127.0.0.1:6432/db?sslmode=disable'
+
+    def test_rewrite_drops_ssl_params_and_forces_disable(self):
+        """ssl* params from the direct URI must not reach the plaintext
+        pooler; sslmode=disable is set explicitly and the other params are
+        kept."""
+        out = db_utils._rewrite_hostport(
+            'postgresql://u:p@10.0.0.5:5432/db'
+            '?sslmode=require&sslrootcert=/x.pem&connect_timeout=10',
+            '127.0.0.1:6432')
+        assert out == ('postgresql://u:p@127.0.0.1:6432/db'
+                       '?connect_timeout=10&sslmode=disable')
+
+    def test_rewrite_no_query_gains_sslmode_disable(self):
+        """Even without ssl params in the direct URI, the pooled DSN must
+        say sslmode=disable explicitly: URI params take precedence over
+        libpq env (e.g. PGSSLMODE), so this makes the pooled connection
+        deterministic regardless of process environment."""
+        out = db_utils._rewrite_hostport('postgresql://u:p@10.0.0.5:5432/db',
+                                         '127.0.0.1:6432')
+        assert out == 'postgresql://u:p@127.0.0.1:6432/db?sslmode=disable'
+
+    def test_rewrite_keeps_non_ssl_params(self):
+        out = db_utils._rewrite_hostport(
+            'postgresql://u:p@10.0.0.5:5432/db'
+            '?application_name=sky&sslmode=verify-full', '127.0.0.1:6432')
+        assert out == ('postgresql://u:p@127.0.0.1:6432/db'
+                       '?application_name=sky&sslmode=disable')
 
     def test_rewrite_non_postgres_is_noop(self):
         uri = 'sqlite:////var/lib/sky/state.db'
@@ -628,11 +808,22 @@ class TestConnStringResolution:
         monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
                            'postgresql://u:p@h:5432/db')
         monkeypatch.setenv('SKYPILOT_DB_POOL_HOSTPORT', '127.0.0.1:6432')
-        assert db_utils._resolve_conn_string(
-            direct=False) == 'postgresql://u:p@127.0.0.1:6432/db'
+        assert db_utils._resolve_conn_string(direct=False) == (
+            'postgresql://u:p@127.0.0.1:6432/db?sslmode=disable')
         # direct always bypasses the pooler.
         assert db_utils._resolve_conn_string(
             direct=True) == 'postgresql://u:p@h:5432/db'
+
+    def test_resolve_direct_keeps_ssl_params_untouched(self, monkeypatch):
+        """direct=True returns the base URI verbatim, ssl params included,
+        even when a pooler hostport is configured."""
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv(
+            'SKYPILOT_DB_CONNECTION_URI',
+            'postgresql://u:p@h:5432/db?sslmode=require&sslrootcert=/x.pem')
+        monkeypatch.setenv('SKYPILOT_DB_POOL_HOSTPORT', '127.0.0.1:6432')
+        assert db_utils._resolve_conn_string(direct=True) == (
+            'postgresql://u:p@h:5432/db?sslmode=require&sslrootcert=/x.pem')
 
     def test_resolve_full_override_wins(self, monkeypatch):
         monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
@@ -643,3 +834,153 @@ class TestConnStringResolution:
                            'postgresql://u:p@pooler:6432/db')
         assert db_utils._resolve_conn_string(
             direct=False) == 'postgresql://u:p@pooler:6432/db'
+
+    def test_resolve_full_override_is_verbatim_including_ssl(self, monkeypatch):
+        """ENV_VAR_DB_POOL_CONNECTION_URI is the explicit escape hatch (e.g.
+        a TLS-terminating or remote pooler): it is used verbatim, including
+        any ssl params it carries."""
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://u:p@h:5432/db')
+        monkeypatch.setenv(
+            'SKYPILOT_DB_POOL_CONNECTION_URI',
+            'postgresql://u:p@pooler:6432/db?sslmode=verify-full')
+        assert db_utils._resolve_conn_string(direct=False) == (
+            'postgresql://u:p@pooler:6432/db?sslmode=verify-full')
+
+
+class TestIdleInTransactionTimeout:
+    """Tests for the per-transaction idle_in_transaction_session_timeout
+    bound that get_engine installs on Postgres engines."""
+
+    @staticmethod
+    def _begin_listeners(engine):
+        return list(engine.dispatch.begin)
+
+    def test_not_installed_on_sqlite(self, tmp_path):
+        engine = sqlalchemy.create_engine(
+            f'sqlite:///{tmp_path}/idle_tx_sqlite.db')
+        before = len(self._begin_listeners(engine))
+        db_utils._install_idle_in_transaction_timeout(engine)
+        assert len(self._begin_listeners(engine)) == before
+        # A real sqlite transaction runs no SET statement.
+        statements = []
+
+        @sqlalchemy.event.listens_for(engine, 'before_cursor_execute')
+        def _spy(conn, cursor, statement, parameters, context, executemany):
+            del conn, cursor, parameters, context, executemany
+            statements.append(statement)
+
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text('select 1'))
+        assert not any(s.startswith('SET LOCAL') for s in statements)
+
+    def test_installed_on_postgres_engine_emits_set_local(self):
+        # create_engine does not connect, so a Postgres URL is safe here.
+        engine = sqlalchemy.create_engine('postgresql+psycopg2://u:p@h/db',
+                                          poolclass=sqlalchemy.NullPool)
+        before = len(self._begin_listeners(engine))
+        db_utils._install_idle_in_transaction_timeout(engine)
+        listeners = self._begin_listeners(engine)
+        assert len(listeners) == before + 1
+        listener = listeners[-1]
+
+        conn = self._fake_connection(autocommit=False)
+        listener(conn)
+        conn.exec_driver_sql.assert_called_once_with(
+            db_utils._IDLE_IN_TRANSACTION_TIMEOUT_SQL)
+        # The result is closed so nothing is left unconsumed on the cursor
+        # (matters for the asyncpg adapter).
+        conn.exec_driver_sql.return_value.close.assert_called_once_with()
+
+    @staticmethod
+    def _fake_connection(autocommit: bool) -> mock.MagicMock:
+        """A stand-in for sqlalchemy.engine.Connection as the listener sees
+        it: a DBAPI connection with an ``autocommit`` attribute."""
+        conn = mock.MagicMock()
+        conn.connection.dbapi_connection.autocommit = autocommit
+        return conn
+
+    def _installed_listener(self):
+        engine = sqlalchemy.create_engine('postgresql+psycopg2://u:p@h/db',
+                                          poolclass=sqlalchemy.NullPool)
+        db_utils._install_idle_in_transaction_timeout(engine)
+        return self._begin_listeners(engine)[-1]
+
+    def test_skipped_on_autocommit_connection(self):
+        """A transaction-local setting outside a transaction block is a
+        no-op, so an autocommit DBAPI connection gets no statement."""
+        listener = self._installed_listener()
+        conn = self._fake_connection(autocommit=True)
+        listener(conn)
+        conn.exec_driver_sql.assert_not_called()
+
+    def test_statement_only_lowers_the_timeout(self):
+        """The bound is applied only when the value in effect is 0 or looser
+        than ours, so a tighter bound is kept whether it came from a
+        server/role default, from a caller's SET LOCAL issued before this
+        statement (e.g. prepended to it by a before_cursor_execute hook), or
+        from one issued after it. That is what makes the statement safe to
+        run first in every transaction regardless of other hooks' order."""
+        sql = db_utils._IDLE_IN_TRANSACTION_TIMEOUT_SQL
+        value = db_utils._IDLE_IN_TRANSACTION_TIMEOUT_MS
+        # Transaction-local (SET LOCAL semantics): reset at COMMIT/ROLLBACK,
+        # so it cannot leak through a transaction-mode pooler.
+        assert ('set_config(\'idle_in_transaction_session_timeout\', '
+                f'\'{value}\', true)') in sql
+        # Conditional on the value currently in effect for this session, read
+        # with current_setting() and compared as an interval (the GUC's text
+        # form carries a unit: '0', '30s', '90500ms', '1d').
+        assert ('current_setting(\'idle_in_transaction_session_timeout\')'
+                '::interval = interval \'0\'') in sql
+        assert ('current_setting(\'idle_in_transaction_session_timeout\')'
+                f'::interval > interval \'{value} ms\'') in sql
+        # Never through pg_settings: that view formats every GUC on each call
+        # (~0.8 ms of server CPU per transaction on Postgres 16, ~20x the
+        # statement itself), and this runs once per transaction fleet-wide.
+        assert 'pg_settings' not in sql
+        assert ' FROM ' not in sql.upper()
+        # One statement: no `;`, so it is safe for the asyncpg adapter too
+        # (extended protocol rejects multi-statement strings).
+        assert ';' not in sql
+
+    def test_statement_is_transaction_local_not_session_wide(self):
+        # A session-wide SET would leak onto the next client that borrows
+        # the server connection through a transaction-mode pooler.
+        sql = db_utils._IDLE_IN_TRANSACTION_TIMEOUT_SQL.upper()
+        assert 'SET_CONFIG(' in sql and ', TRUE)' in sql
+        assert not sql.startswith('SET ')
+
+    def test_installed_on_async_engine_sync_side(self):
+        """For an AsyncEngine the listener goes on sync_engine, where
+        SQLAlchemy emits connection events."""
+        pytest.importorskip('asyncpg')
+        engine = sqlalchemy_async.create_async_engine(
+            'postgresql+asyncpg://u:p@h/db', poolclass=sqlalchemy.NullPool)
+        before = len(self._begin_listeners(engine.sync_engine))
+        db_utils._install_idle_in_transaction_timeout(engine)
+        assert len(self._begin_listeners(engine.sync_engine)) == before + 1
+
+    def test_timeout_value_is_a_sane_default(self):
+        # A minute: far above the milliseconds of in-process work any of our
+        # transactions does between statements, far below the time an
+        # orphaned row lock needs to stall a thread pool.
+        assert db_utils._IDLE_IN_TRANSACTION_TIMEOUT_MS == 60_000
+
+    def test_get_engine_installs_on_postgres(self, monkeypatch):
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://u:p@h:5432/db')
+        monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
+        monkeypatch.delenv('SKYPILOT_DB_POOL_CONNECTION_URI', raising=False)
+        db_utils._postgres_engine_cache.clear()
+        db_utils.set_max_connections(0)
+        try:
+            with mock.patch.object(
+                    db_utils, '_install_idle_in_transaction_timeout') as inst:
+                engine = db_utils.get_engine(None)
+                # cached on the second call: installed exactly once.
+                assert db_utils.get_engine(None) is engine
+            inst.assert_called_once_with(engine)
+        finally:
+            db_utils._postgres_engine_cache.clear()

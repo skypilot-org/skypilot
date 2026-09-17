@@ -184,7 +184,10 @@ class TestRunPodVolume:
         with pytest.raises(ValueError) as exc_info:
             vol = volume_lib.Volume.from_yaml_config(cfg)
             vol.validate()
-        assert 'Invalid volume name: Volume name exceeds' in str(exc_info.value)
+        # The message names the offending volume, then the rule.
+        assert 'Invalid volume name' in str(exc_info.value)
+        assert 'x' * 31 in str(exc_info.value)
+        assert 'Volume name exceeds' in str(exc_info.value)
         # Max length boundary (30) should pass
         ok_cfg = {
             'name': 'y' * 30,

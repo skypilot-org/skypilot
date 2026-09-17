@@ -659,6 +659,20 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs logs --no-follow -n {job_name})"; echo "$result"; echo "$result" | grep "hello world"',
             f'{self.ACTIVATE_CURRENT} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.SUCCEEDED])}',
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep SUCCEEDED',
+            # `--infra` against a server that predates it. The client refuses
+            # before sending, because a dropped infra filter would answer with
+            # jobs on *other* infra -- right-looking and wrong. Once the base
+            # release carries the filter, the same call has to work instead,
+            # so the assertion follows the base's API version rather than
+            # expiring the day this ships.
+            (f'{self.ACTIVATE_CURRENT} && '
+             f's="$(sky jobs queue --infra {generic_cloud} 2>&1)" || true; '
+             'echo "$s" && echo "$s" | grep -i "not supported by your API '
+             'server"' if
+             self.BASE_API_VERSION < constants.MIN_JOBS_INFRA_FILTER_API_VERSION
+             else f'{self.ACTIVATE_CURRENT} && '
+             f's="$(sky jobs queue --infra {generic_cloud})" && '
+             f'echo "$s" && echo "$s" | grep {job_name}'),
             # sync-down: new client, old server. Verifies the server still
             # writes downloaded logs under the path the client expects to
             # rewrite (api_server_user_logs_dir_prefix); regression check
@@ -939,6 +953,12 @@ class TestBackwardCompatibility:
                 # Use volume in current version
                 f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
                 f'sky volumes ls | grep "{volume_name}"',
+                # `apply` above only started provisioning; the launch below
+                # mounts the volume and is refused with VolumeNotReadyError
+                # until the claim binds. Waited for on the current side, the
+                # one that does the mounting.
+                f'{self.ACTIVATE_CURRENT} && '
+                f'{smoke_tests_utils.get_cmd_wait_until_volume_is_ready(volume_name)}',
                 # Launch new task with volume
                 f'{self.ACTIVATE_CURRENT} && sky launch -y -c {cluster_name} --infra k8s {task_yaml_path}',
                 f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1 --status',

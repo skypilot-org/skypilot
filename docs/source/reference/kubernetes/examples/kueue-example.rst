@@ -331,6 +331,20 @@ The config above allows the API server to submit jobs using the local queue.
    :width: 80%
    :align: center
 
+Using Kueue with pools and SkyServe
+-----------------------------------
+
+The queue applies to every cluster SkyPilot launches on the context, including
+the workers of a :ref:`pool <pool>` and the replicas of a SkyServe service.
+Each worker is its own single-pod Kueue workload, so a pool with more workers
+than the quota allows is admitted partially: the workers that fit start
+running, and the rest are held by Kueue until quota frees up. They show up as
+``PROVISIONING (waiting for queue admission)`` in ``sky jobs pool status`` and
+are admitted automatically, without being relaunched. When Kueue preempts a
+running worker for a higher-priority workload, the pool recycles the worker
+and queues a replacement, and the jobs it was running are rescheduled onto the
+remaining workers.
+
 Further reading
 ---------------
 

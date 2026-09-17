@@ -203,7 +203,7 @@ class TestGetRequestsFromManagedJobs:
 
     MOCK_QUEUE_V2 = 'sky.jobs.server.core.queue_v2'
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_finds_requests_by_job_id(self, mock_get_tasks, _mock_queue):
         """Should find requests whose body has a matching job_id."""
@@ -219,7 +219,7 @@ class TestGetRequestsFromManagedJobs:
 
         assert 'req-j1' in ctx['request_ids']
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_finds_requests_by_job_ids_list(self, mock_get_tasks, _mock_queue):
         """Should find requests whose body has matching job_ids list."""
@@ -235,7 +235,7 @@ class TestGetRequestsFromManagedJobs:
 
         assert 'req-j2' in ctx['request_ids']
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_skips_non_matching_job_ids(self, mock_get_tasks, _mock_queue):
         """Requests with unrelated job IDs should not be collected."""
@@ -261,7 +261,7 @@ class TestGetRequestsFromManagedJobs:
         mock_get_tasks.assert_not_called()
         assert ctx['request_ids'] == set()
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_none_body_is_skipped(self, mock_get_tasks, _mock_queue):
         """Requests with None body should be silently skipped."""
@@ -276,7 +276,7 @@ class TestGetRequestsFromManagedJobs:
 
         assert ctx['request_ids'] == set()
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_db_failure_logs_warning(self, mock_get_tasks, _mock_queue):
         """DB failure should log warning but not crash."""
@@ -288,7 +288,7 @@ class TestGetRequestsFromManagedJobs:
 
         assert ctx['request_ids'] == set()
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_filters_by_managed_job_request_names(self, mock_get_tasks,
                                                   _mock_queue):
@@ -315,7 +315,7 @@ class TestGetRequestsFromManagedJobs:
             'job_id': 42,
             'job_name': 'my-training',
             'user_hash': 'user-abc'
-        }], 1, {}, 1)
+        }], 1, {}, 1, [])
         body = SimpleNamespace(job_id=None,
                                job_ids=None,
                                name='my-training',
@@ -340,7 +340,7 @@ class TestGetRequestsFromManagedJobs:
             'job_id': 42,
             'job_name': 'my-job',
             'user_hash': 'user-abc'
-        }], 1, {}, 1)
+        }], 1, {}, 1, [])
         body = SimpleNamespace(job_id=None,
                                job_ids=None,
                                name=None,
@@ -365,7 +365,7 @@ class TestGetRequestsFromManagedJobs:
             'job_id': 42,
             'job_name': 'my-job',
             'user_hash': 'user-abc'
-        }], 1, {}, 1)
+        }], 1, {}, 1, [])
         body = SimpleNamespace(job_id=None,
                                job_ids=None,
                                name=None,
@@ -391,7 +391,7 @@ class TestGetRequestsFromManagedJobs:
             'job_id': 42,
             'job_name': 'my-job',
             'user_hash': 'user-abc'
-        }], 1, {}, 1)
+        }], 1, {}, 1, [])
         body = SimpleNamespace(job_id=None,
                                job_ids=None,
                                name=None,
@@ -409,7 +409,7 @@ class TestGetRequestsFromManagedJobs:
 
         assert 'req-cancel-other' not in ctx['request_ids']
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_matches_launch_by_return_value(self, mock_get_tasks, _mock_queue):
         """Should match jobs.launch request via return_value.job_id."""
@@ -426,7 +426,7 @@ class TestGetRequestsFromManagedJobs:
 
         assert 'req-rv' in ctx['request_ids']
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_matches_launch_by_return_value_list(self, mock_get_tasks,
                                                  _mock_queue):
@@ -620,7 +620,7 @@ class TestGetManagedJobsFromClusters:
             'task_name': 'train',
             'current_cluster_name': None,
             'pool': None,
-        }], 0, {}, 0)
+        }], 0, {}, 0, [])
         name = managed_job_utils.generate_managed_job_cluster_name('train', 7)
         ctx = _make_context(cluster_names={name})
 
@@ -651,7 +651,7 @@ class TestGetManagedJobsFromClusters:
                 'current_cluster_name': 'worker-2',
                 'pool': 'p',
             },
-        ], 0, {}, 0)
+        ], 0, {}, 0, [])
         ctx = _make_context(cluster_names={'worker-1'})
 
         debug_utils._get_managed_jobs_from_clusters(ctx, _StubReachability())
@@ -713,7 +713,7 @@ class TestGetJobClustersFromManagedJobs:
                 'current_cluster_name': None,
                 'pool': None,
             },
-        ], 0, {}, 0)
+        ], 0, {}, 0, [])
         ctx = _make_context(managed_job_ids={5})
 
         debug_utils._get_job_clusters_from_managed_jobs(ctx)
@@ -737,7 +737,7 @@ class TestGetJobClustersFromManagedJobs:
             'task_name': 'train',
             'current_cluster_name': 'worker-9',
             'pool': 'p',
-        }], 0, {}, 0)
+        }], 0, {}, 0, [])
         ctx = _make_context(managed_job_ids={6})
 
         debug_utils._get_job_clusters_from_managed_jobs(ctx)
@@ -949,7 +949,7 @@ class TestPopulateRecentContext:
         recent_request = _make_request(request_id='req-recent')
         mock_get_tasks.return_value = [recent_request]
         mock_get_clusters.return_value = []
-        mock_queue_v2.return_value = ([], 0, {}, 0)
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -966,7 +966,7 @@ class TestPopulateRecentContext:
         """Should push time filtering to the DB via finished_after."""
         mock_get_tasks.return_value = []
         mock_get_clusters.return_value = []
-        mock_queue_v2.return_value = ([], 0, {}, 0)
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -1000,7 +1000,7 @@ class TestPopulateRecentContext:
                 'launched_at': now - 200000,
             },
         ]
-        mock_queue_v2.return_value = ([], 0, {}, 0)
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -1039,7 +1039,7 @@ class TestPopulateRecentContext:
                 'launched_at': now - 60,
             },
         ]
-        mock_queue_v2.return_value = ([], 0, {}, 0)
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -1068,7 +1068,7 @@ class TestPopulateRecentContext:
                 'submitted_at': now - 100000,
                 'end_at': now - 90000,
             },
-        ], 2, {}, 2)
+        ], 2, {}, 2, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -1089,7 +1089,7 @@ class TestPopulateRecentContext:
                                         finished_at=None)
         mock_get_tasks.return_value = [running_request]
         mock_get_clusters.return_value = []
-        mock_queue_v2.return_value = ([], 0, {}, 0)
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -1133,7 +1133,7 @@ class TestPopulateRecentContext:
             'status_updated_at': now - 100000,
             'launched_at': now - 1800,
         }]
-        mock_queue_v2.return_value = ([], 0, {}, 0)
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -1241,7 +1241,7 @@ class TestCrossLinkCycleBreak:
         ]
         # queue_v2 must not raise — patch it as a no-op.
         with mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2',
-                        return_value=([], 0, {}, 0)):
+                        return_value=([], 0, {}, 0, [])):
             ctx = _make_context(managed_job_ids={42})
             debug_utils._get_requests_from_managed_jobs(ctx,
                                                         _StubReachability())
@@ -1300,7 +1300,7 @@ class TestCrossLinkCycleBreak:
                           name='sky.jobs.launch'),
         ]
         with mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2',
-                        return_value=([], 0, {}, 0)):
+                        return_value=([], 0, {}, 0, [])):
             # 'user-seeded' was already in request_ids before the helper ran.
             ctx = _make_context(managed_job_ids={42},
                                 request_ids={'user-seeded'})
@@ -1336,7 +1336,7 @@ class TestCrossLinkCycleBreak:
                           name='sky.jobs.cancel'),
         ]
         with mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2',
-                        return_value=([], 0, {}, 0)):
+                        return_value=([], 0, {}, 0, [])):
             ctx = _make_context(managed_job_ids={1})
             debug_utils._get_requests_from_managed_jobs(ctx,
                                                         _StubReachability())
@@ -1843,7 +1843,7 @@ class TestDumpManagedJobQueueInfo:
             'job_id': 1,
             'job_name': 'test-job',
             'status': 'RUNNING',
-        }], 1, {}, 1)
+        }], 1, {}, 1, [])
 
         jobs_dir = str(tmp_path / 'managed_jobs')
         os.makedirs(jobs_dir, exist_ok=True)
@@ -1872,7 +1872,7 @@ class TestDumpManagedJobQueueInfo:
                 'task_name': 'task-b',
                 'status': 'RUNNING'
             },
-        ], 1, {}, 1)
+        ], 1, {}, 1, [])
 
         jobs_dir = str(tmp_path / 'managed_jobs')
         os.makedirs(jobs_dir, exist_ok=True)
