@@ -95,38 +95,17 @@ _SSH_AUTH_FAILURE_PATTERNS = [
 ]
 
 
-def wrap_command_as_user(command: str,
+def wrap_command_as_user(argv: List[str],
                          user: str,
-                         shell_argv0: Optional[str] = None,
                          use_sudo: bool = False) -> str:
-    """Build a command that a privileged SSH user runs as a Unix user."""
-    # A login shell is required: Slurm clients (squeue, sbatch, scancel, ...)
-    # are invoked by bare name, so sites that install Slurm outside sudoers'
-    # `secure_path` need the target user's profile to set PATH. `su --login`
-    # also chdir's to the target's home; `sudo -u` stays in the caller's cwd,
-    # so restore it here to keep both forms equivalent.
-    payload = f'cd -- "$HOME" || exit 1; {command}'
+    """Build a direct executable invocation as a Unix user."""
+    if not argv or isinstance(argv, str):
+        raise ValueError('User commands must be nonempty argument lists.')
     if use_sudo:
-        # `-u <user>` is load-bearing: without it sudo runs the command as
-        # root, which would require granting the SSH user passwordless sudo to
-        # `su` (root-equivalent and not constrainable in sudoers). `-H` sets
-        # HOME for sites that do not enable `env_reset`. `sudo -i` is not
-        # usable here: it re-serializes argv through the target's login shell,
-        # evaluating the command string twice and pre-expanding `$0`/`$@`.
-        argv = [
-            'sudo', '--non-interactive', '-H', '-u', user, '--', '/bin/bash',
-            '--login', '-c', payload
-        ]
+        prefix = ['sudo', '--non-interactive', '-H', '-u', user, '--']
     else:
-        # The SSH user is already root, so no sudo grant is needed and root's
-        # `su` never authenticates.
-        argv = [
-            'su', '--login', '--shell', '/bin/bash', '--command', payload, '--',
-            user
-        ]
-    if shell_argv0 is not None:
-        argv.append(shell_argv0)
-    return shlex.join(argv)
+        prefix = ['runuser', '-u', user, '--']
+    return shlex.join(prefix + argv)
 
 
 def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
@@ -436,6 +415,10 @@ class CommandRunner:
             raise ValueError('Failed to find remote home directory identifier: '
                              f'{output + stderr}')
         return remote_home_dir
+
+    def command_as_user(self, argv: List[str]) -> str:
+        """Quote argv for this runner's execution identity."""
+        return shlex.join(argv)
 
     def _get_command_to_run(
         self,
@@ -1977,6 +1960,8 @@ class LocalProcessCommandRunner(CommandRunner):
         """
         del port_forward, ssh_mode, connect_timeout  # Unused.
 
+        if isinstance(cmd, list):
+            cmd = shlex.join(cmd)
         command_str = self._get_command_to_run(
             cmd,
             process_stream,
@@ -2061,23 +2046,41 @@ class SlurmLoginNodeCommandRunner(SSHCommandRunner):
         self.slurm_user = slurm_user
         self._use_sudo = ssh_user != 'root'
 
-    def _inline_command_quote_levels(self) -> int:
-        # wrap_command_as_user adds one inner login-shell `-c` command.
-        extra = 1 if self.slurm_user is not None else 0
-        return super()._inline_command_quote_levels() + extra
+    def command_as_user(self, argv: List[str]) -> str:
+        """Quote one executable for the allocation owner."""
+        if self.slurm_user is None:
+            return shlex.join(argv)
+        return wrap_command_as_user(argv,
+                                    self.slurm_user,
+                                    use_sudo=self._use_sudo)
 
     def run(
         self,
         cmd: Union[str, List[str]],
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
-        if self.slurm_user is not None:
-            if isinstance(cmd, list):
-                cmd = ' '.join(cmd)
-            cmd = wrap_command_as_user(cmd,
-                                       self.slurm_user,
-                                       use_sudo=self._use_sudo)
+        """Run argv as the allocation owner, or shell code as the SSH user."""
+        if isinstance(cmd, list):
+            cmd = self.command_as_user(cmd)
         return super().run(cmd, **kwargs)
+
+    def get_remote_home_dir(self) -> str:
+        if self.slurm_user is None:
+            return super().get_remote_home_dir()
+        rc, stdout, stderr = SSHCommandRunner.run(
+            self,
+            shlex.join(['getent', 'passwd', self.slurm_user]),
+            require_outputs=True,
+            separate_stderr=True,
+            stream_logs=False)
+        if rc == 0:
+            for line in stdout.splitlines():
+                fields = line.split(':')
+                if (len(fields) == 7 and fields[0] == self.slurm_user and
+                        os.path.isabs(fields[5])):
+                    return fields[5]
+        raise ValueError(f'Cannot resolve home directory for '
+                         f'{self.slurm_user!r}: {stdout}\n{stderr}')
 
     def rsync(
         self,
@@ -2092,10 +2095,7 @@ class SlurmLoginNodeCommandRunner(SSHCommandRunner):
     ) -> None:
         remote_rsync_command = None
         if self.slurm_user is not None:
-            remote_rsync_command = wrap_command_as_user('exec rsync "$@"',
-                                                        self.slurm_user,
-                                                        shell_argv0='rsync',
-                                                        use_sudo=self._use_sudo)
+            remote_rsync_command = self.command_as_user(['rsync'])
         super().rsync(source,
                       target,
                       up=up,
@@ -2176,6 +2176,9 @@ class SlurmCommandRunner(SlurmLoginNodeCommandRunner):
         self.slurm_node = slurm_node
         self.container_args = container_args
 
+    def get_remote_home_dir(self) -> str:
+        return CommandRunner.get_remote_home_dir(self)
+
     def _rsync_via_srun(
         self,
         source: str,
@@ -2250,15 +2253,12 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                                    f'{common_utils.exception_to_string(e)}')
             return
 
-        rsync_command = (
-            f'exec srun --unbuffered --quiet --overlap {extra_srun_args}'
-            f'--jobid={shlex.quote(self.job_id)} '
-            f'--nodelist={shlex.quote(self.slurm_node)} '
-            f'--nodes=1 --ntasks=1 rsync "$@"')
-        remote_rsync_command = wrap_command_as_user(rsync_command,
-                                                    self.slurm_user,
-                                                    shell_argv0='rsync',
-                                                    use_sudo=self._use_sudo)
+        rsync_command = ('srun --unbuffered --quiet --overlap --chdir=/tmp '
+                         f'{extra_srun_args}'
+                         f'--jobid={shlex.quote(self.job_id)} '
+                         f'--nodelist={shlex.quote(self.slurm_node)} '
+                         f'--nodes=1 --ntasks=1 rsync')
+        remote_rsync_command = self.command_as_user(shlex.split(rsync_command))
         SSHCommandRunner.rsync(self,
                                source,
                                target,
@@ -2310,13 +2310,14 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                          f'{cmd}')
             extra_srun_args = ''
 
-        srun_cmd = (
-            f'srun --unbuffered --quiet --overlap --jobid={self.job_id} '
-            f'--nodelist={self.slurm_node} '
-            f'--nodes=1 --ntasks=1 {extra_srun_args}'
-            f'bash -c {shlex.quote(inner_cmd)}')
+        srun_cmd = ('srun --unbuffered --quiet --overlap --chdir=/tmp '
+                    f'--jobid={self.job_id} '
+                    f'--nodelist={self.slurm_node} '
+                    f'--nodes=1 --ntasks=1 {extra_srun_args}'
+                    f'bash -c {shlex.quote(inner_cmd)}')
 
-        return SlurmLoginNodeCommandRunner.run(self, srun_cmd, **kwargs)
+        return SlurmLoginNodeCommandRunner.run(self, shlex.split(srun_cmd),
+                                               **kwargs)
 
     def rsync(
         self,

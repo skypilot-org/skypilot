@@ -251,7 +251,8 @@ class TestJobSteps:
                                return_value=(0, '', '')) as mock_run:
             client.signal_job_step('123', '123.4', 'TERM')
 
-        mock_run.assert_called_once_with('scancel --signal TERM 123.4')
+        mock_run.assert_called_once_with(
+            ['scancel', '--signal', 'TERM', '123.4'])
 
     def test_signal_tolerates_step_exiting_concurrently(self):
         client = self._client()
@@ -263,7 +264,7 @@ class TestJobSteps:
             client.signal_job_step('123', '123.4', 'TERM')
 
         assert mock_run.call_args_list == [
-            mock.call('scancel --signal TERM 123.4'),
+            mock.call(['scancel', '--signal', 'TERM', '123.4']),
             mock.call('scontrol -o show step 123'),
         ]
 
@@ -488,7 +489,7 @@ class TestCheckJobHasNodes:
             mock_run.return_value = (0, 'node1,node2', '')
             assert client.check_job_has_nodes('12345') is True
             mock_run.assert_called_once_with(
-                'squeue -h --jobs 12345 -o "%N"',
+                ['squeue', '-h', '--jobs', '12345', '-o', '%N'],
                 require_outputs=True,
                 separate_stderr=True,
                 stream_logs=False,
@@ -537,7 +538,10 @@ class TestGetJobState:
             mock_run.return_value = (0, 'RUNNING\n', '')
             result = client.get_job_state('12345')
             mock_run.assert_called_once_with(
-                'squeue -h --only-job-state --jobs 12345 -o "%T"',
+                [
+                    'squeue', '-h', '--only-job-state', '--jobs', '12345', '-o',
+                    '%T'
+                ],
                 require_outputs=True,
                 separate_stderr=True,
                 stream_logs=False,
@@ -561,7 +565,7 @@ class TestGetJobState:
             result = client.get_job_state('12345')
             assert mock_run.call_count == 2
             mock_run.assert_called_with(
-                'squeue -h --jobs 12345 -o "%T"',
+                ['squeue', '-h', '--jobs', '12345', '-o', '%T'],
                 require_outputs=True,
                 separate_stderr=True,
                 stream_logs=False,
@@ -601,7 +605,10 @@ class TestGetJobsStateByName:
 
             result = client.get_jobs_state_by_name('sky-3a5e-pilot-9b1gdacf')
             mock_run.assert_called_once_with(
-                'squeue -h --name sky-3a5e-pilot-9b1gdacf -o "%T"',
+                [
+                    'squeue', '-h', '--name', 'sky-3a5e-pilot-9b1gdacf', '-o',
+                    '%T'
+                ],
                 require_outputs=True,
                 separate_stderr=True,
                 stream_logs=False,
@@ -624,7 +631,7 @@ class TestGetJobsStateByName:
 
             result = client.get_jobs_state_by_name('sky-test-job')
             mock_run.assert_called_once_with(
-                'squeue -h --name sky-test-job -o "%T"',
+                ['squeue', '-h', '--name', 'sky-test-job', '-o', '%T'],
                 require_outputs=True,
                 separate_stderr=True,
                 stream_logs=False,

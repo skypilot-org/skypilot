@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import re
+import shlex
 from unittest.mock import call
 from unittest.mock import patch
 import unittest.mock as mock
@@ -1375,6 +1376,7 @@ class TestProvisionTimeoutPassthrough:
         mock_slurm_client.return_value = mock_client
 
         mock_runner = mock.MagicMock()
+        mock_runner.command_as_user.side_effect = shlex.join
         mock_runner.run.side_effect = lambda cmd, **kwargs: (
             (44, '', '')
             if slurm_instance.SNAPSHOT_MANIFEST_FILENAME in cmd else
@@ -1449,6 +1451,7 @@ class TestProvisionTimeoutPassthrough:
         mock_slurm_client.return_value = mock_client
 
         mock_runner = mock.MagicMock()
+        mock_runner.command_as_user.side_effect = shlex.join
         mock_runner.run.side_effect = lambda cmd, **kwargs: (
             (44, '', '')
             if slurm_instance.SNAPSHOT_MANIFEST_FILENAME in cmd else
@@ -1517,6 +1520,7 @@ class TestCreateVirtualInstance:
         mock_slurm_client.return_value = mock_client
 
         mock_runner = mock.MagicMock()
+        mock_runner.command_as_user.side_effect = shlex.join
         mock_runner.run.side_effect = lambda cmd, **kwargs: (
             (44, '', '')
             if slurm_instance.SNAPSHOT_MANIFEST_FILENAME in cmd else
@@ -2248,8 +2252,26 @@ class TestHelperPathFunctions:
 class TestGetEnv:
     """Test SlurmClient.get_env() parsing."""
 
+    def test_submit_user_path_variables(self):
+        client = slurm.SlurmClient('host', 22, 'login', slurm_user='alice')
+        with mock.patch.object(
+                client,
+                '_run_slurm_cmd',
+                return_value=
+            (0, 'HOME=/home/login\nUSER=login\nLOGNAME=login\nSCRATCH=/fsx\n',
+             '')), mock.patch.object(client,
+                                     'get_remote_home_dir',
+                                     return_value='/home/alice'):
+            assert client.get_env() == {
+                'HOME': '/home/alice',
+                'USER': 'alice',
+                'LOGNAME': 'alice',
+                'SCRATCH': '/fsx',
+            }
+
     def test_parses_env_output(self):
         client = mock.MagicMock(spec=slurm.SlurmClient)
+        client.slurm_user = None
         client._run_slurm_cmd.return_value = (
             0, 'HOME=/home/ubuntu\nUSER=ubuntu\n', '')
         # Call the real method with the mocked client
@@ -2258,6 +2280,7 @@ class TestGetEnv:
 
     def test_handles_values_with_equals(self):
         client = mock.MagicMock(spec=slurm.SlurmClient)
+        client.slurm_user = None
         client._run_slurm_cmd.return_value = (0,
                                               'PATH=/usr/bin:/bin\nFOO=a=b\n',
                                               '')
@@ -2267,6 +2290,7 @@ class TestGetEnv:
 
     def test_command_failure_returns_empty(self):
         client = mock.MagicMock(spec=slurm.SlurmClient)
+        client.slurm_user = None
         client._run_slurm_cmd.return_value = (1, '', 'Connection refused')
         env = slurm.SlurmClient.get_env(client)
         assert env == {}

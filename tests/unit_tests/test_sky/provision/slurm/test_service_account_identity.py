@@ -155,12 +155,12 @@ def test_submit_validation_uses_bounded_submit_runner():
     with mock.patch(
             'sky.adaptors.slurm.command_runner.SlurmLoginNodeCommandRunner'
     ) as runner:
-        runner.return_value.run.return_value = (0, '', '')
+        runner.return_value.run.return_value = (0, 'svc\n', '')
         client = slurm.SlurmClient('host', 22, 'login', slurm_user='svc')
         client.validate_submit_user('a', 'svc')
         assert runner.call_args.kwargs['slurm_user'] == 'svc'
         assert runner.return_value.run.call_args.kwargs['timeout'] == 15
-        assert 'id -u -- svc' in runner.return_value.run.call_args.args[0]
+        assert runner.return_value.run.call_args.args[0] == ['id', '-un']
 
 
 def test_submit_validation_timeout():

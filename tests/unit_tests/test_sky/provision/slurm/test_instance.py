@@ -41,6 +41,10 @@ def _snapshot_manifest(num_nodes=2, generation=_SNAPSHOT_GENERATION):
     }
 
 
+def _command_text(command):
+    return shlex.join(command) if isinstance(command, list) else command
+
+
 class TestSnapshotManifest:
     """Tests snapshot manifest parsing and validation."""
 
@@ -68,19 +72,45 @@ class TestSnapshotManifest:
 
     def test_missing_manifest(self):
         runner = mock.MagicMock()
+        runner.command_as_user.side_effect = shlex.join
         runner.run.return_value = (44, '', '')
         assert instance._read_snapshot_manifest(
             runner, '/home/test/.sky_snapshots/test-cluster') is None
 
+    def test_missing_manifest_probe(self, tmp_path):
+        runner = command_runner.LocalProcessCommandRunner()
+        assert instance._read_snapshot_manifest(runner, str(tmp_path)) is None
+
+    def test_denied_manifest_probe_raises(self, tmp_path):
+        runner = command_runner.LocalProcessCommandRunner()
+        denied = tmp_path / 'denied'
+        denied.write_text(
+            'printf "sudo: a password is required\\n" >&2\nexit 1\n')
+        runner.command_as_user = lambda argv: shlex.join(
+            ['sh', str(denied), *argv])
+        with pytest.raises(exceptions.CommandError):
+            instance._read_snapshot_manifest(runner, str(tmp_path))
+
+    def test_denied_file_probe_raises(self):
+        runner = mock.MagicMock()
+        runner.run.return_value = (1, '', 'sudo: a password is required')
+        with pytest.raises(exceptions.CommandError):
+            instance._run_on_login_node(
+                runner, ['test', '-f', '/home/alice/.sky_clusters/ready'],
+                'Failed to inspect readiness.',
+                tolerate_returncodes=(1,))
+
     def test_read_valid_manifest(self):
         manifest = _snapshot_manifest()
         runner = mock.MagicMock()
+        runner.command_as_user.side_effect = shlex.join
         runner.run.return_value = (0, json.dumps(manifest), '')
         assert instance._read_snapshot_manifest(
             runner, '/home/test/.sky_snapshots/test-cluster') == manifest
 
     def test_read_corrupt_manifest(self):
         runner = mock.MagicMock()
+        runner.command_as_user.side_effect = shlex.join
         runner.run.return_value = (0, '{', '')
         with pytest.raises(RuntimeError, match='not valid JSON'):
             instance._read_snapshot_manifest(
@@ -101,6 +131,7 @@ class TestSnapshotManifest:
 
     def test_missing_rank_snapshot(self):
         runner = mock.MagicMock()
+        runner.command_as_user.side_effect = shlex.join
         runner.run.side_effect = [(0, '', ''), (1, '', '')]
         with pytest.raises(RuntimeError, match='rank 1'):
             instance._validate_snapshot_files(
@@ -111,6 +142,7 @@ class TestSnapshotManifest:
         manifest = _snapshot_manifest()
         manifest['has_job_db'] = True
         runner = mock.MagicMock()
+        runner.command_as_user.side_effect = shlex.join
         runner.run.side_effect = [(0, '', ''), (0, '', ''), (1, '', '')]
         with pytest.raises(RuntimeError, match='missing job database'):
             instance._validate_snapshot_files(
@@ -202,6 +234,7 @@ def mock_client(monkeypatch):
     monkeypatch.setattr(instance.slurm_utils, 'is_inside_slurm_cluster',
                         mock.MagicMock(return_value=False))
     login_runner = mock.MagicMock()
+    login_runner.command_as_user.side_effect = shlex.join
     login_runner.run.return_value = (0, '', '')
     monkeypatch.setattr(instance, '_make_login_node_runner',
                         mock.MagicMock(return_value=login_runner))
@@ -239,7 +272,7 @@ class TestTerminateInstances:
         instance.terminate_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
         mock_client.cancel_jobs_by_name.assert_not_called()
         remove_commands = [
-            call.args[0]
+            _command_text(call.args[0])
             for call in mock_client.test_login_runner.run.call_args_list
         ]
         assert any('.sky_snapshots/test-cluster' in command
@@ -526,8 +559,10 @@ class TestStopInstances:
         ])
         client.list_job_steps.return_value = []
         login_runner = mock.MagicMock()
+        login_runner.command_as_user.side_effect = shlex.join
 
         def run(command, **kwargs):
+            command = _command_text(command)
             del command, kwargs
             return 0, '', ''
 
@@ -590,6 +625,7 @@ class TestStopInstances:
         original_run = login_runner.run.side_effect
 
         def run(command, **kwargs):
+            command = _command_text(command)
             if 'sqlite3.connect' in command:
                 events.append('backup jobs db')
             return original_run(command, **kwargs)
@@ -611,7 +647,8 @@ class TestStopInstances:
                                 provider_config=_CONTAINER_PROVIDER_CONFIG)
 
         driver_commands = [
-            call.args[0] for call in head_runner.run_driver.call_args_list
+            _command_text(call.args[0])
+            for call in head_runner.run_driver.call_args_list
         ]
         assert len(driver_commands) == 2
         assert driver_commands[0].startswith('test -f ')
@@ -619,9 +656,9 @@ class TestStopInstances:
         assert 'cancel_jobs_encoded_results' in driver_commands[1]
         head_runner.run.assert_not_called()
         stop_skylet_commands = [
-            call.args[0]
+            _command_text(call.args[0])
             for call in login_runner.run.call_args_list
-            if 'skylet_pid' in call.args[0]
+            if 'skylet_pid' in _command_text(call.args[0])
         ]
         assert len(stop_skylet_commands) == 1
         stop_skylet_command = stop_skylet_commands[0]
@@ -633,9 +670,9 @@ class TestStopInstances:
         assert manifest['nodes'] == nodes
         assert manifest['has_job_db'] is True
         export_commands = [
-            call.args[0]
+            _command_text(call.args[0])
             for call in login_runner.run.call_args_list
-            if 'enroot export' in call.args[0]
+            if 'enroot export' in _command_text(call.args[0])
         ]
         assert len(export_commands) == 2
         assert all('enroot export -f' in command for command in export_commands)
@@ -646,9 +683,9 @@ class TestStopInstances:
         assert any(
             '--nodelist=node-b' in command for command in export_commands)
         backup_job_db_commands = [
-            call.args[0]
+            _command_text(call.args[0])
             for call in login_runner.run.call_args_list
-            if 'sqlite3.connect' in call.args[0]
+            if 'sqlite3.connect' in _command_text(call.args[0])
         ]
         assert len(backup_job_db_commands) == 1
         backup_job_db_script = shlex.split(backup_job_db_commands[0])[-1]
@@ -661,6 +698,7 @@ class TestStopInstances:
     def test_cleanup_allocation_runs_on_every_node(self, monkeypatch):
         client = mock.MagicMock()
         login_runner = mock.MagicMock()
+        login_runner.command_as_user.side_effect = shlex.join
         login_runner.run.return_value = (0, '', '')
         monkeypatch.setattr(instance.skypilot_config,
                             'get_effective_region_config',
@@ -675,7 +713,7 @@ class TestStopInstances:
                                            _PROVIDER_CONFIG, '123',
                                            ['node-a', 'node-b'])
 
-        node_cleanup = login_runner.run.call_args_list[0].args[0]
+        node_cleanup = _command_text(login_runner.run.call_args_list[0].args[0])
         assert '--jobid=123' in node_cleanup
         assert '--nodes=2 --ntasks-per-node=1' in node_cleanup
         assert 'pyxis_test-cluster' in node_cleanup
@@ -691,7 +729,7 @@ class TestStopInstances:
     def test_remove_shared_state_script_preserves_logs(self):
         script = instance._remove_shared_state_script(
             '/home/test/.sky_clusters/test-cluster', preserve_logs=True)
-        assert '! -name sky_logs' in script
+        assert "'!' -name sky_logs" in script
         assert '-print -quit' in script
         # The verification must fail when find itself errors (e.g. a stale
         # file handle), not only when leftovers remain.
@@ -771,8 +809,10 @@ class TestStopInstances:
     def test_cleanup_allocation_preserves_logs(self, monkeypatch, tmp_path):
         client = mock.MagicMock()
         login_runner = mock.MagicMock()
+        login_runner.command_as_user.side_effect = shlex.join
 
         def run(command, **kwargs):
+            command = _command_text(command)
             del kwargs
             if command.startswith('srun '):
                 return 0, '', ''
@@ -904,6 +944,7 @@ class TestStopInstances:
             monkeypatch, ['node-a'], inside=True))
 
         def run(command, **kwargs):
+            command = _command_text(command)
             del kwargs
             if (command.startswith('test -f ') and
                     '/skypilot-runtime/bin/activate' in command):
@@ -917,7 +958,10 @@ class TestStopInstances:
         instance.stop_instances(_CLUSTER,
                                 provider_config=_CONTAINER_PROVIDER_CONFIG)
 
-        commands = [call.args[0] for call in local_runner.run.call_args_list]
+        commands = [
+            _command_text(call.args[0])
+            for call in local_runner.run.call_args_list
+        ]
         assert not any(
             'cancel_jobs_encoded_results' in command for command in commands)
         warning.assert_called_once()
@@ -933,6 +977,7 @@ class TestStopInstances:
         original_run = login_runner.run.side_effect
 
         def fail_rank_one(command, **kwargs):
+            command = _command_text(command)
             if 'enroot export' in command and 'rank1.sqsh' in command:
                 return 7, '', 'export failed'
             return original_run(command, **kwargs)
@@ -948,7 +993,10 @@ class TestStopInstances:
         previous_generation_dir = instance._snapshot_generation_dir(
             '/home/test/.sky_snapshots/test-cluster',
             previous_manifest['generation'])
-        commands = [call.args[0] for call in login_runner.run.call_args_list]
+        commands = [
+            _command_text(call.args[0])
+            for call in login_runner.run.call_args_list
+        ]
         assert not any(
             previous_generation_dir in command for command in commands)
 
@@ -965,7 +1013,8 @@ class TestStopInstances:
         events = []
 
         def record_snapshot_events(command, **kwargs):
-            if command.startswith('test ! -e ') and 'mv --' in command:
+            command = _command_text(command)
+            if command.startswith("test '!' -e ") and 'mv --' in command:
                 events.append('commit generation')
             if command == f'rm -rf -- {previous_generation_dir}':
                 events.append('remove previous generation')
@@ -1000,7 +1049,10 @@ class TestStopInstances:
             previous_manifest['generation'])
         new_generation_dir = instance._snapshot_generation_dir(
             '/home/test/.sky_snapshots/test-cluster', _NEW_SNAPSHOT_GENERATION)
-        commands = [call.args[0] for call in login_runner.run.call_args_list]
+        commands = [
+            _command_text(call.args[0])
+            for call in login_runner.run.call_args_list
+        ]
         remove_commands = [
             command for command in commands if command.startswith('rm -rf -- ')
         ]
@@ -1017,6 +1069,7 @@ class TestStopInstances:
         original_run = login_runner.run.side_effect
 
         def fail_node_preflight(command, **kwargs):
+            command = _command_text(command)
             if ('enroot list' in command and 'enroot export' not in command and
                     '--nodelist=node-b' in command):
                 return 1, '', 'Pyxis container not found on node node-b'
@@ -1028,7 +1081,10 @@ class TestStopInstances:
             instance.stop_instances(_CLUSTER,
                                     provider_config=_CONTAINER_PROVIDER_CONFIG)
 
-        commands = [call.args[0] for call in login_runner.run.call_args_list]
+        commands = [
+            _command_text(call.args[0])
+            for call in login_runner.run.call_args_list
+        ]
         assert not any(
             command.startswith(
                 'rm -rf -- /home/test/.sky_snapshots/test-cluster')
@@ -1051,9 +1107,9 @@ class TestStopInstances:
         instance.get_command_runners.assert_not_called()
         head_runner.run_driver.assert_not_called()
         cancel_commands = [
-            call.args[0]
+            _command_text(call.args[0])
             for call in local_runner.run.call_args_list
-            if 'cancel_jobs_encoded_results' in call.args[0]
+            if 'cancel_jobs_encoded_results' in _command_text(call.args[0])
         ]
         assert len(cancel_commands) == 1
         assert cancel_commands[0].startswith(
@@ -1072,7 +1128,10 @@ class TestStopInstances:
 
         # The skylet executing the stop is the process the skylet-kill step
         # would stop, so the stop flow must not touch its keeper spec or pid.
-        commands = [call.args[0] for call in local_runner.run.call_args_list]
+        commands = [
+            _command_text(call.args[0])
+            for call in local_runner.run.call_args_list
+        ]
         assert not any('skylet_pid' in command for command in commands)
         assert not any('skylet_start' in command for command in commands)
 
@@ -1088,11 +1147,12 @@ class TestStopInstances:
         original_run = local_runner.run.side_effect
 
         def run(command, **kwargs):
+            command = _command_text(command)
             if 'cancel_jobs_encoded_results' in command:
                 events.append('cancel jobs')
             if 'sqlite3.connect' in command:
                 events.append('backup jobs db')
-            if command.startswith('test ! -e ') and 'mv --' in command:
+            if command.startswith("test '!' -e ") and 'mv --' in command:
                 events.append('commit generation')
             return original_run(command, **kwargs)
 
@@ -1143,7 +1203,10 @@ class TestStopInstances:
 
         write_manifest.assert_called_once()
         cleanup.assert_not_called()
-        commands = [call.args[0] for call in local_runner.run.call_args_list]
+        commands = [
+            _command_text(call.args[0])
+            for call in local_runner.run.call_args_list
+        ]
         assert not any(
             command == 'rm -rf -- /tmp/test-cluster' for command in commands)
 
@@ -1244,6 +1307,7 @@ class TestQueryInstances:
         monkeypatch.setattr(instance.slurm, 'SlurmClient',
                             mock.MagicMock(return_value=client))
         login_runner = mock.MagicMock()
+        login_runner.command_as_user.side_effect = shlex.join
         monkeypatch.setattr(instance, '_make_login_node_runner',
                             mock.MagicMock(return_value=login_runner))
         get_config = mock.MagicMock(
