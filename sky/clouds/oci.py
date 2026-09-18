@@ -48,6 +48,9 @@ logger = logging.getLogger(__name__)
 
 _tenancy_prefix: Optional[str] = None
 
+# AMD Instinct accelerators (MI300X, MI355X, ...) as named in the catalog.
+_AMD_ACCELERATOR_PREFIX = 'MI'
+
 
 @registry.CLOUD_REGISTRY.register
 class OCI(clouds.Cloud):
@@ -632,7 +635,18 @@ class OCI(clouds.Cloud):
             image_tag = oci_utils.oci_config.get_default_image_tag()
         else:
             assert len(acc) == 1, acc
-            image_tag = oci_utils.oci_config.get_default_gpu_image_tag()
+            acc_name = next(iter(acc))
+            if acc_name.upper().startswith(_AMD_ACCELERATOR_PREFIX):
+                # The default GPU image is an NVIDIA (CUDA) Marketplace
+                # listing, which is not offered for the AMD Instinct shapes
+                # (BM.GPU.MI300X.8, BM.GPU.MI355X.8). Fall back to the plain
+                # OS image so the instance boots; ROCm has to be installed
+                # in `setup`, or an `image_id` supplied explicitly.
+                logger.info(f'{instance_type} has AMD GPUs; using the '
+                            'general image instead of the NVIDIA GPU image.')
+                image_tag = oci_utils.oci_config.get_default_image_tag()
+            else:
+                image_tag = oci_utils.oci_config.get_default_gpu_image_tag()
 
         return image_tag
 
