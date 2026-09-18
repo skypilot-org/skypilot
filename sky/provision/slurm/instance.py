@@ -5,7 +5,6 @@ import math
 import os
 import re
 import shlex
-import subprocess
 import tempfile
 import threading
 import time
@@ -441,11 +440,18 @@ def _sky_cluster_home_dir(base_dir: str, cluster_name_on_cloud: str) -> str:
     return f'{base_dir}/.sky_clusters/{cluster_name_on_cloud}'
 
 
-def _snapshot_dir(base_dir: str, cluster_name_on_cloud: str) -> str:
+def _snapshot_dir(base_dir: str,
+                  cluster_name_on_cloud: str,
+                  snapshot_id: Optional[str] = None) -> str:
     """Returns the shared directory for a Slurm container snapshot."""
     # TODO(kevin): Verify that base_dir is on a shared filesystem (e.g., NFS)
     # visible to every allocated node before using it for snapshots.
-    return f'{base_dir}/{SNAPSHOT_DIRECTORY_NAME}/{cluster_name_on_cloud}'
+    path = f'{base_dir}/{SNAPSHOT_DIRECTORY_NAME}/{cluster_name_on_cloud}'
+    if snapshot_id is not None:
+        if re.fullmatch(r'[0-9a-f]{32}', snapshot_id) is None:
+            raise ValueError(f'Invalid Slurm snapshot ID: {snapshot_id!r}.')
+        path = f'{path}/{snapshot_id}'
+    return path
 
 
 def _snapshot_manifest_path(snapshot_dir: str) -> str:
@@ -967,20 +973,13 @@ def _create_virtual_instance(
         client, provider_config, cluster_name_on_cloud)
     sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
                                                  cluster_name_on_cloud)
-    snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud)
+    snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud,
+                                 provider_config.get('snapshot_id'))
     snapshot_manifest_path = _snapshot_manifest_path(snapshot_dir)
-    try:
+    snapshot_manifest = None
+    if config.prev_cluster_ever_up:
         snapshot_manifest = _read_snapshot_manifest(
             login_node_runner, snapshot_dir, expected_num_nodes=num_nodes)
-    except (exceptions.CommandError, OSError, subprocess.TimeoutExpired) as e:
-        # Existing clusters may depend on a snapshot for their container state.
-        if config.prev_cluster_ever_up:
-            raise
-        logger.warning(
-            'Could not check for a Slurm container snapshot at '
-            f'{snapshot_dir}; continuing with a fresh allocation. '
-            f'Details: {common_utils.format_exception(e, use_bracket=True)}')
-        snapshot_manifest = None
     if snapshot_manifest is not None:
         _validate_snapshot_files(login_node_runner, snapshot_dir,
                                  snapshot_manifest)
@@ -1518,7 +1517,8 @@ def query_instances(
             # so stopped clusters do not pay for additional Slurm queries.
             login_node_runner = _make_login_node_runner(provider_config)
             sky_base_dir = _resolve_sky_base_dir(client, provider_config)
-            snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud)
+            snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud,
+                                         provider_config.get('snapshot_id'))
             manifest = _read_snapshot_manifest(login_node_runner, snapshot_dir)
             snapshot_checked = True
             if manifest is not None:
@@ -1650,7 +1650,8 @@ def stop_instances(
     client, login_node_runner = _make_client_and_login_runner(
         provider_config, inside_slurm_cluster)
     sky_base_dir = _resolve_sky_base_dir(client, provider_config)
-    snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud)
+    snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud,
+                                 provider_config.get('snapshot_id'))
 
     running_jobs = client.query_jobs(cluster_name_on_cloud,
                                      ['running', 'suspended'])
@@ -2218,7 +2219,8 @@ def terminate_instances(
                       inside_slurm_cluster,
                       pre_batch_cancel=pre_batch_cancel)
     sky_base_dir = _resolve_sky_base_dir(client, provider_config)
-    snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud)
+    snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud,
+                                 provider_config.get('snapshot_id'))
     _remove_snapshot_path_best_effort(login_node_runner, snapshot_dir,
                                       'Slurm container snapshot')
 

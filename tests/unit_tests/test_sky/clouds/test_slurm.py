@@ -16,10 +16,12 @@ from sky import models
 from sky import resources as resources_lib
 from sky import skypilot_config
 from sky.adaptors import slurm
+from sky.backends import backend_utils
 from sky.clouds import slurm as slurm_cloud
 from sky.provision.slurm import instance as slurm_instance
 from sky.provision.slurm import utils as slurm_utils
 from sky.skylet import constants
+from sky.utils import yaml_utils
 
 
 class TestStopFeatureSupport:
@@ -241,6 +243,26 @@ class TestSubmitUserDeployVariables:
                 num_nodes=1,
                 volume_mounts=volume_mounts)
 
+    def test_new_clusters_get_distinct_snapshot_ids(self):
+        first = self._make_deploy_variables('alice')['snapshot_id']
+        second = self._make_deploy_variables('alice')['snapshot_id']
+        assert re.fullmatch(r'[0-9a-f]{32}', first)
+        assert re.fullmatch(r'[0-9a-f]{32}', second)
+        assert first != second
+
+    @pytest.mark.parametrize('snapshot_id', [None, 'a' * 32])
+    def test_restart_preserves_snapshot_location(self, snapshot_id):
+        provider = {'sky_base_dir': '/home/alice'}
+        if snapshot_id is not None:
+            provider['snapshot_id'] = snapshot_id
+        new_provider = dict(provider, snapshot_id='b' * 32)
+        restored = backend_utils._replace_yaml_dicts(
+            yaml_utils.dump_yaml_str({'provider': new_provider}),
+            yaml_utils.dump_yaml_str({'provider': provider}),
+            backend_utils._RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
+            backend_utils._RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
+        assert yaml_utils.safe_load(restored)['provider'] == provider
+
     def test_submit_user_persisted(self):
         deploy_vars = self._make_deploy_variables('alice')
 
@@ -388,6 +410,7 @@ class TestSubmitUserTemplate:
                 'slurm_partition': 'gpu',
                 'provision_timeout': 120,
                 'sky_base_dir': '/fsx/alice',
+                'snapshot_id': 'a' * 32,
                 'ssh_hostname': 'login.example.com',
                 'ssh_port': 22,
                 'slurm_private_key': '/root/.ssh/key',
@@ -436,6 +459,7 @@ class TestSubmitUserTemplate:
             assert config['provider']['slurm_user'] == slurm_user
         assert config['provider']['ssh']['user'] == transport_user
         assert config['provider']['sky_base_dir'] == '/fsx/alice'
+        assert config['provider']['snapshot_id'] == 'a' * 32
         if image_id is None:
             assert 'container_image' not in config['provider']
         else:
@@ -1567,6 +1591,8 @@ class TestCreateVirtualInstance:
             if container:
                 assert '--container-image=ubuntu:24.04' in script
             assert 'rank0.sqsh' not in script
+            assert not any('.sky_snapshots/' in str(call.args[0])
+                           for call in runner.run.call_args_list)
 
     @patch('sky.provision.slurm.instance._wait_for_job_nodes')
     @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
@@ -1574,21 +1600,58 @@ class TestCreateVirtualInstance:
     @patch('sky.provision.slurm.instance.slurm.SlurmClient')
     @patch('sky.provision.slurm.instance.command_runner.'
            'SlurmLoginNodeCommandRunner')
-    def test_corrupt_snapshot_blocks_fresh_launch(self, mock_ssh_runner,
-                                                  mock_slurm_client,
-                                                  mock_get_partition_info,
-                                                  mock_get_proctrack_type,
-                                                  mock_wait_for_job_nodes):
+    def test_corrupt_snapshot_blocks_restart(self, mock_ssh_runner,
+                                             mock_slurm_client,
+                                             mock_get_partition_info,
+                                             mock_get_proctrack_type,
+                                             mock_wait_for_job_nodes):
         del mock_wait_for_job_nodes
         self._setup_mocks(mock_ssh_runner, mock_slurm_client,
                           mock_get_partition_info, 'cpus')
         mock_get_proctrack_type.return_value = 'cgroup'
         mock_ssh_runner.return_value.run.return_value = (0, '{', '')
         mock_ssh_runner.return_value.run.side_effect = None
+        config = self._make_non_container_config(2)
+        config.prev_cluster_ever_up = True
         with pytest.raises(RuntimeError, match='not valid JSON'):
-            self._run_and_capture_script('test-cluster',
-                                         self._make_non_container_config(2))
+            self._run_and_capture_script('test-cluster', config)
         mock_slurm_client.return_value.submit_job.assert_not_called()
+
+    @pytest.mark.parametrize('old_image', ['ubuntu:24.04', 'debian:12'])
+    @patch('sky.provision.slurm.instance._read_snapshot_manifest')
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_fresh_launch_ignores_readable_orphan(
+            self, mock_ssh_runner, mock_slurm_client, mock_get_partition_info,
+            mock_get_proctrack_type, mock_wait_for_job_nodes,
+            mock_read_manifest, old_image):
+        del mock_wait_for_job_nodes
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'cpus')
+        mock_get_proctrack_type.return_value = 'cgroup'
+        mock_read_manifest.return_value = {
+            'version': slurm_instance.SNAPSHOT_MANIFEST_VERSION,
+            'generation': 'a' * 32,
+            'image_id': old_image,
+            'has_job_db': True,
+            'nodes': ['old-node'],
+        }
+        config = self._make_non_container_config(2)
+        config.node_config['image_id'] = 'ubuntu:24.04'
+        config.provider_config['snapshot_id'] = 'b' * 32
+
+        script = self._run_and_capture_script('test-cluster', config)
+
+        mock_read_manifest.assert_not_called()
+        mock_slurm_client.return_value.submit_job.assert_called_once()
+        assert '--container-image=ubuntu:24.04' in script
+        assert 'rank0.sqsh' not in script
+        assert 'jobs.db' not in script
+        assert f'/test-cluster/{"b" * 32}/manifest.json' in script
 
     def _run_and_capture_script(self, cluster_name, config) -> str:
         """Run _create_virtual_instance and capture the generated script."""
@@ -1736,6 +1799,7 @@ class TestCreateVirtualInstance:
             resume_stopped_nodes=True,
             ports_to_open_on_launch=None,
         )
+        config.prev_cluster_ever_up = True
         manifest = {
             'version': slurm_instance.SNAPSHOT_MANIFEST_VERSION,
             'generation': '0123456789abcdef0123456789abcdef',
@@ -1887,6 +1951,7 @@ class TestCreateVirtualInstance:
                 '/host/data:/data:ro,/nvme/$SLURM_JOB_ID:/scratch,'
                 '/host/models:/models:ro"' in mounted_script)
 
+    @pytest.mark.parametrize('snapshot_id', [None, 'b' * 32])
     @patch('sky.provision.slurm.instance._validate_snapshot_files')
     @patch('sky.provision.slurm.instance._read_snapshot_manifest')
     @patch('sky.provision.slurm.instance._wait_for_job_nodes')
@@ -1898,7 +1963,7 @@ class TestCreateVirtualInstance:
     def test_multi_node_snapshot_restore_script(
             self, mock_ssh_runner, mock_slurm_client, mock_get_partition_info,
             mock_get_proctrack_type, mock_wait_for_job_nodes,
-            mock_read_manifest, mock_validate_files):
+            mock_read_manifest, mock_validate_files, snapshot_id):
         from sky.provision import common
 
         del mock_wait_for_job_nodes
@@ -1909,6 +1974,8 @@ class TestCreateVirtualInstance:
         snapshot_dir = (
             f'/home/testuser/{slurm_instance.SNAPSHOT_DIRECTORY_NAME}'
             f'/{cluster_name}')
+        if snapshot_id is not None:
+            snapshot_dir += f'/{snapshot_id}'
         generation = '0123456789abcdef0123456789abcdef'
         generation_dir = slurm_instance._snapshot_generation_dir(
             snapshot_dir, generation)
@@ -1946,6 +2013,9 @@ class TestCreateVirtualInstance:
             ports_to_open_on_launch=None,
         )
 
+        config.prev_cluster_ever_up = True
+        if snapshot_id is not None:
+            config.provider_config['snapshot_id'] = snapshot_id
         script = self._run_and_capture_script(cluster_name, config)
 
         mock_validate_files.assert_called_once()
@@ -1975,8 +2045,7 @@ class TestCreateVirtualInstance:
         assert script.index(readiness_check) < script.index(
             'touch /home/testuser/.sky_clusters/'
             'test-cluster-restore/.sky_sbatch_ready')
-        consume_snapshot = ('rm -rf -- /home/testuser/.sky_snapshots/'
-                            'test-cluster-restore')
+        consume_snapshot = f'rm -rf -- {snapshot_dir}'
         ready_signal = ('touch /home/testuser/.sky_clusters/'
                         'test-cluster-restore/.sky_sbatch_ready')
         assert script.index(readiness_check) < script.index(consume_snapshot)

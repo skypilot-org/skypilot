@@ -324,8 +324,9 @@ only need fresh launches, ``sky exec``, ``sky logs``, managed jobs, and
 restore with ``sky start`` or ``sky launch``, and autostop. Autodown, which
 tears down the allocation without saving a snapshot, uses the smaller policy.
 
-For a fresh cluster, a failed snapshot read produces a warning and launch
-continues. Snapshot cleanup failures after cancellation also produce a warning
+Fresh clusters skip snapshot reads and use a unique snapshot directory, so
+leftover snapshots from a deleted cluster cannot be restored by a same-name
+launch. Snapshot cleanup failures after cancellation produce a warning
 without failing ``sky down``; snapshot files may remain and require manual
 cleanup. Snapshot reads for previously running clusters and container
 stop/start operations remain strict to protect saved state.
