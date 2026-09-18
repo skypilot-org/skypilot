@@ -341,8 +341,7 @@ def _run_on_login_node(
     rc, stdout, stderr = login_node_runner.run(cmd,
                                                require_outputs=True,
                                                stream_logs=False)
-    if (rc not in tolerate_returncodes or (rc != 0 and
-                                           (stdout.strip() or stderr.strip()))):
+    if rc not in tolerate_returncodes:
         subprocess_utils.handle_returncode(
             rc,
             cmd if isinstance(cmd, str) else shlex.join(cmd),
@@ -350,6 +349,17 @@ def _run_on_login_node(
             stderr=f'{stdout}\n{stderr}',
             stream_logs=False)
     return rc, stdout
+
+
+def _file_exists_command(login_node_runner: command_runner.CommandRunner,
+                         path: str) -> str:
+    """Return 0 for a regular file, 1 for missing, and 2 for probe failure."""
+    exists = login_node_runner.command_as_user(['test', '-f', path])
+    missing = login_node_runner.command_as_user(['test', '!', '-f', path])
+    # A successful predicate distinguishes file state from sudo/runuser failure,
+    # even when login profiles or sudo emit unrelated output.
+    return (f'if {exists}; then true; '
+            f'elif {missing}; then (exit 1); else (exit 2); fi')
 
 
 def _validate_snapshot_manifest(
@@ -400,13 +410,10 @@ def _read_snapshot_manifest(
     """Read a snapshot manifest from the Slurm cluster's shared storage."""
     manifest_path = _snapshot_manifest_path(snapshot_dir)
     missing_exit_code = 44
-    test_command = login_node_runner.command_as_user(
-        ['test', '-f', manifest_path])
+    test_command = _file_exists_command(login_node_runner, manifest_path)
     read_command = login_node_runner.command_as_user(
         ['cat', '--', manifest_path])
-    cmd = (f'probe_output=$({test_command} 2>&1); rc=$?; '
-           'if [ -n "$probe_output" ]; then '
-           'printf "%s\\n" "$probe_output" >&2; exit 1; fi; '
+    cmd = (f'{test_command}; rc=$?; '
            f'if [ "$rc" = 1 ]; then exit {missing_exit_code}; '
            f'elif [ "$rc" != 0 ]; then exit "$rc"; fi; {read_command}')
     rc, stdout = _run_on_login_node(
@@ -495,7 +502,8 @@ def _validate_snapshot_files(login_node_runner: command_runner.CommandRunner,
     missing = []
     for label, path in labeled_paths:
         rc, _ = _run_on_login_node(
-            login_node_runner, ['test', '-f', path],
+            login_node_runner,
+            _file_exists_command(login_node_runner, path),
             f'Failed to inspect the Slurm container snapshot ({label}).',
             tolerate_returncodes=(1,))
         if rc == 1:
@@ -672,7 +680,8 @@ def _wait_for_job_ready(
 
     while True:
         rc, _ = _run_on_login_node(login_node_runner,
-                                   ['test', '-f', ready_signal],
+                                   _file_exists_command(login_node_runner,
+                                                        ready_signal),
                                    'Failed to inspect Slurm startup readiness.',
                                    tolerate_returncodes=(1,))
         if rc == 0:
@@ -1685,7 +1694,8 @@ fi
             shlex.split(_srun_on_node(job_id, nodes[0], backup_job_db_script)),
             'Failed to snapshot the Slurm cluster job database.')
         rc, _ = _run_on_login_node(
-            login_node_runner, ['test', '-f', staging_job_db_path],
+            login_node_runner,
+            _file_exists_command(login_node_runner, staging_job_db_path),
             'Failed to inspect the Slurm cluster job database snapshot.',
             tolerate_returncodes=(1,))
         has_job_db = rc == 0

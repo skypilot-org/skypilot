@@ -91,14 +91,57 @@ class TestSnapshotManifest:
         with pytest.raises(exceptions.CommandError):
             instance._read_snapshot_manifest(runner, str(tmp_path))
 
-    def test_denied_file_probe_raises(self):
-        runner = mock.MagicMock()
-        runner.run.return_value = (1, '', 'sudo: a password is required')
+    @pytest.mark.parametrize('noisy', [False, True])
+    @pytest.mark.parametrize('exists', [False, True])
+    @pytest.mark.parametrize('denied', [False, True])
+    def test_file_probe_with_banner_and_sudo_warning(self, tmp_path, exists,
+                                                     denied, noisy):
+        runner = command_runner.LocalProcessCommandRunner()
+        path = tmp_path / 'ready with spaces'
+        if exists:
+            path.touch()
+        wrapper = tmp_path / 'sudo'
+        wrapper.write_text((
+            'printf "sudo: unable to resolve host login\\n" >&2\n' if noisy else
+            '') + ('printf "sudo: a password is required\\n" >&2\nexit 1\n'
+                   if denied else 'exec /bin/test "$@"\n'))
+        runner.command_as_user = lambda argv: shlex.join(
+            ['sh', str(wrapper), *argv[1:]])
+        command = instance._file_exists_command(runner, str(path))
+        if noisy:
+            command = 'printf "Welcome\\n"; ' + command
+        if denied:
+            with pytest.raises(exceptions.CommandError):
+                instance._run_on_login_node(runner,
+                                            command,
+                                            'probe failed',
+                                            tolerate_returncodes=(1,))
+        else:
+            rc, stdout = instance._run_on_login_node(runner,
+                                                     command,
+                                                     'probe failed',
+                                                     tolerate_returncodes=(1,))
+            assert rc == (0 if exists else 1)
+            assert ('Welcome' in stdout) == noisy
+
+    def test_silent_denied_file_probe_raises(self, tmp_path):
+        runner = command_runner.LocalProcessCommandRunner()
+        runner.command_as_user = lambda argv: 'false'
         with pytest.raises(exceptions.CommandError):
-            instance._run_on_login_node(
-                runner, ['test', '-f', '/home/alice/.sky_clusters/ready'],
-                'Failed to inspect readiness.',
-                tolerate_returncodes=(1,))
+            instance._run_on_login_node(runner,
+                                        instance._file_exists_command(
+                                            runner, str(tmp_path)),
+                                        'probe failed',
+                                        tolerate_returncodes=(1,))
+
+    def test_missing_manifest_with_banner_and_warning(self, tmp_path):
+        runner = command_runner.LocalProcessCommandRunner()
+        original_run = runner.run
+        runner.run = lambda cmd, **kwargs: original_run(
+            'printf "Welcome\\n"; '
+            'printf "sudo: unable to resolve host login\\n" >&2; ' + cmd, **
+            kwargs)
+        assert instance._read_snapshot_manifest(runner, str(tmp_path)) is None
 
     def test_read_valid_manifest(self):
         manifest = _snapshot_manifest()

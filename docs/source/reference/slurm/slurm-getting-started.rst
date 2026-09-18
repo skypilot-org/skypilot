@@ -296,6 +296,7 @@ sessions run inside allocations through ``srun``.
 Allow the following executables as the workload accounts:
 
 * ``sbatch``, ``srun``, ``scancel``, and ``squeue`` for allocation operations.
+* ``scontrol -o show step`` for inspecting steps before container snapshots.
 * ``id -un`` for identity validation and ``stat -f -c %T`` for shared-directory
   checks.
 * ``mkdir``, ``test``, ``cat``, ``tail``, ``mv``, ``rm``, ``find``, and

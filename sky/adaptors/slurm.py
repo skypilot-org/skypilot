@@ -314,7 +314,10 @@ class SlurmClient:
         except subprocess.TimeoutExpired as e:
             raise RuntimeError(error + 'Account validation timed out after '
                                '15 seconds.') from e
-        if rc != 0 or stdout.strip() != submit_user:
+        output_lines = [
+            line.strip() for line in stdout.splitlines() if line.strip()
+        ]
+        if rc != 0 or not output_lines or output_lines[-1] != submit_user:
             raise RuntimeError(
                 error + f'Account validation exited with code {rc}. '
                 'Check that the account exists and the SSH user can run '
@@ -556,19 +559,19 @@ class SlurmClient:
 
     def list_job_steps(self, job_id: str) -> List[JobStepInfo]:
         """Lists the active steps in a Slurm job allocation."""
-        cmd = f'scontrol -o show step {shlex.quote(job_id)}'
+        cmd = ['scontrol', '-o', 'show', 'step', job_id]
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         error_output = f'{stdout}\n{stderr}'
         if rc != 0 and _JOB_STEP_NOT_FOUND_REGEX.search(error_output):
             subprocess_utils.handle_returncode(
                 rc,
-                cmd,
+                shlex.join(cmd),
                 f'Slurm allocation {job_id} disappeared during stop.',
                 stderr=error_output,
                 stream_logs=False)
         subprocess_utils.handle_returncode(
             rc,
-            cmd,
+            shlex.join(cmd),
             f'Failed to query steps for Slurm job {job_id}.',
             stderr=error_output,
             stream_logs=False)

@@ -3,6 +3,7 @@
 Defaults:skypilot secure_path=/opt/slurm/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 Defaults>alice !requiretty
 skypilot ALL=(alice) NOPASSWD: /usr/bin/sbatch, /usr/bin/srun, /usr/bin/scancel, /usr/bin/squeue
+skypilot ALL=(alice) NOPASSWD: /usr/bin/scontrol ^-o show step [0-9]+$
 skypilot ALL=(alice) NOPASSWD: /usr/bin/id ^-un$
 skypilot ALL=(alice) NOPASSWD: /usr/bin/stat ^-f -c %T -- /home/alice$
 skypilot ALL=(alice) NOPASSWD: /usr/bin/mkdir ^(-p )?-- /home/alice/[.]sky_(provision|clusters|snapshots)(/([.][A-Za-z_]|[A-Za-z0-9_])[A-Za-z0-9_.-]*)*$

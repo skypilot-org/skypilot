@@ -214,7 +214,20 @@ class TestJobSteps:
                 slurm.JobStepInfo('123.1', 'bash'),
             ]
 
-        mock_run.assert_called_once_with('scontrol -o show step 123')
+        mock_run.assert_called_once_with(
+            ['scontrol', '-o', 'show', 'step', '123'])
+
+    def test_list_job_steps_runs_as_allocation_owner(self):
+        client = slurm.SlurmClient('localhost', 22, 'login', slurm_user='alice')
+        with mock.patch.object(command_runner_lib.SSHCommandRunner,
+                               'run',
+                               return_value=(0, 'StepId=123.batch Name=batch\n',
+                                             '')) as transport:
+            assert client.list_job_steps('123') == [
+                slurm.JobStepInfo('123.batch', 'batch')
+            ]
+        assert transport.call_args.args[0] == (
+            'sudo --non-interactive -H -u alice -- scontrol -o show step 123')
 
     def test_rejects_malformed_job_step_output(self):
         client = self._client()
@@ -265,7 +278,7 @@ class TestJobSteps:
 
         assert mock_run.call_args_list == [
             mock.call(['scancel', '--signal', 'TERM', '123.4']),
-            mock.call('scontrol -o show step 123'),
+            mock.call(['scontrol', '-o', 'show', 'step', '123']),
         ]
 
     def test_signal_failure_for_active_step_is_reported(self):

@@ -163,6 +163,29 @@ def test_submit_validation_uses_bounded_submit_runner():
         assert runner.return_value.run.call_args.args[0] == ['id', '-un']
 
 
+@pytest.mark.parametrize(
+    'stdout', ['alice\n', 'Welcome\nalice\n', 'Welcome\n\nalice\n\n'])
+def test_submit_validation_accepts_login_banner(stdout):
+    client = slurm.SlurmClient('host', 22, 'login', slurm_user='alice')
+    with mock.patch.object(command_runner.SSHCommandRunner,
+                           'run',
+                           return_value=(0, stdout, '')) as transport:
+        client.validate_submit_user('cluster', 'alice')
+    assert transport.call_args.args[0] == (
+        'sudo --non-interactive -H -u alice -- id -un')
+
+
+@pytest.mark.parametrize('rc,stdout', [(0, ''), (0, 'alice\nlogin\n'),
+                                       (0, 'Welcome alice\n'), (1, 'alice\n')])
+def test_submit_validation_rejects_wrong_user_or_failed_command(rc, stdout):
+    client = slurm.SlurmClient('host', 22, 'login', slurm_user='alice')
+    with mock.patch.object(command_runner.SSHCommandRunner,
+                           'run',
+                           return_value=(rc, stdout, '')):
+        with pytest.raises(RuntimeError):
+            client.validate_submit_user('cluster', 'alice')
+
+
 def test_submit_validation_timeout():
     with mock.patch(
             'sky.adaptors.slurm.command_runner.SlurmLoginNodeCommandRunner'
