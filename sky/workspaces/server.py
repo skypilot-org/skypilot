@@ -1,10 +1,12 @@
 """REST API for workspace management."""
 
+from typing import Optional
 import uuid
 
 import fastapi
 
 from sky import check as sky_check
+from sky import models
 from sky import sky_logging
 from sky.server.requests import executor
 from sky.server.requests import payloads
@@ -117,25 +119,47 @@ async def get_config(request: fastapi.Request) -> None:
     )
 
 
-@router.post('/config')
-async def update_config(request: fastapi.Request,
-                        update_config_body: payloads.UpdateConfigBody) -> None:
-    """Updates the entire SkyPilot configuration.
+async def schedule_update_config(
+    request_id: str,
+    update_config_body: payloads.UpdateConfigBody,
+    auth_user: Optional[models.User],
+    request_name: request_names.RequestName = (
+        request_names.RequestName.WORKSPACES_UPDATE_CONFIG),
+) -> None:
+    """Schedules a config save and the `sky check` that follows it.
 
-    Schedules two requests. The first writes the config and is the request
-    the caller polls. The second is a `sky check` gated on the first request
-    SUCCEEDING. The check refreshes the enabled-clouds cache and the
-    per-context check results that the infra page and the optimizer read.
-    Running it as its own request means the save returns as soon as the
-    write lands instead of waiting for every cloud to be probed.
+    Two requests are scheduled. The first runs `core.update_config` under
+    `request_id` and is the request the caller polls. The second is a
+    `sky check` with its own id, gated on the first request SUCCEEDING. The
+    check refreshes the enabled-clouds cache and the per-context check
+    results that the infra page and the optimizer read. Running it as a
+    separate request lets the save return as soon as the write lands
+    instead of waiting for every cloud to be probed.
+
+    Callers outside this module that schedule `core.update_config` as a
+    request (for example a config rollback) should call this instead of
+    `executor.schedule_request_async` directly, so they keep the follow-up
+    check.
+
+    Args:
+        request_id: The id of the save request.
+        update_config_body: The save request body.
+        auth_user: The authenticated user, if any. Passed to both requests.
+        request_name: The request name for the save. Defaults to the name
+            the dashboard's config editor uses.
+
+    Raises:
+        Whatever `executor.schedule_request_async` raises for the save
+        request. A failure scheduling the follow-up check is logged and
+        not raised, because the save is already queued by then.
     """
     await executor.schedule_request_async(
-        request_id=request.state.request_id,
-        request_name=request_names.RequestName.WORKSPACES_UPDATE_CONFIG,
+        request_id=request_id,
+        request_name=request_name,
         request_body=update_config_body,
         func=core.update_config,
         schedule_type=api_requests.ScheduleType.SHORT,
-        auth_user=request.state.auth_user,
+        auth_user=auth_user,
     )
     check_request_id = str(uuid.uuid4())
     try:
@@ -150,18 +174,31 @@ async def update_config(request: fastapi.Request,
             func=sky_check.check,
             schedule_type=api_requests.ScheduleType.SHORT,
             precondition=preconditions.RequestSucceededPrecondition(
-                request_id=check_request_id,
-                awaited_request_id=request.state.request_id),
-            auth_user=request.state.auth_user,
+                request_id=check_request_id, awaited_request_id=request_id),
+            auth_user=auth_user,
         )
     except Exception as e:  # pylint: disable=broad-except
-        # The save is already queued and will commit. Failing the endpoint
-        # here would tell the client the save failed when it did not. A
-        # missing refresh only leaves the enabled-clouds cache stale until
-        # the next `sky check`, which is the same outcome the inline check
-        # had when it failed (it logged a warning and the save succeeded).
+        # The save is already queued and will commit. Failing here would
+        # tell the client the save failed when it did not. A missing refresh
+        # only leaves the enabled-clouds cache stale until the next
+        # `sky check`, which is the same outcome the inline check had when
+        # it failed (it logged a warning and the save succeeded).
         logger.warning(
-            f'Config save {request.state.request_id} was queued but the '
-            f'follow-up sky check could not be scheduled: '
+            f'Config save {request_id} was queued but the follow-up sky '
+            f'check could not be scheduled: '
             f'{common_utils.format_exception(e)}. Run `sky check` to '
             'refresh enabled infra.')
+
+
+@router.post('/config')
+async def update_config(request: fastapi.Request,
+                        update_config_body: payloads.UpdateConfigBody) -> None:
+    """Updates the entire SkyPilot configuration.
+
+    See `schedule_update_config` for why this schedules two requests.
+    """
+    await schedule_update_config(
+        request_id=request.state.request_id,
+        update_config_body=update_config_body,
+        auth_user=request.state.auth_user,
+    )

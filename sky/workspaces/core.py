@@ -665,7 +665,8 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """Updates the entire SkyPilot configuration.
 
     Writes the config and updates workspace permission policies. Does not
-    run `sky check`; the API route schedules that as a follow-up request.
+    run `sky check`; `sky.workspaces.server.schedule_update_config`
+    schedules that as a follow-up request.
 
     Args:
         config: The new configuration to save.
@@ -770,9 +771,11 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
             'configuration. Please try again.') from e
 
     # The `sky check` that refreshes the enabled-clouds cache for the new
-    # config is scheduled as a separate request by the API route
-    # (sky/workspaces/server.py::update_config), gated on this request
-    # succeeding, so the save does not wait on probing every cloud.
+    # config is scheduled as a separate request by
+    # sky/workspaces/server.py::schedule_update_config, gated on this
+    # request succeeding, so the save does not wait on probing every cloud.
+    # Callers that schedule this function as a request should go through
+    # that helper to keep the follow-up check.
     return config
 
 
