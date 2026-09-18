@@ -657,7 +657,21 @@ function ExternalJobId({ item, href }) {
   );
 }
 
-function JobNameLink({ href, name }) {
+function JobNameLink({ href, name, id, isExternal }) {
+  // A job with no name (Slurm prints none for jobs submitted through its
+  // REST API, such as slurm-bridge placeholder jobs) still has a detail
+  // page. Render the same dash the other missing fields use, gray so it
+  // does not read as a name, and say why in the tooltip.
+  if (!name) {
+    const what = isExternal ? 'Slurm job' : 'Job';
+    return (
+      <NonCapitalizedTooltip content={`${what} ${id} has no name`}>
+        <Link href={href} className="text-gray-500 hover:underline block">
+          -
+        </Link>
+      </NonCapitalizedTooltip>
+    );
+  }
   // max-w (not fixed w): the box shrinks to the name so a trailing badge
   // sits next to the text instead of parking at the 240px edge after a
   // short name; long names still truncate at 240px.
@@ -1853,7 +1867,12 @@ export function ManagedJobsTable({
           return (
             <TableCell className="whitespace-nowrap">
               <div className="flex items-center">
-                <JobNameLink href={detailHref} name={item.name} />
+                <JobNameLink
+                  href={detailHref}
+                  name={item.name}
+                  id={item.id}
+                  isExternal={item.is_external}
+                />
                 {item.is_external && <ExternalPill />}
                 {isBatch && <BatchBadge className="ml-2" />}
               </div>
