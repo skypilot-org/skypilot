@@ -100,15 +100,21 @@ class QueryHelper:
             inst_id = inst.id
             logger.debug(f'Terminating instance {inst_id}')
 
-            try:
-                # Release the NSG reference so that the NSG can be
-                # deleted without waiting the instance being terminated.
-                if nsg_id is not None:
+            if nsg_id is not None:
+                # Release the NSG reference so that the NSG can be deleted
+                # without waiting for the instance to terminate. This is
+                # best effort: the instance is terminated below whether or
+                # not it succeeds, otherwise `sky down` would leave the
+                # instance running (and billed).
+                try:
                     cls.detach_nsg(region, inst, nsg_id)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.warning(
+                        f'Failed to detach NSG {nsg_id} from instance '
+                        f'{inst_id}; terminating it anyway: {str(e)}')
 
-                # Terminate the instance
+            try:
                 core_client.terminate_instance(inst_id)
-
             except oci_adaptor.oci.exceptions.ServiceError as e:
                 fail_count += 1
                 logger.error(f'Terminate instance failed: {str(e)}\n: {inst}')
@@ -648,9 +654,10 @@ class QueryHelper:
                 'compartment': inst.compartment_id,
             })
 
-        # Detatch the NSG before removing it.
-        oci_adaptor.get_net_client(region, oci_utils.oci_config.get_profile(
-        )).update_vnic(
+        # Detach the NSG before removing it.
+        net_client = oci_adaptor.get_net_client(
+            region, oci_utils.oci_config.get_profile(region))
+        net_client.update_vnic(
             vnic_id=vnic.id,
             update_vnic_details=oci_adaptor.oci.core.models.UpdateVnicDetails(
                 nsg_ids=[], skip_source_dest_check=False),
