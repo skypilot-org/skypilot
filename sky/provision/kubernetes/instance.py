@@ -3241,6 +3241,9 @@ class NodeHealthInfo:
 _POD_NOT_READY_PREFIX = 'pod not ready ('
 _TERMINATION_FALLBACK = 'Terminated unexpectedly'
 _CONTAINER_ERRORS_MARKER = 'Container errors:'
+# Starts the line _get_pod_termination_reason writes after the reason.
+# _termination_reason_line() cuts the text here to read the reason back out.
+_LAST_STATE_MARKER = 'Last known state:'
 
 
 def pod_reason_identifies_cause(reason: Optional[str]) -> bool:
@@ -3565,7 +3568,7 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
             termination_reason += f' ({pod_status_message})'
 
     pod_reason = (f'{termination_reason}.\n'
-                  f'Last known state: {ready_state}.')
+                  f'{_LAST_STATE_MARKER} {ready_state}.')
 
     # Check container statuses for exit codes/errors
     if pod.status and pod.status.container_statuses:
@@ -4252,9 +4255,25 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
     return reason
 
 
-def _first_line(text: str) -> str:
-    """The first line of ``text``, without the period that ends it."""
-    return text.split('\n', 1)[0].strip().rstrip('.')
+def _termination_reason_line(text: str) -> str:
+    """The reason out of what _get_pod_termination_reason wrote, on one line.
+
+    Cuts the text at the last-known-state line that follows the reason rather
+    than at the first newline, because the reason itself ends up holding a
+    condition or status message copied straight off the pod, and a message
+    that spans lines would otherwise be cut mid-sentence -- after an opening
+    parenthesis that never closes. What is left is flattened to one line and
+    loses the single period that ends it, since the caller reads it into a
+    sentence of its own.
+
+    Falls back to the first line when the text does not have the shape that
+    helper writes, which is what a wrapper around it may return.
+    """
+    reason, marker, _ = text.partition(f'\n{_LAST_STATE_MARKER}')
+    if not marker:
+        reason = text.split('\n', 1)[0]
+    reason = ' '.join(reason.split())
+    return reason[:-1] if reason.endswith('.') else reason
 
 
 def _get_pod_deletion_reason(
@@ -4277,8 +4296,9 @@ def _get_pod_deletion_reason(
     the pod is precisely the thing that is missing.
 
     What _get_pod_termination_reason returns for the pod is passed through
-    unchanged (its first line is the reason), so a wrapper that rewrites that
-    text sees its own wording in the launch error too.
+    unchanged (the reason is the part it writes ahead of the pod's last known
+    state), so a wrapper that rewrites that text sees its own wording in the
+    launch error too.
 
     Never raises: it runs on a launch that is already failing, and what the
     user needs to hear is that their pod was deleted, not a transport error
@@ -4307,16 +4327,16 @@ def _get_pod_deletion_reason(
                     pod, cluster_name)
                 logger.debug(f'Pod {pod_name} terminated: '
                              f'{termination_reason}')
-                # The first line of what that helper returns is the reason
-                # itself; the lines after it are the pod's last known state
-                # and its container errors, which belong in the cluster event
-                # it just wrote and not in a one-line reason. Preferred over
-                # the condensed status below because it is exactly the text
-                # the status refresh reports for the same pod (see
-                # query_instances), so a user who sees this launch fail and
-                # then runs `sky status` is told the same thing twice rather
-                # than two differently worded things.
-                candidate = _first_line(termination_reason)
+                # What that helper writes ahead of the last known state
+                # is the reason itself; that state and the container errors
+                # after it belong in the cluster event it just wrote and not
+                # in a one-line reason. Preferred over the condensed status
+                # below because it is exactly the text the status refresh
+                # reports for the same pod (see query_instances), so a user
+                # who sees this launch fail and then runs `sky status` is
+                # told the same thing twice rather than two differently
+                # worded things.
+                candidate = _termination_reason_line(termination_reason)
                 if candidate.startswith(_TERMINATION_FALLBACK):
                     # It found no cause; the condensed status may still hold
                     # container-level detail (an OOM kill, say).

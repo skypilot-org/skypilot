@@ -3208,6 +3208,31 @@ class TestGetPodDeletionReason:
             pod=pod) == 'Preempted by Kueue: reworded'
         assert not events.called
 
+    def test_a_message_that_spans_lines_comes_through_whole(self, monkeypatch):
+        """The reason carries a message copied straight off the pod, and
+        nothing stops whoever wrote the condition from writing more than one
+        line. Cutting at the first newline would end the reason inside the
+        parenthesis the message opened."""
+        events, _ = self._setup(monkeypatch, [])
+        pod = TestWaitForPodsToScheduleDeletedPods._make_terminating_pod(
+            'pod-0',
+            'my-cluster',
+            reason='WorkloadEvictedDueToPodsReadyTimeout',
+            message='Exceeded the PodsReady timeout default/wl\nand gave up')
+
+        reason = instance._get_pod_deletion_reason(context='ctx',
+                                                   namespace='ns',
+                                                   cluster_name='cn',
+                                                   pod_name='pod-0',
+                                                   pod=pod)
+        assert reason == ('Preempted by Kueue: '
+                          'WorkloadEvictedDueToPodsReadyTimeout '
+                          '(Exceeded the PodsReady timeout default/wl '
+                          'and gave up)')
+        assert '\n' not in reason
+        assert reason.count('(') == reason.count(')')
+        assert not events.called
+
     def test_a_container_failure_answers_when_the_termination_does_not(
             self, monkeypatch):
         """Nothing deleted this pod on purpose: its container was killed for
