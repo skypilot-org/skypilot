@@ -15,6 +15,7 @@ History:
 """
 
 import logging
+import os
 import threading
 import typing
 from typing import Dict, List, Optional, Tuple, Union
@@ -35,58 +36,92 @@ logger = logging.getLogger(__name__)
 # Keep in sync with the update-oci-catalog GitHub Action in skypilot-catalog.
 _PULL_FREQUENCY_HOURS = 7
 
-_df = None
+_VMS_FILE = 'oci/vms.csv'
+
+# The catalog as published. read_catalog() re-downloads the file every
+# _PULL_FREQUENCY_HOURS and reloads this frame on the next access, so keep
+# the LazyDataFrame itself and never cache a materialized copy of it.
+_vms_df = common.read_catalog(_VMS_FILE,
+                              pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 _image_df = common.read_catalog('oci/images.csv',
                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+
+# The view served to callers: _vms_df restricted to the regions the tenancy
+# is subscribed to (or _vms_df itself when that cannot be determined). It is
+# rebuilt whenever the catalog file on disk changes, which is detected via
+# the file's mtime (the same signal read_catalog() uses to decide staleness).
+_df: Optional[Union['pd.DataFrame', common.LazyDataFrame]] = None
+_df_catalog_mtime: Optional[float] = None
+_subscribed_regions: Optional[List[str]] = None
 
 _lock = threading.RLock()
 
 
-def _get_df() -> 'pd.DataFrame':
+def _catalog_mtime() -> Optional[float]:
+    try:
+        return os.path.getmtime(common.get_catalog_path(_VMS_FILE))
+    except OSError:
+        return None
+
+
+def _fetch_subscribed_regions() -> List[str]:
+    """Returns the regions the configured tenancy is subscribed to.
+
+    Returns an empty list when the OCI SDK or credentials are missing, or the
+    call fails, in which case the catalog is served unfiltered.
+    """
+    try:
+        oci_adaptor.oci.load_module()
+    except ImportError:
+        return []
+
+    try:
+        config_profile = oci_utils.oci_config.get_profile()
+        client = oci_adaptor.get_identity_client(profile=config_profile)
+
+        subscriptions = client.list_region_subscriptions(
+            tenancy_id=oci_adaptor.get_oci_config(
+                profile=config_profile)['tenancy']).data
+
+        return [r.region_name for r in subscriptions]
+
+    except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
+            oci_adaptor.oci.exceptions.InvalidConfig) as e:
+        # This should only happen in testing where oci config is
+        # missing, because it means the 'sky check' will fail if
+        # enter here (meaning OCI disabled).
+        logger.debug(f'It is OK goes here when testing: {str(e)}')
+        return []
+
+    except oci_adaptor.oci.exceptions.ServiceError as e:
+        # Should never expect going here. However, we still catch
+        # it so that if any OCI call failed, the program can still
+        # proceed with try-and-error way.
+        logger.warning(f'Unexpected exception when handle catalog: {str(e)}')
+        return []
+
+
+def _get_df() -> Union['pd.DataFrame', common.LazyDataFrame]:
+    global _df, _df_catalog_mtime, _subscribed_regions
     with _lock:
-        global _df
-        if _df is not None:
+        # Read through the lazy frame first: this is what gives
+        # read_catalog() the chance to replace the file on disk with a fresh
+        # copy. Only then is the mtime a faithful generation signal.
+        regions = _vms_df['Region']
+        mtime = _catalog_mtime()
+        if _df is not None and mtime == _df_catalog_mtime:
             return _df
 
-        df = common.read_catalog('oci/vms.csv',
-                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
-        try:
-            oci_adaptor.oci.load_module()
-        except ImportError:
-            _df = df
-            return _df
-
-        try:
-            config_profile = oci_utils.oci_config.get_profile()
-            client = oci_adaptor.get_identity_client(profile=config_profile)
-
-            subscriptions = client.list_region_subscriptions(
-                tenancy_id=oci_adaptor.get_oci_config(
-                    profile=config_profile)['tenancy']).data
-
-            subscribed_regions = [r.region_name for r in subscriptions]
-
-        except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
-                oci_adaptor.oci.exceptions.InvalidConfig) as e:
-            # This should only happen in testing where oci config is
-            # missing, because it means the 'sky check' will fail if
-            # enter here (meaning OCI disabled).
-            logger.debug(f'It is OK goes here when testing: {str(e)}')
-            subscribed_regions = []
-
-        except oci_adaptor.oci.exceptions.ServiceError as e:
-            # Should never expect going here. However, we still catch
-            # it so that if any OCI call failed, the program can still
-            # proceed with try-and-error way.
-            logger.warning(
-                f'Unexpected exception when handle catalog: {str(e)}')
-            subscribed_regions = []
-
-        if subscribed_regions:
-            _df = df[df['Region'].isin(subscribed_regions)]
+        # The catalog changed (or this is the first call): re-derive the
+        # filtered view. The subscribed-region lookup is an OCI API call, so
+        # it is only repeated when the catalog actually changed, i.e. at most
+        # once per pull.
+        _subscribed_regions = _fetch_subscribed_regions()
+        if _subscribed_regions:
+            _df = _vms_df[regions.isin(_subscribed_regions)]
         else:
-            _df = df
-
+            _df = _vms_df
+        _df_catalog_mtime = mtime
         return _df
 
 
