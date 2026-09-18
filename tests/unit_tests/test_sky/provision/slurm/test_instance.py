@@ -321,6 +321,31 @@ class TestTerminateInstances:
         assert any('.sky_snapshots/test-cluster' in command
                    for command in remove_commands)
 
+    def test_snapshot_cleanup_denied_after_cancellation(self, mock_client):
+        mock_client.get_jobs_state_by_name.return_value = ['PENDING']
+        mock_client.test_login_runner.run.return_value = (
+            1, '', 'sudo: a password is required')
+        instance.terminate_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+        mock_client.cancel_jobs_by_name.assert_called_once_with(_CLUSTER,
+                                                                signal=None)
+        mock_client.test_login_runner.run.assert_called_once_with(
+            ['rm', '-rf', '--', '/home/test/.sky_snapshots/test-cluster'],
+            require_outputs=True,
+            stream_logs=False)
+
+    def test_local_snapshot_cleanup_failure(self, mock_client, monkeypatch):
+        runner = mock.MagicMock()
+        runner.run.return_value = (1, '', 'Permission denied')
+        monkeypatch.setattr(instance.slurm_utils, 'is_inside_slurm_cluster',
+                            lambda: True)
+        monkeypatch.setattr(instance, '_make_client_and_login_runner',
+                            lambda *args: (mock_client, runner))
+        mock_client.get_jobs_state_by_name.return_value = ['PENDING']
+        instance.terminate_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+        mock_client.cancel_jobs_by_name.assert_called_once_with(_CLUSTER,
+                                                                signal=None)
+        runner.run.assert_called_once()
+
     @pytest.mark.parametrize('job_state', ['PENDING', 'CONFIGURING'])
     def test_pending_cancels_without_signal(self, mock_client, job_state):
         mock_client.get_jobs_state_by_name.return_value = [job_state]
@@ -1363,7 +1388,7 @@ class TestQueryInstances:
         sleep = mock.MagicMock()
         monkeypatch.setattr(instance.time, 'sleep', sleep)
         provider_config = {
-            **_PROVIDER_CONFIG,
+            **_CONTAINER_PROVIDER_CONFIG,
             'sky_base_dir': '/home/test',
         }
 
@@ -1413,6 +1438,14 @@ class TestQueryInstances:
                 (instance.status_lib.ClusterStatus.UP, None)
         }
         read_manifest.assert_not_called()
+
+    def test_container_snapshot_denial_keeps_status_unknown(self, mock_client):
+        mock_client.query_jobs.return_value = []
+        mock_client.test_login_runner.run.return_value = (
+            2, '', 'sudo: a password is required')
+        with pytest.raises(exceptions.CommandError):
+            instance.query_instances.__wrapped__(
+                _CLUSTER, _CLUSTER, provider_config=_CONTAINER_PROVIDER_CONFIG)
 
     def test_retries_missing_job(self, mock_client, monkeypatch):
         running_queries = 0
@@ -1469,7 +1502,7 @@ class TestQueryInstances:
         assert not result
         assert mock_client.query_jobs.call_count == 7
         mock_client.get_job_reason.assert_called_once_with('386700')
-        read_manifest.assert_called_once()
+        read_manifest.assert_not_called()
         sleep.assert_not_called()
 
     def test_does_not_retry_by_default(self, mock_client, monkeypatch):
@@ -1502,7 +1535,7 @@ class TestQueryInstances:
         assert not result
         expected_rounds = 1 + instance._MAX_QUERY_INSTANCES_RETRIES
         assert mock_client.query_jobs.call_count == 7 * expected_rounds
-        read_manifest.assert_called_once()
+        read_manifest.assert_not_called()
 
 
 class TestRecordPendingReason:

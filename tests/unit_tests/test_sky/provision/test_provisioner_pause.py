@@ -75,7 +75,7 @@ def _attempt_rows():
                 global_user_state.launch_attempt_table.c.attempt_seq)).all()
 
 
-def _call_bulk_provision(tmp_path):
+def _call_bulk_provision(tmp_path, prev_cluster_ever_up=False):
     return provisioner.bulk_provision(cloud=clouds.Kubernetes(),
                                       region=clouds.Region('us'),
                                       zones=None,
@@ -83,7 +83,7 @@ def _call_bulk_provision(tmp_path):
                                           'c', 'c-on-cloud'),
                                       num_nodes=1,
                                       cluster_yaml='/fake/cluster.yaml',
-                                      prev_cluster_ever_up=False,
+                                      prev_cluster_ever_up=prev_cluster_ever_up,
                                       log_dir=str(tmp_path))
 
 
@@ -217,3 +217,21 @@ def test_cancellation_leaves_the_attempt_open_for_the_sweep(
     rows = _attempt_rows()
     assert len(rows) == 1
     assert rows[0].outcome is None
+
+
+@pytest.mark.parametrize('previously_up', [False, True])
+def test_bulk_provision_passes_previous_cluster_state(patched_bulk_provision,
+                                                      fresh_state_db,
+                                                      monkeypatch, tmp_path,
+                                                      previously_up):
+
+    def provision(cloud, region, cluster_name, config):
+        assert config.prev_cluster_ever_up is previously_up
+        raise exceptions.ExecutionPausedError('Paused for test.',
+                                              hint='resume later',
+                                              retry_wait_seconds=5)
+
+    monkeypatch.setattr(provisioner, '_bulk_provision', provision)
+    with pytest.raises(exceptions.ExecutionPausedError):
+        _call_bulk_provision(tmp_path, previously_up)
+    patched_bulk_provision.assert_not_called()

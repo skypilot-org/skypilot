@@ -11,6 +11,7 @@ import unittest.mock as mock
 import pytest
 
 from sky import clouds
+from sky import exceptions
 from sky import models
 from sky import resources as resources_lib
 from sky import skypilot_config
@@ -1527,6 +1528,67 @@ class TestCreateVirtualInstance:
             (0, '', ''))
         mock_runner.get_remote_home_dir.return_value = '/home/testuser'
         mock_ssh_runner.return_value = mock_runner
+
+    @pytest.mark.parametrize('container', [False, True])
+    @pytest.mark.parametrize('previously_up', [False, True])
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_snapshot_permission_denied_on_launch(self, mock_ssh_runner,
+                                                  mock_slurm_client,
+                                                  mock_get_partition_info,
+                                                  mock_get_proctrack_type,
+                                                  mock_wait_for_job_nodes,
+                                                  previously_up, container):
+        del mock_wait_for_job_nodes
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'cpus')
+        mock_get_proctrack_type.return_value = 'cgroup'
+        config = self._make_non_container_config(2)
+        config.prev_cluster_ever_up = previously_up
+        if container:
+            config.node_config['image_id'] = 'ubuntu:24.04'
+        runner = mock_ssh_runner.return_value
+        runner.run.side_effect = lambda cmd, **kwargs: (
+            (2, '', 'sudo: a password is required')
+            if isinstance(cmd, str) and '.sky_snapshots/' in cmd else
+            (0, '', ''))
+
+        if previously_up:
+            with pytest.raises(exceptions.CommandError):
+                self._run_and_capture_script('test-cluster', config)
+            mock_slurm_client.return_value.submit_job.assert_not_called()
+        else:
+            script = self._run_and_capture_script('test-cluster', config)
+            mock_slurm_client.return_value.submit_job.assert_called_once()
+            if container:
+                assert '--container-image=ubuntu:24.04' in script
+            assert 'rank0.sqsh' not in script
+
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_corrupt_snapshot_blocks_fresh_launch(self, mock_ssh_runner,
+                                                  mock_slurm_client,
+                                                  mock_get_partition_info,
+                                                  mock_get_proctrack_type,
+                                                  mock_wait_for_job_nodes):
+        del mock_wait_for_job_nodes
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'cpus')
+        mock_get_proctrack_type.return_value = 'cgroup'
+        mock_ssh_runner.return_value.run.return_value = (0, '{', '')
+        mock_ssh_runner.return_value.run.side_effect = None
+        with pytest.raises(RuntimeError, match='not valid JSON'):
+            self._run_and_capture_script('test-cluster',
+                                         self._make_non_container_config(2))
+        mock_slurm_client.return_value.submit_job.assert_not_called()
 
     def _run_and_capture_script(self, cluster_name, config) -> str:
         """Run _create_virtual_instance and capture the generated script."""

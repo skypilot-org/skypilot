@@ -5,7 +5,7 @@ import math
 import os
 import re
 import shlex
-import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -969,9 +969,18 @@ def _create_virtual_instance(
                                                  cluster_name_on_cloud)
     snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud)
     snapshot_manifest_path = _snapshot_manifest_path(snapshot_dir)
-    snapshot_manifest = _read_snapshot_manifest(login_node_runner,
-                                                snapshot_dir,
-                                                expected_num_nodes=num_nodes)
+    try:
+        snapshot_manifest = _read_snapshot_manifest(
+            login_node_runner, snapshot_dir, expected_num_nodes=num_nodes)
+    except (exceptions.CommandError, OSError, subprocess.TimeoutExpired) as e:
+        # Existing clusters may depend on a snapshot for their container state.
+        if config.prev_cluster_ever_up:
+            raise
+        logger.warning(
+            'Could not check for a Slurm container snapshot at '
+            f'{snapshot_dir}; continuing with a fresh allocation. '
+            f'Details: {common_utils.format_exception(e, use_bracket=True)}')
+        snapshot_manifest = None
     if snapshot_manifest is not None:
         _validate_snapshot_files(login_node_runner, snapshot_dir,
                                  snapshot_manifest)
@@ -1504,7 +1513,7 @@ def query_instances(
         if non_terminated_statuses:
             return non_terminated_statuses
 
-        if not snapshot_checked:
+        if not snapshot_checked and provider_config.get('container_image'):
             # A snapshot is the stopped steady state. Check it before retrying
             # so stopped clusters do not pay for additional Slurm queries.
             login_node_runner = _make_login_node_runner(provider_config)
@@ -2210,12 +2219,8 @@ def terminate_instances(
                       pre_batch_cancel=pre_batch_cancel)
     sky_base_dir = _resolve_sky_base_dir(client, provider_config)
     snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud)
-    if inside_slurm_cluster:
-        if os.path.exists(snapshot_dir):
-            shutil.rmtree(snapshot_dir)
-    else:
-        _run_on_login_node(login_node_runner, ['rm', '-rf', '--', snapshot_dir],
-                           'Failed to remove Slurm container snapshot.')
+    _remove_snapshot_path_best_effort(login_node_runner, snapshot_dir,
+                                      'Slurm container snapshot')
 
 
 def open_ports(
