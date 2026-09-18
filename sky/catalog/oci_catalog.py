@@ -31,13 +31,16 @@ logger = logging.getLogger(__name__)
 
 _df = None
 _image_df = common.read_catalog('oci/images.csv')
+# Set once a failed subscribed-region lookup has been reported; the lookup is
+# retried on every call until it succeeds (see _get_df), so warn only once.
+_subscription_lookup_warned = False
 
 _lock = threading.RLock()
 
 
 def _get_df() -> 'pd.DataFrame':
     with _lock:
-        global _df
+        global _df, _subscription_lookup_warned
         if _df is not None:
             return _df
 
@@ -67,10 +70,16 @@ def _get_df() -> 'pd.DataFrame':
             subscribed_regions = []
 
         except oci_adaptor.OCISessionTokenError as e:
-            # The session token is missing or expired. `sky check` tells the
-            # user how to fix it; fall back to the full catalog here.
-            logger.warning(str(e))
-            subscribed_regions = []
+            # The session token is missing or expired; `sky check` tells the
+            # user how to fix it. Serve the full catalog for now, but do not
+            # cache it: the lookup is retried on the next call, so filtering
+            # resumes once the user has a new token, without a restart.
+            if _subscription_lookup_warned:
+                logger.debug(str(e))
+            else:
+                logger.warning(str(e))
+                _subscription_lookup_warned = True
+            return df
 
         except oci_adaptor.oci.exceptions.ServiceError as e:
             # Should never expect going here. However, we still catch
