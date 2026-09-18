@@ -1208,9 +1208,9 @@ class SlurmClient:
                        LOGNAME=self.slurm_user)
         return env
 
-    def get_remote_home_dir(self) -> str:
+    def get_remote_home_dir(self, timeout: Optional[int] = None) -> str:
         """Returns the remote user's home directory."""
-        return self._runner.get_remote_home_dir()
+        return self._runner.get_remote_home_dir(timeout=timeout)
 
     def check_fuse_enabled(self) -> bool:
         """Check if FUSE is available on the cluster.
