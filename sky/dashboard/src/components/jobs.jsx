@@ -665,7 +665,7 @@ function JobNameLink({ href, name, id, tooltip, muted }) {
   // muted flag instead; this component only renders what it is given.
   if (!name) {
     return (
-      <NonCapitalizedTooltip content={`Job ${id} has no name`}>
+      <NonCapitalizedTooltip content={tooltip || `Job ${id} has no name`}>
         <Link href={href} className="text-gray-500 hover:underline block">
           -
         </Link>
