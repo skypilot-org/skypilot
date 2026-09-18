@@ -1791,7 +1791,11 @@ export function ManagedJobsTable({
             return (
               <TableCell className="whitespace-nowrap">
                 <div className="flex items-center">
-                  <JobNameLink href={`/jobs/${jobId}`} name={item.name} />
+                  <JobNameLink
+                    href={`/jobs/${jobId}`}
+                    name={item.name}
+                    id={jobId}
+                  />
                   {isBatch && <BatchBadge className="ml-2" />}
                   <button
                     onClick={() => toggleJobGroup(jobId)}
