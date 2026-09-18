@@ -237,6 +237,19 @@ SKY_APISERVER_EVENT_LOOP_LAG_SECONDS = prom.Histogram(
     buckets=_LATENCY_BUCKETS,
 )
 
+# Scheduling delay of the event loop the metrics server runs on -- the one
+# serving /metrics itself alongside the two federation routes. Deliberately a
+# metric of its own rather than a label on the series above: that series is
+# the request-serving loops' and carries no label to tell one loop from
+# another, and an alert is keyed on it, so feeding a second loop into it
+# would change what that alert means. Nothing else runs on this loop, so a
+# non-zero value here is a federation route (or a collector) blocking it.
+SKY_APISERVER_METRICS_LOOP_LAG_SECONDS = prom.Histogram(
+    'sky_apiserver_metrics_loop_lag_seconds',
+    'Scheduling delay of the event loop serving the metrics endpoints',
+    buckets=_LATENCY_BUCKETS,
+)
+
 # Per-process peak event loop lag observed in the most recent 30s tumbling
 # window. Kept as a low-cardinality companion to the (pid-less) lag histogram
 # so operators can still attribute spikes to a specific worker.
@@ -1025,6 +1038,24 @@ SKY_APISERVER_LOCAL_CONTEXT_PROBE_QUEUE_DEPTH = prom.Gauge(
 # verdict existed) | unknown (no verdict yet; served as remote for the
 # request). A context stuck at result="unknown" is one whose probes
 # never conclude.
+# When the federation routes last refreshed their view of which clusters to
+# scrape (see sky/server/metrics.py _FederationTargets). That refresh is
+# single-flight and is deliberately never cancelled or retried, so one hung
+# on an unreachable config database leaves both routes federating a frozen
+# cluster list -- with the event loop, /metrics and the scrape all healthy,
+# which is precisely what makes it invisible otherwise. Alert on
+# time() - this exceeding a few scrape intervals; 0 means no refresh has
+# ever completed. multiprocess_mode='livemax' rather than the 'liveall' used
+# elsewhere here: there is exactly one writer (the metrics server runs in the
+# main process), so a pid label would only add a dimension to strip back off,
+# and 'max' over live processes cannot pin a dead writer's timestamp.
+SKY_APISERVER_FEDERATION_TARGETS_LAST_SUCCESS_TIMESTAMP_SECONDS = prom.Gauge(
+    'sky_apiserver_federation_targets_last_success_timestamp_seconds',
+    'Unix timestamp of the last successful federation target refresh; 0 if '
+    'none has completed since process start',
+    multiprocess_mode='livemax',
+)
+
 SKY_APISERVER_LOCAL_CONTEXT_SERVED_TOTAL = prom.Counter(
     'sky_apiserver_local_context_served_total',
     'Verdicts served by the non-blocking request path, per context',
@@ -1649,6 +1680,11 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
 def stop_svc_port_forward(port_forward_process: subprocess.Popen,
                           timeout: int = 5) -> None:
     """Stops a port forward to a service in a Kubernetes cluster.
+
+    Blocking (up to roughly 2x timeout when kubectl ignores SIGTERM). Call it
+    from a thread, never from the metrics event loop -- see
+    stop_svc_port_forward_off_loop.
+
     Args:
         port_forward_process: The subprocess.Popen process to terminate
     """
@@ -1657,7 +1693,34 @@ def stop_svc_port_forward(port_forward_process: subprocess.Popen,
         port_forward_process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         port_forward_process.kill()
-        port_forward_process.wait()
+        try:
+            port_forward_process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # SIGKILL cannot be caught, so anything still unreaped here is
+            # stuck in the kernel (uninterruptible sleep). Waiting forever
+            # for it would pin this thread for the life of the process;
+            # leaving the zombie to be reaped later is the lesser cost.
+            logger.warning(
+                f'Port forward process {port_forward_process.pid} did not exit '
+                f'{timeout}s after SIGKILL; abandoning it.')
+
+
+def stop_svc_port_forward_off_loop(
+        port_forward_process: subprocess.Popen) -> None:
+    """Tears a port forward down without spending event-loop time on it.
+
+    The teardown cannot be awaited: asyncio.wait_for() cancels the federation
+    coroutine at the per-context budget, and an `await` in the `finally` that
+    follows re-raises CancelledError immediately -- the kubectl child would
+    leak. Running it inline instead keeps the guarantee but charges the
+    terminate-and-wait to the loop that also serves /metrics, once per
+    context. A detached thread keeps both: the teardown always runs to
+    completion, and the loop never waits for it.
+    """
+    threading.Thread(target=stop_svc_port_forward,
+                     args=(port_forward_process,),
+                     name='metrics-port-forward-stop',
+                     daemon=True).start()
 
 
 async def send_metrics_request_with_port_forward(
@@ -1741,12 +1804,12 @@ async def send_metrics_request_with_port_forward(
             return text
 
     finally:
-        # Clean up port forward synchronously to guarantee cleanup
-        # even if the task is cancelled by asyncio.wait_for().
-        # Using await here would risk CancelledError preventing
-        # cleanup.
+        # Hand the teardown to a detached thread: it must run even when this
+        # coroutine is being cancelled by asyncio.wait_for(), and it must not
+        # be charged to the loop that serves /metrics. See
+        # stop_svc_port_forward_off_loop.
         if port_forward_process:
-            stop_svc_port_forward(port_forward_process)
+            stop_svc_port_forward_off_loop(port_forward_process)
 
 
 # Matches an existing `cluster="..."` label token in a metric line's label

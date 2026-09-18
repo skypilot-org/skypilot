@@ -1,5 +1,6 @@
 """Unit tests for the metrics system."""
 
+import asyncio
 import base64
 import os
 import socket
@@ -1623,3 +1624,273 @@ def test_no_gauge_defaults_to_all_multiprocess_mode():
                        getattr(obj, '_multiprocess_mode', None) == 'all')
     assert not offenders, (
         f'Gauges left on the default multiprocess_mode="all": {offenders}')
+
+
+# ── nothing may block the loop that serves /metrics ─────────────────
+
+
+async def _await_until(predicate, timeout=10.0, interval=0.01):
+    """Polls `predicate` without blocking the loop.
+
+    _wait_until() sleeps synchronously, which would keep the loop from ever
+    entering the task that starts the worker thread being waited on.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        await asyncio.sleep(interval)
+    return predicate()
+
+
+def _slow_prologue(started, release, result=((), ())):
+    """A federation prologue that blocks until released."""
+
+    def prologue():
+        started.set()
+        release.wait(30)
+        return (list(result[0]), list(result[1]))
+
+    return prologue
+
+
+def test_federation_prologue_runs_off_the_event_loop():
+    """The config reload / kubeconfig read must happen in a worker thread."""
+    targets = metrics._FederationTargets()
+    ran_on = []
+
+    def prologue():
+        ran_on.append(threading.current_thread())
+        return (['ctx-a'], ['slurm-a'])
+
+    with patch.object(targets, '_prologue', prologue):
+        assert asyncio.run(targets.resolve()) == (['ctx-a'], ['slurm-a'])
+
+    assert ran_on, 'prologue never ran'
+    assert ran_on[0] is not threading.main_thread(), (
+        'prologue ran on the thread driving the event loop')
+
+
+def test_federation_prologue_is_single_flight():
+    """A scrape that finds a prologue in flight is served the last result.
+
+    Without this, a prologue hung on an unreachable database would add a
+    stuck thread per scrape and eventually starve the same executor the
+    port-forwards run in.
+    """
+    targets = metrics._FederationTargets()
+    started = threading.Event()
+    release = threading.Event()
+    prologue = _slow_prologue(started, release, (['fresh'], []))
+    calls = []
+
+    def counting_prologue():
+        calls.append(1)
+        return prologue()
+
+    async def scenario():
+        with patch.object(targets, '_prologue', counting_prologue):
+            targets._snapshot = (['stale'], [])
+            first = asyncio.create_task(targets.resolve())
+            assert await _await_until(started.is_set), 'prologue not started'
+
+            assert await targets.resolve() == (['stale'], [])
+            assert len(calls) == 1, 'a second prologue was started'
+
+            release.set()
+            assert await first == (['fresh'], [])
+            assert await targets.resolve() == (['fresh'], [])
+
+    asyncio.run(scenario())
+
+
+def test_federation_prologue_flag_is_owned_by_the_worker():
+    """Prometheus giving up cancels the handler, never the worker thread.
+
+    So cancellation must not release the single-flight guard: if it did, the
+    next scrape would start a second prologue alongside the first one, which
+    is still running.
+    """
+    targets = metrics._FederationTargets()
+    started = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def counting_prologue():
+        calls.append(1)
+        return _slow_prologue(started, release, (['fresh'], []))()
+
+    async def scenario():
+        with patch.object(targets, '_prologue', counting_prologue):
+            task = asyncio.create_task(targets.resolve())
+            assert await _await_until(started.is_set), 'prologue not started'
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+            assert targets._in_flight, (
+                'cancelling the scrape released the single-flight guard')
+            assert await targets.resolve() == ([], [])
+            assert len(calls) == 1, 'a second prologue was started'
+
+            release.set()
+            assert await _await_until(lambda: not targets._in_flight), (
+                'the worker never released the guard')
+            # Let the abandoned future settle before the loop closes.
+            await asyncio.sleep(0.05)
+
+    asyncio.run(scenario())
+
+
+def _single_gauge_value(gauge):
+    """Value of an unlabelled gauge (_gauge_value is name-specific)."""
+    for family in gauge.collect():
+        for sample in family.samples:
+            return sample.value
+    return None
+
+
+def test_federation_prologue_publishes_its_freshness(monkeypatch):
+    """A hung prologue freezes the cluster list silently; the timestamp is
+    the only thing that says so, since the loop, /metrics and the scrape
+    all stay healthy. So it must advance on success and not on failure."""
+    monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', True)
+    gauge = (metrics_utils.
+             SKY_APISERVER_FEDERATION_TARGETS_LAST_SUCCESS_TIMESTAMP_SECONDS)
+    targets = metrics._FederationTargets()
+
+    with patch.object(targets, '_prologue', lambda: (['ctx'], [])):
+        before = time.time()
+        asyncio.run(targets.resolve())
+    published = _single_gauge_value(gauge)
+    assert published is not None and published >= before, (
+        'success did not advance the timestamp')
+
+    def failing_prologue():
+        raise RuntimeError('config database is unreachable')
+
+    with patch.object(targets, '_prologue', failing_prologue):
+        with pytest.raises(RuntimeError):
+            asyncio.run(targets.resolve())
+    assert _single_gauge_value(gauge) == published, (
+        'a failed refresh advanced the freshness timestamp')
+
+
+def test_federation_prologue_failure_releases_the_guard():
+    """A failing prologue must not wedge the guard, and must not be
+    silently swallowed: the route answering 500 is the existing behavior."""
+    targets = metrics._FederationTargets()
+
+    def failing_prologue():
+        raise RuntimeError('config database is unreachable')
+
+    async def scenario():
+        with patch.object(targets, '_prologue', failing_prologue):
+            with pytest.raises(RuntimeError):
+                await targets.resolve()
+            assert not targets._in_flight
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('prologue_off_loop', [True, False])
+def test_gpu_metrics_prologue_does_not_hold_off_the_metrics_scrape(
+        monkeypatch, prologue_off_loop):
+    """/metrics must answer while /gpu-metrics is stuck in its prologue.
+
+    Both routes are served by one uvicorn worker on one event loop, so a
+    synchronous call in the federation handler is not just that route's
+    problem: while the loop is blocked, /metrics is not even read off the
+    socket, and at 20s (the chart's scrape_timeout) the target flaps to
+    up == 0 -- hiding exactly the outage the metrics are needed for.
+
+    The prologue_off_loop=False arm is the control: it restores the
+    pre-fix shape (prologue inline on the loop) and asserts the harness
+    can actually see the blocking. Without it a passing test would prove
+    nothing.
+    """
+    monkeypatch.delenv('PROMETHEUS_MULTIPROC_DIR', raising=False)
+    block_seconds = 3.0
+    started = threading.Event()
+    release = threading.Event()
+    prologue = _slow_prologue(started, release)
+
+    targets = metrics._FEDERATION_TARGETS
+    monkeypatch.setattr(targets, '_prologue', prologue)
+    if not prologue_off_loop:
+
+        async def inline_resolve():
+            return targets._prologue()
+
+        monkeypatch.setattr(targets, 'resolve', inline_resolve)
+
+    def fetch(port, path, timeout):
+        with urllib.request.urlopen(f'http://127.0.0.1:{port}{path}',
+                                    timeout=timeout) as response:
+            return response.status
+
+    server = metrics.start_metrics_server('127.0.0.1', 0)
+    federation = None
+    try:
+        assert _wait_until(lambda: server.started), 'server never started'
+        port = server.servers[0].sockets[0].getsockname()[1]
+
+        federation = threading.Thread(target=fetch,
+                                      args=(port, '/gpu-metrics', 60),
+                                      daemon=True)
+        federation.start()
+        assert _wait_until(started.is_set), 'prologue never started'
+
+        begin = time.monotonic()
+        assert fetch(port, '/metrics', 60) == 200
+        elapsed = time.monotonic() - begin
+    finally:
+        release.set()
+        if federation is not None:
+            federation.join(timeout=60)
+        metrics.stop_metrics_server()
+
+    if prologue_off_loop:
+        assert elapsed < block_seconds / 3, (
+            f'/metrics took {elapsed:.2f}s while /gpu-metrics was in its '
+            f'prologue')
+    else:
+        assert elapsed > block_seconds / 2, (
+            f'/metrics answered in {elapsed:.2f}s with the prologue inline '
+            f'on the loop; the harness cannot see blocking, so the other '
+            f'arm proves nothing')
+
+
+def test_metrics_loop_lag_has_its_own_metric(monkeypatch):
+    """The metrics loop must not be blended into the request loops' series.
+
+    sky_apiserver_event_loop_lag_seconds has no label to tell one loop from
+    another and APIServerEventLoopLagHigh is keyed on it, so feeding a
+    second loop into it would change what that alert means.
+    """
+    request_loops = metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS
+    metrics_loop = metrics_utils.SKY_APISERVER_METRICS_LOOP_LAG_SECONDS
+    assert metrics_loop is not request_loops
+
+    # The observer is gated on METRICS_ENABLED, which is off by default.
+    monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', True)
+    observe = metrics._metrics_loop_lag_observer()
+    before = _histogram_count(request_loops)
+    observe(0.25)
+
+    samples = {
+        sample.name: sample.value for metric in metrics_loop.collect()
+        for sample in metric.samples
+    }
+    assert samples['sky_apiserver_metrics_loop_lag_seconds_count'] >= 1.0
+    assert samples['sky_apiserver_metrics_loop_lag_seconds_sum'] >= 0.25
+    assert _histogram_count(request_loops) == before, (
+        'the metrics loop was recorded into the request loops\' series')
+
+
+def _histogram_count(histogram):
+    for metric in histogram.collect():
+        for sample in metric.samples:
+            if sample.name.endswith('_count'):
+                return sample.value
+    return 0.0
