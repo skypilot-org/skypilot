@@ -60,8 +60,7 @@ def _common():
        return_value=['c1', 'c2', 'c3'])
 @patch('sky.clouds.slurm.slurm_utils.get_slurm_ssh_config')
 @patch('sky.clouds.slurm.slurm.SlurmClient')
-def test_all_clusters_enabled_in_input_order(mock_client_class, mock_ssh,
-                                             *_):
+def test_all_clusters_enabled_in_input_order(mock_client_class, mock_ssh, *_):
     mock_ssh.return_value = _ssh_config()
     mock_client_class.side_effect = lambda *a, **k: _client()
 
@@ -69,13 +68,11 @@ def test_all_clusters_enabled_in_input_order(mock_client_class, mock_ssh,
 
     assert success
     assert list(ctx2text) == ['c1', 'c2', 'c3']
-    assert all('enabled' in t and 'disabled' not in t
-               for t in ctx2text.values())
+    assert all(
+        'enabled' in t and 'disabled' not in t for t in ctx2text.values())
     # One client per cluster, built from that cluster's ssh options.
     hosts = sorted(c.args[0] for c in mock_client_class.call_args_list)
-    assert hosts == [
-        'c1.example.com', 'c2.example.com', 'c3.example.com'
-    ]
+    assert hosts == ['c1.example.com', 'c2.example.com', 'c3.example.com']
     for c in mock_client_class.call_args_list:
         assert c.kwargs['slurm_user'] is None
 
@@ -86,8 +83,8 @@ def test_all_clusters_enabled_in_input_order(mock_client_class, mock_ssh,
        return_value=['good', 'bad', 'also-good'])
 @patch('sky.clouds.slurm.slurm_utils.get_slurm_ssh_config')
 @patch('sky.clouds.slurm.slurm.SlurmClient')
-def test_one_cluster_failing_does_not_affect_others(mock_client_class,
-                                                    mock_ssh, *_):
+def test_one_cluster_failing_does_not_affect_others(mock_client_class, mock_ssh,
+                                                    *_):
     mock_ssh.return_value = _ssh_config()
 
     def make_client(host, *args, **kwargs):
@@ -117,8 +114,8 @@ def test_one_cluster_failing_does_not_affect_others(mock_client_class,
        return_value=['only'])
 @patch('sky.clouds.slurm.slurm_utils.get_slurm_ssh_config')
 @patch('sky.clouds.slurm.slurm.SlurmClient')
-def test_all_clusters_failing_reports_not_success(mock_client_class,
-                                                  mock_ssh, *_):
+def test_all_clusters_failing_reports_not_success(mock_client_class, mock_ssh,
+                                                  *_):
     mock_ssh.return_value = _ssh_config()
     client = _client()
     client.info_and_env.side_effect = RuntimeError('boom')
@@ -164,13 +161,11 @@ def test_missing_ssh_config_key_message(mock_client_class, mock_ssh, *_):
 ])
 @patch('sky.clouds.slurm.skypilot_config.get_effective_region_config',
        return_value=None)
-@patch('sky.clouds.slurm.Slurm.existing_allowed_clusters',
-       return_value=['c'])
+@patch('sky.clouds.slurm.Slurm.existing_allowed_clusters', return_value=['c'])
 @patch('sky.clouds.slurm.slurm_utils.get_slurm_ssh_config')
 @patch('sky.clouds.slurm.slurm.SlurmClient')
-def test_shared_fs_messages_preserved(mock_client_class, mock_ssh,
-                                      mock_allowed, mock_region, fs_type,
-                                      expected):
+def test_shared_fs_messages_preserved(mock_client_class, mock_ssh, mock_allowed,
+                                      mock_region, fs_type, expected):
     del mock_allowed, mock_region
     mock_ssh.return_value = _ssh_config()
     client = _client(fs_type=fs_type)
@@ -205,7 +200,10 @@ def test_workdir_resolved_per_cluster_against_remote_env(
     def make_client(host, *args, **kwargs):
         del args, kwargs
         name = host.split('.')[0]
-        client = _client(env={'HOME': f'/home/{name}', 'SCRATCH': f'/scr/{name}'},
+        client = _client(env={
+            'HOME': f'/home/{name}',
+            'SCRATCH': f'/scr/{name}'
+        },
                          fs_type='fuseblk')
         clients[name] = client
         return client
@@ -229,8 +227,8 @@ def test_workdir_resolved_per_cluster_against_remote_env(
        return_value=[f'c{i}' for i in range(12)])
 @patch('sky.clouds.slurm.slurm_utils.get_slurm_ssh_config')
 @patch('sky.clouds.slurm.slurm.SlurmClient')
-def test_probes_run_in_parallel_with_bounded_pool(mock_client_class,
-                                                  mock_ssh, *_):
+def test_probes_run_in_parallel_with_bounded_pool(mock_client_class, mock_ssh,
+                                                  *_):
     mock_ssh.return_value = _ssh_config()
     lock = threading.Lock()
     in_flight = 0
@@ -292,8 +290,7 @@ def test_pool_bound_is_passed_to_run_in_parallel(mock_client_class, mock_ssh,
 
 @patch('sky.clouds.slurm.skypilot_config.get_effective_region_config',
        return_value=None)
-@patch('sky.clouds.slurm.Slurm.existing_allowed_clusters',
-       return_value=['c'])
+@patch('sky.clouds.slurm.Slurm.existing_allowed_clusters', return_value=['c'])
 @patch('sky.clouds.slurm.slurm_utils.get_slurm_ssh_config')
 @patch('sky.clouds.slurm.slurm.SlurmClient')
 def test_two_ssh_sessions_per_cluster(mock_client_class, mock_ssh, *_):
@@ -325,8 +322,8 @@ class TestSlurmClientInfoAndEnv:
         with patch.object(client,
                           '_run_slurm_cmds',
                           return_value=[(0, 'PARTITION AVAIL\n', ''),
-                                        (0, 'HOME=/home/svc\nX=a=b\nnoeq\n',
-                                         '')]) as mock_run:
+                                        (0, 'HOME=/home/svc\nX=a=b\nnoeq\n', '')
+                                       ]) as mock_run:
             info, env = client.info_and_env()
         mock_run.assert_called_once_with(['sinfo', 'env'])
         assert info == 'PARTITION AVAIL\n'
