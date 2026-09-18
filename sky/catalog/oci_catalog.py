@@ -246,14 +246,24 @@ def get_vcpus_mem_from_instance_type(
 
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
-    """Returns the image id from the tag."""
+    """Returns the image id from the tag, or None if `region` has none.
+
+    Platform images are catalogued per region, so a region the shape catalog
+    knows but the image catalog does not has no image for the tag; Marketplace
+    images are catalogued once, without a region, and serve every region.
+    """
+    df = _image_df[_image_df['Tag'].str.fullmatch(tag)]
+    if df.empty:
+        return None
     # Always try get region-specific imageid first (for backward compatible)
-    image_str = common.get_image_id_from_tag_impl(_image_df, tag, region)
+    image_str = common.get_image_id_from_tag_impl(df, tag, region)
     if image_str is None:
         # Support cross-region (general) imageid
-        image_str = common.get_image_id_from_tag_impl(_image_df, tag, None)
+        image_str = common.get_image_id_from_tag_impl(df[df['Region'].isna()],
+                                                      tag, None)
+    if image_str is None:
+        return None
 
-    df = _image_df[_image_df['Tag'].str.fullmatch(tag)]
     app_catalog_listing_id = df['AppCatalogListingId'].iloc[0]
     resource_version = df['ResourceVersion'].iloc[0]
 

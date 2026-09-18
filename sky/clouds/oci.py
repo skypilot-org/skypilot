@@ -622,15 +622,24 @@ class OCI(clouds.Cloud):
                                            region=region_name)
 
         if image_id_str.startswith('skypilot:'):
-            image_id_str = catalog.get_image_id_from_tag(image_id_str,
+            image_tag = image_id_str
+            image_id_str = catalog.get_image_id_from_tag(image_tag,
                                                          region_name,
                                                          clouds='oci')
-
-        # Image_id should be impossible be None, except for the case when
-        # user specify an image tag which does not exist in the image.csv
-        # catalog file which only possible in "test" / "evaluation" phase.
-        # Therefore, we use assert here.
-        assert image_id_str is not None
+            if image_id_str is None:
+                # Platform images are catalogued per region, and a region
+                # can be in the shape catalog before the image catalog has
+                # a row for it. Raise ResourcesUnavailableError so the
+                # launch fails with the cause instead of sending OCI a
+                # bogus image id; another region may well have the image,
+                # so failover is left on.
+                which = 'default image' if image_id is None else 'image'
+                raise exceptions.ResourcesUnavailableError(
+                    f'No {which} for tag {image_tag!r} in region '
+                    f'{region_name}: the OCI image catalog has no entry for '
+                    'it there. Set `image_id` in the task resources to the '
+                    f'OCID of an image available in {region_name}, or pick '
+                    'another region.')
 
         logger.debug(f'Got real image_id {image_id_str}')
         return image_id_str

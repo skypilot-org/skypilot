@@ -4,10 +4,12 @@ import os
 import time
 from unittest import mock
 
+import pandas as pd
 import pytest
 
 from sky.catalog import common as catalog_common
 from sky.catalog import oci_catalog
+from sky.clouds.utils import oci_utils
 from sky.utils import annotations
 
 _HEADER = ('InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,'
@@ -132,3 +134,66 @@ def test_fresh_catalog_does_not_repeat_subscription_lookup(isolated_catalog):
         assert set(first['Region']) == {'eu-frankfurt-1'}
         assert get.call_count == 1
         assert subscribed.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Image lookups
+# ---------------------------------------------------------------------------
+
+_CPU_TAG = 'skypilot:cpu-ubuntu-2204'
+_GPU_TAG = 'skypilot:gpu-ubuntu-2204'
+_IMAGES = pd.DataFrame([
+    {
+        'Tag': _CPU_TAG,
+        'Region': 'us-ashburn-1',
+        'OS': 'ubuntu',
+        'OSVersion': '22.04',
+        'ImageId': 'ocid1.image.oc1.iad.aaaa',
+        'AppCatalogListingId': None,
+        'ResourceVersion': None,
+    },
+    {
+        # Marketplace images are region neutral and catalogued once.
+        'Tag': _GPU_TAG,
+        'Region': None,
+        'OS': 'ubuntu',
+        'OSVersion': '22.04',
+        'ImageId': 'ocid1.image.oc1..bbbb',
+        'AppCatalogListingId': 'ocid1.appcataloglisting.oc1..cccc',
+        'ResourceVersion': '24.05.1',
+    },
+])
+
+
+@pytest.fixture(name='image_catalog')
+def fixture_image_catalog(monkeypatch):
+    monkeypatch.setattr(oci_catalog, '_image_df', _IMAGES.copy())
+
+
+@pytest.mark.usefixtures('image_catalog')
+def test_image_id_for_a_region_with_a_platform_image():
+    image = oci_catalog.get_image_id_from_tag(_CPU_TAG, 'us-ashburn-1')
+    assert image.split(oci_utils.oci_config.IMAGE_TAG_SPERATOR)[0] == (
+        'ocid1.image.oc1.iad.aaaa')
+
+
+@pytest.mark.usefixtures('image_catalog')
+def test_marketplace_image_serves_every_region():
+    image = oci_catalog.get_image_id_from_tag(_GPU_TAG, 'af-casablanca-1')
+    assert image == '|'.join([
+        'ocid1.image.oc1..bbbb', 'ocid1.appcataloglisting.oc1..cccc', '24.05.1'
+    ])
+
+
+@pytest.mark.usefixtures('image_catalog')
+def test_no_image_for_a_region_without_a_platform_image_row():
+    # Neither a row for the region nor a region-neutral one: None, rather
+    # than another region's image or a formatted 'None|...' string.
+    assert oci_catalog.get_image_id_from_tag(_CPU_TAG,
+                                             'af-casablanca-1') is None
+
+
+@pytest.mark.usefixtures('image_catalog')
+def test_no_image_for_an_unknown_tag():
+    assert oci_catalog.get_image_id_from_tag('skypilot:no-such-tag',
+                                             'us-ashburn-1') is None

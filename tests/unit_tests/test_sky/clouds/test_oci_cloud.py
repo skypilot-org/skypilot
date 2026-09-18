@@ -122,3 +122,46 @@ def test_arm_shape_uses_arm_image_once_catalogued(instance_type, accelerators,
                                        arm_image_in_catalog=True)
     assert tag == expected_tag
     is_valid.assert_called_once_with(expected_tag, _REGION, clouds='oci')
+
+
+def _image_id(image_id, region, instance_type, catalog_image):
+    cloud = oci_cloud.OCI()
+    with mock.patch.object(oci_cloud.OCI,
+                           'get_accelerators_from_instance_type',
+                           return_value=None), \
+         mock.patch.object(oci_cloud.catalog,
+                           'get_image_id_from_tag',
+                           return_value=catalog_image) as lookup:
+        return cloud._get_image_id(image_id, region, instance_type), lookup
+
+
+def test_image_id_resolves_the_tag_for_the_region():
+    image, lookup = _image_id(None,
+                              _REGION,
+                              'VM.Standard.E4.Flex$_8_32',
+                              catalog_image='ocid1.image.oc1.iad.aaaa|nan|nan')
+    assert image == 'ocid1.image.oc1.iad.aaaa|nan|nan'
+    lookup.assert_called_once_with(_CPU_TAG, _REGION, clouds='oci')
+
+
+@pytest.mark.parametrize('image_id,which', [
+    (None, 'No default image for tag'),
+    ({
+        None: _CPU_TAG
+    }, 'No image for tag'),
+])
+def test_region_without_image_row_is_an_actionable_error(image_id, which):
+    # Seven regions are in the shape catalog but have no platform-image rows
+    # in oci/images.csv; a launch there must fail with the cause rather than
+    # hand OCI a bogus image id.
+    region = 'af-casablanca-1'
+    with pytest.raises(exceptions.ResourcesUnavailableError) as exc_info:
+        _image_id(image_id,
+                  region,
+                  'VM.Standard.E4.Flex$_8_32',
+                  catalog_image=None)
+    message = str(exc_info.value)
+    assert message.startswith(f'{which} {_CPU_TAG!r} in region {region}')
+    assert 'image_id' in message
+    # Other regions do have the image, so failover stays on.
+    assert not exc_info.value.no_failover
