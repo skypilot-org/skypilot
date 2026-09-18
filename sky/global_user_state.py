@@ -8,6 +8,7 @@ Concepts:
 """
 import asyncio
 import enum
+import functools
 import json
 import os
 import pickle
@@ -28,12 +29,14 @@ from sqlalchemy.ext import declarative
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.metrics import launch_phases
 from sky.metrics import utils as metrics_lib
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import asyncio_utils
 from sky.utils import common_utils
 from sky.utils import context_utils
+from sky.utils import log_utils
 from sky.utils import registry
 from sky.utils import status_lib
 from sky.utils import yaml_utils
@@ -53,6 +56,13 @@ _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 _ALLOWED_CLOUDS_KEY_PREFIX = 'allowed_clouds_'
 
 DEFAULT_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
+# Matches the event retentions above so the launch timeline and the events it
+# sits alongside expire together by default.
+DEFAULT_LAUNCH_ATTEMPT_RETENTION_HOURS = 30 * 24.0
+# How long an attempt may stay open before it is treated as abandoned. Well
+# past any provision timeout, because a launch parked waiting for quota is
+# legitimately open for hours and must not be swept out from under itself.
+ABANDONED_LAUNCH_ATTEMPT_HOURS = 24.0
 DEBUG_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
 TERMINAL_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
 # How often the cluster-event retention daemon wakes up. Fixed, and
@@ -262,6 +272,40 @@ class ClusterEventType(enum.Enum):
     # LAUNCHING-state badge tooltip on the dashboard.
     LAUNCH_PROGRESS = 'LAUNCH_PROGRESS'
 
+    # A boundary of a launch that has been passed, carrying how long the phase
+    # it closes took. Kept apart from LAUNCH_PROGRESS above, which is consumed
+    # latest-wins as a managed job's `details` column -- "what is this launch
+    # waiting on *now*". A row saying a wait has ended is by construction not
+    # that, and would sit in that column as a stale answer for the rest of the
+    # launch.
+    LAUNCH_MILESTONE = 'LAUNCH_MILESTONE'
+
+
+# Which retention window each event type is swept under.
+#
+# The sweep is per type -- `cleanup_cluster_events_with_retention` takes one --
+# so a type with no entry here is never swept and its rows are retained
+# forever. That failure is silent: no error, no red test, just a table that
+# grows. Listing the types here rather than as calls in the daemon lets
+# `test_every_event_type_has_a_retention_window` assert the mapping covers the
+# enum, so the next type added cannot be missed the way LAUNCH_MILESTONE nearly
+# was.
+#
+# Keys are the config option each window is read from; see
+# `cluster_event_retention_daemon`.
+CLUSTER_EVENT_RETENTION_GROUPS: Dict[str, Tuple['ClusterEventType', ...]] = {
+    'cluster_event_retention_hours': (ClusterEventType.STATUS_CHANGE,),
+    # Short-lived observability, of no business-record value once the launch is
+    # over. LAUNCH_MILESTONE shares the window rather than the meaning: it is a
+    # record of a boundary, but only useful for as long as anyone is looking at
+    # that launch.
+    'cluster_debug_event_retention_hours': (
+        ClusterEventType.DEBUG,
+        ClusterEventType.LAUNCH_PROGRESS,
+        ClusterEventType.LAUNCH_MILESTONE,
+    ),
+    'cluster_terminal_event_retention_hours': (ClusterEventType.TERMINAL,),
+}
 
 # Prefix of the STATUS_CHANGE event reason recorded when a cluster is flipped
 # to INIT because a status refresh found it in an abnormal state -- e.g. a node
@@ -289,6 +333,129 @@ cluster_event_table = sqlalchemy.Table(
     sqlalchemy.Column('transitioned_at', sqlalchemy.Integer, primary_key=True),
     sqlalchemy.Column('type', sqlalchemy.Text),
     sqlalchemy.Column('request_id', sqlalchemy.Text, server_default=None),
+    # The primary key is (cluster_hash, reason, transitioned_at), but the two
+    # readers that have to survive a cluster's teardown look events up by
+    # `name` instead -- see get_latest_cluster_events and
+    # get_cluster_events_by_name. Without this they scan the whole table.
+    sqlalchemy.Index('ix_cluster_events_name_type', 'name', 'type',
+                     'transitioned_at'),
+)
+
+# One row per provisioning attempt, recording the milestones a launch passes
+# through so launch latency can be broken down after the fact.
+#
+# Why a table rather than in-memory timers: a launch that parks on an external
+# condition (e.g. waiting for quota admission) raises ExecutionPausedError,
+# which unwinds bulk_provision entirely and resumes as a fresh call in a
+# possibly different executor worker. Milestones held in memory do not survive
+# that, so the wait that matters most is exactly the one that would be lost.
+#
+# Every segment is a subtraction between two persisted timestamps, so whoever
+# closes a segment can read the opening one back instead of carrying state.
+#
+# attempt_id is minted per real provisioning attempt (one per failover
+# iteration). A pause/resume continues the existing row -- the resources are
+# kept, not torn down, so it is one attempt.
+
+# Attempts the metrics daemon still has to turn into observations: finished,
+# and not yet claimed. Written once and used twice -- as the claim query's
+# WHERE and as its index's predicate -- because PostgreSQL matches a partial
+# index only when the two agree, and two hand-kept copies of a predicate are
+# how they come to disagree.
+UNOBSERVED_ATTEMPT_PREDICATE = ('outcome IS NOT NULL AND '
+                                'metrics_observed_at IS NULL')
+
+launch_attempt_table = sqlalchemy.Table(
+    'launch_attempts',
+    Base.metadata,
+    sqlalchemy.Column('attempt_id', sqlalchemy.Text, primary_key=True),
+    # Not a key: failover reuses the hash (the clusters row is kept), while a
+    # teardown + relaunch mints a new one. Neither per-attempt nor per-job
+    # stable -- see attempt_seq for ordering.
+    sqlalchemy.Column('cluster_hash', sqlalchemy.Text),
+    # Display only. A name outlives the cluster it named, so it must never be
+    # used to group attempts or to find a row to resume.
+    sqlalchemy.Column('cluster_name', sqlalchemy.Text),
+    # Recorded so that provisioning code holding only the on-cloud name (the
+    # one stamped on pods) can stamp a milestone without resolving it back.
+    sqlalchemy.Column('cluster_name_on_cloud',
+                      sqlalchemy.Text,
+                      server_default=None),
+    # The request whose execution opened this attempt. This is what makes
+    # resuming exact rather than a guess: a pause re-queues the *same* request,
+    # so an open row under the same request_id is this launch resuming, while a
+    # row left behind by a crashed earlier launch carries a different one and
+    # is never adopted.
+    sqlalchemy.Column('request_id', sqlalchemy.Text, server_default=None),
+    # Monotonic within cluster_name. See open_launch_attempt for why the name
+    # rather than the hash.
+    sqlalchemy.Column('attempt_seq', sqlalchemy.Integer),
+    # Recorded on the row rather than joined from the clusters table, which is
+    # deleted on teardown -- the attempt outlives the cluster it provisioned.
+    sqlalchemy.Column('workspace', sqlalchemy.Text, server_default=None),
+    # The external scheduler queue this launch was submitted to, where one
+    # gates it (a Kueue LocalQueue today). NULL where nothing does. Recorded by
+    # whichever scheduler plugin owns the admission boundary, and used only to
+    # slice the admission wait -- "which queue is starving" is the question it
+    # answers, and it is the only one that needs this dimension.
+    sqlalchemy.Column('queue', sqlalchemy.Text, server_default=None),
+    # Milestones, epoch seconds. Named cloud-agnostically: on Kubernetes
+    # instances_requested is pod creation and instances_ready is all pods
+    # running; on VM clouds they are the create call and the instances being
+    # up. admitted stays NULL where no external scheduler gates the workload.
+    sqlalchemy.Column('provision_start', sqlalchemy.Float),
+    sqlalchemy.Column('instances_requested',
+                      sqlalchemy.Float,
+                      server_default=None),
+    sqlalchemy.Column('admitted', sqlalchemy.Float, server_default=None),
+    sqlalchemy.Column('instances_ready', sqlalchemy.Float, server_default=None),
+    # NULL while in flight. 'succeeded' | 'failed' | 'abandoned', where
+    # abandoned means the writing process died and the startup sweep closed the
+    # row -- only that case counts as a lost metric.
+    sqlalchemy.Column('outcome', sqlalchemy.Text, server_default=None),
+    # Set when the segments of this row have been turned into metric
+    # observations, so a row is never observed twice.
+    sqlalchemy.Column('metrics_observed_at',
+                      sqlalchemy.Float,
+                      server_default=None),
+    # Resume lookup, attempt_seq allocation, the in-flight milestone lookup,
+    # and the per-cluster timeline. cluster_hash is not indexed: a timeline
+    # scoped to one incarnation filters these few rows by hash.
+    sqlalchemy.Index('ix_launch_attempts_cluster', 'cluster_name',
+                     'attempt_seq'),
+    # Retention sweep. Without it the sweep full-scans on every tick.
+    sqlalchemy.Index('ix_launch_attempts_provision_start', 'provision_start'),
+    # The milestone writers hold the on-cloud name (it is what is stamped on
+    # the pods) and look up the in-flight attempt by either name. Without this
+    # that branch of the OR cannot be indexed, so the whole lookup degrades to
+    # a table scan: 21ms against 4us over 200k rows, several times per launch,
+    # growing with the retention window. The extra write cost is ~2us per
+    # insert, and there is one insert per attempt against several lookups.
+    sqlalchemy.Index('ix_launch_attempts_cluster_on_cloud',
+                     'cluster_name_on_cloud'),
+    # The abandoned sweep, which runs once a minute and in the steady state
+    # finds nothing. On provision_start alone it still had to read every row
+    # older than the bound -- in the steady state, nearly the table -- before
+    # discovering that none were open. Leading with outcome makes it a seek
+    # into the few in-flight rows: 120ms against nothing measurable over 200k
+    # rows, once a minute, inside a write transaction that blocks other
+    # writers for its duration.
+    sqlalchemy.Index('ix_launch_attempts_open', 'outcome', 'provision_start'),
+    # The metrics daemon's claim, also once a minute. Its predicate is
+    # "closed but not yet observed", and `ix_launch_attempts_open` serves only
+    # the first half: leading on `outcome IS NOT NULL` is nearly the whole
+    # table in the steady state, every row of which is then filtered on
+    # metrics_observed_at.
+    #
+    # Partial, and that is the point: rows leave this index as they are
+    # observed, so in the steady state it holds only the last minute's work
+    # rather than the job history. The predicate has to be repeated in the
+    # index for PostgreSQL to match it to the query.
+    sqlalchemy.Index(
+        'ix_launch_attempts_unobserved',
+        'provision_start',
+        postgresql_where=sqlalchemy.text(UNOBSERVED_ATTEMPT_PREDICATE),
+        sqlite_where=sqlalchemy.text(UNOBSERVED_ATTEMPT_PREDICATE)),
 )
 
 ssh_key_table = sqlalchemy.Table(
@@ -417,9 +584,130 @@ def _sqlite_supports_returning() -> bool:
         return (major > 3) or (major == 3 and minor >= 35)
 
 
+@annotations.lru_cache(scope='global', maxsize=1)
+def _supports_returning() -> bool:
+    """Whether this backend can return the rows a statement just changed.
+
+    Not the same question as `_sqlite_supports_returning`, which answers "is
+    this SQLite, and new enough" and so returns False on PostgreSQL -- where
+    RETURNING has existed since 8.2. Asking that one here would send every
+    PostgreSQL deployment, the ones with the tables large enough for this to
+    matter, down the fallback.
+
+    Only SQLite needs asking, and only about its own version: RETURNING there
+    arrived in 3.35, and SQLAlchemy exposes it from 2.0, which
+    `dependencies.py` already requires.
+
+    True for anything else because `SQLAlchemyDialect` models exactly two
+    backends -- not because not-SQLite implies RETURNING. A third would fail
+    loudly here, with a CompileError out of the claim, and would have to be
+    taught the other dialect branches in this module first; this is one of the
+    places to look when adding one.
+    """
+    engine = _db_manager.get_engine()
+    if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
+        return _sqlite_supports_returning()
+    return True
+
+
 _db_manager = db_utils.DatabaseManager(
     'state', create_table, post_init_fn=lambda _: _sqlite_supports_returning())
 initialize_and_get_db = _db_manager.get_engine
+
+# Server-side bounds on the `users` upsert transaction (Postgres only).
+#
+# The upsert runs on the request authentication path for every request, on
+# the API server's bounded auth thread pool, under a client-side deadline
+# (`AUTH_DB_TIMEOUT_SECONDS` in `sky.server.auth.db_lookup`; not imported
+# here because this module is not server-only). That deadline frees the
+# caller but not the thread: a thread that waits on the users row lock, or a
+# session that stops talking inside its open transaction, keeps its thread
+# and its connection for as long as the database allows. One orphaned
+# session holding a single users row then pins every later upsert of that
+# row until the pool is exhausted.
+#
+# The three timeouts are therefore derived from that same deadline, read
+# through `db_utils.get_auth_db_timeout_seconds()` (the one place the
+# configured value is parsed), as these percentages of it. They MUST stay at
+# or below the deadline so the database gives up before (or as) the caller
+# does and the thread is released:
+# - lock_timeout (78 %) < statement_timeout (80 %), so a row-lock wait
+#   reports the distinct "lock not available" error (SQLSTATE 55P03) instead
+#   of a generic statement cancel (57014);
+# - statement_timeout (80 %) bounds each statement itself, with a little
+#   headroom under the deadline for the round trip;
+# - idle_in_transaction_session_timeout (100 %) terminates a session that
+#   goes quiet inside the transaction (the orphan case), which releases the
+#   row lock it holds. The terminated session's own next statement fails:
+#   with SQLSTATE 25P03 if the client reads the FATAL, otherwise as a closed
+#   connection (the FATAL was sent while nobody was reading).
+# At the default 5 s deadline these are 3900 / 4000 / 5000 ms.
+#
+# `SET LOCAL` is transaction-scoped: it applies to this transaction only and
+# resets at COMMIT/ROLLBACK, so it is safe through a transaction-mode
+# connection pooler and leaks nothing into later transactions on the same
+# server connection.
+_USER_UPSERT_LOCK_TIMEOUT_PERCENT = 78
+_USER_UPSERT_STATEMENT_TIMEOUT_PERCENT = 80
+_USER_UPSERT_IDLE_IN_TRANSACTION_TIMEOUT_PERCENT = 100
+
+
+def _user_upsert_timeouts_ms() -> Tuple[int, int, int]:
+    """The users upsert's server-side timeouts, in whole milliseconds.
+
+    Returns ``(lock_timeout, statement_timeout,
+    idle_in_transaction_session_timeout)``, each the corresponding
+    percentage of the configured auth deadline (see the note above).
+    Computed per call: the deadline lookup is one environment read, which is
+    nothing next to the statements it bounds, and it lets tests vary the
+    deadline. The read sees the server's own setting only: the variable is
+    stripped from client request payloads and from the per-request
+    environment overlay (`executor.override_request_env_and_config`) before
+    the request worker calls this.
+
+    Raises:
+        ValueError: if the configured deadline is not a positive number (see
+            `db_utils.get_auth_db_timeout_seconds`), or is so small that the
+            three values would not be distinct, ordered, positive integers.
+            Postgres treats a timeout of ``0`` as *disabled*, so a rounding
+            to zero must never reach the database.
+    """
+    deadline_ms = db_utils.get_auth_db_timeout_seconds() * 1000
+    lock_ms = round(deadline_ms * _USER_UPSERT_LOCK_TIMEOUT_PERCENT / 100)
+    statement_ms = round(deadline_ms * _USER_UPSERT_STATEMENT_TIMEOUT_PERCENT /
+                         100)
+    idle_ms = round(deadline_ms *
+                    _USER_UPSERT_IDLE_IN_TRANSACTION_TIMEOUT_PERCENT / 100)
+    if not 0 < lock_ms < statement_ms < idle_ms:
+        raise ValueError(
+            f'{constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS} is too small '
+            f'({deadline_ms} ms) to derive distinct server-side timeouts for '
+            f'the users upsert (got lock_timeout={lock_ms}ms, '
+            f'statement_timeout={statement_ms}ms, '
+            f'idle_in_transaction_session_timeout={idle_ms}ms).')
+    return lock_ms, statement_ms, idle_ms
+
+
+def _bound_user_upsert_transaction(session: orm.Session) -> None:
+    """Issue the `SET LOCAL` timeouts for the users upsert transaction.
+
+    Must run before any other statement in the session: the Session
+    auto-begins its transaction on the first statement, and `SET LOCAL`
+    only takes effect inside that transaction. Issued explicitly through
+    the Session (not from an engine event hook) so a failure here goes
+    through SQLAlchemy's normal error handling and reaches the caller as a
+    regular DB error.
+    """
+    lock_ms, statement_ms, idle_ms = _user_upsert_timeouts_ms()
+    for parameter, value_ms in (
+        ('lock_timeout', lock_ms),
+        ('statement_timeout', statement_ms),
+        ('idle_in_transaction_session_timeout', idle_ms),
+    ):
+        # SET does not accept bind parameters; the values are integers
+        # derived from a validated setting, never user input.
+        session.execute(
+            sqlalchemy.text(f'SET LOCAL {parameter} = \'{value_ms}ms\''))
 
 
 @metrics_lib.time_me
@@ -442,6 +730,10 @@ def add_or_update_user(
     if created_at is None:
         created_at = int(time.time())
     with orm.Session(engine) as session:
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
+            # First statements of the transaction; see the constants above.
+            _bound_user_upsert_transaction(session)
+
         # Check for duplicate names if not allowed (within the same transaction)
         if not allow_duplicate_name:
             existing_user = session.query(user_table).filter(
@@ -1180,27 +1472,37 @@ def get_last_cluster_event_of_type_multiple(
         return {}
     event_types = ([event_type]
                    if isinstance(event_type, ClusterEventType) else event_type)
+    type_values = [t.value for t in event_types]
+    hashes_list = list(cluster_hashes)
+    result: Dict[str, str] = {}
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        row_number = sqlalchemy.func.row_number().over(
-            partition_by=cluster_event_table.c.cluster_hash,
-            order_by=cluster_event_table.c.transitioned_at.desc()).label('rn')
+        # Chunk the IN clause to stay under SQLite's bind-parameter limit;
+        # see _CLUSTER_IN_QUERY_CHUNK_SIZE. Each chunk is partitioned by
+        # cluster_hash, so ranking per chunk is exact.
+        for offset in range(0, len(hashes_list), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = hashes_list[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            row_number = sqlalchemy.func.row_number().over(
+                partition_by=cluster_event_table.c.cluster_hash,
+                order_by=cluster_event_table.c.transitioned_at.desc()).label(
+                    'rn')
 
-        ranked = session.query(
-            cluster_event_table.c.cluster_hash,
-            cluster_event_table.c.reason,
-            row_number,
-        ).filter(
-            cluster_event_table.c.cluster_hash.in_(cluster_hashes),
-            cluster_event_table.c.type.in_([t.value for t in event_types]),
-        ).subquery()
+            ranked = session.query(
+                cluster_event_table.c.cluster_hash,
+                cluster_event_table.c.reason,
+                row_number,
+            ).filter(
+                cluster_event_table.c.cluster_hash.in_(batch),
+                cluster_event_table.c.type.in_(type_values),
+            ).subquery()
 
-        rows = session.query(
-            ranked.c.cluster_hash,
-            ranked.c.reason,
-        ).filter(ranked.c.rn == 1).all()
+            rows = session.query(
+                ranked.c.cluster_hash,
+                ranked.c.reason,
+            ).filter(ranked.c.rn == 1).all()
+            result.update({row.cluster_hash: row.reason for row in rows})
 
-    return {row.cluster_hash: row.reason for row in rows}
+    return result
 
 
 def get_last_status_change_times(
@@ -1264,6 +1566,47 @@ def cleanup_cluster_events_with_retention(retention_hours: float,
         session.commit()
 
 
+@db_retries.retry
+def cleanup_launch_attempts_with_retention(retention_hours: float) -> int:
+    """Drop finished launch attempts older than the window.
+
+    Only finished ones: an attempt still in flight has a launch waiting on it,
+    and a queue wait can legitimately outlast any sane retention window. Age is
+    measured from when the attempt started, which is also what the index is on.
+
+    Returns the number of rows removed.
+    """
+    cutoff = time.time() - retention_hours * 3600
+    hard_cutoff = time.time() - retention_hours * 2 * 3600
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        # Observed attempts go at the window. Unobserved ones are held back:
+        # the daemon deliberately leaves them unclaimed while metrics are off
+        # or their output would be invisible, and deleting them anyway makes
+        # that hold pointless. They are still dropped eventually -- at twice
+        # the window -- so a deployment that never turns metrics on does not
+        # accumulate them forever.
+        #
+        # Written as one range plus a test rather than the OR it reads as. The
+        # hard cutoff is older than the window, so everything past it is
+        # already past the window and the two are equivalent -- but the OR
+        # plans as a multi-index union that walks the older range twice, which
+        # measured 175ms against 120ms over 200k rows. This runs on the API
+        # server's background loop, alongside every other retention sweep, and
+        # a blocking statement there delays all of them.
+        result = session.execute(launch_attempt_table.delete().where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.outcome.is_not(None),
+                launch_attempt_table.c.provision_start < cutoff,
+                sqlalchemy.or_(
+                    launch_attempt_table.c.metrics_observed_at.is_not(None),
+                    launch_attempt_table.c.provision_start < hard_cutoff,
+                ),
+            )))
+        session.commit()
+        return result.rowcount
+
+
 async def cluster_event_retention_daemon():
     """Garbage collect cluster events periodically."""
     await asyncio_utils.sleep_startup_jitter('cluster event retention daemon')
@@ -1280,28 +1623,29 @@ async def cluster_event_retention_daemon():
         terminal_retention_hours = skypilot_config.get_nested(
             ('api_server', 'cluster_terminal_event_retention_hours'),
             TERMINAL_CLUSTER_EVENT_RETENTION_HOURS)
+        windows = {
+            'cluster_event_retention_hours': retention_hours,
+            'cluster_debug_event_retention_hours': debug_retention_hours,
+            'cluster_terminal_event_retention_hours': terminal_retention_hours,
+        }
         try:
-            if retention_hours >= 0:
-                logger.debug('Cleaning up cluster events with retention '
-                             f'{retention_hours} hours.')
-                cleanup_cluster_events_with_retention(
-                    retention_hours, ClusterEventType.STATUS_CHANGE)
-            if debug_retention_hours >= 0:
-                logger.debug('Cleaning up debug cluster events with retention '
-                             f'{debug_retention_hours} hours.')
-                cleanup_cluster_events_with_retention(debug_retention_hours,
-                                                      ClusterEventType.DEBUG)
-                # LAUNCH_PROGRESS shares debug retention semantics: short-lived
-                # observability info, no business-record value once the launch
-                # is over.
-                cleanup_cluster_events_with_retention(
-                    debug_retention_hours, ClusterEventType.LAUNCH_PROGRESS)
-            if terminal_retention_hours >= 0:
-                logger.debug(
-                    'Cleaning up terminal cluster events with retention '
-                    f'{terminal_retention_hours} hours.')
-                cleanup_cluster_events_with_retention(terminal_retention_hours,
-                                                      ClusterEventType.TERMINAL)
+            for option, types in CLUSTER_EVENT_RETENTION_GROUPS.items():
+                hours = windows[option]
+                if hours < 0:
+                    continue
+                logger.debug(f'Cleaning up {option} cluster events with '
+                             f'retention {hours} hours.')
+                for event_type in types:
+                    cleanup_cluster_events_with_retention(hours, event_type)
+            launch_retention_hours = skypilot_config.get_nested(
+                ('api_server', 'launch_attempt_retention_hours'),
+                DEFAULT_LAUNCH_ATTEMPT_RETENTION_HOURS)
+            if launch_retention_hours >= 0:
+                removed = cleanup_launch_attempts_with_retention(
+                    launch_retention_hours)
+                if removed:
+                    logger.debug(
+                        f'Removed {removed} expired launch attempt(s).')
         except asyncio.CancelledError:
             logger.info('Cluster event retention daemon cancelled')
             break
@@ -1406,6 +1750,72 @@ def get_cluster_events(
             'transitioned_at': row.transitioned_at
         } for row in rows]
     return [row.reason for row in rows]
+
+
+@db_retries.retry
+def get_latest_cluster_events(
+    cluster_names: List[str],
+    event_types: List[ClusterEventType],
+) -> Dict[str, Tuple[str, int]]:
+    """{cluster_name: (reason, transitioned_at)} of the newest matching event.
+
+    Looks up by the persisted ``name`` column (like get_cluster_events_by_name)
+    in a single query, so callers can annotate many clusters without a
+    per-cluster round trip. Clusters with no matching event are omitted; the
+    timestamp lets a caller ignore events left by an earlier attempt on a
+    reused cluster name.
+    """
+    if not cluster_names or not event_types:
+        return {}
+    engine = _db_manager.get_engine()
+    type_values = [event_type.value for event_type in event_types]
+    events: Dict[str, Tuple[str, int]] = {}
+    names_list = list(cluster_names)
+    with orm.Session(engine) as session:
+        # Chunked for the same reason as every other name/hash IN query in
+        # this module: SQLite caps a statement at 999 bound parameters, and a
+        # deployment with that many clusters provisioning at once would
+        # otherwise raise -- which the caller swallows, so *every* cluster
+        # would lose its launch reason rather than the excess.
+        for offset in range(0, len(names_list), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = names_list[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            # Latest transitioned_at per cluster in SQL, so the read does not
+            # grow with a cluster's event history.
+            latest = session.query(
+                cluster_event_table.c.name.label('name'),
+                sqlalchemy.func.max(
+                    cluster_event_table.c.transitioned_at).label('latest_at'),
+            ).filter(
+                cluster_event_table.c.name.in_(batch),
+                cluster_event_table.c.type.in_(type_values),
+            ).group_by(cluster_event_table.c.name).subquery()
+            rows = session.query(
+                cluster_event_table.c.name,
+                cluster_event_table.c.reason,
+                cluster_event_table.c.transitioned_at,
+            ).join(
+                latest,
+                sqlalchemy.and_(
+                    cluster_event_table.c.name == latest.c.name,
+                    cluster_event_table.c.transitioned_at == latest.c.latest_at,
+                ),
+            ).filter(cluster_event_table.c.type.in_(type_values)).order_by(
+                cluster_event_table.c.transitioned_at.desc(),
+                # transitioned_at is whole seconds and the table has no
+                # insertion order to fall back on, so a second key is what
+                # makes the answer stable instead of whatever the database
+                # happened to return. Which row of a tied pair it prefers is
+                # arbitrary: text ordering is the database's collation, and
+                # the same two rows sort the other way round under a locale
+                # collation than under SQLite's binary one. No caller may
+                # rely on the direction -- writers whose rows must not be
+                # confused for each other must not share a second.
+                cluster_event_table.c.reason.desc(),
+            ).all()
+            for name, reason, transitioned_at in rows:
+                if name not in events and reason:
+                    events[name] = (reason, transitioned_at)
+    return events
 
 
 @db_retries.retry
@@ -1629,7 +2039,7 @@ def get_cluster_name_to_handle_map(
     return name_to_handle
 
 
-@metrics_lib.time_me
+@metrics_lib.time_me_async
 async def get_status_from_cluster_name_async(
         cluster_name: str) -> Optional[status_lib.ClusterStatus]:
     """Get the status of a cluster."""
@@ -3775,3 +4185,446 @@ def get_max_db_connections() -> Optional[int]:
         if max_connections is None:
             return None
         return int(max_connections)
+
+
+# --- Launch attempts ---------------------------------------------------------
+#
+# See launch_attempt_table for why these milestones are persisted rather than
+# timed in memory.
+
+
+class LaunchMilestone(enum.Enum):
+    """A boundary in a provisioning attempt, one column of launch_attempts."""
+    # Instances/pods asked for. Closes the provision-setup segment.
+    INSTANCES_REQUESTED = 'instances_requested'
+    # An external scheduler (e.g. a quota admission gate) let the workload
+    # through. Never set where nothing gates it.
+    ADMITTED = 'admitted'
+    # All instances/pods up. Closes the startup segment.
+    INSTANCES_READY = 'instances_ready'
+
+
+class LaunchOutcome(enum.Enum):
+    """Terminal state of a provisioning attempt."""
+    SUCCEEDED = 'succeeded'
+    FAILED = 'failed'
+    # The writing process died without closing the row; set by the startup
+    # sweep. Only this outcome means a metric was actually lost.
+    ABANDONED = 'abandoned'
+
+
+def get_cluster_hash(cluster_name: str) -> Optional[str]:
+    """The hash of the live cluster with this name, or None if there is none.
+
+    A cluster's hash is minted on first launch and reused while its row lives,
+    so it identifies one incarnation: failover keeps it, `sky down` + relaunch
+    replaces it.
+    """
+    return _get_hash_for_existing_cluster(cluster_name)
+
+
+def _best_effort(func):
+    """Swallow a failure in a write whose caller must not fail because of it.
+
+    For side observations that run on a user-facing path: the caller is doing
+    something else, and this write is a note about it. Returns None when the
+    write fails, so only wrap functions whose callers can read None as "it did
+    not happen" -- not one returning a list a caller iterates.
+
+    What it is for, concretely: the launch-attempt writes run inside the `try`
+    in `bulk_provision` whose `except` tears the cluster down and fails over.
+    A database blip in the two that run after a *successful* provision did not
+    merely lose a measurement -- it raised past the return, landed in that
+    handler, and destroyed a working cluster. `db_retries.retry` does not
+    prevent that; it raises once retries are spent.
+
+    Applied at the definition rather than at each call site on purpose: the
+    guarantee has to hold for the call site somebody adds later.
+
+    Not for background work. A daemon that raises gets logged with a traceback
+    and retried on the next tick, which is strictly better than continuing as
+    though there had been nothing to do.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Ignoring a failure in {func.__name__}, which is '
+                           f'best-effort: {e}. Its caller carries on without '
+                           f'it; what was being recorded is lost.')
+            return None
+
+    return wrapper
+
+
+@_best_effort
+@db_retries.retry
+def open_launch_attempt(
+    cluster_name: str,
+    # Optional because a cluster's row -- and so its hash -- may not exist yet
+    # on a first launch.
+    cluster_hash: Optional[str],
+    request_id: Optional[str],
+    provision_start: float,
+    cluster_name_on_cloud: Optional[str] = None,
+    workspace: Optional[str] = None,
+    # None when the row could not be written -- see `_best_effort`. The caller
+    # carries that through by skipping the milestones instead of failing.
+) -> Optional[str]:
+    """Open a provisioning attempt, or resume the one already in flight.
+
+    Returns the attempt_id to record milestones against.
+
+    A launch that parks on an external condition unwinds its whole provision
+    call and resumes as a fresh one, possibly in another worker process. That
+    resume must continue the *same* attempt: the resources were kept, so the
+    wait it is still serving is one continuous interval. Resuming is keyed on
+    the request, which survives the pause unchanged -- an open row left behind
+    by some earlier, crashed launch of the same cluster carries a different
+    request_id and is therefore never adopted.
+
+    A failover retry is the opposite case: the previous attempt is closed as
+    failed before the next begins, so no open row is found and a new attempt
+    starts even though cluster_hash is unchanged.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        if request_id is not None:
+            in_flight = session.execute(
+                sqlalchemy.select(launch_attempt_table.c.attempt_id).where(
+                    sqlalchemy.and_(
+                        launch_attempt_table.c.cluster_name == cluster_name,
+                        launch_attempt_table.c.request_id == request_id,
+                        launch_attempt_table.c.outcome.is_(None),
+                    )).order_by(
+                        launch_attempt_table.c.provision_start.desc(),
+                        launch_attempt_table.c.attempt_seq.desc()).limit(
+                            1)).fetchone()
+            if in_flight is not None:
+                return in_flight[0]
+
+        # A new attempt. The sequence is allocated per cluster_name rather
+        # than per cluster_hash because a managed-job recovery tears the
+        # cluster down and mints a *new* hash for what is still the same job:
+        # scoping by hash would restart the sequence there and make the second
+        # attempt look like the first. The name is stable across that, and for
+        # a managed job it encodes the job id, so it is job-scoped in effect.
+        #
+        # The tradeoff is that relaunching a plain cluster under a reused name
+        # continues the sequence instead of restarting at 0. That is cosmetic:
+        # timelines are always scoped by cluster_hash (one incarnation) or by
+        # the job, so ordering stays correct either way.
+        # Read-then-insert, with no unique constraint on
+        # (cluster_name, attempt_seq). Deliberate: a duplicate would need two
+        # provisions of one cluster name to open a row at the same instant,
+        # which the per-cluster launch lock already excludes, and a constraint
+        # here could fail a launch over a measurement. The lookups above order
+        # by provision_start first, so even a tie picks the newer row; the
+        # sequence is a display and tie-break column, not an identifier.
+        last_seq = session.execute(
+            sqlalchemy.select(
+                sqlalchemy.func.max(  # pylint: disable=not-callable
+                    launch_attempt_table.c.attempt_seq)).where(
+                        launch_attempt_table.c.cluster_name ==
+                        cluster_name)).scalar()
+
+        attempt_id = str(uuid.uuid4())
+        session.execute(launch_attempt_table.insert().values(
+            attempt_id=attempt_id,
+            cluster_hash=cluster_hash,
+            cluster_name=cluster_name,
+            cluster_name_on_cloud=cluster_name_on_cloud,
+            request_id=request_id,
+            workspace=workspace,
+            attempt_seq=0 if last_seq is None else last_seq + 1,
+            provision_start=provision_start,
+        ))
+        session.commit()
+    return attempt_id
+
+
+@_best_effort
+@db_retries.retry
+def record_launch_milestone(attempt_id: str, milestone: LaunchMilestone,
+                            timestamp: float) -> None:
+    """Stamp a milestone on an attempt, keeping the earliest value.
+
+    Write-once: a resumed launch re-walks the provisioning path and would
+    otherwise restamp milestones it already passed, which is exactly how the
+    wait before the pause would get erased.
+    """
+    column = launch_attempt_table.c[milestone.value]
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(launch_attempt_table.update().where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.attempt_id == attempt_id,
+                column.is_(None),
+            )).values({column: timestamp}))
+        session.commit()
+
+
+@db_retries.retry
+def get_launch_attempts_for_cluster(cluster_name: str) -> List[Any]:
+    """Every attempt made for this cluster, oldest first.
+
+    All of them, not just the one that worked: the abandoned tries are what
+    the retry overhead is measured from, and a job that took five tries waited
+    through all of them.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        return list(
+            session.execute(
+                sqlalchemy.select(launch_attempt_table).where(
+                    launch_attempt_table.c.cluster_name ==
+                    cluster_name).order_by(
+                        launch_attempt_table.c.attempt_seq)).all())
+
+
+@db_retries.retry
+def claim_unobserved_launch_attempts(limit: int = 500) -> List[Any]:
+    """Claim finished attempts that have not been turned into metrics yet.
+
+    Claiming is a conditional UPDATE, so an attempt is observed exactly once
+    even when several API server replicas run this concurrently: only the
+    writer whose UPDATE matched gets the row. That is what lets the observer be
+    a plain background loop -- no global cursor to keep, and no leader election
+    to decide who is allowed to run it.
+
+    Only closed attempts are returned; an in-flight one has segments that have
+    not happened yet.
+    """
+    engine = _db_manager.get_engine()
+    # The claim is one UPDATE. A row-at-a-time loop would instead hold write
+    # locks for its whole length, so a second replica would block for the
+    # length of the batch rather than for one statement. It still comes away
+    # with nothing this tick -- its UPDATE re-checks metrics_observed_at IS
+    # NULL and matches none -- which is the point: the observation happens
+    # exactly once, not once per replica.
+    #
+    # Which rows this call won comes from RETURNING where the backend has it,
+    # so the claim is a single statement. The timestamp is still written, but
+    # it is no longer read back as a token: doing that needed a third query on
+    # an unindexable predicate, which scanned the table every minute.
+    now = time.time()
+    with orm.Session(engine) as session:
+        candidates = sqlalchemy.select(launch_attempt_table.c.attempt_id).where(
+            sqlalchemy.and_(
+                # Spelled as the index's own predicate, not restated: a
+                # PostgreSQL partial index is matched to a query only when the
+                # planner can prove the two agree, so an edit to one that
+                # misses the other silently drops back to a scan.
+                sqlalchemy.text(UNOBSERVED_ATTEMPT_PREDICATE),)).order_by(
+                    launch_attempt_table.c.provision_start).limit(limit)
+        claim = launch_attempt_table.update().where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.attempt_id.in_(
+                    candidates.scalar_subquery()),
+                launch_attempt_table.c.metrics_observed_at.is_(None),
+            )).values({launch_attempt_table.c.metrics_observed_at: now})
+        if _supports_returning():
+            # One statement: the UPDATE hands back the rows it matched.
+            claimed = session.execute(
+                claim.returning(*launch_attempt_table.c)).all()
+        else:
+            # The fallback reads the rows back by the token. No index can
+            # serve that -- the partial index above covers unobserved rows,
+            # and these have just stopped being unobserved -- so it scans the
+            # table once a minute, growing with the retention window. Kept
+            # only for SQLite older than 3.35, where RETURNING does not exist.
+            session.execute(claim)
+            claimed = session.execute(
+                sqlalchemy.select(launch_attempt_table).where(
+                    launch_attempt_table.c.metrics_observed_at == now)).all()
+        session.commit()
+    return list(claimed)
+
+
+@db_retries.retry
+def sweep_abandoned_launch_attempts(
+        older_than_hours: float = ABANDONED_LAUNCH_ATTEMPT_HOURS) -> int:
+    """Close attempts left open by a process that died mid-launch.
+
+    Marking them (rather than leaving them open) matters twice over: it keeps a
+    later launch of the same cluster from stamping milestones onto a dead
+    attempt, and it makes a lost measurement countable instead of silently
+    missing.
+
+    Bounded by age rather than sweeping every open row. The table is shared
+    across API server replicas, so a server starting up does not mean nothing
+    is provisioning: during a rolling upgrade an older replica is still running
+    launches, and closing their rows would discard their milestones and let
+    their paused launches resume as duplicate attempts. The bound is generous
+    because a launch parked waiting for quota is legitimately open for hours;
+    an attempt older than it has outlived any provision timeout.
+
+    Returns the number of attempts closed.
+    """
+    cutoff = time.time() - older_than_hours * 3600
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(launch_attempt_table.update().where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.outcome.is_(None),
+                launch_attempt_table.c.provision_start < cutoff,
+            )).values({
+                launch_attempt_table.c.outcome: LaunchOutcome.ABANDONED.value
+            }))
+        session.commit()
+        return result.rowcount
+
+
+@_best_effort
+@db_retries.retry
+def record_launch_queue_for_cluster(cluster_name: str, queue: str) -> None:
+    """Note which external scheduler queue this launch was submitted to.
+
+    Separate from the admission milestone so that a launch still waiting is
+    already attributable to its queue -- otherwise the queue a workload is
+    stuck in would only be known once it stopped being stuck.
+
+    Same targeting and no-op behaviour as record_launch_milestone_for_cluster.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.execute(
+            sqlalchemy.select(launch_attempt_table.c.attempt_id).where(
+                sqlalchemy.and_(
+                    sqlalchemy.or_(
+                        launch_attempt_table.c.cluster_name == cluster_name,
+                        launch_attempt_table.c.cluster_name_on_cloud ==
+                        cluster_name,
+                    ),
+                    launch_attempt_table.c.outcome.is_(None),
+                )).order_by(launch_attempt_table.c.provision_start.desc(),
+                            launch_attempt_table.c.attempt_seq.desc()).limit(
+                                1)).fetchone()
+        if row is None:
+            return
+        session.execute(launch_attempt_table.update().where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.attempt_id == row[0],
+                launch_attempt_table.c.queue.is_(None),
+            )).values({launch_attempt_table.c.queue: queue}))
+        session.commit()
+
+
+@_best_effort
+@db_retries.retry
+def record_launch_milestone_for_cluster(cluster_name: str,
+                                        milestone: LaunchMilestone,
+                                        timestamp: float) -> None:
+    """Stamp a milestone on whichever attempt is in flight for this cluster.
+
+    Lets provisioning code -- and scheduler plugins patched into it -- record a
+    boundary without the attempt id being threaded down through every layer.
+    A cluster has at most one launch running at a time, so the newest open row
+    for the name is that launch: a row left behind by an earlier crashed launch
+    is older, and the live attempt always sorts ahead of it.
+
+    ``cluster_name`` may be either the display name or the on-cloud name, so a
+    caller stamps with whichever it happens to hold (pod labels carry the
+    on-cloud one).
+
+    A no-op when nothing is in flight, so callers never have to guard.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.execute(
+            sqlalchemy.select(
+                launch_attempt_table.c.attempt_id,
+                # For the admission event below: the queue it waited in, the
+                # boundary the wait is measured from, and the name to file the
+                # event under -- which is the display name even when this was
+                # called with the on-cloud one.
+                launch_attempt_table.c.queue,
+                launch_attempt_table.c.instances_requested,
+                launch_attempt_table.c.provision_start,
+                launch_attempt_table.c.cluster_name,
+            ).where(
+                sqlalchemy.and_(
+                    sqlalchemy.or_(
+                        launch_attempt_table.c.cluster_name == cluster_name,
+                        launch_attempt_table.c.cluster_name_on_cloud ==
+                        cluster_name,
+                    ),
+                    launch_attempt_table.c.outcome.is_(None),
+                )).order_by(launch_attempt_table.c.provision_start.desc(),
+                            launch_attempt_table.c.attempt_seq.desc()).limit(
+                                1)).fetchone()
+        if row is None:
+            return
+        column = launch_attempt_table.c[milestone.value]
+        result = session.execute(launch_attempt_table.update().where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.attempt_id == row[0],
+                column.is_(None),
+            )).values({column: timestamp}))
+        session.commit()
+        stamped = bool(result.rowcount)
+
+    # Outside the session: add_cluster_event opens its own, and an event
+    # written before the commit above could outlive a rolled-back timestamp.
+    #
+    # Gated on `stamped`, which is what makes this emit-once. The UPDATE is
+    # conditional on the column being NULL, and a launch that parks on an
+    # external condition resumes into the *same* open row -- so the second
+    # call matches nothing, and cannot announce the same admission twice.
+    if stamped and milestone == LaunchMilestone.ADMITTED:
+        _record_admission_event(row, timestamp)
+
+
+def _record_admission_event(attempt: Any, admitted_at: float) -> None:
+    """Note in the cluster's event log that a queued launch was admitted.
+
+    The event table already says a launch is *waiting* on a queue -- with the
+    queue's name and the position in it -- and never says when that stopped.
+    For a gated job the admission wait is routinely most of the start-up, so
+    its end is the one boundary a reader cannot otherwise place.
+
+    The duration comes from `launch_phases`, not from subtracting here: the
+    wait is measured from `instances_requested` where the cloud stamps it and
+    from `provision_start` where it does not, and a number computed by hand
+    would disagree with `t_queue_wait` on exactly the clouds that fallback
+    exists for.
+    """
+    waited_from = launch_phases.queue_wait_from(attempt)
+    if waited_from is None or attempt.cluster_name is None:
+        return
+    where = f' by queue {attempt.queue}' if attempt.queue else ''
+    waited = log_utils.readable_time_duration(waited_from,
+                                              admitted_at,
+                                              absolute=True)
+    add_cluster_event(
+        # The attempt's own display name, not the caller's argument: this is
+        # reachable with the on-cloud name (pod labels carry that one), and
+        # the event table is keyed by the display name at both ends -- so
+        # filing it under the caller's name would silently drop the event for
+        # every caller holding the other one.
+        attempt.cluster_name,
+        new_status=None,
+        reason=f'Admitted{where} after waiting {waited}',
+        # Not LAUNCH_PROGRESS: that type is consumed latest-wins as a managed
+        # job's `details` column, answering "what is this launch waiting on
+        # now". This row says a wait has ended, so it would sit there as a
+        # stale answer for the rest of the launch.
+        event_type=ClusterEventType.LAUNCH_MILESTONE,
+        transitioned_at=int(admitted_at),
+    )
+
+
+@_best_effort
+@db_retries.retry
+def close_launch_attempt(attempt_id: str, outcome: LaunchOutcome) -> None:
+    """Mark an attempt terminal. No-op if it is already closed."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(launch_attempt_table.update().where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.attempt_id == attempt_id,
+                launch_attempt_table.c.outcome.is_(None),
+            )).values({launch_attempt_table.c.outcome: outcome.value}))
+        session.commit()

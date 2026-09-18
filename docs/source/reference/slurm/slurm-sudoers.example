@@ -1,0 +1,21 @@
+# SSH account skypilot submitting as any member of Unix group skyusers.
+# Shared base is each account's home directory, the default workdir.
+# For a custom base, set workdir to a path containing $USER, for example
+# /training/$USER/sky-workdir, and replace /home/[a-z_][a-z0-9_-]* below with
+# /training/[a-z_][a-z0-9_-]*/sky-workdir.
+# Requires sudo >= 1.9.10. Adjust executable locations and the group name.
+Defaults:skypilot secure_path=/opt/slurm/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+Defaults:skypilot !requiretty
+skypilot ALL=(%skyusers) NOPASSWD: /usr/bin/sbatch, /usr/bin/srun, /usr/bin/scancel, /usr/bin/squeue
+skypilot ALL=(%skyusers) NOPASSWD: /usr/bin/scontrol ^-o show step [0-9]+$
+skypilot ALL=(%skyusers) NOPASSWD: /usr/bin/id ^-un$
+skypilot ALL=(%skyusers) NOPASSWD: /usr/bin/stat ^-f -c %T -- /home/[a-z_][a-z0-9_-]*$
+skypilot ALL=(%skyusers) NOPASSWD: /usr/bin/mkdir ^(-p )?-- /home/[a-z_][a-z0-9_-]*/[.]sky_(provision|clusters|snapshots)(/([.][A-Za-z_]|[A-Za-z0-9_])[A-Za-z0-9_.-]*)*$
+skypilot ALL=(%skyusers) NOPASSWD: /usr/bin/test ^(! )?-(e|f) /home/[a-z_][a-z0-9_-]*/[.]sky_(provision|clusters|snapshots)(/([.][A-Za-z_]|[A-Za-z0-9_])[A-Za-z0-9_.-]*)*$
+skypilot ALL=(%skyusers) NOPASSWD: /usr/bin/cat ^-- /home/[a-z_][a-z0-9_-]*/[.]sky_(provision|clusters|snapshots)(/([.][A-Za-z_]|[A-Za-z0-9_])[A-Za-z0-9_.-]*)*$
+skypilot ALL=(%skyusers) NOPASSWD: /usr/bin/tail ^-n [0-9]+ (-f )?-- /home/[a-z_][a-z0-9_-]*/[.]sky_provision/slurm-[0-9]+[.]out$
+skypilot ALL=(%skyusers) NOPASSWD: /usr/bin/mv ^(-f )?-- /home/[a-z_][a-z0-9_-]*/[.]sky_(provision|clusters|snapshots)(/([.][A-Za-z_]|[A-Za-z0-9_])[A-Za-z0-9_.-]*)* /home/[a-z_][a-z0-9_-]*/[.]sky_(provision|clusters|snapshots)(/([.][A-Za-z_]|[A-Za-z0-9_])[A-Za-z0-9_.-]*)*$
+skypilot ALL=(%skyusers) NOPASSWD: /usr/bin/rm ^-rf -- /home/[a-z_][a-z0-9_-]*/[.]sky_(provision|clusters|snapshots)(/([.][A-Za-z_]|[A-Za-z0-9_])[A-Za-z0-9_.-]*)*$
+skypilot ALL=(%skyusers) NOPASSWD: /usr/bin/find ^/home/[a-z_][a-z0-9_-]*/[.]sky_clusters/[A-Za-z0-9_-]+ -depth -mindepth 1 ! -path /home/[a-z_][a-z0-9_-]*/[.]sky_clusters/[A-Za-z0-9_-]+/sky_logs ! -path /home/[a-z_][a-z0-9_-]*/[.]sky_clusters/[A-Za-z0-9_-]+/sky_logs/[*] -delete$
+skypilot ALL=(%skyusers) NOPASSWD: /usr/bin/find ^/home/[a-z_][a-z0-9_-]*/[.]sky_clusters/[A-Za-z0-9_-]+ -mindepth 1 -maxdepth 1 ! -name sky_logs -print -quit$
+skypilot ALL=(%skyusers) NOPASSWD: /usr/bin/rsync ^--server (--sender )?-vlDtprze[.]iLsfxCIvu? (--partial )?[.] /home/[a-z_][a-z0-9_-]*/[.]sky_(provision|clusters|snapshots)(/([.][A-Za-z_]|[A-Za-z0-9_])[A-Za-z0-9_.-]*)*$

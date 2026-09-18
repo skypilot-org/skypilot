@@ -2,12 +2,14 @@
 
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 import pathlib
 import threading
 import time
 from unittest import mock
+import zipfile
 
 import fastapi
 import prometheus_client as prom
@@ -1790,3 +1792,327 @@ async def test_receive_chunks_skips_the_directory_listing_for_one_chunk(
     assert result is None
     assert listed == []
     assert (tmp_path / 'upload.zip').read_bytes() == b'chunk'
+
+
+def _chunks_for(total_bytes: int) -> int:
+    """Chunk count a client would declare for an upload of *total_bytes*."""
+    return -(-total_bytes // server_constants.UPLOAD_CHUNK_BYTES)
+
+
+_CAP = 100 * 1000 * 1000 * 1000
+
+
+@pytest.fixture
+def upload_cap(monkeypatch):
+    """The cap is off unless a deployment sets it."""
+    monkeypatch.setenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR,
+                       str(_CAP))
+    return _CAP
+
+
+@pytest.mark.asyncio
+async def test_receive_chunks_rejects_a_chunk_group_over_the_total_cap(
+        tmp_path, upload_cap):
+    """The cap is checked from the declared chunk count, before any write.
+
+    The upload and its extraction are not synchronous, so the space free at
+    extraction time cannot be known here; the cap is absolute.
+    """
+    over_cap = _chunks_for(upload_cap) + 1
+
+    with pytest.raises(fastapi.HTTPException) as exc_info:
+        await server._receive_and_assemble_chunks(base_dir=tmp_path,
+                                                  zip_name='upload',
+                                                  request=_FakeUploadRequest(),
+                                                  chunk_index=0,
+                                                  total_chunks=over_cap,
+                                                  extract=False,
+                                                  assemble=False)
+
+    assert exc_info.value.status_code == 413
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_receive_chunks_accepts_a_chunk_group_at_the_total_cap(
+        tmp_path, upload_cap):
+    at_cap = upload_cap // server_constants.UPLOAD_CHUNK_BYTES
+
+    result = await server._receive_and_assemble_chunks(
+        base_dir=tmp_path,
+        zip_name='upload',
+        request=_FakeUploadRequest(),
+        chunk_index=0,
+        total_chunks=at_cap,
+        extract=False,
+        assemble=False)
+
+    assert result is not None
+    assert result.status == api_responses.UploadStatus.UPLOADING.value
+
+
+def _write_zip(path: pathlib.Path, member_bytes: int) -> None:
+    with zipfile.ZipFile(path, 'w') as zipf:
+        zipf.writestr('payload.bin', b'\0' * member_bytes)
+
+
+@pytest.mark.asyncio
+async def test_unzip_refuses_an_extraction_that_would_not_fit(
+        tmp_path, monkeypatch):
+    zip_path = tmp_path / 'upload.zip'
+    _write_zip(zip_path, 4096)
+    monkeypatch.setattr(server.local_disk, 'available_for_path',
+                        lambda path: 1024)
+    target = tmp_path / 'out'
+    target.mkdir()
+
+    with pytest.raises(fastapi.HTTPException) as exc_info:
+        await server.unzip_file(zip_path, target)
+
+    assert exc_info.value.status_code == 507
+    assert list(target.iterdir()) == []
+    # The zip is garbage once refused, and the existing cleanup removes it.
+    assert not zip_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_unzip_proceeds_when_the_extraction_fits(tmp_path, monkeypatch):
+    zip_path = tmp_path / 'upload.zip'
+    _write_zip(zip_path, 4096)
+    monkeypatch.setattr(server.local_disk, 'available_for_path',
+                        lambda path: 1024**3)
+    target = tmp_path / 'out'
+    target.mkdir()
+
+    await server.unzip_file(zip_path, target)
+
+    assert (target / 'payload.bin').stat().st_size == 4096
+
+
+@pytest.mark.asyncio
+async def test_unzip_proceeds_when_no_budget_is_declared(tmp_path, monkeypatch):
+    """With no budget exposed there is nothing to check against."""
+    zip_path = tmp_path / 'upload.zip'
+    _write_zip(zip_path, 4096)
+    monkeypatch.setattr(server.local_disk, 'available_for_path',
+                        lambda path: None)
+    target = tmp_path / 'out'
+    target.mkdir()
+
+    await server.unzip_file(zip_path, target)
+
+    assert (target / 'payload.bin').stat().st_size == 4096
+
+
+@pytest.mark.asyncio
+async def test_receive_chunks_bounds_the_bytes_actually_streamed(
+        tmp_path, monkeypatch):
+    """A client may stream a chunk of any size, whatever it declared.
+
+    The declared chunk count is only a claim, so the cap has to be
+    enforced against the bytes that reach disk.
+    """
+    monkeypatch.setenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR, '8')
+
+    with pytest.raises(fastapi.HTTPException) as exc_info:
+        await server._receive_and_assemble_chunks(
+            base_dir=tmp_path,
+            zip_name='upload',
+            request=_FakeUploadRequest(payload=b'0123456789'),
+            chunk_index=0,
+            total_chunks=1,
+            extract=False,
+            assemble=False)
+
+    assert exc_info.value.status_code == 413
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_receive_chunks_counts_the_chunks_already_stored(
+        tmp_path, monkeypatch):
+    """The cap covers one upload's chunks together, not each in turn."""
+    monkeypatch.setenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR, '8')
+    chunk_dir = tmp_path / 'upload'
+    chunk_dir.mkdir()
+    (chunk_dir / 'part0').write_bytes(b'12345')
+
+    with pytest.raises(fastapi.HTTPException) as exc_info:
+        await server._receive_and_assemble_chunks(
+            base_dir=tmp_path,
+            zip_name='upload',
+            request=_FakeUploadRequest(payload=b'6789'),
+            chunk_index=1,
+            total_chunks=2,
+            extract=False,
+            assemble=False)
+
+    assert exc_info.value.status_code == 413
+    # The refused chunk leaves nothing behind; part0 is untouched.
+    assert [p.name for p in chunk_dir.iterdir()] == ['part0']
+
+
+def test_on_disk_size_rounds_each_member_up_to_a_block():
+    """Many tiny files cost far more than the sum of their sizes."""
+    tiny = [zipfile.ZipInfo('f') for _ in range(1000)]
+    for member in tiny:
+        member.file_size = 1
+
+    assert server._on_disk_bytes(tiny) == 1000 * server._EXTRACT_BLOCK_BYTES
+    # An empty member still occupies a block.
+    empty = zipfile.ZipInfo('d/')
+    assert server._on_disk_bytes([empty]) == server._EXTRACT_BLOCK_BYTES
+
+
+@pytest.mark.asyncio
+async def test_unzip_refuses_an_archive_of_tiny_files_that_would_not_fit(
+        tmp_path, monkeypatch):
+    zip_path = tmp_path / 'upload.zip'
+    with zipfile.ZipFile(zip_path, 'w') as zipf:
+        for i in range(64):
+            zipf.writestr(f'f{i}', b'x')
+    target = tmp_path / 'out'
+    target.mkdir()
+    # Well above the 64 apparent bytes, well below the 64 blocks on disk.
+    monkeypatch.setattr(server.local_disk, 'available_for_path',
+                        lambda path: 16 * 1024)
+
+    with pytest.raises(fastapi.HTTPException) as exc_info:
+        await server.unzip_file(zip_path, target)
+
+    assert exc_info.value.status_code == 507
+
+
+@pytest.mark.asyncio
+async def test_unzip_holds_its_space_while_it_writes(tmp_path, monkeypatch):
+    """A concurrent extraction must measure against what is left."""
+    held = []
+    monkeypatch.setattr(server.local_disk, 'available_for_path',
+                        lambda path: 1024**3)
+    monkeypatch.setattr(server.local_disk, 'reserve',
+                        lambda n: held.append(n) or contextlib.nullcontext())
+    zip_path = tmp_path / 'upload.zip'
+    _write_zip(zip_path, 4096)
+    target = tmp_path / 'out'
+    target.mkdir()
+
+    await server.unzip_file(zip_path, target)
+
+    assert held == [server._EXTRACT_BLOCK_BYTES]
+    assert (target / 'payload.bin').stat().st_size == 4096
+
+
+@pytest.mark.asyncio
+async def test_receive_chunks_has_no_cap_unless_one_is_configured(
+        tmp_path, monkeypatch):
+    """The cap is opt-in, so an unset deployment uploads as before."""
+    monkeypatch.delenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR,
+                       raising=False)
+    scanned = []
+    real_scandir = os.scandir
+
+    def tracking_scandir(path):
+        scanned.append(str(path))
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, 'scandir', tracking_scandir)
+
+    result = await server._receive_and_assemble_chunks(
+        base_dir=tmp_path,
+        zip_name='upload',
+        request=_FakeUploadRequest(payload=b'0123456789'),
+        chunk_index=0,
+        total_chunks=1,
+        extract=False,
+        assemble=False)
+
+    assert result is None
+    assert (tmp_path / 'upload.zip').read_bytes() == b'0123456789'
+    # Nothing to enforce, so the stored-bytes scan is skipped too.
+    assert scanned == []
+
+
+@pytest.mark.parametrize('raw', ['', 'not-a-number', '0', '-1'])
+def test_an_unusable_cap_means_no_cap(monkeypatch, raw):
+    monkeypatch.setenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR, raw)
+    assert server._max_upload_total_bytes() is None
+
+
+def test_a_configured_cap_is_read_as_bytes(monkeypatch):
+    monkeypatch.setenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR, '12345')
+    assert server._max_upload_total_bytes() == 12345
+
+
+_STORE_CAP = 200 * 1000 * 1000
+
+
+@pytest.fixture
+def store_cap(monkeypatch):
+    """The store's cap is off unless a deployment sets it."""
+    monkeypatch.setenv(server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR,
+                       str(_STORE_CAP))
+    return _STORE_CAP
+
+
+def _store_holding(monkeypatch, used_bytes):
+    """Makes the store's filesystem report *used_bytes* in use."""
+    monkeypatch.setattr(server.local_disk, 'used_for_path',
+                        lambda path: used_bytes)
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_is_refused_once_the_store_is_full(
+        tmp_path, monkeypatch, store_cap):
+    """The cap covers what the store holds, across uploads."""
+    _store_holding(monkeypatch, store_cap)
+
+    with pytest.raises(fastapi.HTTPException) as exc_info:
+        await server._admit_stored_file_mounts(tmp_path)
+
+    assert exc_info.value.status_code == 507
+    assert 'bucket' in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_is_admitted_while_the_store_has_room(
+        tmp_path, monkeypatch, store_cap):
+    _store_holding(monkeypatch, store_cap - 1)
+
+    await server._admit_stored_file_mounts(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_the_store_has_no_cap_unless_one_is_configured(
+        tmp_path, monkeypatch):
+    """The cap is opt-in, so an unset deployment uploads as before."""
+    monkeypatch.delenv(server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR,
+                       raising=False)
+    measured = []
+    monkeypatch.setattr(server.local_disk, 'used_for_path',
+                        lambda path: measured.append(path) or 0)
+
+    await server._admit_stored_file_mounts(tmp_path)
+
+    assert measured == []
+
+
+@pytest.mark.asyncio
+async def test_an_unmeasurable_store_is_not_enforced_against(
+        tmp_path, monkeypatch, store_cap):
+    """Refusing every upload is the wrong answer to not being able to tell."""
+    _store_holding(monkeypatch, None)
+
+    await server._admit_stored_file_mounts(tmp_path)
+
+
+@pytest.mark.parametrize('raw', ['', 'not-a-number', '0', '-1'])
+def test_an_unusable_store_cap_means_no_cap(monkeypatch, raw):
+    monkeypatch.setenv(server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR,
+                       raw)
+    assert server._max_stored_file_mounts_bytes() is None
+
+
+def test_a_configured_store_cap_is_read_as_bytes(monkeypatch):
+    monkeypatch.setenv(server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR,
+                       '12345')
+    assert server._max_stored_file_mounts_bytes() == 12345

@@ -1007,6 +1007,28 @@ def override_skypilot_config(
 
 
 @contextlib.contextmanager
+def replace_skypilot_config_in_process(
+        new_configs: config_utils.Config) -> Iterator[None]:
+    """Replaces the loaded config for the current process or context only.
+
+    Unlike :func:`replace_skypilot_config`, no temporary config file is
+    written and ``SKYPILOT_CONFIG`` is left untouched, so subprocesses
+    spawned inside the block keep seeing the original config. Use it when
+    only in-process readers need the replacement, e.g. a per-launch default
+    consumed by the provisioner.
+    """
+    original_config = _get_loaded_config()
+    if new_configs == original_config:
+        yield
+        return
+    _set_loaded_config(new_configs)
+    try:
+        yield
+    finally:
+        _set_loaded_config(original_config)
+
+
+@contextlib.contextmanager
 def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
     """Replaces the global config with the new configs.
 
@@ -1066,6 +1088,10 @@ _SLURM_QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [('quota', 'queue')]
 _SLURM_ACCOUNT_KEYS: List[Tuple[str, ...]] = [('quota', 'account')]
 
 _NAMESPACE_KEYS: List[Tuple[str, ...]] = [('namespace',)]
+
+_QUEUE_ADMISSION_TIMEOUT_KEYS: List[Tuple[str, ...]] = [
+    ('kueue', 'admission_timeout'),
+]
 
 # Hooks invoked at the end of `update_api_server_config_no_lock`, after the
 # new config has been persisted and reloaded in-process. Plugins use this to
@@ -1299,6 +1325,75 @@ def get_effective_slurm_account(
                                               workspace=workspace,
                                               override_configs=override_configs,
                                               partition=partition)
+
+
+def get_effective_slurm_quota_value(
+        key: str,
+        cluster: Optional[str] = None,
+        partition: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Any:
+    """Returns a ``slurm.quota.<key>`` value, scope-resolved.
+
+    The ``slurm.quota`` block is deliberately permissive
+    (``additionalProperties: True``) so that consumers can carry
+    scheduler-specific sub-fields beyond the ``queue`` and ``account`` that
+    :func:`get_effective_queue_name` and :func:`get_effective_slurm_account`
+    read. This is the generic counterpart to those two: it resolves any such
+    sub-field over the same scopes -- workspace > global, and within each,
+    partition > cluster > cloud -- so a consumer does not have to reimplement
+    the walk and risk resolving its own field differently from ``queue``.
+
+    Returns ``Any`` rather than ``Optional[str]``, unlike the two named
+    getters: their fields are declared ``{'type': 'string'}`` and so are
+    validated as strings before they get here, while ``additionalProperties``
+    constrains nothing, so a sub-field can hold a number, a bool, a list or a
+    mapping. Narrowing the annotation would let a caller run string
+    operations on a value the schema never promised was a string. Validating
+    the type is the caller's job, the same split the ``slurm.quota`` schema
+    comment already describes.
+
+    Args:
+        key: The sub-field under ``slurm.quota`` to read.
+        cluster: Slurm cluster, selecting the ``cluster_configs`` level.
+        partition: Partition, selecting the ``partition_configs`` level.
+        workspace: Workspace to read first; defaults to the active one.
+        override_configs: Task-level ``config`` overrides.
+
+    Returns:
+        The resolved value as configured, or None if the field is unset at
+        every scope.
+    """
+    return _get_effective_scoped_config_value(cloud='slurm',
+                                              property_keys=[('quota', key)],
+                                              region=cluster,
+                                              workspace=workspace,
+                                              override_configs=override_configs,
+                                              partition=partition)
+
+
+def get_effective_queue_admission_timeout(
+        cloud: str,
+        region: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Optional[int]:
+    """Returns the effective ``kueue.admission_timeout``, or None if unset.
+
+    Bound, in seconds, on how long a launch waits for pods held by a
+    scheduling gate to be admitted; ``-1`` waits indefinitely. Resolved with
+    the same scope precedence as :func:`get_effective_queue_name` (workspace
+    over global, context over cloud), with ``override_configs`` (a task's
+    ``config`` block) merged in at every scope.
+    """
+    value = _get_effective_scoped_config_value(
+        cloud=cloud,
+        property_keys=_QUEUE_ADMISSION_TIMEOUT_KEYS,
+        region=region,
+        workspace=workspace,
+        override_configs=override_configs)
+    if value is None:
+        return None
+    return int(value)
 
 
 def get_effective_namespace(

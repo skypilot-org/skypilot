@@ -248,8 +248,9 @@ def test_gcp_zone():
     [
         'docker:nvidia/cuda:11.8.0-devel-ubuntu18.04',
         'docker:ubuntu:18.04',
-        # Test image with python 3.11 installed by default.
-        'docker:continuumio/miniconda3:24.1.2-0',
+        # Test a pinned miniconda image on a supported Debian release
+        # (bookworm), with python 3.13 installed by default.
+        'docker:continuumio/miniconda3:25.3.1-1',
         # Test python>=3.12 where SkyPilot should automatically create a separate
         # conda env for runtime with python 3.10.
         'docker:continuumio/miniconda3:latest',

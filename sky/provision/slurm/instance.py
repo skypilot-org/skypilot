@@ -5,16 +5,16 @@ import math
 import os
 import re
 import shlex
-import shutil
 import tempfile
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import uuid
 
 import colorama
 
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
@@ -270,6 +270,17 @@ def _wait_for_job_nodes(
             raise RuntimeError(f'Job {job_id} terminated with state {state} '
                                'before nodes were allocated.')
 
+        # Checked before the pending branch, not after: the state read above
+        # can say CONFIGURING (or PENDING) while the nodes are granted moments
+        # later in this same iteration, and recording a pending reason then
+        # would write it in the same second as the caller's node-allocated
+        # event. transitioned_at is whole seconds, so those two rows would tie
+        # with nothing but the database's collation to separate them -- the
+        # thing the two event types exist to avoid.
+        if client.check_job_has_nodes(job_id):
+            logger.debug(f'Job {job_id} has nodes allocated')
+            return
+
         if state in ('PENDING', 'CONFIGURING') and on_pending is not None:
             try:
                 reason = client.get_job_reason(job_id)
@@ -284,14 +295,141 @@ def _wait_for_job_nodes(
                 logger.debug(f'Failed to get pending status for job '
                              f'{job_id}: {e}')
 
-        if client.check_job_has_nodes(job_id):
-            logger.debug(f'Job {job_id} has nodes allocated')
-            return
-
         time.sleep(2)
 
     raise TimeoutError(f'Job {job_id} did not get nodes allocated within '
                        f'{timeout} seconds. Last state: {last_state}')
+
+
+def _record_pending_reason(cluster_name: str, reason: Optional[str],
+                           partition: Optional[str]) -> None:
+    """Persist the squeue pending reason as a cluster launch-progress event.
+
+    The spinner is transient; this makes the reason visible in `sky jobs queue
+    -v` details and in the job's event timeline. Only the reason is
+    recorded (not the pending count) so nop_if_duplicate collapses repeated
+    polls into one event.
+
+    The partition rides along because a reader has no other way to get it: by
+    the time anyone looks at the event the allocation may be gone, and Slurm's
+    reason code alone ('Resources') cannot say *where* the job was waiting.
+    Deliberately not recorded: node counts. They are a snapshot, and a
+    "3 idle nodes" claim still sitting in the event log an hour later is worse
+    than no claim -- a reader that wants counts should ask for them now.
+    """
+    if not reason:
+        return
+    detail = f'pending: {reason}'
+    if partition:
+        detail += f'; partition: {partition}'
+    try:
+        global_user_state.add_cluster_event(
+            cluster_name,
+            new_status=None,
+            reason=f'Launching ({detail})',
+            event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+            nop_if_duplicate=True,
+        )
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to record pending reason for {cluster_name}: '
+                     f'{e}')
+
+
+def _record_allocation(cluster_name: str, slurm_cluster: str,
+                       job_id: str) -> None:
+    """Persist which Slurm allocation backs this cluster.
+
+    The cluster row carries the same two facts -- its resources' region, and
+    cluster_name_on_cloud on the handle -- but teardown removes it, while
+    cluster events outlive it. Recording them is what lets a finished job
+    still be asked what its allocation did, which is the whole reason to read
+    sacct: it is the only source for a job squeue has already forgotten.
+
+    Written at submission, so it survives a job cancelled while it was still
+    queued -- the case most worth asking about afterwards.
+
+    One event per allocation, by id: a recovery submits a new one and adds a
+    row rather than replacing this one, so every attempt stays addressable.
+
+    A DEBUG event rather than launch progress: which allocation backs a
+    cluster is metadata. It never changes and the launch is not waiting on it,
+    so it does not belong in the column that says what the launch *is* waiting
+    on -- where it also landed in the same second as the first pending reason,
+    leaving the database's collation to decide which of the two a reader saw.
+    The launch-progress half is recorded once the nodes are granted, by which
+    time it is strictly later than any pending reason.
+    """
+    try:
+        global_user_state.add_cluster_event(
+            cluster_name,
+            new_status=None,
+            reason=f'Slurm allocation {job_id} on {slurm_cluster}',
+            event_type=global_user_state.ClusterEventType.DEBUG,
+            nop_if_duplicate=True,
+        )
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to record the Slurm allocation of '
+                     f'{cluster_name}: {e}')
+
+
+def _record_nodes_allocated(cluster_name: str, slurm_cluster: str,
+                            job_id: str) -> None:
+    """Record that the allocation has its nodes, as launch progress.
+
+    Written once the wait returns, so `details` moves from why the queue was
+    waiting to which allocation is now bootstrapping the runtime. The text
+    leads with the transition rather than the id, because marking the end of
+    the queue wait is what a reader watching that column is waiting for.
+    """
+    reason = (f'Launching (nodes allocated; Slurm job {job_id} '
+              f'on {slurm_cluster})')
+    try:
+        global_user_state.add_cluster_event(
+            cluster_name,
+            new_status=None,
+            reason=reason,
+            event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+            nop_if_duplicate=True,
+        )
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to record the node allocation of '
+                     f'{cluster_name}: {e}')
+
+
+def _make_pending_callback(
+    cluster_name: str,
+    partition: Optional[str] = None,
+) -> Callable[[str, Optional[str], Optional[int]], None]:
+    """Callback for the pending phase of a Slurm allocation.
+
+    Refreshes the launch spinner and records the squeue reason as a cluster
+    event. Both are change-gated: the wait loop polls every few seconds, and
+    the spinner message embeds the pending count (which moves far more often
+    than the reason), so the two need separate memories.
+    """
+    last_status_msg: Optional[str] = None
+    last_recorded_reason: Optional[str] = None
+
+    def _on_pending(state: str, reason: Optional[str],
+                    pending_count: Optional[int]) -> None:
+        nonlocal last_status_msg, last_recorded_reason
+        del state  # unused
+        parts = []
+        if reason:
+            parts.append(f'pending: {reason}')
+        if pending_count is not None and pending_count > 0:
+            word = 'other' if pending_count == 1 else 'others'
+            parts.append(f'{pending_count} {word} pending')
+        msg = f'Launching ({", ".join(parts)})' if parts else 'Launching'
+        status_msg = ux_utils.spinner_message(msg, cluster_name=cluster_name)
+        if status_msg != last_status_msg:
+            rich_utils.force_update_status(status_msg)
+            last_status_msg = status_msg
+        if reason != last_recorded_reason:
+            _record_pending_reason(cluster_name, reason, partition)
+            last_recorded_reason = reason
+
+    return _on_pending
 
 
 def _sky_cluster_home_dir(base_dir: str, cluster_name_on_cloud: str) -> str:
@@ -302,11 +440,18 @@ def _sky_cluster_home_dir(base_dir: str, cluster_name_on_cloud: str) -> str:
     return f'{base_dir}/.sky_clusters/{cluster_name_on_cloud}'
 
 
-def _snapshot_dir(base_dir: str, cluster_name_on_cloud: str) -> str:
+def _snapshot_dir(base_dir: str,
+                  cluster_name_on_cloud: str,
+                  snapshot_id: Optional[str] = None) -> str:
     """Returns the shared directory for a Slurm container snapshot."""
     # TODO(kevin): Verify that base_dir is on a shared filesystem (e.g., NFS)
     # visible to every allocated node before using it for snapshots.
-    return f'{base_dir}/{SNAPSHOT_DIRECTORY_NAME}/{cluster_name_on_cloud}'
+    path = f'{base_dir}/{SNAPSHOT_DIRECTORY_NAME}/{cluster_name_on_cloud}'
+    if snapshot_id is not None:
+        if re.fullmatch(r'[0-9a-f]{32}', snapshot_id) is None:
+            raise ValueError(f'Invalid Slurm snapshot ID: {snapshot_id!r}.')
+        path = f'{path}/{snapshot_id}'
+    return path
 
 
 def _snapshot_manifest_path(snapshot_dir: str) -> str:
@@ -328,7 +473,7 @@ def _snapshot_job_db_path(generation_dir: str) -> str:
 
 def _run_on_login_node(
         login_node_runner: command_runner.CommandRunner,
-        cmd: str,
+        cmd: Union[str, List[str]],
         failure_message: str,
         tolerate_returncodes: Tuple[int, ...] = (),
 ) -> Tuple[int, str]:
@@ -342,12 +487,24 @@ def _run_on_login_node(
                                                require_outputs=True,
                                                stream_logs=False)
     if rc not in tolerate_returncodes:
-        subprocess_utils.handle_returncode(rc,
-                                           cmd,
-                                           failure_message,
-                                           stderr=f'{stdout}\n{stderr}',
-                                           stream_logs=False)
+        subprocess_utils.handle_returncode(
+            rc,
+            cmd if isinstance(cmd, str) else shlex.join(cmd),
+            failure_message,
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
     return rc, stdout
+
+
+def _file_exists_command(login_node_runner: command_runner.CommandRunner,
+                         path: str) -> str:
+    """Return 0 for a regular file, 1 for missing, and 2 for probe failure."""
+    exists = login_node_runner.command_as_user(['test', '-f', path])
+    missing = login_node_runner.command_as_user(['test', '!', '-f', path])
+    # A successful predicate distinguishes file state from sudo/runuser failure,
+    # even when login profiles or sudo emit unrelated output.
+    return (f'if {exists}; then true; '
+            f'elif {missing}; then (exit 1); else (exit 2); fi')
 
 
 def _validate_snapshot_manifest(
@@ -398,8 +555,12 @@ def _read_snapshot_manifest(
     """Read a snapshot manifest from the Slurm cluster's shared storage."""
     manifest_path = _snapshot_manifest_path(snapshot_dir)
     missing_exit_code = 44
-    cmd = (f'test -f {shlex.quote(manifest_path)} || '
-           f'exit {missing_exit_code}; cat {shlex.quote(manifest_path)}')
+    test_command = _file_exists_command(login_node_runner, manifest_path)
+    read_command = login_node_runner.command_as_user(
+        ['cat', '--', manifest_path])
+    cmd = (f'{test_command}; rc=$?; '
+           f'if [ "$rc" = 1 ]; then exit {missing_exit_code}; '
+           f'elif [ "$rc" != 0 ]; then exit "$rc"; fi; {read_command}')
     rc, stdout = _run_on_login_node(
         login_node_runner,
         cmd,
@@ -453,10 +614,9 @@ def _write_snapshot_manifest(login_node_runner: command_runner.CommandRunner,
                                 remote_tmp_path,
                                 up=True,
                                 stream_logs=False)
-    _run_on_login_node(
-        login_node_runner,
-        f'mv -f {shlex.quote(remote_tmp_path)} {shlex.quote(manifest_path)}',
-        'Failed to publish Slurm container snapshot manifest.')
+    _run_on_login_node(login_node_runner,
+                       ['mv', '-f', '--', remote_tmp_path, manifest_path],
+                       'Failed to publish Slurm container snapshot manifest.')
 
 
 def _remove_snapshot_path_best_effort(
@@ -466,7 +626,7 @@ def _remove_snapshot_path_best_effort(
 ) -> None:
     """Remove an unreferenced snapshot path without masking the main result."""
     try:
-        _run_on_login_node(login_node_runner, f'rm -rf -- {shlex.quote(path)}',
+        _run_on_login_node(login_node_runner, ['rm', '-rf', '--', path],
                            f'Failed to remove {description}.')
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to remove {description}: '
@@ -488,7 +648,7 @@ def _validate_snapshot_files(login_node_runner: command_runner.CommandRunner,
     for label, path in labeled_paths:
         rc, _ = _run_on_login_node(
             login_node_runner,
-            f'test -f {shlex.quote(path)}',
+            _file_exists_command(login_node_runner, path),
             f'Failed to inspect the Slurm container snapshot ({label}).',
             tolerate_returncodes=(1,))
         if rc == 1:
@@ -642,7 +802,8 @@ def _stop_skylet_script(skypilot_runtime_dir: str) -> str:
 
 def _srun_on_node(job_id: str, node: str, script: str) -> str:
     """Build an srun command that runs a script on one allocated node."""
-    return (f'srun --unbuffered --overlap --jobid={shlex.quote(job_id)} '
+    return ('srun --unbuffered --overlap --chdir=/tmp '
+            f'--jobid={shlex.quote(job_id)} '
             f'--nodelist={shlex.quote(node)} --nodes=1 --ntasks=1 '
             f'bash -c {shlex.quote(script)}')
 
@@ -663,9 +824,11 @@ def _wait_for_job_ready(
     poll_interval_seconds = 1
 
     while True:
-        rc, _, _ = login_node_runner.run(f'test -f {ready_signal}',
-                                         require_outputs=True,
-                                         stream_logs=False)
+        rc, _ = _run_on_login_node(login_node_runner,
+                                   _file_exists_command(login_node_runner,
+                                                        ready_signal),
+                                   'Failed to inspect Slurm startup readiness.',
+                                   tolerate_returncodes=(1,))
         if rc == 0:
             return
 
@@ -747,26 +910,7 @@ def _create_virtual_instance(
                  f'job to be allocated on partition {partition}')
 
     num_nodes = config.count
-    last_status_msg = None
-
-    def _on_pending(state: str, reason: Optional[str],
-                    pending_count: Optional[int]) -> None:
-        nonlocal last_status_msg
-        del state  # unused
-        parts = []
-        if reason:
-            parts.append(f'pending: {reason}')
-        if pending_count is not None and pending_count > 0:
-            word = 'other' if pending_count == 1 else 'others'
-            parts.append(f'{pending_count} {word} pending')
-        if parts:
-            msg = f'Launching ({", ".join(parts)})'
-        else:
-            msg = 'Launching'
-        status_msg = ux_utils.spinner_message(msg, cluster_name=cluster_name)
-        if status_msg != last_status_msg:
-            rich_utils.force_update_status(status_msg)
-            last_status_msg = status_msg
+    on_pending = _make_pending_callback(cluster_name, partition)
 
     if existing_jobs:
         assert len(existing_jobs) == 1, (
@@ -776,10 +920,12 @@ def _create_virtual_instance(
         job_id = existing_jobs[0]
         logger.debug(f'Job with name {cluster_name_on_cloud} already exists '
                      f'(JOBID: {job_id})')
+        _record_allocation(cluster_name, slurm_cluster, job_id)
 
         # Wait for nodes to be allocated (job might be in PENDING state)
         _wait_for_job_nodes(client, job_id, provision_timeout, partition,
-                            _on_pending)
+                            on_pending)
+        _record_nodes_allocated(cluster_name, slurm_cluster, job_id)
         nodes, _ = client.get_job_nodes(job_id)
         # Reset spinner since nodes are now allocated
         rich_utils.force_update_status(
@@ -827,11 +973,13 @@ def _create_virtual_instance(
         client, provider_config, cluster_name_on_cloud)
     sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
                                                  cluster_name_on_cloud)
-    snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud)
+    snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud,
+                                 provider_config.get('snapshot_id'))
     snapshot_manifest_path = _snapshot_manifest_path(snapshot_dir)
-    snapshot_manifest = _read_snapshot_manifest(login_node_runner,
-                                                snapshot_dir,
-                                                expected_num_nodes=num_nodes)
+    snapshot_manifest = None
+    if config.prev_cluster_ever_up:
+        snapshot_manifest = _read_snapshot_manifest(
+            login_node_runner, snapshot_dir, expected_num_nodes=num_nodes)
     if snapshot_manifest is not None:
         _validate_snapshot_files(login_node_runner, snapshot_dir,
                                  snapshot_manifest)
@@ -1186,13 +1334,13 @@ touch {sky_cluster_home_dir}/.hushlogin
     # fmt: on
     # pylint: enable=line-too-long
 
-    cmd = f'mkdir -p {provision_scripts_dir}'
+    cmd = ['mkdir', '-p', '--', provision_scripts_dir]
     rc, stdout, stderr = login_node_runner.run(cmd,
                                                require_outputs=True,
                                                stream_logs=False)
     subprocess_utils.handle_returncode(
         rc,
-        cmd,
+        shlex.join(cmd),
         'Failed to create provision scripts directory on login node.',
         stderr=f'{stdout}\n{stderr}')
     if snapshot_manifest is not None:
@@ -1206,8 +1354,10 @@ touch {sky_cluster_home_dir}/.hushlogin
         # files after it.
         _run_on_login_node(
             login_node_runner,
-            _remove_shared_state_script(sky_cluster_home_dir,
-                                        preserve_logs=True),
+            _remove_shared_state_script(
+                sky_cluster_home_dir,
+                preserve_logs=True,
+                command_builder=login_node_runner.command_as_user),
             'Failed to clean leftover shared state before restoring the '
             'Slurm cluster.')
 
@@ -1223,9 +1373,11 @@ touch {sky_cluster_home_dir}/.hushlogin
     logger.debug(f'Successfully submitted Slurm job {job_id} to partition '
                  f'{partition} for cluster {cluster_name_on_cloud} '
                  f'with {num_nodes} nodes')
+    _record_allocation(cluster_name, slurm_cluster, job_id)
 
     _wait_for_job_nodes(client, job_id, provision_timeout, partition,
-                        _on_pending)
+                        on_pending)
+    _record_nodes_allocated(cluster_name, slurm_cluster, job_id)
     nodes, _ = client.get_job_nodes(job_id)
     # Reset spinner since nodes are now allocated
     rich_utils.force_update_status(
@@ -1249,7 +1401,7 @@ touch {sky_cluster_home_dir}/.hushlogin
     if env_options.Options.SHOW_DEBUG_INFO.get():
 
         def _stream_logs():
-            login_node_runner.run(f'tail -f {slurm_log} 2>/dev/null',
+            login_node_runner.run(['tail', '-n', '10', '-f', '--', slurm_log],
                                   require_outputs=False,
                                   stream_logs=True)
 
@@ -1265,7 +1417,7 @@ touch {sky_cluster_home_dir}/.hushlogin
             slurm_log,
         )
     except (RuntimeError, exceptions.CommandError) as e:
-        _, stdout, _ = login_node_runner.run(f'cat {slurm_log} 2>/dev/null',
+        _, stdout, _ = login_node_runner.run(['cat', '--', slurm_log],
                                              require_outputs=True,
                                              stream_logs=False)
         if stdout:
@@ -1360,12 +1512,13 @@ def query_instances(
         if non_terminated_statuses:
             return non_terminated_statuses
 
-        if not snapshot_checked:
+        if not snapshot_checked and provider_config.get('container_image'):
             # A snapshot is the stopped steady state. Check it before retrying
             # so stopped clusters do not pay for additional Slurm queries.
             login_node_runner = _make_login_node_runner(provider_config)
             sky_base_dir = _resolve_sky_base_dir(client, provider_config)
-            snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud)
+            snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud,
+                                         provider_config.get('snapshot_id'))
             manifest = _read_snapshot_manifest(login_node_runner, snapshot_dir)
             snapshot_checked = True
             if manifest is not None:
@@ -1497,7 +1650,8 @@ def stop_instances(
     client, login_node_runner = _make_client_and_login_runner(
         provider_config, inside_slurm_cluster)
     sky_base_dir = _resolve_sky_base_dir(client, provider_config)
-    snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud)
+    snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud,
+                                 provider_config.get('snapshot_id'))
 
     running_jobs = client.query_jobs(cluster_name_on_cloud,
                                      ['running', 'suspended'])
@@ -1597,8 +1751,9 @@ def stop_instances(
         # final scancel reaps skylet anyway.
         _run_on_login_node(
             login_node_runner,
-            _srun_on_node(job_id, nodes[0],
-                          _stop_skylet_script(skypilot_runtime_dir)),
+            shlex.split(
+                _srun_on_node(job_id, nodes[0],
+                              _stop_skylet_script(skypilot_runtime_dir))),
             'Failed to stop Skylet before snapshotting the Slurm container.')
 
     global_enroot_name = _enroot_container_name_global_scope(
@@ -1627,7 +1782,8 @@ fi
     def _check_node_container(node: str) -> None:
         check_script = 'set -e\n' + _find_enroot_container_script(node)
         _run_on_login_node(
-            login_node_runner, _srun_on_node(job_id, node, check_script),
+            login_node_runner,
+            shlex.split(_srun_on_node(job_id, node, check_script)),
             f'Failed to verify the Slurm container on node {node} before '
             'preparing its snapshot.')
 
@@ -1638,8 +1794,10 @@ fi
     staging_dir = f'{snapshot_dir}/.staging-{generation}'
     _run_on_login_node(
         login_node_runner,
-        (f'mkdir -p {shlex.quote(os.path.dirname(generation_dir))} && '
-         f'mkdir {shlex.quote(staging_dir)}'),
+        (login_node_runner.command_as_user(
+            ['mkdir', '-p', '--',
+             os.path.dirname(generation_dir)]) + ' && ' +
+         login_node_runner.command_as_user(['mkdir', '--', staging_dir])),
         'Failed to prepare Slurm container snapshot directory.')
 
     # The directory to delete if the snapshot fails partway. Cleared before
@@ -1667,11 +1825,11 @@ fi
             f'{shlex.quote(staging_job_db_path)}; fi')
         _run_on_login_node(
             login_node_runner,
-            _srun_on_node(job_id, nodes[0], backup_job_db_script),
+            shlex.split(_srun_on_node(job_id, nodes[0], backup_job_db_script)),
             'Failed to snapshot the Slurm cluster job database.')
         rc, _ = _run_on_login_node(
             login_node_runner,
-            f'test -f {shlex.quote(staging_job_db_path)}',
+            _file_exists_command(login_node_runner, staging_job_db_path),
             'Failed to inspect the Slurm cluster job database snapshot.',
             tolerate_returncodes=(1,))
         has_job_db = rc == 0
@@ -1686,7 +1844,8 @@ sync
 enroot export -f -o {shlex.quote(staging_snapshot_path)} "$enroot_name"
 """
             _run_on_login_node(
-                login_node_runner, _srun_on_node(job_id, node, export_script),
+                login_node_runner,
+                shlex.split(_srun_on_node(job_id, node, export_script)),
                 f'Failed to snapshot Slurm container rank {rank} on node '
                 f'{node}.')
 
@@ -1700,9 +1859,10 @@ enroot export -f -o {shlex.quote(staging_snapshot_path)} "$enroot_name"
             'nodes': nodes,
         }
         _run_on_login_node(
-            login_node_runner,
-            (f'test ! -e {shlex.quote(generation_dir)} && '
-             f'mv -- {shlex.quote(staging_dir)} {shlex.quote(generation_dir)}'),
+            login_node_runner, (login_node_runner.command_as_user(
+                ['test', '!', '-e', generation_dir]) + ' && ' +
+                                login_node_runner.command_as_user(
+                                    ['mv', '--', staging_dir, generation_dir])),
             'Failed to commit the Slurm container snapshot generation.')
         cleanup_dir_on_failure = generation_dir
         _validate_snapshot_files(login_node_runner, snapshot_dir, manifest)
@@ -1817,8 +1977,10 @@ _SHARED_STATE_CLEANUP_ATTEMPTS = 3
 _SHARED_STATE_CLEANUP_RETRY_INTERVAL_SECONDS = 10
 
 
-def _remove_shared_state_script(sky_cluster_home_dir: str,
-                                preserve_logs: bool) -> str:
+def _remove_shared_state_script(
+        sky_cluster_home_dir: str,
+        preserve_logs: bool,
+        command_builder: Callable[[List[str]], str] = shlex.join) -> str:
     """Build a script that empties the shared cluster home on the login node.
 
     A stop keeps the logs referenced by the jobs database that start restores;
@@ -1827,22 +1989,24 @@ def _remove_shared_state_script(sky_cluster_home_dir: str,
     and the leftovers (e.g. a partially deleted uv-managed Python install)
     break the next start's runtime setup.
     """
-    home = shlex.quote(sky_cluster_home_dir)
     if preserve_logs:
-        remove_cmd = (f'find {home} -mindepth 1 -maxdepth 1 '
-                      '! -name sky_logs '
-                      '-exec rm -rf -- {} +')
-        # GNU find exits 0 even when the invoked rm fails, so the result
-        # must be verified separately. The command substitution takes
-        # find's exit status (a stale handle makes find error out), so a
-        # find failure cannot be mistaken for an empty home.
-        verify_cmd = (f'leftovers="$(find {home} -mindepth 1 -maxdepth 1 '
-                      '! -name sky_logs -print -quit)" && '
-                      '[ -z "$leftovers" ]')
+        logs = f'{sky_cluster_home_dir}/sky_logs'
+        remove_cmd = command_builder([
+            'find', sky_cluster_home_dir, '-depth', '-mindepth', '1', '!',
+            '-path', logs, '!', '-path', f'{logs}/*', '-delete'
+        ])
+        inspect_cmd = command_builder([
+            'find', sky_cluster_home_dir, '-mindepth', '1', '-maxdepth', '1',
+            '!', '-name', 'sky_logs', '-print', '-quit'
+        ])
+        verify_cmd = f'leftovers="$({inspect_cmd})" && [ -z "$leftovers" ]'
     else:
-        remove_cmd = f'rm -rf -- {home}'
-        verify_cmd = f'[ ! -e {home} ]'
-    return (f'for attempt in $(seq {_SHARED_STATE_CLEANUP_ATTEMPTS}); do\n'
+        remove_cmd = command_builder(['rm', '-rf', '--', sky_cluster_home_dir])
+        test_cmd = command_builder(['test', '!', '-e', sky_cluster_home_dir])
+        verify_cmd = test_cmd
+    # GNU find must be able to return to its starting directory.
+    return ('cd /tmp || exit $?\n'
+            f'for attempt in $(seq {_SHARED_STATE_CLEANUP_ATTEMPTS}); do\n'
             f'  {remove_cmd} && {verify_cmd} && exit 0\n'
             f'  sleep {_SHARED_STATE_CLEANUP_RETRY_INTERVAL_SECONDS}\n'
             'done\n'
@@ -1901,18 +2065,20 @@ if command -v enroot > /dev/null; then
 fi
 rm -rf -- {shlex.quote(skypilot_runtime_dir)}
 """
-    cleanup_node_cmd = (
-        f'srun --unbuffered --overlap --jobid={shlex.quote(job_id)} '
-        f'--nodes={len(nodes)} --ntasks-per-node=1 '
-        f'bash -c {shlex.quote(cleanup_node_script)}')
+    cleanup_node_cmd = ('srun --unbuffered --overlap --chdir=/tmp '
+                        f'--jobid={shlex.quote(job_id)} '
+                        f'--nodes={len(nodes)} --ntasks-per-node=1 '
+                        f'bash -c {shlex.quote(cleanup_node_script)}')
     _run_on_login_node(
-        login_node_runner, cleanup_node_cmd,
+        login_node_runner, shlex.split(cleanup_node_cmd),
         'Failed to clean up the Slurm allocation before cancellation.')
 
     _run_on_login_node(
         login_node_runner,
-        _remove_shared_state_script(sky_cluster_home_dir,
-                                    preserve_logs=preserve_logs),
+        _remove_shared_state_script(
+            sky_cluster_home_dir,
+            preserve_logs=preserve_logs,
+            command_builder=login_node_runner.command_as_user),
         'Failed to clean up shared Slurm cluster state before cancellation.')
 
 
@@ -2053,14 +2219,10 @@ def terminate_instances(
                       inside_slurm_cluster,
                       pre_batch_cancel=pre_batch_cancel)
     sky_base_dir = _resolve_sky_base_dir(client, provider_config)
-    snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud)
-    if inside_slurm_cluster:
-        if os.path.exists(snapshot_dir):
-            shutil.rmtree(snapshot_dir)
-    else:
-        _run_on_login_node(login_node_runner,
-                           f'rm -rf -- {shlex.quote(snapshot_dir)}',
-                           'Failed to remove Slurm container snapshot.')
+    snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud,
+                                 provider_config.get('snapshot_id'))
+    _remove_snapshot_path_best_effort(login_node_runner, snapshot_dir,
+                                      'Slurm container snapshot')
 
 
 def open_ports(

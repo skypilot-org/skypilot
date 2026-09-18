@@ -1,10 +1,12 @@
 """Unit tests for the metrics system."""
 
+import asyncio
 import base64
 import os
 import socket
 import threading
 import time
+import types
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
@@ -19,8 +21,10 @@ from prometheus_client import multiprocess
 import prometheus_client as prom
 import pytest
 
+from sky import skypilot_config
 from sky.metrics import utils as metrics_utils
 from sky.server import metrics
+from sky.server import middleware_utils
 from sky.server.server import BasicAuthMiddleware
 
 
@@ -343,6 +347,41 @@ async def test_metrics_endpoint_with_multiprocess():
             mock_gen.assert_called_once_with(mock_registry_instance)
 
 
+def _http_request(path,
+                  method='GET',
+                  *,
+                  reached_router=True,
+                  state=None,
+                  app=None,
+                  headers=None) -> fastapi.Request:
+    """A real Request on a minimal ASGI scope.
+
+    `reached_router` models whether the request got past every middleware to
+    the router: Starlette's router stamps `scope['router']` when it runs, and
+    a request a middleware answered itself never gets there.
+    """
+    scope = {
+        'type': 'http',
+        'method': method,
+        'path': path,
+        'headers': [(k.lower().encode(), v.encode())
+                    for k, v in (headers or {}).items()],
+        'query_string': b'',
+        'state': {} if state is None else state,
+    }
+    if reached_router:
+        scope['router'] = object()
+    if app is not None:
+        scope['app'] = app
+    return fastapi.Request(scope)
+
+
+def _response(status_code: int) -> MagicMock:
+    response = MagicMock()
+    response.status_code = status_code
+    return response
+
+
 @pytest.fixture
 def prometheus_middleware():
     """Create PrometheusMiddleware instance for testing."""
@@ -352,6 +391,7 @@ def prometheus_middleware():
     metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.clear()
     metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.clear()
     metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS.clear()
+    metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL.clear()
 
     return middleware
 
@@ -359,13 +399,8 @@ def prometheus_middleware():
 @pytest.mark.asyncio
 async def test_middleware_successful_request(prometheus_middleware):
     """Test middleware with successful non-streaming request."""
-    request = MagicMock()
-    request.url.path = "/api/v1/status"
-    request.method = "GET"
-
-    response = MagicMock()
-    response.status_code = 200
-
+    request = _http_request('/api/v1/status')
+    response = _response(200)
     call_next = AsyncMock(return_value=response)
 
     start_time = time.time()
@@ -405,13 +440,8 @@ async def test_middleware_successful_request(prometheus_middleware):
 @pytest.mark.asyncio
 async def test_middleware_streaming_request(prometheus_middleware):
     """Test middleware with streaming API request."""
-    request = MagicMock()
-    request.url.path = "/api/v1/logs"
-    request.method = "GET"
-
-    response = MagicMock()
-    response.status_code = 200
-
+    request = _http_request('/api/v1/logs')
+    response = _response(200)
     call_next = AsyncMock(return_value=response)
 
     result = await prometheus_middleware.dispatch(request, call_next)
@@ -439,10 +469,7 @@ async def test_middleware_streaming_request(prometheus_middleware):
 @pytest.mark.asyncio
 async def test_middleware_exception_handling(prometheus_middleware):
     """Test middleware handles exceptions properly."""
-    request = MagicMock()
-    request.url.path = "/api/v1/failing"
-    request.method = "POST"
-
+    request = _http_request('/api/v1/failing', 'POST')
     call_next = AsyncMock(side_effect=Exception("Test error"))
 
     with pytest.raises(Exception, match="Test error"):
@@ -467,14 +494,8 @@ async def test_middleware_different_status_codes(prometheus_middleware):
     ]
 
     for status_code, expected_group in test_cases:
-        request = MagicMock()
-        request.url.path = f"/test/{status_code}"
-        request.method = "GET"
-
-        response = MagicMock()
-        response.status_code = status_code
-
-        call_next = AsyncMock(return_value=response)
+        request = _http_request(f'/test/{status_code}')
+        call_next = AsyncMock(return_value=_response(status_code))
 
         await prometheus_middleware.dispatch(request, call_next)
 
@@ -486,6 +507,180 @@ async def test_middleware_different_status_codes(prometheus_middleware):
                 'status': expected_group
             })
         assert total_requests == 1.0
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# The metrics middleware is the outermost one, so it also sees the responses
+# other middlewares produce. Their paths are bounded; everything that reached
+# the router keeps the raw path as before.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _app_with_routes() -> fastapi.FastAPI:
+    app = fastapi.FastAPI()
+
+    @app.get('/status')
+    async def status():  # pylint: disable=unused-variable
+        return {}
+
+    @app.get('/api/get')
+    async def api_get():  # pylint: disable=unused-variable
+        return {}
+
+    @app.get('/dashboard/{full_path:path}')
+    async def dashboard(full_path: str):  # pylint: disable=unused-variable
+        return {'path': full_path}
+
+    return app
+
+
+@pytest.mark.asyncio
+async def test_path_label_is_read_after_the_inner_layers_ran(
+        prometheus_middleware):
+    """Inner middlewares rewrite `scope['path']` in place (the internal
+    dashboard prefix); the scope dict is shared down the stack, so reading it
+    after `call_next` gives the path the router saw, as before the move."""
+    request = _http_request('/internal/dashboard/status', reached_router=False)
+
+    async def call_next(req):
+        req.scope['path'] = '/status'
+        req.scope['router'] = object()
+        return _response(200)
+
+    await prometheus_middleware.dispatch(request, call_next)
+
+    assert _get_metric_value('sky_apiserver_requests_total', {
+        'path': '/status',
+        'status': '2xx'
+    }) == 1.0
+    assert _get_metric_value('sky_apiserver_requests_total',
+                             {'path': '/internal/dashboard/status'}) == 0.0
+
+
+@pytest.mark.asyncio
+async def test_a_404_from_the_router_keeps_the_raw_path(prometheus_middleware):
+    request = _http_request('/no/such/route')
+    await prometheus_middleware.dispatch(request,
+                                         AsyncMock(return_value=_response(404)))
+    assert _get_metric_value('sky_apiserver_requests_total', {
+        'path': '/no/such/route',
+        'status': '4xx'
+    }) == 1.0
+
+
+@pytest.mark.asyncio
+async def test_a_middleware_rejection_keeps_a_registered_route_path(
+        prometheus_middleware):
+    """A 503 an auth middleware answered for `/status` lands in the same
+    series as the successes of `/status`."""
+    app = _app_with_routes()
+    request = _http_request('/status', reached_router=False, app=app)
+    await prometheus_middleware.dispatch(request,
+                                         AsyncMock(return_value=_response(503)))
+    assert _get_metric_value('sky_apiserver_requests_total', {
+        'path': '/status',
+        'status': '5xx'
+    }) == 1.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('raw_path, label', [
+    ('/wp-admin/setup.php', metrics.OTHER_PATH_LABEL),
+    ('/.env', metrics.OTHER_PATH_LABEL),
+    ('/api/no-such-endpoint', '/api/*'),
+    ('/dashboard/_next/static/chunks/main.js', '/dashboard/*'),
+    ('/internal/dashboard/clusters', '/internal/dashboard/*'),
+    ('/plugins/api/foo/list', '/plugins/*'),
+    ('/jobs/no-such-thing', '/jobs/*'),
+    ('/users', '/users/*'),
+])
+async def test_a_middleware_rejection_on_an_unknown_path_is_bucketed(
+        prometheus_middleware, raw_path, label):
+    """Rejected requests' paths are chosen by unauthenticated clients, so
+    anything that is not a registered route folds into a fixed prefix or
+    `other`. The `<prefix>*` form keeps the prefix regexes dashboards use
+    (`/api/.*`, `/dashboard/.*`) matching."""
+    app = _app_with_routes()
+    request = _http_request(raw_path, reached_router=False, app=app)
+    await prometheus_middleware.dispatch(request,
+                                         AsyncMock(return_value=_response(401)))
+    assert _get_metric_value('sky_apiserver_requests_total', {
+        'path': label,
+        'status': '4xx'
+    }) == 1.0
+    assert _get_metric_value('sky_apiserver_requests_total',
+                             {'path': raw_path}) == 0.0
+
+
+@pytest.mark.asyncio
+async def test_a_middleware_rejection_without_an_app_is_still_bounded(
+        prometheus_middleware):
+    """No app on the scope (bare ASGI callable): nothing to match against,
+    so every rejected path folds into a prefix or `other`."""
+    request = _http_request('/status', reached_router=False)
+    await prometheus_middleware.dispatch(request,
+                                         AsyncMock(return_value=_response(503)))
+    assert _get_metric_value('sky_apiserver_requests_total', {
+        'path': metrics.OTHER_PATH_LABEL,
+        'status': '5xx'
+    }) == 1.0
+
+
+def test_unrouted_path_label():
+    literal = frozenset(('/status', '/api/get'))
+    label = metrics._unrouted_path_label
+    assert label('/status', literal) == '/status'
+    assert label('/api/get', literal) == '/api/get'
+    assert label('/api/stream', literal) == '/api/*'
+    assert label('/dashboard/clusters', literal) == '/dashboard/*'
+    # A router's root route is the bare prefix.
+    assert label('/workspaces', literal) == '/workspaces/*'
+    assert label('/status/', literal) == metrics.OTHER_PATH_LABEL
+    assert label('/wp-admin', literal) == metrics.OTHER_PATH_LABEL
+    assert label('', literal) == metrics.OTHER_PATH_LABEL
+
+
+def test_literal_route_paths_skip_parameterized_routes():
+    paths = metrics._literal_route_paths(_app_with_routes())
+    assert '/status' in paths
+    assert '/api/get' in paths
+    assert not any('{' in path for path in paths)
+    assert metrics._literal_route_paths(None) == frozenset()
+    assert metrics._literal_route_paths(MagicMock()) == frozenset()
+
+
+def test_reached_router_uses_the_router_scope_key():
+    assert metrics._reached_router(_http_request('/x', reached_router=True))
+    assert not metrics._reached_router(_http_request('/x',
+                                                     reached_router=False))
+
+
+@pytest.mark.asyncio
+async def test_a_stamped_rejection_is_counted_by_reason(prometheus_middleware):
+    """The auth helpers stamp why they answered; the metrics middleware
+    turns the stamp into `sky_apiserver_request_rejections_total`."""
+    request = _http_request('/status', reached_router=False)
+    middleware_utils.mark_rejection(
+        request, middleware_utils.REJECT_REASON_AUTH_DB_TIMEOUT)
+    await prometheus_middleware.dispatch(request,
+                                         AsyncMock(return_value=_response(503)))
+    collectors = [metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL]
+    assert _get_metric_value('sky_apiserver_request_rejections_total', {
+        'reason': middleware_utils.REJECT_REASON_AUTH_DB_TIMEOUT,
+        'status': '503',
+        'kind': 'http'
+    },
+                             collectors=collectors) == 1.0
+
+
+@pytest.mark.asyncio
+async def test_an_unstamped_response_is_not_a_rejection(prometheus_middleware):
+    request = _http_request('/status')
+    await prometheus_middleware.dispatch(request,
+                                         AsyncMock(return_value=_response(500)))
+    collectors = [metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL]
+    assert _get_metric_value('sky_apiserver_request_rejections_total',
+                             collectors=collectors) == 0.0
 
 
 def test_get_user_label_with_auth_user():
@@ -575,16 +770,10 @@ def prometheus_middleware_user():
 @pytest.mark.asyncio
 async def test_middleware_records_user_metrics(prometheus_middleware_user):
     """Test that middleware records per-user metrics for authenticated user."""
-    request = MagicMock()
-    request.url.path = '/api/v1/status'
-    request.method = 'GET'
-    request.state.auth_user = MagicMock()
-    request.state.auth_user.name = 'alice@example.com'
-
-    response = MagicMock()
-    response.status_code = 200
-
-    call_next = AsyncMock(return_value=response)
+    request = _http_request(
+        '/api/v1/status',
+        state={'auth_user': types.SimpleNamespace(name='alice@example.com')})
+    call_next = AsyncMock(return_value=_response(200))
 
     await prometheus_middleware_user.dispatch(request, call_next)
 
@@ -603,15 +792,8 @@ async def test_middleware_records_user_metrics(prometheus_middleware_user):
 async def test_middleware_records_anonymous_user_metrics(
         prometheus_middleware_user):
     """Test that middleware records 'anonymous' for unauthenticated requests."""
-    request = MagicMock(spec=['url', 'method', 'state'])
-    request.url.path = '/api/v1/status'
-    request.method = 'GET'
-    request.state = MagicMock(spec=[])  # No auth_user attribute
-
-    response = MagicMock()
-    response.status_code = 200
-
-    call_next = AsyncMock(return_value=response)
+    request = _http_request('/api/v1/status')  # No auth_user in the state.
+    call_next = AsyncMock(return_value=_response(200))
 
     await prometheus_middleware_user.dispatch(request, call_next)
 
@@ -629,23 +811,23 @@ async def test_middleware_records_anonymous_user_metrics(
 @pytest.mark.asyncio
 async def test_middleware_user_metrics_with_basic_auth(
         prometheus_middleware_user):
-    """E2E test: BasicAuthMiddleware -> PrometheusMiddleware chain records
+    """E2E test: PrometheusMiddleware -> BasicAuthMiddleware chain records
     correct user label for basic auth.
 
-    Verifies that when BasicAuthMiddleware authenticates via Basic auth
-    and sets request.state.auth_user, PrometheusMiddleware records the
-    correct username in per-user metrics.
+    Verifies that when BasicAuthMiddleware (inside the metrics middleware, as
+    in production) authenticates via Basic auth and sets
+    request.state.auth_user, PrometheusMiddleware records the correct
+    username in per-user metrics.
     """
     # Create request with Basic Auth header (bob:secret)
-    request = MagicMock(spec=['url', 'method', 'headers', 'state'])
-    request.url = MagicMock()
-    request.url.path = '/api/v1/clusters'
-    request.method = 'POST'
-    request.headers = {
-        'authorization': 'Basic ' + base64.b64encode(b'bob:secret').decode(),
-    }
-    request.state = MagicMock()
-    request.state.auth_user = None  # As InitializeRequestAuthUserMiddleware
+    request = _http_request(
+        '/api/v1/clusters',
+        'POST',
+        headers={
+            'authorization': 'Basic ' +
+                             base64.b64encode(b'bob:secret').decode(),
+        },
+        state={'auth_user': None})  # As InitializeRequestAuthUserMiddleware
 
     # Final handler returning success
     async def final_handler(_req):
@@ -653,9 +835,9 @@ async def test_middleware_user_metrics_with_basic_auth(
 
     basic_auth_middleware = BasicAuthMiddleware(app=MagicMock())
 
-    # Chain: BasicAuth -> Prometheus -> final_handler
-    async def prometheus_call_next(req):
-        return await prometheus_middleware_user.dispatch(req, final_handler)
+    # Chain: Prometheus -> BasicAuth -> final_handler
+    async def basic_auth_call_next(req):
+        return await basic_auth_middleware.dispatch(req, final_handler)
 
     mock_user = MagicMock()
     mock_user.name = 'bob'
@@ -668,8 +850,8 @@ async def test_middleware_user_metrics_with_basic_auth(
                return_value=False), \
          patch('sky.jobs.utils.is_consolidation_mode', return_value=False):
 
-        response = await basic_auth_middleware.dispatch(request,
-                                                        prometheus_call_next)
+        response = await prometheus_middleware_user.dispatch(
+            request, basic_auth_call_next)
 
     assert response.status_code == 200
     # BasicAuth should have set auth_user
@@ -687,21 +869,58 @@ async def test_middleware_user_metrics_with_basic_auth(
 
 
 @pytest.mark.asyncio
+async def test_middleware_user_metrics_with_basic_auth_rejection(
+        prometheus_middleware_user):
+    """A 401 BasicAuthMiddleware answers itself is counted, attributed, and
+    recorded as anonymous."""
+    request = _http_request('/api/v1/clusters',
+                            'POST',
+                            reached_router=False,
+                            state={'auth_user': None})
+
+    basic_auth_middleware = BasicAuthMiddleware(app=MagicMock())
+    final_handler = AsyncMock()
+
+    async def basic_auth_call_next(req):
+        return await basic_auth_middleware.dispatch(req, final_handler)
+
+    with patch('sky.server.auth.loopback.is_loopback_request',
+               return_value=False), \
+         patch('sky.jobs.utils.is_consolidation_mode', return_value=False):
+        response = await prometheus_middleware_user.dispatch(
+            request, basic_auth_call_next)
+
+    assert response.status_code == 401
+    final_handler.assert_not_awaited()
+    assert _get_metric_value(
+        'sky_apiserver_requests_by_user_total', {
+            'user': 'anonymous',
+            'method': 'POST',
+            'status': '4xx'
+        },
+        collectors=[metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL]) == 1.0
+    assert _get_metric_value(
+        'sky_apiserver_request_rejections_total', {
+            'reason': middleware_utils.REJECT_REASON_UNAUTHORIZED,
+            'status': '401',
+            'kind': 'http'
+        },
+        collectors=[metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL
+                   ]) == 1.0
+
+
+@pytest.mark.asyncio
 async def test_middleware_records_api_get_duration_by_name(
         prometheus_middleware):
     """/api/get latency is recorded under the request name the handler stamps."""
-    request = MagicMock()
-    request.url.path = '/api/v1/api/get'
-    request.method = 'GET'
-    request.state.auth_user = None
     # The api_get handler stamps request.state.request_name once it knows which
     # request is being fetched.
-    request.state.request_name = 'status'
-
-    response = MagicMock()
-    response.status_code = 200
-
-    call_next = AsyncMock(return_value=response)
+    request = _http_request('/api/v1/api/get',
+                            state={
+                                'auth_user': None,
+                                'request_name': 'status'
+                            })
+    call_next = AsyncMock(return_value=_response(200))
 
     await prometheus_middleware.dispatch(request, call_next)
 
@@ -719,16 +938,8 @@ async def test_middleware_records_api_get_duration_by_name(
 async def test_middleware_no_api_get_duration_without_name(
         prometheus_middleware):
     """No per-name /api/get series is recorded when the name is not stamped."""
-    request = MagicMock(spec=['url', 'method', 'state'])
-    request.url.path = '/api/v1/status'
-    request.method = 'GET'
-    request.state = MagicMock(
-        spec=[])  # No request_name / auth_user attributes.
-
-    response = MagicMock()
-    response.status_code = 200
-
-    call_next = AsyncMock(return_value=response)
+    request = _http_request('/api/v1/status')  # No request_name / auth_user.
+    call_next = AsyncMock(return_value=_response(200))
 
     await prometheus_middleware.dispatch(request, call_next)
 
@@ -750,6 +961,7 @@ def cleanup_metrics():
     metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.clear()
     metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS.clear()
     metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL.clear()
+    metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL.clear()
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -1395,3 +1607,329 @@ def test_metrics_server_reports_a_bind_failure(monkeypatch):
             assert mock_logger.error.called, 'bind failure was not reported'
     finally:
         blocker.close()
+
+
+# ── multiprocess gauge modes ────────────────────────────────────────
+
+
+def test_no_gauge_defaults_to_all_multiprocess_mode():
+    """'all' keeps serving a dead process's last value forever.
+
+    It also writes gauge_all_<pid>.db, which mark_process_dead() does not
+    reclaim, so the directory /metrics merges grows with every process the
+    server has ever spawned. Fleet-wide totals want 'livesum'; per-pid
+    series want 'liveall'.
+    """
+    offenders = sorted(name for name, obj in vars(metrics_utils).items()
+                       if isinstance(obj, prom.Gauge) and
+                       getattr(obj, '_multiprocess_mode', None) == 'all')
+    assert not offenders, (
+        f'Gauges left on the default multiprocess_mode="all": {offenders}')
+
+
+# ── nothing may block the loop that serves /metrics ─────────────────
+
+
+def _slow_prologue(started, release, result=((), ()), timeout=30):
+    """A federation refresh that blocks until released.
+
+    `timeout` bounds the block so a test whose release lands after the
+    measurement -- the inline control arm below cannot set it until the
+    fetch it is blocking returns -- costs that long and not the default.
+    """
+
+    def prologue():
+        started.set()
+        release.wait(timeout)
+        return (list(result[0]), list(result[1]))
+
+    return prologue
+
+
+def _single_gauge_value(gauge):
+    """Value of an unlabelled gauge (_gauge_value is name-specific)."""
+    for family in gauge.collect():
+        for sample in family.samples:
+            return sample.value
+    return None
+
+
+def test_federation_refresh_runs_off_the_event_loop():
+    """The config reload / kubeconfig read must happen on another thread."""
+    targets = metrics._FederationTargets()
+    ran_on = []
+
+    def prologue():
+        ran_on.append(threading.current_thread())
+        return (['ctx-a'], ['slurm-a'])
+
+    with patch.object(targets, '_prologue', prologue):
+        thread = targets.start_refresh_if_idle()
+        assert thread is not None
+        thread.join(timeout=10)
+
+    assert ran_on, 'refresh never ran'
+    assert ran_on[0] is not threading.main_thread(), (
+        'the refresh ran on the thread driving the event loop')
+    assert targets.snapshot()[0] == ['ctx-a']
+
+
+def test_federation_scrape_does_not_wait_for_a_slow_refresh():
+    """A refresh slower than the scrape interval must still leave the routes
+    federating something.
+
+    Both federation routes are scraped every 60s with a 45s timeout. If a
+    scrape waited for the refresh, a refresh in that 45-60s band would be
+    cancelled by Prometheus on every single scrape -- each one starting a
+    fresh attempt that finishes just in time to be discarded -- so the
+    routes would federate nothing for as long as it lasted, and the cached
+    snapshot would never be reached because two scrapes never overlap.
+    """
+    targets = metrics._FederationTargets()
+    started = threading.Event()
+    release = threading.Event()
+
+    # Prime a snapshot, the way server start-up does.
+    with patch.object(targets, '_prologue', lambda: (['ctx-a'], [])):
+        targets.start_refresh_if_idle().join(timeout=10)
+    assert targets.snapshot() == (['ctx-a'], [])
+
+    with patch.object(targets, '_prologue',
+                      _slow_prologue(started, release, (['ctx-b'], []))):
+        # A scrape asks for the slow refresh and must not wait for it.
+        begin = time.monotonic()
+        targets.start_refresh_if_idle()
+        assert _wait_until(started.is_set), 'refresh never started'
+
+        for _ in range(3):
+            assert targets.snapshot() == ([
+                'ctx-a'
+            ], []), ('a scrape was served an empty list while a refresh was '
+                     'in flight')
+        elapsed = time.monotonic() - begin
+        assert elapsed < 5.0, f'the scrape path waited {elapsed:.1f}s'
+        release.set()
+        assert _wait_until(lambda: targets.snapshot() == (['ctx-b'], []))
+
+
+def test_federation_refresh_is_single_flight():
+    """A scrape landing during a refresh must not start a second one.
+
+    Otherwise a refresh hung on an unreachable database would add one stuck
+    thread per scrape and eventually starve the executor the port-forwards
+    run in.
+    """
+    targets = metrics._FederationTargets()
+    started = threading.Event()
+    release = threading.Event()
+    prologue = _slow_prologue(started, release, (['fresh'], []))
+    calls = []
+
+    def counting_prologue():
+        calls.append(1)
+        return prologue()
+
+    with patch.object(targets, '_prologue', counting_prologue):
+        first = targets.start_refresh_if_idle()
+        assert first is not None
+        assert _wait_until(started.is_set), 'refresh never started'
+
+        assert targets.start_refresh_if_idle() is None, (
+            'a second refresh was started')
+        assert len(calls) == 1
+
+        release.set()
+        first.join(timeout=10)
+        assert len(calls) == 1
+    assert targets.snapshot() == (['fresh'], [])
+
+
+def test_federation_refresh_failure_keeps_the_previous_snapshot():
+    """A failed refresh must release the guard and keep the last list.
+
+    Publishing an empty snapshot instead would make every cluster's series
+    vanish at once, which is worse than a stale list; the freshness gauge is
+    what reports the staleness.
+    """
+    targets = metrics._FederationTargets()
+    with patch.object(targets, '_prologue', lambda: (['ctx-a'], [])):
+        targets.start_refresh_if_idle().join(timeout=10)
+
+    def failing_prologue():
+        raise RuntimeError('config database is unreachable')
+
+    with patch.object(targets, '_prologue', failing_prologue):
+        targets.start_refresh_if_idle().join(timeout=10)
+        assert not targets._refreshing, 'the guard was not released'
+        # A scrape landing now is still served the previous list.
+        assert targets.snapshot() == (['ctx-a'],
+                                      []), ('lost the previous snapshot')
+
+    # And a later good refresh still gets through.
+    with patch.object(targets, '_prologue', lambda: (['ctx-b'], [])):
+        assert _wait_until(lambda: targets.start_refresh_if_idle() is not None)
+        assert _wait_until(lambda: targets.snapshot() == (['ctx-b'], []))
+
+
+def test_federation_refresh_publishes_its_freshness(monkeypatch):
+    """A refresh that stops completing leaves the routes on a frozen list
+    while the loop, /metrics and the scrape all stay healthy. The timestamp
+    is the only thing that says so, so it must advance on success and not on
+    failure."""
+    monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', True)
+    gauge = (metrics_utils.
+             SKY_APISERVER_FEDERATION_TARGETS_LAST_SUCCESS_TIMESTAMP_SECONDS)
+    targets = metrics._FederationTargets()
+
+    before = time.time()
+    with patch.object(targets, '_prologue', lambda: (['ctx'], [])):
+        targets.start_refresh_if_idle().join(timeout=10)
+    published = _single_gauge_value(gauge)
+    assert published is not None and published >= before, (
+        'success did not advance the timestamp')
+
+    def failing_prologue():
+        raise RuntimeError('config database is unreachable')
+
+    with patch.object(targets, '_prologue', failing_prologue):
+        targets.start_refresh_if_idle().join(timeout=10)
+    assert _single_gauge_value(gauge) == published, (
+        'a failed refresh advanced the freshness timestamp')
+
+
+def test_federation_refresh_reload_is_visible_on_the_loop(
+        monkeypatch, tmp_path):
+    """The config the refresh loads must be the config the loop then reads.
+
+    This is the assumption the whole off-thread design rests on, and nothing
+    else in the suite exercises it: the other tests patch _prologue, so they
+    never run the real reload. If a future change ran the refresh under a
+    copied *and cloned* context (SkyPilotContext.copy() does deepcopy the
+    config context), every one of them would stay green while
+    _get_prometheus_target() and the Slurm URLs silently reverted to the
+    start-up snapshot.
+    """
+    config = tmp_path / 'server-config.yaml'
+    config.write_text('metrics:\n  prometheus:\n    namespace: sentinel-ns\n')
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, str(config))
+    try:
+        targets = metrics._FederationTargets()
+        # The real _prologue, hence the real reload_config(), on the thread.
+        thread = targets.start_refresh_if_idle()
+        assert thread is not None
+        thread.join(timeout=30)
+        assert not thread.is_alive(), 'refresh did not finish'
+
+        # Read back from this thread, the way the routes do after the
+        # refresh publishes.
+        namespace, _, _ = metrics_utils._get_prometheus_target()
+        assert namespace == 'sentinel-ns', (
+            f'the loop thread sees {namespace!r}, not the config the refresh '
+            f'loaded; the reload did not land where the loop reads it')
+    finally:
+        monkeypatch.undo()
+        skypilot_config.reload_config()
+
+
+@pytest.mark.parametrize('prologue_off_loop', [True, False])
+def test_gpu_metrics_prologue_does_not_hold_off_the_metrics_scrape(
+        monkeypatch, prologue_off_loop):
+    """/metrics must answer while /gpu-metrics is stuck in its prologue.
+
+    Both routes are served by one uvicorn worker on one event loop, so a
+    synchronous call in the federation handler is not just that route's
+    problem: while the loop is blocked, /metrics is not even read off the
+    socket, and at 20s (the chart's scrape_timeout) the target flaps to
+    up == 0 -- hiding exactly the outage the metrics are needed for.
+
+    The prologue_off_loop=False arm is the control: it restores the
+    pre-fix shape (prologue inline on the loop) and asserts the harness
+    can actually see the blocking. Without it a passing test would prove
+    nothing.
+    """
+    monkeypatch.delenv('PROMETHEUS_MULTIPROC_DIR', raising=False)
+    block_seconds = 3.0
+    started = threading.Event()
+    release = threading.Event()
+    prologue = _slow_prologue(started, release, timeout=block_seconds)
+
+    targets = metrics._FEDERATION_TARGETS
+    monkeypatch.setattr(targets, '_prologue', prologue)
+    if not prologue_off_loop:
+
+        def inline_snapshot():
+            return targets._prologue()
+
+        monkeypatch.setattr(targets, 'snapshot', inline_snapshot)
+        monkeypatch.setattr(targets, 'start_refresh_if_idle', lambda: None)
+
+    def fetch(port, path, timeout):
+        with urllib.request.urlopen(f'http://127.0.0.1:{port}{path}',
+                                    timeout=timeout) as response:
+            return response.status
+
+    server = metrics.start_metrics_server('127.0.0.1', 0)
+    federation = None
+    try:
+        assert _wait_until(lambda: server.started), 'server never started'
+        port = server.servers[0].sockets[0].getsockname()[1]
+
+        federation = threading.Thread(target=fetch,
+                                      args=(port, '/gpu-metrics', 60),
+                                      daemon=True)
+        federation.start()
+        assert _wait_until(started.is_set), 'prologue never started'
+
+        begin = time.monotonic()
+        assert fetch(port, '/metrics', 60) == 200
+        elapsed = time.monotonic() - begin
+    finally:
+        release.set()
+        if federation is not None:
+            federation.join(timeout=60)
+        metrics.stop_metrics_server()
+
+    if prologue_off_loop:
+        assert elapsed < block_seconds / 3, (
+            f'/metrics took {elapsed:.2f}s while /gpu-metrics was in its '
+            f'prologue')
+    else:
+        assert elapsed > block_seconds / 2, (
+            f'/metrics answered in {elapsed:.2f}s with the prologue inline '
+            f'on the loop; the harness cannot see blocking, so the other '
+            f'arm proves nothing')
+
+
+def test_metrics_loop_lag_has_its_own_metric(monkeypatch):
+    """The metrics loop must not be blended into the request loops' series.
+
+    sky_apiserver_event_loop_lag_seconds has no label to tell one loop from
+    another and APIServerEventLoopLagHigh is keyed on it, so feeding a
+    second loop into it would change what that alert means.
+    """
+    request_loops = metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS
+    metrics_loop = metrics_utils.SKY_APISERVER_METRICS_LOOP_LAG_SECONDS
+    assert metrics_loop is not request_loops
+
+    # The observer is gated on METRICS_ENABLED, which is off by default.
+    monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', True)
+    observe = metrics._metrics_loop_lag_observer()
+    before = _histogram_count(request_loops)
+    observe(0.25)
+
+    samples = {
+        sample.name: sample.value for metric in metrics_loop.collect()
+        for sample in metric.samples
+    }
+    assert samples['sky_apiserver_metrics_loop_lag_seconds_count'] >= 1.0
+    assert samples['sky_apiserver_metrics_loop_lag_seconds_sum'] >= 0.25
+    assert _histogram_count(request_loops) == before, (
+        'the metrics loop was recorded into the request loops\' series')
+
+
+def _histogram_count(histogram):
+    for metric in histogram.collect():
+        for sample in metric.samples:
+            if sample.name.endswith('_count'):
+                return sample.value
+    return 0.0

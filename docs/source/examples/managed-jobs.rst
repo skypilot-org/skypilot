@@ -675,6 +675,8 @@ means managed jobs can call the SkyPilot CLI/SDK to launch new workloads:
 
 The credentials are automatically injected and revoked when the job finishes. To disable this, set :code:`api_server_access: false`.
 
+When the launching job is a task of a :ref:`job group <job-groups>`, the new job attaches to that group: it is listed under the group and cancelled with it. See :ref:`job-groups-dynamic-members`. Pass :code:`--no-job-group` to launch a top-level job instead.
+
 .. note::
 
   Credential injection requires the SkyPilot API server to have :ref:`service accounts <service-accounts>` enabled. If not enabled, injection is silently skipped.

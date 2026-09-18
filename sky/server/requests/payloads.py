@@ -103,6 +103,10 @@ def request_body_env_vars() -> dict:
     # Any new environment variables that are server-specific should
     # use SKYPILOT_SERVER_ENV_VAR_PREFIX.
     env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
+    # The auth DB deadline is a server-side setting: the server derives the
+    # timeouts it puts on its own users upsert from it, so a client must not
+    # be able to supply it.
+    env_vars.pop(constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS, None)
     # Remove the in-cluster context name - this is only meaningful for the
     # local Kubernetes environment and should not be forwarded to the server,
     # which has its own cluster context configuration.
@@ -620,6 +624,14 @@ class JobsLaunchBody(RequestBody):
     name: Optional[str]
     pool: Optional[str] = None
     num_jobs: Optional[int] = None
+    # The managed job (and task within it) this job is launched from, when it
+    # should join that job as a dynamic member. None for top-level jobs.
+    parent_job_id: Optional[int] = None
+    parent_task_id: Optional[int] = None
+    # True when the caller asked for the attachment (an explicit job_group);
+    # False when it came from the in-job-group default. Decides whether a
+    # server that cannot record attachments errors or launches top-level.
+    job_group_explicit: bool = False
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
@@ -649,6 +661,11 @@ class JobsQueueV2Body(RequestBody):
     skip_finished: bool = False
     all_users: bool = False
     job_ids: Optional[List[int]] = None
+    # With `job_ids`, also return the rest of each job's tree: the jobs
+    # launched under it, at any depth. Servers older than
+    # MIN_JOBS_INCLUDE_TREE_API_VERSION ignore this field, so the client
+    # checks the server version before sending it.
+    include_tree: bool = False
     user_match: Optional[str] = None
     workspace_match: Optional[str] = None
     name_match: Optional[str] = None
@@ -680,6 +697,9 @@ class JobsCancelBody(RequestBody):
     pool: Optional[str] = None
     graceful: bool = False
     graceful_timeout: Optional[int] = None
+    # With exactly one job id: cancel only this dynamic task of it (index as
+    # shown in the queue, or name). int for the index, str for the name.
+    task: Optional[Union[str, int]] = None
 
 
 class JobsLogsBody(RequestBody):
@@ -1081,6 +1101,9 @@ class GetJobEventsBody(RequestBody):
     """The request body for the get job task events endpoint."""
     job_id: int
     task_id: Optional[int] = None
+    # Task name or id, resolved server-side. Mirrors the `task` argument of
+    # `sky jobs logs`; `task_id` stays for callers that already have the id.
+    task: Optional[Union[str, int]] = None
     limit: Optional[int] = 10  # Default to 10 most recent task events
     # When True, merge in launch-progress events from the job's underlying
     # cluster (e.g. image pulling) so the timeline shows provisioning

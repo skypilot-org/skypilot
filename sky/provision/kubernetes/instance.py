@@ -141,18 +141,16 @@ _CONTAINER_CREATION_REASON = 'container creation'
 # Prefix of the synthetic pending reasons describing an init container that is
 # running, or that the kubelet is still creating.
 _INIT_CONTAINER_REASON_PREFIX = 'init container '
-# Synthetic pending reason for a pod that reports 'PodInitializing' while no
-# init container is running or being created -- i.e. they have all terminated
-# successfully and the kubelet has not moved on to the main containers. Kept
-# distinct from the reasons above precisely so it is *not* stall-exempt: there
-# is no legitimately-slow work behind it to wait for.
-_POD_INITIALIZATION_REASON = 'pod initialization'
 # Pending reasons that can legitimately persist, unchanged, for a very long
 # time, and so must not count towards the no-progress deadline below:
 #   - the allow-listed Normal events (pulling a large image, an external CSI
 #     provisioner creating a volume, a late-binding storage class),
 #   - 'container creation', which is also what a pod reports while pulling an
-#     image whose 'Pulling' event has already aged out of the event window,
+#     image whose 'Pulling' event has already aged out of the event window.
+#     For a pod with init containers this covers the main containers' own
+#     image pull too: the kubelet reports those as 'PodInitializing' rather
+#     than 'ContainerCreating' until they are created, see
+#     _inspect_pod_status,
 #   - a running init container, which may be doing arbitrary user work, and an
 #     init container the kubelet is still creating, which may be pulling a
 #     large image of its own -- the latter only reaches this exemption when no
@@ -1019,9 +1017,13 @@ def _count_transport_error(e: Exception, first_error_time: Optional[float],
     return first_error_time
 
 
-def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
+def _wait_for_pods_to_schedule(namespace,
+                               context,
+                               new_nodes,
+                               timeout: int,
                                cluster_name: str,
-                               create_pods_start: datetime.datetime):
+                               create_pods_start: datetime.datetime,
+                               admission_timeout: Optional[int] = None):
     """Wait for all pods to be scheduled.
 
     Wait for all pods including jump pod to be scheduled, and if it
@@ -1080,12 +1082,16 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
     # provisioning clock is paused: provision_timeout starts counting from
     # the moment all expected pods are ungated (admitted). The gated wait
     # itself is bounded by kubernetes.kueue.admission_timeout (default
-    # _QUEUE_ADMISSION_TIMEOUT_SECONDS; -1 waits indefinitely).
-    admission_timeout = skypilot_config.get_effective_region_config(
-        cloud='ssh' if is_ssh_node_pool else 'kubernetes',
-        region=context,
-        keys=('kueue', 'admission_timeout'),
-        default_value=_QUEUE_ADMISSION_TIMEOUT_SECONDS)
+    # _QUEUE_ADMISSION_TIMEOUT_SECONDS; -1 waits indefinitely). The cluster
+    # YAML carries the value resolved at launch time (task config overrides
+    # and workspace scope included); fall back to the request config for
+    # cluster YAMLs written before that field existed.
+    if admission_timeout is None:
+        admission_timeout = skypilot_config.get_effective_region_config(
+            cloud='ssh' if is_ssh_node_pool else 'kubernetes',
+            region=context,
+            keys=('kueue', 'admission_timeout'),
+            default_value=_QUEUE_ADMISSION_TIMEOUT_SECONDS)
     pods_are_gated = False
     last_gated_pod_names: List[str] = []
     # Start of the provisioning clock; slides to the admission moment when
@@ -1206,6 +1212,17 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
             provision_clock_start = time.time()
             logger.info('All pods admitted (scheduling gates removed); '
                         f'waiting up to {timeout}s for scheduling.')
+            # Record the transition: the latest LAUNCH_PROGRESS event is
+            # surfaced as the status detail of a provisioning SkyServe
+            # replica / pool worker, so it must stop reading as a queue
+            # wait once the pods are admitted.
+            global_user_state.add_cluster_event(
+                cluster_name,
+                new_status=None,
+                reason='Launching (admitted by queue, waiting for scheduling)',
+                event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+                nop_if_duplicate=True,
+            )
 
         # A pod is considered scheduled once the kube-scheduler has bound it
         # to a node (capacity found). We deliberately do not wait for the
@@ -1468,6 +1485,21 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                     waiting = container_status.state.waiting
                     if waiting is not None:
                         if waiting.reason == 'PodInitializing':
+                            # PodInitializing with no init container running
+                            # or being created means they have all terminated
+                            # successfully and the kubelet is on to the main
+                            # containers. That is not a stuck pod: whenever a
+                            # pod has init containers, the kubelet reports its
+                            # main containers as 'PodInitializing' instead of
+                            # 'ContainerCreating' for the whole of their own
+                            # image pull, and only moves off it once the
+                            # container is created. So it is the same state a
+                            # pod without init containers shows as
+                            # 'ContainerCreating', and gets the same handling
+                            # by leaving init_reason unset: the events tier
+                            # below reports a live 'Pulling', or a live
+                            # Warning that the no-progress deadline bounds,
+                            # and 'container creation' is the exempt fallback.
                             init_progress = _check_init_containers(pod)
                             if init_progress is not None:
                                 verb = ('running' if init_progress.running else
@@ -1479,15 +1511,6 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                                     f'{init_progress.total})')
                                 init_reason_is_assumed = (
                                     not init_progress.running)
-                            else:
-                                # PodInitializing, yet no init container is
-                                # running or being created -- they have all
-                                # terminated successfully and the kubelet has
-                                # simply not moved on to the main containers.
-                                # Nothing here is legitimately slow, so unlike
-                                # the two branches above this reason is not
-                                # exempt from the no-progress deadline.
-                                init_reason = _POD_INITIALIZATION_REASON
                         elif waiting.reason != 'ContainerCreating':
                             msg = waiting.message if (
                                 waiting.message) else str(waiting)
@@ -2168,6 +2191,14 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     context = kubernetes_utils.get_control_context_from_config(provider_config)
     pod_spec = copy.deepcopy(config.node_config)
     create_pods_start = datetime.datetime.now(datetime.timezone.utc)
+    # Closes the provision-setup segment of this launch attempt and opens the
+    # admission-wait one. The same reference point _wait_for_pods_to_schedule
+    # measures from, so the two agree. Write-once, so a resumed launch
+    # re-entering here keeps the original time rather than restarting the wait
+    # at admission.
+    global_user_state.record_launch_milestone_for_cluster(
+        cluster_name, global_user_state.LaunchMilestone.INSTANCES_REQUESTED,
+        create_pods_start.timestamp())
 
     to_create_deployment = 'deployment_spec' in pod_spec
     if to_create_deployment:
@@ -2555,8 +2586,14 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     # Wait until the pods are scheduled and surface cause for error
     # if there is one
-    _wait_for_pods_to_schedule(namespace, context, pods, provision_timeout,
-                               cluster_name, create_pods_start)
+    _wait_for_pods_to_schedule(
+        namespace,
+        context,
+        pods,
+        provision_timeout,
+        cluster_name,
+        create_pods_start,
+        admission_timeout=provider_config.get('queue_admission_timeout'))
     # Reset spinner message here because it might have hinted autoscaling
     # while waiting for pods to schedule.
     rich_utils.force_update_status(
@@ -2663,11 +2700,118 @@ def _delete_cluster_services(cluster_name: str, namespace: str,
                        f'{cluster_name}: {e}')
 
 
+def _pod_has_resource_claims(pod: Any) -> bool:
+    """Whether the pod requests devices via dynamic resource allocation (DRA).
+
+    ``spec.resourceClaims`` is only modelled by kubernetes client 26.1.0 and
+    later, so on an older client the attribute is missing and every pod reads
+    as claim-free, keeping the force-delete path below. That is acceptable:
+    ``dependencies.py`` floors the client at 20.0.0, but the range is unpinned
+    and has no lock file, so an install resolves to the newest allowed version
+    (published images are many major versions past 26.1.0), and a client old
+    enough to lack the field predates DRA anyway.
+
+    Deliberately not the other way around: reading an unmodellable field as
+    "may have claims" would put *every* pod on the graceful path for those
+    clients, which is the teardown slowdown this check exists to avoid.
+    """
+    pod_spec = getattr(pod, 'spec', None)
+    return bool(getattr(pod_spec, 'resource_claims', None))
+
+
+def _force_delete_pod(namespace: str, context: Optional[str],
+                      pod_name: str) -> None:
+    """Delete a pod with a zero grace period.
+
+    Some misbehaving pods do not terminate gracefully if they have open file
+    descriptors, which used to make teardown hang for many minutes, so this is
+    the default path for pod deletion.
+    """
+    kubernetes_utils.delete_k8s_resource_with_retry(
+        delete_func=lambda: kubernetes.core_api(context).delete_namespaced_pod(
+            name=pod_name,
+            namespace=namespace,
+            _request_timeout=config_lib.DELETION_TIMEOUT,
+            grace_period_seconds=0),
+        resource_type='pod',
+        resource_name=pod_name)
+
+
+def _wait_for_pod_gone(namespace: str, context: Optional[str],
+                       pod_name: str) -> bool:
+    """Polls until the pod object is gone. False if it is still there."""
+    start_time = time.time()
+    while time.time() - start_time < _TIMEOUT_FOR_POD_TERMINATION:
+        try:
+            kubernetes.core_api(context).read_namespaced_pod(
+                pod_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
+        except kubernetes.api_exception() as e:
+            if e.status == 404:
+                return True
+            # A transient API error should not short-circuit the wait into a
+            # force delete; keep polling until the timeout.
+            logger.debug(f'Error while waiting for pod {pod_name} to '
+                         f'terminate: {e}')
+        time.sleep(POLL_INTERVAL)
+    return False
+
+
+def _delete_pod(namespace: str, context: Optional[str], pod_name: str,
+                graceful: bool) -> None:
+    """Deletes a pod, optionally waiting for the kubelet to finish with it.
+
+    A zero grace period removes the pod object from etcd immediately, without
+    waiting for the kubelet to confirm that the pod is gone. That is what we
+    want for most pods (see ``_force_delete_pod``), but it is unsafe for pods
+    holding DRA resource claims: the kubelet unprepares a pod's claims after
+    its containers stop and *before* it reports the terminal pod status,
+    precisely so that the cleanup happens while the pod still exists in the
+    API. Deleting the object out from under it lets the resourceclaim
+    controller drop the claim's ``reservedFor`` entry and finalizer while the
+    kubelet may still be unpreparing, which can strand device state on the node
+    and leave claims allocated to a pod that no longer exists.
+
+    So for those pods, delete with the pod's own
+    ``terminationGracePeriodSeconds`` and wait for the object to disappear --
+    the kubelet only lets that happen once termination is complete. The wait is
+    bounded (and independent of ``terminationGracePeriodSeconds``) so that a
+    pod the container runtime cannot stop still cannot hang teardown: on
+    timeout we fall back to the force delete.
+    """
+    if not graceful:
+        _force_delete_pod(namespace, context, pod_name)
+        return
+
+    kubernetes_utils.delete_k8s_resource_with_retry(
+        delete_func=lambda: kubernetes.core_api(context).delete_namespaced_pod(
+            name=pod_name,
+            namespace=namespace,
+            _request_timeout=config_lib.DELETION_TIMEOUT),
+        resource_type='pod',
+        resource_name=pod_name)
+
+    if _wait_for_pod_gone(namespace, context, pod_name):
+        return
+
+    logger.warning(f'Pod {pod_name} did not finish terminating within '
+                   f'{_TIMEOUT_FOR_POD_TERMINATION}s. Force deleting it - '
+                   'devices held by the pod may have to be reclaimed by their '
+                   'driver before they can be used again.')
+    _force_delete_pod(namespace, context, pod_name)
+
+
 def _terminate_node(namespace: str,
                     context: Optional[str],
                     pod_name: str,
-                    is_head: bool = False) -> None:
-    """Terminate a pod and its associated services."""
+                    is_head: bool = False,
+                    has_resource_claims: bool = False) -> None:
+    """Terminate a pod and its associated services.
+
+    Args:
+        has_resource_claims: whether the pod requests DRA devices, in which
+            case it is deleted gracefully rather than force deleted. See
+            ``_delete_pod``.
+    """
     logger.debug(f'terminate_instances: namespace: {namespace}, context: '
                  f'{context}, pod_name: {pod_name}, is_head: {is_head}')
 
@@ -2682,16 +2826,7 @@ def _terminate_node(namespace: str,
     # Note - delete pod after all other resources are deleted.
     # This is to ensure there are no leftover resources if this down is run
     # from within the pod, e.g., for autodown.
-    # Note - some misbehaving pods may not terminate gracefully if they have
-    # open file descriptors. We force delete pods to avoid this.
-    kubernetes_utils.delete_k8s_resource_with_retry(
-        delete_func=lambda: kubernetes.core_api(context).delete_namespaced_pod(
-            name=pod_name,
-            namespace=namespace,
-            _request_timeout=config_lib.DELETION_TIMEOUT,
-            grace_period_seconds=0),
-        resource_type='pod',
-        resource_name=pod_name)
+    _delete_pod(namespace, context, pod_name, graceful=has_resource_claims)
 
 
 def _terminate_deployment(cluster_name: str, namespace: str,
@@ -2750,7 +2885,11 @@ def terminate_instances(
         if _is_head(pod) and worker_only:
             return
         logger.debug(f'Terminating instance {pod_name}: {pod}')
-        _terminate_node(namespace, context, pod_name, _is_head(pod))
+        _terminate_node(namespace,
+                        context,
+                        pod_name,
+                        is_head=_is_head(pod),
+                        has_resource_claims=_pod_has_resource_claims(pod))
 
     # Run pod termination in parallel
     num_threads = max(1, min(_NUM_THREADS, len(pods)))

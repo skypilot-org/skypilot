@@ -8,7 +8,7 @@ import os
 import re
 import threading
 import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, FrozenSet, List, Optional, Set, Tuple
 
 import fastapi
 from prometheus_client import core as prom_core
@@ -17,6 +17,7 @@ from prometheus_client import multiprocess
 import prometheus_client as prom
 import psutil
 import starlette.middleware.base
+import starlette.types
 import uvicorn
 
 from sky import core
@@ -26,10 +27,14 @@ from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
 from sky.server import constants as server_constants
+from sky.server import local_disk
+from sky.server import loop_stall
+from sky.server import middleware_utils
 from sky.skylet import runtime_utils
 from sky.utils import annotations
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import perf_utils
 from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -507,6 +512,188 @@ _SQLITE_DB_SIZE_COLLECTOR = _wrap_collector(SqliteDBSizeCollector())
 
 try:
     prom.REGISTRY.register(_SQLITE_DB_SIZE_COLLECTOR)  # for non-multiprocess
+except ValueError:
+    pass
+
+_LOCAL_DISK_USED_HELP = (
+    'Disk used by one of the trees the API server writes to its own local '
+    'disk, by root. Counted in allocated blocks with hard links counted '
+    'once, matching what du -- and therefore a container runtime\'s '
+    'ephemeral-storage accounting -- reports. A series appears only for a '
+    'root that exists on this host. Blocks held by a file that was unlinked '
+    'while still open are invisible to a directory walk and so are missing '
+    'from this value.')
+
+_LOCAL_DISK_FILES_HELP = (
+    'Distinct regular files under one of the API server\'s local roots, '
+    'hard links counted once. Worth watching alongside bytes: the cost of '
+    'the periodic du a container runtime runs to account for ephemeral '
+    'storage scales with file count, not with size.')
+
+_LOCAL_DISK_TRUNCATED_HELP = (
+    '1 when the last walk of this root hit its entry or time bound and '
+    'stopped early, making that root\'s reported size and file count lower '
+    'bounds; 0 otherwise.')
+
+_LOCAL_DISK_ROOT_CHARGED_HELP = (
+    '1 when bytes written under this root count against the container\'s own '
+    'ephemeral-storage budget, 0 when the platform charges them elsewhere -- '
+    'a persistent volume or a memory-backed tmpfs mounted into the tree. '
+    'Only the roots marked 1 go into '
+    'sky_apiserver_local_disk_headroom_bytes, so this is what makes that '
+    'number reproducible from the per-root series. A root marked 0 is not '
+    'measured at all -- it reports no size or file count -- because a '
+    'volume is where a network filesystem turns up and walking one is '
+    'prohibitively slow.')
+
+_LOCAL_DISK_SCAN_DURATION_HELP = (
+    'Wall-clock seconds the last walk of all local roots took. Runs off the '
+    'scrape path, so this is a cost signal rather than scrape latency.')
+
+_LOCAL_DISK_FS_SIZE_HELP = (
+    'Total size of a filesystem hosting at least one of the API server\'s '
+    'local roots, by mount point.')
+
+_LOCAL_DISK_FS_AVAIL_HELP = (
+    'Space available to a non-root writer on a filesystem hosting at least '
+    'one of the API server\'s local roots, by mount point. On Kubernetes '
+    'the value for the filesystem behind the container\'s writable layer is '
+    'the headroom to the kubelet\'s node-level eviction threshold, which is '
+    'what actually stops the server writing -- unlike the per-container '
+    'budget below, it is exact.')
+
+_LOCAL_DISK_BUDGET_HELP = (
+    'The container\'s own declared ephemeral-storage allowance in bytes, by '
+    'the resource field it came from. source="limit" is enforced -- exceed '
+    'it and the container is stopped. source="request" is not: a platform '
+    'may allow a container past its request, so exceeding it means only that '
+    'the container is over what it declared, and first in line to be stopped '
+    'when the node itself runs out. No series is emitted when neither field '
+    'is exposed, which is the common case: it cannot be read from the '
+    'kernel, since ephemeral-storage is not a cgroup controller, so it has '
+    'to be injected (Kubernetes: a resourceFieldRef env var).')
+
+_LOCAL_DISK_HEADROOM_HELP = (
+    'Bytes left before the budget stops the server writing. Emitted only '
+    'when the budget is an enforced limit: room left against a mere '
+    'scheduling request is not headroom, since the container is allowed '
+    'past it, and the number would reach zero with disk to spare. For the '
+    'boundary that does stop writes without a limit, use '
+    'sky_apiserver_local_disk_fs_avail_bytes. Counts only the roots whose '
+    'sky_apiserver_local_disk_root_charged_to_ephemeral is 1, and is an '
+    'upper bound: those roots cover what the server writes, not every byte '
+    'the platform charges to this container.')
+
+_LOCAL_DISK_UNREADABLE_HELP = (
+    'Entries the last walk of this root could not read, excluding entries '
+    'that had simply gone away -- the request-log GC unlinks constantly and '
+    'those bytes really are gone. Non-zero means a permission or I/O error '
+    'kept part of the tree out of the reported size, so treat it as a lower '
+    'bound.')
+
+
+class LocalDiskUsageCollector:
+    """Collector for the API server's own local disk footprint.
+
+    The trees behind these series grow with traffic and have no size bound
+    of their own, so on a node with finite local disk the server can fill
+    it. Without this, the earliest available signal is a node-level
+    filesystem alert, which cannot say which pod is responsible and has
+    only the gap between its own threshold and the eviction threshold as
+    lead time -- a few percentage points, which at multi-GB-per-minute fill
+    rates is under a minute. Per-root series make the growth attributable
+    and let an alert trigger on rate rather than on level.
+
+    Measurement only: nothing here bounds or refuses writes.
+
+    A walk of a few hundred thousand files costs well under a second on
+    local disk, but the roots are on whatever the deployment mounted, so
+    ResilientCollector keeps it off the scrape path and each root's walk
+    carries its own entry and time bound.
+    """
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily('sky_apiserver_local_disk_used_bytes',
+                                          _LOCAL_DISK_USED_HELP,
+                                          labels=['root'])
+
+    def collect(self):
+        snapshot = local_disk.scan()
+
+        used = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_used_bytes',
+            _LOCAL_DISK_USED_HELP,
+            labels=['root'])
+        files = prom_core.GaugeMetricFamily('sky_apiserver_local_disk_files',
+                                            _LOCAL_DISK_FILES_HELP,
+                                            labels=['root'])
+        truncated = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_scan_truncated',
+            _LOCAL_DISK_TRUNCATED_HELP,
+            labels=['root'])
+        charged = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_root_charged_to_ephemeral',
+            _LOCAL_DISK_ROOT_CHARGED_HELP,
+            labels=['root'])
+        unreadable = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_scan_unreadable_entries',
+            _LOCAL_DISK_UNREADABLE_HELP,
+            labels=['root'])
+        for root, usage in snapshot.roots.items():
+            charged.add_metric(
+                [root], 1 if snapshot.is_charged_to_ephemeral(root) else 0)
+            if not usage.walked:
+                # A zero here would read as a measurement.
+                continue
+            used.add_metric([root], usage.used_bytes)
+            files.add_metric([root], usage.files)
+            truncated.add_metric([root], 1 if usage.truncated else 0)
+            unreadable.add_metric([root], usage.unreadable)
+        yield used
+        yield files
+        yield truncated
+        yield unreadable
+        yield charged
+
+        fs_size = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_fs_size_bytes',
+            _LOCAL_DISK_FS_SIZE_HELP,
+            labels=['mountpoint'])
+        fs_avail = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_fs_avail_bytes',
+            _LOCAL_DISK_FS_AVAIL_HELP,
+            labels=['mountpoint'])
+        for mountpoint, fs in snapshot.filesystems.items():
+            fs_size.add_metric([mountpoint], fs.size_bytes)
+            fs_avail.add_metric([mountpoint], fs.avail_bytes)
+        yield fs_size
+        yield fs_avail
+
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_scan_duration_seconds',
+            _LOCAL_DISK_SCAN_DURATION_HELP,
+            value=snapshot.duration_seconds)
+
+        budget = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_budget_bytes',
+            _LOCAL_DISK_BUDGET_HELP,
+            labels=['source'])
+        headroom = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_headroom_bytes',
+            _LOCAL_DISK_HEADROOM_HELP)
+        if snapshot.budget is not None:
+            budget.add_metric([snapshot.budget.source],
+                              snapshot.budget.total_bytes)
+        if snapshot.headroom_bytes is not None:
+            headroom.add_metric([], snapshot.headroom_bytes)
+        yield budget
+        yield headroom
+
+
+_LOCAL_DISK_USAGE_COLLECTOR = _wrap_collector(LocalDiskUsageCollector())
+
+try:
+    prom.REGISTRY.register(_LOCAL_DISK_USAGE_COLLECTOR)  # non-multiprocess
 except ValueError:
     pass
 
@@ -1045,6 +1232,7 @@ def metrics() -> fastapi.Response:
         registry.register(_BURN_RATE_COLLECTOR)
         registry.register(_SQLITE_DB_SIZE_COLLECTOR)
         registry.register(_WORKSPACE_USAGE_COLLECTOR)
+        registry.register(_LOCAL_DISK_USAGE_COLLECTOR)
         registry.register(_COLLECTOR_HEALTH_COLLECTOR)
         registry.register(_SERVER_START_TIME_COLLECTOR)
         if _MANAGED_JOBS_COLLECTOR is not None:
@@ -1061,6 +1249,160 @@ def metrics() -> fastapi.Response:
                             media_type=prom.CONTENT_TYPE_LATEST,
                             headers={'Cache-Control': 'no-cache'})
 
+
+class _FederationTargets:
+    """Which clusters a federation scrape covers, resolved off the loop.
+
+    The metrics server serves /metrics, /gpu-metrics and /endpoints-metrics
+    from one event loop, so whatever blocks that loop takes the /metrics
+    scrape down with it -- and the federation routes used to open by
+    reloading the server config (a database read on Postgres-backed
+    deployments), dropping the request-level caches and re-reading the
+    kubeconfig, inline. Exactly the outage those metrics are needed for is
+    the one that makes that work slow.
+
+    So a scrape never does it. A scrape reads ``snapshot()`` and asks for a
+    background refresh with ``start_refresh_if_idle()``; the refresh
+    publishes to the cache for a later scrape. This is the shape the
+    collectors already use (see ResilientCollector) and it is what keeps a
+    slow refresh from costing anything: merely moving the work to a thread
+    the handler awaits would leave the loop free, but every scrape would
+    still wait the full refresh, and one slower than the scrape timeout (45s
+    against a 60s interval for both federation routes) would then be
+    cancelled by Prometheus on every single scrape -- each one starting a
+    fresh attempt that completes just in time to be thrown away, so the
+    routes would federate nothing at all for as long as it lasted, with the
+    cached snapshot never reached because two scrapes never overlap.
+
+    At most one refresh runs at a time, so a refresh hung on an unreachable
+    database cannot accumulate one stuck thread per scrape and starve the
+    executor the port-forwards run in. Like ResilientCollector, a hung
+    refresh is deliberately neither cancelled nor retried: a thread blocked
+    in a DB driver cannot be killed, and retrying only adds load.
+
+    The cost is staleness: the cluster list is up to one refresh old. The
+    refresh is primed at server start (see start_metrics_server) so the
+    first scrape is not the one paying for it, and a refresh that stops
+    completing is reported rather than silent --
+    sky_apiserver_federation_targets_last_success_timestamp_seconds stops
+    advancing, and time() - it is the age of the list being served.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._refreshing = False
+        # (remote contexts, Slurm clusters) of the last successful refresh.
+        self._snapshot: Tuple[List[str], List[str]] = ([], [])
+
+    def _prologue(self) -> Tuple[List[str], List[str]]:
+        """Blocking; runs on the refresh thread.
+
+        The metrics server runs as a daemon thread, not as a normal request
+        handler, so:
+        1. The global config context (allowed_contexts, etc.) is a snapshot
+           from startup. Reload it from the DB to pick up config changes.
+        2. Request-scoped caches (kubernetes API clients, context names) are
+           never cleared automatically. Clear them to pick up new kubeconfigs.
+
+        Both reloads land where the loop thread will see them, which is what
+        makes running them off-thread safe at all: with no request context
+        set (this app installs no middleware) skypilot_config writes its
+        process-global config context, and even with one set,
+        contextvars.copy_context() -- what a worker thread is handed --
+        shares the context object rather than cloning it, so the write still
+        lands on the object the loop reads. The request-level caches are
+        process-global either way. Concurrent readers are safe because
+        _reload_config_as_server() is written for them: it builds the new
+        config fully and swaps it in with a single _set_loaded_config, and
+        says so.
+
+        Contexts that point at the API server's own cluster are dropped: the
+        central Prometheus scrapes the local cluster's exporters directly, so
+        federating them again would only duplicate the raw series under a
+        stamped copy. The dashboard matches the local cluster with cluster=""
+        (see /dashboard_config local_contexts).
+        """
+        skypilot_config.reload_config()
+        annotations.clear_request_level_cache()
+        contexts = core.get_all_contexts()
+        _, remote_contexts = metrics_utils.split_local_remote_contexts(contexts)
+        # Slurm clusters federate through their login node; only clusters
+        # with a configured prometheus_url participate. Enumeration reads
+        # local config only, and is shared by both routes so the snapshot has
+        # one shape (/endpoints-metrics ignores it).
+        return remote_contexts, metrics_utils.get_slurm_metrics_clusters()
+
+    def _run_refresh(self) -> None:
+        """Refresh thread: publish the new snapshot, then release the guard.
+
+        A failure keeps the previous snapshot rather than publishing an empty
+        one -- every cluster's series vanishing at once is worse than a stale
+        list, and the freshness gauge reports the staleness either way.
+
+        The guard is released in a ``finally``, which is load-bearing rather
+        than tidiness: every path that could leave it set leaves it set for
+        the life of the process, and that is the exact state this class
+        exists to avoid -- every later scrape serving a frozen list and
+        starting nothing. A ``finally`` covers the paths an ``except
+        Exception`` does not, namely a BaseException out of the prologue and
+        a logging call that raises while handling one.
+        """
+        try:
+            snapshot = self._prologue()
+        except Exception:  # pylint: disable=broad-except
+            logger.exception('Failed to refresh the federation targets; '
+                             'serving the previous cluster list.')
+            return
+        else:
+            with self._lock:
+                self._snapshot = snapshot
+                # Stamped and published together, so a reader cannot see a
+                # new list with the old timestamp or the reverse.
+                metrics_utils.SKY_APISERVER_FEDERATION_TARGETS_LAST_SUCCESS_TIMESTAMP_SECONDS.set(  # pylint: disable=line-too-long
+                    time.time())
+        finally:
+            with self._lock:
+                self._refreshing = False
+
+    def start_refresh_if_idle(self) -> Optional[threading.Thread]:
+        """Starts a refresh unless one is already running.
+
+        Returns the thread so start-up and tests can join it; a scrape fires
+        and forgets. The check and the flip happen together under the lock so
+        two concurrent scrapes cannot both start one.
+        """
+        with self._lock:
+            if self._refreshing:
+                return None
+            self._refreshing = True
+        thread = threading.Thread(target=self._run_refresh,
+                                  name='metrics-federation-targets',
+                                  daemon=True)
+        try:
+            thread.start()
+        except RuntimeError:
+            # Cannot start a thread (the process is out of them). Give the
+            # guard back: holding it would mean no refresh is ever attempted
+            # again, long after the pressure passed.
+            logger.exception('Could not start the federation target '
+                             'refresh; serving the previous cluster list.')
+            with self._lock:
+                self._refreshing = False
+            return None
+        return thread
+
+    def snapshot(self) -> Tuple[List[str], List[str]]:
+        """The cluster list a scrape should federate. A pure read.
+
+        Deliberately does not ask for a refresh: a reader that also mutates
+        needs a warning at every call site, and the callers pair this with an
+        explicit ``start_refresh_if_idle()`` instead.
+        """
+        with self._lock:
+            return self._snapshot
+
+
+_FEDERATION_TARGETS = _FederationTargets()
 
 # Per-context timeout for metrics collection. Must be shorter than the
 # Prometheus scrape_timeout configured on the upstream Prometheus that
@@ -1081,8 +1423,13 @@ _CREDENTIAL_MANAGER_KUBECONFIG_PATH = (
 
 
 @metrics_app.get('/debug-gpu-metrics')
-async def gpu_metrics_debug() -> dict:
-    """Debug endpoint for diagnosing GPU metrics collection issues."""
+def gpu_metrics_debug() -> dict:
+    """Debug endpoint for diagnosing GPU metrics collection issues.
+
+    Declared sync for the same reason /metrics is: every call below blocks
+    (kubeconfig reads, context discovery), and this route shares its event
+    loop with the /metrics scrape. Starlette runs it in a worker thread.
+    """
     kubeconfig_env = os.environ.get('KUBECONFIG', 'NOT_SET')
     default_path = os.path.expanduser('~/.kube/config')
 
@@ -1180,26 +1527,12 @@ def _handle_federation_result(context: str, route: str, result: object,
 @metrics_app.get('/gpu-metrics')
 async def gpu_metrics() -> fastapi.Response:
     """Gets the GPU metrics from multiple external k8s clusters"""
-    # The metrics server runs as a daemon thread, not as a normal request
-    # handler, so:
-    # 1. The global config context (allowed_contexts, etc.) is a snapshot
-    #    from startup. Reload it from the DB to pick up config changes.
-    # 2. Request-scoped caches (kubernetes API clients, context names) are
-    #    never cleared automatically. Clear them to pick up new kubeconfigs.
-    skypilot_config.reload_config()
-    annotations.clear_request_level_cache()
-    contexts = core.get_all_contexts()
+    # Served from the last refresh and asking for the next one, both off
+    # this loop; see _FederationTargets for why a scrape may neither do that
+    # work nor wait for it.
+    remote_contexts, slurm_clusters = _FEDERATION_TARGETS.snapshot()
+    _FEDERATION_TARGETS.start_refresh_if_idle()
     all_metrics: List[str] = []
-
-    # Skip contexts that point at the API server's own cluster: the central
-    # Prometheus scrapes the local cluster's exporters directly, so
-    # federating them again would only duplicate the raw series under a
-    # stamped copy. The dashboard matches the local cluster with cluster=""
-    # (see /dashboard_config local_contexts). Non-blocking: verdicts come
-    # from the detection cache and any probing happens in a background
-    # worker, so a slow or broken context cannot stall this scrape (or
-    # the co-located /metrics scrape) no matter how it fails.
-    _, remote_contexts = metrics_utils.split_local_remote_contexts(contexts)
     # One stats record per context, filled in by get_metrics_for_context even
     # if the task is later cancelled by the wait_for timeout — so the timeout
     # log can report how far the attempt got (port-forward vs. federate).
@@ -1212,14 +1545,12 @@ async def gpu_metrics() -> fastapi.Response:
             )) for context, stats in zip(remote_contexts, stats_list)
     ]
 
-    # Slurm clusters federate through their login node (see
-    # get_metrics_for_slurm_cluster); only clusters with a configured
-    # prometheus_url participate. Their series ride the same scrape,
+    # Slurm clusters (resolved above) federate through their login node (see
+    # get_metrics_for_slurm_cluster). Their series ride the same scrape,
     # stamped cluster="slurm/<name>", under the same per-context budget:
     # the budget is passed down so the SSH invocation is hard-killed at
     # the same instant wait_for() gives up on it. There is no port-forward
     # phase on this path, so its stats omit that phase.
-    slurm_clusters = metrics_utils.get_slurm_metrics_clusters()
     slurm_contexts = [
         metrics_utils.SLURM_CONTEXT_PREFIX + name for name in slurm_clusters
     ]
@@ -1261,16 +1592,11 @@ async def endpoint_metrics() -> fastapi.Response:
     DCGM/node metrics. The cluster= label is injected so the Grafana
     serving dashboards can filter by cluster.
     """
-    # Same daemon-thread caveats as /gpu-metrics: reload config from the DB
-    # (allowed_contexts etc. are a startup snapshot) and clear request-scoped
-    # caches so new kubeconfigs are picked up.
-    skypilot_config.reload_config()
-    annotations.clear_request_level_cache()
-    contexts = core.get_all_contexts()
+    # Same off-loop refresh as /gpu-metrics, sharing its snapshot; the Slurm
+    # half of it does not apply to this route.
+    remote_contexts, _ = _FEDERATION_TARGETS.snapshot()
+    _FEDERATION_TARGETS.start_refresh_if_idle()
     all_metrics: List[str] = []
-
-    # Same local-context handling as /gpu-metrics above (non-blocking).
-    _, remote_contexts = metrics_utils.split_local_remote_contexts(contexts)
     stats_list = [metrics_utils.FederationStats() for _ in remote_contexts]
     tasks = [
         asyncio.create_task(
@@ -1303,6 +1629,25 @@ def build_metrics_server(host: str, port: int) -> uvicorn.Server:
     )
     metrics_server_instance = uvicorn.Server(metrics_config)
     return metrics_server_instance
+
+
+def _metrics_loop_lag_observer() -> Callable[[float], None]:
+    """Records the metrics server loop's lag; see loop_stall.start_lag_monitor.
+
+    A closure so the threshold is read once rather than on every tick.
+    """
+    lag_threshold = perf_utils.get_loop_lag_threshold()
+
+    def observe(lag: float) -> None:
+        if not metrics_utils.METRICS_ENABLED:
+            return
+        if lag_threshold is not None and lag > lag_threshold:
+            logger.warning(
+                f'Metrics server event loop lag {lag} seconds exceeds '
+                f'threshold {lag_threshold} seconds.')
+        metrics_utils.SKY_APISERVER_METRICS_LOOP_LAG_SECONDS.observe(lag)
+
+    return observe
 
 
 # The metrics server, so stop_metrics_server() can reach the instance
@@ -1338,9 +1683,23 @@ def start_metrics_server(host: str, port: int) -> uvicorn.Server:
     server = build_metrics_server(host, port)
     _metrics_server = server
 
+    # Load the first snapshot now rather than leaving the first scrape to
+    # kick it off and federate nothing while it runs.
+    _FEDERATION_TARGETS.start_refresh_if_idle()
+
+    async def _serve_instrumented() -> None:
+        # Instrument this loop the way the request-serving loops are. It is
+        # the loop everything on this app shares, so its lag is the direct
+        # measure of "something is holding /metrics off"; without it the
+        # only symptom is the scrape target going down, which says nothing
+        # about why.
+        loop_stall.start_lag_monitor(asyncio.get_running_loop(),
+                                     _metrics_loop_lag_observer())
+        await server.serve()
+
     def _serve() -> None:
         try:
-            asyncio.run(server.serve())
+            asyncio.run(_serve_instrumented())
         except SystemExit:
             # uvicorn calls sys.exit(1) when it cannot bind, and
             # threading.excepthook drops SystemExit on the floor, so
@@ -1385,51 +1744,239 @@ def _get_user_label(request: fastapi.Request) -> str:
     return 'anonymous'
 
 
+# Prefixes that bound the `path` label of an unrouted request -- one a
+# middleware answered without the router running; see `_unrouted_path_label`.
+# The prefixes are the routers mounted in sky/server/server.py plus the
+# plugin route root; the `*` form keeps the prefix regexes dashboards and
+# rules already use (e.g. `/api/.*`, `/dashboard/.*`) matching, and a
+# router's bare root (`/users`) folds into the same bucket.
+_UNROUTED_PATH_PREFIXES = (
+    '/api/',
+    '/dashboard/',
+    '/internal/dashboard/',
+    '/plugins/',
+    '/jobs/',
+    '/serve/',
+    '/users/',
+    '/workspaces/',
+    '/volumes/',
+    '/ssh_node_pools/',
+    '/recipes/',
+    '/storage/',
+    '/debug/',
+)
+OTHER_PATH_LABEL = 'other'
+
+
+def warn_unless_outermost(app) -> bool:
+    """Warn at startup if this layer is installed but not outermost.
+
+    Returns whether the ordering invariant holds or does not apply. Reads
+    the answer out of the middleware stack rather than from the metrics
+    env-var, because the stack is the thing being judged: a plugin that
+    appends to `user_middleware` directly is invisible to any env-var-based
+    guard, and that is the deployment shape this check exists for.
+
+    Everything this middleware exists to count -- the 401/403/503s an
+    authentication, RBAC, shutdown or plugin middleware answers itself -- is
+    invisible to it from anywhere else in the stack, and the symptom of being
+    wrong is silence: dashboards go quiet exactly as they did during the
+    outage this was written for. The ordering is asserted by a unit test on
+    the plugin-less app, which cannot see a deployment whose plugins register
+    middleware -- and the plugin API appends straight to `user_middleware`,
+    so it bypasses `add_middleware` and raises nothing. This says so in the
+    server's own log instead.
+
+    `user_middleware[0]` is the outermost layer: Starlette wraps the list in
+    reverse, and `add_middleware` inserts at the front.
+    """
+    stack = getattr(app, 'user_middleware', None) or []
+    classes = [m.cls for m in stack]
+    if PrometheusMiddleware not in classes:
+        # Metrics are off, or registration was skipped: nothing to check.
+        return True
+    if classes[0] is PrometheusMiddleware:
+        return True
+    outermost = classes[0]
+    logger.warning(
+        f'{PrometheusMiddleware.__name__} is not the outermost middleware '
+        f'({getattr(outermost, "__name__", outermost)} is). Responses that a '
+        'middleware outside it produces -- authentication and RBAC failures, '
+        'drains -- will not be counted in sky_apiserver_requests_total, so an '
+        'outage on those paths shows up as a drop in successful traffic '
+        'instead of as errors. Middleware order: '
+        f'{[c.__name__ for c in classes]}')
+    return False
+
+
+def _reached_router(request: fastapi.Request) -> bool:
+    """Whether the request got past every middleware to the router.
+
+    Starlette's router stamps itself on the scope when it runs
+    (`scope['router']`); a request a middleware answered itself never gets
+    there. This is what tells a route's own 4xx/5xx (raw path, as before)
+    from a middleware's canned response (bounded path).
+    """
+    return 'router' in request.scope
+
+
+def _literal_route_paths(app) -> FrozenSet[str]:
+    """The registered route paths without path parameters.
+
+    `include_router` expands each sub-route onto `app.routes` with the
+    prefix applied, so the core and plugin routers' own routes are in here
+    too: on the real app, 132 routes of which 126 are parameterless
+    (`/jobs/queue`, `/users/update`, `/volumes/apply`, ...). An unrouted
+    request to any of them keeps its exact path; only a path that matches
+    no route at all falls back to a prefix bucket. Bounded either way --
+    126 literal routes plus 13 buckets plus `other`.
+    """
+    routes = getattr(app, 'routes', None)
+    if not isinstance(routes, (list, tuple)):
+        return frozenset()
+    return frozenset(route.path
+                     for route in routes
+                     if isinstance(getattr(route, 'path', None), str) and
+                     '{' not in route.path)
+
+
+def _unrouted_path_label(path: str, literal_routes: FrozenSet[str]) -> str:
+    """Bounded `path` label for a response a middleware produced.
+
+    The request never reached the router (an authentication 401/503, an
+    RBAC 403, a CORS preflight, a sign-in redirect, ...), and its path is
+    chosen by whoever sent it -- unauthenticated scanners included -- so
+    the raw path cannot be the label value. The raw path is kept only when
+    it is exactly a registered (parameterless) route; anything else is
+    folded into one of the fixed `_UNROUTED_PATH_PREFIXES` buckets, as
+    `<prefix>*`, or into `other`. A request that did reach the router keeps
+    its raw path, 404s included, exactly as before.
+
+    Registered routes include the ones `include_router` expanded (see
+    `_literal_route_paths`), so the buckets catch what matches no route at
+    all: scanner probes, and the concrete values of the parameterised
+    routes (`/dashboard/_next/...`, `/ssh_node_pools/<name>/status`).
+    """
+    if path in literal_routes:
+        return path
+    for prefix in _UNROUTED_PATH_PREFIXES:
+        if path.startswith(prefix) or path == prefix[:-1]:
+            return prefix + '*'
+    return OTHER_PATH_LABEL
+
+
 class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
-    """Middleware to collect Prometheus metrics for HTTP requests."""
+    """Middleware to collect Prometheus metrics for HTTP requests.
+
+    Registered as the OUTERMOST middleware (added last in
+    sky/server/server.py), so it records the response the client actually
+    receives. An authentication, RBAC or shutdown middleware that answers a
+    request itself never calls the next layer; with this middleware inside
+    the stack those responses -- exactly the ones an outage produces -- were
+    never counted, and the only visible symptom was successful traffic
+    dropping.
+
+    The `path` label is read after the inner layers ran, so it is the path
+    the router saw (inner middlewares rewrite `scope['path']` in place, e.g.
+    the internal dashboard prefix): the same value as before. For a response
+    produced by a middleware the path is bounded instead; see
+    `_unrouted_path_label`. When the middleware that answered
+    stamped a reason (`middleware_utils.mark_rejection`), the response is
+    also counted in `sky_apiserver_request_rejections_total`.
+
+    Duration is measured from entry into this layer, i.e. it includes the
+    time the authentication middlewares spend (DB lookups under their
+    deadline): it is the latency the client observed.
+
+    WebSocket scopes pass straight through, as for every BaseHTTPMiddleware;
+    refused handshakes are counted by `middleware_utils.websocket_aware`.
+    """
+
+    def __init__(self, app: starlette.types.ASGIApp):
+        super().__init__(app)
+        # (route count, literal route paths) of the app, rebuilt if routes
+        # were added since. Routes are all registered before the first
+        # request in practice; the count check keeps the memo honest anyway.
+        self._literal_routes: Optional[Tuple[int, FrozenSet[str]]] = None
+
+    def _literal_route_paths(self, app) -> FrozenSet[str]:
+        routes = getattr(app, 'routes', None)
+        count = len(routes) if isinstance(routes, (list, tuple)) else 0
+        if self._literal_routes is None or self._literal_routes[0] != count:
+            self._literal_routes = (count, _literal_route_paths(app))
+        return self._literal_routes[1]
 
     async def dispatch(self, request: fastapi.Request, call_next):
-        path = request.url.path
         logger.debug(f'PROM Middleware Request: {request}, {request.url.path}')
-        streaming = _is_streaming_api(path)
-        if not streaming:
-            # Exclude streaming APIs, the duration is not meaningful.
-            # TODO(aylei): measure the duration of async execution instead.
-            start_time = time.time()
+        start_time = time.time()
         method = request.method
-        status_code_group = ''
+        status_code = 0
 
         try:
             response = await call_next(request)
-            status_code_group = _get_status_code_group(response.status_code)
+            status_code = response.status_code
         except Exception:  # pylint: disable=broad-except
-            status_code_group = '5xx'
+            # Escaped every inner layer; Starlette's error handler (outside
+            # us) turns it into a bare 500. Count what the client sees.
+            status_code = 500
             raise
         finally:
-            metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.labels(
-                path=path, method=method, status=status_code_group).inc()
-            # Record per-user metrics
-            user = _get_user_label(request)
-            metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL.labels(
-                user=user, method=method, status=status_code_group).inc()
-            if not streaming:
-                duration = time.time() - start_time
-                metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.labels(
-                    path=path, method=method,
-                    status=status_code_group).observe(duration)
-                # /api/get long-polls until the underlying request is terminal,
-                # so its duration is the client-observed latency of that request
-                # type. The handler stamps request.state.request_name once it
-                # knows which request is being fetched; record it by name so
-                # bounded types can be alerted on separately from unbounded ones
-                # (launch/exec/...).
-                request_name = getattr(request.state, 'request_name', None)
-                if request_name is not None:
-                    metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS \
-                        .labels(name=request_name,
-                                status=status_code_group).observe(duration)
+            # This layer is outermost, so it sees 100% of responses: a
+            # recording fault must not turn a served request into a 500.
+            middleware_utils.record_safely('request', self._record, request,
+                                           method, status_code, start_time)
 
         return response
+
+    def _path_label(self, request: fastapi.Request, raw_path: str) -> str:
+        """`path` label, never raising: a fault must not lose the count.
+
+        Labelling an unrouted request reads the app's route table, so it is
+        the one part of recording that depends on state this layer does not
+        own. Falling back to the catch-all bucket keeps the request in
+        `sky_apiserver_requests_total`: mislabelled beats uncounted.
+        """
+        if _reached_router(request):
+            return raw_path
+        try:
+            return _unrouted_path_label(
+                raw_path, self._literal_route_paths(request.scope.get('app')))
+        except Exception as e:  # pylint: disable=broad-except
+            middleware_utils.note_recording_failure('the request path label', e)
+            return OTHER_PATH_LABEL
+
+    def _record(self, request: fastapi.Request, method: str, status_code: int,
+                start_time: float) -> None:
+        # Read after the inner layers ran: the scope dict is shared down the
+        # stack, so this is the (possibly rewritten) path the router saw.
+        raw_path = request.scope.get('path', '')
+        path = self._path_label(request, raw_path)
+        status_code_group = _get_status_code_group(status_code)
+        metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.labels(
+            path=path, method=method, status=status_code_group).inc()
+        # Record per-user metrics
+        user = _get_user_label(request)
+        metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL.labels(
+            user=user, method=method, status=status_code_group).inc()
+        middleware_utils.record_rejection(request.scope, status_code,
+                                          middleware_utils.REJECTION_KIND_HTTP)
+        if _is_streaming_api(raw_path):
+            # Exclude streaming APIs, the duration is not meaningful.
+            # TODO(aylei): measure the duration of async execution instead.
+            return
+        duration = time.time() - start_time
+        metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.labels(
+            path=path, method=method,
+            status=status_code_group).observe(duration)
+        # /api/get long-polls until the underlying request is terminal, so its
+        # duration is the client-observed latency of that request type. The
+        # handler stamps request.state.request_name once it knows which
+        # request is being fetched; record it by name so bounded types can be
+        # alerted on separately from unbounded ones (launch/exec/...).
+        request_name = getattr(request.state, 'request_name', None)
+        if request_name is not None:
+            metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS.labels(
+                name=request_name, status=status_code_group).observe(duration)
 
 
 peak_rss_bytes = 0
