@@ -141,18 +141,16 @@ _CONTAINER_CREATION_REASON = 'container creation'
 # Prefix of the synthetic pending reasons describing an init container that is
 # running, or that the kubelet is still creating.
 _INIT_CONTAINER_REASON_PREFIX = 'init container '
-# Synthetic pending reason for a pod that reports 'PodInitializing' while no
-# init container is running or being created -- i.e. they have all terminated
-# successfully and the kubelet has not moved on to the main containers. Kept
-# distinct from the reasons above precisely so it is *not* stall-exempt: there
-# is no legitimately-slow work behind it to wait for.
-_POD_INITIALIZATION_REASON = 'pod initialization'
 # Pending reasons that can legitimately persist, unchanged, for a very long
 # time, and so must not count towards the no-progress deadline below:
 #   - the allow-listed Normal events (pulling a large image, an external CSI
 #     provisioner creating a volume, a late-binding storage class),
 #   - 'container creation', which is also what a pod reports while pulling an
-#     image whose 'Pulling' event has already aged out of the event window,
+#     image whose 'Pulling' event has already aged out of the event window.
+#     For a pod with init containers this covers the main containers' own
+#     image pull too: the kubelet reports those as 'PodInitializing' rather
+#     than 'ContainerCreating' until they are created, see
+#     _inspect_pod_status,
 #   - a running init container, which may be doing arbitrary user work, and an
 #     init container the kubelet is still creating, which may be pulling a
 #     large image of its own -- the latter only reaches this exemption when no
@@ -1487,6 +1485,21 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                     waiting = container_status.state.waiting
                     if waiting is not None:
                         if waiting.reason == 'PodInitializing':
+                            # PodInitializing with no init container running
+                            # or being created means they have all terminated
+                            # successfully and the kubelet is on to the main
+                            # containers. That is not a stuck pod: whenever a
+                            # pod has init containers, the kubelet reports its
+                            # main containers as 'PodInitializing' instead of
+                            # 'ContainerCreating' for the whole of their own
+                            # image pull, and only moves off it once the
+                            # container is created. So it is the same state a
+                            # pod without init containers shows as
+                            # 'ContainerCreating', and gets the same handling
+                            # by leaving init_reason unset: the events tier
+                            # below reports a live 'Pulling', or a live
+                            # Warning that the no-progress deadline bounds,
+                            # and 'container creation' is the exempt fallback.
                             init_progress = _check_init_containers(pod)
                             if init_progress is not None:
                                 verb = ('running' if init_progress.running else
@@ -1498,15 +1511,6 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                                     f'{init_progress.total})')
                                 init_reason_is_assumed = (
                                     not init_progress.running)
-                            else:
-                                # PodInitializing, yet no init container is
-                                # running or being created -- they have all
-                                # terminated successfully and the kubelet has
-                                # simply not moved on to the main containers.
-                                # Nothing here is legitimately slow, so unlike
-                                # the two branches above this reason is not
-                                # exempt from the no-progress deadline.
-                                init_reason = _POD_INITIALIZATION_REASON
                         elif waiting.reason != 'ContainerCreating':
                             msg = waiting.message if (
                                 waiting.message) else str(waiting)
@@ -2187,6 +2191,14 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     context = kubernetes_utils.get_control_context_from_config(provider_config)
     pod_spec = copy.deepcopy(config.node_config)
     create_pods_start = datetime.datetime.now(datetime.timezone.utc)
+    # Closes the provision-setup segment of this launch attempt and opens the
+    # admission-wait one. The same reference point _wait_for_pods_to_schedule
+    # measures from, so the two agree. Write-once, so a resumed launch
+    # re-entering here keeps the original time rather than restarting the wait
+    # at admission.
+    global_user_state.record_launch_milestone_for_cluster(
+        cluster_name, global_user_state.LaunchMilestone.INSTANCES_REQUESTED,
+        create_pods_start.timestamp())
 
     to_create_deployment = 'deployment_spec' in pod_spec
     if to_create_deployment:

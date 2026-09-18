@@ -138,10 +138,22 @@ _SERVER_USER_HASH_KEY = 'server_user_hash'
 
 logger = sky_logging.init_logger(__name__)
 
-# Resolved once at import so `subprocess.Popen(executable=...)` gets an
-# absolute path — a required precondition for Python subprocess to route
-# through posix_spawn instead of fork_exec.
-_KUBECTL_PATH: Optional[str] = shutil.which('kubectl')
+# Grace period for srun to exit after SIGTERM before the Slurm ssh proxy
+# escalates to SIGKILL.
+_SRUN_REAP_TIMEOUT_SECONDS = 5
+
+
+def _reap_srun(proc: subprocess.Popen) -> None:
+    """Waits for srun to exit, escalating to SIGKILL. Runs in a thread."""
+    try:
+        proc.wait(timeout=_SRUN_REAP_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        logger.warning(f'srun did not exit within '
+                       f'{_SRUN_REAP_TIMEOUT_SECONDS}s of SIGTERM; sending '
+                       'SIGKILL.')
+        proc.kill()
+        proc.wait()
+
 
 # TODO(zhwu): Streaming requests, such log tailing after sky launch or sky logs,
 # need to be detached from the main requests queue. Otherwise, the streaming
@@ -1330,7 +1342,7 @@ if __name__ == 'sky.server.server':
 # middleware added), none of those were counted and an authentication outage
 # showed up on dashboards as a drop in successful requests rather than as
 # errors. Use environment variable to make the metrics middleware optional.
-if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
+if metrics_utils.METRICS_ENABLED:
     app.add_middleware(metrics.PrometheusMiddleware)
 
 # The middleware stack is final here: plugins loaded above, the metrics layer
@@ -1841,19 +1853,28 @@ def _gb(num_bytes: int) -> str:
     return f'{num_bytes / 1000 ** 3:.1f} GB'
 
 
-def _max_upload_total_bytes() -> Optional[int]:
-    """The configured cap on one upload, or None when uncapped."""
-    raw = os.environ.get(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR)
+def _byte_limit_env(name: str) -> Optional[int]:
+    """The byte limit *name* declares, or None when it declares none."""
+    raw = os.environ.get(name)
     if not raw:
         return None
     try:
         value = int(raw)
     except ValueError:
-        logger.warning(
-            'Ignoring unparseable '
-            f'{server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR}={raw!r}')
+        logger.warning(f'Ignoring unparseable {name}={raw!r}')
         return None
     return value if value > 0 else None
+
+
+def _max_upload_total_bytes() -> Optional[int]:
+    """The configured cap on one upload, or None when uncapped."""
+    return _byte_limit_env(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR)
+
+
+def _max_stored_file_mounts_bytes() -> Optional[int]:
+    """The configured cap on the stored file mounts, or None when uncapped."""
+    return _byte_limit_env(
+        server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR)
 
 
 def _upload_too_large(num_bytes: int, limit: int) -> fastapi.HTTPException:
@@ -1861,6 +1882,15 @@ def _upload_too_large(num_bytes: int, limit: int) -> fastapi.HTTPException:
         status_code=413,
         detail=(f'Upload of {_gb(num_bytes)} exceeds the {_gb(limit)} limit '
                 'on a single upload. Upload fewer or smaller files.'))
+
+
+def _file_mounts_storage_full(stored: int, limit: int) -> fastapi.HTTPException:
+    return fastapi.HTTPException(
+        status_code=507,
+        detail=(f'The storage holding file mounts is at {_gb(stored)}, over '
+                f'the {_gb(limit)} this server keeps. Read large inputs from '
+                'a bucket or a volume instead of uploading them, or retry '
+                'once the workloads using the current ones have finished.'))
 
 
 def _stored_bytes(directory: Optional[pathlib.Path]) -> int:
@@ -1908,6 +1938,26 @@ def _admit_extraction(members: List[zipfile.ZipInfo], target_dir: pathlib.Path):
                     'available there. Upload fewer or smaller files.'))
     with local_disk.reserve(needed):
         yield
+
+
+async def _admit_stored_file_mounts(blobs_dir: pathlib.Path) -> None:
+    """Refuses a chunk once the blob store's filesystem is full.
+
+    The limit bounds that filesystem, not one user's uploads: anything
+    else mounted there competes for the same space and counts too.
+
+    The limit is soft: an upload admitted while there was still room runs
+    to the end, and uploads in flight are admitted against the same
+    reading. What bounds how far past the limit that carries the store is
+    MAX_UPLOAD_TOTAL_BYTES, and on a backend that extracts, what an
+    admitted archive expands to.
+    """
+    limit = _max_stored_file_mounts_bytes()
+    if limit is None:
+        return
+    stored = await asyncio.to_thread(local_disk.used_for_path, str(blobs_dir))
+    if stored is not None and stored >= limit:
+        raise _file_mounts_storage_full(stored, limit)
 
 
 async def _receive_and_assemble_chunks(
@@ -2156,6 +2206,7 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
     # Note that we skip assemble and extract here since cocurrent chunk
     # uploads will race, and we do finalize with the upload_lock instead.
     staging_dir = storage.get_staging_dir(user_id, upload_id)
+    await _admit_stored_file_mounts(storage.blobs_dir(user_id))
     result = await _receive_and_assemble_chunks(base_dir=staging_dir,
                                                 zip_name='staging',
                                                 request=request,
@@ -3525,6 +3576,12 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                      json.dumps(redirect_info).encode())
             await websocket.send_bytes(frame)
             await websocket.close()
+            # Counted before returning: this session is handed off, so none of
+            # the SSH metrics below will ever see it. Without this label an
+            # all-redirected deployment is indistinguishable from one where
+            # nobody SSHes at all.
+            metrics_utils.SKY_APISERVER_SSH_SESSIONS_TOTAL.labels(
+                path=websocket_utils.SSH_PATH_REDIRECTED).inc()
             return
 
     handle = await _validate_cluster_for_ssh_proxy_ws(websocket, cluster_name,
@@ -3538,38 +3595,16 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
     head_ssh_port = handle.head_ssh_port or 22
     kubectl_cmd = handle.get_command_runners()[0].port_forward_command(
         port_forward=[(None, head_ssh_port)])
-    # Under uvloop, `asyncio.create_subprocess_exec` goes through libuv's
-    # `uv_spawn`, which on Linux always uses fork().
-    # The forked child runs `PyOS_AfterFork_Child` which tears down inherited
-    # Python objects; if any sqlite3 statement is in that set, its
-    # destructor calls `sqlite3_free → pthread_mutex_lock` on the sqlite3
+    # Must not fork. Beyond the stall `spawn_without_fork` documents, a child
+    # forked from this process runs `PyOS_AfterFork_Child`, which tears down
+    # inherited Python objects; if any sqlite3 statement is among them, its
+    # destructor calls `sqlite3_free -> pthread_mutex_lock` on the sqlite3
     # static allocator mutex. That mutex was held by another parent thread at
-    # the fork moment (aiosqlite worker), and the child only has one thread,
-    # so no one ever releases it. Child deadlocks before execv, leaks the
-    # parent's inherited fds (including every `.<request>.lock` flock), and
-    # the parent's event loop stall trips uvicorn's 5s ping-timeout →
-    # parent SIGKILL.
-    # Run `subprocess.Popen` in a worker thread to bypass uvloop's transport
-    # entirely.
-    if _KUBECTL_PATH is None or not os.path.isabs(_KUBECTL_PATH):
-        raise RuntimeError(
-            'kubectl not found on PATH with an absolute path; refusing to '
-            'fall back to fork-based spawn which risks the SQLite-mutex '
-            'ghost-worker deadlock.')
-    argv = [_KUBECTL_PATH] + list(kubectl_cmd[1:])
-
-    def _spawn_sync() -> subprocess.Popen:
-        return subprocess.Popen(
-            argv,
-            executable=_KUBECTL_PATH,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            close_fds=False,
-        )
-
+    # the fork moment (aiosqlite worker), and the child has only one thread,
+    # so nobody releases it. The child then deadlocks before execv and leaks
+    # every fd it inherited, including each `.<request>.lock` flock.
     loop = asyncio.get_running_loop()
-    proc = await loop.run_in_executor(None, _spawn_sync)
+    proc = await asyncio_utils.spawn_without_fork(kubectl_cmd)
     logger.info(f'Started kubectl port-forward with command: {kubectl_cmd}')
     assert proc.stdout is not None
 
@@ -3621,6 +3656,8 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
         logger.info(f'Starting port-forward to local port: {local_port}')
         proxying = True
         conn_gauge.inc()
+        metrics_utils.SKY_APISERVER_SSH_SESSIONS_TOTAL.labels(
+            path=websocket_utils.SSH_PATH_PORT_FORWARD).inc()
         # Connect to the local port
         reader, writer = await asyncio.open_connection('127.0.0.1', local_port)
 
@@ -3637,6 +3674,7 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
             write_to_backend=write_and_drain,
             close_backend=close_writer,
             timestamps_supported=timestamps_supported,
+            path=websocket_utils.SSH_PATH_PORT_FORWARD,
         )
     finally:
         if proxying:
@@ -3704,7 +3742,9 @@ def _build_slurm_job_ssh_command(
     )
     if slurm_user is not None:
         command = command_runner.wrap_command_as_user(
-            command, slurm_user, use_sudo=login_node_user != 'root')
+            shlex.split(command),
+            slurm_user,
+            use_sudo=login_node_user != 'root')
     return command
 
 
@@ -3781,19 +3821,27 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
             ))
     ]
 
-    proc = await asyncio.create_subprocess_shell(
-        ' '.join(ssh_cmd),
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,  # Capture stderr separately for logging
+    loop = asyncio.get_running_loop()
+    # `/bin/sh -c` is what `asyncio.create_subprocess_shell` would run, minus
+    # the forking spawn that call carries under uvloop.
+    proc = await asyncio_utils.spawn_without_fork(
+        ['/bin/sh', '-c', ' '.join(ssh_cmd)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,  # Capture stderr separately for logging
     )
     assert proc.stdin is not None
     assert proc.stdout is not None
     assert proc.stderr is not None
 
-    stdin = proc.stdin
-    stdout = proc.stdout
-    stderr = proc.stderr
+    # Drive the three pipes without handing their fds to the loop; `proc`
+    # stays their single owner and closes each exactly once in the `finally`.
+    stdin = asyncio_utils.NonOwningPipeWriter(loop, proc.stdin.fileno())
+    stdout = asyncio_utils.NonOwningPipeReader(loop, proc.stdout.fileno())
+    stderr = asyncio_utils.NonOwningPipeReader(loop, proc.stderr.fileno())
+    stdin.start()
+    stdout.start()
+    stderr.start()
 
     async def log_stderr():
         while True:
@@ -3802,21 +3850,28 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
                 break
             logger.debug(f'srun stderr: {line.decode().rstrip()}')
 
-    stderr_task = None
-    if env_options.Options.SHOW_DEBUG_INFO.get():
-        stderr_task = asyncio.create_task(log_stderr())
+    # Drain stderr for the life of the session, not only under SKYPILOT_DEBUG:
+    # the reader empties the OS pipe as soon as srun writes, so an unconsumed
+    # stderr grows the buffer it feeds instead of filling the pipe. `logger`
+    # drops the lines itself when debug logging is off.
+    stderr_task = asyncio.create_task(log_stderr())
     conn_gauge = metrics_utils.SKY_APISERVER_WEBSOCKET_CONNECTIONS.labels(
         pid=os.getpid())
     ssh_failed = False
     try:
         conn_gauge.inc()
+        metrics_utils.SKY_APISERVER_SSH_SESSIONS_TOTAL.labels(
+            path=websocket_utils.SSH_PATH_SLURM).inc()
 
         async def write_and_drain(data: bytes) -> None:
-            stdin.write(data)
-            await stdin.drain()
+            await stdin.write(data)
 
         async def close_stdin() -> None:
+            # Stop watching, then close the fd through its owner: srun reads
+            # EOF on stdin and shuts the session down.
             stdin.close()
+            assert proc.stdin is not None
+            proc.stdin.close()
 
         ssh_failed = await websocket_utils.run_websocket_proxy(
             websocket,
@@ -3824,38 +3879,57 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
             write_to_backend=write_and_drain,
             close_backend=close_stdin,
             timestamps_supported=timestamps_supported,
+            # srun's stdio, not a port-forward: keep the two out of one
+            # histogram, their latency profiles have nothing in common.
+            path=websocket_utils.SSH_PATH_SLURM,
         )
 
     finally:
+        # Nothing in this block may `await`: a cancellation delivered into one
+        # skips every statement after it, and this is the only code that takes
+        # the loop's watchers off the srun pipes before their owner closes
+        # them. A watcher left on a closed fd fires for whatever the kernel
+        # hands out next. `test_slurm_ssh_proxy_teardown_does_not_await`
+        # enforces this.
         conn_gauge.dec()
-        reason = ''
-        try:
-            logger.info('Terminating srun process')
+        logger.info('Terminating srun process')
+        # `subprocess.Popen.terminate()` is a no-op on a process that has
+        # already been reaped rather than raising ProcessLookupError, so ask
+        # for the exit status directly.
+        srun_exited = proc.poll() is not None
+        if not srun_exited:
             proc.terminate()
-        except ProcessLookupError:
-            stdout_data = await stdout.read()
-            logger.error('srun process was terminated before the '
-                         'ssh websocket connection was closed. Remaining '
-                         f'output: {str(stdout_data)}')
-            reason = 'SrunProcessExit'
-            metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
-                pid=os.getpid(), reason=reason).inc()
-        else:
-            if ssh_failed:
-                reason = 'SSHToSlurmJobDisconnected'
-            else:
-                reason = 'ClientClosed'
+        stderr_task.cancel()
+        # Reads the fd, so it has to run before the owner closes it below.
+        leftover = stdout.drain() if srun_exited else b''
 
+        # Every watcher has to come off its fd before the object that owns the
+        # fd closes it.
+        stdin.close()
+        stdout.stop()
+        stderr.stop()
+        for pipe in (proc.stdin, proc.stdout, proc.stderr):
+            if pipe is not None:
+                pipe.close()
+        # `subprocess.Popen` is outside asyncio's child watcher, so nothing
+        # else would ever wait() on srun.
+        loop.run_in_executor(None, _reap_srun, proc)
+
+        if srun_exited:
+            logger.error('srun process exited with returncode '
+                         f'{proc.returncode} before the ssh websocket '
+                         'connection was closed; its stderr is in the debug '
+                         f'log. Remaining output: {str(leftover)}')
+            reason = 'SrunProcessExit'
+        elif ssh_failed:
+            reason = 'SSHToSlurmJobDisconnected'
+        else:
+            reason = 'ClientClosed'
+        # Counted once per session. The early-exit branch used to increment
+        # here as well as on its own, so one failed session reported two
+        # closures.
         metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
             pid=os.getpid(), reason=reason).inc()
-
-        # Cancel the stderr logging task if it's still running
-        if stderr_task is not None and not stderr_task.done():
-            stderr_task.cancel()
-            try:
-                await stderr_task
-            except asyncio.CancelledError:
-                pass
 
 
 @app.websocket('/ssh-interactive-auth')
@@ -4333,6 +4407,24 @@ if __name__ == '__main__':
     permission.permission_service.initialize()
     logger.info('Permission service initialized')
 
+    # Nothing can legitimately be provisioning yet, so any launch attempt
+    # still open belongs to a process that died mid-launch. Closing them here
+    # keeps a new launch of the same cluster from stamping milestones onto a
+    # dead attempt, and makes the measurements that were lost countable.
+    #
+    # Guarded because this is startup: tidying measurement rows must not be
+    # able to stop the server from coming up. The daemon that also runs this
+    # catches for the same reason, and the next tick of it will sweep whatever
+    # was missed here.
+    try:
+        stranded = global_user_state.sweep_abandoned_launch_attempts()
+        if stranded:
+            logger.info(f'Closed {stranded} launch attempt(s) abandoned by a '
+                        'previous server process.')
+    except Exception as sweep_error:  # pylint: disable=broad-except
+        logger.warning(f'Could not sweep abandoned launch attempts at '
+                       f'startup: {sweep_error}')
+
     max_db_connections = global_user_state.get_max_db_connections()
     logger.info(f'Max db connections: {max_db_connections}')
 
@@ -4358,7 +4450,7 @@ if __name__ == '__main__':
     global_tasks: List[asyncio.Task] = []
     try:
         background = uvloop.new_event_loop()
-        if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
+        if metrics_utils.METRICS_ENABLED:
             metrics.maybe_register_managed_jobs_collector()
             # Deliberately not on `background`: the scrape shares that
             # loop's anyio thread limiter with every daemon below, and the

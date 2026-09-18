@@ -1,5 +1,6 @@
 """Constants for SkyPilot."""
 import enum
+import os
 from typing import List, Tuple
 
 from packaging import version
@@ -196,7 +197,7 @@ ROOT_JOB_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}ROOT_JOB_ID'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '42'  # managed job table carries dynamic_task_index.
+SKYLET_VERSION = '43'  # managed job table query takes include_tree.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -725,6 +726,21 @@ SERVE_OVERRIDE_CONCURRENT_LAUNCHES = (
 # Environment variable that is set to 'true' if metrics are enabled.
 ENV_VAR_SERVER_METRICS_ENABLED = 'SKY_API_SERVER_METRICS_ENABLED'
 
+
+def server_metrics_enabled() -> bool:
+    """Whether the API server's metrics machinery should run.
+
+    One predicate for every consumer, because there used to be four over the
+    same variable: two `== 'true'` comparisons and two bare truthiness
+    checks. `=1` therefore installed the metrics middleware and served
+    /metrics while every instrument behind it stayed off, and `=false`
+    installed them too. Spelled the way the rest of the repo spells a boolean
+    environment variable (`sky/utils/env_options.py`).
+    """
+    return os.environ.get(ENV_VAR_SERVER_METRICS_ENABLED,
+                          'false').lower() in ('true', '1')
+
+
 # If set, overrides the header that we can use to get the user name.
 ENV_VAR_SERVER_AUTH_USER_HEADER = f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_USER_HEADER'
 
@@ -752,6 +768,57 @@ ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
 ENV_VAR_DB_POOL_CONNECTION_URI = (
     f'{SKYPILOT_ENV_VAR_PREFIX}DB_POOL_CONNECTION_URI')
 ENV_VAR_DB_POOL_HOSTPORT = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_POOL_HOSTPORT')
+
+# Number of persistent Postgres connections each server process keeps in its
+# state-DB connection pool (SQLAlchemy `QueuePool`), overriding the budget the
+# server derives at runtime (`sky.server.config.compute_server_config`).
+# Unset by default, in which case nothing changes: the derived budget decides,
+# and it asks for a pool only when the database reports more connections than
+# the server can occupy.
+#
+# Why an override exists: the derived budget compares the server's worker count
+# against the database's own `max_connections`, which is a property of the
+# database, not of this server's share of it -- the same database may serve
+# other replicas, other tenants and ad-hoc clients, so that number is neither
+# an upper bound this server may take nor, behind a connection pooler, the
+# number of backends a pool would actually hold. A deployment that knows its
+# own share states it here instead.
+#
+# Also unlike the derived budget, this value needs no coordination with server
+# startup: it is read whenever an engine is built
+# (`sky.utils.db.db_utils.get_db_connection_pool_size`), so it applies to
+# engines built before a process sets its budget -- e.g. the one
+# `skypilot_config` builds while it is being imported -- as well as after.
+#
+# Set it to N > 0 to keep N connections open per process, on top of which the
+# process may burst (see ENV_VAR_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW). Size
+# N from what the deployment may hold open when idle:
+# N x (uvicorn workers + executor workers + 1). 0 disables pooling explicitly
+# (every state query opens its own connection, `NullPool`).
+#
+# Server-side only: the SKYPILOT_SERVER_ prefix keeps clients from forwarding
+# it (`sky.server.requests.payloads.request_body_env_vars`).
+ENV_VAR_SERVER_DB_CONNECTION_POOL_SIZE = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}DB_CONNECTION_POOL_SIZE')
+
+# Burst connections a server process may open beyond the pooled ones
+# (SQLAlchemy's `max_overflow`), each closed when it is returned rather than
+# kept. A process therefore holds `pool_size` connections open when idle and
+# uses at most `pool_size + max_overflow` at once; a query that arrives when
+# all of them are busy waits for one instead of opening its own.
+#
+# Unset by default, in which case a process bursts up to
+# DEFAULT_DB_CONNECTION_POOL_MAX_CONCURRENCY concurrent connections, so a
+# process that pools only a couple of connections does not serialize its
+# queries behind them. That default reaches 0 once the pool alone is that
+# wide, which is why a deployment that pools more than a handful of
+# connections and still wants burst room states the value here.
+ENV_VAR_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}DB_CONNECTION_POOL_MAX_OVERFLOW')
+
+# Concurrent state-DB connections a server process uses before it starts
+# queueing queries, when the burst size is left to the default.
+DEFAULT_DB_CONNECTION_POOL_MAX_CONCURRENCY = 5
 
 # Total deadline, in seconds, on each DB lookup the API server's
 # authentication middlewares make (`sky.server.auth.db_lookup`). The users

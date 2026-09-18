@@ -1600,11 +1600,9 @@ def warn_unless_outermost(app) -> bool:
 
     Returns whether the ordering invariant holds or does not apply. Reads
     the answer out of the middleware stack rather than from the metrics
-    env-var: the registration below uses the variable's truthiness while
-    `metrics_utils.METRICS_ENABLED` requires the literal `true`, so a guard
-    with its own predicate would go silent under
-    `SKY_API_SERVER_METRICS_ENABLED=1` -- an enabled deployment, and one of
-    the configurations where a misordered stack would go unnoticed.
+    env-var, because the stack is the thing being judged: a plugin that
+    appends to `user_middleware` directly is invisible to any env-var-based
+    guard, and that is the deployment shape this check exists for.
 
     Everything this middleware exists to count -- the 401/403/503s an
     authentication, RBAC, shutdown or plugin middleware answers itself -- is

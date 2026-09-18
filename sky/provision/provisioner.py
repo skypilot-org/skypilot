@@ -8,7 +8,7 @@ import socket
 import subprocess
 import time
 import traceback
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import colorama
 
@@ -50,6 +50,60 @@ logger = sky_logging.init_logger('sky.provisioner')
 # teardown instances when provisioning fails.
 _MAX_RETRY = 3
 _TITLE = '\n\n' + '=' * 20 + ' {} ' + '=' * 20 + '\n'
+
+# Hooks that report where a provider actually placed a cluster's instances,
+# for providers that submit work to one control plane and then execute it on
+# another -- the submission target names the control plane, so on its own it
+# does not say where the instances ended up.
+#
+# Each hook is called with ``(provider_name, region_name,
+# cluster_name_on_cloud)`` and returns the name of the execution target, or
+# None when it does not apply to that provider or the instances run where they
+# were submitted. ``provider_name`` is the canonical lower-case name the
+# provision registry dispatches on (``kubernetes``), not the cloud's display
+# repr -- a hook comparing against the canonical name is what works. Purely
+# descriptive: the answer is used for user-facing reporting and never to
+# address the cluster. Empty by default -- nothing in core registers one.
+ExecutionTargetResolver = Callable[[str, str, str], Optional[str]]
+EXECUTION_TARGET_RESOLVERS: List[ExecutionTargetResolver] = []
+
+
+def register_execution_target_resolver(
+        resolver: ExecutionTargetResolver) -> None:
+    """Register a hook reporting where a provider placed its instances.
+
+    Idempotent, so a module that registers on import keeps one registration
+    across the several process contexts that may import it.
+    """
+    if resolver not in EXECUTION_TARGET_RESOLVERS:
+        EXECUTION_TARGET_RESOLVERS.append(resolver)
+
+
+def _resolve_execution_target(provider_name: str, region_name: str,
+                              cluster_name_on_cloud: str) -> Optional[str]:
+    """The execution target for this cluster, if it differs from ``region``.
+
+    Never raises: a hook that fails leaves the caller reporting the
+    submission target alone, which is what it reported before any hook
+    existed. ``BaseException`` and not ``Exception`` because this runs after
+    the instances are already up -- ``bulk_provision`` reads SystemExit and
+    KeyboardInterrupt as user cancellation and records nothing, so a resolver
+    raising either would file a live cluster as cancelled. Delaying a
+    cancellation by one cache read is the lesser harm.
+    """
+    for resolver in EXECUTION_TARGET_RESOLVERS:
+        try:
+            target = resolver(provider_name, region_name, cluster_name_on_cloud)
+        except BaseException:  # pylint: disable=broad-except
+            logger.debug(
+                'Execution target resolver %r failed; reporting the '
+                'submission target only.',
+                resolver,
+                exc_info=True)
+            continue
+        if target is not None and target != region_name:
+            return target
+    return None
 
 
 def _bulk_provision(
@@ -117,13 +171,64 @@ def _bulk_provision(
         f'\nProvisioning {cluster_name!r} took {time.time() - start:.2f} '
         f'seconds.')
 
-    # Add cluster event for provisioning completion.
+    # Add cluster event for provisioning completion. ``region.name`` rather
+    # than the dataclass repr, to match the 'Provisioning on ...' event that
+    # precedes it. When the provider executed the instances somewhere other
+    # than where they were submitted, name both -- otherwise the event reports
+    # the control plane and silently implies the work runs there.
+    # ``provider_name`` is ``repr(cloud)``, which is display-cased
+    # ('Kubernetes'); hooks match on the canonical name the provision registry
+    # dispatches on, so normalize the same way ``_route_to_cloud_impl`` does.
+    execution_target = _resolve_execution_target(provider_name.lower(),
+                                                 region_name,
+                                                 cluster_name.name_on_cloud)
+    launched_on = f'{cloud.display_name()} in {region.name}'
+    if execution_target is not None:
+        launched_on += f', running on {execution_target}'
     global_user_state.add_cluster_event(
         str(cluster_name), status_lib.ClusterStatus.INIT,
-        f'Instances launched on {cloud.display_name()} in {region}',
+        f'Instances launched on {launched_on}',
         global_user_state.ClusterEventType.STATUS_CHANGE)
 
     return provision_record
+
+
+def _active_workspace() -> Optional[str]:
+    """The workspace this launch belongs to, for slicing launch latency.
+
+    Best-effort: a label missing from a metric is better than a launch failing
+    because the workspace could not be resolved.
+    """
+    try:
+        return skypilot_config.get_active_workspace()
+    except Exception:  # pylint: disable=broad-except
+        logger.debug('Could not resolve the active workspace for the launch '
+                     'attempt record.')
+        return None
+
+
+def _existing_cluster_hash(cluster_name: str) -> Optional[str]:
+    """Which incarnation of this cluster the attempt belongs to, if any.
+
+    Best-effort for the same reason as `_active_workspace`, and it has to be
+    its own function to be so: this is evaluated as an *argument* to
+    `open_launch_attempt`, and an argument is evaluated in the caller's frame
+    before the call -- so the `_best_effort` guard on that function, which
+    wraps its body, never sees it.
+
+    Unguarded it is worse than losing a label. It reads the clusters table,
+    and the raise would land in the handler below that runs `teardown_cluster`
+    with `terminate = not prev_cluster_ever_up`: relaunching onto a cluster
+    that is already up, a transient database error here would *stop that
+    running cluster* before failing the launch -- to fill one column on a
+    measurement row.
+    """
+    try:
+        return global_user_state.get_cluster_hash(cluster_name)
+    except Exception:  # pylint: disable=broad-except
+        logger.debug('Could not resolve the cluster hash for the launch '
+                     'attempt record.')
+        return None
 
 
 def bulk_provision(
@@ -160,6 +265,15 @@ def bulk_provision(
         resume_stopped_nodes=True,
         ports_to_open_on_launch=ports_to_open_on_launch)
 
+    # None outside a server-side request execution, where no scheduler exists
+    # to park and resume a launch -- so no attempt can ever be resumed there,
+    # which is exactly what a None request_id means to open_launch_attempt.
+    # Read via is_in_request_context() rather than trusting
+    # get_current_request_id(), which returns a shared placeholder when unset;
+    # two unrelated launches sharing that value could adopt each other's rows.
+    request_id = (common_utils.get_current_request_id()
+                  if common_utils.is_in_request_context() else None)
+
     with provision_logging.setup_provision_logging(log_dir):
         try:
             logger.debug(f'SkyPilot version: {sky.__version__}; '
@@ -168,24 +282,55 @@ def bulk_provision(
             redacted_config = bootstrap_config.get_redacted_config()
             logger.debug('Provision config:\n'
                          f'{json.dumps(redacted_config, indent=2)}')
+            # One timestamp for both: the attempt's phases have to add up to
+            # the duration reported beside them, and two time.time() calls
+            # here would make them disagree by however long opening the row
+            # took.
             provision_start = time.time()
+            attempt_id = global_user_state.open_launch_attempt(
+                cluster_name=cluster_name.display_name,
+                cluster_hash=_existing_cluster_hash(cluster_name.display_name),
+                request_id=request_id,
+                provision_start=provision_start,
+                cluster_name_on_cloud=cluster_name.name_on_cloud,
+                workspace=_active_workspace())
             try:
                 provision_record = _bulk_provision(cloud, region, cluster_name,
                                                    bootstrap_config)
             except exceptions.ExecutionPausedError:
                 # A pause to wait on an external condition is neither a
-                # success nor a failure; the attempt resumes later.
+                # success nor a failure; the attempt resumes later. The row is
+                # deliberately left open for that resume, which re-enters here
+                # and continues this same attempt, so the wait being measured
+                # stays one interval instead of being split at the pause.
                 raise
             except (KeyboardInterrupt, SystemExit):
                 # User cancellation (SIGTERM on the executor surfaces as
-                # KeyboardInterrupt): not an outcome of the attempt, so
-                # record nothing.
+                # KeyboardInterrupt): not an outcome of the attempt, so record
+                # nothing. The row stays open and the sweep closes it as
+                # abandoned, which is honest -- the measurement really was
+                # lost.
                 raise
             except BaseException:
+                if attempt_id is not None:
+                    global_user_state.close_launch_attempt(
+                        attempt_id, global_user_state.LaunchOutcome.FAILED)
                 metrics_utils.observe_provision_duration(
                     repr(cloud), 'failure',
                     time.time() - provision_start)
                 raise
+            # Past the point of success. Nothing below may raise: the handler
+            # further down tears the cluster down and fails over, so an
+            # exception here would destroy the cluster that was just
+            # provisioned. The two state calls are `_best_effort` and the
+            # metric swallows its own failures.
+            if attempt_id is not None:
+                global_user_state.record_launch_milestone(
+                    attempt_id,
+                    global_user_state.LaunchMilestone.INSTANCES_READY,
+                    time.time())
+                global_user_state.close_launch_attempt(
+                    attempt_id, global_user_state.LaunchOutcome.SUCCEEDED)
             metrics_utils.observe_provision_duration(
                 repr(cloud), 'success',
                 time.time() - provision_start)

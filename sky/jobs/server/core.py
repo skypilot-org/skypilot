@@ -1,6 +1,7 @@
 """SDK functions for managed jobs."""
 import contextlib
 import datetime
+import inspect
 import ipaddress
 import os
 import pathlib
@@ -222,6 +223,18 @@ def _job_ids_to_str(job_ids: Optional[List[int]]) -> str:
     return managed_job_utils.format_job_ids_as_ranges(job_ids)
 
 
+def _runner_accepts(method: Any, keyword: str) -> bool:
+    """Whether a runner method takes ``keyword`` (or ``**kwargs``)."""
+    try:
+        params = inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        # Signature not available (a C callable, a mock without a spec).
+        # Assume the current protocol so the request is not silently dropped.
+        return True
+    return keyword in params or any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+
 class _DefaultManagedJobRunner:
     """Default implementation — codegen + run_on_head on the controller.
 
@@ -237,6 +250,7 @@ class _DefaultManagedJobRunner:
         skip_finished: bool,
         accessible_workspaces: List[str],
         job_ids: Optional[List[int]],
+        include_tree: bool,
         workspace_match: Optional[str],
         name_match: Optional[str],
         pool_match: Optional[str],
@@ -276,6 +290,7 @@ class _DefaultManagedJobRunner:
                 skip_finished=skip_finished,
                 accessible_workspaces=accessible_workspaces,
                 job_ids=job_ids,
+                include_tree=include_tree,
                 workspace_match=workspace_match,
                 name_match=name_match,
                 pool_match=pool_match,
@@ -299,16 +314,22 @@ class _DefaultManagedJobRunner:
 
         if returncode != 0:
             output = job_table_payload + stderr
-            marker = managed_job_utils.INFRA_FILTER_UNSUPPORTED_MARKER
-            if marker in output:
-                # The controller refused the infra filter rather than answering
-                # without it. Its message names the version it actually runs,
-                # so surface that line on its own instead of a traceback.
+            refusals = (
+                (managed_job_utils.INFRA_FILTER_UNSUPPORTED_MARKER,
+                 managed_job_utils.INFRA_FILTER_UNSUPPORTED_MESSAGE),
+                (managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MARKER,
+                 managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE),
+            )
+            for marker, default_message in refusals:
+                if marker not in output:
+                    continue
+                # The controller refused the infra filter or the include_tree
+                # request because it predates it. Show the controller's own
+                # message instead of a traceback.
                 detail = output.partition(f'{marker}: ')[2].splitlines()
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.NotSupportedError(
-                        detail[0].strip() if detail else managed_job_utils.
-                        INFRA_FILTER_UNSUPPORTED_MESSAGE)
+                        detail[0].strip() if detail else default_message)
             logger.error(output)
             raise RuntimeError('Failed to fetch managed jobs with returncode: '
                                f'{returncode}.\n{output}')
@@ -511,10 +532,15 @@ def _maybe_submit_job_locally(
                 is_primary_in_job_group = (dag.primary_tasks is None or
                                            task.name in dag.primary_tasks)
             assert task.name is not None, 'task must have a name'
+            # A job group's tasks all start waiting now; so does task 0 of
+            # anything. A pipeline's later tasks are waiting on the task before
+            # them, not on us, so their origin is written at the handoff.
+            eligible_at = (time.time()
+                           if task_id == 0 or dag.is_job_group() else None)
             managed_job_state.set_pending(consolidation_mode_job_id, task_id,
                                           task.name, resources_str,
                                           task.metadata_json,
-                                          is_primary_in_job_group)
+                                          is_primary_in_job_group, eligible_at)
         job_ids.append(consolidation_mode_job_id)
     return job_ids
 
@@ -1483,6 +1509,7 @@ def queue_v2_api(
     sort_order: Optional[str] = None,
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
+    include_tree: bool = False,
 ) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int,
            List[str]]:
     """Gets statuses of managed jobs and parse the
@@ -1492,6 +1519,7 @@ def queue_v2_api(
         skip_finished=skip_finished,
         all_users=all_users,
         job_ids=job_ids,
+        include_tree=include_tree,
         user_match=user_match,
         workspace_match=workspace_match,
         name_match=name_match,
@@ -1540,6 +1568,7 @@ def queue_v2(
     sort_order: Optional[str] = None,
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
+    include_tree: bool = False,
 ) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int, List[str]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs with filtering.
@@ -1595,6 +1624,31 @@ def queue_v2(
         if page is not None:
             raise ValueError('Limit must be specified when page is specified')
 
+    if include_tree:
+        # The tree lookup takes job ids and nothing else. Whether a filter
+        # should test the named jobs, their roots, or every row of the tree
+        # is undecided (SKY-7163), so the combination is refused rather than
+        # answered one way. Visibility (workspace access, all_users) still
+        # applies; it is not a filter the caller chose.
+        if job_ids is None:
+            raise ValueError('include_tree requires job_ids.')
+        if page is not None or limit is not None:
+            raise ValueError('include_tree cannot be combined with pagination.')
+        extras = {
+            'skip_finished': skip_finished or None,
+            'user_match': user_match,
+            'workspace_match': workspace_match,
+            'name_match': name_match,
+            'pool_match': pool_match,
+            'infra_match': infra_match,
+            'statuses': statuses,
+            'submitted_after': submitted_after,
+            'submitted_before': submitted_before,
+        }
+        given = sorted(k for k, v in extras.items() if v is not None)
+        if given:
+            raise ValueError('include_tree cannot be combined with filters; '
+                             f'got {", ".join(given)}.')
     with metrics_lib.time_it('jobs.queue.restart_controller', group='jobs'):
         handle = _maybe_restart_controller(refresh,
                                            stopped_message='No in-progress '
@@ -1645,6 +1699,7 @@ def queue_v2(
                     workspaces=accessible_workspaces)),
                 job_ids=managed_jobsv1_pb2.JobIds(
                     ids=job_ids) if job_ids is not None else None,
+                include_tree=include_tree,
                 workspace_match=workspace_match,
                 name_match=name_match,
                 pool_match=pool_match,
@@ -1677,13 +1732,32 @@ def queue_v2(
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.NotSupportedError(
                         managed_job_utils.INFRA_FILTER_UNSUPPORTED_MESSAGE)
+            if include_tree and not response.include_tree_applied:
+                # Same for include_tree: an old controller ignores the field
+                # and returns only the requested jobs' rows.
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE)
             jobs = managed_job_utils.decode_managed_job_protos(response.jobs)
             return (jobs, response.total, dict(response.status_counts),
                     response.total_no_filter, list(response.infra_options))
         except exceptions.SkyletMethodNotImplementedError:
             pass
 
-    fetched = managed_job_runner.current().fetch_managed_job_table(
+    runner = managed_job_runner.current()
+    # A runner registered by a plugin may predate `include_tree`. Passing the
+    # keyword to it would raise TypeError on every queue request, not only the
+    # ones asking for a tree. Pass the keyword only to a runner that takes it.
+    # If the runner does not take it and a tree was asked for, refuse the
+    # request the way an old controller does.
+    tree_kwargs: Dict[str, Any] = {}
+    if _runner_accepts(runner.fetch_managed_job_table, 'include_tree'):
+        tree_kwargs['include_tree'] = include_tree
+    elif include_tree:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE)
+    fetched = runner.fetch_managed_job_table(
         handle=handle,
         backend=backend,
         skip_finished=skip_finished,
@@ -1702,6 +1776,7 @@ def queue_v2(
         sort_order=sort_order,
         submitted_after=submitted_after,
         submitted_before=submitted_before,
+        **tree_kwargs,
     )
     # A runner registered out of tree may still be on the five-value signature
     # that predates the infra options. That costs the dashboard its option list
@@ -2390,6 +2465,11 @@ def _job_events(
     event_types = [
         global_user_state.ClusterEventType.STATUS_CHANGE,
         global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+        # Boundaries that have been passed, with how long the phase they close
+        # took. Today that is the end of an admission wait, which is the one
+        # moment of a gated launch the rest of this list never marks -- and
+        # routinely most of the job's start-up.
+        global_user_state.ClusterEventType.LAUNCH_MILESTONE,
     ]
     # (event, task_id) so each merged row keeps the task it belongs to.
     cluster_events: List[Tuple[Dict[str, Any], Optional[int]]] = []

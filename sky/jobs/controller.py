@@ -55,6 +55,7 @@ from sky.utils import dag_utils
 from sky.utils import log_links
 from sky.utils import status_lib
 from sky.utils import ux_utils
+from sky.utils.db import retries as db_retries
 from sky.utils.plugin_extensions import ExternalClusterFailure
 from sky.utils.plugin_extensions import ExternalFailureSource
 from sky.utils.plugin_extensions import LogDeliverySource
@@ -2534,6 +2535,16 @@ class JobController:
                                         f'{len(self._dag.tasks)-1}: '
                                         f'{task.name}')
                             task_start = time.time()
+                            if task_id > 0:
+                                # The task before this one has just finished,
+                                # so this is the moment this task could first
+                                # have started -- the origin its startup
+                                # breakdown is measured from. Written once: a
+                                # controller that restarts mid-pipeline
+                                # re-enters here, and the first value is the
+                                # true one.
+                                await (managed_job_state.set_eligible_at_async(
+                                    self._job_id, task_id, task_start))
                             succeeded = await self._run_one_task(task_id, task)
                             task_time = time.time() - task_start
                             logger.info(
@@ -3478,11 +3489,25 @@ class ControllerManager:
                          f'{common_utils.format_exception(e)}')
             raise
         finally:
+            deadline = (time.monotonic() +
+                        jobs_constants.JOB_FINALIZE_DB_RETRY_BUDGET_SECONDS)
+
+            async def finalize_step(coro_fn):
+                return await db_retries.with_db_retries_async(
+                    coro_fn,
+                    max_retries=None,
+                    initial_backoff=jobs_constants.
+                    JOB_FINALIZE_DB_RETRY_BACKOFF_BASE_SECONDS,
+                    max_backoff=jobs_constants.
+                    JOB_FINALIZE_DB_RETRY_BACKOFF_CAP_SECONDS,
+                    deadline=deadline)
+
             try:
-                await self._cleanup(job_id,
-                                    pool=pool,
-                                    graceful=graceful,
-                                    graceful_timeout=graceful_timeout)
+                await finalize_step(
+                    lambda _: self._cleanup(job_id,
+                                            pool=pool,
+                                            graceful=graceful,
+                                            graceful_timeout=graceful_timeout))
                 logger.info(f'Cluster of managed job {job_id} has been cleaned '
                             'up.')
             except Exception as e:  # pylint: disable=broad-except
@@ -3490,42 +3515,48 @@ class ControllerManager:
                     'Failed to clean up, resources may have leaked: '
                     f'{common_utils.format_exception(e)}. Please check '
                     'whether the job\'s cluster and storage still exist.')
-                await managed_job_state.set_failed_async(
-                    job_id,
-                    task_id=None,
-                    failure_type=managed_job_state.ManagedJobStatus.
-                    FAILED_CONTROLLER,
-                    failure_reason=failure_reason,
-                    override_terminal=True)
+                await finalize_step(
+                    lambda _: managed_job_state.set_failed_async(
+                        job_id,
+                        task_id=None,
+                        failure_type=managed_job_state.ManagedJobStatus.
+                        FAILED_CONTROLLER,
+                        failure_reason=failure_reason,
+                        override_terminal=True))
 
             if cancelling:
                 # Since it's set with cancelling
                 assert task_id is not None, job_id
-                await managed_job_state.set_cancelled_async(
-                    job_id=job_id,
-                    callback_func=managed_job_utils.event_callback_func(
-                        job_id=job_id, task_id=task_id,
-                        task=dag.tasks[task_id]))
+                await finalize_step(
+                    lambda _: managed_job_state.set_cancelled_async(
+                        job_id=job_id,
+                        callback_func=managed_job_utils.event_callback_func(
+                            job_id=job_id,
+                            task_id=task_id,
+                            task=dag.tasks[task_id])))
 
             # We should check job status after 'set_cancelled', otherwise
             # the job status is not terminal.
-            job_status = await managed_job_state.get_status_async(job_id)
+            job_status = await finalize_step(
+                lambda _: managed_job_state.get_status_async(job_id))
             assert job_status is not None
             # The job can be non-terminal if the controller exited
             # abnormally, e.g. failed to launch cluster after reaching
             # the MAX_RETRY.
             if not job_status.is_terminal():
                 logger.info(f'Previous job status: {job_status.value}')
-                await managed_job_state.set_failed_async(
-                    job_id,
-                    task_id=None,
-                    failure_type=managed_job_state.ManagedJobStatus.
-                    FAILED_CONTROLLER,
-                    failure_reason=(
-                        'Unexpected error occurred. For details, '
-                        f'run: sky jobs logs --controller {job_id}'))
+                await finalize_step(
+                    lambda _: managed_job_state.set_failed_async(
+                        job_id,
+                        task_id=None,
+                        failure_type=managed_job_state.ManagedJobStatus.
+                        FAILED_CONTROLLER,
+                        failure_reason=
+                        ('Unexpected error occurred. For details, '
+                         f'run: sky jobs logs --controller {job_id}')))
 
-            await scheduler.job_done_async(job_id)
+            await finalize_step(
+                lambda _: scheduler.job_done_async(job_id, idempotent=True))
 
             async with self._job_tasks_lock:
                 try:

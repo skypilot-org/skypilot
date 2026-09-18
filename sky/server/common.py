@@ -1016,7 +1016,7 @@ def _set_metrics_env_var(env: Union[Dict[str, str], os._Environ], metrics: bool,
             multiple processes might be running.
     """
     del deploy
-    if metrics or os.getenv(constants.ENV_VAR_SERVER_METRICS_ENABLED) == 'true':
+    if metrics or constants.server_metrics_enabled():
         env[constants.ENV_VAR_SERVER_METRICS_ENABLED] = 'true'
         # Always set the metrics dir since we need to collect metrics from
         # subprocesses like the executor.

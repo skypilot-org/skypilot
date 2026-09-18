@@ -2,6 +2,7 @@
 import asyncio
 import contextlib
 import functools
+import inspect
 import os
 import queue
 import random
@@ -46,8 +47,7 @@ _MEM_BUCKETS = [
 logger = sky_logging.init_logger(__name__)
 
 # Whether the metrics are enabled, cannot be changed at runtime.
-METRICS_ENABLED = os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED,
-                                 'false').lower() == 'true'
+METRICS_ENABLED = constants.server_metrics_enabled()
 
 # Default Prometheus deployment that each context's metrics are federated
 # from. Overridable via the `metrics.prometheus` server config section.
@@ -154,6 +154,24 @@ _anchor_read_failed = False
 # while preserving the 1000s upper bound for slow-call precision.
 _LATENCY_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30,
                     60, 120, 300, 600, 1000, float('inf'))
+
+# Interactive-SSH scale, for the round trips a keystroke takes. _LATENCY_BUCKETS
+# starts at 5ms and runs to 1000s because it is sized for request durations; a
+# healthy API-server-to-pod round trip inside one cluster is sub-millisecond to
+# a few ms, so every good value would land in that ladder's first bucket.
+#
+# The ladder stops at 2s because that is the largest value the sampler can
+# produce: _BackendTurnaroundSampler discards a reply that takes longer than
+# _MAX_PENDING_SECONDS, since past that it is far more likely to be unrelated
+# output than a very slow echo. Buckets above the cap would be structurally
+# empty and would advertise a reach the measurement does not have. Keep the two
+# numbers in step -- raising one without the other is what made 2.5/5/10 dead
+# boundaries. A late reply that does arrive is not silently lost: it
+# increments SKY_APISERVER_SSH_BACKEND_TURNAROUND_DROPPED_TOTAL, which is how
+# a backend too slow to measure stays visible. A write the backend never
+# answers at all is a different case and is not counted -- see that counter.
+_SSH_ROUND_TRIP_BUCKETS = (0.001, 0.002, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25,
+                           0.5, 1, 2, float('inf'))
 
 # Time spent processing a piece of code, refer to time_it().
 SKY_APISERVER_CODE_DURATION_SECONDS = prom.Histogram(
@@ -263,10 +281,66 @@ SKY_APISERVER_REQUEST_REJECTIONS_TOTAL = prom.Counter(
 # the request counter's point of view, so without this counter a storm of
 # refused handshakes is invisible: it only shows up as fewer connections.
 # `path` is restricted to the registered WebSocket routes, else `other`.
+#
+# `status` is the status the middleware answered with, and it is not
+# derivable from `outcome`: `error` is every refusal that is not a 401 or a
+# 403, which covers a 503 (drain, saturated auth pool), a 500 (a middleware
+# crash), a 400 (client API version) and a middleware that answers 2xx/3xx
+# without passing the handshake on. Only the status separates the server's
+# own failures from the client's, which is what an error-ratio alert is
+# about, so without it such an alert has to treat all of those alike.
+# `outcome` stays: it is what the client actually got, the close code.
 SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL = prom.Counter(
     'sky_apiserver_websocket_handshake_rejections_total',
-    'WebSocket handshakes refused by a middleware, by decision',
-    ['path', 'outcome'],
+    'WebSocket handshakes refused by a middleware, by decision and status',
+    ['path', 'outcome', 'status'],
+)
+
+# WebSocket connection scopes that reached the middleware stack, by route:
+# the attempt volume, and the denominator of any handshake ratio. Counted
+# inside `middleware_utils.websocket_aware`, at scope entry, once per
+# handshake.
+#
+# The outcomes are each counted, not derived: refusals above, accepts below.
+# Deriving accepts as attempts - refusals would over-count, because passing
+# every middleware is not the same as being accepted -- FastAPI validates a
+# route's required query parameters after the middlewares and closes the
+# connection itself when one is missing, so nothing refuses that handshake
+# and nothing accepts it. What is left over, attempts - refusals - accepts,
+# is exactly that class: closed before the accept, by the router or by a
+# handler.
+#
+# Published at zero for every `path` value from process start, by
+# `middleware_utils.preinitialize_websocket_metrics()`: a labelled counter
+# does not exist until its first increment, and `increase()` over a series
+# that springs into existence at 1 returns no sample at all, so a rule using
+# this as a denominator would read no data rather than zero. With the series
+# pre-published, `absent()` on it means the build predates the counter --
+# build drift -- rather than "nobody has used ssh".
+#
+# Two notes for anyone reading this alongside the SSH metrics below. `path`
+# here is the route, while `sky_apiserver_ssh_sessions_total`'s `path` is the
+# transport the session was served over, so the two must never be joined on
+# it. And that counter is incremented once a session is actually being served
+# -- only from the two ssh-proxy routes, after the accept and after cluster
+# validation -- so the accepts counter below bounds it from above, and the
+# gap is handshakes accepted and then dropped before the session ran.
+SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL = prom.Counter(
+    'sky_apiserver_websocket_handshake_attempts_total',
+    'WebSocket handshake attempts reaching the middleware stack, by route',
+    ['path'],
+)
+
+# WebSocket handshakes this server accepted, by route, counted where it
+# happens: the `websocket.accept` message on its way out to the client.
+# Measured rather than inferred, for the reason in the comment above.
+#
+# Published at zero for every `path` value from process start, like the
+# attempt counter, so a ratio against it cannot read as no data.
+SKY_APISERVER_WEBSOCKET_HANDSHAKE_ACCEPTS_TOTAL = prom.Counter(
+    'sky_apiserver_websocket_handshake_accepts_total',
+    'WebSocket handshakes this server accepted, by route',
+    ['path'],
 )
 
 SKY_APISERVER_WEBSOCKET_CONNECTIONS = prom.Gauge(
@@ -321,11 +395,94 @@ SKY_APISERVER_REQUEST_RSS_INCR_BYTES = prom.Histogram(
 
 SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
     'sky_apiserver_websocket_ssh_latency_seconds',
-    ('Time taken for ssh message to go from client to API server and back'
-     'to the client. This does not include: latency to reach the pod, '
-     'overhead from sending through the k8s port-forward tunnel, or '
-     'ssh server lag on the destination pod.'),
+    # NOT keystroke latency. Read the whole string before alerting on it.
+    ('SSH websocket heartbeat round trip, client to API server and back. '
+     'This is a synthetic PING the client sends every 10s while a session is '
+     'open -- NOT keystroke latency, and not tied to any user input. The '
+     'server echoes the PING without forwarding it, so the k8s port-forward '
+     'tunnel and the destination pod sshd are excluded by construction; see '
+     'sky_apiserver_ssh_backend_turnaround_seconds for those. Because the '
+     'PONG cannot be sent until the websocket read loop is free, this is '
+     'also an indirect event-loop responsiveness probe. Empty -- not zero -- '
+     'when clients are older than API version 21, when '
+     'SKYPILOT_SSH_DISABLE_LATENCY_MEASUREMENT=1, or when a plugin redirected '
+     'the session away from this API server.'),
     buckets=_LATENCY_BUCKETS,
+)
+
+# The leg the heartbeat above cannot see: API server -> (k8s API server ->
+# kubelet -> pod sshd, or a plugin's direct in-cluster connection) -> shell
+# echo -> back. Measured by pairing a small write to the backend with the next
+# read from it, so it costs two clock reads on a path that already inspects
+# every frame -- no injected bytes, no added latency, and no client support
+# needed. See sky.server.websocket_utils._BackendTurnaroundSampler for the
+# pairing rules and what makes a sample get dropped.
+#
+# `path` distinguishes how the session reached the pod: 'portforward' for this
+# server's kubectl port-forward, or a plugin-supplied value when a hook routes
+# the connection elsewhere. Two or three values in practice, so no cardinality
+# concern.
+#
+# A redirect hook that hands the session off labels it SSH_PATH_REDIRECTED here
+# and records no turnaround -- this server never touches the stream, so it has
+# nothing to time. A plugin that terminates the stream itself instead calls
+# run_websocket_proxy() with its own `path`, and that sample lands in whichever
+# process runs the proxy. So an empty histogram alongside redirected sessions is
+# expected rather than a fault, which is what SKY_APISERVER_SSH_SESSIONS_TOTAL
+# below exists to make legible.
+SKY_APISERVER_SSH_BACKEND_TURNAROUND_SECONDS = prom.Histogram(
+    'sky_apiserver_ssh_backend_turnaround_seconds',
+    ('Round trip from the API server to the SSH backend and back, measured by '
+     'pairing a keystroke-sized write with the next read. Covers everything '
+     'the websocket heartbeat excludes: the port-forward tunnel, both sshd '
+     'hops and the shell echo. A distribution, not a per-keystroke truth -- '
+     'unpaired backend traffic can attach a read to the wrong write.'),
+    ['path'],
+    buckets=_SSH_ROUND_TRIP_BUCKETS,
+)
+
+# The histogram's blind spot, made visible. A keystroke-sized write whose reply
+# does not arrive within _MAX_PENDING_SECONDS is dropped rather than observed,
+# because at that age a reply is far more likely to be unrelated output than a
+# very slow echo -- admitting it would put a multi-second sample in a
+# distribution whose real values are single-digit milliseconds, and one such
+# sample moves p99 by four orders of magnitude.
+#
+# Dropping is right for the distribution and wrong as the whole story: a
+# backend that genuinely echoes slower than the cap would go quiet rather than
+# look slow. So count the drops. A rising ratio of dropped to observed is the
+# signal for "too slow to measure", which the distribution cannot express and
+# the session counter cannot either.
+#
+# Scope, precisely: this counts a late reply that *arrives*. It is incremented
+# from _BackendTurnaroundSampler.on_read(), which the proxy calls only when the
+# backend returns bytes, and there is no flush at teardown -- so a session that
+# closes with a write still unanswered discards its pending timestamp without
+# counting anything. Covering that too means counting a still-pending stamp
+# when the proxy tears down, which is not obviously free: SSH teardown sends
+# small client-to-backend packets, and one the backend never answers before the
+# socket closes would put a baseline drop on every ordinary session and blunt
+# the ratio this counter exists to carry. Left out until that baseline is
+# measured on a live server.
+SKY_APISERVER_SSH_BACKEND_TURNAROUND_DROPPED_TOTAL = prom.Counter(
+    'sky_apiserver_ssh_backend_turnaround_dropped_total',
+    ('Keystroke-sized writes whose backend reply arrived later than the '
+     'pairing window, so no turnaround sample was taken. Does not count a '
+     'write the backend never answered at all. Read against '
+     'sky_apiserver_ssh_backend_turnaround_seconds_count: a rising share of '
+     'drops means the backend is slower than the measurement can express, '
+     'not that SSH went idle.'),
+    ['path'],
+)
+
+# Denominator for the histograms above. Without it an empty
+# sky_apiserver_ssh_backend_turnaround_seconds is ambiguous: nobody is SSHing,
+# or every session was redirected away, or the pairing never fires. An alert on
+# the histogram alone is a rule that can go silently dead.
+SKY_APISERVER_SSH_SESSIONS_TOTAL = prom.Counter(
+    'sky_apiserver_ssh_sessions_total',
+    'SSH proxy sessions accepted, by how the session was served',
+    ['path'],
 )
 
 # Fleet-wide free-executor counts, so 'livesum'. The default ('all') emits
@@ -475,6 +632,204 @@ SKY_APISERVER_SKY_LOGS_PRUNED_ENTRIES_TOTAL = prom.Counter(
     'sky_apiserver_sky_logs_pruned_entries_total',
     'Expired ~/sky_logs artifacts removed by the retention sweep',
 )
+
+# --- Launch latency -----------------------------------------------------------
+
+# Launch phases span seconds (a container starting) to hours (a workload
+# waiting for quota), so the API-latency buckets, which stop at 1000s, would
+# put every interesting queue wait in +Inf and make p95 meaningless.
+_LAUNCH_PHASE_BUCKETS = (1.0, 5.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0,
+                         1200.0, 1800.0, 3600.0, 7200.0, 21600.0, 43200.0,
+                         86400.0, float('inf'))
+
+# One phase of one provisioning attempt.
+#
+# phase partitions the attempt's wall clock, so a stacked panel of the phases
+# adds up to the whole attempt and nothing is counted twice:
+#   provision_setup  provision start -> instances/pods asked for
+#   queue_wait       asked for -> admitted by an external scheduler (absent
+#                    where nothing gates the workload)
+#   node_startup     admitted (or asked for) -> instances/pods up
+#
+# attempt is 'final' for the attempt that delivered the cluster and
+# 'superseded' for one that was thrown away. Do not mix them in one quantile:
+# a superseded attempt answers how long doomed launches burn, which is a
+# different question from how long a launch takes.
+#
+# Labels stop at workspace on purpose. Adding infra and queue here multiplies
+# every bucket by both and puts this one metric an order of magnitude over the
+# series budget; per-launch detail belongs in the launch_attempts table.
+SKY_LAUNCH_PHASE_DURATION_SECONDS = prom.Histogram(
+    'sky_launch_phase_duration_seconds',
+    'Duration of one phase of a provisioning attempt',
+    ['phase', 'attempt', 'workspace'],
+    buckets=_LAUNCH_PHASE_BUCKETS,
+)
+
+# Segments that never closed, so no duration could be observed. Counted rather
+# than skipped: a phase silently missing from the histogram looks the same as a
+# phase that was fast.
+SKY_LAUNCH_PHASE_DROPPED_TOTAL = prom.Counter(
+    'sky_launch_phase_dropped_total',
+    'Launch phases that could not be measured',
+    ['phase', 'reason'],
+)
+
+# A segment whose end preceded its start. Clamped to zero before observing, but
+# counted here: a negative observation lands in the lowest bucket, so absorbing
+# it silently would leave the histogram looking healthy while being wrong.
+SKY_LAUNCH_PHASE_ANOMALIES_TOTAL = prom.Counter(
+    'sky_launch_phase_anomalies_total',
+    'Launch phase durations that were not usable as measured',
+    ['phase', 'reason'],
+)
+
+# The admission wait alone, sliced by the queue the workload sat in. Carried
+# separately from the phase histogram because the queue dimension is only
+# meaningful for this one phase, and folding it in would multiply every other
+# phase's buckets by the number of queues for no added answer.
+#
+# Kueue publishes its own kueue_admission_wait_time_seconds per ClusterQueue.
+# This is the same wait seen from SkyPilot's side, attributed to a workspace
+# and a launch; where the two disagree, the difference is our detection lag.
+SKY_LAUNCH_QUEUE_WAIT_SECONDS = prom.Histogram(
+    'sky_launch_queue_wait_seconds',
+    'Time a launch waited for admission, by scheduler queue',
+    ['workspace', 'queue'],
+    buckets=_LAUNCH_PHASE_BUCKETS,
+)
+
+
+def observe_launch_queue_wait(workspace: str, queue_name: str,
+                              duration_seconds: float) -> None:
+    """Record an admission wait against the queue it happened in."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_LAUNCH_QUEUE_WAIT_SECONDS.labels(workspace=workspace,
+                                             queue=queue_name).observe(
+                                                 max(0.0, duration_seconds))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe queue wait metric: {e}')
+
+
+def observe_launch_phase(phase: str, attempt: str, workspace: str,
+                         duration_seconds: float) -> None:
+    """Record one launch phase duration.
+
+    Metric emission must never disrupt the caller, so any failure is logged
+    and swallowed.
+    """
+    if not METRICS_ENABLED:
+        return
+    try:
+        if duration_seconds < 0:
+            SKY_LAUNCH_PHASE_ANOMALIES_TOTAL.labels(phase=phase,
+                                                    reason='negative').inc()
+        SKY_LAUNCH_PHASE_DURATION_SECONDS.labels(phase=phase,
+                                                 attempt=attempt,
+                                                 workspace=workspace).observe(
+                                                     max(0.0, duration_seconds))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe launch phase metric: {e}')
+
+
+def count_launch_phase_dropped(phase: str, reason: str) -> None:
+    """Record a launch phase that could not be measured."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_LAUNCH_PHASE_DROPPED_TOTAL.labels(phase=phase, reason=reason).inc()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to count dropped launch phase: {e}')
+
+
+# One phase of a managed job's path from submission to running. Unlike
+# sky_launch_phase_duration_seconds, which describes a single provisioning
+# attempt, these partition the *job's* wall clock -- so a retried job's thrown
+# away attempts show up as retry_overhead rather than disappearing:
+#   controller_queue  accepted -> a controller claimed the job
+#   retry_overhead    attempts that were thrown away, plus backoff between them
+#   provision_setup   the final attempt's provision start -> instances asked for
+#   queue_wait        asked for -> admitted by an external scheduler
+#   node_startup      admitted -> instances up
+#   runtime_setup     instances up -> the job is RUNNING
+SKY_MANAGED_JOB_PHASE_DURATION_SECONDS = prom.Histogram(
+    'sky_managed_job_phase_duration_seconds',
+    'Duration of one phase of a managed job reaching RUNNING',
+    ['phase', 'workspace'],
+    buckets=_LAUNCH_PHASE_BUCKETS,
+)
+
+# The headline: submission to running. Measured directly rather than summed
+# from the phases above, because histogram quantiles are not additive --
+# p95 of the total is not the sum of the phases' p95s.
+SKY_MANAGED_JOB_TIME_TO_RUNNING_SECONDS = prom.Histogram(
+    'sky_managed_job_time_to_running_seconds',
+    'Time from a managed job being accepted to it running',
+    ['workspace'],
+    buckets=_LAUNCH_PHASE_BUCKETS,
+)
+
+# The denominator for the timings above. Without it a fleet where half the
+# jobs never start shows a healthy p95 computed only over the survivors, and
+# nothing says how many there were.
+#
+# outcome is 'running' for a job that reached RUNNING and so has a timing, or
+# 'never_ran' for one that went terminal first. path separates jobs placed on a
+# warm pool -- they skip provisioning entirely, so their absence from the
+# provisioning phases is expected rather than missing data.
+SKY_MANAGED_JOB_STARTS_TOTAL = prom.Counter(
+    'sky_managed_job_starts_total',
+    'Managed job tasks that finished waiting to start, by how they ended up',
+    ['outcome', 'path', 'workspace'],
+)
+
+JOB_OUTCOME_RUNNING = 'running'
+JOB_OUTCOME_NEVER_RAN = 'never_ran'
+JOB_PATH_POOL = 'pool'
+JOB_PATH_PROVISION = 'provision'
+
+
+def count_managed_job_start(outcome: str, path: str, workspace: str) -> None:
+    """Record that a job finished waiting to start, however it ended up."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_MANAGED_JOB_STARTS_TOTAL.labels(outcome=outcome,
+                                            path=path,
+                                            workspace=workspace).inc()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to count a managed job start: {e}')
+
+
+def observe_managed_job_phase(phase: str, workspace: str,
+                              duration_seconds: float) -> None:
+    """Record one phase of a managed job reaching RUNNING."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        if duration_seconds < 0:
+            SKY_LAUNCH_PHASE_ANOMALIES_TOTAL.labels(phase=phase,
+                                                    reason='negative').inc()
+        SKY_MANAGED_JOB_PHASE_DURATION_SECONDS.labels(
+            phase=phase,
+            workspace=workspace).observe(max(0.0, duration_seconds))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe managed job phase metric: {e}')
+
+
+def observe_managed_job_time_to_running(workspace: str,
+                                        duration_seconds: float) -> None:
+    """Record a managed job's submission-to-running time."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_MANAGED_JOB_TIME_TO_RUNNING_SECONDS.labels(
+            workspace=workspace).observe(max(0.0, duration_seconds))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe time-to-running metric: {e}')
+
 
 # Time a request spent before its execution first started: from the request
 # row being created (PENDING) to its first transition to RUNNING. Unlike
@@ -804,7 +1159,34 @@ def time_it(name: str, group: str = 'default'):
 
 
 def time_me(func):
-    """Measure the duration of decorated function."""
+    """Measure the duration of decorated function.
+
+    Coroutine and generator functions are dispatched to wrappers that span
+    their execution: calling them only builds the coroutine/generator object,
+    so timing the call alone would record a near-zero duration.
+
+    Async generator functions are rejected: delegating to one without losing
+    ``asend`` and ``athrow`` is not expressible, and timing only their
+    construction is exactly what this dispatch exists to prevent.
+    """
+    if inspect.isasyncgenfunction(func):
+        raise TypeError('time_me does not support async generator functions: '
+                        f'{func.__module__}/{func.__name__}')
+
+    if inspect.iscoroutinefunction(func):
+        return time_me_async(func)
+
+    if inspect.isgeneratorfunction(func):
+
+        @functools.wraps(func)
+        def generator_wrapper(*args, **kwargs):
+            if not METRICS_ENABLED:
+                return (yield from func(*args, **kwargs))
+            name = f'{func.__module__}/{func.__name__}'
+            with time_it(name, group='function'):
+                return (yield from func(*args, **kwargs))
+
+        return generator_wrapper
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):

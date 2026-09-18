@@ -85,7 +85,14 @@ class TestOAuth2ProxyMiddleware:
         await middleware(scope, receive, send)
 
         middleware.middleware.dispatch.assert_awaited_once()
-        app.assert_awaited_once_with(scope, receive, send)
+        assert app.await_count == 1
+        passed_scope, passed_receive, passed_send = app.await_args.args
+        assert passed_scope is scope
+        assert passed_receive is receive
+        # `send` is wrapped, not passed through, so the accept can be counted
+        # where it happens; the wrapper must be transparent to the app.
+        await passed_send({'type': 'websocket.accept'})
+        assert sent_messages[-1] == {'type': 'websocket.accept'}
         assert all(
             msg.get('type') != 'websocket.close' for msg in sent_messages)
 

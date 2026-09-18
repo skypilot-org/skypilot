@@ -25,7 +25,6 @@ import {
 } from '@/components/ui/select';
 import {
   useSingleManagedJob,
-  useJobTreeMembers,
   getPoolStatus,
   computeJobGroupStatus,
 } from '@/data/connectors/jobs';
@@ -76,7 +75,12 @@ import { hasAccelerator } from '@/utils/gpuUtils';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import PropTypes from 'prop-types';
 
-function JobDetails({ overrideJobId = null, taskContext = null } = {}) {
+function JobDetails({
+  overrideJobId = null,
+  taskContext = null,
+  preloaded = null,
+  onRefresh = null,
+} = {}) {
   // `taskContext` is set when this page renders a dynamic task under its
   // group's URL (/jobs/<root>/<index>, see [task].js): the job shown is
   // `overrideJobId`, and the header reads as task <index> of the root.
@@ -84,7 +88,14 @@ function JobDetails({ overrideJobId = null, taskContext = null } = {}) {
   const { job: routeJobId, tab } = router.query;
   const jobId = overrideJobId ?? routeJobId;
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const { jobData, loading } = useSingleManagedJob(jobId, refreshTrigger);
+  // The job's rows and, from the same fetch, the rows of the jobs launched
+  // from inside it (dynamic job group members). A dynamic task's page gets
+  // its rows preloaded from the group's tree ([task].js) and fetches nothing.
+  const {
+    jobData,
+    loading,
+    members: treeMemberRows,
+  } = useSingleManagedJob(jobId, refreshTrigger, { preloaded });
   // A dynamic task is addressed as task <index> of its group: /jobs/67 for
   // task 2 of group 66 becomes /jobs/66/2 (the URL matches the `66-2` the
   // CLI takes). The page content is the same job's.
@@ -99,7 +110,6 @@ function JobDetails({ overrideJobId = null, taskContext = null } = {}) {
   }, [jobData, jobId, taskContext, overrideJobId, router, tab]);
   // Jobs launched from inside this job (dynamic job group members), one
   // entry per job with its rows, in submission order.
-  const { members: treeMemberRows } = useJobTreeMembers(jobId, refreshTrigger);
   const launchedJobs = useMemo(() => {
     const byJob = new Map();
     treeMemberRows.forEach((row) => {
@@ -285,8 +295,13 @@ function JobDetails({ overrideJobId = null, taskContext = null } = {}) {
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     try {
-      // Trigger job data refresh
-      setRefreshTrigger((prev) => prev + 1);
+      // Trigger job data refresh. Preloaded rows come from the parent's
+      // fetch, so the parent refreshes them.
+      if (onRefresh) {
+        onRefresh();
+      } else {
+        setRefreshTrigger((prev) => prev + 1);
+      }
       // Trigger logs refresh
       setRefreshLogsFlag((prev) => prev + 1);
       // Trigger controller logs refresh
@@ -1808,25 +1823,39 @@ function JobDetailsContent({
       <div>
         <div className="text-gray-600 font-medium text-base">Infra</div>
         <div className="text-base mt-1">
-          {jobData.infra ? (
-            <NonCapitalizedTooltip
-              content={jobData.full_infra || jobData.infra}
-              className="text-sm text-muted-foreground"
-            >
-              <span>
-                <Link href="/infra" className="text-blue-600 hover:underline">
-                  {jobData.cloud || jobData.infra.split('(')[0].trim()}
-                </Link>
-                {jobData.infra.includes('(') && (
-                  <span>
-                    {' ' + jobData.infra.substring(jobData.infra.indexOf('('))}
-                  </span>
-                )}
-              </span>
-            </NonCapitalizedTooltip>
-          ) : (
-            '-'
-          )}
+          {(() => {
+            // The default rendering, also handed to the plugin slot as
+            // `defaultContent` so a plugin that only changes how *some* jobs
+            // read can return it unchanged for the rest. `fallback` keeps the
+            // no-plugin case identical.
+            const infraContent = jobData.infra ? (
+              <NonCapitalizedTooltip
+                content={jobData.full_infra || jobData.infra}
+                className="text-sm text-muted-foreground"
+              >
+                <span>
+                  <Link href="/infra" className="text-blue-600 hover:underline">
+                    {jobData.cloud || jobData.infra.split('(')[0].trim()}
+                  </Link>
+                  {jobData.infra.includes('(') && (
+                    <span>
+                      {' ' +
+                        jobData.infra.substring(jobData.infra.indexOf('('))}
+                    </span>
+                  )}
+                </span>
+              </NonCapitalizedTooltip>
+            ) : (
+              '-'
+            );
+            return (
+              <PluginSlot
+                name="jobs.detail.infra"
+                context={{ job: jobData, defaultContent: infraContent }}
+                fallback={infraContent}
+              />
+            );
+          })()}
         </div>
       </div>
       {/* Slurm schedules onto a partition (its zone); it is how quota and

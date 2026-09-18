@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 62  # managed jobs: dynamic_task_index queue field
+API_VERSION = 63  # managed jobs: include_tree on the queue
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -54,6 +54,11 @@ MIN_JOBS_PARENT_LINK_API_VERSION = 61
 # Minimum server API version whose managed-jobs queue knows
 # dynamic_task_index (a dynamic task's ordinal within its job group).
 MIN_JOBS_DYNAMIC_TASK_INDEX_API_VERSION = 62
+# Minimum server API version whose managed-jobs queue takes `include_tree`
+# (with `job_ids`, also return the jobs launched under those jobs). An older
+# server ignores the field and returns only the requested jobs' rows, and the
+# client cannot tell, so the client refuses to send it.
+MIN_JOBS_INCLUDE_TREE_API_VERSION = 63
 
 # Minimum API version that supports Sky Batch (sky.batch module).
 MIN_BATCH_API_VERSION = 49
@@ -200,9 +205,21 @@ UPLOAD_CHUNK_BYTES = 95 * 1000 * 1000
 # at extraction time cannot be known while its chunks arrive.
 MAX_UPLOAD_TOTAL_BYTES_ENV_VAR = 'SKYPILOT_MAX_UPLOAD_TOTAL_BYTES'
 
+# Ceiling on the storage the blob backend keeps file mounts on, as an
+# integer number of bytes. Unset or non-positive means no limit. Bounds
+# what the server holds across uploads, where MAX_UPLOAD_TOTAL_BYTES
+# bounds any one of them; an upload already admitted still lands, so set
+# both to bound how far one can carry the store past this.
+MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR = 'SKYPILOT_MAX_STORED_FILE_MOUNTS_BYTES'
+
 # Interval for the daemon that sweeps expired managed-job API access tokens
 # from the service_account_tokens table. These tokens are normally revoked
 # by the jobs controller on completion, but the daemon ensures any tokens
 # that leak (e.g., due to controller crash mid-cleanup) are eventually
 # removed once their TTL has passed.
 EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS = 3600  # 1 hour
+
+# How often finished launch attempts are turned into phase metrics. Short
+# enough that a launch shows up on the dashboard while someone is still
+# watching it, long enough that the sweep is negligible next to provisioning.
+LAUNCH_METRICS_DAEMON_INTERVAL_SECONDS = 60
