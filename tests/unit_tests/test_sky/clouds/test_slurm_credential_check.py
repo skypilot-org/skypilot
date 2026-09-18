@@ -306,6 +306,56 @@ def test_two_ssh_sessions_per_cluster(mock_client_class, mock_ssh, *_):
     client.get_env.assert_not_called()
 
 
+@patch('sky.clouds.slurm.skypilot_config.get_effective_region_config',
+       return_value=None)
+@patch('sky.clouds.slurm.Slurm.existing_allowed_clusters',
+       return_value=['good', 'bad-lookup', 'also-good'])
+@patch('sky.clouds.slurm.slurm_utils.get_slurm_ssh_config')
+@patch('sky.clouds.slurm.slurm.SlurmClient')
+def test_ssh_config_lookup_failure_isolated_to_that_cluster(
+        mock_client_class, mock_ssh, *_):
+    """A cluster whose ssh-config lookup raises is reported disabled and
+    skipped; the other clusters are still probed, in input order."""
+    cfg = mock.MagicMock()
+
+    def lookup(cluster):
+        if cluster == 'bad-lookup':
+            raise ValueError('Unparsable Include directive')
+        return {**_SSH, 'hostname': f'{cluster}.example.com'}
+
+    cfg.lookup.side_effect = lookup
+    mock_ssh.return_value = cfg
+    mock_client_class.side_effect = lambda *a, **k: _client()
+
+    success, ctx2text = slurm_cloud.Slurm._check_compute_credentials()
+
+    assert success
+    assert list(ctx2text) == ['good', 'bad-lookup', 'also-good']
+    assert ctx2text['bad-lookup'].startswith(
+        'disabled. Credential check failed')
+    assert 'Unparsable Include directive' in ctx2text['bad-lookup']
+    assert ctx2text['good'].endswith('enabled\x1b[0m')
+    assert ctx2text['also-good'].endswith('enabled\x1b[0m')
+    # No client was built for the cluster that failed preparation.
+    hosts = sorted(c.args[0] for c in mock_client_class.call_args_list)
+    assert hosts == ['also-good.example.com', 'good.example.com']
+
+
+@patch('sky.clouds.slurm.Slurm.existing_allowed_clusters',
+       return_value=['only'])
+@patch('sky.clouds.slurm.slurm_utils.get_slurm_ssh_config')
+@patch('sky.clouds.slurm.slurm.SlurmClient')
+def test_workdir_resolution_failure_isolated(mock_client_class, mock_ssh, *_):
+    mock_ssh.return_value = _ssh_config()
+    mock_client_class.side_effect = lambda *a, **k: _client()
+    with patch('sky.clouds.slurm.skypilot_config.get_effective_region_config',
+               side_effect=RuntimeError('config unreadable')):
+        success, ctx2text = slurm_cloud.Slurm._check_compute_credentials()
+    assert not success
+    assert ctx2text['only'].startswith('disabled. Credential check failed')
+    mock_client_class.assert_not_called()
+
+
 class TestSlurmClientInfoAndEnv:
     """SlurmClient.info_and_env batches sinfo and env into one session."""
 
