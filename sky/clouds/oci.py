@@ -481,7 +481,10 @@ class OCI(clouds.Cloud):
             'fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:ll:mm:nn:oo:pp\n'
             f'{cls._INDENT_PREFIX}  tenancy=ocid1.tenancy.oc1..aaaaaaaa\n'
             f'{cls._INDENT_PREFIX}  region=us-sanjose-1\n'
-            f'{cls._INDENT_PREFIX}  key_file=~/.oci/oci_api_key.pem')
+            f'{cls._INDENT_PREFIX}  key_file=~/.oci/oci_api_key.pem\n'
+            f'{cls._INDENT_PREFIX}Session-token profiles written by '
+            '`oci session authenticate` (security_token_file + key_file, '
+            'no user/fingerprint) are supported as well.')
 
         dependency_error_msg = (
             '`oci` is not installed. Install it with: '
@@ -497,24 +500,45 @@ class OCI(clouds.Cloud):
         if not os.path.isfile(os.path.expanduser(conf_file)):
             return (False, help_str)
 
+        profile = oci_utils.oci_config.get_profile()
+        uses_session_token = False
         try:
-            user = oci_adaptor.get_identity_client(
-                region=None,
-                profile=oci_utils.oci_config.get_profile()).get_user(
-                    oci_adaptor.get_oci_config(profile=oci_utils.oci_config.
-                                               get_profile())['user']).data
-            del user
+            oci_cfg = oci_adaptor.get_oci_config(profile=profile)
+            uses_session_token = oci_adaptor.is_session_token_config(oci_cfg)
+            identity_client = oci_adaptor.get_identity_client(region=None,
+                                                              profile=profile)
+            if uses_session_token:
+                # Session-token profiles carry no `user` to look up. Listing
+                # the tenancy's availability domains exercises the token and
+                # is a call provisioning relies on anyway.
+                identity_client.list_availability_domains(
+                    compartment_id=oci_cfg['tenancy'])
+            else:
+                user = identity_client.get_user(oci_cfg['user']).data
+                del user
             # TODO[Hysun]: More privilege check can be added
             return True, None
+        except oci_adaptor.OCISessionTokenError as e:
+            return False, (f'{e}\n'
+                           f'{cls._INDENT_PREFIX}{short_credential_help_str}')
         except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
                 oci_adaptor.oci.exceptions.InvalidConfig,
                 oci_adaptor.oci.exceptions.ServiceError) as e:
-            return False, (
-                f'OCI credential is not correctly set. '
-                f'Check the credential file at {conf_file}\n'
-                f'{cls._INDENT_PREFIX}{credential_help_str}\n'
-                f'{cls._INDENT_PREFIX}Error details: '
-                f'{common_utils.format_exception(e, use_bracket=True)}')
+            details = common_utils.format_exception(e, use_bracket=True)
+            if (uses_session_token and
+                    isinstance(e, oci_adaptor.oci.exceptions.ServiceError) and
+                    e.status == 401):
+                # The service reports an expired or revoked session token as
+                # 401 NotAuthenticated; say what to do about it.
+                return False, (
+                    f'OCI rejected the session token of profile {profile!r} '
+                    '(HTTP 401); it has most likely expired. '
+                    f'{oci_adaptor.session_authenticate_hint(profile)}\n'
+                    f'{cls._INDENT_PREFIX}Error details: {details}')
+            return False, (f'OCI credential is not correctly set. '
+                           f'Check the credential file at {conf_file}\n'
+                           f'{cls._INDENT_PREFIX}{credential_help_str}\n'
+                           f'{cls._INDENT_PREFIX}Error details: {details}')
 
     @classmethod
     def check_disk_tier(
@@ -546,6 +570,8 @@ class OCI(clouds.Cloud):
                 profile=oci_utils.oci_config.get_profile())
             api_key_file = oci_cfg[
                 'key_file'] if 'key_file' in oci_cfg else 'BadConf'
+            session_token_file = oci_cfg.get(
+                oci_adaptor.SECURITY_TOKEN_FILE_KEY)
             sky_cfg_file = oci_utils.oci_config.get_sky_user_config_file()
         # Must catch ImportError before any oci_adaptor.oci.exceptions
         # because oci_adaptor.oci.exceptions can throw ImportError.
@@ -556,6 +582,9 @@ class OCI(clouds.Cloud):
 
         # OCI config and API key file are mandatory
         credential_files = [oci_cfg_file, api_key_file]
+        # Session-token profiles also need the token itself on the cluster.
+        if session_token_file is not None:
+            credential_files.append(session_token_file)
 
         # Sky config file is optional
         if os.path.exists(os.path.expanduser(sky_cfg_file)):

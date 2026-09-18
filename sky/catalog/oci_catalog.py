@@ -66,6 +66,12 @@ def _get_df() -> 'pd.DataFrame':
             logger.debug(f'It is OK goes here when testing: {str(e)}')
             subscribed_regions = []
 
+        except oci_adaptor.OCISessionTokenError as e:
+            # The session token is missing or expired. `sky check` tells the
+            # user how to fix it; fall back to the full catalog here.
+            logger.warning(str(e))
+            subscribed_regions = []
+
         except oci_adaptor.oci.exceptions.ServiceError as e:
             # Should never expect going here. However, we still catch
             # it so that if any OCI call failed, the program can still
