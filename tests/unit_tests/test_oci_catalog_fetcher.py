@@ -248,38 +248,73 @@ def test_flex_shape_respects_product_limits():
     assert max(i.memory_gib for i in infos) == 64
 
 
-def test_static_availability_expands_multi_ad_regions():
-    zones = fetch_oci.static_availability({'us-ashburn-1': 3, 'ap-tokyo-1': 1})
-    assert zones == {
-        'ap-tokyo-1': ['ap-tokyo-1-AD-1'],
-        'us-ashburn-1': [
-            'us-ashburn-1-AD-1', 'us-ashburn-1-AD-2', 'us-ashburn-1-AD-3'
-        ],
-    }
+# OCI reports this region's AD in lower case (and matches AD names
+# case-insensitively), so it is the one region whose real name happens to
+# look like the '<region>-AD-n' form the catalog must otherwise never use.
+_LOWERCASE_AD_REGIONS = {'eu-amsterdam-1'}
+
+
+def test_region_zones_are_real_availability_domain_names():
+    zones = fetch_oci.REGION_ZONES
+    # The two oldest regions keep their legacy AD names.
+    assert zones['us-phoenix-1'] == ['PHX-AD-1', 'PHX-AD-2', 'PHX-AD-3']
+    assert zones['us-ashburn-1'] == [
+        'US-ASHBURN-AD-1', 'US-ASHBURN-AD-2', 'US-ASHBURN-AD-3'
+    ]
+    assert zones['eu-frankfurt-1'] == [
+        'EU-FRANKFURT-1-AD-1', 'EU-FRANKFURT-1-AD-2', 'EU-FRANKFURT-1-AD-3'
+    ]
+    assert zones['ap-seoul-1'] == ['AP-SEOUL-1-AD-1']
+    for region, region_zones in zones.items():
+        assert 1 <= len(region_zones) <= 3, region
+        assert len(set(region_zones)) == len(region_zones), region
+        for n, zone in enumerate(region_zones, start=1):
+            assert zone.endswith(f'-AD-{n}'), (region, zone)
+            # Never the synthesized '<region>-AD-n' that OCI rejects with
+            # CannotParseRequest.
+            if region not in _LOWERCASE_AD_REGIONS:
+                assert zone != f'{region}-AD-{n}', (region, zone)
+                assert zone == zone.upper(), (region, zone)
+            # No tenancy prefix.
+            assert ':' not in zone, (region, zone)
 
 
 def test_regions_table_is_sane():
-    # Every region identifier looks like a real OCI region and has 1-3 ADs.
-    for region, num_ads in fetch_oci.REGIONS.items():
+    # Every region identifier looks like a real OCI region.
+    for region in fetch_oci.REGION_ZONES:
         assert region.count('-') == 2 and region.split('-')[-1].isdigit()
-        assert 1 <= num_ads <= 3
     # The regions the previous hand-maintained catalog covered must remain.
     for region in ('us-ashburn-1', 'us-phoenix-1', 'eu-frankfurt-1',
                    'uk-london-1', 'ap-tokyo-1', 'sa-saopaulo-1'):
-        assert region in fetch_oci.REGIONS
+        assert region in fetch_oci.REGION_ZONES
+
+
+def test_default_zone_names_for_unknown_region():
+    assert fetch_oci.default_zone_names('eu-oslo-1') == ['EU-OSLO-1-AD-1']
+
+
+@pytest.mark.parametrize('ad_name,expected', [
+    ('Uocm:PHX-AD-1', 'PHX-AD-1'),
+    ('bxtG:US-SANJOSE-1-AD-1', 'US-SANJOSE-1-AD-1'),
+    ('tarc:eu-amsterdam-1-AD-1', 'eu-amsterdam-1-AD-1'),
+    ('US-ASHBURN-AD-2', 'US-ASHBURN-AD-2'),
+])
+def test_zone_from_ad_name_strips_tenancy_prefix(ad_name, expected):
+    assert fetch_oci.zone_from_ad_name(ad_name) == expected
 
 
 def test_expand_rows_and_write_csv(tmp_path):
     shapes = fetch_oci.collect_shapes(SHAPES, PRODUCTS)
     availability = {
-        'us-ashburn-1': {
-            'us-ashburn-1-AD-1': None,
-            'us-ashburn-1-AD-2': {'BM.GPU.H100.8', 'VM.Standard.E4.Flex'},
+        'us-phoenix-1': {
+            'PHX-AD-1': None,
+            'PHX-AD-2': {'BM.GPU.H100.8', 'VM.Standard.E4.Flex'},
         },
     }
     rows = fetch_oci.expand_rows(shapes, availability)
-    ad1 = [r for r in rows if r['AvailabilityZone'] == 'us-ashburn-1-AD-1']
-    ad2 = [r for r in rows if r['AvailabilityZone'] == 'us-ashburn-1-AD-2']
+    assert {r['Region'] for r in rows} == {'us-phoenix-1'}
+    ad1 = [r for r in rows if r['AvailabilityZone'] == 'PHX-AD-1']
+    ad2 = [r for r in rows if r['AvailabilityZone'] == 'PHX-AD-2']
     # None -> every shape; a set -> only the listed shapes (flex sizes map
     # back to their base shape name).
     assert len(ad1) == len(shapes)
@@ -297,7 +332,7 @@ def test_expand_rows_and_write_csv(tmp_path):
         ]
         written = list(reader)
     h100 = next(r for r in written if r['InstanceType'] == 'BM.GPU.H100.8' and
-                r['AvailabilityZone'] == 'us-ashburn-1-AD-1')
+                r['AvailabilityZone'] == 'PHX-AD-1')
     assert h100['Price'] == '80' and h100['SpotPrice'] == ''
     assert h100['AcceleratorCount'] == '8' and h100['vCPUs'] == '224'
     flex = next(

@@ -58,56 +58,71 @@ PRICE_MODEL = 'PAY_AS_YOU_GO'
 # https://docs.oracle.com/en-us/iaas/Content/Compute/Concepts/preemptible.htm
 PREEMPTIBLE_DISCOUNT = 0.5
 
-# Commercial (OC1 realm) regions and their number of availability domains.
-# Source:
+# Commercial (OC1 realm) regions and the names of their availability domains
+# as OCI reports them, minus the tenancy-specific prefix ('Uocm:PHX-AD-1' ->
+# 'PHX-AD-1'); sky/clouds/oci.py adds the prefix back at launch time. OCI
+# needs the real name here: a synthesized '<region>-AD-1' is rejected with
+# 400 CannotParseRequest / 404 NotAuthorizedOrNotFound. The names are the
+# ones ListAvailabilityDomains returned for the tenancies that produced the
+# previous hand-maintained catalog (they match case-insensitively; OCI
+# reports eu-amsterdam-1's AD in lower case). The two oldest regions keep
+# their legacy names ('PHX-AD-n', 'US-ASHBURN-AD-n'); every later region is
+# '<REGION>-AD-n'. AD counts per region:
 # https://docs.oracle.com/en-us/iaas/Content/General/Concepts/regions.htm
-# The catalog encodes zones as '<region>-AD-<n>'; the tenancy-specific prefix
-# of the real AD name is added by sky/clouds/oci.py at launch time.
-REGIONS: Dict[str, int] = {
-    'af-casablanca-1': 1,
-    'af-johannesburg-1': 1,
-    'ap-batam-1': 1,
-    'ap-chuncheon-1': 1,
-    'ap-hyderabad-1': 1,
-    'ap-kulai-2': 1,
-    'ap-melbourne-1': 1,
-    'ap-mumbai-1': 1,
-    'ap-osaka-1': 1,
-    'ap-seoul-1': 1,
-    'ap-singapore-1': 1,
-    'ap-singapore-2': 1,
-    'ap-sydney-1': 1,
-    'ap-tokyo-1': 1,
-    'ca-montreal-1': 1,
-    'ca-toronto-1': 1,
-    'eu-amsterdam-1': 1,
-    'eu-frankfurt-1': 3,
-    'eu-madrid-1': 1,
-    'eu-madrid-3': 1,
-    'eu-marseille-1': 1,
-    'eu-milan-1': 1,
-    'eu-paris-1': 1,
-    'eu-stockholm-1': 1,
-    'eu-turin-1': 1,
-    'eu-zurich-1': 1,
-    'il-jerusalem-1': 1,
-    'me-abudhabi-1': 1,
-    'me-dubai-1': 1,
-    'me-jeddah-1': 1,
-    'me-riyadh-1': 1,
-    'mx-monterrey-1': 1,
-    'mx-queretaro-1': 1,
-    'sa-bogota-1': 1,
-    'sa-santiago-1': 1,
-    'sa-saopaulo-1': 1,
-    'sa-valparaiso-1': 1,
-    'sa-vinhedo-1': 1,
-    'uk-cardiff-1': 1,
-    'uk-london-1': 3,
-    'us-ashburn-1': 3,
-    'us-chicago-1': 3,
-    'us-phoenix-1': 3,
-    'us-sanjose-1': 1,
+#
+# Regions marked UNVERIFIED opened after the previous catalog was produced;
+# their names follow the '<REGION>-AD-1' pattern (all single-AD per the docs)
+# but have not been confirmed against ListAvailabilityDomains. Running with
+# --use-sdk from a tenancy subscribed to them will print the real names.
+REGION_ZONES: Dict[str, List[str]] = {
+    'af-casablanca-1': ['AF-CASABLANCA-1-AD-1'],  # UNVERIFIED
+    'af-johannesburg-1': ['AF-JOHANNESBURG-1-AD-1'],
+    'ap-batam-1': ['AP-BATAM-1-AD-1'],  # UNVERIFIED
+    'ap-chuncheon-1': ['AP-CHUNCHEON-1-AD-1'],
+    'ap-hyderabad-1': ['AP-HYDERABAD-1-AD-1'],
+    'ap-kulai-2': ['AP-KULAI-2-AD-1'],  # UNVERIFIED
+    'ap-melbourne-1': ['AP-MELBOURNE-1-AD-1'],
+    'ap-mumbai-1': ['AP-MUMBAI-1-AD-1'],
+    'ap-osaka-1': ['AP-OSAKA-1-AD-1'],
+    'ap-seoul-1': ['AP-SEOUL-1-AD-1'],
+    'ap-singapore-1': ['AP-SINGAPORE-1-AD-1'],
+    'ap-singapore-2': ['AP-SINGAPORE-2-AD-1'],
+    'ap-sydney-1': ['AP-SYDNEY-1-AD-1'],
+    'ap-tokyo-1': ['AP-TOKYO-1-AD-1'],
+    'ca-montreal-1': ['CA-MONTREAL-1-AD-1'],
+    'ca-toronto-1': ['CA-TORONTO-1-AD-1'],
+    'eu-amsterdam-1': ['eu-amsterdam-1-AD-1'],
+    'eu-frankfurt-1': [
+        'EU-FRANKFURT-1-AD-1', 'EU-FRANKFURT-1-AD-2', 'EU-FRANKFURT-1-AD-3'
+    ],
+    'eu-madrid-1': ['EU-MADRID-1-AD-1'],
+    'eu-madrid-3': ['EU-MADRID-3-AD-1'],  # UNVERIFIED
+    'eu-marseille-1': ['EU-MARSEILLE-1-AD-1'],
+    'eu-milan-1': ['EU-MILAN-1-AD-1'],
+    'eu-paris-1': ['EU-PARIS-1-AD-1'],
+    'eu-stockholm-1': ['EU-STOCKHOLM-1-AD-1'],
+    'eu-turin-1': ['EU-TURIN-1-AD-1'],  # UNVERIFIED
+    'eu-zurich-1': ['EU-ZURICH-1-AD-1'],
+    'il-jerusalem-1': ['IL-JERUSALEM-1-AD-1'],
+    'me-abudhabi-1': ['ME-ABUDHABI-1-AD-1'],
+    'me-dubai-1': ['ME-DUBAI-1-AD-1'],
+    'me-jeddah-1': ['ME-JEDDAH-1-AD-1'],
+    'me-riyadh-1': ['ME-RIYADH-1-AD-1'],
+    'mx-monterrey-1': ['MX-MONTERREY-1-AD-1'],
+    'mx-queretaro-1': ['MX-QUERETARO-1-AD-1'],
+    'sa-bogota-1': ['SA-BOGOTA-1-AD-1'],
+    'sa-santiago-1': ['SA-SANTIAGO-1-AD-1'],
+    'sa-saopaulo-1': ['SA-SAOPAULO-1-AD-1'],
+    'sa-valparaiso-1': ['SA-VALPARAISO-1-AD-1'],
+    'sa-vinhedo-1': ['SA-VINHEDO-1-AD-1'],
+    'uk-cardiff-1': ['UK-CARDIFF-1-AD-1'],
+    'uk-london-1': ['UK-LONDON-1-AD-1', 'UK-LONDON-1-AD-2', 'UK-LONDON-1-AD-3'],
+    'us-ashburn-1': ['US-ASHBURN-AD-1', 'US-ASHBURN-AD-2', 'US-ASHBURN-AD-3'],
+    'us-chicago-1': [
+        'US-CHICAGO-1-AD-1', 'US-CHICAGO-1-AD-2', 'US-CHICAGO-1-AD-3'
+    ],
+    'us-phoenix-1': ['PHX-AD-1', 'PHX-AD-2', 'PHX-AD-3'],
+    'us-sanjose-1': ['US-SANJOSE-1-AD-1'],
 }
 
 # CPU shapes to include. Flexible shapes are catalogued as
@@ -437,12 +452,18 @@ def collect_shapes(shapes_json: Dict[str, Any],
     return cpu_infos + gpu_infos
 
 
-def static_availability(regions: Dict[str, int]) -> Dict[str, List[str]]:
-    """Region -> zones, assuming every shape is offered everywhere."""
-    return {
-        region: [f'{region}-AD-{i}' for i in range(1, num_ads + 1)
-                ] for region, num_ads in sorted(regions.items())
-    }
+def default_zone_names(region: str) -> List[str]:
+    """Best-effort AD names for a region missing from REGION_ZONES.
+
+    Every region opened since 2019 has a single '<REGION>-AD-1' domain; the
+    result should still be confirmed with --use-sdk or ListAvailabilityDomains.
+    """
+    return [f'{region.upper()}-AD-1']
+
+
+def zone_from_ad_name(ad_name: str) -> str:
+    """Strips the tenancy prefix: 'Uocm:PHX-AD-1' -> 'PHX-AD-1'."""
+    return ad_name.split(':', 1)[-1]
 
 
 def sdk_availability(profile: str,
@@ -474,11 +495,7 @@ def sdk_availability(profile: str,
         ads = identity.list_availability_domains(compartment_id=tenancy_id).data
         availability[region] = {}
         for ad in ads:
-            match = re.search(r'-AD-(\d+)$', ad.name)
-            if match is None:
-                logger.warning('Skipping unrecognized AD name in %s.', region)
-                continue
-            zone = f'{region}-AD-{match.group(1)}'
+            zone = zone_from_ad_name(ad.name)
             shapes = oci.pagination.list_call_get_all_results(
                 compute.list_shapes,
                 compartment_id=tenancy_id,
@@ -548,7 +565,8 @@ def main() -> None:
         '--regions',
         nargs='+',
         help='Only emit these regions. Without --use-sdk, regions not in '
-        'the built-in list are assumed to have one availability domain.')
+        'REGION_ZONES are assumed to have a single availability domain '
+        'named <REGION>-AD-1.')
     parser.add_argument('--output', default='oci/vms.csv')
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -580,18 +598,21 @@ def main() -> None:
                 'subscribed regions; the catalog will contain CPU shapes '
                 'only. Run without --use-sdk for the full price list.')
     else:
-        regions = REGIONS
+        region_zones = REGION_ZONES
         if args.regions:
-            regions = {}
+            region_zones = {}
             for region in args.regions:
-                if region not in REGIONS:
+                if region not in REGION_ZONES:
                     logger.warning(
-                        '%s is not a known commercial region; assuming one '
-                        'availability domain.', region)
-                regions[region] = REGIONS.get(region, 1)
+                        '%s is not in REGION_ZONES; assuming a single '
+                        'availability domain named %s. Confirm it with '
+                        '--use-sdk before relying on it.', region,
+                        default_zone_names(region)[0])
+                region_zones[region] = REGION_ZONES.get(
+                    region) or default_zone_names(region)
         availability = {
             region: {zone: None for zone in zones
-                    } for region, zones in static_availability(regions).items()
+                    } for region, zones in sorted(region_zones.items())
         }
 
     rows = expand_rows(shapes, availability)
