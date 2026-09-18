@@ -657,21 +657,15 @@ function ExternalJobId({ item, href }) {
   );
 }
 
-function JobNameLink({ href, name, id, isExternal }) {
-  // A job with no name (Slurm prints none for jobs submitted through its
-  // REST API, such as slurm-bridge placeholder jobs) still has a detail
-  // page. Render the same dash the other missing fields use, gray so it
-  // does not read as a name, and say why in the tooltip.
-  //
-  // External rows come from the pagination plugin, and its releases are
-  // not pinned to this dashboard. Depending on its version it sends the
-  // name as null, as the dash it rendered itself before this fallback
-  // existed, or as Slurm's literal "(null)". All three mean no name.
-  const nameless = !name || (isExternal && (name === '-' || name === '(null)'));
-  if (nameless) {
-    const what = isExternal ? 'Slurm job' : 'Job';
+function JobNameLink({ href, name, id, tooltip, muted }) {
+  // A job with no name still has a detail page. Render the same dash the
+  // other missing fields use, gray so it does not read as a name, and say
+  // why in the tooltip. Rows that know more about themselves (external
+  // Slurm rows from the pagination plugin) pass their own tooltip and
+  // muted flag instead; this component only renders what it is given.
+  if (!name) {
     return (
-      <NonCapitalizedTooltip content={`${what} ${id} has no name`}>
+      <NonCapitalizedTooltip content={`Job ${id} has no name`}>
         <Link href={href} className="text-gray-500 hover:underline block">
           -
         </Link>
@@ -681,9 +675,10 @@ function JobNameLink({ href, name, id, isExternal }) {
   // max-w (not fixed w): the box shrinks to the name so a trailing badge
   // sits next to the text instead of parking at the 240px edge after a
   // short name; long names still truncate at 240px.
+  const color = muted ? 'text-gray-500 hover:underline' : 'text-blue-600';
   return (
-    <NonCapitalizedTooltip content={name}>
-      <Link href={href} className="text-blue-600 block max-w-[240px] truncate">
+    <NonCapitalizedTooltip content={tooltip || name}>
+      <Link href={href} className={`${color} block max-w-[240px] truncate`}>
         {name}
       </Link>
     </NonCapitalizedTooltip>
@@ -1881,7 +1876,8 @@ export function ManagedJobsTable({
                   href={detailHref}
                   name={item.name}
                   id={item.id}
-                  isExternal={item.is_external}
+                  tooltip={item.name_tooltip}
+                  muted={item.name_muted}
                 />
                 {item.is_external && <ExternalPill />}
                 {isBatch && <BatchBadge className="ml-2" />}
