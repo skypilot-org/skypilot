@@ -5,12 +5,16 @@ import uuid
 import fastapi
 
 from sky import check as sky_check
+from sky import sky_logging
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
+from sky.utils import common_utils
 from sky.workspaces import core
+
+logger = sky_logging.init_logger(__name__)
 
 router = fastapi.APIRouter()
 
@@ -134,18 +138,30 @@ async def update_config(request: fastapi.Request,
         auth_user=request.state.auth_user,
     )
     check_request_id = str(uuid.uuid4())
-    await executor.schedule_request_async(
-        request_id=check_request_id,
-        request_name=request_names.RequestName.CHECK,
-        # Copy env_vars so the check runs as the same user as the save when
-        # auth_user is not set (prepare_request_async falls back to the
-        # env_vars user id).
-        request_body=payloads.CheckBody(
-            env_vars=dict(update_config_body.env_vars)),
-        func=sky_check.check,
-        schedule_type=api_requests.ScheduleType.SHORT,
-        precondition=preconditions.RequestSucceededPrecondition(
+    try:
+        await executor.schedule_request_async(
             request_id=check_request_id,
-            awaited_request_id=request.state.request_id),
-        auth_user=request.state.auth_user,
-    )
+            request_name=request_names.RequestName.CHECK,
+            # Copy env_vars so the check runs as the same user as the save
+            # when auth_user is not set (prepare_request_async falls back to
+            # the env_vars user id).
+            request_body=payloads.CheckBody(
+                env_vars=dict(update_config_body.env_vars)),
+            func=sky_check.check,
+            schedule_type=api_requests.ScheduleType.SHORT,
+            precondition=preconditions.RequestSucceededPrecondition(
+                request_id=check_request_id,
+                awaited_request_id=request.state.request_id),
+            auth_user=request.state.auth_user,
+        )
+    except Exception as e:  # pylint: disable=broad-except
+        # The save is already queued and will commit. Failing the endpoint
+        # here would tell the client the save failed when it did not. A
+        # missing refresh only leaves the enabled-clouds cache stale until
+        # the next `sky check`, which is the same outcome the inline check
+        # had when it failed (it logged a warning and the save succeeded).
+        logger.warning(
+            f'Config save {request.state.request_id} was queued but the '
+            f'follow-up sky check could not be scheduled: '
+            f'{common_utils.format_exception(e)}. Run `sky check` to '
+            'refresh enabled infra.')

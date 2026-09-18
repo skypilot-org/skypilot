@@ -84,3 +84,46 @@ async def test_update_config_without_auth_user():
         assert call.kwargs['auth_user'] is None
     check_body = mock_schedule.await_args_list[1].kwargs['request_body']
     assert check_body.env_vars['SKYPILOT_USER_ID'] == 'user-2'
+
+
+@pytest.mark.asyncio
+async def test_check_scheduling_failure_does_not_fail_the_save():
+    """The save is already queued when the check is scheduled. A failure
+    scheduling the check must not surface as a failed save."""
+    request = _fake_request(models.User(id='user-3', name='u3'))
+    body = payloads.UpdateConfigBody(config={})
+    body.env_vars = {'SKYPILOT_USER_ID': 'user-3', 'SKYPILOT_USER': 'u3'}
+
+    calls = []
+
+    async def schedule(**kwargs):
+        calls.append(kwargs['request_name'])
+        if kwargs['request_name'] == request_names.RequestName.CHECK:
+            raise RuntimeError('db unavailable')
+
+    with mock.patch('sky.workspaces.server.executor.schedule_request_async',
+                    side_effect=schedule):
+        # Must not raise.
+        await workspaces_server.update_config(request, body)
+
+    assert calls == [
+        request_names.RequestName.WORKSPACES_UPDATE_CONFIG,
+        request_names.RequestName.CHECK,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_save_scheduling_failure_propagates_and_skips_check():
+    """If the save itself cannot be scheduled, the error reaches the client
+    and no check is scheduled."""
+    request = _fake_request(None)
+    body = payloads.UpdateConfigBody(config={})
+    body.env_vars = {'SKYPILOT_USER_ID': 'user-4', 'SKYPILOT_USER': 'u4'}
+
+    with mock.patch('sky.workspaces.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock,
+                    side_effect=RuntimeError('db unavailable')) as mock_sched:
+        with pytest.raises(RuntimeError):
+            await workspaces_server.update_config(request, body)
+
+    assert mock_sched.await_count == 1
