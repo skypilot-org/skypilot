@@ -3155,6 +3155,94 @@ class TestGetPodDeletionReason:
         # when the run-phase wait finds the same pod.
         assert gus.add_cluster_event.called
 
+    def test_the_reason_reads_the_same_as_the_status_refresh(self, monkeypatch):
+        """The text is the first line of what _get_pod_termination_reason
+        says about the pod, which is what the status refresh reports for it
+        too -- so the launch error and `sky status` say the same thing. For a
+        pod carrying its deleter's condition that is also, to the character,
+        what the condensed pod status says, so this case reads exactly as it
+        did before the two were unified."""
+        events, _ = self._setup(monkeypatch, [])
+        pod = TestWaitForPodsToScheduleDeletedPods._make_terminating_pod(
+            'pod-0',
+            'my-cluster',
+            reason='WorkloadEvictedDueToPodsReadyTimeout',
+            message='Exceeded the PodsReady timeout default/wl')
+        expected = ('Preempted by Kueue: WorkloadEvictedDueToPodsReadyTimeout '
+                    '(Exceeded the PodsReady timeout default/wl)')
+
+        status_refresh_text = instance._get_pod_termination_reason(
+            pod, 'cn').split('\n')[0].rstrip('.')
+        assert status_refresh_text == expected
+        assert kubernetes_utils.get_condensed_pod_reason(pod) == expected
+        assert instance._get_pod_deletion_reason(context='ctx',
+                                                 namespace='ns',
+                                                 cluster_name='cn',
+                                                 pod_name='pod-0',
+                                                 pod=pod) == expected
+        assert not events.called
+
+    def test_the_termination_reason_is_passed_through(self, monkeypatch):
+        """_get_pod_termination_reason is the one place the text about a
+        terminated pod is written, so whatever it says is what the launch
+        error says."""
+        events, _ = self._setup(monkeypatch, [])
+
+        def reworded(pod, cluster_name):
+            del pod, cluster_name  # unused
+            return ('Preempted by Kueue: reworded.\n'
+                    'Last known state: Unknown.')
+
+        monkeypatch.setattr(instance, '_get_pod_termination_reason', reworded)
+        pod = TestWaitForPodsToScheduleDeletedPods._make_terminating_pod(
+            'pod-0',
+            'my-cluster',
+            reason='WorkloadEvictedDueToPodsReadyTimeout',
+            message='Exceeded the PodsReady timeout default/wl')
+
+        assert instance._get_pod_deletion_reason(
+            context='ctx',
+            namespace='ns',
+            cluster_name='cn',
+            pod_name='pod-0',
+            pod=pod) == 'Preempted by Kueue: reworded'
+        assert not events.called
+
+    def test_a_container_failure_answers_when_the_termination_does_not(
+            self, monkeypatch):
+        """Nothing deleted this pod on purpose: its container was killed for
+        running out of memory, which only the container statuses know about."""
+        events, _ = self._setup(monkeypatch, [])
+        at = datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc)
+        pod = TestWaitForPodsToScheduleDeletedPods._make_pending_pod(
+            'pod-0', 'my-cluster')
+        pod.status.conditions = []
+        pod.status.start_time = at
+        pod.status.reason = None
+        pod.metadata.deletion_timestamp = at
+        # The container is not in the pod spec, so the OOM is not reported
+        # as a node-level one; that distinction is covered in
+        # test_kubernetes_utils.
+        pod.spec.containers = []
+        container = mock.MagicMock()
+        container.name = 'ray-node'
+        container.state.waiting = None
+        container.state.terminated.exit_code = 137
+        container.state.terminated.reason = 'OOMKilled'
+        container.state.terminated.finished_at = at
+        container.last_state.terminated = None
+        pod.status.container_statuses = [container]
+
+        assert instance._get_pod_termination_reason(
+            pod, 'cn').startswith('Terminated unexpectedly')
+        assert instance._get_pod_deletion_reason(
+            context='ctx',
+            namespace='ns',
+            cluster_name='cn',
+            pod_name='pod-0',
+            pod=pod) == 'OOMKilled (exit code 137)'
+        assert not events.called
+
     def test_an_uninformative_object_falls_through_to_the_events(
             self, monkeypatch):
         """A pod deleted while it was still Pending has no container statuses
