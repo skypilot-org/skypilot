@@ -21,6 +21,7 @@ from prometheus_client import multiprocess
 import prometheus_client as prom
 import pytest
 
+from sky import skypilot_config
 from sky.metrics import utils as metrics_utils
 from sky.server import metrics
 from sky.server import middleware_utils
@@ -1629,22 +1630,8 @@ def test_no_gauge_defaults_to_all_multiprocess_mode():
 # ── nothing may block the loop that serves /metrics ─────────────────
 
 
-async def _await_until(predicate, timeout=10.0, interval=0.01):
-    """Polls `predicate` without blocking the loop.
-
-    _wait_until() sleeps synchronously, which would keep the loop from ever
-    entering the task that starts the worker thread being waited on.
-    """
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if predicate():
-            return True
-        await asyncio.sleep(interval)
-    return predicate()
-
-
 def _slow_prologue(started, release, result=((), ())):
-    """A federation prologue that blocks until released."""
+    """A federation refresh that blocks until released."""
 
     def prologue():
         started.set()
@@ -1654,8 +1641,16 @@ def _slow_prologue(started, release, result=((), ())):
     return prologue
 
 
-def test_federation_prologue_runs_off_the_event_loop():
-    """The config reload / kubeconfig read must happen in a worker thread."""
+def _single_gauge_value(gauge):
+    """Value of an unlabelled gauge (_gauge_value is name-specific)."""
+    for family in gauge.collect():
+        for sample in family.samples:
+            return sample.value
+    return None
+
+
+def test_federation_refresh_runs_off_the_event_loop():
+    """The config reload / kubeconfig read must happen on another thread."""
     targets = metrics._FederationTargets()
     ran_on = []
 
@@ -1664,19 +1659,62 @@ def test_federation_prologue_runs_off_the_event_loop():
         return (['ctx-a'], ['slurm-a'])
 
     with patch.object(targets, '_prologue', prologue):
-        assert asyncio.run(targets.resolve()) == (['ctx-a'], ['slurm-a'])
+        thread = targets.start_refresh_if_idle()
+        assert thread is not None
+        thread.join(timeout=10)
 
-    assert ran_on, 'prologue never ran'
+    assert ran_on, 'refresh never ran'
     assert ran_on[0] is not threading.main_thread(), (
-        'prologue ran on the thread driving the event loop')
+        'the refresh ran on the thread driving the event loop')
+    assert targets.resolve()[0] == ['ctx-a']
 
 
-def test_federation_prologue_is_single_flight():
-    """A scrape that finds a prologue in flight is served the last result.
+def test_federation_resolve_does_not_wait_for_a_slow_refresh():
+    """A refresh slower than the scrape interval must still leave the routes
+    federating something.
 
-    Without this, a prologue hung on an unreachable database would add a
-    stuck thread per scrape and eventually starve the same executor the
-    port-forwards run in.
+    Both federation routes are scraped every 60s with a 45s timeout. If a
+    scrape waited for the refresh, a refresh in that 45-60s band would be
+    cancelled by Prometheus on every single scrape -- each one starting a
+    fresh attempt that finishes just in time to be discarded -- so the
+    routes would federate nothing for as long as it lasted, and the cached
+    snapshot would never be reached because two scrapes never overlap.
+    """
+    targets = metrics._FederationTargets()
+    started = threading.Event()
+    release = threading.Event()
+
+    # Prime a snapshot, the way server start-up does. Read _snapshot rather
+    # than calling resolve(): resolve() deliberately asks for a refresh, so
+    # using it here would start a real one and hold the single-flight guard.
+    with patch.object(targets, '_prologue', lambda: (['ctx-a'], [])):
+        targets.start_refresh_if_idle().join(timeout=10)
+        assert targets._snapshot == (['ctx-a'], [])
+
+    with patch.object(targets, '_prologue',
+                      _slow_prologue(started, release, (['ctx-b'], []))):
+        # This resolve kicks the slow refresh; it must not wait for it.
+        begin = time.monotonic()
+        assert targets.resolve() == (['ctx-a'], [])
+        assert _wait_until(started.is_set), 'refresh never started'
+
+        for _ in range(3):
+            assert targets.resolve() == ([
+                'ctx-a'
+            ], []), ('a scrape was served an empty list while a refresh was '
+                     'in flight')
+        elapsed = time.monotonic() - begin
+        assert elapsed < 5.0, f'resolve waited {elapsed:.1f}s on the refresh'
+        release.set()
+        assert _wait_until(lambda: targets._snapshot == (['ctx-b'], []))
+
+
+def test_federation_refresh_is_single_flight():
+    """A scrape landing during a refresh must not start a second one.
+
+    Otherwise a refresh hung on an unreachable database would add one stuck
+    thread per scrape and eventually starve the executor the port-forwards
+    run in.
     """
     targets = metrics._FederationTargets()
     started = threading.Event()
@@ -1688,80 +1726,65 @@ def test_federation_prologue_is_single_flight():
         calls.append(1)
         return prologue()
 
-    async def scenario():
-        with patch.object(targets, '_prologue', counting_prologue):
-            targets._snapshot = (['stale'], [])
-            first = asyncio.create_task(targets.resolve())
-            assert await _await_until(started.is_set), 'prologue not started'
+    with patch.object(targets, '_prologue', counting_prologue):
+        first = targets.start_refresh_if_idle()
+        assert first is not None
+        assert _wait_until(started.is_set), 'refresh never started'
 
-            assert await targets.resolve() == (['stale'], [])
-            assert len(calls) == 1, 'a second prologue was started'
+        assert targets.start_refresh_if_idle() is None, (
+            'a second refresh was started')
+        targets.resolve()
+        assert len(calls) == 1
 
-            release.set()
-            assert await first == (['fresh'], [])
-            assert await targets.resolve() == (['fresh'], [])
+        release.set()
+        first.join(timeout=10)
+        assert len(calls) == 1
+    assert targets.resolve() == (['fresh'], [])
 
-    asyncio.run(scenario())
 
+def test_federation_refresh_failure_keeps_the_previous_snapshot():
+    """A failed refresh must release the guard and keep the last list.
 
-def test_federation_prologue_flag_is_owned_by_the_worker():
-    """Prometheus giving up cancels the handler, never the worker thread.
-
-    So cancellation must not release the single-flight guard: if it did, the
-    next scrape would start a second prologue alongside the first one, which
-    is still running.
+    Publishing an empty snapshot instead would make every cluster's series
+    vanish at once, which is worse than a stale list; the freshness gauge is
+    what reports the staleness.
     """
     targets = metrics._FederationTargets()
-    started = threading.Event()
-    release = threading.Event()
-    calls = []
+    with patch.object(targets, '_prologue', lambda: (['ctx-a'], [])):
+        targets.start_refresh_if_idle().join(timeout=10)
 
-    def counting_prologue():
-        calls.append(1)
-        return _slow_prologue(started, release, (['fresh'], []))()
+    def failing_prologue():
+        raise RuntimeError('config database is unreachable')
 
-    async def scenario():
-        with patch.object(targets, '_prologue', counting_prologue):
-            task = asyncio.create_task(targets.resolve())
-            assert await _await_until(started.is_set), 'prologue not started'
-            task.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await task
+    with patch.object(targets, '_prologue', failing_prologue):
+        targets.start_refresh_if_idle().join(timeout=10)
+        # Checked before any resolve(), which would start a refresh of its
+        # own and set the flag again under us.
+        assert not targets._refreshing, 'the guard was not released'
+        assert targets._snapshot == (['ctx-a'],
+                                     []), ('lost the previous snapshot')
+        # A scrape landing now is still served the previous list.
+        assert targets.resolve() == (['ctx-a'], [])
 
-            assert targets._in_flight, (
-                'cancelling the scrape released the single-flight guard')
-            assert await targets.resolve() == ([], [])
-            assert len(calls) == 1, 'a second prologue was started'
-
-            release.set()
-            assert await _await_until(lambda: not targets._in_flight), (
-                'the worker never released the guard')
-            # Let the abandoned future settle before the loop closes.
-            await asyncio.sleep(0.05)
-
-    asyncio.run(scenario())
+    # And a later good refresh still gets through.
+    with patch.object(targets, '_prologue', lambda: (['ctx-b'], [])):
+        assert _wait_until(lambda: targets.start_refresh_if_idle() is not None)
+        assert _wait_until(lambda: targets._snapshot == (['ctx-b'], []))
 
 
-def _single_gauge_value(gauge):
-    """Value of an unlabelled gauge (_gauge_value is name-specific)."""
-    for family in gauge.collect():
-        for sample in family.samples:
-            return sample.value
-    return None
-
-
-def test_federation_prologue_publishes_its_freshness(monkeypatch):
-    """A hung prologue freezes the cluster list silently; the timestamp is
-    the only thing that says so, since the loop, /metrics and the scrape
-    all stay healthy. So it must advance on success and not on failure."""
+def test_federation_refresh_publishes_its_freshness(monkeypatch):
+    """A refresh that stops completing leaves the routes on a frozen list
+    while the loop, /metrics and the scrape all stay healthy. The timestamp
+    is the only thing that says so, so it must advance on success and not on
+    failure."""
     monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', True)
     gauge = (metrics_utils.
              SKY_APISERVER_FEDERATION_TARGETS_LAST_SUCCESS_TIMESTAMP_SECONDS)
     targets = metrics._FederationTargets()
 
+    before = time.time()
     with patch.object(targets, '_prologue', lambda: (['ctx'], [])):
-        before = time.time()
-        asyncio.run(targets.resolve())
+        targets.start_refresh_if_idle().join(timeout=10)
     published = _single_gauge_value(gauge)
     assert published is not None and published >= before, (
         'success did not advance the timestamp')
@@ -1770,27 +1793,42 @@ def test_federation_prologue_publishes_its_freshness(monkeypatch):
         raise RuntimeError('config database is unreachable')
 
     with patch.object(targets, '_prologue', failing_prologue):
-        with pytest.raises(RuntimeError):
-            asyncio.run(targets.resolve())
+        targets.start_refresh_if_idle().join(timeout=10)
     assert _single_gauge_value(gauge) == published, (
         'a failed refresh advanced the freshness timestamp')
 
 
-def test_federation_prologue_failure_releases_the_guard():
-    """A failing prologue must not wedge the guard, and must not be
-    silently swallowed: the route answering 500 is the existing behavior."""
-    targets = metrics._FederationTargets()
+def test_federation_refresh_reload_is_visible_on_the_loop(
+        monkeypatch, tmp_path):
+    """The config the refresh loads must be the config the loop then reads.
 
-    def failing_prologue():
-        raise RuntimeError('config database is unreachable')
+    This is the assumption the whole off-thread design rests on, and nothing
+    else in the suite exercises it: the other tests patch _prologue, so they
+    never run the real reload. If a future change ran the refresh under a
+    copied *and cloned* context (SkyPilotContext.copy() does deepcopy the
+    config context), every one of them would stay green while
+    _get_prometheus_target() and the Slurm URLs silently reverted to the
+    start-up snapshot.
+    """
+    config = tmp_path / 'server-config.yaml'
+    config.write_text('metrics:\n  prometheus:\n    namespace: sentinel-ns\n')
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, str(config))
+    try:
+        targets = metrics._FederationTargets()
+        # The real _prologue, hence the real reload_config(), on the thread.
+        thread = targets.start_refresh_if_idle()
+        assert thread is not None
+        thread.join(timeout=30)
+        assert not thread.is_alive(), 'refresh did not finish'
 
-    async def scenario():
-        with patch.object(targets, '_prologue', failing_prologue):
-            with pytest.raises(RuntimeError):
-                await targets.resolve()
-            assert not targets._in_flight
-
-    asyncio.run(scenario())
+        # Read back from this thread, the way the routes do after resolve().
+        namespace, _, _ = metrics_utils._get_prometheus_target()
+        assert namespace == 'sentinel-ns', (
+            f'the loop thread sees {namespace!r}, not the config the refresh '
+            f'loaded; the reload did not land where the loop reads it')
+    finally:
+        monkeypatch.undo()
+        skypilot_config.reload_config()
 
 
 @pytest.mark.parametrize('prologue_off_loop', [True, False])
@@ -1819,7 +1857,7 @@ def test_gpu_metrics_prologue_does_not_hold_off_the_metrics_scrape(
     monkeypatch.setattr(targets, '_prologue', prologue)
     if not prologue_off_loop:
 
-        async def inline_resolve():
+        def inline_resolve():
             return targets._prologue()
 
         monkeypatch.setattr(targets, 'resolve', inline_resolve)

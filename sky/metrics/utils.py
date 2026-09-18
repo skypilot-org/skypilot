@@ -1039,21 +1039,25 @@ SKY_APISERVER_LOCAL_CONTEXT_PROBE_QUEUE_DEPTH = prom.Gauge(
 # request). A context stuck at result="unknown" is one whose probes
 # never conclude.
 # When the federation routes last refreshed their view of which clusters to
-# scrape (see sky/server/metrics.py _FederationTargets). That refresh is
-# single-flight and is deliberately never cancelled or retried, so one hung
-# on an unreachable config database leaves both routes federating a frozen
-# cluster list -- with the event loop, /metrics and the scrape all healthy,
-# which is precisely what makes it invisible otherwise. Alert on
-# time() - this exceeding a few scrape intervals; 0 means no refresh has
-# ever completed. multiprocess_mode='livemax' rather than the 'liveall' used
-# elsewhere here: there is exactly one writer (the metrics server runs in the
-# main process), so a pid label would only add a dimension to strip back off,
-# and 'max' over live processes cannot pin a dead writer's timestamp.
+# scrape (see sky/server/metrics.py _FederationTargets). The routes serve
+# whatever the last refresh produced, so time() - this is the age of the
+# cluster list they are federating; a refresh that hangs or keeps failing
+# leaves them on a frozen list while the event loop, /metrics and the scrape
+# all stay healthy, which is what makes it invisible otherwise. 0 means no
+# refresh has ever completed.
+#
+# multiprocess_mode='max', not 'livemax': livemax needs prometheus_client
+# >= 0.15.0 while dependencies.py allows >= 0.8.0, where it is rejected at
+# import and the server would not start at all. 'max' is equivalent for a
+# timestamp that only moves forward -- a dead writer's value is older, so it
+# can never win the max -- and unlike 'livemax' it keeps the series present
+# after the writer exits, so an alert on time() - this does not have to carry
+# an absent() clause to avoid the up-absent-not-zero trap.
 SKY_APISERVER_FEDERATION_TARGETS_LAST_SUCCESS_TIMESTAMP_SECONDS = prom.Gauge(
     'sky_apiserver_federation_targets_last_success_timestamp_seconds',
     'Unix timestamp of the last successful federation target refresh; 0 if '
     'none has completed since process start',
-    multiprocess_mode='livemax',
+    multiprocess_mode='max',
 )
 
 SKY_APISERVER_LOCAL_CONTEXT_SERVED_TOTAL = prom.Counter(
