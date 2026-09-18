@@ -1103,5 +1103,43 @@ class TestWorkspaceNameBackwardCompatibility(unittest.TestCase):
             core.update_config(new_config)
 
 
+class TestUpdateConfigDoesNotRunCheckInline(unittest.TestCase):
+    """update_config must not call sky.check.check; the API route schedules
+    it as a separate request gated on the save succeeding."""
+
+    @mock.patch('sky.skypilot_config.get_skypilot_config_lock_path')
+    @mock.patch('sky.skypilot_config.update_api_server_config_no_lock')
+    @mock.patch('sky.skypilot_config.to_dict')
+    @mock.patch('sky.utils.schemas.get_config_schema')
+    @mock.patch('sky.utils.common_utils.validate_schema')
+    @mock.patch('sky.check.check')
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
+    @mock.patch('sky.users.permission.permission_service')
+    def test_update_config_returns_without_sky_check(
+            self, mock_permission, mock_check_resources, mock_sky_check,
+            mock_validate_schema, mock_get_schema, mock_to_dict,
+            mock_update_no_lock, mock_lock_path):
+        del mock_permission
+        mock_to_dict.return_value = {'workspaces': {'default': {}}}
+        mock_get_schema.return_value = {
+            'properties': {
+                'workspaces': {
+                    'additionalProperties': {}
+                }
+            }
+        }
+        mock_validate_schema.return_value = None
+        mock_check_resources.return_value = None
+        mock_lock_path.return_value = '/tmp/test-lock'
+
+        new_config = {'workspaces': {'default': {}}, 'gcp': {'project_id': 'p'}}
+        result = core.update_config(new_config)
+
+        self.assertEqual(result, new_config)
+        mock_update_no_lock.assert_called_once()
+        mock_sky_check.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()
