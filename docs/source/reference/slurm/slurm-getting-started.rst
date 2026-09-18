@@ -310,10 +310,10 @@ readiness), and ``<workdir>/.sky_snapshots/<cluster>`` (container snapshots).
 runtime directory is accessed inside the allocation using ``srun``.
 
 :download:`Download an example sudoers policy <slurm-sudoers.example>` for SSH
-account ``skypilot`` and workload account ``alice``, using ``/home/alice`` as
-the shared base. It requires sudo 1.9.10 or later for argument regexes.
-Adjust the executable locations and paths, repeat the rules for each workload
-account, install the file with root ownership and mode ``0440``, and check it
+account ``skypilot`` and workload accounts in group ``skyusers``, using each
+account's home directory as the shared base. It requires sudo 1.9.10 or later
+for argument regexes. Adjust the executable locations, group name, and paths,
+install the file with root ownership and mode ``0440``, and check it
 with ``visudo -cf``. The rsync rule lists explicit server arguments; different
 rsync versions may require an adjusted rule based on sudo's log.
 
@@ -323,21 +323,26 @@ Argument matching does not resolve symlinks or constrain file names carried
 inside the rsync protocol. These rules are executable and argument controls,
 not a filesystem sandbox. Keep the rsync installation patched and use workload
 accounts whose accessible data matches the intended trust boundary.
+The path regexes accept any account's base, so the SSH account can invoke a
+file operation as one group member against another member's path; the target
+account's filesystem permissions still apply.
 
 Restrict run-as identities to workload accounts without administrative
 privileges. Any privileges available to those accounts are transitively
 available to the shared SSH account. Avoid ``(ALL, !root)``: it permits
 impersonating Slurm's administrative account. Use an explicit account or a
-dedicated group. ``Defaults>alice !requiretty`` permits noninteractive SSH
-operations as that account.
+dedicated group. ``Defaults:skypilot !requiretty`` permits noninteractive sudo
+operations by the SSH account ``skypilot``.
 
 Slurm executables must be available in sudo's ``secure_path`` (or the SSH
 account's ``PATH`` for a root transport). Configure site-specific binary paths
 there. Target-user login profiles are not sourced. Configure a shared
 ``workdir``/``tmpdir`` explicitly when needed; ``$HOME``, ``$USER``, and
 ``$LOGNAME`` resolve to the target account, while other expansion variables
-come from the SSH account's environment. Load workload modules in the task's
-``setup`` or ``run`` commands.
+come from the SSH account's environment. For example, set
+``workdir: /training/$USER/autodata`` and follow the policy's comment to swap
+the matching path prefix. Load workload modules in the task's ``setup`` or
+``run`` commands.
 
 SkyPilot maps the authenticated username to the portion before ``@``. For
 example, ``alice@example.com`` maps to the Unix account ``alice``. The account
