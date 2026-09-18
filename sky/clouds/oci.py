@@ -69,12 +69,17 @@ def _get_availability_domain_prefix(region: str) -> Optional[str]:
         compartment = query_helper.find_compartment(region)
         with _ad_prefixes_lock:
             prefix = _ad_prefixes.get(compartment)
-            if prefix is None:
-                identity_client = oci_adaptor.get_identity_client(
-                    region=region, profile=profile)
-                ad_list = identity_client.list_availability_domains(
-                    compartment_id=compartment).data
-                prefix = str(ad_list[0].name).split(':', maxsplit=1)[0]
+        if prefix is None:
+            # The lookup runs outside the lock so that launches into other
+            # compartments are not queued behind this network call. Two
+            # concurrent misses for the same compartment merely repeat one
+            # cheap request and store the same prefix.
+            identity_client = oci_adaptor.get_identity_client(region=region,
+                                                              profile=profile)
+            ad_list = identity_client.list_availability_domains(
+                compartment_id=compartment).data
+            prefix = str(ad_list[0].name).split(':', maxsplit=1)[0]
+            with _ad_prefixes_lock:
                 _ad_prefixes[compartment] = prefix
     except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
             oci_adaptor.oci.exceptions.InvalidConfig) as e:

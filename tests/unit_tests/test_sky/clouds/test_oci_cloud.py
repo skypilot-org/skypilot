@@ -1,5 +1,7 @@
 """Tests for the OCI cloud."""
+from concurrent import futures
 import functools
+import threading
 from unittest import mock
 
 import jsonschema
@@ -311,6 +313,45 @@ def test_availability_domain_prefix_is_cached_per_compartment(ad_prefix_lookup):
         mock.call(compartment_id=_COMPARTMENT),
         mock.call(compartment_id=_OTHER_COMPARTMENT),
     ]
+
+
+def test_availability_domain_lookups_for_different_compartments_overlap(
+        ad_prefix_lookup):
+    # The cache lock must not be held across the network call: a launch into
+    # another compartment starts its own lookup while the first is still in
+    # flight. The first lookup blocks until the second has started, so the
+    # test deadlocks (and times out below) if the two are serialised.
+    first_started = threading.Event()
+    second_started = threading.Event()
+
+    def _list_availability_domains(compartment_id):
+        response = mock.MagicMock()
+        if compartment_id == _COMPARTMENT:
+            first_started.set()
+            assert second_started.wait(timeout=5), (
+                'the second lookup waited for the first one to finish')
+            response.data = [_availability_domain('Uocm:PHX-AD-1')]
+        else:
+            second_started.set()
+            response.data = [_availability_domain('Other:US-ASHBURN-AD-1')]
+        return response
+
+    ad_prefix_lookup.list_availability_domains.side_effect = (
+        _list_availability_domains)
+
+    # pylint: disable=protected-access
+    with futures.ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(oci_cloud._get_availability_domain_prefix,
+                            'us-phoenix-1')
+        assert first_started.wait(timeout=5)
+        second = pool.submit(oci_cloud._get_availability_domain_prefix,
+                             'us-ashburn-1')
+        assert second.result(timeout=10) == 'Other'
+        assert first.result(timeout=10) == 'Uocm'
+    assert oci_cloud._ad_prefixes == {
+        _COMPARTMENT: 'Uocm',
+        _OTHER_COMPARTMENT: 'Other',
+    }
 
 
 def test_availability_domain_prefix_is_none_without_valid_config(monkeypatch):
