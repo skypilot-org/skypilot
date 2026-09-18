@@ -32,11 +32,6 @@ def _make_websocket():
     return websocket
 
 
-# `wrap_command_as_user` prefixes the payload with this: `sudo -u` stays in the
-# caller's cwd, unlike `su --login`, so the target's home is restored by hand.
-_CD_HOME = 'cd -- "$HOME" || exit 1; '
-
-
 def test_slurm_ssh_proxy_runs_as_submit_user():
     command = server._build_slurm_job_ssh_command(
         provider_config={
@@ -51,10 +46,8 @@ def test_slurm_ssh_proxy_runs_as_submit_user():
         is_container_image=False)
 
     argv = shlex.split(command)
-    assert argv[:5] == ['su', '--login', '--shell', '/bin/bash', '--command']
-    assert argv[6:] == ['--', 'alice']
-    assert argv[5].startswith(_CD_HOME + 'srun ')
-    assert '~alice/.ssh/authorized_keys' in argv[5]
+    assert argv[:5] == ['runuser', '-u', 'alice', '--', 'srun']
+    assert 'AuthorizedKeysFile=~alice/.ssh/authorized_keys' in argv
 
 
 def test_slurm_ssh_proxy_uses_sudo_for_non_root_transport():
@@ -71,17 +64,10 @@ def test_slurm_ssh_proxy_uses_sudo_for_non_root_transport():
         is_container_image=False)
 
     argv = shlex.split(command)
-    # `-u alice` is load-bearing: the privilege drop happens in sudo itself,
-    # so the sudoers grant can be scoped to the submit users. Without it sudo
-    # would run the inner shell as root.
-    assert argv[:9] == [
-        'sudo', '--non-interactive', '-H', '-u', 'alice', '--', '/bin/bash',
-        '--login', '-c'
+    assert argv[:7] == [
+        'sudo', '--non-interactive', '-H', '-u', 'alice', '--', 'srun'
     ]
-    # The old form ran `su` as root and dropped privileges there.
-    assert 'su' not in argv
-    assert argv[9].startswith(_CD_HOME + 'srun ')
-    assert len(argv) == 10
+    assert '/bin/bash' not in argv
 
 
 def test_slurm_container_ssh_proxy_uses_root_in_container():
@@ -98,9 +84,9 @@ def test_slurm_container_ssh_proxy_uses_root_in_container():
         is_container_image=True)
 
     argv = shlex.split(command)
-    assert argv[:5] == ['su', '--login', '--shell', '/bin/bash', '--command']
-    assert argv[6:] == ['--', 'alice']
-    assert '--container-remap-root' in argv[5]
+    assert argv[:5] == ['runuser', '-u', 'alice', '--', 'srun']
+    assert '--container-remap-root' in argv
+    assert argv[-3:-1] == ['/bin/bash', '-c']
 
 
 @pytest.mark.asyncio

@@ -3742,7 +3742,9 @@ def _build_slurm_job_ssh_command(
     )
     if slurm_user is not None:
         command = command_runner.wrap_command_as_user(
-            command, slurm_user, use_sudo=login_node_user != 'root')
+            shlex.split(command),
+            slurm_user,
+            use_sudo=login_node_user != 'root')
     return command
 
 
