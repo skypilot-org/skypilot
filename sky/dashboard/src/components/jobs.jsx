@@ -662,7 +662,13 @@ function JobNameLink({ href, name, id, isExternal }) {
   // REST API, such as slurm-bridge placeholder jobs) still has a detail
   // page. Render the same dash the other missing fields use, gray so it
   // does not read as a name, and say why in the tooltip.
-  if (!name) {
+  //
+  // External rows come from the pagination plugin, and its releases are
+  // not pinned to this dashboard. Depending on its version it sends the
+  // name as null, as the dash it rendered itself before this fallback
+  // existed, or as Slurm's literal "(null)". All three mean no name.
+  const nameless = !name || (isExternal && (name === '-' || name === '(null)'));
+  if (nameless) {
     const what = isExternal ? 'Slurm job' : 'Job';
     return (
       <NonCapitalizedTooltip content={`${what} ${id} has no name`}>
