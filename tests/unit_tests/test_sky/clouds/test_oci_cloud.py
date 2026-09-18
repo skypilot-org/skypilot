@@ -243,39 +243,84 @@ def test_region_profile_without_default_falls_back_to_default_profile(
 # ---------------------------------------------------------------------------
 
 _COMPARTMENT = 'ocid1.compartment.oc1..aaaaaaaalaunchhere'
+_OTHER_COMPARTMENT = 'ocid1.compartment.oc1..aaaaaaaaother'
 
 
-def test_availability_domain_prefix_comes_from_launch_compartment(monkeypatch):
+def _availability_domain(name):
+    ad = mock.MagicMock()
+    ad.name = name
+    return ad
+
+
+@pytest.fixture(name='ad_prefix_lookup')
+def fixture_ad_prefix_lookup(monkeypatch):
+    """Stubs the compartment and identity lookups behind the AD prefix.
+
+    Returns the mocked identity client; `find_compartment` maps
+    'us-phoenix-1' to `_COMPARTMENT` and every other region to
+    `_OTHER_COMPARTMENT`, whose tenancies have different prefixes.
+    """
     pytest.importorskip('oci')
+    monkeypatch.setattr(oci_cloud, '_ad_prefixes', {})
     monkeypatch.setattr(oci_utils.oci_config,
                         'get_profile',
                         lambda region=None: 'TOKEN')
     # `query_helper` is an instance, so patch with a plain callable.
-    monkeypatch.setattr(oci_cloud.query_helper, 'find_compartment',
-                        lambda region: _COMPARTMENT)
+    monkeypatch.setattr(
+        oci_cloud.query_helper, 'find_compartment', lambda region: _COMPARTMENT
+        if region == 'us-phoenix-1' else _OTHER_COMPARTMENT)
     client = mock.MagicMock()
-    ad = mock.MagicMock()
-    ad.name = 'Uocm:PHX-AD-1'
-    client.list_availability_domains.return_value.data = [ad]
+
+    def _list_availability_domains(compartment_id):
+        response = mock.MagicMock()
+        if compartment_id == _COMPARTMENT:
+            response.data = [_availability_domain('Uocm:PHX-AD-1')]
+        else:
+            response.data = [_availability_domain('Other:US-ASHBURN-AD-1')]
+        return response
+
+    client.list_availability_domains.side_effect = _list_availability_domains
     monkeypatch.setattr(oci_adaptor,
                         'get_identity_client',
                         lambda region=None, profile='DEFAULT': client)
+    return client
 
+
+def test_availability_domain_prefix_comes_from_launch_compartment(
+        ad_prefix_lookup):
     # pylint: disable=protected-access
     prefix = oci_cloud._get_availability_domain_prefix('us-phoenix-1')
 
     assert prefix == 'Uocm'
     # The prefix is tenancy-specific and must match the tenancy that owns the
     # launch compartment, not the profile's home tenancy.
-    client.list_availability_domains.assert_called_once_with(
+    ad_prefix_lookup.list_availability_domains.assert_called_once_with(
         compartment_id=_COMPARTMENT)
+
+
+def test_availability_domain_prefix_is_cached_per_compartment(ad_prefix_lookup):
+    # A launch into a compartment of another tenancy must not reuse the
+    # prefix cached for the first one, and the same compartment is only
+    # looked up once per process.
+    # pylint: disable=protected-access
+    assert oci_cloud._get_availability_domain_prefix('us-phoenix-1') == 'Uocm'
+    assert oci_cloud._get_availability_domain_prefix('us-ashburn-1') == 'Other'
+    assert oci_cloud._get_availability_domain_prefix('us-phoenix-1') == 'Uocm'
+    assert oci_cloud._get_availability_domain_prefix('us-ashburn-1') == 'Other'
+    assert ad_prefix_lookup.list_availability_domains.call_args_list == [
+        mock.call(compartment_id=_COMPARTMENT),
+        mock.call(compartment_id=_OTHER_COMPARTMENT),
+    ]
 
 
 def test_availability_domain_prefix_is_none_without_valid_config(monkeypatch):
     oci_sdk = pytest.importorskip('oci')
+    monkeypatch.setattr(oci_cloud, '_ad_prefixes', {})
     monkeypatch.setattr(oci_utils.oci_config,
                         'get_profile',
                         lambda region=None: 'TOKEN')
+    monkeypatch.setattr(oci_cloud.query_helper, 'find_compartment',
+                        lambda region: _COMPARTMENT)
 
     def _raise(region=None, profile='DEFAULT'):
         raise oci_sdk.exceptions.ConfigFileNotFound('no config')

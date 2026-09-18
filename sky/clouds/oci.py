@@ -22,6 +22,7 @@ History:
 """
 import logging
 import os
+import threading
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
@@ -46,7 +47,11 @@ if typing.TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_tenancy_prefix: Optional[str] = None
+# Availability-domain prefix by launch compartment OCID. The prefix belongs
+# to the tenancy that owns the compartment, and one process (the API server)
+# can launch into compartments of different tenancies.
+_ad_prefixes: Dict[str, str] = {}
+_ad_prefixes_lock = threading.Lock()
 
 
 def _get_availability_domain_prefix(region: str) -> Optional[str]:
@@ -56,14 +61,21 @@ def _get_availability_domain_prefix(region: str) -> Optional[str]:
     and the prefix is specific to the tenancy that owns the resources. That
     is the tenancy of the compartment instances are launched in, which with
     cross-tenancy policies is not necessarily the `tenancy` of the profile,
-    so the prefix is resolved from the launch compartment.
+    so the prefix is resolved from the launch compartment and cached per
+    compartment.
     """
     profile = oci_utils.oci_config.get_profile(region)
     try:
-        identity_client = oci_adaptor.get_identity_client(region=region,
-                                                          profile=profile)
-        ad_list = identity_client.list_availability_domains(
-            compartment_id=query_helper.find_compartment(region)).data
+        compartment = query_helper.find_compartment(region)
+        with _ad_prefixes_lock:
+            prefix = _ad_prefixes.get(compartment)
+            if prefix is None:
+                identity_client = oci_adaptor.get_identity_client(
+                    region=region, profile=profile)
+                ad_list = identity_client.list_availability_domains(
+                    compartment_id=compartment).data
+                prefix = str(ad_list[0].name).split(':', maxsplit=1)[0]
+                _ad_prefixes[compartment] = prefix
     except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
             oci_adaptor.oci.exceptions.InvalidConfig) as e:
         # This should only happen in testing where oci config is
@@ -71,7 +83,7 @@ def _get_availability_domain_prefix(region: str) -> Optional[str]:
         # valid, the 'sky check' would fail (OCI disabled).
         logger.debug(f'It is OK goes here when testing: {str(e)}')
         return None
-    return str(ad_list[0].name).split(':', maxsplit=1)[0]
+    return prefix
 
 
 @registry.CLOUD_REGISTRY.register
@@ -337,9 +349,7 @@ class OCI(clouds.Cloud):
             if zones is not None:
                 zone = zones[0].name
 
-        global _tenancy_prefix
-        if _tenancy_prefix is None:
-            _tenancy_prefix = _get_availability_domain_prefix(region.name)
+        ad_prefix = _get_availability_domain_prefix(region.name)
 
         # Disk performane: Volume Performance Units.
         vpu = self.get_vpu_from_disktier(
@@ -368,7 +378,7 @@ class OCI(clouds.Cloud):
             'memory': resources.memory,
             'disk_size': resources.disk_size,
             'vpu': str(vpu),
-            'zone': f'{_tenancy_prefix}:{zone}',
+            'zone': f'{ad_prefix}:{zone}',
             'image': image_id,
             'app_catalog_listing_id': listing_id,
             'resource_version': res_ver,
