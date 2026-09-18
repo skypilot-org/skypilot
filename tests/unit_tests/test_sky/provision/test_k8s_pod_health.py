@@ -4,6 +4,7 @@ from typing import Optional
 from unittest import mock
 
 from sky.provision.kubernetes import instance as k8s_instance
+from sky.provision.kubernetes import utils as k8s_utils
 from sky.provision.kubernetes.instance import _check_nodes_health
 from sky.provision.kubernetes.instance import _get_pod_health_issues
 
@@ -531,6 +532,11 @@ class TestGetClusterFailureReasonFromEvents:
     def test_returns_first_evicted(self, mock_events, mock_kutils):
         mock_kutils.get_namespace_from_config.return_value = 'ns'
         mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        # The derivation of a reason from pod events lives in
+        # kubernetes_utils, which the mock above stands in for; let the real
+        # one run, since it is what the result is being asserted on.
+        mock_kutils.reason_from_pod_events.side_effect = (
+            k8s_utils.reason_from_pod_events)
         mock_events.return_value = [
             _make_event(
                 'Evicted', 'Pod ephemeral local storage usage '
@@ -547,6 +553,11 @@ class TestGetClusterFailureReasonFromEvents:
     def test_none_when_no_failure_event(self, mock_events, mock_kutils):
         mock_kutils.get_namespace_from_config.return_value = 'ns'
         mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        # The derivation of a reason from pod events lives in
+        # kubernetes_utils, which the mock above stands in for; let the real
+        # one run, since it is what the result is being asserted on.
+        mock_kutils.reason_from_pod_events.side_effect = (
+            k8s_utils.reason_from_pod_events)
         mock_events.return_value = [_make_event('Scheduled', 'assigned')]
         assert k8s_instance.get_cluster_failure_reason_from_events(
             {}, ['pod-0', 'pod-1']) is None

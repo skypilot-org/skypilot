@@ -1538,7 +1538,7 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
         pod.status.conditions = []
         # Not being deleted. Set explicitly: an auto-created truthy
         # MagicMock attribute would make the wait loop treat the pod as
-        # gone and fail the launch fast.
+        # deleted and fail the launch fast.
         pod.metadata.deletion_timestamp = None
         return pod
 
@@ -2410,7 +2410,7 @@ class TestWaitForPodsToScheduleBoundPod:
 _PODS_CREATED_AT = datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc)
 
 
-def _make_gone_pod_event(reason, message, type_='Normal', at=0):
+def _make_deleted_pod_event(reason, message, type_='Normal', at=0):
     """A pod event, shaped like what _get_pod_events returns.
 
     *at* is seconds relative to _PODS_CREATED_AT; a negative value is an event
@@ -2420,7 +2420,7 @@ def _make_gone_pod_event(reason, message, type_='Normal', at=0):
     event.reason = reason
     event.message = message
     event.type = type_
-    # _event_last_observed prefers these over the creation timestamp; leaving
+    # event_last_observed prefers these over the creation timestamp; leaving
     # them as auto-created MagicMocks would make the event read as undated.
     event.series = None
     event.last_timestamp = None
@@ -2430,7 +2430,7 @@ def _make_gone_pod_event(reason, message, type_='Normal', at=0):
     return event
 
 
-class TestWaitForPodsToScheduleGonePods:
+class TestWaitForPodsToScheduleDeletedPods:
     """Failing fast when a pod SkyPilot created disappears while the launch
     is still waiting for it to be scheduled.
 
@@ -2454,7 +2454,7 @@ class TestWaitForPodsToScheduleGonePods:
     # these waits; the real-world value is 24h with queueing configured.
     _LONG_TIMEOUT = 900
 
-    _make_event = staticmethod(_make_gone_pod_event)
+    _make_event = staticmethod(_make_deleted_pod_event)
 
     @classmethod
     def _make_terminating_pod(cls,
@@ -2546,6 +2546,17 @@ class TestWaitForPodsToScheduleGonePods:
         monkeypatch.setattr(instance, 'global_user_state', mock.MagicMock())
         return clock, raise_errors
 
+    @staticmethod
+    def _assert_failed_after_the_grace_window(clock, deleted_at=1.0):
+        """The wait ended one grace window after the pod went missing.
+
+        The poll interval puts the failure a fraction of a second late; what
+        matters is that it is the grace window that ended the wait and not
+        the provision timeout, which is two orders of magnitude further out.
+        """
+        expected = deleted_at + instance._MISSING_POD_GRACE_SECONDS
+        assert expected <= clock.now <= expected + 1.0, clock.now
+
     def _wait(self, node, timeout=None):
         instance._wait_for_pods_to_schedule(
             namespace='ns',
@@ -2556,7 +2567,7 @@ class TestWaitForPodsToScheduleGonePods:
             create_pods_start=_PODS_CREATED_AT)
 
     def test_vanished_pod_fails_fast_with_the_event_reason(self, monkeypatch):
-        """The incident shape: the pod is listed on the first poll and gone
+        """The incident shape: the pod is listed on the first poll and missing
         from the second on, with a Kueue eviction recorded in its events. The
         wait must end about _MISSING_POD_GRACE_SECONDS later -- not at the
         900s provision_timeout -- and name the pod and the eviction."""
@@ -2589,12 +2600,18 @@ class TestWaitForPodsToScheduleGonePods:
             'The launch must fail on the missing pod, not by falling through '
             'to the provision_timeout error path.')
         assert 'pod-0' in message
-        assert 'stopped by Kueue' in message
+        assert 'Stopped by Kueue' in message
         assert 'Exceeded the PodsReady timeout default/wl' in message
         assert 'sky logs --provision cn' in message
-        # The pod went missing at t=1; the grace window is 30s.
-        assert 30.0 <= clock.now <= 32.0, clock.now
+        # The pod went missing at t=1, one grace window before the failure.
+        self._assert_failed_after_the_grace_window(clock)
         assert clock.now < self._LONG_TIMEOUT
+        # Pinned rather than derived from the constant, because the value is
+        # the point: the window is insurance against a bad poll and a reason
+        # that has not been recorded yet, and a user watching a launch has to
+        # see it fail. See _MISSING_POD_GRACE_SECONDS.
+        assert instance._MISSING_POD_GRACE_SECONDS == 10
+        assert clock.now <= 11.5, clock.now
 
     def test_a_brief_gap_in_the_pod_list_is_tolerated(self, monkeypatch):
         """A pod missing for less than the grace window -- a stale list read
@@ -2606,7 +2623,7 @@ class TestWaitForPodsToScheduleGonePods:
         clock, raise_errors = self._setup(monkeypatch,
                                           pod_timeline=[(0.0, present),
                                                         (1.0, None),
-                                                        (11.0, back)])
+                                                        (6.0, back)])
 
         node = self._make_node('pod-0', cluster)
         self._wait(node)
@@ -2617,7 +2634,7 @@ class TestWaitForPodsToScheduleGonePods:
 
     def test_terminating_pod_fails_fast_with_its_condition(self, monkeypatch):
         """A pod that is still listed but carries a deletion timestamp is
-        just as gone -- and the condition its deleter left on it is the best
+        just as lost -- and the condition its deleter left on it is the best
         reason available, better than anything in the events."""
         cluster = 'my-cluster'
         present = self._make_pending_pod('pod-0', cluster)
@@ -2645,7 +2662,7 @@ class TestWaitForPodsToScheduleGonePods:
         # condition, so the helper's 'Last known state: Unknown.' says
         # nothing and has no business in a launch error.
         assert 'Last known state' not in message
-        assert 30.0 <= clock.now <= 32.0, clock.now
+        self._assert_failed_after_the_grace_window(clock)
 
     def test_a_queue_eviction_does_not_trip_the_node_pressure_hint(
             self, monkeypatch):
@@ -2725,7 +2742,7 @@ class TestWaitForPodsToScheduleGonePods:
         assert 'deleted by another controller or user' in message
         assert 'same pod name' in message
         assert 'sky logs --provision cn' in message
-        assert 30.0 <= clock.now <= 32.0, clock.now
+        self._assert_failed_after_the_grace_window(clock)
 
     def test_scheduling_error_lookup_survives_a_deleted_pod(self, monkeypatch):
         """Belt and braces for the timeout firing during the grace window:
@@ -2762,8 +2779,8 @@ class TestWaitForPodsToScheduleGonePods:
 
     def test_scheduling_error_lookup_still_raises_other_api_errors(
             self, monkeypatch):
-        """Only a 404 means the pod is gone; every other API error keeps its
-        existing behaviour (and its existing wrapper at the call site)."""
+        """Only a 404 means the pod was deleted; every other API error keeps
+        its existing behaviour (and its existing wrapper at the call site)."""
         core_api = mock.MagicMock()
         core_api.read_namespaced_pod.side_effect = _make_api_exception(
             500, 'Internal Server Error')
@@ -2810,7 +2827,7 @@ class TestWaitForPodsToScheduleGonePods:
         # as the reason it was deleted.
         assert 'last entry before it disappeared' in message
         assert 'FailedScheduling: 0/1 nodes are available' in message
-        assert 30.0 <= clock.now <= 32.0, clock.now
+        self._assert_failed_after_the_grace_window(clock)
 
     def test_a_kill_event_is_not_reported_as_the_cause(self, monkeypatch):
         """The kubelet emits 'Killing' for every pod deletion, including the
@@ -2838,14 +2855,14 @@ class TestWaitForPodsToScheduleGonePods:
         assert 'no cause could be derived from its events' in message
         assert 'deleted by another controller or user' in message
         assert 'Killing: Stopping container ray-node' in message
-        assert 30.0 <= clock.now <= 32.0, clock.now
+        self._assert_failed_after_the_grace_window(clock)
 
     def test_events_of_a_previous_pod_of_the_same_name_are_ignored(
             self, monkeypatch):
         """Pod names are a function of the cluster name and Kubernetes keeps
         events for an hour, so a relaunch inherits the events of the pod it
         replaces. The eviction that removed the previous incarnation is not
-        the reason this one is gone."""
+        the reason this one was deleted."""
         cluster = 'my-cluster'
         present = self._make_pending_pod('pod-0', cluster)
         clock, raise_errors = self._setup(
@@ -2870,10 +2887,10 @@ class TestWaitForPodsToScheduleGonePods:
 
         message = str(exc_info.value)
         assert not raise_errors.called
-        assert 'stopped by Kueue' not in message
+        assert 'Stopped by Kueue' not in message
         assert 'default/old' not in message
         assert 'no cause could be derived from its events' in message
-        assert 30.0 <= clock.now <= 32.0, clock.now
+        self._assert_failed_after_the_grace_window(clock)
 
     def test_the_grace_window_restarts_when_the_pod_comes_back(
             self, monkeypatch):
@@ -2887,8 +2904,8 @@ class TestWaitForPodsToScheduleGonePods:
         clock, raise_errors = self._setup(monkeypatch,
                                           pod_timeline=[(0.0, present),
                                                         (1.0, None),
-                                                        (11.0, back),
-                                                        (20.0, None)],
+                                                        (6.0, back),
+                                                        (12.0, None)],
                                           pod_events=[])
 
         logged = []
@@ -2904,8 +2921,9 @@ class TestWaitForPodsToScheduleGonePods:
             self._wait(node)
 
         assert not raise_errors.called
-        # 30s after the second disappearance at t=20, not after the first.
-        assert 50.0 <= clock.now <= 52.0, clock.now
+        # One grace window after the second disappearance at t=12, not after
+        # the first at t=1.
+        self._assert_failed_after_the_grace_window(clock, deleted_at=12.0)
         missing_lines = [
             line for line in logged if 'are missing or being deleted' in line
         ]
@@ -2940,14 +2958,14 @@ class TestWaitForPodsToScheduleGonePods:
         assert 'Disrupted: EvictionByEvictionAPI' in message
         assert 'Eviction API: evicting' in message
         assert 'no cause could be derived' not in message
-        assert 30.0 <= clock.now <= 32.0, clock.now
+        self._assert_failed_after_the_grace_window(clock)
 
     def test_a_failed_lookup_still_reports_the_deletion(self, monkeypatch):
         """Going after the cause needs the API server, which may be exactly
         what is broken. What the user needs to hear is that their pod was
         deleted, so a failure there must not escape in place of the launch
         failure -- there is no wrapper above this path to turn it back into
-        one."""
+        one -- and must not stop the launch failing either."""
         cluster = 'my-cluster'
         present = self._make_pending_pod('pod-0', cluster)
         clock, raise_errors = self._setup(monkeypatch,
@@ -2968,8 +2986,13 @@ class TestWaitForPodsToScheduleGonePods:
         assert not raise_errors.called
         assert 'pod-0' in message
         assert 'were deleted while SkyPilot was waiting' in message
+        # Nothing was read, so nothing is claimed about what the events hold:
+        # a broken lookup and a deletion nobody left a reason for send the
+        # user to different places.
         assert 'the cause could not be looked up' in message
-        assert 30.0 <= clock.now <= 32.0, clock.now
+        assert 'timed out' in message
+        assert 'no cause could be derived' not in message
+        self._assert_failed_after_the_grace_window(clock)
 
     def test_a_timeout_during_the_grace_window_reports_the_deletion(
             self, monkeypatch):
@@ -2981,11 +3004,11 @@ class TestWaitForPodsToScheduleGonePods:
         present = self._make_pending_pod('pod-0', cluster)
         clock, raise_errors = self._setup(
             monkeypatch,
-            pod_timeline=[(0.0, present), (880.0, None)],
+            pod_timeline=[(0.0, present), (895.0, None)],
             pod_events=[
                 self._make_event('Stopped',
                                  'Exceeded the PodsReady timeout default/wl',
-                                 at=875),
+                                 at=890),
             ],
             patch_raise_errors=False,
             read_pod_error=_make_api_exception(404, 'Not Found'))
@@ -2996,20 +3019,61 @@ class TestWaitForPodsToScheduleGonePods:
             self._wait(node)
 
         message = str(exc_info.value)
-        # The grace window (30s from t=880) had not elapsed at the deadline.
+        # The grace window (from t=895) had not elapsed at the deadline.
         assert 900.0 <= clock.now <= 901.0, clock.now
         assert 'pod-0' in message
         assert 'deleted while SkyPilot was waiting' in message
-        assert 'stopped by Kueue' in message
+        assert 'Stopped by Kueue' in message
         assert 'Exceeded the PodsReady timeout default/wl' in message
         assert 'An error occurred while trying to fetch the reason' not in (
             message)
         assert 'Timed out while waiting for nodes to start' not in message
 
+    def test_a_timeout_during_the_grace_window_keeps_the_condition(
+            self, monkeypatch):
+        """The same deadline, for a pod whose only explanation was on the
+        object. An API-initiated eviction writes a DisruptionTarget condition
+        and deletes the pod without leaving a pod event that names it, so if
+        the post-timeout lookup -- which can only get a 404 by then -- does
+        not get what the wait saw, the cause is lost in exactly the window
+        the cache exists for."""
+        cluster = 'my-cluster'
+        present = self._make_pending_pod('pod-0', cluster)
+        terminating = self._make_terminating_pod(
+            'pod-0',
+            cluster,
+            reason='EvictionByEvictionAPI',
+            message='Eviction API: evicting',
+            condition_type='DisruptionTarget')
+        clock, raise_errors = self._setup(monkeypatch,
+                                          pod_timeline=[(0.0, present),
+                                                        (895.0, terminating),
+                                                        (897.0, None)],
+                                          pod_events=[],
+                                          patch_raise_errors=False,
+                                          read_pod_error=_make_api_exception(
+                                              404, 'Not Found'))
+        assert raise_errors is None
+
+        node = self._make_node('pod-0', cluster)
+        with pytest.raises(config_lib.KubernetesError) as exc_info:
+            self._wait(node)
+
+        message = str(exc_info.value)
+        # The grace window (from t=895) had not elapsed at the deadline.
+        assert 900.0 <= clock.now <= 901.0, clock.now
+        assert 'pod-0' in message
+        assert 'deleted while SkyPilot was waiting' in message
+        assert 'Disrupted: EvictionByEvictionAPI' in message
+        assert 'Eviction API: evicting' in message
+        assert 'no cause could be derived' not in message
+        assert 'An error occurred while trying to fetch the reason' not in (
+            message)
+
     def test_scheduling_error_lookup_reports_a_terminating_pod(
             self, monkeypatch):
         """The same window, one moment earlier: the pod still reads back, but
-        with a deletion timestamp on it. It is just as gone -- it will never
+        with a deletion timestamp on it. It is just as lost -- it will never
         be scheduled -- and the condition on it says why, which 'Pod status:
         Pending' never would."""
         core_api = mock.MagicMock()
@@ -3040,102 +3104,208 @@ class TestWaitForPodsToScheduleGonePods:
         assert 'Timed out while waiting for nodes to start' not in message
 
 
-class TestReasonFromPodEvents:
-    """What a gone pod's own events are allowed to say about its deletion."""
+class TestGetPodDeletionReason:
+    """The one explanation for a deleted pod, whether or not its object still
+    exists.
 
-    _make_event = staticmethod(_make_gone_pod_event)
+    The scheduling wait and the post-timeout reason lookup both call this
+    function. The run-phase wait and the status refresh share its event
+    derivation (kubernetes_utils.reason_from_pod_events) from inside
+    _get_pod_missing_reason, keeping their own entry point and its
+    de-duplication gate.
+    """
 
-    def test_a_deletion_cause_outranks_a_newer_generic_event(self):
-        """The informative event is usually not the last one: the kubelet's
-        Killing follows whatever actually caused the deletion."""
-        events = [
-            self._make_event('Killing', 'Stopping container ray-node', at=12),
-            self._make_event('Stopped',
-                             'Exceeded the PodsReady timeout default/wl',
-                             at=10),
-        ]
-        assert instance._reason_from_pod_events(events) == (
-            'stopped by Kueue: Exceeded the PodsReady timeout default/wl')
+    _make_event = staticmethod(_make_deleted_pod_event)
 
-    def test_events_that_do_not_name_a_deletion_cause_do_not_count(self):
-        """Callers report whatever comes back as an identified cause, so the
-        scheduler's complaint and the kubelet's kill notice must not."""
-        assert instance._reason_from_pod_events([
-            self._make_event('FailedScheduling',
-                             '0/1 nodes are available: 1 Insufficient cpu.',
-                             type_='Warning',
-                             at=5),
-            self._make_event('Scheduled', 'Successfully assigned ns/p to n'),
-        ]) is None
-        assert instance._reason_from_pod_events([
-            self._make_event('Killing', 'Stopping container ray-node')
-        ]) is None
-        assert instance._reason_from_pod_events([]) is None
+    @staticmethod
+    def _setup(monkeypatch, pod_events):
+        events = mock.MagicMock(side_effect=lambda *a, **kw: list(pod_events))
+        monkeypatch.setattr(instance, '_get_pod_events', events)
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: mock.MagicMock())
+        gus = mock.MagicMock()
+        gus.get_cluster_events.return_value = []
+        monkeypatch.setattr(instance, 'global_user_state', gus)
+        return events, gus
 
-    def test_an_eviction_is_reported_without_naming_who_did_it(self):
-        """The kubelet is not the only thing that emits Evicted -- node
-        autoscalers emit it for every pod they drain -- so the message names
-        the actor, the lead-in does not."""
-        reason = instance._reason_from_pod_events([
-            self._make_event('Evicted',
-                             'The node was low on resource: ephemeral-storage',
-                             type_='Warning')
+    def test_an_informative_object_answers_without_the_events(
+            self, monkeypatch):
+        """A pod caught on its way out carries the condition its deleter
+        wrote, which is better than anything the events hold -- and reads
+        exactly like the run-phase failure for the same pod."""
+        events, gus = self._setup(monkeypatch, [
+            self._make_event('Killing', 'Stopping container ray-node', at=5),
         ])
-        assert reason == ('evicted: The node was low on resource: '
-                          'ephemeral-storage')
+        pod = TestWaitForPodsToScheduleDeletedPods._make_terminating_pod(
+            'pod-0',
+            'my-cluster',
+            reason='WorkloadEvictedDueToPodsReadyTimeout',
+            message='Exceeded the PodsReady timeout default/wl')
 
-    def test_events_from_before_the_launch_are_not_evidence(self):
-        """An event older than the launch describes whatever held the pod
-        name before it."""
-        old = [
+        assert instance._get_pod_deletion_reason(
+            context='ctx',
+            namespace='ns',
+            cluster_name='cn',
+            pod_name='pod-0',
+            pod=pod) == ('Preempted by Kueue: '
+                         'WorkloadEvictedDueToPodsReadyTimeout '
+                         '(Exceeded the PodsReady timeout default/wl)')
+        assert not events.called
+        # The full reason still reaches `sky logs --provision`, as it does
+        # when the run-phase wait finds the same pod.
+        assert gus.add_cluster_event.called
+
+    def test_an_uninformative_object_falls_through_to_the_events(
+            self, monkeypatch):
+        """A pod deleted while it was still Pending has no container statuses
+        and, unless its deleter left a condition, nothing on the object says
+        more than "it was deleted" -- which the caller knew already."""
+        self._setup(monkeypatch, [
+            self._make_event(
+                'Stopped', 'Exceeded the PodsReady timeout default/wl', at=10),
+        ])
+        pod = TestWaitForPodsToScheduleDeletedPods._make_pending_pod(
+            'pod-0', 'my-cluster')
+        pod.status.reason = None
+        pod.metadata.deletion_timestamp = _PODS_CREATED_AT
+
+        assert instance._get_pod_deletion_reason(
+            context='ctx',
+            namespace='ns',
+            cluster_name='cn',
+            pod_name='pod-0',
+            pod=pod) == ('Stopped by Kueue: Exceeded the PodsReady timeout '
+                         'default/wl')
+
+    def test_without_an_object_the_events_answer(self, monkeypatch):
+        self._setup(monkeypatch, [
+            self._make_event('Killing', 'Stopping container ray-node', at=12),
+            self._make_event(
+                'Stopped', 'Exceeded the PodsReady timeout default/wl', at=10),
+        ])
+        assert instance._get_pod_deletion_reason(
+            context='ctx', namespace='ns', cluster_name='cn',
+            pod_name='pod-0') == ('Stopped by Kueue: Exceeded the PodsReady '
+                                  'timeout default/wl')
+
+    def test_events_from_before_the_pod_are_not_evidence(self, monkeypatch):
+        """Pod names are a function of the cluster name and Kubernetes keeps
+        events for an hour, so what removed a previous pod of the same name is
+        still on file."""
+        self._setup(monkeypatch, [
             self._make_event('Stopped',
                              'Exceeded the PodsReady timeout default/old',
-                             at=-1800)
-        ]
-        assert instance._reason_from_pod_events(old, _PODS_CREATED_AT) is None
-        # Without a launch time to compare against, nothing is filtered.
-        assert instance._reason_from_pod_events(old) is not None
-        # Clock skew between this process and the API server that stamps the
-        # events must not throw away this launch's own events.
-        recent = [
-            self._make_event('Stopped',
-                             'Exceeded the PodsReady timeout default/wl',
-                             at=-5)
-        ]
-        assert instance._reason_from_pod_events(recent,
-                                                _PODS_CREATED_AT) is not None
+                             at=-1800),
+        ])
+        assert instance._get_pod_deletion_reason(context='ctx',
+                                                 namespace='ns',
+                                                 cluster_name='cn',
+                                                 pod_name='pod-0',
+                                                 since=_PODS_CREATED_AT) is None
 
-    def test_an_undated_event_is_not_assumed_to_be_stale(self):
-        event = self._make_event('Stopped', 'Exceeded the PodsReady timeout')
-        event.metadata.creation_timestamp = None
-        assert instance._reason_from_pod_events([event],
-                                                _PODS_CREATED_AT) is not None
-
-    def test_the_last_event_is_offered_as_context(self):
-        """Not as a cause -- see the tests above -- but it is still the last
-        thing anything said about the pod."""
-        assert instance._last_pod_event_context([
-            self._make_event('Scheduled',
-                             'Successfully assigned ns/p to n',
-                             at=6),
-            self._make_event('FailedScheduling',
-                             '0/1 nodes are available',
+    def test_without_a_cluster_nothing_is_recorded(self, monkeypatch):
+        """Callers that have no cluster to record the events against still
+        get the reason."""
+        _, gus = self._setup(monkeypatch, [
+            self._make_event('Evicted',
+                             'The node was low on resource: ephemeral-storage',
                              type_='Warning',
-                             at=5),
-        ]) == 'FailedScheduling: 0/1 nodes are available'
-        assert instance._last_pod_event_context(
-            [self._make_event('Killing', 'Stopping container ray-node',
-                              at=5)]) == 'Killing: Stopping container ray-node'
-        assert instance._last_pod_event_context([
-            self._make_event('Scheduled', 'Successfully assigned ns/p to n')
-        ]) is None
+                             at=10),
+        ])
+        assert instance._get_pod_deletion_reason(
+            context='ctx', namespace='ns', cluster_name=None,
+            pod_name='pod-0') == ('Evicted: The node was low on resource: '
+                                  'ephemeral-storage')
+        assert not gus.add_cluster_event.called
+
+    def test_a_failed_lookup_is_not_raised(self, monkeypatch):
+        """It runs on a launch that is already failing; the deletion is what
+        the user needs to hear, not a transport error from the lookup."""
+
+        def explode(*args, **kwargs):
+            del args, kwargs  # unused
+            raise urllib3.exceptions.ReadTimeoutError(None, '/api', 'timed out')
+
+        self._setup(monkeypatch, [])
+        monkeypatch.setattr(instance, '_get_pod_events', explode)
+        assert instance._get_pod_deletion_reason(
+            context='ctx', namespace='ns', cluster_name='cn',
+            pod_name='pod-0') is None
+
+
+class TestPodEventsSince:
+    """Where a pod's own event history starts, which bounds what may be read
+    as evidence about it."""
+
+    @staticmethod
+    def _make_node(name, created_at):
+        node = mock.MagicMock()
+        node.metadata.name = name
+        node.metadata.creation_timestamp = created_at
+        return node
+
+    def test_a_reused_pod_is_bounded_by_its_own_creation(self):
+        """Relaunching a cluster that is still INIT reuses the pod an earlier
+        request created, and that pod's events -- older than this launch --
+        are exactly the ones that explain it."""
+        created_at = _PODS_CREATED_AT - datetime.timedelta(seconds=1800)
+        since = instance._pod_events_since(
+            [self._make_node('pod-0', created_at)], _PODS_CREATED_AT)
+        assert since == {'pod-0': created_at}
+
+    def test_an_unstamped_object_falls_back_to_the_launch(self):
+        since = instance._pod_events_since([self._make_node('pod-0', None)],
+                                           _PODS_CREATED_AT)
+        assert since == {'pod-0': _PODS_CREATED_AT}
+
+    def test_a_naive_timestamp_is_read_as_utc(self):
+        naive = datetime.datetime(2025, 1, 1)
+        since = instance._pod_events_since([self._make_node('pod-0', naive)],
+                                           None)
+        assert since == {'pod-0': _PODS_CREATED_AT}
+
+
+class TestPodFailureReasonFromEvents:
+    """The status-refresh path's event fallback, which now recognises every
+    deletion cause rather than only a kubelet eviction."""
+
+    _make_event = staticmethod(_make_deleted_pod_event)
+
+    def test_a_queue_eviction_is_reported(self, monkeypatch):
+        monkeypatch.setattr(
+            instance, '_get_pod_events', lambda *a, **kw: [
+                self._make_event('Stopped',
+                                 'Exceeded the PodsReady timeout default/wl')
+            ])
+        assert instance._get_pod_failure_reason_from_events(
+            'ctx', 'ns',
+            'pod-0') == ('Stopped by Kueue: Exceeded the PodsReady timeout '
+                         'default/wl')
+
+    def test_a_kubelet_eviction_reads_as_it_always_did(self, monkeypatch):
+        monkeypatch.setattr(
+            instance, '_get_pod_events', lambda *a, **kw: [
+                self._make_event('Evicted',
+                                 'The node was low on resource: memory.',
+                                 type_='Warning')
+            ])
+        assert instance._get_pod_failure_reason_from_events(
+            'ctx', 'ns',
+            'pod-0') == 'Evicted: The node was low on resource: memory.'
+
+    def test_a_pod_with_nothing_to_say_reports_nothing(self, monkeypatch):
+        monkeypatch.setattr(
+            instance, '_get_pod_events', lambda *a, **kw:
+            [self._make_event('Scheduled', 'Successfully assigned ns/p to n')])
+        assert instance._get_pod_failure_reason_from_events(
+            'ctx', 'ns', 'pod-0') is None
 
 
 class TestGetPodMissingReason:
     """The reason a status refresh and _wait_for_pods_to_run report for a pod
     that is no longer listed."""
 
-    _make_event = staticmethod(_make_gone_pod_event)
+    _make_event = staticmethod(_make_deleted_pod_event)
 
     @staticmethod
     def _setup(monkeypatch, pod_events, duplicate_events=False):
@@ -3159,7 +3329,7 @@ class TestGetPodMissingReason:
         ])
         assert instance._get_pod_missing_reason(
             'ctx', 'ns', 'cn', 'pod-0',
-            True) == ('stopped by Kueue: Exceeded the PodsReady timeout '
+            True) == ('Stopped by Kueue: Exceeded the PodsReady timeout '
                       'default/wl')
 
     def test_events_that_were_all_seen_before_report_nothing(self, monkeypatch):
@@ -3911,14 +4081,14 @@ class TestEventLastObserved:
                          id='not-a-datetime'),
         ])
     def test_precedence(self, fields, expected):
-        assert instance._event_last_observed(
+        assert kubernetes_utils.event_last_observed(
             _make_pod_event(**fields)) == expected
 
     def test_naive_timestamp_is_read_as_utc(self):
         """Not as local time, which would shift it by the host's offset and
         misorder it against a tz-aware sibling event."""
         naive = datetime.datetime(2026, 1, 1, 0, 0, 0)
-        assert instance._event_last_observed(
+        assert kubernetes_utils.event_last_observed(
             _make_pod_event(last_timestamp=naive)) == naive.replace(
                 tzinfo=datetime.timezone.utc).timestamp()
 
