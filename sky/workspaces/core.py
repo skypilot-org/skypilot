@@ -664,6 +664,10 @@ def get_config() -> Dict[str, Any]:
 def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """Updates the entire SkyPilot configuration.
 
+    Writes the config and updates workspace permission policies. Does not
+    run `sky check`; `sky.workspaces.server.schedule_update_config`
+    schedules that as a follow-up request.
+
     Args:
         config: The new configuration to save.
 
@@ -766,14 +770,12 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
             'indicate another SkyPilot process is currently updating the '
             'configuration. Please try again.') from e
 
-    # Validate the configuration by running sky check
-    try:
-        sky_check.check(quiet=True)
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Configuration saved but '
-                       f'validation check failed: {e}')
-        # Don't fail the update if the check fails, just warn
-
+    # The `sky check` that refreshes the enabled-clouds cache for the new
+    # config is scheduled as a separate request by
+    # sky/workspaces/server.py::schedule_update_config, gated on this
+    # request succeeding, so the save does not wait on probing every cloud.
+    # Callers that schedule this function as a request should go through
+    # that helper to keep the follow-up check.
     return config
 
 
