@@ -49,6 +49,31 @@ logger = logging.getLogger(__name__)
 _tenancy_prefix: Optional[str] = None
 
 
+def _get_availability_domain_prefix(region: str) -> Optional[str]:
+    """The tenancy-specific prefix of availability domain names.
+
+    OCI names availability domains `<prefix>:<AD>`, e.g. `bxtG:PHX-AD-1`,
+    and the prefix is specific to the tenancy that owns the resources. That
+    is the tenancy of the compartment instances are launched in, which with
+    cross-tenancy policies is not necessarily the `tenancy` of the profile,
+    so the prefix is resolved from the launch compartment.
+    """
+    profile = oci_utils.oci_config.get_profile()
+    try:
+        identity_client = oci_adaptor.get_identity_client(region=region,
+                                                          profile=profile)
+        ad_list = identity_client.list_availability_domains(
+            compartment_id=query_helper.find_compartment(region)).data
+    except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
+            oci_adaptor.oci.exceptions.InvalidConfig) as e:
+        # This should only happen in testing where oci config is
+        # monkeypatched. In real use, if the OCI config is not
+        # valid, the 'sky check' would fail (OCI disabled).
+        logger.debug(f'It is OK goes here when testing: {str(e)}')
+        return None
+    return str(ad_list[0].name).split(':', maxsplit=1)[0]
+
+
 @registry.CLOUD_REGISTRY.register
 class OCI(clouds.Cloud):
     """OCI: Oracle Cloud Infrastructure """
@@ -314,25 +339,7 @@ class OCI(clouds.Cloud):
 
         global _tenancy_prefix
         if _tenancy_prefix is None:
-            try:
-                identity_client = oci_adaptor.get_identity_client(
-                    region=region.name,
-                    profile=oci_utils.oci_config.get_profile())
-
-                ad_list = identity_client.list_availability_domains(
-                    compartment_id=oci_adaptor.get_oci_config(
-                        profile=oci_utils.oci_config.get_profile())
-                    ['tenancy']).data
-
-                first_ad = ad_list[0]
-                _tenancy_prefix = str(first_ad.name).split(':', maxsplit=1)[0]
-            except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
-                    oci_adaptor.oci.exceptions.InvalidConfig) as e:
-                # This should only happen in testing where oci config is
-                # monkeypatched. In real use, if the OCI config is not
-                # valid, the 'sky check' would fail (OCI disabled).
-                logger.debug(f'It is OK goes here when testing: {str(e)}')
-                pass
+            _tenancy_prefix = _get_availability_domain_prefix(region.name)
 
         # Disk performane: Volume Performance Units.
         vpu = self.get_vpu_from_disktier(

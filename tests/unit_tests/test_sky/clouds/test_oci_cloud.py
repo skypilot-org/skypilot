@@ -174,3 +174,46 @@ def test_config_schema_accepts_oci_config_profile_per_region():
                 }
             }
         }, schemas.get_config_schema())
+
+
+# ---------------------------------------------------------------------------
+# Availability-domain prefix
+# ---------------------------------------------------------------------------
+
+_COMPARTMENT = 'ocid1.compartment.oc1..aaaaaaaalaunchhere'
+
+
+def test_availability_domain_prefix_comes_from_launch_compartment(monkeypatch):
+    pytest.importorskip('oci')
+    monkeypatch.setattr(oci_utils.oci_config, 'get_profile', lambda: 'TOKEN')
+    # `query_helper` is an instance, so patch with a plain callable.
+    monkeypatch.setattr(oci_cloud.query_helper, 'find_compartment',
+                        lambda region: _COMPARTMENT)
+    client = mock.MagicMock()
+    ad = mock.MagicMock()
+    ad.name = 'Uocm:PHX-AD-1'
+    client.list_availability_domains.return_value.data = [ad]
+    monkeypatch.setattr(oci_adaptor,
+                        'get_identity_client',
+                        lambda region=None, profile='DEFAULT': client)
+
+    # pylint: disable=protected-access
+    prefix = oci_cloud._get_availability_domain_prefix('us-phoenix-1')
+
+    assert prefix == 'Uocm'
+    # The prefix is tenancy-specific and must match the tenancy that owns the
+    # launch compartment, not the profile's home tenancy.
+    client.list_availability_domains.assert_called_once_with(
+        compartment_id=_COMPARTMENT)
+
+
+def test_availability_domain_prefix_is_none_without_valid_config(monkeypatch):
+    oci_sdk = pytest.importorskip('oci')
+    monkeypatch.setattr(oci_utils.oci_config, 'get_profile', lambda: 'TOKEN')
+
+    def _raise(region=None, profile='DEFAULT'):
+        raise oci_sdk.exceptions.ConfigFileNotFound('no config')
+
+    monkeypatch.setattr(oci_adaptor, 'get_identity_client', _raise)
+    # pylint: disable=protected-access
+    assert oci_cloud._get_availability_domain_prefix('us-phoenix-1') is None
