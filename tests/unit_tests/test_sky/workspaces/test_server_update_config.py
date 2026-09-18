@@ -32,9 +32,8 @@ async def test_update_config_schedules_save_then_gated_check():
     body = payloads.UpdateConfigBody(config={'workspaces': {'default': {}}})
     body.env_vars = {'SKYPILOT_USER_ID': 'user-1', 'SKYPILOT_USER': 'User One'}
 
-    with mock.patch(
-            'sky.workspaces.server.executor.schedule_request_async',
-            new_callable=mock.AsyncMock) as mock_schedule:
+    with mock.patch('sky.workspaces.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
         await workspaces_server.update_config(request, body)
 
     assert mock_schedule.await_count == 2
@@ -76,9 +75,8 @@ async def test_update_config_without_auth_user():
     body = payloads.UpdateConfigBody(config={})
     body.env_vars = {'SKYPILOT_USER_ID': 'user-2', 'SKYPILOT_USER': 'u2'}
 
-    with mock.patch(
-            'sky.workspaces.server.executor.schedule_request_async',
-            new_callable=mock.AsyncMock) as mock_schedule:
+    with mock.patch('sky.workspaces.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
         await workspaces_server.update_config(request, body)
 
     assert mock_schedule.await_count == 2
