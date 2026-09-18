@@ -14,7 +14,7 @@ History:
    VCN for SkyServe.
 """
 import os
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from sky import sky_logging
 from sky import skypilot_config
@@ -184,6 +184,34 @@ class OCIConfig:
             region=region,
             keys=('oci_config_profile',),
             default_value=default_profile)
+
+    @classmethod
+    def get_profiles_in_use(cls) -> List[Tuple[Optional[str], str]]:
+        """Every `~/.oci/config` profile the SkyPilot config names.
+
+        Returns `(region, profile)` pairs: the default profile first, with
+        region None, then one entry per profile that a region under
+        `region_configs` names and no earlier entry covers. Provisioning in
+        a region authenticates as that region's profile, so whatever acts
+        for the user as a whole (`sky check`, the credential files copied
+        to a cluster) has to cover all of them. Callers hand both values to
+        the adaptor, which resolves a profile named `DEFAULT` through
+        `get_profile(region)`.
+        """
+        profiles: List[Tuple[Optional[str], str]] = [(None, cls.get_profile())]
+        region_configs = skypilot_config.get_nested(('oci', 'region_configs'),
+                                                    default_value=None)
+        if not isinstance(region_configs, dict):
+            return profiles
+        seen = {profiles[0][1]}
+        for region in region_configs:
+            if region == 'default':
+                continue
+            profile = cls.get_profile(region)
+            if profile not in seen:
+                seen.add(profile)
+                profiles.append((region, profile))
+        return profiles
 
     @classmethod
     def get_default_image_os(cls) -> str:

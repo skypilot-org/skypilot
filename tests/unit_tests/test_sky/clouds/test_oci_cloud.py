@@ -42,28 +42,48 @@ def _session_token_config():
     }
 
 
+def _use_region_configs(monkeypatch, region_configs):
+    """Serves `oci.region_configs` from a dict instead of ~/.sky/config.yaml."""
+    config = config_utils.Config({'oci': {'region_configs': region_configs}})
+    monkeypatch.setattr(
+        oci_utils.skypilot_config, 'get_effective_region_config',
+        functools.partial(config_utils.get_cloud_config_value_from_dict,
+                          config))
+    monkeypatch.setattr(
+        oci_utils.skypilot_config,
+        'get_nested',
+        lambda keys, default_value, override_configs=None: config.get_nested(
+            keys, default_value, override_configs))
+
+
 @pytest.fixture(name='oci_credentials')
 def fixture_oci_credentials(tmp_path, monkeypatch):
     """Points the OCI cloud at a config file that exists and stubs the SDK.
 
-    Returns a function that installs a given profile config + identity
-    client and yields the mocked identity client.
+    The default profile is `TOKEN`. Returns a function that installs that
+    profile's loaded config + identity client, plus `(config, client)` pairs
+    for further profiles passed by name, and yields the default profile's
+    identity client.
     """
     config_file = tmp_path / 'config'
     config_file.write_text('[TOKEN]\n')
     monkeypatch.setattr(oci_adaptor, 'get_config_file',
                         lambda: str(config_file))
-    monkeypatch.setattr(oci_utils.oci_config,
-                        'get_profile',
-                        lambda region=None: 'TOKEN')
+    _use_region_configs(monkeypatch,
+                        {'default': {
+                            'oci_config_profile': 'TOKEN'
+                        }})
 
-    def install(config, client):
-        monkeypatch.setattr(oci_adaptor,
-                            'get_oci_config',
-                            lambda region=None, profile='DEFAULT': config)
-        monkeypatch.setattr(oci_adaptor,
-                            'get_identity_client',
-                            lambda region=None, profile='DEFAULT': client)
+    def install(config, client, **others):
+        by_profile = {'TOKEN': (config, client), **others}
+        monkeypatch.setattr(
+            oci_adaptor,
+            'get_oci_config',
+            lambda region=None, profile='DEFAULT': by_profile[profile][0])
+        monkeypatch.setattr(
+            oci_adaptor,
+            'get_identity_client',
+            lambda region=None, profile='DEFAULT': by_profile[profile][1])
         return client
 
     return install
@@ -140,30 +160,239 @@ def test_check_credentials_reports_missing_or_expired_token(oci_credentials):
     client.list_availability_domains.assert_not_called()
 
 
-def test_credential_file_mounts_include_session_token(monkeypatch):
-    monkeypatch.setattr(oci_s3, 'use_s3_api', lambda: False)
-    monkeypatch.setattr(oci_adaptor, 'get_config_file', lambda: '~/.oci/config')
-    monkeypatch.setattr(
-        oci_adaptor,
-        'get_oci_config',
-        lambda region=None, profile='DEFAULT': _session_token_config())
-    mounts = oci_cloud.OCI().get_credential_file_mounts()
-    for path in ('~/.oci/config', '~/.oci/sessions/TOKEN/oci_api_key.pem',
-                 '~/.oci/sessions/TOKEN/token'):
-        assert mounts[path] == path
+_REGIONAL_PROFILES = {
+    'default': {
+        'oci_config_profile': 'TOKEN'
+    },
+    'us-ashburn-1': {
+        'oci_config_profile': 'ASHBURN'
+    },
+    # Uses the default profile; nothing extra to probe.
+    'us-phoenix-1': {
+        'compartment_ocid': 'ocid1.compartment.oc1..aaaa'
+    },
+}
 
 
-def test_credential_file_mounts_for_api_key_profile_unchanged(monkeypatch):
+def test_check_credentials_probes_every_regional_profile(
+        oci_credentials, monkeypatch):
+    pytest.importorskip('oci')
+    ashburn = mock.MagicMock()
+    client = oci_credentials(_session_token_config(),
+                             mock.MagicMock(),
+                             ASHBURN=(_api_key_config(), ashburn))
+    _use_region_configs(monkeypatch, _REGIONAL_PROFILES)
+    # pylint: disable=protected-access
+    ok, msg = oci_cloud.OCI._check_credentials()
+    assert ok, msg
+    # Each profile is probed once, the way its auth type calls for.
+    client.list_availability_domains.assert_called_once_with(
+        compartment_id=_TENANCY)
+    client.get_user.assert_not_called()
+    ashburn.get_user.assert_called_once_with(_USER)
+
+
+def test_check_credentials_names_the_failing_regional_profile(
+        oci_credentials, monkeypatch):
+    oci_sdk = pytest.importorskip('oci')
+    ashburn = mock.MagicMock()
+    ashburn.get_user.side_effect = oci_sdk.exceptions.ServiceError(
+        status=401, code='NotAuthenticated', headers={}, message='nope')
+    client = oci_credentials(_session_token_config(),
+                             mock.MagicMock(),
+                             ASHBURN=(_api_key_config(), ashburn))
+    _use_region_configs(monkeypatch, _REGIONAL_PROFILES)
+    # pylint: disable=protected-access
+    ok, msg = oci_cloud.OCI._check_credentials()
+    assert not ok
+    assert msg.startswith(
+        "OCI profile 'ASHBURN' (the profile for region 'us-ashburn-1' in ")
+    assert 'OCI credential is not correctly set' in msg
+    assert 'NotAuthenticated' in msg
+    # The default profile was fine and was probed first.
+    client.list_availability_domains.assert_called_once()
+
+
+def test_check_credentials_names_the_failing_default_profile(
+        oci_credentials, monkeypatch):
+    oci_sdk = pytest.importorskip('oci')
+    client = mock.MagicMock()
+    client.list_availability_domains.side_effect = (
+        oci_sdk.exceptions.ServiceError(status=401,
+                                        code='NotAuthenticated',
+                                        headers={},
+                                        message='expired'))
+    ashburn = mock.MagicMock()
+    oci_credentials(_session_token_config(),
+                    client,
+                    ASHBURN=(_api_key_config(), ashburn))
+    _use_region_configs(monkeypatch, _REGIONAL_PROFILES)
+    # pylint: disable=protected-access
+    ok, msg = oci_cloud.OCI._check_credentials()
+    assert not ok
+    assert msg.startswith("OCI profile 'TOKEN' (the default profile in ")
+    assert 'oci session authenticate --profile-name TOKEN' in msg
+    ashburn.get_user.assert_not_called()
+
+
+def test_check_credentials_reports_a_regional_profile_missing_from_config(
+        oci_credentials, monkeypatch):
+    oci_sdk = pytest.importorskip('oci')
+    client = oci_credentials(_session_token_config(), mock.MagicMock())
+    _use_region_configs(monkeypatch, _REGIONAL_PROFILES)
+
+    def _get_oci_config(region=None, profile='DEFAULT'):
+        if profile == 'ASHBURN':
+            raise oci_sdk.exceptions.ProfileNotFound(
+                'Profile ASHBURN not found in config file')
+        return _session_token_config()
+
+    monkeypatch.setattr(oci_adaptor, 'get_oci_config', _get_oci_config)
+    # pylint: disable=protected-access
+    ok, msg = oci_cloud.OCI._check_credentials()
+    assert not ok
+    assert msg.startswith("OCI profile 'ASHBURN' (")
+    assert 'ProfileNotFound' in msg
+    client.list_availability_domains.assert_called_once()
+
+
+@pytest.fixture(name='credential_mounts')
+def fixture_credential_mounts(tmp_path, monkeypatch):
+    """Serves `~/.oci/config` profiles from dicts for the credential mounts.
+
+    Returns `install(region_configs, **profiles)`, where `region_configs` is
+    the `oci.region_configs` section and each keyword maps a profile name
+    to its loaded config; profiles not passed are missing from the config
+    file. `install` returns the path of the (empty) OCI config file.
+    """
     monkeypatch.setattr(oci_s3, 'use_s3_api', lambda: False)
-    monkeypatch.setattr(oci_adaptor, 'get_config_file', lambda: '~/.oci/config')
-    monkeypatch.setattr(
-        oci_adaptor,
-        'get_oci_config',
-        lambda region=None, profile='DEFAULT': _api_key_config())
+    config_file = tmp_path / 'config'
+    config_file.write_text('')
+    monkeypatch.setattr(oci_adaptor, 'get_config_file',
+                        lambda: str(config_file))
+    # No ~/.sky/config.yaml to copy along.
+    monkeypatch.setattr(oci_utils.oci_config, 'get_sky_user_config_file',
+                        lambda: str(tmp_path / 'no-config.yaml'))
+
+    def install(region_configs, **profiles):
+        _use_region_configs(monkeypatch, region_configs)
+
+        def _get_oci_config(region=None, profile='DEFAULT'):
+            if profile not in profiles:
+                raise oci_adaptor.oci.exceptions.ProfileNotFound(
+                    f'Profile {profile} not found in config file')
+            return profiles[profile]
+
+        monkeypatch.setattr(oci_adaptor, 'get_oci_config', _get_oci_config)
+        return str(config_file)
+
+    return install
+
+
+def _profile_config(tmp_path, name, session_token, create=True):
+    """A loaded profile whose key (and token) files live under tmp_path/name."""
+    files = {'key_file': tmp_path / name / 'oci_api_key.pem'}
+    if session_token:
+        files[oci_adaptor.SECURITY_TOKEN_FILE_KEY] = tmp_path / name / 'token'
+    config = {'tenancy': _TENANCY, 'region': 'us-phoenix-1'}
+    for key, path in files.items():
+        if create:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('')
+        config[key] = str(path)
+    return config
+
+
+def _mounted(*paths):
+    return {path: path for path in paths}
+
+
+def test_credential_file_mounts_include_session_token(tmp_path,
+                                                      credential_mounts):
+    token = _profile_config(tmp_path, 'TOKEN', session_token=True)
+    config_file = credential_mounts(
+        {'default': {
+            'oci_config_profile': 'TOKEN'
+        }}, TOKEN=token)
     mounts = oci_cloud.OCI().get_credential_file_mounts()
-    assert '~/.oci/config' in mounts
-    assert '~/.oci/oci_api_key.pem' in mounts
-    assert not any('token' in path for path in mounts)
+    assert mounts == _mounted(config_file, token['key_file'],
+                              token['security_token_file'])
+
+
+def test_credential_file_mounts_for_api_key_profile_unchanged(
+        tmp_path, credential_mounts):
+    api_key = _profile_config(tmp_path, 'DEFAULT', session_token=False)
+    config_file = credential_mounts({}, DEFAULT=api_key)
+    mounts = oci_cloud.OCI().get_credential_file_mounts()
+    assert mounts == _mounted(config_file, api_key['key_file'])
+
+
+def test_credential_file_mounts_cover_every_regional_profile(
+        tmp_path, credential_mounts):
+    token = _profile_config(tmp_path, 'TOKEN', session_token=True)
+    ashburn = _profile_config(tmp_path, 'ASHBURN', session_token=True)
+    config_file = credential_mounts(_REGIONAL_PROFILES,
+                                    TOKEN=token,
+                                    ASHBURN=ashburn)
+    mounts = oci_cloud.OCI().get_credential_file_mounts()
+    # Provisioning from the cluster resolves the region's profile the same
+    # way, so its key and token must be there too, at the same paths the
+    # copied ~/.oci/config points at.
+    assert mounts == _mounted(config_file, token['key_file'],
+                              token['security_token_file'], ashburn['key_file'],
+                              ashburn['security_token_file'])
+
+
+def test_credential_file_mounts_list_a_shared_file_once(tmp_path,
+                                                        credential_mounts):
+    token = _profile_config(tmp_path, 'TOKEN', session_token=True)
+    # An API-key profile reusing the default profile's key file.
+    ashburn = {
+        'user': _USER,
+        'tenancy': _TENANCY,
+        'key_file': token['key_file'],
+    }
+    config_file = credential_mounts(_REGIONAL_PROFILES,
+                                    TOKEN=token,
+                                    ASHBURN=ashburn)
+    mounts = oci_cloud.OCI().get_credential_file_mounts()
+    assert mounts == _mounted(config_file, token['key_file'],
+                              token['security_token_file'])
+
+
+def test_credential_file_mounts_skip_missing_regional_files(
+        tmp_path, credential_mounts):
+    token = _profile_config(tmp_path, 'TOKEN', session_token=True)
+    ashburn = _profile_config(tmp_path,
+                              'ASHBURN',
+                              session_token=True,
+                              create=False)
+    config_file = credential_mounts(_REGIONAL_PROFILES,
+                                    TOKEN=token,
+                                    ASHBURN=ashburn)
+    with mock.patch.object(oci_cloud, 'logger') as logger:
+        mounts = oci_cloud.OCI().get_credential_file_mounts()
+    assert mounts == _mounted(config_file, token['key_file'],
+                              token['security_token_file'])
+    warnings = [call.args[0] for call in logger.warning.call_args_list]
+    assert [ashburn['key_file'] in w for w in warnings] == [True, False]
+    assert [ashburn['security_token_file'] in w for w in warnings
+           ] == [False, True]
+    assert all("'ASHBURN'" in w and 'does not exist' in w for w in warnings)
+
+
+def test_credential_file_mounts_skip_a_profile_missing_from_config(
+        tmp_path, credential_mounts):
+    token = _profile_config(tmp_path, 'TOKEN', session_token=True)
+    # `ASHBURN` is named in ~/.sky/config.yaml but not in ~/.oci/config.
+    config_file = credential_mounts(_REGIONAL_PROFILES, TOKEN=token)
+    with mock.patch.object(oci_cloud, 'logger') as logger:
+        mounts = oci_cloud.OCI().get_credential_file_mounts()
+    assert mounts == _mounted(config_file, token['key_file'],
+                              token['security_token_file'])
+    warning = logger.warning.call_args.args[0]
+    assert warning.startswith(f"OCI profile 'ASHBURN' is not defined in "
+                              f'{config_file}')
 
 
 def test_config_schema_accepts_oci_config_profile_per_region():
@@ -185,16 +414,6 @@ def test_config_schema_accepts_oci_config_profile_per_region():
 # ---------------------------------------------------------------------------
 # Profile selection
 # ---------------------------------------------------------------------------
-
-
-def _use_region_configs(monkeypatch, region_configs):
-    """Serves `oci.region_configs` from a dict instead of ~/.sky/config.yaml."""
-    monkeypatch.setattr(
-        oci_utils.skypilot_config, 'get_effective_region_config',
-        functools.partial(config_utils.get_cloud_config_value_from_dict,
-                          {'oci': {
-                              'region_configs': region_configs
-                          }}))
 
 
 def test_profile_is_default_without_config(monkeypatch):
@@ -238,6 +457,54 @@ def test_region_profile_without_default_falls_back_to_default_profile(
     assert oci_utils.oci_config.get_profile('us-ashburn-1') == 'ASHBURN'
     assert oci_utils.oci_config.get_profile('us-phoenix-1') == 'DEFAULT'
     assert oci_utils.oci_config.get_profile() == 'DEFAULT'
+
+
+def test_profiles_in_use_is_just_the_default_without_regional_profiles(
+        monkeypatch):
+    _use_region_configs(monkeypatch, {})
+    assert oci_utils.oci_config.get_profiles_in_use() == [(None, 'DEFAULT')]
+    _use_region_configs(
+        monkeypatch, {
+            'default': {
+                'oci_config_profile': 'TOKEN'
+            },
+            'us-phoenix-1': {
+                'compartment_ocid': 'ocid1.compartment.oc1..aaaa'
+            },
+        })
+    assert oci_utils.oci_config.get_profiles_in_use() == [(None, 'TOKEN')]
+
+
+def test_profiles_in_use_lists_each_regional_profile_once(monkeypatch):
+    _use_region_configs(
+        monkeypatch,
+        {
+            'default': {
+                'oci_config_profile': 'TOKEN'
+            },
+            'us-ashburn-1': {
+                'oci_config_profile': 'ASHBURN'
+            },
+            # Same as the default: already covered.
+            'us-phoenix-1': {
+                'oci_config_profile': 'TOKEN'
+            },
+            # Same as us-ashburn-1: listed once.
+            'us-chicago-1': {
+                'oci_config_profile': 'ASHBURN'
+            },
+            # The literal `DEFAULT` profile differs from the configured
+            # default and is kept with its region, which the adaptor needs
+            # to resolve it.
+            'eu-frankfurt-1': {
+                'oci_config_profile': 'DEFAULT'
+            },
+        })
+    assert oci_utils.oci_config.get_profiles_in_use() == [
+        (None, 'TOKEN'),
+        ('us-ashburn-1', 'ASHBURN'),
+        ('eu-frankfurt-1', 'DEFAULT'),
+    ]
 
 
 # ---------------------------------------------------------------------------
