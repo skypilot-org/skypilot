@@ -59,32 +59,27 @@ class QueryHelper:
     @classmethod
     @debug_enabled(logger)
     def query_instances_by_tags(cls, tag_filters, region):
+        """Live instances in the launch compartment carrying `tag_filters`.
 
-        where_clause_tags = ''
-        for tag_key in tag_filters:
-            if where_clause_tags != '':
-                where_clause_tags += ' && '
+        Lists the compartment directly instead of going through Resource
+        Search: search only covers the caller's home tenancy, so it comes
+        back empty when the compartment belongs to another tenancy reached
+        through cross-tenancy policies (a freshly launched head node is
+        then never found and the cluster is left behind), and its index
+        also lags behind new instances.
+        """
+        core_client = oci_adaptor.get_core_client(
+            region, oci_utils.oci_config.get_profile())
+        instances = oci_adaptor.oci.pagination.list_call_get_all_results(
+            core_client.list_instances,
+            compartment_id=cls.find_compartment(region)).data
 
-            tag_value = tag_filters[tag_key]
-            where_clause_tags += (f'(freeformTags.key = \'{tag_key}\''
-                                  f' && freeformTags.value = \'{tag_value}\')')
-
-        qv_str = (f'query instance resources where {where_clause_tags}'
-                  f' && (lifecycleState != \'TERMINATED\''
-                  f' && lifecycleState != \'TERMINATING\')')
-
-        qv = oci_adaptor.oci.resource_search.models.StructuredSearchDetails(
-            query=qv_str,
-            type='Structured',
-            matching_context_type=oci_adaptor.oci.resource_search.models.
-            SearchDetails.MATCHING_CONTEXT_TYPE_NONE,
-        )
-
-        list_instances_response = oci_adaptor.get_search_client(
-            region, oci_utils.oci_config.get_profile()).search_resources(qv)
-        result_set = list_instances_response.data.items
-
-        return result_set
+        return [
+            inst for inst in instances if inst.lifecycle_state not in (
+                'TERMINATED', 'TERMINATING') and all(
+                    (inst.freeform_tags or {}).get(key) == value
+                    for key, value in tag_filters.items())
+        ]
 
     @classmethod
     @debug_enabled(logger)
@@ -102,7 +97,7 @@ class QueryHelper:
         insts = cls.query_instances_by_tags(tag_filters, region)
         fail_count = 0
         for inst in insts:
-            inst_id = inst.identifier
+            inst_id = inst.id
             logger.debug(f'Terminating instance {inst_id}')
 
             try:
@@ -575,7 +570,7 @@ class QueryHelper:
             vnic = cls.get_instance_primary_vnic(
                 region=region,
                 inst_info={
-                    'inst_id': inst.identifier,
+                    'inst_id': inst.id,
                     'ad': inst.availability_domain,
                     'compartment': inst.compartment_id,
                 })
@@ -647,7 +642,7 @@ class QueryHelper:
         vnic = cls.get_instance_primary_vnic(
             region=region,
             inst_info={
-                'inst_id': inst.identifier,
+                'inst_id': inst.id,
                 'ad': inst.availability_domain,
                 'compartment': inst.compartment_id,
             })
