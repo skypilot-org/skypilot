@@ -13,6 +13,7 @@ from unittest import mock
 
 import paramiko
 import pytest
+import sqlalchemy
 
 from sky import exceptions
 from sky import skypilot_config
@@ -20,6 +21,7 @@ from sky.utils import auth_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import interactive_utils
+from sky.utils.db import kv_cache
 
 
 def test_docker_runner_passes_proxy_command_to_inner_hop() -> None:
@@ -356,6 +358,14 @@ class TestSSHCommandRunnerInteractiveAuth:
 
 class TestSlurmCommandRunnerUserImpersonation:
 
+    @pytest.fixture(autouse=True)
+    def isolated_home_cache(self, tmp_path, monkeypatch):
+        engine = sqlalchemy.create_engine(f'sqlite:///{tmp_path}/cache.db')
+        kv_cache.Base.metadata.create_all(engine)
+        monkeypatch.setattr(kv_cache._db_manager, '_engine', engine)
+        yield
+        engine.dispose()
+
     @staticmethod
     def _login_runner(slurm_user, ssh_user='root'):
         return command_runner.SlurmLoginNodeCommandRunner(
@@ -487,6 +497,83 @@ class TestSlurmCommandRunnerUserImpersonation:
             assert runner.get_remote_home_dir() == '/home/alice'
         assert shlex.split(
             run.call_args.args[1]) == ['getent', 'passwd', 'alice']
+
+    def test_home_cache_shared_between_runners_and_expires(self):
+        with mock.patch.object(
+                command_runner.SSHCommandRunner,
+                'run',
+                return_value=(0, 'alice:x:1001:1001::/home/alice:/bin/bash',
+                              '')) as run, mock.patch.object(
+                                  command_runner.time,
+                                  'time',
+                                  return_value=1000) as now:
+            assert self._login_runner(
+                'alice').get_remote_home_dir() == '/home/alice'
+            now.return_value = 1029
+            assert self._login_runner(
+                'alice').get_remote_home_dir() == '/home/alice'
+            assert run.call_count == 1
+            now.return_value = 1030
+            run.return_value = (0, 'alice:x:1001:1001::/new/alice:/bin/bash',
+                                '')
+            assert self._login_runner(
+                'alice').get_remote_home_dir() == '/new/alice'
+            assert run.call_count == 2
+
+    @pytest.mark.parametrize('changes', [
+        {
+            'slurm_user': 'bob'
+        },
+        {
+            'node': ('other.example.com', 22)
+        },
+        {
+            'node': ('login.example.com', 2222)
+        },
+        {
+            'ssh_user': 'ubuntu'
+        },
+        {
+            'ssh_proxy_command': 'ssh gateway -W %h:%p'
+        },
+        {
+            'ssh_proxy_jump': 'gateway'
+        },
+    ])
+    def test_home_cache_isolates_connection_and_user(self, changes):
+        kwargs = dict(node=('login.example.com', 22),
+                      ssh_user='root',
+                      ssh_private_key=None,
+                      slurm_user='alice')
+        with mock.patch.object(
+                command_runner.SSHCommandRunner,
+                'run',
+                return_value=(0, 'alice:x:1001:1001::/home/alice:/bin/bash',
+                              '')) as run:
+            assert self._login_runner(
+                'alice').get_remote_home_dir() == '/home/alice'
+            kwargs.update(changes)
+            user = kwargs['slurm_user']
+            run.return_value = (0, f'{user}:x:1001:1001::/other/home:/bin/bash',
+                                '')
+            runner = command_runner.SlurmLoginNodeCommandRunner(**kwargs)
+            assert runner.get_remote_home_dir() == '/other/home'
+            assert run.call_count == 2
+
+    @pytest.mark.parametrize('result', [
+        (2, '', ''),
+        (0, 'alice:x:1001:1001::relative:/bin/bash', ''),
+        (0, 'bob:x:1001:1001::/home/bob:/bin/bash', ''),
+    ])
+    def test_home_cache_does_not_store_failed_lookups(self, result):
+        runner = self._login_runner('alice')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               return_value=result) as run:
+            for _ in range(2):
+                with pytest.raises(ValueError, match='Cannot resolve home'):
+                    runner.get_remote_home_dir()
+            assert run.call_count == 2
 
     @pytest.mark.parametrize('container_args,home', [
         (None, '/home/alice/.sky_clusters/test'),

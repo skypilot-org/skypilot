@@ -38,6 +38,7 @@ from sky.utils import infra_utils
 from sky.utils import interactive_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+from sky.utils.db import kv_cache
 
 logger = sky_logging.init_logger(__name__)
 
@@ -47,6 +48,7 @@ _INTERACTIVE_AUTH_LOCK = threading.Lock()
 
 # Pattern to extract home directory from command output
 _HOME_DIR_PATTERN = re.compile(r'SKYPILOT_HOME_DIR: ([^\s\n]+)')
+_SLURM_HOME_DIR_CACHE_TTL_SECONDS = 30
 
 # Largest command, in bytes, to inline into what a runner sends rather than
 # writing to a file and rsyncing it. The command runs via /bin/sh on the remote,
@@ -2067,6 +2069,13 @@ class SlurmLoginNodeCommandRunner(SSHCommandRunner):
     def get_remote_home_dir(self) -> str:
         if self.slurm_user is None:
             return super().get_remote_home_dir()
+        identity = (self.ip, self.port, self.ssh_user, self.slurm_user,
+                    self._ssh_proxy_command, self._ssh_proxy_jump)
+        identity_hash = hashlib.sha256(repr(identity).encode()).hexdigest()
+        cache_key = f'slurm:home_dir:{identity_hash}'
+        cached_home = kv_cache.get_cache_entry(cache_key)
+        if cached_home is not None:
+            return cached_home
         rc, stdout, stderr = SSHCommandRunner.run(
             self,
             shlex.join(['getent', 'passwd', self.slurm_user]),
@@ -2078,6 +2087,9 @@ class SlurmLoginNodeCommandRunner(SSHCommandRunner):
                 fields = line.split(':')
                 if (len(fields) == 7 and fields[0] == self.slurm_user and
                         os.path.isabs(fields[5])):
+                    kv_cache.add_or_update_cache_entry(
+                        cache_key, fields[5],
+                        time.time() + _SLURM_HOME_DIR_CACHE_TTL_SECONDS)
                     return fields[5]
         raise ValueError(f'Cannot resolve home directory for '
                          f'{self.slurm_user!r}: {stdout}\n{stderr}')
