@@ -2331,6 +2331,57 @@ class TestGetEnv:
                 'SCRATCH': '/fsx',
             }
 
+    @pytest.mark.parametrize('env_failure', [None, 'returncode', 'exception'])
+    @pytest.mark.parametrize('home_failure', [False, True])
+    def test_best_effort_submit_user_env(self, env_failure, home_failure,
+                                         caplog, monkeypatch):
+        monkeypatch.setattr(slurm.logger, 'handlers', [caplog.handler])
+        client = slurm.SlurmClient('host', 22, 'login', slurm_user='alice')
+        with mock.patch.object(client, '_run_slurm_cmd') as run, \
+                mock.patch.object(client, 'get_remote_home_dir') as home:
+            run.return_value = (0,
+                                'HOME=/home/login\nUSER=login\nSCRATCH=/fsx\n',
+                                '')
+            if env_failure == 'returncode':
+                run.return_value = (1, 'HOME=/home/login\n', 'env denied')
+            elif env_failure == 'exception':
+                run.side_effect = OSError('env connection failed')
+            home.return_value = '/home/alice'
+            if home_failure:
+                home.side_effect = ValueError('home lookup failed')
+
+            env = client.get_env()
+
+        expected = {'USER': 'alice', 'LOGNAME': 'alice'}
+        if env_failure is None:
+            expected['SCRATCH'] = '/fsx'
+        if not home_failure:
+            expected['HOME'] = '/home/alice'
+        assert env == expected
+        home.assert_called_once_with()
+        assert ('Failed to fetch remote env from host'
+                in caplog.text) == (env_failure is not None)
+        if env_failure == 'returncode':
+            assert 'exit code 1' in caplog.text
+            assert 'env denied' in caplog.text
+        elif env_failure == 'exception':
+            assert 'env connection failed' in caplog.text
+        assert ('omitting HOME from path expansion'
+                in caplog.text) == home_failure
+        if home_failure:
+            assert "Slurm user 'alice'" in caplog.text
+            assert 'home lookup failed' in caplog.text
+
+    def test_command_exception_without_submit_user(self, caplog, monkeypatch):
+        monkeypatch.setattr(slurm.logger, 'handlers', [caplog.handler])
+        client = slurm.SlurmClient('host', 22, 'login')
+        with mock.patch.object(client, '_run_slurm_cmd',
+                               side_effect=OSError('connection failed')), \
+                mock.patch.object(client, 'get_remote_home_dir') as home:
+            assert client.get_env() == {}
+        home.assert_not_called()
+        assert 'Failed to fetch remote env from host' in caplog.text
+
     def test_parses_env_output(self):
         client = mock.MagicMock(spec=slurm.SlurmClient)
         client.slurm_user = None
@@ -2353,6 +2404,7 @@ class TestGetEnv:
     def test_command_failure_returns_empty(self):
         client = mock.MagicMock(spec=slurm.SlurmClient)
         client.slurm_user = None
+        client.ssh_host = 'host'
         client._run_slurm_cmd.return_value = (1, '', 'Connection refused')
         env = slurm.SlurmClient.get_env(client)
         assert env == {}
