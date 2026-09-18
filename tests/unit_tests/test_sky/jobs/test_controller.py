@@ -28,7 +28,6 @@ from sky import task as task_lib
 from sky.jobs import constants as jobs_constants
 from sky.jobs import controller as controller_module
 from sky.jobs import job_group_networking
-from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.jobs.controller import ControllerManager
@@ -2531,29 +2530,24 @@ class TestRunJobLoopTransientDbErrors:
             managed_job_state, 'get_status_async',
             AsyncMock(
                 return_value=managed_job_state.ManagedJobStatus.SUCCEEDED))
-        monkeypatch.setattr(scheduler, 'job_done_async', AsyncMock())
+        monkeypatch.setattr(managed_job_state, 'finalize_job_done_async',
+                            AsyncMock())
         return manager
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize('step', ['cleanup', 'get_status'])
+    @pytest.mark.parametrize('step', ['cleanup', 'finalize'])
     async def test_transient_db_error_is_retried(self, manager, sleeps, step):
-        if step == 'cleanup':
-            target = manager._cleanup
-            target.side_effect = [self._db_error(), self._db_error(), None]
-        else:
-            target = managed_job_state.get_status_async
-            target.side_effect = [
-                self._db_error(),
-                self._db_error(),
-                managed_job_state.ManagedJobStatus.SUCCEEDED,
-            ]
+        target = (manager._cleanup if step == 'cleanup' else
+                  managed_job_state.finalize_job_done_async)
+        target.side_effect = [self._db_error(), self._db_error(), None]
 
         await manager.run_job_loop(1, 'job.log')
 
         assert target.await_count == 3
         assert len(sleeps) == 2
         managed_job_state.set_failed_async.assert_not_awaited()
-        scheduler.job_done_async.assert_awaited_once_with(1, idempotent=True)
+        managed_job_state.finalize_job_done_async.assert_awaited_with(
+            1, cancelling=False, callback_func=None)
         assert 1 not in manager.job_tasks
 
     @pytest.mark.asyncio
@@ -2572,8 +2566,6 @@ class TestRunJobLoopTransientDbErrors:
     @pytest.mark.asyncio
     async def test_cleanup_non_db_error_fails_job(self, manager, sleeps):
         manager._cleanup.side_effect = RuntimeError('boom')
-        managed_job_state.get_status_async.return_value = (
-            managed_job_state.ManagedJobStatus.FAILED_CONTROLLER)
 
         await manager.run_job_loop(1, 'job.log')
 
@@ -2585,14 +2577,13 @@ class TestRunJobLoopTransientDbErrors:
             managed_job_state.ManagedJobStatus.FAILED_CONTROLLER)
         assert kwargs['override_terminal'] is True
         assert kwargs['failure_reason'].startswith('Failed to clean up')
-        scheduler.job_done_async.assert_awaited_once_with(1, idempotent=True)
+        managed_job_state.finalize_job_done_async.assert_awaited_once_with(
+            1, cancelling=False, callback_func=None)
 
     @pytest.mark.asyncio
     async def test_cleanup_db_error_past_budget_fails_job(
             self, manager, sleeps):
         manager._cleanup.side_effect = self._db_error()
-        managed_job_state.get_status_async.return_value = (
-            managed_job_state.ManagedJobStatus.FAILED_CONTROLLER)
 
         await manager.run_job_loop(1, 'job.log')
 
@@ -2608,7 +2599,8 @@ class TestRunJobLoopTransientDbErrors:
         kwargs = managed_job_state.set_failed_async.await_args.kwargs
         assert kwargs['override_terminal'] is True
         assert 'OperationalError' in kwargs['failure_reason']
-        scheduler.job_done_async.assert_awaited_once_with(1, idempotent=True)
+        managed_job_state.finalize_job_done_async.assert_awaited_once_with(
+            1, cancelling=False, callback_func=None)
 
     @pytest.mark.asyncio
     async def test_cancelled_job_ends_cancelled_after_cleanup_retry(
@@ -2616,17 +2608,15 @@ class TestRunJobLoopTransientDbErrors:
         controller_module.JobController.return_value.run.side_effect = (
             asyncio.CancelledError())
         manager._cleanup.side_effect = [self._db_error(), None]
-        managed_job_state.get_status_async.return_value = (
-            managed_job_state.ManagedJobStatus.CANCELLED)
 
         with pytest.raises(asyncio.CancelledError):
             await manager.run_job_loop(1, 'job.log')
 
         assert manager._cleanup.await_count == 2
         managed_job_state.set_cancelling_async.assert_awaited_once()
-        managed_job_state.set_cancelled_async.assert_awaited_once()
         managed_job_state.set_failed_async.assert_not_awaited()
-        scheduler.job_done_async.assert_awaited_once_with(1, idempotent=True)
+        managed_job_state.finalize_job_done_async.assert_awaited_once_with(
+            1, cancelling=True, callback_func=None)
 
 
 class TestCancelDynamicMembers:
