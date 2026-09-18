@@ -1630,12 +1630,17 @@ def test_no_gauge_defaults_to_all_multiprocess_mode():
 # ── nothing may block the loop that serves /metrics ─────────────────
 
 
-def _slow_prologue(started, release, result=((), ())):
-    """A federation refresh that blocks until released."""
+def _slow_prologue(started, release, result=((), ()), timeout=30):
+    """A federation refresh that blocks until released.
+
+    `timeout` bounds the block so a test whose release lands after the
+    measurement -- the inline control arm below cannot set it until the
+    fetch it is blocking returns -- costs that long and not the default.
+    """
 
     def prologue():
         started.set()
-        release.wait(30)
+        release.wait(timeout)
         return (list(result[0]), list(result[1]))
 
     return prologue
@@ -1666,10 +1671,10 @@ def test_federation_refresh_runs_off_the_event_loop():
     assert ran_on, 'refresh never ran'
     assert ran_on[0] is not threading.main_thread(), (
         'the refresh ran on the thread driving the event loop')
-    assert targets.resolve()[0] == ['ctx-a']
+    assert targets.snapshot()[0] == ['ctx-a']
 
 
-def test_federation_resolve_does_not_wait_for_a_slow_refresh():
+def test_federation_scrape_does_not_wait_for_a_slow_refresh():
     """A refresh slower than the scrape interval must still leave the routes
     federating something.
 
@@ -1684,29 +1689,27 @@ def test_federation_resolve_does_not_wait_for_a_slow_refresh():
     started = threading.Event()
     release = threading.Event()
 
-    # Prime a snapshot, the way server start-up does. Read _snapshot rather
-    # than calling resolve(): resolve() deliberately asks for a refresh, so
-    # using it here would start a real one and hold the single-flight guard.
+    # Prime a snapshot, the way server start-up does.
     with patch.object(targets, '_prologue', lambda: (['ctx-a'], [])):
         targets.start_refresh_if_idle().join(timeout=10)
-        assert targets._snapshot == (['ctx-a'], [])
+    assert targets.snapshot() == (['ctx-a'], [])
 
     with patch.object(targets, '_prologue',
                       _slow_prologue(started, release, (['ctx-b'], []))):
-        # This resolve kicks the slow refresh; it must not wait for it.
+        # A scrape asks for the slow refresh and must not wait for it.
         begin = time.monotonic()
-        assert targets.resolve() == (['ctx-a'], [])
+        targets.start_refresh_if_idle()
         assert _wait_until(started.is_set), 'refresh never started'
 
         for _ in range(3):
-            assert targets.resolve() == ([
+            assert targets.snapshot() == ([
                 'ctx-a'
             ], []), ('a scrape was served an empty list while a refresh was '
                      'in flight')
         elapsed = time.monotonic() - begin
-        assert elapsed < 5.0, f'resolve waited {elapsed:.1f}s on the refresh'
+        assert elapsed < 5.0, f'the scrape path waited {elapsed:.1f}s'
         release.set()
-        assert _wait_until(lambda: targets._snapshot == (['ctx-b'], []))
+        assert _wait_until(lambda: targets.snapshot() == (['ctx-b'], []))
 
 
 def test_federation_refresh_is_single_flight():
@@ -1733,13 +1736,12 @@ def test_federation_refresh_is_single_flight():
 
         assert targets.start_refresh_if_idle() is None, (
             'a second refresh was started')
-        targets.resolve()
         assert len(calls) == 1
 
         release.set()
         first.join(timeout=10)
         assert len(calls) == 1
-    assert targets.resolve() == (['fresh'], [])
+    assert targets.snapshot() == (['fresh'], [])
 
 
 def test_federation_refresh_failure_keeps_the_previous_snapshot():
@@ -1758,18 +1760,15 @@ def test_federation_refresh_failure_keeps_the_previous_snapshot():
 
     with patch.object(targets, '_prologue', failing_prologue):
         targets.start_refresh_if_idle().join(timeout=10)
-        # Checked before any resolve(), which would start a refresh of its
-        # own and set the flag again under us.
         assert not targets._refreshing, 'the guard was not released'
-        assert targets._snapshot == (['ctx-a'],
-                                     []), ('lost the previous snapshot')
         # A scrape landing now is still served the previous list.
-        assert targets.resolve() == (['ctx-a'], [])
+        assert targets.snapshot() == (['ctx-a'],
+                                      []), ('lost the previous snapshot')
 
     # And a later good refresh still gets through.
     with patch.object(targets, '_prologue', lambda: (['ctx-b'], [])):
         assert _wait_until(lambda: targets.start_refresh_if_idle() is not None)
-        assert _wait_until(lambda: targets._snapshot == (['ctx-b'], []))
+        assert _wait_until(lambda: targets.snapshot() == (['ctx-b'], []))
 
 
 def test_federation_refresh_publishes_its_freshness(monkeypatch):
@@ -1821,7 +1820,8 @@ def test_federation_refresh_reload_is_visible_on_the_loop(
         thread.join(timeout=30)
         assert not thread.is_alive(), 'refresh did not finish'
 
-        # Read back from this thread, the way the routes do after resolve().
+        # Read back from this thread, the way the routes do after the
+        # refresh publishes.
         namespace, _, _ = metrics_utils._get_prometheus_target()
         assert namespace == 'sentinel-ns', (
             f'the loop thread sees {namespace!r}, not the config the refresh '
@@ -1851,16 +1851,17 @@ def test_gpu_metrics_prologue_does_not_hold_off_the_metrics_scrape(
     block_seconds = 3.0
     started = threading.Event()
     release = threading.Event()
-    prologue = _slow_prologue(started, release)
+    prologue = _slow_prologue(started, release, timeout=block_seconds)
 
     targets = metrics._FEDERATION_TARGETS
     monkeypatch.setattr(targets, '_prologue', prologue)
     if not prologue_off_loop:
 
-        def inline_resolve():
+        def inline_snapshot():
             return targets._prologue()
 
-        monkeypatch.setattr(targets, 'resolve', inline_resolve)
+        monkeypatch.setattr(targets, 'snapshot', inline_snapshot)
+        monkeypatch.setattr(targets, 'start_refresh_if_idle', lambda: None)
 
     def fetch(port, path, timeout):
         with urllib.request.urlopen(f'http://127.0.0.1:{port}{path}',

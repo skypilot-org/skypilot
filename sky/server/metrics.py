@@ -1261,18 +1261,18 @@ class _FederationTargets:
     kubeconfig, inline. Exactly the outage those metrics are needed for is
     the one that makes that work slow.
 
-    So a scrape never does it. ``resolve()`` returns the last snapshot
-    immediately and asks for a background refresh; the refresh publishes to
-    the cache for a later scrape. This is the shape the collectors already
-    use (see ResilientCollector) and it is what keeps a slow resolve from
-    costing anything: merely moving the work to a thread the handler awaits
-    would leave the loop free, but every scrape would still wait the full
-    resolve, and a resolve slower than the scrape timeout (45s against a 60s
-    interval for both federation routes) would then be cancelled by
-    Prometheus on every single scrape -- each one starting a fresh attempt
-    that completes just in time to be thrown away, so the routes would
-    federate nothing at all for as long as it lasted, with the cached
-    snapshot never reached because two scrapes never overlap.
+    So a scrape never does it. A scrape reads ``snapshot()`` and asks for a
+    background refresh with ``start_refresh_if_idle()``; the refresh
+    publishes to the cache for a later scrape. This is the shape the
+    collectors already use (see ResilientCollector) and it is what keeps a
+    slow refresh from costing anything: merely moving the work to a thread
+    the handler awaits would leave the loop free, but every scrape would
+    still wait the full refresh, and one slower than the scrape timeout (45s
+    against a 60s interval for both federation routes) would then be
+    cancelled by Prometheus on every single scrape -- each one starting a
+    fresh attempt that completes just in time to be thrown away, so the
+    routes would federate nothing at all for as long as it lasted, with the
+    cached snapshot never reached because two scrapes never overlap.
 
     At most one refresh runs at a time, so a refresh hung on an unreachable
     database cannot accumulate one stuck thread per scrape and starve the
@@ -1338,20 +1338,31 @@ class _FederationTargets:
         A failure keeps the previous snapshot rather than publishing an empty
         one -- every cluster's series vanishing at once is worse than a stale
         list, and the freshness gauge reports the staleness either way.
+
+        The guard is released in a ``finally``, which is load-bearing rather
+        than tidiness: every path that could leave it set leaves it set for
+        the life of the process, and that is the exact state this class
+        exists to avoid -- every later scrape serving a frozen list and
+        starting nothing. A ``finally`` covers the paths an ``except
+        Exception`` does not, namely a BaseException out of the prologue and
+        a logging call that raises while handling one.
         """
         try:
             snapshot = self._prologue()
         except Exception:  # pylint: disable=broad-except
             logger.exception('Failed to refresh the federation targets; '
                              'serving the previous cluster list.')
+            return
+        else:
+            with self._lock:
+                self._snapshot = snapshot
+                # Stamped and published together, so a reader cannot see a
+                # new list with the old timestamp or the reverse.
+                metrics_utils.SKY_APISERVER_FEDERATION_TARGETS_LAST_SUCCESS_TIMESTAMP_SECONDS.set(  # pylint: disable=line-too-long
+                    time.time())
+        finally:
             with self._lock:
                 self._refreshing = False
-            return
-        with self._lock:
-            self._snapshot = snapshot
-            self._refreshing = False
-        metrics_utils.SKY_APISERVER_FEDERATION_TARGETS_LAST_SUCCESS_TIMESTAMP_SECONDS.set(  # pylint: disable=line-too-long
-            time.time())
 
     def start_refresh_if_idle(self) -> Optional[threading.Thread]:
         """Starts a refresh unless one is already running.
@@ -1367,20 +1378,28 @@ class _FederationTargets:
         thread = threading.Thread(target=self._run_refresh,
                                   name='metrics-federation-targets',
                                   daemon=True)
-        thread.start()
+        try:
+            thread.start()
+        except RuntimeError:
+            # Cannot start a thread (the process is out of them). Give the
+            # guard back: holding it would mean no refresh is ever attempted
+            # again, long after the pressure passed.
+            logger.exception('Could not start the federation target '
+                             'refresh; serving the previous cluster list.')
+            with self._lock:
+                self._refreshing = False
+            return None
         return thread
 
-    def resolve(self) -> Tuple[List[str], List[str]]:
-        """(remote contexts, Slurm clusters) for this scrape.
+    def snapshot(self) -> Tuple[List[str], List[str]]:
+        """The cluster list a scrape should federate. A pure read.
 
-        Never blocks and never waits on a refresh: it returns the snapshot it
-        has -- empty before the first refresh completes -- and leaves the
-        refresh to run behind it.
+        Deliberately does not ask for a refresh: a reader that also mutates
+        needs a warning at every call site, and the callers pair this with an
+        explicit ``start_refresh_if_idle()`` instead.
         """
         with self._lock:
-            snapshot = self._snapshot
-        self.start_refresh_if_idle()
-        return snapshot
+            return self._snapshot
 
 
 _FEDERATION_TARGETS = _FederationTargets()
@@ -1508,10 +1527,11 @@ def _handle_federation_result(context: str, route: str, result: object,
 @metrics_app.get('/gpu-metrics')
 async def gpu_metrics() -> fastapi.Response:
     """Gets the GPU metrics from multiple external k8s clusters"""
-    # Served from the last refresh, which runs off this loop; see
-    # _FederationTargets for why a scrape may neither do this work nor wait
-    # for it.
-    remote_contexts, slurm_clusters = _FEDERATION_TARGETS.resolve()
+    # Served from the last refresh and asking for the next one, both off
+    # this loop; see _FederationTargets for why a scrape may neither do that
+    # work nor wait for it.
+    remote_contexts, slurm_clusters = _FEDERATION_TARGETS.snapshot()
+    _FEDERATION_TARGETS.start_refresh_if_idle()
     all_metrics: List[str] = []
     # One stats record per context, filled in by get_metrics_for_context even
     # if the task is later cancelled by the wait_for timeout — so the timeout
@@ -1574,7 +1594,8 @@ async def endpoint_metrics() -> fastapi.Response:
     """
     # Same off-loop refresh as /gpu-metrics, sharing its snapshot; the Slurm
     # half of it does not apply to this route.
-    remote_contexts, _ = _FEDERATION_TARGETS.resolve()
+    remote_contexts, _ = _FEDERATION_TARGETS.snapshot()
+    _FEDERATION_TARGETS.start_refresh_if_idle()
     all_metrics: List[str] = []
     stats_list = [metrics_utils.FederationStats() for _ in remote_contexts]
     tasks = [
