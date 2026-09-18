@@ -340,7 +340,7 @@ there. Target-user login profiles are not sourced. Configure a shared
 ``workdir``/``tmpdir`` explicitly when needed; ``$HOME``, ``$USER``, and
 ``$LOGNAME`` resolve to the target account, while other expansion variables
 come from the SSH account's environment. For example, set
-``workdir: /training/$USER/autodata`` and follow the policy's comment to swap
+``workdir: /training/$USER/sky-workdir`` and follow the policy's comment to swap
 the matching path prefix. Load workload modules in the task's ``setup`` or
 ``run`` commands.
 

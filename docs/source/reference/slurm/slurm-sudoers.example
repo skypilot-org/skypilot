@@ -1,8 +1,8 @@
 # SSH account skypilot submitting as any member of Unix group skyusers.
 # Shared base is each account's home directory, the default workdir.
 # For a custom base, set workdir to a path containing $USER, for example
-# /training/$USER/autodata, and replace /home/[a-z_][a-z0-9_-]* below with
-# /training/[a-z_][a-z0-9_-]*/autodata.
+# /training/$USER/sky-workdir, and replace /home/[a-z_][a-z0-9_-]* below with
+# /training/[a-z_][a-z0-9_-]*/sky-workdir.
 # Requires sudo >= 1.9.10. Adjust executable locations and the group name.
 Defaults:skypilot secure_path=/opt/slurm/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 Defaults:skypilot !requiretty
