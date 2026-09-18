@@ -199,6 +199,7 @@ async def update_config(request: fastapi.Request,
     """
     await schedule_update_config(
         request_id=request.state.request_id,
+        request_name=request_names.RequestName.WORKSPACES_UPDATE_CONFIG,
         update_config_body=update_config_body,
         auth_user=request.state.auth_user,
     )
