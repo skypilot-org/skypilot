@@ -274,6 +274,27 @@ def _patch_launch_environment(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('raise_on_failure', [True, False])
+async def test_cloud_name_collision_never_cleans_up_or_retries(
+        monkeypatch: pytest.MonkeyPatch, raise_on_failure: bool) -> None:
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    collision = exceptions.ClusterNameCollisionError('Already owned')
+    executor._await_launch_request = mock.AsyncMock(side_effect=collision)
+
+    if raise_on_failure:
+        with pytest.raises(exceptions.ProvisionPrechecksError) as error:
+            await executor._launch(raise_on_failure=True)
+        assert error.value.reasons == [collision]
+    else:
+        assert await executor._launch(raise_on_failure=False) is None
+
+    patches.sdk_launch.assert_called_once()
+    executor._cleanup_cluster.assert_not_called()
+    patches.set_backoff_pending.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_launch_parks_and_reattaches_without_teardown(monkeypatch):
     """A parked launch request releases the slot and re-attaches on resume."""
     executor = _make_launch_executor()

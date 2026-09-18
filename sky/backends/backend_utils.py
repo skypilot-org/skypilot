@@ -1,5 +1,6 @@
 """Util constants/functions for the backends."""
 import asyncio
+import contextlib
 from datetime import datetime
 import enum
 import fnmatch
@@ -40,6 +41,7 @@ from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.backends import cluster_name as cluster_name_lib
 from sky.jobs import utils as managed_job_utils
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
@@ -763,6 +765,9 @@ def write_cluster_config(
     volume_mounts: Optional[List['volume_utils.VolumeMount']] = None,
     cloud_specific_failover_overrides: Optional[Dict[str, Any]] = None,
     extra_template_variables: Optional[Dict[str, Any]] = None,
+    name_reservation: Optional[contextlib.ExitStack] = None,
+    cloud_user_identity: Optional[List[str]] = None,
+    cluster_name_on_cloud: Optional[str] = None,
 ) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
@@ -792,8 +797,14 @@ def write_cluster_config(
     cloud = to_provision.cloud
     assert cloud is not None, to_provision
 
-    cluster_name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        cluster_name, max_length=cloud.max_cluster_name_length())
+    yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
+    old_yaml_content = global_user_state.get_cluster_yaml_str(yaml_path)
+    if old_yaml_content is not None and keep_launch_fields_in_existing_config:
+        cluster_name_on_cloud = yaml_utils.safe_load(
+            old_yaml_content)['cluster_name']
+    if cluster_name_on_cloud is None:
+        cluster_name_on_cloud = common_utils.make_cluster_name_on_cloud(
+            cluster_name, max_length=cloud.max_cluster_name_length())
 
     # This can raise a ResourcesUnavailableError when:
     #  * The region/zones requested does not appear in the catalog. It can be
@@ -919,8 +930,6 @@ def write_cluster_config(
     private_key_path, _ = auth_utils.get_or_generate_keys()
     auth_config = {'ssh_private_key': private_key_path}
     region_name = resources_vars.get('region')
-
-    yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
 
     # Retrieve the ssh_proxy_command for the given cloud / region.
     ssh_proxy_command_config = skypilot_config.get_effective_region_config(
@@ -1364,10 +1373,24 @@ def write_cluster_config(
             logger.warning(f'Failed to calculate config_hash: {e}')
             logger.debug('Full exception:', exc_info=e)
         return config_dict
+    with open(tmp_yaml_path, 'r', encoding='utf-8') as f:
+        reservation_yaml = f.read()
+    if old_yaml_content is not None and keep_launch_fields_in_existing_config:
+        reservation_yaml = _replace_yaml_dicts(
+            reservation_yaml, old_yaml_content,
+            _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
+            _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
+    if name_reservation is None:
+        raise ValueError('Provisioning must reserve the cloud name until the '
+                         'initial cluster handle is committed.')
+    name_reservation.enter_context(
+        cluster_name_lib.reserve(cluster_name,
+                                 yaml_utils.safe_load(reservation_yaml), cloud,
+                                 cloud_user_identity))
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
 
-    # Restore the old yaml content for backward compatibility.
-    old_yaml_content = global_user_state.get_cluster_yaml_str(yaml_path)
+    # Auth setup must precede restoration: it can overwrite persisted SSH
+    # users, keys and proxy commands that existing clusters still require.
     if old_yaml_content is not None and keep_launch_fields_in_existing_config:
         with open(tmp_yaml_path, 'r', encoding='utf-8') as f:
             new_yaml_content = f.read()
