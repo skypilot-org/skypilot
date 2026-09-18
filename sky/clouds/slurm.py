@@ -931,14 +931,24 @@ class Slurm(clouds.Cloud):
         # thread-local, so the worker threads below would resolve `workdir`
         # against the wrong workspace.
         probes: List[Tuple[str, Dict[str, Any], Optional[str]]] = []
+        # A cluster whose inputs cannot be resolved gets its result here and
+        # is not probed, so one bad entry does not take down the others.
+        prep_failures: Dict[str, str] = {}
         for cluster in existing_allowed_clusters:
-            workdir = skypilot_config.get_effective_region_config(
-                cloud='slurm',
-                region=cluster,
-                keys=('workdir',),
-                default_value=None)
-            # Retrieve the config options for a given SlurmctldHost name alias.
-            probes.append((cluster, ssh_config.lookup(cluster), workdir))
+            try:
+                workdir = skypilot_config.get_effective_region_config(
+                    cloud='slurm',
+                    region=cluster,
+                    keys=('workdir',),
+                    default_value=None)
+                # Retrieve the config options for a given SlurmctldHost name
+                # alias.
+                ssh_config_dict = ssh_config.lookup(cluster)
+            except Exception as e:  # pylint: disable=broad-except
+                prep_failures[cluster] = (f'disabled. Credential check failed: '
+                                          f'{common_utils.format_exception(e)}')
+                continue
+            probes.append((cluster, ssh_config_dict, workdir))
 
         # Each probe opens SSH sessions to a login node. Run them in parallel
         # with a bounded pool so a tenant with many clusters does not open
@@ -947,10 +957,17 @@ class Slurm(clouds.Cloud):
             cls._check_one_cluster,
             probes,
             num_threads=cls._CREDENTIAL_CHECK_MAX_PARALLELISM)
+        probe_results = {
+            cluster: result for (cluster, _, _), result in zip(probes, results)
+        }
 
         ctx2text: Dict[str, str] = {}
         success = False
-        for (cluster, _, _), (enabled, text) in zip(probes, results):
+        for cluster in existing_allowed_clusters:
+            if cluster in prep_failures:
+                ctx2text[cluster] = prep_failures[cluster]
+                continue
+            enabled, text = probe_results[cluster]
             ctx2text[cluster] = text
             success = success or enabled
         return success, ctx2text
