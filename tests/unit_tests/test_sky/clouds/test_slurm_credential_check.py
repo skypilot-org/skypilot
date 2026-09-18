@@ -356,6 +356,24 @@ def test_workdir_resolution_failure_isolated(mock_client_class, mock_ssh, *_):
     mock_client_class.assert_not_called()
 
 
+@patch('sky.clouds.slurm.skypilot_config.get_effective_region_config',
+       return_value=None)
+@patch('sky.clouds.slurm.Slurm.existing_allowed_clusters',
+       return_value=['alpha', 'beta', 'alpha'])
+@patch('sky.clouds.slurm.slurm_utils.get_slurm_ssh_config')
+@patch('sky.clouds.slurm.slurm.SlurmClient')
+def test_duplicate_cluster_names_probed_once(mock_client_class, mock_ssh, *_):
+    mock_ssh.return_value = _ssh_config()
+    mock_client_class.side_effect = lambda *a, **k: _client()
+
+    success, ctx2text = slurm_cloud.Slurm._check_compute_credentials()
+
+    assert success
+    assert list(ctx2text) == ['alpha', 'beta']
+    hosts = sorted(c.args[0] for c in mock_client_class.call_args_list)
+    assert hosts == ['alpha.example.com', 'beta.example.com']
+
+
 class TestSlurmClientInfoAndEnv:
     """SlurmClient.info_and_env batches sinfo and env into one session."""
 

@@ -930,6 +930,10 @@ class Slurm(clouds.Cloud):
         # SSH config here, in the calling thread. The active workspace is
         # thread-local, so the worker threads below would resolve `workdir`
         # against the wrong workspace.
+        # `allowed_clusters` is a free-form list and may repeat a name. Probe
+        # each cluster once and report it once, in first-seen order.
+        existing_allowed_clusters = list(
+            dict.fromkeys(existing_allowed_clusters))
         probes: List[Tuple[str, Dict[str, Any], Optional[str]]] = []
         # A cluster whose inputs cannot be resolved gets its result here and
         # is not probed, so one bad entry does not take down the others.
