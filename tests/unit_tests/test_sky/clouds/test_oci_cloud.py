@@ -1,4 +1,5 @@
 """Tests for the OCI cloud."""
+import functools
 from unittest import mock
 
 import jsonschema
@@ -8,6 +9,7 @@ from sky.adaptors import oci as oci_adaptor
 from sky.adaptors import oci_s3
 from sky.clouds import oci as oci_cloud
 from sky.clouds.utils import oci_utils
+from sky.utils import config_utils
 from sky.utils import schemas
 
 # ---------------------------------------------------------------------------
@@ -49,7 +51,9 @@ def fixture_oci_credentials(tmp_path, monkeypatch):
     config_file.write_text('[TOKEN]\n')
     monkeypatch.setattr(oci_adaptor, 'get_config_file',
                         lambda: str(config_file))
-    monkeypatch.setattr(oci_utils.oci_config, 'get_profile', lambda: 'TOKEN')
+    monkeypatch.setattr(oci_utils.oci_config,
+                        'get_profile',
+                        lambda region=None: 'TOKEN')
 
     def install(config, client):
         monkeypatch.setattr(oci_adaptor,
@@ -177,6 +181,64 @@ def test_config_schema_accepts_oci_config_profile_per_region():
 
 
 # ---------------------------------------------------------------------------
+# Profile selection
+# ---------------------------------------------------------------------------
+
+
+def _use_region_configs(monkeypatch, region_configs):
+    """Serves `oci.region_configs` from a dict instead of ~/.sky/config.yaml."""
+    monkeypatch.setattr(
+        oci_utils.skypilot_config, 'get_effective_region_config',
+        functools.partial(config_utils.get_cloud_config_value_from_dict,
+                          {'oci': {
+                              'region_configs': region_configs
+                          }}))
+
+
+def test_profile_is_default_without_config(monkeypatch):
+    _use_region_configs(monkeypatch, {})
+    assert oci_utils.oci_config.get_profile() == 'DEFAULT'
+    assert oci_utils.oci_config.get_profile('us-phoenix-1') == 'DEFAULT'
+
+
+def test_default_profile_applies_to_every_region(monkeypatch):
+    _use_region_configs(monkeypatch,
+                        {'default': {
+                            'oci_config_profile': 'TOKEN'
+                        }})
+    assert oci_utils.oci_config.get_profile() == 'TOKEN'
+    assert oci_utils.oci_config.get_profile('us-phoenix-1') == 'TOKEN'
+
+
+def test_region_names_its_own_profile(monkeypatch):
+    _use_region_configs(
+        monkeypatch, {
+            'default': {
+                'oci_config_profile': 'TOKEN'
+            },
+            'us-ashburn-1': {
+                'oci_config_profile': 'ASHBURN',
+                'compartment_ocid': 'ocid1.compartment.oc1..aaaa',
+            },
+        })
+    # Named region -> region_configs.default -> DEFAULT, like the compartment.
+    assert oci_utils.oci_config.get_profile('us-ashburn-1') == 'ASHBURN'
+    assert oci_utils.oci_config.get_profile('us-phoenix-1') == 'TOKEN'
+    assert oci_utils.oci_config.get_profile() == 'TOKEN'
+
+
+def test_region_profile_without_default_falls_back_to_default_profile(
+        monkeypatch):
+    _use_region_configs(monkeypatch,
+                        {'us-ashburn-1': {
+                            'oci_config_profile': 'ASHBURN'
+                        }})
+    assert oci_utils.oci_config.get_profile('us-ashburn-1') == 'ASHBURN'
+    assert oci_utils.oci_config.get_profile('us-phoenix-1') == 'DEFAULT'
+    assert oci_utils.oci_config.get_profile() == 'DEFAULT'
+
+
+# ---------------------------------------------------------------------------
 # Availability-domain prefix
 # ---------------------------------------------------------------------------
 
@@ -185,7 +247,9 @@ _COMPARTMENT = 'ocid1.compartment.oc1..aaaaaaaalaunchhere'
 
 def test_availability_domain_prefix_comes_from_launch_compartment(monkeypatch):
     pytest.importorskip('oci')
-    monkeypatch.setattr(oci_utils.oci_config, 'get_profile', lambda: 'TOKEN')
+    monkeypatch.setattr(oci_utils.oci_config,
+                        'get_profile',
+                        lambda region=None: 'TOKEN')
     # `query_helper` is an instance, so patch with a plain callable.
     monkeypatch.setattr(oci_cloud.query_helper, 'find_compartment',
                         lambda region: _COMPARTMENT)
@@ -209,7 +273,9 @@ def test_availability_domain_prefix_comes_from_launch_compartment(monkeypatch):
 
 def test_availability_domain_prefix_is_none_without_valid_config(monkeypatch):
     oci_sdk = pytest.importorskip('oci')
-    monkeypatch.setattr(oci_utils.oci_config, 'get_profile', lambda: 'TOKEN')
+    monkeypatch.setattr(oci_utils.oci_config,
+                        'get_profile',
+                        lambda region=None: 'TOKEN')
 
     def _raise(region=None, profile='DEFAULT'):
         raise oci_sdk.exceptions.ConfigFileNotFound('no config')

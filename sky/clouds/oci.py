@@ -58,7 +58,7 @@ def _get_availability_domain_prefix(region: str) -> Optional[str]:
     cross-tenancy policies is not necessarily the `tenancy` of the profile,
     so the prefix is resolved from the launch compartment.
     """
-    profile = oci_utils.oci_config.get_profile()
+    profile = oci_utils.oci_config.get_profile(region)
     try:
         identity_client = oci_adaptor.get_identity_client(region=region,
                                                           profile=profile)

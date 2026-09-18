@@ -2848,6 +2848,7 @@ Advanced OCI configuration (optional).
 
 ``oci_config_profile``
     The profile name in ``~/.oci/config`` to use for launching instances.
+    A region-specific section can name a different profile for that region; the credential files copied to a cluster and the ``sky check`` probe use the ``default`` one.
     Default: ``DEFAULT``
 
 ``compartment_ocid``

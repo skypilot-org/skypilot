@@ -14,6 +14,7 @@ History:
    VCN for SkyServe.
 """
 import os
+from typing import Optional
 
 from sky import sky_logging
 from sky import skypilot_config
@@ -169,12 +170,20 @@ class OCIConfig:
         return config_path
 
     @classmethod
-    def get_profile(cls) -> str:
-        return skypilot_config.get_effective_region_config(
+    def get_profile(cls, region: Optional[str] = None) -> str:
+        # The profile under `region_configs.default` applies to every region
+        # unless `region_configs.<region>` names its own, like the
+        # compartment above.
+        default_profile = skypilot_config.get_effective_region_config(
             cloud='oci',
             region='default',
             keys=('oci_config_profile',),
             default_value='DEFAULT')
+        return skypilot_config.get_effective_region_config(
+            cloud='oci',
+            region=region,
+            keys=('oci_config_profile',),
+            default_value=default_profile)
 
     @classmethod
     def get_default_image_os(cls) -> str:

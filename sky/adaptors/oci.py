@@ -43,15 +43,22 @@ def get_config_file() -> str:
     return conf_file_path
 
 
-def _resolve_profile(profile: Optional[str]) -> str:
+def _resolve_profile(profile: Optional[str],
+                     region: Optional[str] = None) -> str:
+    """The `~/.oci/config` profile to use.
+
+    `DEFAULT` defers to `oci_config_profile` in `~/.sky/config.yaml`, where a
+    region can name its own profile, so the region is passed along whenever
+    the caller knows it.
+    """
     if not profile or profile == 'DEFAULT':
-        return oci_utils.oci_config.get_profile()
+        return oci_utils.oci_config.get_profile(region)
     return profile
 
 
 def get_oci_config(region=None, profile='DEFAULT'):
     conf_file_path = get_config_file()
-    config_profile = _resolve_profile(profile)
+    config_profile = _resolve_profile(profile, region)
 
     oci_config = oci.config.from_file(file_location=conf_file_path,
                                       profile_name=config_profile)
@@ -83,7 +90,9 @@ def _session_token_expired(token: str) -> bool:
     return not container.valid()
 
 
-def get_oci_signer(oci_config: Dict[str, Any], profile: str = 'DEFAULT'):
+def get_oci_signer(oci_config: Dict[str, Any],
+                   profile: str = 'DEFAULT',
+                   region: Optional[str] = None):
     """Returns the request signer for `oci_config`, or None for API keys.
 
     `oci session authenticate` writes profiles that carry a
@@ -100,7 +109,7 @@ def get_oci_signer(oci_config: Dict[str, Any], profile: str = 'DEFAULT'):
     token_file = oci_config.get(SECURITY_TOKEN_FILE_KEY)
     if not token_file:
         return None
-    profile = _resolve_profile(profile)
+    profile = _resolve_profile(profile, region)
     token_path = os.path.expanduser(token_file)
     if not os.path.isfile(token_path):
         raise OCISessionTokenError(
@@ -122,7 +131,7 @@ def _get_client_args(region, profile) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Config and keyword arguments to construct an OCI SDK client."""
     oci_config = get_oci_config(region, profile)
     kwargs: Dict[str, Any] = {}
-    signer = get_oci_signer(oci_config, profile)
+    signer = get_oci_signer(oci_config, profile, region)
     if signer is not None:
         kwargs['signer'] = signer
     return oci_config, kwargs

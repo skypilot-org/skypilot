@@ -230,3 +230,44 @@ def test_default_profile_resolves_through_skypilot_config(oci_config_file):
                            return_value='TOKEN'):
         config = oci.get_oci_config()
     assert oci.is_session_token_config(config)
+
+
+def test_default_profile_is_resolved_for_the_region(oci_config_file):
+    # `region_configs.<region>.oci_config_profile` selects the profile for
+    # clients built for that region; other regions keep the default one.
+    del oci_config_file
+
+    def _profile_for(region=None):
+        return 'TOKEN' if region == 'us-ashburn-1' else 'APIKEY'
+
+    with mock.patch.object(oci.oci_utils.oci_config, 'get_profile',
+                           _profile_for):
+        assert oci.is_session_token_config(
+            oci.get_oci_config(region='us-ashburn-1'))
+        assert not oci.is_session_token_config(
+            oci.get_oci_config(region='us-phoenix-1'))
+        assert not oci.is_session_token_config(oci.get_oci_config())
+        with mock.patch.object(oci.oci.core, 'ComputeClient') as client_cls:
+            oci.get_core_client(region='us-ashburn-1')
+            oci.get_core_client(region='us-phoenix-1')
+    (ashburn_config,), ashburn_kwargs = client_cls.call_args_list[0]
+    (phoenix_config,), phoenix_kwargs = client_cls.call_args_list[1]
+    assert isinstance(ashburn_kwargs['signer'],
+                      oci.oci.auth.signers.SecurityTokenSigner)
+    assert ashburn_config['region'] == 'us-ashburn-1'
+    assert phoenix_kwargs == {}
+    assert phoenix_config['user'] == _USER
+
+
+def test_session_token_error_names_the_regional_profile(oci_config_file):
+    oci_config_file.unlink()
+    with mock.patch.object(oci.oci_utils.oci_config,
+                           'get_profile',
+                           lambda region=None: 'TOKEN'
+                           if region == 'us-ashburn-1' else 'APIKEY'):
+        with pytest.raises(oci.OCISessionTokenError) as exc_info:
+            oci.get_identity_client(region='us-ashburn-1')
+        # The other region uses the API-key profile and is unaffected.
+        oci.get_identity_client(region='us-phoenix-1')
+    assert 'oci session authenticate --profile-name TOKEN' in str(
+        exc_info.value)

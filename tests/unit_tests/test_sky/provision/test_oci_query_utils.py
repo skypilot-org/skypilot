@@ -20,7 +20,9 @@ def _instance(instance_id, state, tags):
 
 def test_query_instances_by_tags_lists_the_launch_compartment(monkeypatch):
     pytest.importorskip('oci')
-    monkeypatch.setattr(oci_utils.oci_config, 'get_profile', lambda: 'TOKEN')
+    monkeypatch.setattr(oci_utils.oci_config,
+                        'get_profile',
+                        lambda region=None: 'TOKEN')
     monkeypatch.setattr(query_utils.QueryHelper, 'find_compartment',
                         classmethod(lambda cls, region: _COMPARTMENT))
     # Paginate by calling straight through.
@@ -55,7 +57,9 @@ def test_query_instances_by_tags_lists_the_launch_compartment(monkeypatch):
 
 def test_query_instances_by_tags_requires_every_tag(monkeypatch):
     pytest.importorskip('oci')
-    monkeypatch.setattr(oci_utils.oci_config, 'get_profile', lambda: 'TOKEN')
+    monkeypatch.setattr(oci_utils.oci_config,
+                        'get_profile',
+                        lambda region=None: 'TOKEN')
     monkeypatch.setattr(query_utils.QueryHelper, 'find_compartment',
                         classmethod(lambda cls, region: _COMPARTMENT))
     monkeypatch.setattr(oci_adaptor.oci.pagination, 'list_call_get_all_results',
