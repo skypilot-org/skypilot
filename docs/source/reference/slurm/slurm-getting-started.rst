@@ -317,6 +317,20 @@ install the file with root ownership and mode ``0440``, and check it
 with ``visudo -cf``. The rsync rule lists explicit server arguments; different
 rsync versions may require an adjusted rule based on sudo's log.
 
+:download:`Download a smaller policy <slurm-sudoers-minimal.example>` if you
+only need fresh launches, ``sky exec``, ``sky logs``, managed jobs, and
+``sky down``. It omits ``scontrol``, ``mv``, ``find``, and access to
+``.sky_snapshots``. Use the full policy for container ``sky stop``, snapshot
+restore with ``sky start`` or ``sky launch``, and autostop. Autodown, which
+tears down the allocation without saving a snapshot, uses the smaller policy.
+
+Fresh clusters skip snapshot reads and use a unique snapshot directory, so
+leftover snapshots from a deleted cluster cannot be restored by a same-name
+launch. Snapshot cleanup failures after cancellation produce a warning
+without failing ``sky down``; snapshot files may remain and require manual
+cleanup. Snapshot reads for previously running clusters and container
+stop/start operations remain strict to protect saved state.
+
 The file-operation rules reject additional arguments and ``.``/``..`` path
 components.
 Argument matching does not resolve symlinks or constrain file names carried

@@ -45,6 +45,53 @@ def _command_text(command):
     return shlex.join(command) if isinstance(command, list) else command
 
 
+@pytest.mark.parametrize('old_id', [None, 'a' * 32])
+def test_orphaned_snapshot_isolated_from_new_cluster(tmp_path, monkeypatch,
+                                                     old_id):
+    old_dir = instance._snapshot_dir(str(tmp_path), _CLUSTER, old_id)
+    os.makedirs(old_dir)
+    runner = command_runner.LocalProcessCommandRunner()
+    instance._write_snapshot_manifest(runner, old_dir,
+                                      _snapshot_manifest(num_nodes=2))
+    client = mock.MagicMock()
+    client.query_jobs.return_value = []
+    client.get_jobs_state_by_name.return_value = []
+    monkeypatch.setattr(instance, '_make_slurm_client', lambda _: client)
+    monkeypatch.setattr(instance, '_make_login_node_runner', lambda _: runner)
+    monkeypatch.setattr(instance.slurm_utils, 'is_inside_slurm_cluster',
+                        lambda: False)
+    original_run = runner.run
+
+    def run(cmd, **kwargs):
+        if cmd == ['rm', '-rf', '--', old_dir]:
+            return 1, '', 'Permission denied'
+        return original_run(cmd, **kwargs)
+
+    monkeypatch.setattr(runner, 'run', run)
+    old_provider = dict(_CONTAINER_PROVIDER_CONFIG, sky_base_dir=str(tmp_path))
+    if old_id is not None:
+        old_provider['snapshot_id'] = old_id
+    instance.terminate_instances(_CLUSTER, provider_config=old_provider)
+    assert os.path.exists(instance._snapshot_manifest_path(old_dir))
+
+    new_provider = dict(old_provider, snapshot_id='b' * 32)
+    assert instance.query_instances.__wrapped__(
+        _CLUSTER, _CLUSTER, provider_config=new_provider) == {}
+
+    new_dir = instance._snapshot_dir(str(tmp_path), _CLUSTER, 'b' * 32)
+    os.makedirs(new_dir)
+    instance._write_snapshot_manifest(runner, new_dir,
+                                      _snapshot_manifest(num_nodes=1))
+    assert instance.query_instances.__wrapped__(
+        _CLUSTER, _CLUSTER, provider_config=new_provider) == {
+            'snapshot-rank-0':
+                (instance.status_lib.ClusterStatus.STOPPED, None),
+        }
+    instance.terminate_instances(_CLUSTER, provider_config=new_provider)
+    assert not os.path.exists(new_dir)
+    assert os.path.exists(instance._snapshot_manifest_path(old_dir))
+
+
 class TestSnapshotManifest:
     """Tests snapshot manifest parsing and validation."""
 
@@ -320,6 +367,31 @@ class TestTerminateInstances:
         ]
         assert any('.sky_snapshots/test-cluster' in command
                    for command in remove_commands)
+
+    def test_snapshot_cleanup_denied_after_cancellation(self, mock_client):
+        mock_client.get_jobs_state_by_name.return_value = ['PENDING']
+        mock_client.test_login_runner.run.return_value = (
+            1, '', 'sudo: a password is required')
+        instance.terminate_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+        mock_client.cancel_jobs_by_name.assert_called_once_with(_CLUSTER,
+                                                                signal=None)
+        mock_client.test_login_runner.run.assert_called_once_with(
+            ['rm', '-rf', '--', '/home/test/.sky_snapshots/test-cluster'],
+            require_outputs=True,
+            stream_logs=False)
+
+    def test_local_snapshot_cleanup_failure(self, mock_client, monkeypatch):
+        runner = mock.MagicMock()
+        runner.run.return_value = (1, '', 'Permission denied')
+        monkeypatch.setattr(instance.slurm_utils, 'is_inside_slurm_cluster',
+                            lambda: True)
+        monkeypatch.setattr(instance, '_make_client_and_login_runner',
+                            lambda *args: (mock_client, runner))
+        mock_client.get_jobs_state_by_name.return_value = ['PENDING']
+        instance.terminate_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+        mock_client.cancel_jobs_by_name.assert_called_once_with(_CLUSTER,
+                                                                signal=None)
+        runner.run.assert_called_once()
 
     @pytest.mark.parametrize('job_state', ['PENDING', 'CONFIGURING'])
     def test_pending_cancels_without_signal(self, mock_client, job_state):
@@ -656,6 +728,25 @@ class TestStopInstances:
         client.test_read_manifest = read_manifest
         return (client, login_runner, head_runner, write_manifest,
                 cancel_slurm_job)
+
+    def test_stop_writes_current_cluster_snapshot(self, monkeypatch):
+        client, login_runner, _, write_manifest, _ = self._setup(
+            monkeypatch, ['node-a'])
+        provider = dict(_CONTAINER_PROVIDER_CONFIG, snapshot_id='b' * 32)
+        snapshot_dir = f'/home/test/.sky_snapshots/{_CLUSTER}/{"b" * 32}'
+
+        instance.stop_instances(_CLUSTER, provider_config=provider)
+
+        client.test_read_manifest.assert_called_once_with(
+            login_runner, snapshot_dir)
+        assert write_manifest.call_args.args[1] == snapshot_dir
+        exports = [
+            _command_text(call.args[0])
+            for call in login_runner.run.call_args_list
+            if 'enroot export' in _command_text(call.args[0])
+        ]
+        assert len(exports) == 1
+        assert f'{snapshot_dir}/.staging-' in exports[0]
 
     def test_drains_steps_before_snapshotting_job_database(self, monkeypatch):
         client, login_runner, head_runner, _, _ = self._setup(
@@ -1363,7 +1454,7 @@ class TestQueryInstances:
         sleep = mock.MagicMock()
         monkeypatch.setattr(instance.time, 'sleep', sleep)
         provider_config = {
-            **_PROVIDER_CONFIG,
+            **_CONTAINER_PROVIDER_CONFIG,
             'sky_base_dir': '/home/test',
         }
 
@@ -1413,6 +1504,14 @@ class TestQueryInstances:
                 (instance.status_lib.ClusterStatus.UP, None)
         }
         read_manifest.assert_not_called()
+
+    def test_container_snapshot_denial_keeps_status_unknown(self, mock_client):
+        mock_client.query_jobs.return_value = []
+        mock_client.test_login_runner.run.return_value = (
+            2, '', 'sudo: a password is required')
+        with pytest.raises(exceptions.CommandError):
+            instance.query_instances.__wrapped__(
+                _CLUSTER, _CLUSTER, provider_config=_CONTAINER_PROVIDER_CONFIG)
 
     def test_retries_missing_job(self, mock_client, monkeypatch):
         running_queries = 0
@@ -1469,7 +1568,7 @@ class TestQueryInstances:
         assert not result
         assert mock_client.query_jobs.call_count == 7
         mock_client.get_job_reason.assert_called_once_with('386700')
-        read_manifest.assert_called_once()
+        read_manifest.assert_not_called()
         sleep.assert_not_called()
 
     def test_does_not_retry_by_default(self, mock_client, monkeypatch):
@@ -1502,7 +1601,7 @@ class TestQueryInstances:
         assert not result
         expected_rounds = 1 + instance._MAX_QUERY_INSTANCES_RETRIES
         assert mock_client.query_jobs.call_count == 7 * expected_rounds
-        read_manifest.assert_called_once()
+        read_manifest.assert_not_called()
 
 
 class TestRecordPendingReason:

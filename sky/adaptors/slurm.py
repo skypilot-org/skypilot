@@ -1193,19 +1193,35 @@ class SlurmClient:
         Returns:
             Dictionary of environment variable name -> value.
         """
-        rc, stdout, stderr = self._run_slurm_cmd('env')
-        if rc != 0:
-            logger.warning(f'Failed to fetch remote env: {stderr}')
-            return {}
         env: Dict[str, str] = {}
-        for line in stdout.splitlines():
-            if '=' in line:
-                key, _, value = line.partition('=')
-                env[key] = value
+        try:
+            rc, stdout, stderr = self._run_slurm_cmd('env')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                'Failed to fetch remote env from %s; continuing '
+                'with available user variables: %s', self.ssh_host, e)
+        else:
+            if rc != 0:
+                logger.warning(
+                    'Failed to fetch remote env from %s '
+                    '(exit code %s); continuing with available '
+                    'user variables: %s', self.ssh_host, rc, stderr)
+            else:
+                for line in stdout.splitlines():
+                    if '=' in line:
+                        key, _, value = line.partition('=')
+                        env[key] = value
         if self.slurm_user is not None:
-            env.update(HOME=self.get_remote_home_dir(),
-                       USER=self.slurm_user,
-                       LOGNAME=self.slurm_user)
+            env.update(USER=self.slurm_user, LOGNAME=self.slurm_user)
+            # HOME must refer to the workload account for path expansion.
+            env.pop('HOME', None)
+            try:
+                env['HOME'] = self.get_remote_home_dir()
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    'Failed to resolve HOME for Slurm user %r '
+                    'on %s; omitting HOME from path expansion: %s',
+                    self.slurm_user, self.ssh_host, e)
         return env
 
     def get_remote_home_dir(self) -> str:
