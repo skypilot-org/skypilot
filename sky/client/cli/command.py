@@ -255,6 +255,7 @@ def _get_cluster_records_and_set_ssh_config(
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
     verbose: bool = False,
+    output_stream: Optional[io.TextIOBase] = None,
 ) -> List[responses.StatusResponse]:
     """Returns a list of clusters that match the glob pattern.
 
@@ -264,6 +265,9 @@ def _get_cluster_records_and_set_ssh_config(
         all_users: Whether to query clusters from all users.
             If clusters is not None, this field is ignored because cluster list
             can include other users' clusters.
+        output_stream: Where to write the request's streamed server-side logs.
+            If None, they go to the console. Callers printing machine-readable
+            output pass a sink to keep stdout parseable.
     """
     # TODO(zhwu): we should move this function into SDK.
     # TODO(zhwu): this additional RTT makes CLIs slow. We should optimize this.
@@ -274,7 +278,8 @@ def _get_cluster_records_and_set_ssh_config(
                             all_users=all_users,
                             _include_credentials=True,
                             _summary_response=not verbose)
-    cluster_records = sdk.stream_and_get(request_id)
+    cluster_records = sdk.stream_and_get(request_id,
+                                         output_stream=output_stream)
     # Cache the ws-proxy command (constant across clusters).
     ws_proxy_cmd = _get_ws_proxy_command()
     # Update the SSH config for all clusters
@@ -2311,10 +2316,20 @@ def status(verbose: bool,
                               pool_status_request_id)
 
     # Phase 3: Get cluster records and handle special cases
+    json_output = output_format == flags.OUTPUT_FORMAT_JSON
     cluster_records = _get_cluster_records_and_set_ssh_config(
-        query_clusters, refresh_mode, all_users, verbose)
+        query_clusters,
+        refresh_mode,
+        all_users,
+        verbose,
+        # Keep stdout parseable. The status request's server-side logs are
+        # streamed back here, and a cluster name matching nothing logs a line
+        # exactly when a caller is most likely to be scripting against a name
+        # it is unsure of. Ahead of the JSON that is a line a parser cannot
+        # read, so send the stream to a sink, as `sky check -o json` does.
+        output_stream=io.StringIO() if json_output else None)
 
-    if output_format == flags.OUTPUT_FORMAT_JSON:
+    if json_output:
         click.echo(
             json.dumps([
                 r.model_dump(mode='json', exclude={'handle', 'credentials'})
