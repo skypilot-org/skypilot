@@ -170,11 +170,12 @@ class TestCheckComputeCredentials:
             if kwargs.get('slurm_user') is not None:
                 # Restricted-sudo cluster: any impersonated command is
                 # denied, exactly what the check must not depend on.
-                client.info.side_effect = RuntimeError(
+                client.info_and_env.side_effect = RuntimeError(
                     'sudo: a password is required')
             else:
-                client.info.return_value = 'PARTITION AVAIL NODES'
-                client.get_env.return_value = {'HOME': '/home/svc'}
+                client.info_and_env.return_value = ('PARTITION AVAIL NODES', {
+                    'HOME': '/home/svc'
+                })
                 client.check_dir_shared_fs.return_value = 'nfs'
             return client
 

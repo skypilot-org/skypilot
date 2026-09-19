@@ -240,6 +240,39 @@ def _parse_partitions_info_output(stdout: str) -> List[SlurmPartition]:
     return partitions
 
 
+def _parse_env_output(stdout: str) -> Dict[str, str]:
+    """Parses `env` output into a dict. Lines without '=' are skipped."""
+    env: Dict[str, str] = {}
+    for line in stdout.splitlines():
+        if '=' in line:
+            key, _, value = line.partition('=')
+            env[key] = value
+    return env
+
+
+def _apply_submit_user_env(env: Dict[str, str],
+                           client: 'SlurmClient') -> Dict[str, str]:
+    """Overrides the identity variables in `env` with the submit user.
+
+    Returns `env` unchanged when the client has no submit user. Otherwise
+    sets USER and LOGNAME to the submit user and replaces HOME with the
+    submit user's home, omitting HOME if it cannot be resolved.
+    """
+    if client.slurm_user is None:
+        return env
+    env.update(USER=client.slurm_user, LOGNAME=client.slurm_user)
+    # HOME must refer to the workload account for path expansion.
+    env.pop('HOME', None)
+    try:
+        env['HOME'] = client.get_remote_home_dir()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(
+            'Failed to resolve HOME for Slurm user %r '
+            'on %s; omitting HOME from path expansion: %s', client.slurm_user,
+            client.ssh_host, e)
+    return env
+
+
 class SlurmClient:
     """Client for Slurm control plane operations."""
 
@@ -1207,22 +1240,39 @@ class SlurmClient:
                     '(exit code %s); continuing with available '
                     'user variables: %s', self.ssh_host, rc, stderr)
             else:
-                for line in stdout.splitlines():
-                    if '=' in line:
-                        key, _, value = line.partition('=')
-                        env[key] = value
-        if self.slurm_user is not None:
-            env.update(USER=self.slurm_user, LOGNAME=self.slurm_user)
-            # HOME must refer to the workload account for path expansion.
-            env.pop('HOME', None)
-            try:
-                env['HOME'] = self.get_remote_home_dir()
-            except Exception as e:  # pylint: disable=broad-except
-                logger.warning(
-                    'Failed to resolve HOME for Slurm user %r '
-                    'on %s; omitting HOME from path expansion: %s',
-                    self.slurm_user, self.ssh_host, e)
-        return env
+                env = _parse_env_output(stdout)
+        return _apply_submit_user_env(env, self)
+
+    def info_and_env(self) -> Tuple[str, Dict[str, str]]:
+        """Runs `sinfo` and `env` in one SSH session.
+
+        Returns:
+            (sinfo stdout, remote environment), the same values `info()` and
+            `get_env()` return when called separately.
+
+        Raises:
+            exceptions.CommandError: If `sinfo` fails or the SSH transport
+                fails. A failing `env` logs a warning and continues with only
+                the submit-user variables, matching `get_env()`.
+        """
+        results = self._run_slurm_cmds(['sinfo', 'env'])
+        info_rc, info_stdout, info_stderr = results[0]
+        env_rc, env_stdout, env_stderr = results[1]
+        subprocess_utils.handle_returncode(
+            info_rc,
+            'sinfo',
+            'Failed to get Slurm cluster information.',
+            stderr=f'{info_stdout}\n{info_stderr}',
+            stream_logs=False)
+        env: Dict[str, str] = {}
+        if env_rc != 0:
+            logger.warning(
+                'Failed to fetch remote env from %s '
+                '(exit code %s); continuing with available '
+                'user variables: %s', self.ssh_host, env_rc, env_stderr)
+        else:
+            env = _parse_env_output(env_stdout)
+        return info_stdout, _apply_submit_user_env(env, self)
 
     def get_remote_home_dir(self) -> str:
         """Returns the remote user's home directory."""

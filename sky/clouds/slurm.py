@@ -19,6 +19,7 @@ from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import registry
 from sky.utils import resources_utils
+from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -90,6 +91,9 @@ class Slurm(clouds.Cloud):
         'glusterfs',
         'fuse.glusterfs',
     })
+
+    # Max concurrent login-node SSH probes during a credential check.
+    _CREDENTIAL_CHECK_MAX_PARALLELISM = 8
 
     # Same as Kubernetes.
     _DEFAULT_NUM_VCPUS_WITH_GPU = 4
@@ -922,99 +926,149 @@ class Slurm(clouds.Cloud):
             return (False, 'No Slurm clusters found in ~/.slurm/config. '
                     'Please configure at least one Slurm cluster.')
 
-        # Check credentials for each cluster and return ctx2text mapping
-        ctx2text = {}
-        success = False
+        # Resolve every input that depends on the active workspace or on the
+        # SSH config here, in the calling thread. The active workspace is
+        # thread-local, so the worker threads below would resolve `workdir`
+        # against the wrong workspace.
+        # `allowed_clusters` is a free-form list and may repeat a name. Probe
+        # each cluster once and report it once, in first-seen order.
+        existing_allowed_clusters = list(
+            dict.fromkeys(existing_allowed_clusters))
+        probes: List[Tuple[str, Dict[str, Any], Optional[str]]] = []
+        # A cluster whose inputs cannot be resolved gets its result here and
+        # is not probed, so one bad entry does not take down the others.
+        prep_failures: Dict[str, str] = {}
         for cluster in existing_allowed_clusters:
-            # Retrieve the config options for a given SlurmctldHost name alias.
-            ssh_config_dict = ssh_config.lookup(cluster)
             try:
-                client = slurm.SlurmClient(
-                    ssh_config_dict['hostname'],
-                    int(ssh_config_dict.get('port', 22)),
-                    ssh_config_dict['user'],
-                    slurm_utils.get_identity_file(ssh_config_dict),
-                    ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
-                    ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
-                    identities_only=slurm_utils.get_identities_only(
-                        ssh_config_dict),
-                    # The check's probes (sinfo, env, a stat of the workdir)
-                    # are read-only: run them as the SSH user rather than the
-                    # submit user. With submit_as_user, acting as the submit
-                    # user goes through su/sudo, and clusters commonly grant
-                    # passwordless sudo only for the submission commands
-                    # (sbatch/srun/scancel/squeue) — wrapping sinfo would fail
-                    # the whole credential check and silently disable Slurm,
-                    # taking down every consumer of the enabled-clouds cache
-                    # (e.g. GPU availability on the infra page).
-                    slurm_user=None,
-                )
-                info = client.info()
-                logger.debug(f'Slurm cluster {cluster} sinfo: {info}')
-                # Check if the working directory is on a shared filesystem.
-                # If workdir is configured, check that path; otherwise
-                # fall back to checking the home directory.
                 workdir = skypilot_config.get_effective_region_config(
                     cloud='slurm',
                     region=cluster,
                     keys=('workdir',),
                     default_value=None)
-                # Resolve the check path to an absolute path so that
-                # stat (via shlex.quote) gets a literal path with no
-                # shell variables or ~.
-                remote_env = client.get_env()
-                if workdir is not None:
-                    check_path = slurm_utils.expand_path_vars(
-                        workdir, remote_env)
-                else:
-                    check_path = remote_env.get('HOME', '~')
-                fs_type = client.check_dir_shared_fs(check_path)
-                path_label = (f'workdir ({workdir})'
-                              if workdir is not None else 'Home directory (~)')
-                hint = (' Set slurm.cluster_configs.'
-                        f'{cluster}.workdir in '
-                        '~/.sky/config.yaml to a shared '
-                        'filesystem path.')
-                if fs_type is None:
-                    ctx2text[cluster] = (
-                        f'{colorama.Fore.GREEN}enabled.'
-                        f'{colorama.Style.RESET_ALL} '
-                        f'{colorama.Fore.LIGHTYELLOW_EX}'
-                        f'Warning: Could not determine filesystem '
-                        f'type for {path_label} ({check_path}). '
-                        'Ensure the working directory is on a shared '
-                        'filesystem (e.g., NFS) visible to all nodes.'
-                        f'{hint}'
-                        f'{colorama.Style.RESET_ALL}')
-                elif fs_type not in cls._SHARED_FS_TYPES:
-                    ctx2text[cluster] = (
-                        f'{colorama.Fore.GREEN}enabled.'
-                        f'{colorama.Style.RESET_ALL} '
-                        f'{colorama.Fore.LIGHTYELLOW_EX}'
-                        f'Warning: {path_label} filesystem '
-                        f'type is {fs_type!r}, not a shared '
-                        'filesystem. SkyPilot requires the working '
-                        'directory to be on a shared filesystem '
-                        '(e.g., NFS) visible to all nodes.'
-                        f'{hint}'
-                        f'{colorama.Style.RESET_ALL}')
-                else:
-                    ctx2text[cluster] = (f'{colorama.Fore.GREEN}enabled'
-                                         f'{colorama.Style.RESET_ALL}')
-                success = True
-            except KeyError as e:
-                key = e.args[0]
-                ctx2text[cluster] = (
-                    f'disabled. '
-                    f'{cls._SSH_CONFIG_KEY_MAPPING.get(key, key.capitalize())} '
-                    'is missing, please check your ~/.slurm/config '
-                    'and try again.')
+                # Retrieve the config options for a given SlurmctldHost name
+                # alias.
+                ssh_config_dict = ssh_config.lookup(cluster)
             except Exception as e:  # pylint: disable=broad-except
-                error_msg = (f'Credential check failed: '
-                             f'{common_utils.format_exception(e)}')
-                ctx2text[cluster] = f'disabled. {error_msg}'
+                prep_failures[cluster] = (f'disabled. Credential check failed: '
+                                          f'{common_utils.format_exception(e)}')
+                continue
+            probes.append((cluster, ssh_config_dict, workdir))
 
+        # Each probe opens SSH sessions to a login node. Run them in parallel
+        # with a bounded pool so a tenant with many clusters does not open
+        # one session per cluster at once from the API server.
+        results = subprocess_utils.run_in_parallel(
+            cls._check_one_cluster,
+            probes,
+            num_threads=cls._CREDENTIAL_CHECK_MAX_PARALLELISM)
+        probe_results = {
+            cluster: result for (cluster, _, _), result in zip(probes, results)
+        }
+
+        ctx2text: Dict[str, str] = {}
+        success = False
+        for cluster in existing_allowed_clusters:
+            if cluster in prep_failures:
+                ctx2text[cluster] = prep_failures[cluster]
+                continue
+            enabled, text = probe_results[cluster]
+            ctx2text[cluster] = text
+            success = success or enabled
         return success, ctx2text
+
+    @classmethod
+    def _check_one_cluster(
+            cls, probe: Tuple[str, Dict[str, Any],
+                              Optional[str]]) -> Tuple[bool, str]:
+        """Probes one Slurm cluster's login node.
+
+        Args:
+            probe: (cluster name, ssh config options for the cluster, the
+                configured workdir or None).
+
+        Returns:
+            (enabled, text) where text is the per-cluster line `sky check`
+            shows. Failures are returned as a 'disabled. ...' text; this
+            method does not raise.
+        """
+        cluster, ssh_config_dict, workdir = probe
+        try:
+            client = slurm.SlurmClient(
+                ssh_config_dict['hostname'],
+                int(ssh_config_dict.get('port', 22)),
+                ssh_config_dict['user'],
+                slurm_utils.get_identity_file(ssh_config_dict),
+                ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+                ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+                identities_only=slurm_utils.get_identities_only(
+                    ssh_config_dict),
+                # The check's probes (sinfo, env, a stat of the workdir)
+                # are read-only: run them as the SSH user rather than the
+                # submit user. With submit_as_user, acting as the submit
+                # user goes through su/sudo, and clusters commonly grant
+                # passwordless sudo only for the submission commands
+                # (sbatch/srun/scancel/squeue) — wrapping sinfo would fail
+                # the whole credential check and silently disable Slurm,
+                # taking down every consumer of the enabled-clouds cache
+                # (e.g. GPU availability on the infra page).
+                slurm_user=None,
+            )
+            # sinfo and env share one SSH session. The stat below needs the
+            # remote env to expand the workdir first, so it is a second
+            # session.
+            info, remote_env = client.info_and_env()
+            logger.debug(f'Slurm cluster {cluster} sinfo: {info}')
+            # Check if the working directory is on a shared filesystem.
+            # If workdir is configured, check that path; otherwise
+            # fall back to checking the home directory.
+            # Resolve the check path to an absolute path so that
+            # stat (via shlex.quote) gets a literal path with no
+            # shell variables or ~.
+            if workdir is not None:
+                check_path = slurm_utils.expand_path_vars(workdir, remote_env)
+            else:
+                check_path = remote_env.get('HOME', '~')
+            fs_type = client.check_dir_shared_fs(check_path)
+            path_label = (f'workdir ({workdir})'
+                          if workdir is not None else 'Home directory (~)')
+            hint = (' Set slurm.cluster_configs.'
+                    f'{cluster}.workdir in '
+                    '~/.sky/config.yaml to a shared '
+                    'filesystem path.')
+            if fs_type is None:
+                return True, (f'{colorama.Fore.GREEN}enabled.'
+                              f'{colorama.Style.RESET_ALL} '
+                              f'{colorama.Fore.LIGHTYELLOW_EX}'
+                              f'Warning: Could not determine filesystem '
+                              f'type for {path_label} ({check_path}). '
+                              'Ensure the working directory is on a shared '
+                              'filesystem (e.g., NFS) visible to all nodes.'
+                              f'{hint}'
+                              f'{colorama.Style.RESET_ALL}')
+            if fs_type not in cls._SHARED_FS_TYPES:
+                return True, (f'{colorama.Fore.GREEN}enabled.'
+                              f'{colorama.Style.RESET_ALL} '
+                              f'{colorama.Fore.LIGHTYELLOW_EX}'
+                              f'Warning: {path_label} filesystem '
+                              f'type is {fs_type!r}, not a shared '
+                              'filesystem. SkyPilot requires the working '
+                              'directory to be on a shared filesystem '
+                              '(e.g., NFS) visible to all nodes.'
+                              f'{hint}'
+                              f'{colorama.Style.RESET_ALL}')
+            return True, (f'{colorama.Fore.GREEN}enabled'
+                          f'{colorama.Style.RESET_ALL}')
+        except KeyError as e:
+            key = e.args[0]
+            return False, (
+                f'disabled. '
+                f'{cls._SSH_CONFIG_KEY_MAPPING.get(key, key.capitalize())} '
+                'is missing, please check your ~/.slurm/config '
+                'and try again.')
+        except Exception as e:  # pylint: disable=broad-except
+            error_msg = (f'Credential check failed: '
+                         f'{common_utils.format_exception(e)}')
+            return False, f'disabled. {error_msg}'
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         ########
