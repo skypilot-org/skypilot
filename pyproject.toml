@@ -2,6 +2,17 @@
 requires = ["setuptools>=58.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.uv]
+# setup.py derives the version and dependencies from these files. uv only watches
+# pyproject.toml/setup.py/setup.cfg by default, so downstream lockfiles kept stale
+# metadata for this path dependency when only dependencies.py changed.
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "setup.py" },
+    { file = "sky/__init__.py" },
+    { file = "sky/setup_files/dependencies.py" },
+]
+
 [tool.yapf]
 based_on_style = "google"
 allow_split_before_dict_value = false
