@@ -3591,7 +3591,13 @@ async def set_starting_async(job_id: int,
     async def _op(session: sql_async.AsyncSession) -> int:
         values = {
             spot_table.c.resources: resources_str,
-            spot_table.c.submitted_at: submit_time,
+            # Write-once: a parked launch sets the task back to PENDING
+            # (set_backoff_pending_async) with its submission already
+            # recorded, and a controller restart during that window re-runs
+            # this transition. Keeping the first value stops the restart
+            # moment from being reported as the submission time.
+            spot_table.c.submitted_at: sqlalchemy.func.coalesce(
+                spot_table.c.submitted_at, submit_time),
             spot_table.c.status: ManagedJobStatus.STARTING.value,
             spot_table.c.run_timestamp: run_timestamp,
             spot_table.c.specs: json.dumps(specs),
@@ -3622,6 +3628,14 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
     logger.info('Job started.')
 
     async def _op(session: sql_async.AsyncSession) -> int:
+        # A failure-credited episode can still be open here: a recovery that
+        # parked (set_backoff_pending_async) is PENDING when the controller
+        # restarts, and the restart drives it back to RUNNING through this
+        # transition rather than through set_recovered_async. Close it the
+        # same way that function does, so the recovery is still counted.
+        # Only an explicit TRUE counts: a fresh start leaves the column NULL.
+        count_expr = spot_table.c.recovery_count + sqlalchemy.case(
+            (spot_table.c.recovering_from_failure.is_(True), 1), else_=0)
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
@@ -3632,13 +3646,20 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
                         ManagedJobStatus.PENDING.value
                     ]),
                     spot_table.c.end_at.is_(None),
-                )).values({
-                    spot_table.c.status: ManagedJobStatus.RUNNING.value,
-                    spot_table.c.start_at: start_time,
-                    spot_table.c.last_recovered_at: start_time,
-                    # Defensive: no recovery episode is open once RUNNING.
-                    spot_table.c.recovering_from_failure: None,
-                }))
+                )).
+            values({
+                spot_table.c.status: ManagedJobStatus.RUNNING.value,
+                # Write-once, like submitted_at above: start_at is the
+                # first time the task ran, and set_recovered_async never
+                # moves it. A restart resuming a parked task must not
+                # reset it either.
+                spot_table.c.start_at: sqlalchemy.func.coalesce(
+                    spot_table.c.start_at, start_time),
+                spot_table.c.last_recovered_at: start_time,
+                spot_table.c.recovery_count: count_expr,
+                # Defensive: no recovery episode is open once RUNNING.
+                spot_table.c.recovering_from_failure: None,
+            }))
         return result.rowcount
 
     await _retry_task_status_update(job_id, task_id, ManagedJobStatus.RUNNING,
