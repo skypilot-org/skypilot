@@ -12,23 +12,6 @@ import pytest
 from sky.utils import context
 
 
-@pytest.fixture(autouse=True)
-def _restore_context():
-    """Leave no active context behind.
-
-    `context.initialize()` sets a ContextVar on the calling thread, and most
-    tests here call it without unsetting it. Under xdist that thread goes on
-    to run other modules' tests, and anything that reads the config through
-    `skypilot_config` then gets the leaked context's cloned copy instead of
-    the global one. That made
-    `test_metrics.py::test_federation_refresh_reload_is_visible_on_the_loop`
-    fail whenever it landed on the same worker after this module.
-    """
-    token = context._CONTEXT.set(context._CONTEXT.get())
-    yield
-    context._CONTEXT.reset(token)
-
-
 @pytest.fixture
 def ctx():
     """Fixture to provide a fresh context for each test."""
