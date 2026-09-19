@@ -311,7 +311,7 @@ class TestBecomeLeaderOrdering:
         def on_sleep(*args, **kwargs):
             order.append('sleep')
 
-        def recovery_and_stop():
+        def recovery_and_stop(*args, **kwargs):
             order.append('recovery')
             # Raise to skip the infinite event loop that follows recovery.
             raise RuntimeError('stop before event loop')
@@ -398,6 +398,75 @@ class TestBecomeLeaderOrdering:
         # The gate file is NOT removed on the step-down path; the suicide
         # routine owns re-touching it for the shutdown drain.
         assert signal_file.exists()
+
+    def test_steps_down_if_ownership_lost_while_starting(
+            self, tmp_path, monkeypatch):
+        """Losing the lease mid-start is a step-down, not a recovery failure.
+
+        The gate file must survive it. _suicide_on_lock_loss relies on the gate
+        to keep the status sweep off the jobs it is about to abandon, so
+        unlinking first would leave a window with no gate at all.
+        """
+        signal_file = tmp_path / 'restart_signal'
+        monkeypatch.setattr(mjrt.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(signal_file))
+
+        thread = mjrt.ManagedJobRefreshDaemonThread()
+        lock = mock.create_autospec(locks.PostgresLock,
+                                    instance=True,
+                                    spec_set=True)
+        lock.is_locked.return_value = False
+        lock.is_session_alive.return_value = True
+        thread._lock = lock
+
+        lost = mjrt.managed_job_scheduler.ControllerPoolNotOwnedError(
+            'Stopped owning the controller pool after starting 8 controller(s)')
+        with mock.patch.object(mjrt.time, 'sleep'), \
+                mock.patch.object(mjrt.managed_job_utils,
+                                  'ha_recovery_for_consolidation_mode',
+                                  side_effect=lost), \
+                mock.patch.object(mjrt, 'logger') as log, \
+                mock.patch.object(mjrt.ManagedJobRefreshDaemonThread,
+                                  '_suicide_on_lock_loss') as suicide:
+            thread._become_leader_and_run()
+
+        suicide.assert_called_once()
+        assert signal_file.exists()
+        # How far the pool got before the abort is the operator's only clue to
+        # how many controllers this replica left behind; it must reach the log.
+        assert any('after starting 8 controller(s)' in str(c)
+                   for c in log.error.call_args_list)
+
+    def test_recovery_gets_the_leadership_probe(self, tmp_path, monkeypatch):
+        """Recovery starts the controller pool, which spans tens of seconds.
+
+        It must be able to re-check the lease itself; the check made here
+        before calling it is stale by the time the last controller starts.
+        """
+        signal_file = tmp_path / 'restart_signal'
+        monkeypatch.setattr(mjrt.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(signal_file))
+
+        thread = mjrt.ManagedJobRefreshDaemonThread()
+        lock = mock.create_autospec(locks.PostgresLock,
+                                    instance=True,
+                                    spec_set=True)
+        lock.is_locked.return_value = False
+        lock.is_session_alive.return_value = True
+        thread._lock = lock
+
+        with mock.patch.object(mjrt.time, 'sleep'), \
+                mock.patch.object(
+                    mjrt.managed_job_utils,
+                    'ha_recovery_for_consolidation_mode',
+                    side_effect=RuntimeError('stop before event loop')
+                ) as recovery:
+            with pytest.raises(RuntimeError, match='stop before event loop'):
+                thread._become_leader_and_run()
+
+        recovery.assert_called_once_with(still_leader=thread._lock_still_held)
 
 
 class TestStart:
