@@ -111,18 +111,32 @@ def launch(name: str,
     # `ports` is currently unused. Keep it in the signature for caller
     # compatibility and future use (port-forwarding is handled separately).
     del ports
-    cpu_ram = float(instance_type.split('-')[-1]) / 1024
-    gpu_name = instance_type.split('-')[1].replace('_', ' ')
+    # Floor the RAM: this is a `>=` guarantor, and the value came from the
+    # catalog entry for this very instance type, so rounding up could exclude
+    # the offer we are looking for.
+    cpu_ram = int(float(instance_type.split('-')[-1]) / 1024)
+    # Keep the underscore form the instance type already carries: the catalog
+    # builds it as re.sub(r'\s', '_', gpu_name), and that is the form the
+    # query below needs (see the comment there).
+    gpu_name = instance_type.split('-')[1]
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
 
+    # Every value here must be bare -- no quotes, spaces or dots. The Vast SDK
+    # parses this query with pyparsing using `Word(alphanums + '_')`, so a
+    # quoted value makes the parser stop at that token and
+    # `preprocess_search_query()` (which runs whenever `georegion` or `chunked`
+    # is set, as they are here) returns an *empty* query. Every filter is then
+    # silently dropped and `search_offers` returns offers of every GPU type in
+    # score order, from which we pick [0] below -- i.e. an arbitrary GPU in an
+    # arbitrary region rather than the one the user asked for.
     query = [
         'chunked=true',
         'georegion=true',
-        f'geolocation="{region[-2:]}"',
+        f'geolocation={region[-2:]}',
         f'disk_space>={disk_size}',
         f'num_gpus={num_gpus}',
-        f'gpu_name="{gpu_name}"',
-        f'cpu_ram>="{cpu_ram}"',
+        f'gpu_name={gpu_name}',
+        f'cpu_ram>={cpu_ram}',
     ]
     if secure_only:
         query.append('datacenter=true')
