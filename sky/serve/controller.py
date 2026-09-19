@@ -271,9 +271,9 @@ class SkyServeController:
             return responses.JSONResponse(
                 status_code=500,
                 content={
-                    'message':
-                        (f'Failed method {request.method} at URL {request.url}.'
-                         f' Exception message is {exc!r}.')
+                    'message': (f'Failed method {request.method} at URL '
+                                f'{request.url.path}.'
+                                f' Exception message is {exc!r}.')
                 },
             )
 
