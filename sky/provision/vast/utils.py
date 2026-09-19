@@ -6,6 +6,7 @@
 #
 """Vast library wrapper for SkyPilot."""
 from pathlib import Path
+import re
 import shlex
 from typing import Any, Dict, List, Optional
 
@@ -150,6 +151,20 @@ def launch(name: str,
                            'offer that satisfies the requirements '
                            f'"{query_str}".')
 
+    # Defence in depth: the query above is a string the SDK re-parses, and its
+    # grammar has both changed across SDK versions and cannot express a GPU
+    # name containing '-' (e.g. 'RTX PRO 6000 Max-Q') in any released version.
+    # If the gpu_name filter is ever dropped or truncated, the search happily
+    # returns other GPUs -- and picking [0] would launch one of them. Never
+    # launch a GPU that was not asked for; fail instead.
+    instance_list = [
+        offer for offer in instance_list
+        if re.sub(r'\s', '_', offer.get('gpu_name', '')) == gpu_name
+    ]
+    if not instance_list:
+        raise RuntimeError('Failed to create instances: no offer for GPU '
+                           f'{gpu_name!r} among the results for "{query_str}".')
+
     instance_touse = instance_list[0]
 
     # Start with user-provided kwargs as the base
@@ -245,7 +260,6 @@ def launch(name: str,
             env_dict.update(user_env)
         elif isinstance(user_env, str):
             # Parse legacy "-e KEY=VAL" style strings for backwards compat
-            import re  # pylint: disable=import-outside-toplevel
             for match in re.finditer(r'-e\s+(\w+)=([^\s]*)', user_env):
                 env_dict[match.group(1)] = match.group(2)
     launch_params['env'] = env_dict
