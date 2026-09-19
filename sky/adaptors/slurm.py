@@ -7,8 +7,7 @@ import logging
 import re
 import shlex
 import subprocess
-from typing import (Callable, Dict, List, NamedTuple, Optional, Sequence,
-                    Tuple, Union)
+from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 from sky.adaptors import common
 from sky.utils import command_runner
@@ -251,27 +250,26 @@ def _parse_env_output(stdout: str) -> Dict[str, str]:
     return env
 
 
-def _apply_submit_user_env(
-        env: Dict[str, str], slurm_user: Optional[str], ssh_host: Optional[str],
-        get_remote_home_dir: Callable[[], str]) -> Dict[str, str]:
+def _apply_submit_user_env(env: Dict[str, str],
+                           client: 'SlurmClient') -> Dict[str, str]:
     """Overrides the identity variables in `env` with the submit user.
 
-    Returns `env` unchanged when `slurm_user` is None. Otherwise sets USER and
-    LOGNAME to the submit user and replaces HOME with the submit user's home,
-    omitting HOME if it cannot be resolved.
+    Returns `env` unchanged when the client has no submit user. Otherwise
+    sets USER and LOGNAME to the submit user and replaces HOME with the
+    submit user's home, omitting HOME if it cannot be resolved.
     """
-    if slurm_user is None:
+    if client.slurm_user is None:
         return env
-    env.update(USER=slurm_user, LOGNAME=slurm_user)
+    env.update(USER=client.slurm_user, LOGNAME=client.slurm_user)
     # HOME must refer to the workload account for path expansion.
     env.pop('HOME', None)
     try:
-        env['HOME'] = get_remote_home_dir()
+        env['HOME'] = client.get_remote_home_dir()
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(
             'Failed to resolve HOME for Slurm user %r '
-            'on %s; omitting HOME from path expansion: %s', slurm_user,
-            ssh_host, e)
+            'on %s; omitting HOME from path expansion: %s', client.slurm_user,
+            client.ssh_host, e)
     return env
 
 
@@ -1243,8 +1241,7 @@ class SlurmClient:
                     'user variables: %s', self.ssh_host, rc, stderr)
             else:
                 env = _parse_env_output(stdout)
-        return _apply_submit_user_env(env, self.slurm_user, self.ssh_host,
-                                      self.get_remote_home_dir)
+        return _apply_submit_user_env(env, self)
 
     def info_and_env(self) -> Tuple[str, Dict[str, str]]:
         """Runs `sinfo` and `env` in one SSH session.
@@ -1275,9 +1272,7 @@ class SlurmClient:
                 'user variables: %s', self.ssh_host, env_rc, env_stderr)
         else:
             env = _parse_env_output(env_stdout)
-        return info_stdout, _apply_submit_user_env(env, self.slurm_user,
-                                                   self.ssh_host,
-                                                   self.get_remote_home_dir)
+        return info_stdout, _apply_submit_user_env(env, self)
 
     def get_remote_home_dir(self) -> str:
         """Returns the remote user's home directory."""
