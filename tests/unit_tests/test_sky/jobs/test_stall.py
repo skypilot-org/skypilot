@@ -569,7 +569,8 @@ def test_the_task_fields_an_event_payload_needs_are_public():
     fields = {field.name for field in dataclasses.fields(stall.StalledTask)}
 
     assert {
-        'spot_job_id', 'task_id', 'task_name', 'workspace', 'stalled_since'
+        'spot_job_id', 'task_id', 'task_name', 'job_name', 'workspace',
+        'stalled_since'
     } <= fields
 
 
