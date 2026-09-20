@@ -56,14 +56,16 @@ PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python
 $PYTHON_EXEC -m pip install "skypilot-nightly[remote]"
 
 # Install Ray
+# Keep RAY_VERSION in sync with SKY_REMOTE_RAY_VERSION in skylet.constants.
 # Pin click<8.3.0: click 8.3.0+ breaks Ray CLI due to deepcopy issues with
 # Sentinel values. See https://github.com/ray-project/ray/issues/56747.
+RAY_VERSION=2.56.1
 RAY_ADDRESS=127.0.0.1:6380
-$PYTHON_EXEC -m pip install --exists-action w -U "ray[default]==2.9.3" "click<8.3.0"
+$PYTHON_EXEC -m pip install --exists-action w -U "ray[default]==$RAY_VERSION" "click<8.3.0"
 export PATH=$PATH:$HOME/.local/bin
 source ~/skypilot-runtime/bin/activate
 which ray > ~/.sky/ray_path || exit 1
-$PYTHON_EXEC -m pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
+$PYTHON_EXEC -m pip list | grep "ray " | grep $RAY_VERSION 2>&1 > /dev/null && {
   $PYTHON_EXEC -c "from sky.skylet.ray_patches import patch; patch()" || exit 1
 }
 
