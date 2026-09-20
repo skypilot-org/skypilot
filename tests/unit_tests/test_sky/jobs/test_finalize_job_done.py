@@ -49,8 +49,13 @@ def _mock_managed_jobs_db_conn(tmp_path, monkeypatch):
 
 
 def _seed_job(statuses: List[Tuple[ManagedJobStatus, Optional[float]]],
-              schedule_state: ManagedJobScheduleState) -> int:
-    """Create a job with one task per (status, end_at) and a schedule state."""
+              schedule_state: ManagedJobScheduleState,
+              submitted_at: Optional[float] = None) -> int:
+    """Create a job with one task per (status, end_at) and a schedule state.
+
+    ``submitted_at`` is stamped on every task; a non-None value marks them as
+    having begun launching, the way set_starting_async does.
+    """
     job_id = state.set_job_info_without_job_id(name='job',
                                                workspace='ws',
                                                entrypoint='ep',
@@ -67,6 +72,7 @@ def _seed_job(statuses: List[Tuple[ManagedJobStatus, Optional[float]]],
                     task_name=f'task-{task_id}',
                     status=status.value,
                     end_at=end_at,
+                    submitted_at=submitted_at,
                 ))
         session.execute(
             sqlalchemy.update(state.job_info_table).where(
@@ -290,6 +296,23 @@ class TestSetPendingCancelled:
         assert not state.set_pending_cancelled(job_id)
 
         assert _task_rows(job_id) == [(ManagedJobStatus.RUNNING, None)]
+        assert _schedule_state(job_id) == ManagedJobScheduleState.WAITING
+        assert _event_statuses(job_id) == []
+
+    def test_waiting_job_parked_after_launch_rolled_back(
+            self, _mock_managed_jobs_db_conn):
+        # Recovery resets a live job's schedule_state to WAITING, and a task
+        # parked for launch backoff is back to PENDING -- but it has launched
+        # and may own a cluster. Short-circuiting would write DONE, which
+        # neither the scheduler nor the recovery sweep ever reclaims, so
+        # nothing would be left to tear that cluster down.
+        job_id = _seed_job([(ManagedJobStatus.PENDING, None)],
+                           ManagedJobScheduleState.WAITING,
+                           submitted_at=1000.0)
+
+        assert not state.set_pending_cancelled(job_id)
+
+        assert _task_rows(job_id) == [(ManagedJobStatus.PENDING, None)]
         assert _schedule_state(job_id) == ManagedJobScheduleState.WAITING
         assert _event_statuses(job_id) == []
 

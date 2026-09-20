@@ -1381,12 +1381,19 @@ def set_pending_cancelled(job_id: int) -> bool:
     This may fail if the job is not PENDING, e.g. another process has changed
     its state in the meantime.
 
-    A job in this state has never launched anything, so there is nothing to
-    clean up and no controller needs to run for it. The status write, the
-    schedule-state write, and the audit event are a single transaction, so a
-    crash cannot leave the job half-cancelled (e.g. a terminal status with a
-    schedule_state that the scheduler would still claim and launch a
-    controller for).
+    Only jobs that have never launched anything take this path: there is
+    nothing to clean up for them and no controller needs to run. Every task
+    row must be PENDING *and* have a NULL submitted_at. PENDING alone does
+    not establish it -- recovery resets a live job's schedule_state to
+    WAITING, and a task parked for launch backoff goes back to PENDING while
+    keeping whatever it provisioned -- so such a job returns False here and
+    is cancelled through the normal path, where a controller tears its
+    resources down.
+
+    The status write, the schedule-state write, and the audit event are a
+    single transaction, so a crash cannot leave the job half-cancelled (e.g.
+    a terminal status with a schedule_state that the scheduler would still
+    claim and launch a controller for).
 
     For a WAITING job, the schedule_state goes straight to DONE, claiming the
     job away from the scheduler: get_waiting_job_async locks the job_info row
@@ -1437,19 +1444,21 @@ def set_pending_cancelled(job_id: int) -> bool:
             ).where(spot_table.c.spot_job_id == job_id)).fetchone()[0]
         count = session.query(spot_table).filter(
             spot_table.c.spot_job_id == job_id,
-            spot_table.c.status == ManagedJobStatus.PENDING.value).update(
+            spot_table.c.status == ManagedJobStatus.PENDING.value,
+            # submitted_at is written once, by set_starting_async, and never
+            # cleared -- including by the backoff transition back to PENDING.
+            # NULL is therefore the durable proof that this task never began
+            # launching and so has nothing to tear down.
+            spot_table.c.submitted_at.is_(None)).update(
                 {
                     spot_table.c.status: ManagedJobStatus.CANCELLED.value,
                     spot_table.c.end_at: time.time(),
                 },
                 synchronize_session=False)
         if count == 0 or count != total_tasks:
-            # Note: it's possible that a WAITING job actually needs to be
-            # cleaned up, if we are in the middle of an upgrade/recovery and
-            # the job is waiting to be reclaimed by a new controller. In that
-            # case some task will not be PENDING - don't short-circuit; the
-            # normal cancellation path must run so the new controller cleans
-            # up the job's resources.
+            # Some task of this job has launched, or is no longer PENDING, so
+            # the job may own resources. Hand it to the normal cancellation
+            # path, which lets a controller clean them up.
             session.rollback()
             return False
         session.execute(job_events_table.insert().values(
