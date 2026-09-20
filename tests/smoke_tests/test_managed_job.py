@@ -3329,6 +3329,94 @@ def test_job_group_task_logs(generic_cloud: str):
 
 @pytest.mark.managed_jobs
 @pytest.mark.kubernetes
+def test_completed_task_logs_while_pipeline_running(generic_cloud: str):
+    """Read a completed task's saved logs while the next task is running."""
+    name = smoke_tests_utils.get_cluster_name()
+    completed_marker = 'COMPLETED_TASK_LOG_MARKER'
+    running_marker = 'RUNNING_TASK_LOG_MARKER'
+
+    def task_rows():
+        rows = sky.get(
+            jobs_sdk.queue_v2(
+                refresh=False,
+                name_match=name,
+                fields=['job_id', 'job_name', 'task_id', 'status']))[0]
+        rows = [row for row in rows if row['job_name'] == name]
+        assert len(rows) == 2, f'Expected two task rows: {rows}'
+        assert len({row['job_id'] for row in rows}) == 1, rows
+        return {row['task_id']: row for row in rows}
+
+    def check_completed_logs():
+        deadline = time.monotonic() + 600
+        while True:
+            rows = task_rows()
+            statuses = {task_id: _status(row) for task_id, row in rows.items()}
+            yield f'Pipeline task statuses: {statuses}'
+            if statuses == {
+                    0: sky.ManagedJobStatus.SUCCEEDED,
+                    1: sky.ManagedJobStatus.RUNNING
+            }:
+                break
+            assert not any(status.is_failed() or status in (
+                sky.ManagedJobStatus.CANCELLING, sky.ManagedJobStatus.CANCELLED)
+                           for status in statuses.values()), rows
+            assert statuses[1] != sky.ManagedJobStatus.SUCCEEDED, (
+                'Second task finished before the log checks')
+            assert time.monotonic() < deadline, rows
+            time.sleep(5)
+
+        job_id = rows[0]['job_id']
+        for task_filter in ('0', 'completed'):
+            result = subprocess.run([
+                'sky', 'jobs', 'logs',
+                str(job_id), task_filter, '--no-follow'
+            ],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=45,
+                                    check=True)
+            yield result.stdout
+            yield result.stderr
+            assert completed_marker in result.stdout, result.stdout
+            assert running_marker not in result.stdout, result.stdout
+            assert 'Job finished' not in result.stdout, result.stdout
+            assert _status(task_rows()[1]) == sky.ManagedJobStatus.RUNNING, (
+                'Second task must remain running throughout the log checks')
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+        f.write(
+            textwrap.dedent(f"""\
+            name: {name}
+            ---
+            name: completed
+            resources:
+              infra: {generic_cloud}
+              cpus: 2+
+              memory: 4+
+            run: echo {completed_marker}
+            ---
+            name: running
+            resources:
+              infra: {generic_cloud}
+              cpus: 2+
+              memory: 4+
+            run: |
+              echo {running_marker}
+              sleep 600
+            """))
+        f.flush()
+        test = smoke_tests_utils.Test(
+            'completed_task_logs_while_pipeline_running',
+            [f'sky jobs launch {f.name} -y -d', check_completed_logs],
+            f'sky jobs cancel -y -n {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
 def test_job_group_task_logs_sdk(generic_cloud: str):
     """Test SDK task filtering with typed task parameter (int vs str).
 
