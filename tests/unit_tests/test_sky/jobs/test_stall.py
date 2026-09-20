@@ -1,0 +1,565 @@
+"""The two stall scans, one clause at a time.
+
+Every case has a baseline arm: the row that must be reported sits next to the
+row that must not, and the assertion names both. A suppression test that only
+asserts silence passes just as well when the query returns nothing at all.
+"""
+import time
+from typing import Optional
+
+import pytest
+import sqlalchemy
+from sqlalchemy import orm
+
+from sky.jobs import stall
+from sky.jobs import state as managed_job_state
+from sky.skylet import constants as skylet_constants
+from sky.utils.db import db_utils
+
+# Captured at import, before the autouse fixture below replaces them. A test
+# that wants the real body has to use these names: reaching for the module
+# attribute inside a test gets the stub and asserts nothing, which is the
+# failure mode that left these two functions untested to begin with.
+_REAL_TASKS_ACTIVE_RECENTLY = stall._tasks_active_recently
+_REAL_CLUSTERS_WITH_LIVE_REQUESTS = stall._clusters_with_live_requests
+
+# Comfortably past both thresholds (10 and 15 minutes).
+_OLD = 3600
+# Comfortably inside both.
+_RECENT = 60
+
+
+@pytest.fixture(name='engine')
+def engine_fixture(tmp_path, monkeypatch):
+    """A managed-jobs database of this test's own.
+
+    Without the runtime-dir override the manager opens whatever an earlier run
+    left in the real one, and the failure then reads as a missing column rather
+    than as a test pointed at the wrong file.
+    """
+    monkeypatch.setenv(skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY,
+                       str(tmp_path))
+    monkeypatch.setattr(
+        managed_job_state, '_db_manager',
+        db_utils.DatabaseManager('spot_jobs', managed_job_state.create_table))
+    return managed_job_state.get_engine()
+
+
+@pytest.fixture(name='no_cross_store', autouse=True)
+def no_cross_store_fixture(monkeypatch):
+    """Neutral answers from the three stores the claimed scan also reads.
+
+    Neutral means "nothing is suppressing anything", so a test that wants a
+    suppressor has to ask for it explicitly and cannot pass by accident.
+    """
+    monkeypatch.setattr(stall, '_clusters_with_live_requests',
+                        lambda names: set())
+    monkeypatch.setattr(stall, '_tasks_active_recently',
+                        lambda engine, job_ids: set())
+    monkeypatch.setattr(stall.global_user_state,
+                        'get_launch_attempts_for_cluster', lambda name: [])
+
+
+def _add_job(engine,
+             job_id: int,
+             *,
+             status: str,
+             task_id: int = 0,
+             eligible_at: Optional[float] = None,
+             submitted_at: Optional[float] = None,
+             start_at: Optional[float] = None,
+             end_at: Optional[float] = None,
+             workspace: str = 'ws',
+             priority: Optional[int] = None,
+             pool: Optional[str] = None,
+             is_batch: Optional[bool] = None,
+             schedule_state: Optional[str] = None,
+             with_info: bool = True):
+    with orm.Session(engine) as session:
+        session.execute(managed_job_state.spot_table.insert().values(
+            spot_job_id=job_id,
+            task_id=task_id,
+            task_name=f'task-{job_id}-{task_id}',
+            status=status,
+            eligible_at=eligible_at,
+            submitted_at=submitted_at,
+            start_at=start_at,
+            end_at=end_at))
+        if with_info:
+            values = {
+                'spot_job_id': job_id,
+                'name': f'job-{job_id}',
+                'workspace': workspace,
+                'priority': priority,
+                'pool': pool,
+                'is_batch': is_batch,
+            }
+            if schedule_state is not None:
+                values['schedule_state'] = schedule_state
+            session.execute(
+                managed_job_state.job_info_table.insert().values(**values))
+        session.commit()
+
+
+def _never_claimed(engine, job_id: int, *, age: float, **kwargs):
+    """A task nothing has picked up, `age` seconds old."""
+    _add_job(engine,
+             job_id,
+             status='PENDING',
+             eligible_at=time.time() - age,
+             submitted_at=None,
+             **kwargs)
+
+
+def _claimed(engine,
+             job_id: int,
+             *,
+             age: float,
+             status: str = 'STARTING',
+             **kwargs):
+    """A task something claimed `age` seconds ago that has not started."""
+    _add_job(engine,
+             job_id,
+             status=status,
+             submitted_at=time.time() - age,
+             start_at=None,
+             end_at=None,
+             **kwargs)
+
+
+def _ids(scan) -> set:
+    return {task.spot_job_id for task in scan.tasks}
+
+
+# ---------------------------------------------------------------- never_claimed
+
+
+def test_an_old_unclaimed_task_is_reported_and_a_fresh_one_is_not(engine):
+    _never_claimed(engine, 1, age=_OLD)
+    _never_claimed(engine, 2, age=_RECENT)
+
+    assert _ids(stall.scan_never_claimed()) == {1}
+
+
+def test_a_task_whose_sibling_is_progressing_is_not_stalled(engine):
+    # Job 1: a second task of the same job is running, so task 0 is simply not
+    # eligible yet. Job 2 is the same shape with no running sibling.
+    _never_claimed(engine, 1, age=_OLD)
+    _add_job(engine, 1, task_id=1, status='RUNNING', with_info=False)
+    _never_claimed(engine, 2, age=_OLD)
+
+    assert _ids(stall.scan_never_claimed()) == {2}
+
+
+def test_a_winding_down_sibling_counts_as_progress(engine):
+    """A job group merging its output is progressing, not stalled."""
+    _never_claimed(engine, 1, age=_OLD)
+    _add_job(engine, 1, task_id=1, status='WINDING_DOWN', with_info=False)
+    _never_claimed(engine, 2, age=_OLD)
+
+    assert _ids(stall.scan_never_claimed()) == {2}
+
+
+def test_a_task_behind_higher_priority_is_waiting_not_stalled(engine):
+    # Job 1 is at the head of the queue and job 2 is behind it. Only the one
+    # that could have started is reported.
+    _never_claimed(engine, 1, age=_OLD, priority=500)
+    _never_claimed(engine, 2, age=_OLD, priority=100)
+    _add_job(engine,
+             3,
+             status='PENDING',
+             priority=500,
+             schedule_state='WAITING')
+
+    assert _ids(stall.scan_never_claimed()) == {1}
+
+
+def test_a_batch_job_waiting_on_its_busy_pool_is_not_stalled(engine):
+    # Job 1's pool is occupied by job 3; job 2's pool is not.
+    _never_claimed(engine, 1, age=_OLD, pool='busy', is_batch=True)
+    _never_claimed(engine, 2, age=_OLD, pool='idle', is_batch=True)
+    _add_job(engine,
+             3,
+             status='STARTING',
+             pool='busy',
+             is_batch=True,
+             schedule_state='LAUNCHING')
+
+    assert _ids(stall.scan_never_claimed()) == {2}
+
+
+def test_a_batch_job_does_not_suppress_itself(engine):
+    """The pool exclusion must not match the candidate's own row.
+
+    A batch job wedged in LAUNCHING is claimed but has no submitted_at yet --
+    exactly a never-claimed target -- and it occupies its own pool, so an
+    exclusion that did not exclude itself would silence precisely the case
+    this phase exists for.
+    """
+    _never_claimed(engine,
+                   1,
+                   age=_OLD,
+                   pool='solo',
+                   is_batch=True,
+                   schedule_state='LAUNCHING')
+
+    assert _ids(stall.scan_never_claimed()) == {1}
+
+
+def test_a_task_with_no_eligible_at_can_never_be_reported(engine):
+    """A row that predates the timeline columns is invisible to this phase.
+
+    Locks in the behaviour, not one clause of the query: a NULL eligible_at
+    already fails the age comparison, so the explicit IS NOT NULL is
+    belt-and-braces and removing it changes nothing. What would change this is
+    someone giving the comparison a COALESCE default, which is why the
+    behaviour is worth pinning even though no single clause owns it.
+    """
+    _add_job(engine, 1, status='PENDING', eligible_at=None, submitted_at=None)
+    _never_claimed(engine, 2, age=_OLD)
+
+    assert _ids(stall.scan_never_claimed()) == {2}
+
+
+# ------------------------------------------------------------------ unattended
+
+
+class _Attempt:
+    """A launch_attempts row, only the fields the scan reads."""
+
+    def __init__(self,
+                 outcome: Optional[str] = None,
+                 instances_requested: Optional[float] = None,
+                 provision_start: Optional[float] = None):
+        self.outcome = outcome
+        self.instances_requested = instances_requested
+        self.provision_start = provision_start
+
+
+def _attempts(monkeypatch, attempts):
+    monkeypatch.setattr(stall.global_user_state,
+                        'get_launch_attempts_for_cluster',
+                        lambda name: list(attempts))
+
+
+def test_an_old_claimed_task_is_reported_and_a_fresh_one_is_not(engine):
+    _claimed(engine, 1, age=_OLD)
+    _claimed(engine, 2, age=_RECENT)
+
+    assert _ids(stall.scan_unattended()) == {1}
+
+
+def test_a_task_that_started_or_ended_is_not_reported(engine):
+    _claimed(engine, 1, age=_OLD)
+    _add_job(engine,
+             2,
+             status='RUNNING',
+             submitted_at=time.time() - _OLD,
+             start_at=time.time() - _OLD)
+    _add_job(engine,
+             3,
+             status='SUCCEEDED',
+             submitted_at=time.time() - _OLD,
+             end_at=time.time() - _RECENT)
+
+    assert _ids(stall.scan_unattended()) == {1}
+
+
+def test_a_cancelling_task_is_not_reported(engine):
+    _claimed(engine, 1, age=_OLD)
+    _claimed(engine, 2, age=_OLD, status='CANCELLING')
+
+    assert _ids(stall.scan_unattended()) == {1}
+
+
+def test_a_pool_job_is_excluded(engine):
+    _claimed(engine, 1, age=_OLD)
+    _claimed(engine, 2, age=_OLD, pool='p')
+
+    assert _ids(stall.scan_unattended()) == {1}
+
+
+def test_a_live_request_for_the_cluster_suppresses(engine, monkeypatch):
+    _claimed(engine, 1, age=_OLD)
+    _claimed(engine, 2, age=_OLD)
+    busy = stall._cluster_name(stall.scan_unattended().tasks[0])
+    monkeypatch.setattr(stall, '_clusters_with_live_requests',
+                        lambda names: {busy})
+
+    reported = _ids(stall.scan_unattended())
+    assert reported == {2}, 'only the cluster with no live request is reported'
+
+
+def test_an_open_attempt_that_asked_the_cloud_suppresses(engine, monkeypatch):
+    _claimed(engine, 1, age=_OLD)
+    _attempts(monkeypatch, [_Attempt(instances_requested=time.time() - _OLD)])
+
+    assert not stall.scan_unattended().tasks
+
+
+def test_an_open_attempt_that_never_asked_does_not_suppress_forever(
+        engine, monkeypatch):
+    """The age branch, in both directions.
+
+    An attempt whose launcher died before asking for anything is held quiet
+    only until it is as old as the threshold.
+    """
+    _claimed(engine, 1, age=_OLD)
+
+    _attempts(monkeypatch, [_Attempt(provision_start=time.time() - _RECENT)])
+    assert not stall.scan_unattended().tasks, 'young orphan is held quiet'
+
+    _attempts(monkeypatch, [_Attempt(provision_start=time.time() - _OLD)])
+    assert _ids(stall.scan_unattended()) == {1}, 'old orphan is reported'
+
+
+def test_a_succeeded_attempt_suppresses(engine, monkeypatch):
+    """The cluster came up and the job has not started: a group barrier."""
+    _claimed(engine, 1, age=_OLD)
+    _attempts(monkeypatch, [_Attempt(outcome='succeeded')])
+
+    assert not stall.scan_unattended().tasks
+
+
+def test_a_failed_attempt_falls_through_to_the_tasks_own_activity(
+        engine, monkeypatch):
+    """A closed-failed attempt cannot say whether a retry is coming.
+
+    Both arms, because asserting only one would pass on a scan that ignored
+    job_events entirely.
+    """
+    _claimed(engine, 1, age=_OLD)
+    _attempts(monkeypatch, [_Attempt(outcome='failed')])
+
+    monkeypatch.setattr(stall, '_tasks_active_recently',
+                        lambda engine, job_ids: {(1, 0)})
+    assert not stall.scan_unattended().tasks, 'a retrying task is not stalled'
+
+    monkeypatch.setattr(stall, '_tasks_active_recently',
+                        lambda engine, job_ids: set())
+    assert _ids(stall.scan_unattended()) == {1}, 'a silent task is stalled'
+
+
+def test_only_the_latest_attempt_is_consulted(engine, monkeypatch):
+    """One success in the history must not suppress the task for good."""
+    _claimed(engine, 1, age=_OLD)
+    _attempts(monkeypatch,
+              [_Attempt(outcome='succeeded'),
+               _Attempt(outcome='failed')])
+
+    assert _ids(stall.scan_unattended()) == {1}
+
+
+# ------------------------------------------------------- scheduler_moving
+
+
+def test_a_deployment_claiming_nothing_else_is_not_moving(engine):
+    """The self-reference guard, which is the whole value of this field.
+
+    For the claimed phase the anchor *is* the oldest reported task's own
+    submitted_at, so a witness query that did not exclude the reported set
+    would match that row and answer yes however stopped the deployment was --
+    the frozen case could then never be reported at all.
+    """
+    _claimed(engine, 1, age=_OLD)
+
+    assert stall.scan_unattended().scheduler_moving is False
+
+
+def test_a_deployment_claiming_something_else_is_moving(engine):
+    _claimed(engine, 1, age=_OLD)
+    # Claimed after job 1 started waiting, and not itself stalled.
+    _add_job(engine,
+             2,
+             status='RUNNING',
+             submitted_at=time.time() - _RECENT,
+             start_at=time.time() - _RECENT)
+
+    assert stall.scan_unattended().scheduler_moving is True
+
+
+def test_a_claim_older_than_the_stall_does_not_count_as_moving(engine):
+    """Anchored on when the stall began, not on a window ending at now."""
+    _claimed(engine, 1, age=_OLD)
+    _add_job(engine,
+             2,
+             status='RUNNING',
+             submitted_at=time.time() - _OLD * 2,
+             start_at=time.time() - _OLD * 2)
+
+    assert stall.scan_unattended().scheduler_moving is False
+
+
+def test_every_reported_task_is_excluded_not_only_the_oldest(engine):
+    """Two stalled tasks must not witness each other."""
+    _claimed(engine, 1, age=_OLD)
+    _claimed(engine, 2, age=_OLD - 100)
+
+    scan = stall.scan_unattended()
+    assert _ids(scan) == {1, 2}
+    assert scan.scheduler_moving is False
+
+
+# ---------------------------------------------------------------- thresholds
+
+
+def test_the_threshold_can_be_overridden_by_the_environment(
+        engine, monkeypatch):
+    _claimed(engine, 1, age=_OLD)
+    _claimed(engine, 2, age=120)
+
+    assert _ids(stall.scan_unattended()) == {1}
+
+    monkeypatch.setenv(skylet_constants.ENV_VAR_MANAGED_JOBS_UNATTENDED_SECONDS,
+                       '60')
+    assert _ids(stall.scan_unattended()) == {1, 2}
+
+
+@pytest.mark.parametrize('value', ['0', '-5', 'soon', '', 'inf', 'nan'])
+def test_an_unusable_threshold_raises_rather_than_falling_back(
+        engine, monkeypatch, value):
+    """A threshold that silently reverts is a wrong answer that looks right.
+
+    The raise reaches the collector, which reports the phase as not measured
+    instead of as zero.
+    """
+    monkeypatch.setenv(skylet_constants.ENV_VAR_MANAGED_JOBS_UNATTENDED_SECONDS,
+                       value)
+
+    with pytest.raises(ValueError):
+        stall.unattended_seconds()
+
+
+# --------------------------------------------------------------- truncation
+
+
+def test_the_request_lookup_asks_for_only_the_column_it_reads(engine):
+    """Asking for whole requests would decode them, and a decode can raise.
+
+    Request.decode unpickles the request body and re-raises what it cannot
+    read, so one request left behind by another server version would take the
+    whole phase to "not measured" -- during a rollout, which is when it matters
+    most. Narrowing the projection is what prevents that, so it is pinned.
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky.server.requests import requests as api_requests
+
+    seen = {}
+
+    def _capture(req_filter):
+        seen['filter'] = req_filter
+        return []
+
+    _claimed(engine, 1, age=_OLD)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(stall, '_clusters_with_live_requests',
+                      _REAL_CLUSTERS_WITH_LIVE_REQUESTS)
+        patch.setattr(api_requests, 'get_request_tasks', _capture)
+        stall.scan_unattended()
+
+    assert seen['filter'].fields == [api_requests.COL_CLUSTER_NAME]
+
+
+def test_the_activity_lookup_runs_against_a_real_database(engine):
+    """The autouse stub means this function body is otherwise never executed.
+
+    It is the retry suppressor: if its SQL or its clock handling regressed,
+    every task in launch backoff would be reported, and the suite would stay
+    green because nothing calls the real thing. Written through the production
+    event writer so the timestamp format is the one the column really holds.
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs.state import ManagedJobStatus
+
+    _claimed(engine, 1, age=_OLD)
+    _claimed(engine, 2, age=_OLD)
+    managed_job_state.add_job_event(1, 0, ManagedJobStatus.PENDING,
+                                    'Job submitted to queue')
+
+    active = _REAL_TASKS_ACTIVE_RECENTLY(engine, [1, 2])
+
+    assert active == {(1, 0)}, 'only the task that wrote an event is active'
+
+
+def test_a_capped_scan_says_its_count_is_a_floor(engine):
+    for job_id in range(1, 6):
+        _claimed(engine, job_id, age=_OLD)
+
+    full = stall.scan_unattended()
+    assert full.truncated is False and full.unexamined == 0
+
+    capped = stall.scan_unattended(candidate_limit=3)
+    assert capped.truncated is True
+
+    unexamined = stall.scan_unattended(examination_limit=2)
+    assert unexamined.truncated is True
+    assert unexamined.unexamined == 3, 'the skipped candidates are counted'
+
+
+def test_a_task_in_launch_backoff_belongs_to_one_phase_only(engine):
+    """The only row shape that could land in both, built on purpose.
+
+    `set_backoff_pending_async` puts a task back to status PENDING while
+    submitted_at stays set, so it satisfies the never-claimed status test and
+    the claimed one at the same time. `submitted_at IS NULL` is the only thing
+    keeping it out of the never-claimed half; without that clause the task is
+    counted twice and two alerts fire for one incident.
+    """
+    _add_job(engine,
+             1,
+             status='PENDING',
+             eligible_at=time.time() - _OLD,
+             submitted_at=time.time() - _OLD,
+             start_at=None,
+             end_at=None)
+
+    assert _ids(stall.scan_never_claimed()) == set()
+    assert _ids(stall.scan_unattended()) == {1}
+
+
+def test_a_task_that_ended_without_ever_being_claimed_is_not_reported(engine):
+    """status = 'PENDING' is the only clause excluding closed rows here.
+
+    A controller failure marks every task FAILED_CONTROLLER with an end_at,
+    including tasks nothing ever claimed -- which keeps their old eligible_at
+    and their NULL submitted_at. Without the status test those rows match the
+    never-claimed predicate forever, on every deployment that has ever had one.
+    """
+    _add_job(engine,
+             1,
+             status='FAILED_CONTROLLER',
+             eligible_at=time.time() - _OLD,
+             submitted_at=None,
+             end_at=time.time() - _RECENT)
+    _never_claimed(engine, 2, age=_OLD)
+
+    assert _ids(stall.scan_never_claimed()) == {2}
+
+
+def test_the_shared_predicate_stays_unambiguous_in_the_join(engine):
+    """CLAIMED_IN_FLIGHT_PREDICATE names columns without a table qualifier.
+
+    It has to: the same string builds a single-table partial index. That is
+    only safe while job_info has none of those columns -- adding one would make
+    the claimed scan ambiguous at runtime, on a deployment, with nothing in
+    between to catch it.
+    """
+    info_columns = {
+        column.name for column in managed_job_state.job_info_table.columns
+    }
+
+    assert not info_columns & {'submitted_at', 'start_at', 'end_at'}
+
+
+def test_the_phases_do_not_read_each_others_rows(engine):
+    """One condition's shape must not appear in the other's result."""
+    _never_claimed(engine, 1, age=_OLD)
+    _claimed(engine, 2, age=_OLD)
+
+    assert _ids(stall.scan_never_claimed()) == {1}
+    assert _ids(stall.scan_unattended()) == {2}
+    assert all(task.phase == stall.NEVER_CLAIMED
+               for task in stall.scan_never_claimed().tasks)
+    assert all(task.phase == stall.UNATTENDED
+               for task in stall.scan_unattended().tasks)

@@ -1,0 +1,202 @@
+"""The stall collector's two promises: per-phase isolation, and zero vs absent.
+
+Both are claims about what happens when something goes wrong, so both are
+tested by making it go wrong rather than by asserting the happy path.
+"""
+import time
+
+import pytest
+
+from sky.jobs import stall
+from sky.server import metrics
+
+
+def _scan(phase, tasks, **kwargs):
+    kwargs.setdefault('truncated', False)
+    kwargs.setdefault('unexamined', 0)
+    kwargs.setdefault('scheduler_moving', False)
+    return stall.StallScan(phase=phase, tasks=list(tasks), **kwargs)
+
+
+def _task(phase, job_id, *, age, workspace='ws'):
+    return stall.StalledTask(phase=phase,
+                             spot_job_id=job_id,
+                             task_id=0,
+                             task_name=f'task-{job_id}',
+                             job_name=f'job-{job_id}',
+                             workspace=workspace,
+                             priority=None,
+                             stalled_since=time.time() - age)
+
+
+def _families(collector):
+    return {family.name: family for family in collector.collect()}
+
+
+def _samples(family):
+    """{label tuple: value} for one metric family."""
+    return {
+        tuple(sample.labels.values()): sample.value for sample in family.samples
+    }
+
+
+@pytest.fixture(name='scans')
+def scans_fixture(monkeypatch):
+    """Control what each phase's scan does, including raising."""
+    behaviour = {}
+
+    def _run(phase):
+        result = behaviour[phase]
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(stall, 'scan_never_claimed',
+                        lambda **kw: _run(stall.NEVER_CLAIMED))
+    monkeypatch.setattr(stall, 'scan_unattended',
+                        lambda **kw: _run(stall.UNATTENDED))
+    behaviour[stall.NEVER_CLAIMED] = _scan(stall.NEVER_CLAIMED, [])
+    behaviour[stall.UNATTENDED] = _scan(stall.UNATTENDED, [])
+    return behaviour
+
+
+def test_describe_declares_every_family_collect_emits(scans):
+    """Registration must not run a database query to learn the families.
+
+    ResilientCollector.describe() exists for that reason; a family declared in
+    only one of the two places defeats it.
+    """
+    collector = metrics.ManagedJobsStallCollector()
+
+    described = {(family.name, tuple(family._labelnames))
+                 for family in collector.describe()}
+    emitted = {(family.name, tuple(family._labelnames))
+               for family in collector.collect()}
+
+    # Labels too, not just names: a describe() that declared the wrong label
+    # set would still register cleanly and then disagree with every sample.
+    assert described == emitted
+
+
+def test_a_phase_that_found_nothing_reports_zero_and_a_scan_time(scans):
+    """Zero is a measurement and has to be stated.
+
+    An absent series would otherwise mean both "nothing is stalled" and "the
+    scan could not run", and no rule could tell them apart.
+    """
+    collector = metrics.ManagedJobsStallCollector()
+
+    families = _families(collector)
+    counts = _samples(families['sky_managed_jobs_stalled'])
+
+    assert counts[(stall.NEVER_CLAIMED, '')] == 0
+    assert counts[(stall.UNATTENDED, '')] == 0
+    scans_seen = _samples(
+        families['sky_managed_jobs_stall_scan_timestamp_seconds'])
+    assert set(scans_seen) == {(stall.NEVER_CLAIMED,), (stall.UNATTENDED,)}
+
+
+def test_a_phase_that_never_ran_reports_nothing_at_all(scans):
+    """Not even a zero: a zero meaning "I could not look" is undetectable."""
+    scans[stall.UNATTENDED] = RuntimeError('the requests db is unreadable')
+    collector = metrics.ManagedJobsStallCollector()
+
+    families = _families(collector)
+    counts = _samples(families['sky_managed_jobs_stalled'])
+    timestamps = _samples(
+        families['sky_managed_jobs_stall_scan_timestamp_seconds'])
+
+    assert (stall.UNATTENDED, '') not in counts
+    assert (stall.UNATTENDED,) not in timestamps
+
+
+@pytest.mark.parametrize('broken,intact',
+                         [(stall.UNATTENDED, stall.NEVER_CLAIMED),
+                          (stall.NEVER_CLAIMED, stall.UNATTENDED)])
+def test_one_phase_failing_leaves_the_other_reporting(scans, broken, intact):
+    """The isolation claim, which is the reason this collector exists.
+
+    Both orders, and that is the whole point: with a single try around both
+    scans, a failure in the *second* one still leaves the first's cache
+    written, so testing only that direction passes on the very structure this
+    collector exists to avoid. Only a failure in the first phase tells them
+    apart.
+    """
+    scans[broken] = RuntimeError('boom')
+    scans[intact] = _scan(intact, [_task(intact, 1, age=900)])
+    collector = metrics.ManagedJobsStallCollector()
+
+    counts = _samples(_families(collector)['sky_managed_jobs_stalled'])
+
+    assert counts[(intact, 'ws')] == 1
+    assert not any(phase == broken for phase, _ in counts)
+
+
+def test_a_phase_that_stops_scanning_keeps_its_old_timestamp(scans):
+    """What the staleness alert reads.
+
+    The last good values keep being served -- dropping them would flap the
+    alert on one transient failure -- but the timestamp does not advance, so
+    the deployment can see that the phase stopped reporting.
+    """
+    collector = metrics.ManagedJobsStallCollector()
+    first = _samples(
+        _families(collector)['sky_managed_jobs_stall_scan_timestamp_seconds'])
+
+    scans[stall.UNATTENDED] = RuntimeError('boom')
+    collector._last_scrape_time = 0.0  # force a refresh
+    second = _samples(
+        _families(collector)['sky_managed_jobs_stall_scan_timestamp_seconds'])
+
+    assert second[(stall.UNATTENDED,)] == first[(stall.UNATTENDED,)]
+    assert second[(stall.NEVER_CLAIMED,)] > first[(stall.NEVER_CLAIMED,)]
+
+
+def test_a_capped_scan_says_so_in_its_own_series(scans):
+    """A count at the cap is a floor, and the floor has to be exported.
+
+    Both arms: a scan that was not capped must say 0, or the series carries no
+    information and a reader cannot tell a total from a floor.
+    """
+    scans[stall.NEVER_CLAIMED] = _scan(stall.NEVER_CLAIMED,
+                                       [_task(stall.NEVER_CLAIMED, 1, age=900)],
+                                       truncated=True)
+    collector = metrics.ManagedJobsStallCollector()
+
+    truncated = _samples(
+        _families(collector)['sky_managed_jobs_stall_truncated'])
+
+    assert truncated[(stall.NEVER_CLAIMED,)] == 1
+    assert truncated[(stall.UNATTENDED,)] == 0
+
+
+def test_counts_and_ages_are_per_workspace(scans):
+    scans[stall.NEVER_CLAIMED] = _scan(stall.NEVER_CLAIMED, [
+        _task(stall.NEVER_CLAIMED, 1, age=900, workspace='a'),
+        _task(stall.NEVER_CLAIMED, 2, age=100, workspace='a'),
+        _task(stall.NEVER_CLAIMED, 3, age=300, workspace='b'),
+    ])
+    collector = metrics.ManagedJobsStallCollector()
+
+    families = _families(collector)
+    counts = _samples(families['sky_managed_jobs_stalled'])
+    ages = _samples(families['sky_managed_jobs_stall_seconds_max'])
+
+    assert counts[(stall.NEVER_CLAIMED, 'a')] == 2
+    assert counts[(stall.NEVER_CLAIMED, 'b')] == 1
+    # The oldest in each workspace, not the oldest overall.
+    assert ages[(stall.NEVER_CLAIMED, 'a')] == pytest.approx(900, abs=5)
+    assert ages[(stall.NEVER_CLAIMED, 'b')] == pytest.approx(300, abs=5)
+
+
+def test_a_task_with_no_workspace_is_not_mistaken_for_the_empty_scan(scans):
+    """The empty-scan sentinel must be unreachable by a real row."""
+    scans[stall.NEVER_CLAIMED] = _scan(
+        stall.NEVER_CLAIMED,
+        [_task(stall.NEVER_CLAIMED, 1, age=900, workspace=None)])
+    collector = metrics.ManagedJobsStallCollector()
+
+    counts = _samples(_families(collector)['sky_managed_jobs_stalled'])
+
+    assert (stall.NEVER_CLAIMED, '') not in counts
+    assert counts[(stall.NEVER_CLAIMED, metrics._NULL_WORKSPACE_LABEL)] == 1

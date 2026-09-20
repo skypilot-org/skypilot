@@ -89,6 +89,17 @@ PENDING_TIMELINE_PREDICATE = f't_time_to_running IS NULL AND {_MEASURABLE}'
 NEVER_RAN_PREDICATE = (f't_controller_queue IS NULL AND start_at IS NULL AND '
                        f'{_MEASURABLE}')
 
+# A task the scheduler has claimed that has neither started nor finished. Used
+# three ways -- the partial index below, its migration, and the WHERE of the
+# stall scan in sky/jobs/stall.py -- so the query cannot drift from the index
+# that serves it even by editing one of them. The two above are shared by two
+# places each; this one closes the remaining gap.
+#
+# It holds in-flight claimed work only: a row leaves the moment it starts or
+# ends, so the index tracks what is outstanding rather than job history.
+CLAIMED_IN_FLIGHT_PREDICATE = ('submitted_at IS NOT NULL AND '
+                               'start_at IS NULL AND end_at IS NULL')
+
 spot_table = sqlalchemy.Table(
     'spot',
     Base.metadata,
@@ -256,6 +267,13 @@ spot_table = sqlalchemy.Table(
                      'end_at',
                      postgresql_where=sqlalchemy.text(NEVER_RAN_PREDICATE),
                      sqlite_where=sqlalchemy.text(NEVER_RAN_PREDICATE)),
+    # submitted_at is the indexed column so the stall scan's `<= cutoff` is a
+    # range scan and its ORDER BY submitted_at needs no sort.
+    sqlalchemy.Index(
+        'ix_spot_unattended',
+        'submitted_at',
+        postgresql_where=sqlalchemy.text(CLAIMED_IN_FLIGHT_PREDICATE),
+        sqlite_where=sqlalchemy.text(CLAIMED_IN_FLIGHT_PREDICATE)),
 )
 
 job_info_table = sqlalchemy.Table(
@@ -482,6 +500,16 @@ def create_table(engine: sqlalchemy.engine.Engine):
 
 
 _db_manager = db_utils.DatabaseManager('spot_jobs', create_table)
+
+
+def get_engine() -> sqlalchemy.engine.Engine:
+    """The managed-jobs database engine.
+
+    For readers in this package that run their own SQL -- sky/jobs/stall.py
+    asks a question no accessor here answers -- so that they do not reach into
+    this module's manager and couple themselves to its internals.
+    """
+    return _db_manager.get_engine()
 
 
 async def _retry_session(operation):
