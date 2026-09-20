@@ -55,7 +55,7 @@ def no_cross_store_fixture(monkeypatch):
     monkeypatch.setattr(stall, '_clusters_with_live_requests',
                         lambda names: set())
     monkeypatch.setattr(stall, '_tasks_active_recently',
-                        lambda engine, job_ids: set())
+                        lambda engine, job_ids, deadline: set())
     monkeypatch.setattr(stall.global_user_state,
                         'get_launch_attempts_for_cluster', lambda name: [])
 
@@ -332,11 +332,11 @@ def test_a_failed_attempt_falls_through_to_the_tasks_own_activity(
     _attempts(monkeypatch, [_Attempt(outcome='failed')])
 
     monkeypatch.setattr(stall, '_tasks_active_recently',
-                        lambda engine, job_ids: {(1, 0)})
+                        lambda engine, job_ids, deadline: {(1, 0)})
     assert not stall.scan_unattended().tasks, 'a retrying task is not stalled'
 
     monkeypatch.setattr(stall, '_tasks_active_recently',
-                        lambda engine, job_ids: set())
+                        lambda engine, job_ids, deadline: set())
     assert _ids(stall.scan_unattended()) == {1}, 'a silent task is stalled'
 
 
@@ -427,7 +427,9 @@ def test_the_activity_lookup_runs_against_a_real_database(engine):
     managed_job_state.add_job_event(1, 0, ManagedJobStatus.PENDING,
                                     'Job submitted to queue')
 
-    active = _REAL_TASKS_ACTIVE_RECENTLY(engine, [1, 2])
+    active = _REAL_TASKS_ACTIVE_RECENTLY(
+        engine, [1, 2],
+        time.monotonic() + stall._SCAN_BUDGET_SECONDS)
 
     assert active == {(1, 0)}, 'only the task that wrote an event is active'
 
@@ -508,3 +510,35 @@ def test_the_phases_do_not_read_each_others_rows(engine):
     assert _ids(stall.scan_unattended()) == {2}
     assert stall.scan_never_claimed().phase == stall.NEVER_CLAIMED
     assert stall.scan_unattended().phase == stall.UNATTENDED
+
+
+# --- the budget is per scan, not per statement -------------------------------
+
+
+def test_the_budget_shrinks_as_a_scan_spends_it(engine):
+    """Each statement gets what is LEFT, so the total cannot multiply.
+
+    A per-statement timeout looks equivalent and is not: the claimed scan runs
+    two statements and the collector runs both scans, so three statements at a
+    per-statement bound would be three times the number anyone reasoned about,
+    against a refresh interval and a staleness horizon that were the reason for
+    picking it.
+    """
+    deadline = time.monotonic() + stall._SCAN_BUDGET_SECONDS
+
+    first = stall._remaining_ms(deadline, now=time.monotonic())
+    later = stall._remaining_ms(deadline, now=time.monotonic() + 5)
+
+    assert first <= stall._SCAN_BUDGET_SECONDS * 1000
+    assert later < first, 'a spent budget must leave less for what follows'
+
+
+def test_an_exhausted_budget_never_asks_for_no_bound_at_all(engine):
+    """Postgres reads statement_timeout = 0 as DISABLED.
+
+    So a budget that has run out must floor rather than round away, or the
+    last statement of a slow scan is the one statement with no bound on it.
+    """
+    deadline = time.monotonic() - 60
+
+    assert stall._remaining_ms(deadline) >= 1000

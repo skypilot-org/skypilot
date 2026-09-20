@@ -62,18 +62,27 @@ DEFAULT_EXAMINATION_LIMIT = 200
 # being shorter than the unattended threshold itself.
 _RETRY_ACTIVITY_SECONDS = 900
 
-# Bound on each statement a scan runs against the managed-jobs database. A
-# thread parked in a DB driver cannot be killed, so the database has to be the
-# thing that gives up.
+# Budget for ALL the managed-jobs statements one scan runs, not a per-statement
+# timeout. A thread parked in a DB driver cannot be killed, so the database has
+# to be the thing that gives up -- but a per-statement bound multiplies: the
+# claimed scan runs two statements, the collector runs both scans, and three
+# statements at a per-statement 25s would be 75s against a 30s refresh interval
+# and a 90s staleness horizon. Each statement instead gets whatever is left of
+# the budget, so the total holds however many statements there come to be.
 #
-# It does not bound a whole scan. The per-task attempt reads and the request
-# lookup go to other stores; the priority lookup is on THIS engine but opens
-# its own session, so routing it through here is the one that would actually
-# extend the bound. What stops refreshes from stacking is the caller holding
-# one in flight, not this.
-# Chosen under the collector's refresh interval so the common case -- a
-# contended managed-jobs database -- clears before the next refresh is due.
-_STATEMENT_TIMEOUT_SECONDS = 25
+# Two scans per refresh, so a refresh's worst case is twice this, still inside
+# the interval. Measured cost is 0.2 ms and 14.6 ms on a tenant-sized table, so
+# the budget is three orders of magnitude of headroom, not a tuning knob.
+#
+# It still does not bound a whole scan: the per-task attempt reads and the
+# request lookup go to other stores, and the priority lookup is on THIS engine
+# but opens its own session, so routing it through here is the one change that
+# would actually extend the coverage. What stops refreshes from stacking is the
+# caller holding one in flight, not this.
+_SCAN_BUDGET_SECONDS = 12
+# Never issue a timeout below this: a budget that has run out should fail the
+# statement outright rather than ask the database for something unservable.
+_MIN_STATEMENT_TIMEOUT_SECONDS = 1
 
 # Nothing in the job may be in one of these for the never-claimed test to fire:
 # a pipeline whose earlier task is still running has not stalled, its later
@@ -241,8 +250,22 @@ def _quoted(values: Tuple[str, ...]) -> str:
     return ','.join(f'\'{value}\'' for value in values)
 
 
+def _remaining_ms(deadline: float, now: Optional[float] = None) -> int:
+    """What is left of a scan's budget, as whole milliseconds.
+
+    Floored rather than allowed to reach zero: Postgres reads a
+    `statement_timeout` of 0 as *disabled*, so a rounded-away budget would
+    remove the bound instead of enforcing it.
+    """
+    if now is None:
+        now = time.monotonic()
+    left = max(_MIN_STATEMENT_TIMEOUT_SECONDS, deadline - now)
+    return int(left * 1000)
+
+
 @contextlib.contextmanager
-def _bounded(engine: sqlalchemy.engine.Engine) -> Iterator[Any]:
+def _bounded(engine: sqlalchemy.engine.Engine,
+             deadline: float) -> Iterator[Any]:
     """A connection whose statements the database will end on its own.
 
     See `_STATEMENT_TIMEOUT_SECONDS`: nothing above this can interrupt a query
@@ -255,16 +278,18 @@ def _bounded(engine: sqlalchemy.engine.Engine) -> Iterator[Any]:
             yield conn
             return
         with conn.begin():
-            # SET does not take bind parameters; the value is an int constant.
-            timeout_ms = int(_STATEMENT_TIMEOUT_SECONDS * 1000)
+            # SET does not take bind parameters; the value is an int derived
+            # from a constant and the clock, never from input.
+            timeout_ms = _remaining_ms(deadline)
             conn.execute(
                 sqlalchemy.text(
                     f'SET LOCAL statement_timeout = \'{timeout_ms}ms\''))
             yield conn
 
 
-def _rows(engine: sqlalchemy.engine.Engine, sql: str) -> List[Dict[str, Any]]:
-    with _bounded(engine) as conn:
+def _rows(engine: sqlalchemy.engine.Engine, sql: str,
+          deadline: float) -> List[Dict[str, Any]]:
+    with _bounded(engine, deadline) as conn:
         result = conn.execute(sqlalchemy.text(sql))
         return [dict(row) for row in result.mappings()]
 
@@ -371,8 +396,8 @@ def _starved(task: StalledTask, highest: int) -> bool:
     return task.priority is not None and task.priority < highest
 
 
-def _tasks_active_recently(engine: sqlalchemy.engine.Engine,
-                           job_ids: List[int]) -> Set[Tuple[int, int]]:
+def _tasks_active_recently(engine: sqlalchemy.engine.Engine, job_ids: List[int],
+                           deadline: float) -> Set[Tuple[int, int]]:
     """Which (job, task) pairs wrote a job_events row inside the window.
 
     Separates a retry that is coming from one that never came: launch_attempts
@@ -391,7 +416,7 @@ def _tasks_active_recently(engine: sqlalchemy.engine.Engine,
     ids = ','.join(str(int(job_id)) for job_id in job_ids)
     sql = (f'SELECT DISTINCT spot_job_id, task_id FROM job_events '
            f'WHERE timestamp >= {cutoff} AND spot_job_id IN ({ids})')
-    with _bounded(engine) as conn:
+    with _bounded(engine, deadline) as conn:
         return {(row[0], row[1]) for row in conn.execute(sqlalchemy.text(sql))}
 
 
@@ -451,6 +476,7 @@ def scan_never_claimed(
     """
     if age_seconds is None:
         age_seconds = never_claimed_seconds()
+    deadline = time.monotonic() + _SCAN_BUDGET_SECONDS
     engine = managed_job_state.get_engine()
     sql = _NEVER_CLAIMED_SELECT.format(
         now=_now_expr(engine),
@@ -460,7 +486,7 @@ def scan_never_claimed(
         active_batch_states=_quoted(_ACTIVE_BATCH_STATES),
         candidate_limit=int(candidate_limit),
     )
-    rows = _rows(engine, sql)
+    rows = _rows(engine, sql, deadline)
     highest = _highest_blocking_priority()
     tasks = [_task(row) for row in rows]
     return _scan(NEVER_CLAIMED,
@@ -484,6 +510,7 @@ def scan_unattended(
         age_seconds = unattended_seconds()
     if now is None:
         now = time.time()
+    deadline = time.monotonic() + _SCAN_BUDGET_SECONDS
     engine = managed_job_state.get_engine()
     sql = _UNATTENDED_SELECT.format(
         claimed_in_flight=managed_job_state.CLAIMED_IN_FLIGHT_PREDICATE,
@@ -491,7 +518,7 @@ def scan_unattended(
         age_seconds=float(age_seconds),
         candidate_limit=int(candidate_limit),
     )
-    rows = _rows(engine, sql)
+    rows = _rows(engine, sql, deadline)
     candidates = [_task(row) for row in rows]
     examined = candidates[:examination_limit]
     # Both resolved for the whole batch before the per-task pass, for the
@@ -501,7 +528,8 @@ def scan_unattended(
         if name is not None
     ])
     active = _tasks_active_recently(engine,
-                                    [task.spot_job_id for task in examined])
+                                    [task.spot_job_id for task in examined],
+                                    deadline)
     unexamined = len(candidates) - len(examined)
     return _scan(UNATTENDED, [
         task for task in examined
