@@ -4,6 +4,7 @@ Both are claims about what happens when something goes wrong, so both are
 tested by making it go wrong rather than by asserting the happy path.
 """
 import dataclasses
+import inspect
 import time
 
 import pytest
@@ -298,3 +299,32 @@ def test_the_collector_reads_every_field_the_scan_returns(
     declared = {field.name for field in dataclasses.fields(stall.StallScan)}
     assert declared - read == set(), (
         f'StallScan fields the collector never reads: {declared - read}')
+
+
+def test_a_refresh_worth_of_budget_fits_inside_the_refresh_interval():
+    """The budget is picked from the interval and the number of scans.
+
+    It cannot be derived in stall.py, which must not import the collector --
+    so the relation is asserted here instead of assumed there. Add a third
+    scan, or shorten the interval, and this fails rather than leaving a
+    refresh that can overrun the next one with nothing saying so.
+    """
+    scans_per_refresh = 2
+
+    worst_case = scans_per_refresh * stall._SCAN_BUDGET_SECONDS
+
+    assert worst_case < metrics._COLLECTOR_REFRESH_TTL_SECONDS, (
+        f'{scans_per_refresh} scans at {stall._SCAN_BUDGET_SECONDS}s is '
+        f'{worst_case}s against a {metrics._COLLECTOR_REFRESH_TTL_SECONDS}s '
+        'refresh interval')
+    # And well inside the horizon at which the collector reads as inactive,
+    # which is the failure a reader would see rather than a slow scan.
+    assert worst_case < metrics._COLLECTOR_MAX_STALENESS_SECONDS / 2
+
+
+def test_the_collector_runs_exactly_the_scans_the_budget_assumes():
+    """The count above is a claim about _refresh; here it is checked."""
+    source = inspect.getsource(metrics.ManagedJobsStallCollector._refresh)
+
+    assert source.count('stall.scan_') == 2, (
+        'the budget arithmetic assumes two scans per refresh')

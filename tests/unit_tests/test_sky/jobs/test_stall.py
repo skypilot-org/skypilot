@@ -4,6 +4,7 @@ Every case has a baseline arm: the row that must be reported sits next to the
 row that must not, and the assertion names both. A suppression test that only
 asserts silence passes just as well when the query returns nothing at all.
 """
+import dataclasses
 import time
 from typing import Optional
 
@@ -542,3 +543,40 @@ def test_an_exhausted_budget_never_asks_for_no_bound_at_all(engine):
     deadline = time.monotonic() - 60
 
     assert stall._remaining_ms(deadline) >= 1000
+
+
+# --- the surface an out-of-tree caller depends on ---------------------------
+
+
+def test_the_supported_surface_is_what_it_says():
+    """__all__ is a promise to a caller that does not appear in this repo.
+
+    The enterprise plugin imports these names. A rename here is invisible to
+    anyone searching this repository, so the list is pinned: changing it should
+    be a decision, not a side effect.
+    """
+    assert set(stall.__all__) == {
+        'NEVER_CLAIMED',
+        'UNATTENDED',
+        'StalledTask',
+        'StallScan',
+        'scan_never_claimed',
+        'scan_unattended',
+        'never_claimed_seconds',
+        'unattended_seconds',
+    }
+    missing = [name for name in stall.__all__ if not hasattr(stall, name)]
+    assert not missing, f'__all__ names that do not exist: {missing}'
+
+
+def test_the_task_fields_an_event_payload_needs_are_public():
+    """The plugin reads these off StalledTask to build its payload.
+
+    Dropping one is the same kind of break as renaming a function, and it does
+    not show up as a signature change.
+    """
+    fields = {field.name for field in dataclasses.fields(stall.StalledTask)}
+
+    assert {
+        'spot_job_id', 'task_id', 'task_name', 'workspace', 'stalled_since'
+    } <= fields

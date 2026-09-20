@@ -19,6 +19,14 @@ poller that turns the same answer into events for deployments that do not
 scrape. They have to agree, which is why the predicate lives here once instead
 of being written out in each of them.
 
+The two callers deliberately differ on one thing, and it is not in here: what a
+*failed* scan means. A gauge can report "not measured" -- the phase exports no
+series and a staleness alert says so. The event path has no such channel, so it
+suppresses instead. That is a try/except at each call site, because the policy
+belongs to whoever owns the reporting channel; these functions just raise.
+
+``__all__`` below is the supported surface. It is small on purpose.
+
 The two scans are separate entry points on purpose. They tick independently,
 read different stores, and must be able to fail independently: a raise in the
 priority lookup must not take the claimed half down with it. There is
@@ -42,6 +50,22 @@ from sky.server.requests import requests as api_requests
 from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
+
+# This module has a consumer outside this repository: the enterprise support
+# plugin's poller turns the same two scans into events for deployments that do
+# not scrape. So these names are an interface, not internals -- renaming one
+# breaks a caller that does not appear in any search of this repo. Everything
+# else here is private and may change freely.
+__all__ = [
+    'NEVER_CLAIMED',
+    'UNATTENDED',
+    'StalledTask',
+    'StallScan',
+    'scan_never_claimed',
+    'scan_unattended',
+    'never_claimed_seconds',
+    'unattended_seconds',
+]
 
 NEVER_CLAIMED = 'never_claimed'
 UNATTENDED = 'unattended'
