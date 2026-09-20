@@ -17,12 +17,10 @@ def _scan(phase, tasks, **kwargs):
     return stall.StallScan(phase=phase, tasks=list(tasks), **kwargs)
 
 
-def _task(phase, job_id, *, age, workspace='ws'):
-    return stall.StalledTask(phase=phase,
-                             spot_job_id=job_id,
+def _task(job_id, *, age, workspace='ws'):
+    return stall.StalledTask(spot_job_id=job_id,
                              task_id=0,
                              task_name=f'task-{job_id}',
-                             job_name=f'job-{job_id}',
                              workspace=workspace,
                              priority=None,
                              stalled_since=time.time() - age)
@@ -122,7 +120,7 @@ def test_one_phase_failing_leaves_the_other_reporting(scans, broken, intact):
     apart.
     """
     scans[broken] = RuntimeError('boom')
-    scans[intact] = _scan(intact, [_task(intact, 1, age=900)])
+    scans[intact] = _scan(intact, [_task(1, age=900)])
     collector = metrics.ManagedJobsStallCollector()
 
     counts = _samples(_families(collector)['sky_managed_jobs_stalled'])
@@ -157,8 +155,7 @@ def test_a_capped_scan_says_so_in_its_own_series(scans):
     Both arms: a scan that was not capped must say 0, or the series carries no
     information and a reader cannot tell a total from a floor.
     """
-    scans[stall.NEVER_CLAIMED] = _scan(stall.NEVER_CLAIMED,
-                                       [_task(stall.NEVER_CLAIMED, 1, age=900)],
+    scans[stall.NEVER_CLAIMED] = _scan(stall.NEVER_CLAIMED, [_task(1, age=900)],
                                        truncated=True)
     collector = metrics.ManagedJobsStallCollector()
 
@@ -171,9 +168,9 @@ def test_a_capped_scan_says_so_in_its_own_series(scans):
 
 def test_counts_and_ages_are_per_workspace(scans):
     scans[stall.NEVER_CLAIMED] = _scan(stall.NEVER_CLAIMED, [
-        _task(stall.NEVER_CLAIMED, 1, age=900, workspace='a'),
-        _task(stall.NEVER_CLAIMED, 2, age=100, workspace='a'),
-        _task(stall.NEVER_CLAIMED, 3, age=300, workspace='b'),
+        _task(1, age=900, workspace='a'),
+        _task(2, age=100, workspace='a'),
+        _task(3, age=300, workspace='b'),
     ])
     collector = metrics.ManagedJobsStallCollector()
 
@@ -190,9 +187,8 @@ def test_counts_and_ages_are_per_workspace(scans):
 
 def test_a_task_with_no_workspace_is_not_mistaken_for_the_empty_scan(scans):
     """The empty-scan sentinel must be unreachable by a real row."""
-    scans[stall.NEVER_CLAIMED] = _scan(
-        stall.NEVER_CLAIMED,
-        [_task(stall.NEVER_CLAIMED, 1, age=900, workspace=None)])
+    scans[stall.NEVER_CLAIMED] = _scan(stall.NEVER_CLAIMED,
+                                       [_task(1, age=900, workspace=None)])
     collector = metrics.ManagedJobsStallCollector()
 
     counts = _samples(_families(collector)['sky_managed_jobs_stalled'])
@@ -285,12 +281,19 @@ def test_the_collector_reads_every_field_the_scan_returns(
             read.add(name)
             return getattr(object.__getattribute__(self, '_scan'), name)
 
-    monkeypatch.setattr(stall, 'scan_never_claimed',
-                        lambda **kw: _Watched(_scan(stall.NEVER_CLAIMED, [])))
-    monkeypatch.setattr(stall, 'scan_unattended',
-                        lambda **kw: _Watched(_scan(stall.UNATTENDED, [])))
-
-    metrics.ManagedJobsStallCollector()._refresh()
+    # Both paths: a field read only when there is something to report -- or
+    # only when there is not -- would never be touched by one of them, and
+    # the guard would pass on a field that is still unwired.
+    for tasks in ([], [_task(1, age=900)]):
+        monkeypatch.setattr(
+            stall, 'scan_never_claimed',
+            lambda **kw: _Watched(_scan(stall.NEVER_CLAIMED, tasks)))
+        monkeypatch.setattr(
+            stall, 'scan_unattended',
+            lambda **kw: _Watched(_scan(stall.UNATTENDED, tasks)))
+        collector = metrics.ManagedJobsStallCollector()
+        collector._refresh()
+        list(collector.collect())
 
     declared = {field.name for field in dataclasses.fields(stall.StallScan)}
     assert declared - read == set(), (

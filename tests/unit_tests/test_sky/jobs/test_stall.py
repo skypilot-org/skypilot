@@ -506,7 +506,5 @@ def test_the_phases_do_not_read_each_others_rows(engine):
 
     assert _ids(stall.scan_never_claimed()) == {1}
     assert _ids(stall.scan_unattended()) == {2}
-    assert all(task.phase == stall.NEVER_CLAIMED
-               for task in stall.scan_never_claimed().tasks)
-    assert all(task.phase == stall.UNATTENDED
-               for task in stall.scan_unattended().tasks)
+    assert stall.scan_never_claimed().phase == stall.NEVER_CLAIMED
+    assert stall.scan_unattended().phase == stall.UNATTENDED

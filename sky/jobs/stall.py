@@ -92,12 +92,10 @@ _ACTIVE_BATCH_STATES = ('LAUNCHING', 'ALIVE', 'ALIVE_WAITING', 'ALIVE_BACKOFF')
 
 @dataclasses.dataclass(frozen=True)
 class StalledTask:
-    """One task a scan is reporting."""
-    phase: str
+    """One task a scan is reporting; the phase is on the scan."""
     spot_job_id: int
     task_id: int
     task_name: Optional[str]
-    job_name: Optional[str]
     workspace: Optional[str]
     priority: Optional[int]
     # Epoch seconds: when this task started waiting. eligible_at for the
@@ -167,7 +165,6 @@ SELECT * FROM (
         s.task_name AS task_name,
         s.eligible_at AS stalled_since,
         ji.workspace AS workspace,
-        ji.name AS job_name,
         ji.priority AS priority
     FROM spot s
     LEFT JOIN job_info ji ON ji.spot_job_id = s.spot_job_id
@@ -216,7 +213,6 @@ SELECT * FROM (
         s.task_name AS task_name,
         s.submitted_at AS stalled_since,
         ji.workspace AS workspace,
-        ji.name AS job_name,
         ji.priority AS priority
     FROM spot s
     LEFT JOIN job_info ji ON ji.spot_job_id = s.spot_job_id
@@ -273,13 +269,11 @@ def _rows(engine: sqlalchemy.engine.Engine, sql: str) -> List[Dict[str, Any]]:
         return [dict(row) for row in result.mappings()]
 
 
-def _task(phase: str, row: Dict[str, Any]) -> StalledTask:
+def _task(row: Dict[str, Any]) -> StalledTask:
     return StalledTask(
-        phase=phase,
         spot_job_id=int(row['spot_job_id']),
         task_id=int(row['task_id']),
         task_name=row.get('task_name'),
-        job_name=row.get('job_name'),
         workspace=row.get('workspace'),
         priority=row.get('priority'),
         stalled_since=float(row.get('stalled_since') or 0.0),
@@ -468,7 +462,7 @@ def scan_never_claimed(
     )
     rows = _rows(engine, sql)
     highest = _highest_blocking_priority()
-    tasks = [_task(NEVER_CLAIMED, row) for row in rows]
+    tasks = [_task(row) for row in rows]
     return _scan(NEVER_CLAIMED,
                  [task for task in tasks if not _starved(task, highest)],
                  truncated=len(rows) >= candidate_limit)
@@ -498,7 +492,7 @@ def scan_unattended(
         candidate_limit=int(candidate_limit),
     )
     rows = _rows(engine, sql)
-    candidates = [_task(UNATTENDED, row) for row in rows]
+    candidates = [_task(row) for row in rows]
     examined = candidates[:examination_limit]
     # Both resolved for the whole batch before the per-task pass, for the
     # reason in _clusters_with_live_requests.
