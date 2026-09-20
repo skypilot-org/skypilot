@@ -129,6 +129,12 @@ class StalledTask:
     spot_job_id: int
     task_id: int
     task_name: Optional[str]
+    # Not read in this repo. It is in the contract because the event path
+    # names the job in what it sends, and a scan already has it in hand --
+    # rediscovering it there would be a second query for a row this one
+    # already selected. Removed once as unread, which made every event carry
+    # a null name until review caught it.
+    job_name: Optional[str]
     workspace: Optional[str]
     priority: Optional[int]
     # Epoch seconds: when this task started waiting. eligible_at for the
@@ -197,6 +203,7 @@ SELECT * FROM (
         s.task_id AS task_id,
         s.task_name AS task_name,
         s.eligible_at AS stalled_since,
+        ji.name AS job_name,
         ji.workspace AS workspace,
         ji.priority AS priority
     FROM spot s
@@ -245,6 +252,7 @@ SELECT * FROM (
         s.task_id AS task_id,
         s.task_name AS task_name,
         s.submitted_at AS stalled_since,
+        ji.name AS job_name,
         ji.workspace AS workspace,
         ji.priority AS priority
     FROM spot s
@@ -323,6 +331,7 @@ def _task(row: Dict[str, Any]) -> StalledTask:
         spot_job_id=int(row['spot_job_id']),
         task_id=int(row['task_id']),
         task_name=row.get('task_name'),
+        job_name=row.get('job_name'),
         workspace=row.get('workspace'),
         priority=row.get('priority'),
         stalled_since=float(row.get('stalled_since') or 0.0),
