@@ -1000,7 +1000,11 @@ class ManagedJobsStallCollector:
                 logger.exception(
                     'Failed to scan managed jobs stalled in phase %s', phase)
                 continue
-            self._cache[phase] = (result.tasks, time.time(), result.truncated)
+            # Labelled from the result, not from the loop: that is what
+            # StallScan.phase is for, and it is one less place for the two
+            # names to drift apart.
+            self._cache[result.phase] = (result.tasks, time.time(),
+                                         result.truncated)
 
     def describe(self):
         yield prom_core.GaugeMetricFamily('sky_managed_jobs_stalled',

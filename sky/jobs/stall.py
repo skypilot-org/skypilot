@@ -66,9 +66,11 @@ _RETRY_ACTIVITY_SECONDS = 900
 # thread parked in a DB driver cannot be killed, so the database has to be the
 # thing that gives up.
 #
-# It does not bound a whole scan: the priority lookup, the per-task attempt
-# reads and the request lookup go to other engines and are unbounded. What
-# stops refreshes from stacking is the caller holding one in flight, not this.
+# It does not bound a whole scan. The per-task attempt reads and the request
+# lookup go to other stores; the priority lookup is on THIS engine but opens
+# its own session, so routing it through here is the one that would actually
+# extend the bound. What stops refreshes from stacking is the caller holding
+# one in flight, not this.
 # Chosen under the collector's refresh interval so the common case -- a
 # contended managed-jobs database -- clears before the next refresh is due.
 _STATEMENT_TIMEOUT_SECONDS = 25
@@ -114,14 +116,10 @@ class StallScan:
     phase: str
     # Oldest first.
     tasks: List[StalledTask]
-    # A limit was hit, so `tasks` is a floor rather than a total.
+    # A limit was hit, so `tasks` is a floor rather than a total. The two
+    # causes -- more candidates than the query returns, more than the per-task
+    # pass reaches -- are folded together because no consumer separates them.
     truncated: bool
-    # Candidates the per-task pass did not reach.
-    unexamined: int
-    # Whether anything at all left PENDING since the oldest reported task
-    # started waiting. False when nothing did -- the deployment is frozen
-    # rather than merely backed up. Meaningless, and False, for an empty scan.
-    scheduler_moving: bool
 
 
 def _threshold_seconds(env_var: str, default: float) -> float:
@@ -439,57 +437,12 @@ def _still_stalled(task: StalledTask, now: float, age_seconds: float,
     return (task.spot_job_id, task.task_id) not in active
 
 
-def _scheduler_moving(engine: sqlalchemy.engine.Engine, since: float,
-                      reported: Set[Tuple[int, int]]) -> bool:
-    """Whether anything *else* has been claimed since `since`.
-
-    A stalled task while everything else keeps being claimed is a queue, not an
-    outage. The witness is spot.submitted_at, written exactly at the transition
-    out of PENDING.
-
-    Anchored on when the oldest stalled task started waiting, *not* on a
-    sliding window ending at now. A window makes this a function of elapsed
-    time: the last claim before a stall began is recent when the stall is first
-    seen and drops out of the window minutes later, so every episode that
-    outlives the window flips on its own, having learned nothing.
-
-    The reported set is excluded, and that is not a refinement. For the claimed
-    phase `since` *is* the oldest reported task's own submitted_at, so without
-    this the query matches that task and the answer is trivially yes -- the
-    deployment would never be reported as frozen no matter how stopped it was.
-
-    Read `len(reported) + 1` rows rather than filtering in SQL, which keeps the
-    statement dialect-agnostic and the result bounded: if more rows come back
-    than the set can account for, one of them is somebody else, by pigeonhole.
-    That step assumes (spot_job_id, task_id) identifies one row. Nothing in the
-    schema enforces it -- spot's key is the surrogate job_id -- so a duplicate
-    pair would let the reported set account for two rows and could answer
-    "frozen" while the scheduler is moving. Toward silence, not toward a false
-    report, which is the right direction for the one to be wrong in.
-    """
-    sql = ('SELECT spot_job_id, task_id FROM spot '
-           'WHERE submitted_at IS NOT NULL AND submitted_at >= :since '
-           'LIMIT :limit')
-    with _bounded(engine) as conn:
-        rows = conn.execute(sqlalchemy.text(sql), {
-            'since': since,
-            'limit': len(reported) + 1,
-        }).fetchall()
-    return any((row[0], row[1]) not in reported for row in rows)
-
-
-def _scan(phase: str, tasks: List[StalledTask], *, truncated: bool,
-          unexamined: int, engine: sqlalchemy.engine.Engine) -> StallScan:
-    """Assemble a scan result, asking the moving question only if it applies."""
-    tasks = sorted(tasks, key=lambda task: task.stalled_since)
-    reported = {(task.spot_job_id, task.task_id) for task in tasks}
-    moving = bool(tasks) and _scheduler_moving(engine, tasks[0].stalled_since,
-                                               reported)
+def _scan(phase: str, tasks: List[StalledTask], *,
+          truncated: bool) -> StallScan:
+    """Assemble a scan result, oldest first."""
     return StallScan(phase=phase,
-                     tasks=tasks,
-                     truncated=truncated,
-                     unexamined=unexamined,
-                     scheduler_moving=moving)
+                     tasks=sorted(tasks, key=lambda task: task.stalled_since),
+                     truncated=truncated)
 
 
 def scan_never_claimed(
@@ -518,9 +471,7 @@ def scan_never_claimed(
     tasks = [_task(NEVER_CLAIMED, row) for row in rows]
     return _scan(NEVER_CLAIMED,
                  [task for task in tasks if not _starved(task, highest)],
-                 truncated=len(rows) >= candidate_limit,
-                 unexamined=0,
-                 engine=engine)
+                 truncated=len(rows) >= candidate_limit)
 
 
 def scan_unattended(
@@ -562,6 +513,4 @@ def scan_unattended(
         task for task in examined
         if _still_stalled(task, now, age_seconds, busy_clusters, active)
     ],
-                 truncated=unexamined > 0 or len(rows) >= candidate_limit,
-                 unexamined=unexamined,
-                 engine=engine)
+                 truncated=unexamined > 0 or len(rows) >= candidate_limit)

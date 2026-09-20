@@ -350,56 +350,6 @@ def test_only_the_latest_attempt_is_consulted(engine, monkeypatch):
     assert _ids(stall.scan_unattended()) == {1}
 
 
-# ------------------------------------------------------- scheduler_moving
-
-
-def test_a_deployment_claiming_nothing_else_is_not_moving(engine):
-    """The self-reference guard, which is the whole value of this field.
-
-    For the claimed phase the anchor *is* the oldest reported task's own
-    submitted_at, so a witness query that did not exclude the reported set
-    would match that row and answer yes however stopped the deployment was --
-    the frozen case could then never be reported at all.
-    """
-    _claimed(engine, 1, age=_OLD)
-
-    assert stall.scan_unattended().scheduler_moving is False
-
-
-def test_a_deployment_claiming_something_else_is_moving(engine):
-    _claimed(engine, 1, age=_OLD)
-    # Claimed after job 1 started waiting, and not itself stalled.
-    _add_job(engine,
-             2,
-             status='RUNNING',
-             submitted_at=time.time() - _RECENT,
-             start_at=time.time() - _RECENT)
-
-    assert stall.scan_unattended().scheduler_moving is True
-
-
-def test_a_claim_older_than_the_stall_does_not_count_as_moving(engine):
-    """Anchored on when the stall began, not on a window ending at now."""
-    _claimed(engine, 1, age=_OLD)
-    _add_job(engine,
-             2,
-             status='RUNNING',
-             submitted_at=time.time() - _OLD * 2,
-             start_at=time.time() - _OLD * 2)
-
-    assert stall.scan_unattended().scheduler_moving is False
-
-
-def test_every_reported_task_is_excluded_not_only_the_oldest(engine):
-    """Two stalled tasks must not witness each other."""
-    _claimed(engine, 1, age=_OLD)
-    _claimed(engine, 2, age=_OLD - 100)
-
-    scan = stall.scan_unattended()
-    assert _ids(scan) == {1, 2}
-    assert scan.scheduler_moving is False
-
-
 # ---------------------------------------------------------------- thresholds
 
 
@@ -486,15 +436,12 @@ def test_a_capped_scan_says_its_count_is_a_floor(engine):
     for job_id in range(1, 6):
         _claimed(engine, job_id, age=_OLD)
 
-    full = stall.scan_unattended()
-    assert full.truncated is False and full.unexamined == 0
+    assert stall.scan_unattended().truncated is False
 
     capped = stall.scan_unattended(candidate_limit=3)
     assert capped.truncated is True
 
-    unexamined = stall.scan_unattended(examination_limit=2)
-    assert unexamined.truncated is True
-    assert unexamined.unexamined == 3, 'the skipped candidates are counted'
+    assert stall.scan_unattended(examination_limit=2).truncated is True
 
 
 def test_a_task_in_launch_backoff_belongs_to_one_phase_only(engine):

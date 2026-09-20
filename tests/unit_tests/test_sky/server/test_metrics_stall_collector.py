@@ -3,6 +3,7 @@
 Both are claims about what happens when something goes wrong, so both are
 tested by making it go wrong rather than by asserting the happy path.
 """
+import dataclasses
 import time
 
 import pytest
@@ -13,8 +14,6 @@ from sky.server import metrics
 
 def _scan(phase, tasks, **kwargs):
     kwargs.setdefault('truncated', False)
-    kwargs.setdefault('unexamined', 0)
-    kwargs.setdefault('scheduler_moving', False)
     return stall.StallScan(phase=phase, tasks=list(tasks), **kwargs)
 
 
@@ -263,3 +262,36 @@ def test_no_wrapped_collector_is_left_out_of_the_multiprocess_endpoint(
     missing = {c.name for c in wrapped - set(seen)}
 
     assert not missing, f'wrapped but never served in multiproc mode: {missing}'
+
+
+def test_the_collector_reads_every_field_the_scan_returns(
+        monkeypatch, tmp_path, scans):
+    """A field nothing consumes looks exercised because the tests assert on it.
+
+    Three of this dataclass's fields were once read only by tests -- one of
+    them costing a database query per scan to produce. Nothing failed: the
+    collector worked, the tests passed, and the field was dead. So the wiring
+    is asserted directly, and a field added without a consumer fails here
+    rather than being noticed a release later.
+    """
+    read = set()
+
+    class _Watched:
+
+        def __init__(self, scan):
+            object.__setattr__(self, '_scan', scan)
+
+        def __getattr__(self, name):
+            read.add(name)
+            return getattr(object.__getattribute__(self, '_scan'), name)
+
+    monkeypatch.setattr(stall, 'scan_never_claimed',
+                        lambda **kw: _Watched(_scan(stall.NEVER_CLAIMED, [])))
+    monkeypatch.setattr(stall, 'scan_unattended',
+                        lambda **kw: _Watched(_scan(stall.UNATTENDED, [])))
+
+    metrics.ManagedJobsStallCollector()._refresh()
+
+    declared = {field.name for field in dataclasses.fields(stall.StallScan)}
+    assert declared - read == set(), (
+        f'StallScan fields the collector never reads: {declared - read}')
