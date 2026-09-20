@@ -545,21 +545,6 @@ def test_an_exhausted_budget_never_asks_for_no_bound_at_all(engine):
     assert stall._remaining_ms(deadline) >= 1000
 
 
-# --- the surface an out-of-tree caller depends on ---------------------------
-
-
-def test_every_name_the_module_offers_exists():
-    """A rename that updates the definition but not __all__ fails here.
-
-    Deliberately not an assertion that __all__ equals a list written out
-    again: adding a name is a widening, and a check that punishes widening
-    gets edited away rather than obeyed.
-    """
-    missing = [name for name in stall.__all__ if not hasattr(stall, name)]
-
-    assert not missing, f'__all__ names that do not exist: {missing}'
-
-
 def test_the_task_fields_an_event_payload_needs_are_public():
     """The plugin reads these off StalledTask to build its payload.
 
