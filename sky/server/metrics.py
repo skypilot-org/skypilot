@@ -25,6 +25,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
+from sky.jobs import stall
 from sky.metrics import utils as metrics_utils
 from sky.server import constants as server_constants
 from sky.server import local_disk
@@ -988,9 +989,6 @@ class ManagedJobsStallCollector:
         self._cache: dict = {}
 
     def _refresh(self):
-        # pylint: disable=import-outside-toplevel
-        from sky.jobs import stall
-
         # One try per phase, not one around both: the whole point of the
         # separate caches is that either phase can fail without silencing the
         # other, and a shared try would hand that back.
@@ -1395,6 +1393,8 @@ def metrics() -> fastapi.Response:
         registry.register(_SERVER_START_TIME_COLLECTOR)
         if _MANAGED_JOBS_COLLECTOR is not None:
             registry.register(_MANAGED_JOBS_COLLECTOR)
+        if _MANAGED_JOBS_STALL_COLLECTOR is not None:
+            registry.register(_MANAGED_JOBS_STALL_COLLECTOR)
         for c in _plugin_collectors:
             try:
                 registry.register(c)

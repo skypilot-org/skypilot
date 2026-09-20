@@ -200,3 +200,66 @@ def test_a_task_with_no_workspace_is_not_mistaken_for_the_empty_scan(scans):
 
     assert (stall.NEVER_CLAIMED, '') not in counts
     assert counts[(stall.NEVER_CLAIMED, metrics._NULL_WORKSPACE_LABEL)] == 1
+
+
+# --- the collector has to reach the endpoint, not just the registry ---------
+
+
+def _multiproc_registrations(monkeypatch, tmp_path):
+    """Which collectors /metrics registers when multiprocess mode is on."""
+    monkeypatch.setenv('PROMETHEUS_MULTIPROC_DIR', str(tmp_path))
+    seen = []
+    real = metrics.prom.CollectorRegistry.register
+
+    def _record(self, collector):
+        seen.append(collector)
+        try:
+            real(self, collector)
+        except ValueError:
+            pass
+
+    monkeypatch.setattr(metrics.prom.CollectorRegistry, 'register', _record)
+    monkeypatch.setattr(metrics, 'generate_latest', lambda registry=None: b'')
+    metrics.metrics()
+    return seen
+
+
+def test_the_stall_collector_reaches_the_multiprocess_endpoint(
+        monkeypatch, tmp_path, scans):
+    """Registering globally is not enough, and nothing says so.
+
+    In multiprocess mode -- which is the mode the server runs in -- /metrics
+    builds its own registry and names each collector. A collector left out of
+    that list is served in tests, absent in production, and the endpoint still
+    answers 200 with fewer families.
+    """
+    monkeypatch.setattr(
+        metrics, '_MANAGED_JOBS_STALL_COLLECTOR',
+        metrics._wrap_collector(metrics.ManagedJobsStallCollector()))
+
+    seen = _multiproc_registrations(monkeypatch, tmp_path)
+
+    assert metrics._MANAGED_JOBS_STALL_COLLECTOR in seen
+
+
+def test_no_wrapped_collector_is_left_out_of_the_multiprocess_endpoint(
+        monkeypatch, tmp_path, scans):
+    """The general form: the list is hand-kept, so check it against reality.
+
+    Every collector that went through _wrap_collector is meant to be served.
+    One that is not is invisible in exactly the deployment that matters.
+    """
+    monkeypatch.setattr(
+        metrics, '_MANAGED_JOBS_STALL_COLLECTOR',
+        metrics._wrap_collector(metrics.ManagedJobsStallCollector()))
+
+    seen = _multiproc_registrations(monkeypatch, tmp_path)
+
+    wrapped = {
+        value for name, value in vars(metrics).items()
+        if name.endswith('_COLLECTOR') and
+        isinstance(value, metrics.ResilientCollector)
+    }
+    missing = {c.name for c in wrapped - set(seen)}
+
+    assert not missing, f'wrapped but never served in multiproc mode: {missing}'
