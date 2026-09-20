@@ -10,6 +10,10 @@ Also covers the federation observability helpers: FederationStats.summary()
 (the per-context success/timeout/error classification).
 """
 import asyncio
+import subprocess
+import threading
+import time
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -154,3 +158,63 @@ def test_handle_result_base_exception_reraised():
             'ctx', 'gpu-metrics', KeyboardInterrupt(),
             metrics_utils.FederationStats(), out)
     assert out == []
+
+
+# ── port-forward teardown stays off the metrics event loop ──────────
+
+
+def _wait_until(predicate, timeout=10.0, interval=0.01):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return predicate()
+
+
+def test_stop_svc_port_forward_off_loop_does_not_wait_for_the_teardown():
+    """The caller returns immediately, and the teardown still completes.
+
+    The teardown runs in the `finally` of a coroutine that asyncio.wait_for()
+    may be cancelling, so it cannot be awaited; running it inline instead
+    charges terminate-and-wait to the loop that also serves /metrics.
+    """
+    reaped = threading.Event()
+    process = MagicMock()
+
+    def slow_wait(timeout=None):
+        del timeout
+        time.sleep(0.5)
+        reaped.set()
+
+    process.wait.side_effect = slow_wait
+
+    start = time.monotonic()
+    metrics_utils.stop_svc_port_forward_off_loop(process)
+    handed_off_in = time.monotonic() - start
+
+    assert handed_off_in < 0.2, (
+        f'caller waited {handed_off_in:.2f}s for the teardown')
+    assert _wait_until(reaped.is_set), 'teardown never ran'
+    process.terminate.assert_called_once()
+
+
+def test_stop_svc_port_forward_gives_up_on_an_unreapable_child():
+    """The wait after SIGKILL is bounded.
+
+    SIGKILL cannot be caught, so a child that is still unreaped afterwards is
+    stuck in the kernel; waiting for it without a bound pins the thread for
+    the life of the process.
+    """
+    process = MagicMock()
+    process.pid = 4321
+    process.wait.side_effect = subprocess.TimeoutExpired(cmd='kubectl',
+                                                         timeout=1)
+
+    # Returns rather than hanging, having escalated to kill().
+    metrics_utils.stop_svc_port_forward(process, timeout=1)
+
+    process.terminate.assert_called_once()
+    process.kill.assert_called_once()
+    # Once for the terminate grace period, once after the kill.
+    assert process.wait.call_count == 2

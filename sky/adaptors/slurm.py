@@ -7,7 +7,7 @@ import logging
 import re
 import shlex
 import subprocess
-from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 from sky.adaptors import common
 from sky.utils import command_runner
@@ -275,6 +275,7 @@ class SlurmClient:
         self.ssh_host = ssh_host
         self.ssh_port = ssh_port
         self.ssh_user = ssh_user
+        self.slurm_user = slurm_user
         self.ssh_key = ssh_key
         self.ssh_proxy_command = ssh_proxy_command
         self.ssh_proxy_jump = ssh_proxy_jump
@@ -305,9 +306,7 @@ class SlurmClient:
 
     def validate_submit_user(self, cluster_name: str, submit_user: str) -> None:
         """Check the Unix account through the submit runner."""
-        target = shlex.quote(submit_user)
-        command = (f'id -u -- {target} >/dev/null && '
-                   f'test "$(id -u)" = "$(id -u -- {target})"')
+        command = ['id', '-un']
         error = (f'Cannot submit to Slurm cluster {cluster_name!r} as Unix '
                  f'user {submit_user!r} through SSH user {self.ssh_user!r}. ')
         try:
@@ -315,15 +314,24 @@ class SlurmClient:
         except subprocess.TimeoutExpired as e:
             raise RuntimeError(error + 'Account validation timed out after '
                                '15 seconds.') from e
-        if rc != 0:
+        output_lines = [
+            line.strip() for line in stdout.splitlines() if line.strip()
+        ]
+        if rc != 0 or not output_lines or output_lines[-1] != submit_user:
             raise RuntimeError(
                 error + f'Account validation exited with code {rc}. '
                 'Check that the account exists and the SSH user can run '
-                'the submission shell as that account. '
+                'id -un as that account. '
                 f'{stdout}\n{stderr}')
 
+    def _command_as_user(self, argv: List[str]) -> str:
+        if self.slurm_user is None:
+            return shlex.join(argv)
+        return command_runner.wrap_command_as_user(
+            argv, self.slurm_user, use_sudo=self.ssh_user != 'root')
+
     def _run_slurm_cmd(self,
-                       cmd: str,
+                       cmd: Union[str, List[str]],
                        timeout: Optional[int] = None) -> Tuple[int, str, str]:
         # Forward `timeout` only when set so the existing callers keep the
         # runner's default (unbounded) invocation unchanged.
@@ -507,16 +515,15 @@ class SlurmClient:
         Returns:
             List of job IDs matching the filters.
         """
-        cmd = 'squeue --me -h -o "%i"'
+        cmd = ['squeue', '--me', '-h', '-o', '%i']
         if state_filters is not None:
-            state_filters_str = ','.join(state_filters)
-            cmd += f' --states {state_filters_str}'
+            cmd += ['--states', ','.join(state_filters)]
         if job_name is not None:
-            cmd += f' --name {job_name}'
+            cmd += ['--name', job_name]
 
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(rc,
-                                           cmd,
+                                           shlex.join(cmd),
                                            'Failed to query Slurm jobs.',
                                            stderr=f'{stdout}\n{stderr}',
                                            stream_logs=False)
@@ -537,14 +544,14 @@ class SlurmClient:
                 By default, signals other than SIGKILL are not sent to the
                 batch step (the shell script).
         """
-        cmd = f'scancel --name {job_name}'
+        cmd = ['scancel', '--name', job_name]
         if signal is not None:
-            cmd += f' --signal {signal}'
+            cmd += ['--signal', signal]
         if full:
-            cmd += ' --full'
+            cmd += ['--full']
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(rc,
-                                           cmd,
+                                           shlex.join(cmd),
                                            f'Failed to cancel job {job_name}.',
                                            stderr=f'{stdout}\n{stderr}',
                                            stream_logs=False)
@@ -552,19 +559,19 @@ class SlurmClient:
 
     def list_job_steps(self, job_id: str) -> List[JobStepInfo]:
         """Lists the active steps in a Slurm job allocation."""
-        cmd = f'scontrol -o show step {shlex.quote(job_id)}'
+        cmd = ['scontrol', '-o', 'show', 'step', job_id]
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         error_output = f'{stdout}\n{stderr}'
         if rc != 0 and _JOB_STEP_NOT_FOUND_REGEX.search(error_output):
             subprocess_utils.handle_returncode(
                 rc,
-                cmd,
+                shlex.join(cmd),
                 f'Slurm allocation {job_id} disappeared during stop.',
                 stderr=error_output,
                 stream_logs=False)
         subprocess_utils.handle_returncode(
             rc,
-            cmd,
+            shlex.join(cmd),
             f'Failed to query steps for Slurm job {job_id}.',
             stderr=error_output,
             stream_logs=False)
@@ -591,8 +598,7 @@ class SlurmClient:
         if not step_id.startswith(f'{job_id}.'):
             raise ValueError(f'Slurm step {step_id!r} does not belong to job '
                              f'{job_id!r}.')
-        cmd = (f'scancel --signal {shlex.quote(signal)} '
-               f'{shlex.quote(step_id)}')
+        cmd = ['scancel', '--signal', signal, step_id]
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         if rc != 0:
             active_step_ids = {
@@ -604,7 +610,7 @@ class SlurmClient:
                 return
         subprocess_utils.handle_returncode(
             rc,
-            cmd,
+            shlex.join(cmd),
             f'Failed to signal Slurm job step {step_id}.',
             stderr=f'{stdout}\n{stderr}',
             stream_logs=False)
@@ -860,14 +866,14 @@ class SlurmClient:
         # This reduces the work required by slurmctld.
         # Fall back to the command without --only-job-state for older
         # Slurm versions (< 21.08) that don't support this flag.
-        cmd = f'squeue -h --only-job-state --jobs {job_id} -o "%T"'
+        cmd = ['squeue', '-h', '--only-job-state', '--jobs', job_id, '-o', '%T']
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         if rc != 0 and 'unrecognized option' in stderr:
-            cmd = f'squeue -h --jobs {job_id} -o "%T"'
+            cmd = ['squeue', '-h', '--jobs', job_id, '-o', '%T']
             rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
             rc,
-            cmd,
+            shlex.join(cmd),
             f'Failed to get job state for job {job_id}.',
             stderr=f'{stdout}\n{stderr}',
             stream_logs=False)
@@ -878,11 +884,11 @@ class SlurmClient:
     def get_jobs_state_by_name(self, job_name: str) -> List[str]:
         """Get the states of all Slurm jobs by name.
         """
-        cmd = f'squeue -h --name {job_name} -o "%T"'
+        cmd = ['squeue', '-h', '--name', job_name, '-o', '%T']
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
             rc,
-            cmd,
+            shlex.join(cmd),
             f'Failed to get job state for job {job_name}.',
             stderr=f'{stdout}\n{stderr}',
             stream_logs=False)
@@ -898,11 +904,11 @@ class SlurmClient:
             job_id: The Slurm job ID.
         """
         # Without --states all, squeue omits terminated jobs.
-        cmd = f'squeue -h --jobs {job_id} --states all -o "%r"'
+        cmd = ['squeue', '-h', '--jobs', job_id, '--states', 'all', '-o', '%r']
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
             rc,
-            cmd,
+            shlex.join(cmd),
             f'Failed to get job reason for job {job_id}.',
             stderr=f'{stdout}\n{stderr}',
             stream_logs=False)
@@ -936,7 +942,7 @@ class SlurmClient:
 
     def check_job_has_nodes(self, job_id: str) -> bool:
         """Check if a Slurm job has nodes allocated."""
-        cmd = f'squeue -h --jobs {job_id} -o "%N"'
+        cmd = ['squeue', '-h', '--jobs', job_id, '-o', '%N']
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         if rc != 0:
             logger.debug(f'Failed to check nodes for job {job_id}: '
@@ -958,12 +964,14 @@ class SlurmClient:
             and node_ips is a list of corresponding IP addresses.
         """
 
+        query = self._command_as_user(
+            ['squeue', '-h', '--jobs', job_id, '-o', '%N'])
         cmd = (
             # Use scontrol show hostnames to expand both compact Slurm
             # hostlist notation (e.g. ml-16-node-[001-002]) and
             # comma-separated nodes into individual node names.
             # TODO(kevin): Use json output for more robust parsing.
-            f'nodelist=$(squeue -h --jobs {job_id} -o "%N"); '
+            f'nodelist=$({query}) || exit $?; '
             f'scontrol show hostnames $nodelist | while read -r node; do '
             f'node_addr=$(scontrol show node=$node | grep NodeAddr= | '
             f'awk -F= \'{{print $2}}\' | awk \'{{print $1}}\'); '
@@ -1063,10 +1071,13 @@ class SlurmClient:
         Returns:
             The job ID of the submitted job.
         """
-        cmd = f'sbatch --partition={partition} {script_path}'
+        cmd = [
+            'sbatch', f'--partition={partition}',
+            f'--chdir={self.get_remote_home_dir()}', script_path
+        ]
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(rc,
-                                           cmd,
+                                           shlex.join(cmd),
                                            'Failed to submit Slurm job.',
                                            stderr=f'{stdout}\n{stderr}',
                                            stream_logs=False)
@@ -1182,15 +1193,35 @@ class SlurmClient:
         Returns:
             Dictionary of environment variable name -> value.
         """
-        rc, stdout, stderr = self._run_slurm_cmd('env')
-        if rc != 0:
-            logger.warning(f'Failed to fetch remote env: {stderr}')
-            return {}
         env: Dict[str, str] = {}
-        for line in stdout.splitlines():
-            if '=' in line:
-                key, _, value = line.partition('=')
-                env[key] = value
+        try:
+            rc, stdout, stderr = self._run_slurm_cmd('env')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                'Failed to fetch remote env from %s; continuing '
+                'with available user variables: %s', self.ssh_host, e)
+        else:
+            if rc != 0:
+                logger.warning(
+                    'Failed to fetch remote env from %s '
+                    '(exit code %s); continuing with available '
+                    'user variables: %s', self.ssh_host, rc, stderr)
+            else:
+                for line in stdout.splitlines():
+                    if '=' in line:
+                        key, _, value = line.partition('=')
+                        env[key] = value
+        if self.slurm_user is not None:
+            env.update(USER=self.slurm_user, LOGNAME=self.slurm_user)
+            # HOME must refer to the workload account for path expansion.
+            env.pop('HOME', None)
+            try:
+                env['HOME'] = self.get_remote_home_dir()
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    'Failed to resolve HOME for Slurm user %r '
+                    'on %s; omitting HOME from path expansion: %s',
+                    self.slurm_user, self.ssh_host, e)
         return env
 
     def get_remote_home_dir(self) -> str:
@@ -1214,9 +1245,10 @@ class SlurmClient:
         # Try checking on a compute node first. We use a wrapper that
         # prints a marker so we can distinguish "command ran and /dev/fuse
         # is missing" from "srun itself failed to allocate".
-        srun_cmd = ('srun --immediate=10 --time=00:00:30 '
-                    'bash -c \'test -e /dev/fuse '
-                    '&& echo FUSE_OK || echo FUSE_MISSING\'')
+        srun_cmd = [
+            'srun', '--immediate=10', '--time=00:00:30', '--chdir=/tmp', 'bash',
+            '-c', 'test -e /dev/fuse && echo FUSE_OK || echo FUSE_MISSING'
+        ]
         rc, stdout, _ = self._run_slurm_cmd(srun_cmd)
         stdout = stdout.strip()
         if rc == 0 and 'FUSE_OK' in stdout:
@@ -1242,7 +1274,7 @@ class SlurmClient:
             The filesystem type string (e.g., 'nfs', 'ext2/ext3'),
             or None if the check could not be performed.
         """
-        cmd = f'stat -f -c %T {shlex.quote(path)}'
+        cmd = ['stat', '-f', '-c', '%T', '--', path]
         rc, stdout, _ = self._run_slurm_cmd(cmd)
         if rc != 0:
             return None
@@ -1250,4 +1282,4 @@ class SlurmClient:
 
     def check_homedir_shared_fs(self) -> Optional[str]:
         """Check the filesystem type of the home directory."""
-        return self.check_dir_shared_fs('~')
+        return self.check_dir_shared_fs(self.get_remote_home_dir())

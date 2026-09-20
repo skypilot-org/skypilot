@@ -26,7 +26,8 @@ import threading
 import time
 import traceback
 import typing
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Type
+from typing import (Any, Callable, Dict, List, Literal, Optional, Set, Tuple,
+                    Type)
 import uuid
 import zipfile
 
@@ -959,23 +960,13 @@ async def cleanup_sky_logs():
         await asyncio.sleep(3600)
 
 
-# Cadence of the per-worker loop lag timer. Also the heartbeat interval the
-# stall watchdog measures against, so the two must agree.
-LOOP_LAG_INTERVAL = 0.1
+def _request_loop_lag_observer(
+        loop: asyncio.AbstractEventLoop) -> Callable[[float], None]:
+    """Records one request-serving loop's lag; see loop_stall.start_lag_monitor.
 
-
-async def loop_lag_monitor(
-        loop: asyncio.AbstractEventLoop,
-        interval: float = LOOP_LAG_INTERVAL,
-        stall_watchdog: Optional[loop_stall.LoopStallWatchdog] = None) -> None:
-    """Measures the loop's own scheduling lag on a fixed timer.
-
-    The single tick on the loop for this: it feeds the lag metrics when those
-    are enabled, and the stall watchdog's heartbeat when that is enabled. Each
-    consumer is gated on its own, so neither can silently disable the other.
+    Keeps the tumbling-window state for the per-pid peak gauge, which is
+    why this is a closure rather than a plain function.
     """
-    target = loop.time() + interval
-
     pid = str(os.getpid())
     lag_threshold = perf_utils.get_loop_lag_threshold()
     # Tumbling 30s window peak per process — paired with the pid-less lag
@@ -985,29 +976,24 @@ async def loop_lag_monitor(
     lag_max_window_end = loop.time() + lag_max_window_seconds
     lag_max_in_window = 0.0
 
-    def tick():
-        nonlocal target, lag_max_window_end, lag_max_in_window
+    def observe(lag: float) -> None:
+        nonlocal lag_max_window_end, lag_max_in_window
+        if not metrics_utils.METRICS_ENABLED:
+            return
+        if lag_threshold is not None and lag > lag_threshold:
+            logger.warning(f'Event loop lag {lag} seconds exceeds threshold '
+                           f'{lag_threshold} seconds.')
+        metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.observe(lag)
         now = loop.time()
-        lag = max(0.0, now - target)
-        if stall_watchdog is not None:
-            stall_watchdog.beat()
-        if metrics_utils.METRICS_ENABLED:
-            if lag_threshold is not None and lag > lag_threshold:
-                logger.warning(
-                    f'Event loop lag {lag} seconds exceeds threshold '
-                    f'{lag_threshold} seconds.')
-            metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.observe(lag)
-            if now >= lag_max_window_end:
-                lag_max_window_end = now + lag_max_window_seconds
-                lag_max_in_window = lag
-            else:
-                lag_max_in_window = max(lag_max_in_window, lag)
-            metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_MAX_SECONDS.labels(
-                pid=pid).set(lag_max_in_window)
-        target = now + interval
-        loop.call_at(target, tick)
+        if now >= lag_max_window_end:
+            lag_max_window_end = now + lag_max_window_seconds
+            lag_max_in_window = lag
+        else:
+            lag_max_in_window = max(lag_max_in_window, lag)
+        metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_MAX_SECONDS.labels(
+            pid=pid).set(lag_max_in_window)
 
-    loop.call_at(target, tick)
+    return observe
 
 
 async def schedule_on_boot_check_async():
@@ -1049,14 +1035,14 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     # Attribute event loop stalls to the code that caused them. Not gated on
     # METRICS_ENABLED: its primary output is a log line, which is the only
     # thing available when debugging a deployment after the fact.
-    stall_watchdog = loop_stall.start_watchdog(
-        heartbeat_interval=LOOP_LAG_INTERVAL)
+    stall_watchdog = loop_stall.start_watchdog()
     if metrics_utils.METRICS_ENABLED or stall_watchdog is not None:
         # One timer per worker loop, shared by the lag metrics and the stall
         # watchdog's heartbeat.
-        asyncio.create_task(
-            loop_lag_monitor(asyncio.get_event_loop(),
-                             stall_watchdog=stall_watchdog))
+        loop = asyncio.get_event_loop()
+        loop_stall.start_lag_monitor(loop,
+                                     _request_loop_lag_observer(loop),
+                                     stall_watchdog=stall_watchdog)
     try:
         yield
     finally:
@@ -3742,7 +3728,9 @@ def _build_slurm_job_ssh_command(
     )
     if slurm_user is not None:
         command = command_runner.wrap_command_as_user(
-            command, slurm_user, use_sudo=login_node_user != 'root')
+            shlex.split(command),
+            slurm_user,
+            use_sudo=login_node_user != 'root')
     return command
 
 
