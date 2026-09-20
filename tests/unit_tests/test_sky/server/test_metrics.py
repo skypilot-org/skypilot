@@ -26,6 +26,26 @@ from sky.metrics import utils as metrics_utils
 from sky.server import metrics
 from sky.server import middleware_utils
 from sky.server.server import BasicAuthMiddleware
+from sky.utils import context
+
+
+@pytest.fixture(autouse=True)
+def _isolate_context():
+    """Reset the SkyPilotContext ContextVar between tests.
+
+    context.initialize() from an earlier test in the same xdist worker leaks
+    the SkyPilotContext into this module. skypilot_config then resolves reads
+    against that context's deepcopied snapshot instead of the process-global
+    config, so a reload performed off-thread is invisible to the reader and
+    test_federation_refresh_reload_is_visible_on_the_loop sees the start-up
+    namespace. Mirrors the fixture in test_skylet_grpc_cancellable.py.
+    """
+    # pylint: disable=protected-access
+    token = context._CONTEXT.set(None)
+    try:
+        yield
+    finally:
+        context._CONTEXT.reset(token)
 
 
 def test_get_status_code_group():
