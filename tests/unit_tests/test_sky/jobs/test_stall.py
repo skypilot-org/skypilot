@@ -571,3 +571,43 @@ def test_the_task_fields_an_event_payload_needs_are_public():
     assert {
         'spot_job_id', 'task_id', 'task_name', 'workspace', 'stalled_since'
     } <= fields
+
+
+# --- the halves of an exclusion that must NOT apply -------------------------
+
+
+def test_a_claimed_task_is_not_excluded_by_priority(engine):
+    """Priority starvation is the never-claimed phase's business only.
+
+    A claimed task has already won its slot, so excluding it for priority
+    would suppress exactly the case the claimed phase exists to report. The
+    structure makes that true -- _starved is called in one scan and not the
+    other -- which is why it needs a test rather than a reading.
+    """
+    _claimed(engine, 1, age=_OLD, priority=0)
+    _add_job(engine,
+             2,
+             status='PENDING',
+             priority=900,
+             schedule_state='WAITING')
+
+    assert _ids(stall.scan_unattended()) == {1}
+
+
+def test_a_pool_job_that_is_not_a_batch_job_is_still_reported(engine):
+    """The pool exclusion is about batch jobs occupying their pool.
+
+    A job that merely names a pool is not one, and dropping the is_batch
+    clause would silence every job on a busy pool -- which reads as the
+    exclusion working.
+    """
+    _never_claimed(engine, 1, age=_OLD, pool='shared', is_batch=None)
+    # A batch job really is occupying that pool.
+    _add_job(engine,
+             2,
+             status='STARTING',
+             pool='shared',
+             is_batch=True,
+             schedule_state='LAUNCHING')
+
+    assert _ids(stall.scan_never_claimed()) == {1}
