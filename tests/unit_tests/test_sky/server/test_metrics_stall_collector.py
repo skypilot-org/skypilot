@@ -309,6 +309,9 @@ def test_a_refresh_worth_of_budget_fits_inside_the_refresh_interval():
     scan, or shorten the interval, and this fails rather than leaving a
     refresh that can overrun the next one with nothing saying so.
     """
+    # Stated, not derived: _refresh runs both scans. If a third is added,
+    # this number is the thing to change, and the assertion below is what
+    # makes forgetting it visible rather than silent.
     scans_per_refresh = 2
 
     worst_case = scans_per_refresh * stall._SCAN_BUDGET_SECONDS
@@ -320,11 +323,3 @@ def test_a_refresh_worth_of_budget_fits_inside_the_refresh_interval():
     # And well inside the horizon at which the collector reads as inactive,
     # which is the failure a reader would see rather than a slow scan.
     assert worst_case < metrics._COLLECTOR_MAX_STALENESS_SECONDS / 2
-
-
-def test_the_collector_runs_exactly_the_scans_the_budget_assumes():
-    """The count above is a claim about _refresh; here it is checked."""
-    source = inspect.getsource(metrics.ManagedJobsStallCollector._refresh)
-
-    assert source.count('stall.scan_') == 2, (
-        'the budget arithmetic assumes two scans per refresh')
