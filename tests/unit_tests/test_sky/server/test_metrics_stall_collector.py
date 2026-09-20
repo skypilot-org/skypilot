@@ -19,9 +19,13 @@ def _scan(phase, tasks, **kwargs):
 
 
 def _task(job_id, *, age, workspace='ws'):
+    # job_name deliberately unlike task_name: on a real deployment the two
+    # differ for every multi-task job, and a helper that sets them equal hides
+    # a collector reading the wrong one.
     return stall.StalledTask(spot_job_id=job_id,
                              task_id=0,
                              task_name=f'task-{job_id}',
+                             job_name=f'job-{job_id}',
                              workspace=workspace,
                              priority=None,
                              stalled_since=time.time() - age)
