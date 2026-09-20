@@ -893,6 +893,60 @@ class TestStreamLogsByIdTaskFiltering:
         return [(t_id, t_name, managed_job_state.ManagedJobStatus.SUCCEEDED,
                  log_file, None) for t_id, t_name in tasks]
 
+    @pytest.mark.parametrize('task_filter', [0, 'completed'])
+    @pytest.mark.parametrize('follow', [False, True])
+    @pytest.mark.parametrize('storage', ['local', 'external', 'missing'])
+    @pytest.mark.parametrize('task_status',
+                             ['SUCCEEDED', 'FAILED', 'CANCELLED'])
+    def test_completed_task_in_running_job(self, monkeypatch, tmp_path, capsys,
+                                           task_filter, follow, storage,
+                                           task_status):
+        status = managed_job_state.ManagedJobStatus
+        log_file = tmp_path / 'completed.log'
+        log_file.write_text(jobs_utils.log_lib.LOG_FILE_START_STREAMING_AT +
+                            '\nCOMPLETED_TASK_MARKER\n')
+        task_info = [
+            (0, 'completed', status[task_status],
+             str(log_file) if storage == 'local' else None, None),
+            (1, 'running', status.RUNNING, None, None),
+        ]
+        state = MagicMock(wraps=managed_job_state)
+        state.ManagedJobStatus = status
+        state.get_num_tasks.return_value = 2
+        state.get_status.return_value = status.RUNNING
+        state.get_all_task_ids_names_statuses_logs.return_value = task_info
+        state.get_pool_from_job_id.return_value = None
+        state.is_batch_job.return_value = False
+        state.get_latest_task_id_status.side_effect = AssertionError(
+            'Completed task must replay saved logs without live polling')
+        monkeypatch.setattr(jobs_utils, 'managed_job_state', state)
+        monkeypatch.setattr(jobs_utils.context_lib, 'get', MagicMock)
+        reader = MagicMock() if storage == 'external' else None
+        if reader is not None:
+            reader.read_cluster_job_logs.return_value = 0
+        monkeypatch.setattr(jobs_utils.logs, 'get_log_reader', lambda: reader)
+
+        msg, code = jobs_utils.stream_logs_by_id(5,
+                                                 follow=follow,
+                                                 tail=10,
+                                                 task=task_filter)
+
+        output = capsys.readouterr().out
+        assert code == exceptions.JobExitCode.from_managed_job_status(
+            status[task_status])
+        assert 'Job finished' not in output
+        if storage == 'local':
+            assert 'COMPLETED_TASK_MARKER' in output
+        elif storage == 'external':
+            reader.read_cluster_job_logs.assert_called_once_with(
+                jobs_utils.generate_managed_job_cluster_name('completed', 5),
+                None,
+                follow=False,
+                tail=10)
+        else:
+            assert 'Task completed(0)' in msg
+            assert task_status in msg
+
     def test_task_filter_by_int_matches_task_id(self, monkeypatch):
         """Test that int task filter matches against task_id."""
         job_id = 1

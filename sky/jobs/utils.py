@@ -2303,12 +2303,16 @@ def stream_logs_by_id(
     # Resolve task filter to a specific task_id if provided
     # This is used for running jobs to stream logs from the correct task
     filtered_task_id: Optional[int] = None
+    filtered_task_status: Optional[managed_job_state.ManagedJobStatus] = None
+    filtered_task_name: Optional[str] = None
     if task is not None:
         task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
             job_id)
-        for t_id, t_name, _, _, _ in task_info:
+        for t_id, t_name, t_status, _, _ in task_info:
             if matches_task_filter(t_id, t_name, task):
                 filtered_task_id = t_id
+                filtered_task_status = t_status
+                filtered_task_name = t_name
                 break
         if filtered_task_id is None:
             valid_range = f'0-{num_tasks - 1}' if num_tasks > 1 else '0'
@@ -2345,7 +2349,16 @@ def stream_logs_by_id(
                   f'specific task (TASK can be task ID or name).'
                   f'{colorama.Style.RESET_ALL}')
 
-        if not should_keep_logging(managed_job_status):
+        # A completed task's logs are persisted even while its group is active.
+        log_status = managed_job_status
+        log_subject = f'Job {job_id}'
+        if (filtered_task_status is not None and
+                filtered_task_status.is_terminal()):
+            log_status = filtered_task_status
+            log_subject = (f'Task {filtered_task_name}({filtered_task_id}) '
+                           f'of job {job_id}')
+
+        if not should_keep_logging(log_status):
             job_msg = ''
             if managed_job_status.is_failed():
                 job_msg = ('\nFailure reason: '
@@ -2504,7 +2517,7 @@ def stream_logs_by_id(
                         f'Job finished (status: {managed_job_status.value}).'),
                           flush=True)
                 return '', exceptions.JobExitCode.from_managed_job_status(
-                    managed_job_status)
+                    log_status)
             if log_reader is not None:
                 # An external log reader is registered but returned nothing for
                 # this job: its logs were not persisted locally and are not (or
@@ -2520,16 +2533,14 @@ def stream_logs_by_id(
                     f'run: sky jobs logs --controller {job_id}'
                     f'{colorama.Style.RESET_ALL}'
                     f'{job_msg}',
-                    exceptions.JobExitCode.from_managed_job_status(
-                        managed_job_status))
+                    exceptions.JobExitCode.from_managed_job_status(log_status))
             return (f'{colorama.Fore.YELLOW}'
-                    f'Job {job_id} is already in terminal state '
-                    f'{managed_job_status.value}. For more details, run: '
+                    f'{log_subject} is already in terminal state '
+                    f'{log_status.value}. For more details, run: '
                     f'sky jobs logs --controller {job_id}'
                     f'{colorama.Style.RESET_ALL}'
                     f'{job_msg}',
-                    exceptions.JobExitCode.from_managed_job_status(
-                        managed_job_status))
+                    exceptions.JobExitCode.from_managed_job_status(log_status))
         # Batch coordinator jobs run inline on the controller — no
         # separate cluster is provisioned. Stream controller logs instead
         # of trying to find a worker cluster handle.
