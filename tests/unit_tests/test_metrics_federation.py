@@ -8,14 +8,18 @@ counts + the HPA target via the /gpu-metrics federation.
 Also covers the federation observability helpers: FederationStats.summary()
 (the timing/size breakdown surfaced in logs) and _handle_federation_result()
 (the per-context success/timeout/port-forward-error/error classification),
-plus the phase budgets carved out of the per-context timeout.
+the phase budgets carved out of the per-context timeout, and the streamed
+assembly of the federated body.
 """
 import asyncio
+import gc
 import subprocess
 import threading
 import time
 from unittest.mock import MagicMock
+import weakref
 
+import fastapi
 import pytest
 
 from sky import exceptions
@@ -116,58 +120,43 @@ def test_federation_stats_summary_without_port_forward_phase():
 # --- _handle_federation_result() classification ---
 
 
-def test_handle_result_success_appends():
-    out = []
-    server_metrics._handle_federation_result('ctx', 'gpu-metrics',
-                                             'metric_text',
-                                             metrics_utils.FederationStats(),
-                                             out)
-    assert out == ['metric_text']
+def test_handle_result_success_returns_text():
+    assert server_metrics._handle_federation_result(
+        'ctx', 'gpu-metrics', 'metric_text',
+        metrics_utils.FederationStats()) == 'metric_text'
 
 
-def test_handle_result_empty_body_appends():
-    # An empty federated body is valid and must still be appended.
-    out = []
-    server_metrics._handle_federation_result('ctx', 'gpu-metrics', '',
-                                             metrics_utils.FederationStats(),
-                                             out)
-    assert out == ['']
+def test_handle_result_empty_body_is_a_success_not_a_failure():
+    # An empty federated body is valid. It has to come back as '' rather than
+    # None, or the stream drops the separator that the join used to emit.
+    assert server_metrics._handle_federation_result(
+        'ctx', 'gpu-metrics', '', metrics_utils.FederationStats()) == ''
 
 
-def test_handle_result_timeout_not_appended():
-    out = []
-    server_metrics._handle_federation_result('ctx', 'gpu-metrics',
-                                             asyncio.TimeoutError(),
-                                             metrics_utils.FederationStats(),
-                                             out)
-    assert out == []
+def test_handle_result_timeout_returns_none():
+    assert server_metrics._handle_federation_result(
+        'ctx', 'gpu-metrics', asyncio.TimeoutError(),
+        metrics_utils.FederationStats()) is None
 
 
-def test_handle_result_error_not_appended():
-    out = []
-    server_metrics._handle_federation_result('ctx', 'gpu-metrics',
-                                             ValueError('boom'),
-                                             metrics_utils.FederationStats(),
-                                             out)
-    assert out == []
+def test_handle_result_error_returns_none():
+    assert server_metrics._handle_federation_result(
+        'ctx', 'gpu-metrics', ValueError('boom'),
+        metrics_utils.FederationStats()) is None
 
 
 def test_handle_result_base_exception_reraised():
     # KeyboardInterrupt/SystemExit must propagate, not be swallowed.
-    out = []
     with pytest.raises(KeyboardInterrupt):
         server_metrics._handle_federation_result(
             'ctx', 'gpu-metrics', KeyboardInterrupt(),
-            metrics_utils.FederationStats(), out)
-    assert out == []
+            metrics_utils.FederationStats())
 
 
-def test_handle_result_port_forward_startup_not_appended():
-    out = []
-    server_metrics._handle_federation_result(
+def test_handle_result_port_forward_startup_returns_none():
+    assert server_metrics._handle_federation_result(
         'ctx', 'gpu-metrics', exceptions.PortForwardStartupError('no tunnel'),
-        metrics_utils.FederationStats(), out)
-    assert out == []
+        metrics_utils.FederationStats()) is None
 
 
 def test_port_forward_startup_error_recorded_under_its_own_outcome(monkeypatch):
@@ -184,11 +173,10 @@ def test_port_forward_startup_error_recorded_under_its_own_outcome(monkeypatch):
 
     server_metrics._handle_federation_result(
         'ctx', 'gpu-metrics', exceptions.PortForwardStartupError('no tunnel'),
-        metrics_utils.FederationStats(), [])
+        metrics_utils.FederationStats())
     server_metrics._handle_federation_result('ctx', 'gpu-metrics',
                                              ValueError('bad body'),
-                                             metrics_utils.FederationStats(),
-                                             [])
+                                             metrics_utils.FederationStats())
 
     assert recorded == ['port-forward-error', 'error']
 
@@ -319,3 +307,374 @@ def test_stop_svc_port_forward_gives_up_on_an_unreapable_child():
     process.kill.assert_called_once()
     # Once for the terminate grace period, once after the kill.
     assert process.wait.call_count == 2
+
+
+# ── the federated body is streamed, not assembled ──────────────────
+
+
+async def _collect(route, settled):
+    chunks = []
+    stream = server_metrics._stream_federated_metrics(route, set(settled))
+    async for chunk in stream:
+        chunks.append(chunk)
+    return b''.join(chunks)
+
+
+def _settled(*pairs):
+    # (context, result) -> the tasks _stream_federated_metrics consumes. Real
+    # tasks, not bare coroutines: the stream cancels the unfinished ones.
+    return [
+        asyncio.create_task(
+            server_metrics._settle(ctx, metrics_utils.FederationStats(),
+                                   asyncio.sleep(0, result=res)))
+        for ctx, res in pairs
+    ]
+
+
+def _entries(body):
+    # The body is the entries joined by the separator, so splitting on it
+    # recovers them. Compared as a multiset: streaming writes each context
+    # out as it finishes, so the order is completion order, not input order.
+    return sorted(body.split(b'\n\n'))
+
+
+@pytest.mark.asyncio
+async def test_stream_carries_exactly_the_entries_the_join_carried():
+    """Same entries and same separator as '\\n\\n'.join(all_metrics).
+
+    Order is deliberately not asserted -- see
+    test_stream_order_follows_completion_not_input.
+    """
+    texts = ['a 1', 'b 2', 'c 3']
+    body = await _collect(
+        'gpu-metrics', _settled(*[(f'ctx{i}', t) for i, t in enumerate(texts)]))
+    assert _entries(body) == _entries('\n\n'.join(texts).encode('utf-8'))
+
+
+@pytest.mark.asyncio
+async def test_stream_order_follows_completion_not_input():
+    """The documented cost of streaming: contexts land as they finish.
+
+    Prometheus does not require ordering within an exposition, and the
+    federated body already repeated HELP/TYPE per context before this change,
+    so nothing downstream depends on the input order this drops.
+    """
+
+    async def after(delay, text):
+        await asyncio.sleep(delay)
+        return text
+
+    settled = [
+        asyncio.create_task(
+            server_metrics._settle('slow', metrics_utils.FederationStats(),
+                                   after(0.05, 'slow 1'))),
+        asyncio.create_task(
+            server_metrics._settle('fast', metrics_utils.FederationStats(),
+                                   after(0, 'fast 1'))),
+    ]
+    body = await _collect('gpu-metrics', settled)
+    assert body == b'fast 1\n\nslow 1'
+
+
+@pytest.mark.asyncio
+async def test_stream_separates_only_between_entries():
+    # No leading or trailing separator -- a stray one would parse as a blank
+    # line at the head of the exposition.
+    body = await _collect('gpu-metrics', _settled(('only', 'a 1')))
+    assert body == b'a 1'
+    assert not body.startswith(b'\n')
+    assert not body.endswith(b'\n\n')
+
+
+@pytest.mark.asyncio
+async def test_stream_keeps_an_empty_success_in_the_sequence():
+    # '' is a success, so the join emitted separators around it; dropping it
+    # would silently merge its neighbours.
+    body = await _collect('gpu-metrics',
+                          _settled(('a', 'a 1'), ('empty', ''), ('b', 'b 2')))
+    assert _entries(body) == _entries('\n\n'.join(['a 1', '',
+                                                   'b 2']).encode('utf-8'))
+    assert b'' in body.split(b'\n\n')
+
+
+@pytest.mark.asyncio
+async def test_stream_omits_failed_contexts_without_leaving_a_gap():
+    # A dropped context must not leave a doubled separator behind, which
+    # would read as an empty entry that was never federated.
+    body = await _collect(
+        'gpu-metrics',
+        _settled(('ok', 'a 1'), ('bad', ValueError('boom')), ('ok2', 'b 2')))
+    assert _entries(body) == [b'a 1', b'b 2']
+    assert b'' not in body.split(b'\n\n')
+
+
+@pytest.mark.asyncio
+async def test_stream_yields_nothing_when_every_context_fails():
+    body = await _collect(
+        'gpu-metrics',
+        _settled(('bad', ValueError('boom')),
+                 ('worse', asyncio.TimeoutError())))
+    assert body == b''
+
+
+@pytest.mark.asyncio
+async def test_settle_pairs_a_result_with_its_own_context():
+    """Identity has to survive completion-order delivery.
+
+    as_completed() yields in completion order and, before 3.12, does not hand
+    back the tasks it was given, so a result carries no way home on its own.
+    """
+
+    async def slow():
+        await asyncio.sleep(0.05)
+        return 'slow-text'
+
+    async def quick():
+        return 'quick-text'
+
+    settled = [
+        server_metrics._settle('slow-ctx', metrics_utils.FederationStats(),
+                               slow()),
+        server_metrics._settle('quick-ctx', metrics_utils.FederationStats(),
+                               quick()),
+    ]
+    seen = {}
+    for settling in asyncio.as_completed(settled):
+        context, _, result = await settling
+        seen[context] = result
+
+    assert seen == {'slow-ctx': 'slow-text', 'quick-ctx': 'quick-text'}
+
+
+@pytest.mark.asyncio
+async def test_settle_returns_exceptions_but_not_base_exceptions():
+    # Mirrors gather(return_exceptions=True): an Exception becomes a value so
+    # one context cannot cancel the scrape, while KeyboardInterrupt does not.
+    async def boom():
+        raise ValueError('boom')
+
+    _, _, result = await server_metrics._settle('ctx',
+                                                metrics_utils.FederationStats(),
+                                                boom())
+    assert isinstance(result, ValueError)
+
+    async def interrupt():
+        raise KeyboardInterrupt()
+
+    with pytest.raises(KeyboardInterrupt):
+        await server_metrics._settle('ctx', metrics_utils.FederationStats(),
+                                     interrupt())
+
+
+def test_federated_routes_stream_their_response():
+    # A buffered Response would reintroduce the whole-payload copy this
+    # change removes; nginx would do the same if allowed to buffer.
+    response = server_metrics._federated_metrics_response('gpu-metrics', [])
+    assert isinstance(response, fastapi.responses.StreamingResponse)
+    assert response.media_type == 'text/plain; version=0.0.4; charset=utf-8'
+    assert response.headers['x-accel-buffering'] == 'no'
+
+
+@pytest.mark.parametrize(
+    'route,collector',
+    [('/gpu-metrics', 'get_metrics_for_context'),
+     ('/endpoints-metrics', 'get_endpoint_metrics_for_context')])
+def test_route_streams_the_whole_body_over_http(monkeypatch, route, collector):
+    """End to end through the ASGI stack, not just the generator.
+
+    A StreamingResponse is assembled by the server rather than handed over as
+    one buffer, so the bytes a scrape actually receives are worth asserting
+    separately from what the generator yields.
+    """
+    monkeypatch.delenv('PROMETHEUS_MULTIPROC_DIR', raising=False)
+    targets = server_metrics._FEDERATION_TARGETS
+    monkeypatch.setattr(targets, 'snapshot', lambda: (['ctx-a', 'ctx-b'], []))
+    monkeypatch.setattr(targets, 'start_refresh_if_idle', lambda: None)
+
+    async def fake_collect(context, stats=None, **kwargs):
+        del stats, kwargs
+        return f'metric{{cluster="{context}"}} 1'
+
+    monkeypatch.setattr(metrics_utils, collector, fake_collect)
+
+    with fastapi.testclient.TestClient(server_metrics.metrics_app) as client:
+        response = client.get(route)
+
+    assert response.status_code == 200
+    assert response.headers['content-type'].startswith('text/plain')
+    # Both contexts arrive, separated, with nothing lost in the hand-off.
+    assert _entries(response.content) == sorted([
+        b'metric{cluster="ctx-a"} 1',
+        b'metric{cluster="ctx-b"} 1',
+    ])
+
+
+@pytest.mark.asyncio
+async def test_abandoned_scrape_cancels_the_contexts_still_running():
+    """Closing the stream early stops the federation behind it.
+
+    The tasks are started eagerly, and the handler now returns a streaming
+    body instead of awaiting gather(), so cancelling the handler no longer
+    reaches them. A scrape Prometheus gives up on would otherwise leave every
+    unfinished context federating -- and holding whatever it had already
+    pulled -- until its own per-context budget expired.
+    """
+    started = asyncio.Event()
+
+    async def never_finishes():
+        started.set()
+        await asyncio.sleep(30)
+        return 'unreachable'
+
+    settled = [
+        asyncio.create_task(
+            server_metrics._settle('quick', metrics_utils.FederationStats(),
+                                   asyncio.sleep(0, result='quick 1'))),
+        asyncio.create_task(
+            server_metrics._settle('stuck', metrics_utils.FederationStats(),
+                                   never_finishes())),
+    ]
+
+    stream = server_metrics._stream_federated_metrics('gpu-metrics',
+                                                      set(settled))
+    assert await stream.__anext__() == b'quick 1'
+    await started.wait()
+    # What Starlette does when the client goes away mid-body.
+    await stream.aclose()
+
+    await asyncio.sleep(0)
+    assert settled[1].cancelled() or settled[1].done(), (
+        'the unfinished context kept running after the scrape was abandoned')
+
+
+@pytest.mark.asyncio
+async def test_written_payload_is_collectible_before_the_slowest_context():
+    """An emitted body must not stay pinned until every context settles.
+
+    A finished asyncio.Task holds its return value, so retaining the task set
+    to cancel it would keep every context's text alive to the end of the
+    scrape -- exactly the retention streaming is meant to remove.
+    """
+
+    class Payload(str):
+        """str subclass so it can be weak-referenced."""
+
+    payload = Payload('big 1')
+    ref = weakref.ref(payload)
+
+    async def never_finishes():
+        await asyncio.sleep(30)
+        return 'unreachable'
+
+    settled = [
+        asyncio.create_task(
+            server_metrics._settle('quick', metrics_utils.FederationStats(),
+                                   asyncio.sleep(0, result=payload))),
+        asyncio.create_task(
+            server_metrics._settle('stuck', metrics_utils.FederationStats(),
+                                   never_finishes())),
+    ]
+    del payload
+
+    stream = server_metrics._stream_federated_metrics('gpu-metrics',
+                                                      set(settled))
+    try:
+        assert await stream.__anext__() == b'big 1'
+        # The slow context is still running; only local refs remain.
+        del settled
+        gc.collect()
+        assert ref() is None, (
+            'the written payload is still reachable while another context runs')
+    finally:
+        await stream.aclose()
+
+
+@pytest.mark.asyncio
+async def test_disconnect_before_the_body_starts_still_cancels():
+    """The generator's finally does not exist until the generator starts.
+
+    A client that goes away while the headers are going out means the body
+    iterator is never entered, so nothing inside the generator can clean up.
+    """
+    settled = [
+        asyncio.create_task(
+            server_metrics._settle('stuck', metrics_utils.FederationStats(),
+                                   asyncio.sleep(30)))
+    ]
+    response = server_metrics._federated_metrics_response(
+        'gpu-metrics', settled)
+
+    async def receive():
+        return {'type': 'http.disconnect'}
+
+    async def send(message):
+        del message
+        raise ConnectionResetError('client went away')
+
+    with pytest.raises(ConnectionResetError):
+        await response(
+            {
+                'type': 'http',
+                'method': 'GET',
+                'path': '/gpu-metrics',
+                'headers': [],
+            }, receive, send)
+
+    await asyncio.sleep(0)
+    assert settled[0].cancelled() or settled[0].done(), (
+        'federation kept running after the client disconnected early')
+
+
+def test_port_forward_hands_back_its_child_before_it_is_ready(monkeypatch):
+    """A caller cancelled mid-startup still needs a handle on kubectl.
+
+    start_svc_port_forward runs in a thread that cancellation cannot stop, so
+    without this the thread spawns a tunnel that nothing is left to reap.
+    """
+    monkeypatch.setattr(metrics_utils, '_PORT_FORWARD_STARTUP_TIMEOUT_SECONDS',
+                        0.3)
+    real_popen = subprocess.Popen
+    seen = []
+
+    def silent_process(cmd, **kwargs):
+        del cmd
+        return real_popen(['sleep', '30'], **kwargs)
+
+    monkeypatch.setattr(metrics_utils.subprocess, 'Popen', silent_process)
+
+    with pytest.raises(exceptions.PortForwardStartupError):
+        metrics_utils.start_svc_port_forward('ctx',
+                                             'ns',
+                                             'svc',
+                                             80,
+                                             on_process_start=seen.append)
+
+    assert seen, 'the spawned process was never handed back'
+
+
+def test_port_forward_reaps_itself_when_abandoned(monkeypatch):
+    # The waiter gave up before the tunnel was ready; the thread it cannot
+    # stop has to tear the child down itself.
+    real_popen = subprocess.Popen
+    spawned = []
+
+    def silent_process(cmd, **kwargs):
+        del cmd
+        process = real_popen(['sleep', '30'], **kwargs)
+        spawned.append(process)
+        return process
+
+    monkeypatch.setattr(metrics_utils.subprocess, 'Popen', silent_process)
+    abandoned = threading.Event()
+    abandoned.set()
+
+    with pytest.raises(exceptions.PortForwardStartupError, match='abandoned'):
+        metrics_utils.start_svc_port_forward('ctx',
+                                             'ns',
+                                             'svc',
+                                             80,
+                                             abandoned=abandoned)
+
+    assert spawned, 'no process was spawned'
+    assert _wait_until(lambda: spawned[0].poll() is not None), (
+        'the abandoned tunnel was left running')

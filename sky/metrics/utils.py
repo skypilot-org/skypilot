@@ -12,7 +12,7 @@ import shlex
 import subprocess
 import threading
 import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 import urllib.parse
 
 import httpx
@@ -1587,14 +1587,27 @@ def split_local_remote_contexts(
     return local, remote
 
 
-def start_svc_port_forward(context: str, namespace: str, service: str,
-                           service_port: int) -> Tuple[subprocess.Popen, int]:
+def start_svc_port_forward(
+    context: str,
+    namespace: str,
+    service: str,
+    service_port: int,
+    on_process_start: Optional[Callable[[subprocess.Popen], None]] = None,
+    abandoned: Optional[threading.Event] = None,
+) -> Tuple[subprocess.Popen, int]:
     """Starts a port forward to a service in a Kubernetes cluster.
     Args:
         context: Kubernetes context name
         namespace: Namespace where the service is located
         service: Service name to port forward to
         service_port: Port on the service to forward to
+        on_process_start: Called with the kubectl process the moment it is
+            spawned. This runs in a thread that the caller cannot stop, so a
+            caller that is cancelled mid-startup needs a handle on the child
+            to be able to reap it.
+        abandoned: Checked while waiting for the tunnel. Set by a caller that
+            has given up, so the process is torn down here rather than
+            outliving everything that knew about it.
     Returns:
         Tuple of (subprocess.Popen process, local_port assigned)
     Raises:
@@ -1638,6 +1651,8 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
                                                 stderr=subprocess.STDOUT,
                                                 text=True,
                                                 env=env)
+        if on_process_start is not None:
+            on_process_start(port_forward_process)
 
         # Use poll() instead of select() to avoid FD_SETSIZE limit
         poller = select.poll()
@@ -1649,6 +1664,13 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
         buffer = ''
         # wait for the port forward to start and extract the local port
         while time.time() - start_time < start_port_forward_timeout:
+            if abandoned is not None and abandoned.is_set():
+                # Nobody is waiting for this tunnel any more. Raising reaches
+                # the handler below, which reaps the child.
+                raise exceptions.PortForwardStartupError(
+                    f'Port forward for service {service} in namespace '
+                    f'{namespace} on context {context} was abandoned before '
+                    f'it became ready')
             if port_forward_process.poll() is not None:
                 # port forward process has terminated
                 if port_forward_process.returncode != 0:
@@ -1791,12 +1813,20 @@ async def send_metrics_request_with_port_forward(
     if stats is None:
         stats = FederationStats()
     port_forward_process = None
+    # start_svc_port_forward runs in a thread, which cancelling this coroutine
+    # cannot stop: the await raises while the thread goes on to spawn kubectl.
+    # These two give the teardown below a handle on that child either way --
+    # spawned is filled the moment it exists, and abandoned tells the thread to
+    # reap it itself if it has not got that far.
+    spawned: List[subprocess.Popen] = []
+    abandoned = threading.Event()
     # monotonic() so durations are immune to wall-clock adjustments.
     try:
         # Start port forward.
         pf_start = time.monotonic()
         port_forward_process, local_port = await asyncio.to_thread(
-            start_svc_port_forward, context, namespace, service, service_port)
+            start_svc_port_forward, context, namespace, service, service_port,
+            spawned.append, abandoned)
         stats.port_forward_seconds = time.monotonic() - pf_start
         record_federation_phase(context, route, 'port_forward',
                                 stats.port_forward_seconds)
@@ -1838,12 +1868,17 @@ async def send_metrics_request_with_port_forward(
             return text
 
     finally:
+        abandoned.set()
+        # On the cancelled-mid-startup path port_forward_process is still
+        # None while the thread holds a live child, so fall back to whatever
+        # it spawned.
+        process = port_forward_process or (spawned[0] if spawned else None)
         # Hand the teardown to a detached thread: it must run even when this
         # coroutine is being cancelled by asyncio.wait_for(), and it must not
         # be charged to the loop that serves /metrics. See
         # stop_svc_port_forward_off_loop.
-        if port_forward_process:
-            stop_svc_port_forward_off_loop(port_forward_process)
+        if process:
+            stop_svc_port_forward_off_loop(process)
 
 
 # Matches an existing `cluster="..."` label token in a metric line's label
