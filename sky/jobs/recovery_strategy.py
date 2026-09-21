@@ -150,15 +150,22 @@ _KIND_POOL_NO_CLUSTER = 'pool_no_cluster'
 
 # Why _wait_until_job_starts_on_cluster gave up. Without these the whole
 # family is one opaque bucket: the loop swallows three different exceptions
-# and leaves two non-exception ways out, and by the time the caller sees
-# None they are indistinguishable.
-# A submit reason is the whole suffix, separator included, because the
-# separator is what decides how the metric treats it: the cap reads any colon
-# as "open family". These three are fixed at compile time, so they join with
-# '_' and cost nothing from a budget meant for names that can actually grow.
-# The exception-derived reasons join with ':' -- they are open, and should be
-# capped. Keeping the separator in the value means the caller cannot get this
-# wrong by concatenating, which is how it was got wrong once already.
+# and leaves two non-exception ways out, and by the time the caller sees None
+# they are indistinguishable.
+#
+# A reason is the whole suffix, separator included, because the separator is
+# what decides how the metric treats it: the cap reads any colon as "open
+# family". These three are fixed at compile time, so they join with '_' and
+# cost nothing from a budget meant for names that can actually grow; the
+# exception-derived reasons join with ':' because they are open and should be
+# capped. Keeping the separator in the value is what stops the caller
+# reintroducing a colon by concatenating, which is how it was got wrong once.
+#
+# So the composed codes are, exactly:
+#   launch_retry:job_submit_failed_cluster_preempted
+#   launch_retry:job_submit_failed_status_transient
+#   launch_retry:job_submit_failed_checks_exhausted
+#   launch_retry:job_submit_failed:<kind>     e.g. ...:kubernetes:ApiException
 _SUBMIT_CLUSTER_PREEMPTED = '_cluster_preempted'
 _SUBMIT_STATUS_TRANSIENT = '_status_transient'
 _SUBMIT_CHECKS_EXHAUSTED = '_checks_exhausted'
