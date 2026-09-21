@@ -701,7 +701,7 @@ async def test_launch_retry_code_for_job_submit_failure(monkeypatch):
 
     assert await executor._launch(max_retry=None) == 123.45
     assert _codes(patches.set_backoff_pending) == [
-        'launch_retry:job_submit_failed:_checks_exhausted'
+        'launch_retry:job_submit_failed_checks_exhausted'
     ]
 
 
@@ -723,7 +723,7 @@ async def test_retry_code_resets_between_attempts(monkeypatch):
     assert await executor._launch(max_retry=None) == 123.45
     assert _codes(patches.set_backoff_pending) == [
         'launch_retry:KeyError',
-        'launch_retry:job_submit_failed:_checks_exhausted',
+        'launch_retry:job_submit_failed_checks_exhausted',
     ]
 
 
@@ -990,7 +990,7 @@ async def test_submit_wait_attributes_a_swallowed_exception(
     break_site(monkeypatch)
 
     assert await executor._wait_until_job_starts_on_cluster() == (None,
-                                                                  'ValueError')
+                                                                  ':ValueError')
 
 
 @pytest.mark.asyncio
@@ -1049,19 +1049,33 @@ async def test_submit_wait_clears_a_stale_anomaly(monkeypatch):
 
 
 def test_fixed_submit_reasons_are_exempt_from_the_metric_cap():
-    """The three fixed reasons must not compete for the open-family budget.
+    """Saturate the budget, then check the fixed reasons still come back whole.
 
-    The cap reads a colon as 'open family'. Spelling these with '_' is what
-    keeps a full budget from folding a preemption into 'other', where the
-    attribution this change adds would be lost.
+    Asserted by calling the cap, not by counting colons in the composed
+    string: the rule is "any colon means open", so a colon-count assertion
+    passes for spellings the cap still charges. That is how the first attempt
+    at this fix shipped broken with a green test.
     """
     from sky.metrics import utils as metrics_utils
-    for reason in (recovery_strategy._SUBMIT_CLUSTER_PREEMPTED,
-                   recovery_strategy._SUBMIT_STATUS_TRANSIENT,
-                   recovery_strategy._SUBMIT_CHECKS_EXHAUSTED):
-        kind = f'{recovery_strategy._KIND_JOB_SUBMIT_FAILED}:{reason}'
-        assert ':' in kind  # the prefix keeps them in one namespace...
-        # ...but the reason itself must not add a second, capped one.
-        assert kind.count(':') == 1, kind
-    # An exception-derived reason stays open, and so stays capped.
-    assert ':' in f'{recovery_strategy._KIND_JOB_SUBMIT_FAILED}:kubernetes:X'
+
+    with metrics_utils._launch_retry_kinds_lock:
+        saved = set(metrics_utils._launch_retry_kinds)
+        metrics_utils._launch_retry_kinds.clear()
+        metrics_utils._launch_retry_kinds.update(
+            f'aws:Filler{i}'
+            for i in range(metrics_utils._MAX_LAUNCH_RETRY_KINDS))
+    try:
+        for reason in (recovery_strategy._SUBMIT_CLUSTER_PREEMPTED,
+                       recovery_strategy._SUBMIT_STATUS_TRANSIENT,
+                       recovery_strategy._SUBMIT_CHECKS_EXHAUSTED):
+            kind = f'{recovery_strategy._KIND_JOB_SUBMIT_FAILED}{reason}'
+            assert metrics_utils._capped_launch_retry_kind(kind) == kind, kind
+        # An exception-derived reason is open, so a full budget does fold it.
+        open_kind = (f'{recovery_strategy._KIND_JOB_SUBMIT_FAILED}'
+                     f':kubernetes:ApiException')
+        assert metrics_utils._capped_launch_retry_kind(
+            open_kind) == metrics_utils.LAUNCH_RETRY_KIND_OTHER
+    finally:
+        with metrics_utils._launch_retry_kinds_lock:
+            metrics_utils._launch_retry_kinds.clear()
+            metrics_utils._launch_retry_kinds.update(saved)

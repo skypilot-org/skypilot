@@ -152,11 +152,13 @@ _KIND_POOL_NO_CLUSTER = 'pool_no_cluster'
 # family is one opaque bucket: the loop swallows three different exceptions
 # and leaves two non-exception ways out, and by the time the caller sees
 # None they are indistinguishable.
-# Spelled with '_' rather than ':' on purpose: the metric's cap treats a colon
-# as an open family, so a colon here would make these three fixed values
-# compete for the budget with arbitrary cloud and opaque exception names, and
-# a full budget would fold them into 'other'. The exception-derived reasons
-# below do carry a colon, because they genuinely are open.
+# A submit reason is the whole suffix, separator included, because the
+# separator is what decides how the metric treats it: the cap reads any colon
+# as "open family". These three are fixed at compile time, so they join with
+# '_' and cost nothing from a budget meant for names that can actually grow.
+# The exception-derived reasons join with ':' -- they are open, and should be
+# capped. Keeping the separator in the value means the caller cannot get this
+# wrong by concatenating, which is how it was got wrong once already.
 _SUBMIT_CLUSTER_PREEMPTED = '_cluster_preempted'
 _SUBMIT_STATUS_TRANSIENT = '_status_transient'
 _SUBMIT_CHECKS_EXHAUSTED = '_checks_exhausted'
@@ -549,7 +551,7 @@ class StrategyExecutor:
                 # loop.
                 # TODO(zhwu): log the unexpected error to usage collection
                 # for future debugging.
-                reason = _error_kind(e)
+                reason = f':{_error_kind(e)}'
                 logger.info(f'Unexpected exception: {e}\nFailed to get the '
                             'refresh the cluster status. Retrying.')
                 continue
@@ -579,7 +581,7 @@ class StrategyExecutor:
                 # get_job_status, so it should not happen here.
                 # TODO(zhwu): log the unexpected error to usage collection
                 # for future debugging.
-                reason = _error_kind(e)
+                reason = f':{_error_kind(e)}'
                 logger.info('Unexpected exception during fetching job status: '
                             f'{common_utils.format_exception(e)}')
                 continue
@@ -616,7 +618,7 @@ class StrategyExecutor:
                 except Exception as e:  # pylint: disable=broad-except
                     # If we failed to get the job timestamp, we will retry
                     # job checking loop.
-                    reason = _error_kind(e)
+                    reason = f':{_error_kind(e)}'
                     logger.info(f'Unexpected Exception: {e}\nFailed to get '
                                 'the job start timestamp. Retrying.')
                     continue
@@ -1324,7 +1326,7 @@ class StrategyExecutor:
                         # Attribute the give-up reason: the three swallowed
                         # exceptions and the two quiet exits above all reach
                         # here the same way, and only this tells them apart.
-                        retry_code = (f'{_KIND_JOB_SUBMIT_FAILED}:'
+                        retry_code = (f'{_KIND_JOB_SUBMIT_FAILED}'
                                       f'{submit_reason}' if submit_reason else
                                       _KIND_JOB_SUBMIT_FAILED)
                         logger.info(
