@@ -1048,6 +1048,40 @@ async def test_submit_wait_clears_a_stale_anomaly(monkeypatch):
         None, '_checks_exhausted')
 
 
+@pytest.mark.parametrize('registered,expected', [(True, 11.0), (False, 22.0)],
+                         ids=['runtime_site', 'backend_site'])
+@pytest.mark.asyncio
+async def test_submit_wait_returns_the_timestamp_unattributed(
+        monkeypatch, registered, expected):
+    """A successful submit returns (timestamp, None), from either return site.
+
+    Parametrised because that return is written twice and no failure test
+    reaches either -- the nearest stops at the timestamp fetch. mypy does not
+    pin them either: the value comes out of asyncio.to_thread as Any, so a
+    dropped `, None` type-checks cleanly and then breaks the caller's unpack
+    on every successful launch. The two values differ so that one site falling
+    through to the other fails rather than passes.
+    """
+    executor = _make_submit_wait_executor(monkeypatch)
+
+    async def running(*args, **kwargs):
+        return recovery_strategy.job_lib.JobStatus.RUNNING, None
+
+    monkeypatch.setattr(recovery_strategy.managed_job_utils, 'get_job_status',
+                        running)
+    monkeypatch.setattr(recovery_strategy.managed_job_runtime, 'is_registered',
+                        lambda: registered)
+    monkeypatch.setattr(recovery_strategy.global_user_state,
+                        'get_handle_from_cluster_name', lambda *a, **k: None)
+    monkeypatch.setattr(recovery_strategy.managed_job_runtime,
+                        'get_job_submitted_at', lambda *a, **k: 11.0)
+    monkeypatch.setattr(recovery_strategy.managed_job_utils,
+                        'get_job_timestamp', lambda *a, **k: 22.0)
+
+    assert await executor._wait_until_job_starts_on_cluster() == (expected,
+                                                                  None)
+
+
 def test_fixed_submit_reasons_are_exempt_from_the_metric_cap():
     """Saturate the budget, then check the fixed reasons still come back whole.
 
