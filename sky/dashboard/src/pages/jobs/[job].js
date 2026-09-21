@@ -1713,7 +1713,10 @@ function JobDetailsContent({
             return (
               <PluginSlot
                 name="jobs.detail.status.badge"
-                context={jobData}
+                // The slot must see the status the fallback renders:
+                // jobData is the first task's row, not the group's
+                // aggregate.
+                context={{ ...jobData, status: computedStatus }}
                 fallback={
                   <StatusBadge
                     status={computedStatus}
