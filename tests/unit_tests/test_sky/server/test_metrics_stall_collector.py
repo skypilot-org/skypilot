@@ -171,6 +171,23 @@ def test_a_capped_scan_says_so_in_its_own_series(scans):
     assert truncated[(stall.UNATTENDED,)] == 0
 
 
+def test_a_suppressed_scan_says_so_in_its_own_series(scans):
+    """A suppressed phase exports 0 stalled; the 0 has to be qualified.
+
+    Both arms: a phase that was measured must say 0 here, or the series says
+    "nothing was suppressed" forever and a reader cannot tell a phase that
+    found nothing from one that was never asked.
+    """
+    scans[stall.NEVER_CLAIMED] = _scan(stall.NEVER_CLAIMED, [], suppressed=True)
+    collector = metrics.ManagedJobsStallCollector()
+
+    suppressed = _samples(
+        _families(collector)['sky_managed_jobs_stall_suppressed'])
+
+    assert suppressed[(stall.NEVER_CLAIMED,)] == 1
+    assert suppressed[(stall.UNATTENDED,)] == 0
+
+
 def test_counts_and_ages_are_per_workspace(scans):
     scans[stall.NEVER_CLAIMED] = _scan(stall.NEVER_CLAIMED, [
         _task(1, age=900, workspace='a'),

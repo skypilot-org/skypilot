@@ -697,7 +697,9 @@ def test_a_queue_behind_a_full_controller_is_not_a_stall(engine, monkeypatch):
     _add_job(engine, 2, status='RUNNING', submitted_at=_OLD, start_at=_OLD)
     _never_claimed(engine, 3, age=_OLD)
 
-    assert _ids(stall.scan_never_claimed()) == set()
+    scan = stall.scan_never_claimed()
+    assert _ids(scan) == set()
+    assert scan.suppressed is True
 
 
 def test_a_free_slot_in_both_gates_still_reports_the_stall(engine, monkeypatch):
@@ -735,7 +737,11 @@ def test_off_consolidation_the_phase_is_suppressed(engine, monkeypatch):
                         lambda: False)
     _never_claimed(engine, 1, age=_OLD)
 
-    assert _ids(stall.scan_never_claimed()) == set()
+    scan = stall.scan_never_claimed()
+    assert _ids(scan) == set()
+    # Permanent here, not for as long as a queue lasts, and the event path
+    # does run off consolidation even though the collector does not.
+    assert scan.suppressed is True
 
 
 def test_one_full_process_of_two_does_not_fill_the_launch_gate(
