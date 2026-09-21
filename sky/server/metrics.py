@@ -1485,8 +1485,12 @@ def gpu_metrics_debug() -> dict:
 
 
 def _handle_federation_result(
-        context: str, route: str, result: object,
-        stats: metrics_utils.FederationStats) -> Optional[str]:
+        context: str,
+        route: str,
+        result: object,
+        stats: metrics_utils.FederationStats,
+        budget: float = metrics_utils.PER_CONTEXT_TIMEOUT_SECONDS
+) -> Optional[str]:
     """Classifies one federation task result and records its outcome.
 
     Returns the context's metrics text on success and None on failure, so the
@@ -1509,7 +1513,7 @@ def _handle_federation_result(
         metrics_utils.record_federation_outcome(context, route, 'timeout')
         logger.error(
             f'Failed to get metrics for context {context} (route {route}): '
-            f'timed out after {_PER_CONTEXT_TIMEOUT_SECONDS}s '
+            f'timed out after {budget}s '
             f'({stats.summary()}); the federation attempt exceeded the '
             f'per-context budget; series for this cluster are omitted from '
             f'this scrape')
@@ -1542,6 +1546,8 @@ def _handle_federation_result(
     # log at error level, and the Prometheus metrics capture this regardless.
     logger.debug(f'Federated metrics for context {context} (route {route}): '
                  f'{stats.summary()}')
+    metrics_utils.warn_if_near_budget(context, route, stats.elapsed_seconds,
+                                      budget)
     # The guards above leave only the success case: a metrics-text str.
     assert isinstance(result, str)
     return result
@@ -1574,6 +1580,7 @@ async def _settle(
 async def _stream_federated_metrics(
     route: str,
     pending: Set['_SettledTask'],
+    budget: float = metrics_utils.PER_CONTEXT_TIMEOUT_SECONDS,
 ) -> AsyncGenerator[bytes, None]:
     """Yields each context's exposition as that context finishes.
 
@@ -1601,7 +1608,8 @@ async def _stream_federated_metrics(
             pending -= done
             while done:
                 context, stats, result = done.pop().result()
-                text = _handle_federation_result(context, route, result, stats)
+                text = _handle_federation_result(context, route, result, stats,
+                                                 budget)
                 del result
                 if text is None:
                     continue
@@ -1654,6 +1662,7 @@ class _FederatedMetricsResponse(fastapi.responses.StreamingResponse):
 def _federated_metrics_response(
     route: str,
     settled: Sequence['_SettledTask'],
+    budget: float = metrics_utils.PER_CONTEXT_TIMEOUT_SECONDS,
 ) -> fastapi.responses.StreamingResponse:
     """Wraps the federated stream in the response Prometheus expects.
 
@@ -1663,7 +1672,7 @@ def _federated_metrics_response(
     """
     pending = set(settled)
     return _FederatedMetricsResponse(
-        _stream_federated_metrics(route, pending),
+        _stream_federated_metrics(route, pending, budget),
         pending=pending,
         media_type='text/plain; version=0.0.4; charset=utf-8',
         headers={'X-Accel-Buffering': 'no'},
@@ -1671,8 +1680,10 @@ def _federated_metrics_response(
 
 
 @metrics_app.get('/gpu-metrics')
-async def gpu_metrics() -> fastapi.Response:
+async def gpu_metrics(request: fastapi.Request) -> fastapi.Response:
     """Gets the GPU metrics from multiple external k8s clusters"""
+    budget = metrics_utils.resolve_per_context_timeout(
+        request.headers.get(metrics_utils.SCRAPE_TIMEOUT_HEADER))
     # Served from the last refresh and asking for the next one, both off
     # this loop; see _FederationTargets for why a scrape may neither do that
     # work nor wait for it.
@@ -1687,8 +1698,10 @@ async def gpu_metrics() -> fastapi.Response:
             _settle(
                 context, stats,
                 asyncio.wait_for(
-                    metrics_utils.get_metrics_for_context(context, stats=stats),
-                    timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
+                    metrics_utils.get_metrics_for_context(context,
+                                                          stats=stats,
+                                                          timeout=budget),
+                    timeout=budget,
                 ))) for context, stats in zip(remote_contexts, stats_list)
     ]
 
@@ -1710,20 +1723,20 @@ async def gpu_metrics() -> fastapi.Response:
             _settle(
                 context, stats,
                 asyncio.wait_for(
-                    metrics_utils.get_metrics_for_slurm_cluster(
-                        name, stats=stats,
-                        timeout=_PER_CONTEXT_TIMEOUT_SECONDS),
-                    timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
+                    metrics_utils.get_metrics_for_slurm_cluster(name,
+                                                                stats=stats,
+                                                                timeout=budget),
+                    timeout=budget,
                 ))) for context, name, stats in zip(slurm_contexts,
                                                     slurm_clusters, slurm_stats)
     ]
 
     # Plain text for Prometheus, written per context as each one finishes.
-    return _federated_metrics_response('gpu-metrics', tasks)
+    return _federated_metrics_response('gpu-metrics', tasks, budget)
 
 
 @metrics_app.get('/endpoints-metrics')
-async def endpoint_metrics() -> fastapi.Response:
+async def endpoint_metrics(request: fastapi.Request) -> fastapi.Response:
     """Gets Sky Endpoint serving metrics from multiple external k8s clusters.
 
     Mirrors /gpu-metrics but federates the serving engines' native series
@@ -1733,6 +1746,8 @@ async def endpoint_metrics() -> fastapi.Response:
     """
     # Same off-loop refresh as /gpu-metrics, sharing its snapshot; the Slurm
     # half of it does not apply to this route.
+    budget = metrics_utils.resolve_per_context_timeout(
+        request.headers.get(metrics_utils.SCRAPE_TIMEOUT_HEADER))
     remote_contexts, _ = _FEDERATION_TARGETS.snapshot()
     _FEDERATION_TARGETS.start_refresh_if_idle()
     stats_list = [metrics_utils.FederationStats() for _ in remote_contexts]
@@ -1741,13 +1756,13 @@ async def endpoint_metrics() -> fastapi.Response:
             _settle(
                 context, stats,
                 asyncio.wait_for(
-                    metrics_utils.get_endpoint_metrics_for_context(context,
-                                                                   stats=stats),
-                    timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
+                    metrics_utils.get_endpoint_metrics_for_context(
+                        context, stats=stats, timeout=budget),
+                    timeout=budget,
                 ))) for context, stats in zip(remote_contexts, stats_list)
     ]
 
-    return _federated_metrics_response('endpoints-metrics', tasks)
+    return _federated_metrics_response('endpoints-metrics', tasks, budget)
 
 
 def build_metrics_server(host: str, port: int) -> uvicorn.Server:

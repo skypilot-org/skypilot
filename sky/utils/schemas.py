@@ -3035,6 +3035,14 @@ def get_config_schema():
                     },
                 },
             },
+            # Whole-attempt budget for federating one context. Normally
+            # derived from the scrape timeout Prometheus reports on each
+            # request; this pins it instead, for a deployment scraping
+            # /gpu-metrics with something that does not report one.
+            'per_context_timeout_seconds': {
+                'type': 'number',
+                'exclusiveMinimum': 0,
+            },
         },
     }
 

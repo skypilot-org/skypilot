@@ -16,6 +16,7 @@ import gc
 import subprocess
 import threading
 import time
+from unittest import mock
 from unittest.mock import MagicMock
 import weakref
 
@@ -678,3 +679,199 @@ def test_port_forward_reaps_itself_when_abandoned(monkeypatch):
     assert spawned, 'no process was spawned'
     assert _wait_until(lambda: spawned[0].poll() is not None), (
         'the abandoned tunnel was left running')
+
+
+# --- per-context budget follows the scrape timeout ---
+
+
+def test_budget_derives_from_the_scrape_timeout_header():
+    # The whole point: a deployment that changes scrape_timeout does not have
+    # to keep a second number in step by hand.
+    assert metrics_utils.resolve_per_context_timeout('45.000000') == 30.0
+    assert metrics_utils.resolve_per_context_timeout('90') == 60.0
+
+
+def test_budget_from_the_bundled_chart_is_unchanged():
+    # The chart scrapes these routes with scrape_timeout: 45s, which has to
+    # keep producing the 30s this was a fixed constant for.
+    assert (metrics_utils.resolve_per_context_timeout('45.0') ==
+            metrics_utils.PER_CONTEXT_TIMEOUT_SECONDS)
+
+
+def test_budget_leaves_headroom_inside_the_scrape_timeout():
+    # Contexts run concurrently, so the response lands at roughly the slowest
+    # context's budget plus the write; it has to land before the scraper quits.
+    for scrape_timeout in ('10', '45', '120'):
+        assert (metrics_utils.resolve_per_context_timeout(scrape_timeout) <
+                float(scrape_timeout))
+
+
+@pytest.mark.parametrize('header', [None, 'not-a-number', '0', '-5'])
+def test_budget_falls_back_when_the_header_is_absent_or_junk(header):
+    # A manual curl sends no header; a broken one must not produce a
+    # nonsensical budget.
+    assert (metrics_utils.resolve_per_context_timeout(header) ==
+            metrics_utils.PER_CONTEXT_TIMEOUT_SECONDS)
+
+
+def test_budget_falls_back_to_config_before_the_constant(monkeypatch):
+    monkeypatch.setattr(
+        metrics_utils.skypilot_config, 'get_nested', lambda path, default: 12.5
+        if path == ('metrics', 'per_context_timeout_seconds') else default)
+    assert metrics_utils.resolve_per_context_timeout(None) == 12.5
+    # The header still wins: it is what the scraper will actually do.
+    assert metrics_utils.resolve_per_context_timeout('45') == 30.0
+
+
+def test_port_forward_startup_stays_inside_a_shrunken_budget():
+    # A short scrape timeout must not leave the startup wait longer than the
+    # whole budget it is supposed to fit inside.
+    budget = metrics_utils.resolve_per_context_timeout('6')
+    startup = budget * metrics_utils._PORT_FORWARD_STARTUP_BUDGET_FRACTION
+    assert 0 < startup < budget
+
+
+# --- the cliff is visible before it is fallen off ---
+
+
+def test_near_budget_warns_while_still_succeeding():
+    with mock.patch.object(metrics_utils.logger, 'warning') as warn:
+        metrics_utils.warn_if_near_budget('ctx', 'gpu-metrics', 27.0, 30.0)
+    assert 'used 90% of its 30.0s budget' in warn.call_args[0][0]
+
+
+def test_comfortable_context_does_not_warn():
+    with mock.patch.object(metrics_utils.logger, 'warning') as warn:
+        metrics_utils.warn_if_near_budget('ctx', 'gpu-metrics', 3.0, 30.0)
+    warn.assert_not_called()
+
+
+def test_near_budget_warning_reaches_the_success_path():
+    stats = metrics_utils.FederationStats()
+    stats.port_forward_seconds = 2.0
+    stats.federate_seconds = 26.0
+    with mock.patch.object(metrics_utils.logger, 'warning') as warn:
+        out = server_metrics._handle_federation_result('ctx', 'gpu-metrics',
+                                                       'metric 1', stats, 30.0)
+    assert out == 'metric 1'
+    assert 'of its 30.0s budget' in warn.call_args[0][0]
+
+
+def test_timeout_log_names_the_budget_actually_used():
+    with mock.patch.object(server_metrics.logger, 'error') as err:
+        server_metrics._handle_federation_result(
+            'ctx', 'gpu-metrics', asyncio.TimeoutError(),
+            metrics_utils.FederationStats(), 60.0)
+    assert 'timed out after 60.0s' in err.call_args[0][0]
+
+
+@pytest.mark.parametrize(
+    'route,collector',
+    [('/gpu-metrics', 'get_metrics_for_context'),
+     ('/endpoints-metrics', 'get_endpoint_metrics_for_context')])
+def test_scrape_timeout_header_reaches_the_federation(monkeypatch, route,
+                                                      collector):
+    # End to end: the header Prometheus sends has to become the budget the
+    # contexts are actually run under.
+    monkeypatch.delenv('PROMETHEUS_MULTIPROC_DIR', raising=False)
+    targets = server_metrics._FEDERATION_TARGETS
+    monkeypatch.setattr(targets, 'snapshot', lambda: (['ctx-a'], []))
+    monkeypatch.setattr(targets, 'start_refresh_if_idle', lambda: None)
+
+    seen = []
+
+    async def fake_collect(context, stats=None, **kwargs):
+        del stats, kwargs
+        return f'metric{{cluster="{context}"}} 1'
+
+    monkeypatch.setattr(metrics_utils, collector, fake_collect)
+
+    real_wait_for = asyncio.wait_for
+
+    async def recording_wait_for(aw, timeout=None):
+        seen.append(timeout)
+        return await real_wait_for(aw, timeout)
+
+    monkeypatch.setattr(server_metrics.asyncio, 'wait_for', recording_wait_for)
+
+    with fastapi.testclient.TestClient(server_metrics.metrics_app) as client:
+        response = client.get(
+            route, headers={'X-Prometheus-Scrape-Timeout-Seconds': '90.000000'})
+
+    assert response.status_code == 200
+    assert seen == [60.0], f'contexts ran under {seen}, not the header budget'
+
+
+@pytest.mark.parametrize(
+    'route,collector',
+    [('/gpu-metrics', 'get_metrics_for_context'),
+     ('/endpoints-metrics', 'get_endpoint_metrics_for_context')])
+def test_budget_reaches_the_collector_not_just_the_outer_wait(
+        monkeypatch, route, collector):
+    """The inner phases have to run under the same budget as the outer wait.
+
+    The outer wait_for is only the deadline; the startup share and the httpx
+    timeout are computed from what the collector is told, so a collector left
+    on its default would cap federation at 30s no matter what the scraper
+    reported.
+    """
+    monkeypatch.delenv('PROMETHEUS_MULTIPROC_DIR', raising=False)
+    targets = server_metrics._FEDERATION_TARGETS
+    monkeypatch.setattr(targets, 'snapshot', lambda: (['ctx-a'], []))
+    monkeypatch.setattr(targets, 'start_refresh_if_idle', lambda: None)
+
+    seen = {}
+
+    async def fake_collect(context, stats=None, timeout=None, **kwargs):
+        del stats, kwargs
+        seen['timeout'] = timeout
+        return f'metric{{cluster="{context}"}} 1'
+
+    monkeypatch.setattr(metrics_utils, collector, fake_collect)
+
+    with fastapi.testclient.TestClient(server_metrics.metrics_app) as client:
+        response = client.get(
+            route, headers={'X-Prometheus-Scrape-Timeout-Seconds': '90'})
+
+    assert response.status_code == 200
+    assert seen['timeout'] == 60.0, (
+        f'collector ran under {seen["timeout"]}s, not the derived budget')
+
+
+def test_elapsed_counts_the_whole_attempt_when_it_finished():
+    # Stamping runs after federate_seconds is recorded but is still charged
+    # to the budget, so the warning has to see it.
+    stats = metrics_utils.FederationStats()
+    stats.port_forward_seconds = 2.0
+    stats.federate_seconds = 10.0
+    stats.total_seconds = 27.0
+    assert stats.elapsed_seconds == 27.0
+
+
+def test_elapsed_falls_back_to_phases_for_a_cancelled_attempt():
+    # A cancelled attempt never sets total_seconds; the phases that did
+    # complete are all there is to report.
+    stats = metrics_utils.FederationStats()
+    stats.port_forward_seconds = 2.0
+    stats.federate_seconds = 10.0
+    assert stats.elapsed_seconds == 12.0
+
+
+def test_stamping_time_reaches_the_near_budget_warning():
+    # Devin's case: 12s of phases, 27s in total. The phase sum alone is under
+    # the 80% threshold and would stay silent.
+    stats = metrics_utils.FederationStats()
+    stats.port_forward_seconds = 2.0
+    stats.federate_seconds = 10.0
+    stats.total_seconds = 27.0
+    with mock.patch.object(metrics_utils.logger, 'warning') as warn:
+        server_metrics._handle_federation_result('ctx', 'gpu-metrics',
+                                                 'metric 1', stats, 30.0)
+    assert 'used 90% of its 30.0s budget' in warn.call_args[0][0]
+
+
+@pytest.mark.parametrize('header', ['inf', '-inf', 'nan', 'Infinity'])
+def test_non_finite_headers_fall_back(header):
+    # inf survives a bare > 0 test and would make the deadline never fire.
+    assert (metrics_utils.resolve_per_context_timeout(header) ==
+            metrics_utils.PER_CONTEXT_TIMEOUT_SECONDS)
