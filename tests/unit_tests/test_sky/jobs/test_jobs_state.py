@@ -2519,3 +2519,53 @@ class TestParentJobLinks:
         by_id = self._links([root, child])
         assert by_id[root] == (None, None, None)
         assert by_id[child] == (root, root, 1)
+
+
+class _CountingRowMapping(dict):
+    """Stands in for a SQLAlchemy RowMapping, counting direct ``.get()`` calls.
+
+    A real ``RowMapping`` does not return a default cheaply for a key that is
+    not in the result set: it routes through ``_key_fallback`` and
+    *constructs* a ``NoSuchColumnError`` first. ``_get_jobs_dict`` names every
+    column unconditionally, so if it read them off the RowMapping, a query
+    narrowed by ``fields`` would pay one exception object per unselected
+    column per row.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.direct_gets = 0
+
+    def get(self, key, default=None):
+        self.direct_gets += 1
+        return super().get(key, default)
+
+
+def test_get_jobs_dict_reads_selected_columns_without_probing_row_mapping():
+    """Only the ambiguous Column keys may be read off the RowMapping.
+
+    Guards the cost, not just the result: reverting to ``r.get('...')`` per
+    column still returns the right dict, but reintroduces one exception
+    construction per unselected column per row.
+    """
+    # The shape a `fields`-narrowed query produces: a few selected columns,
+    # every other column absent from the result set.
+    row = _CountingRowMapping({
+        'job_id': 7,
+        'task_id': 0,
+        'job_name': 'my-job',
+        'status': state.ManagedJobStatus.RUNNING,
+    })
+
+    result = state._get_jobs_dict(row)  # pylint: disable=protected-access
+
+    assert result['_job_id'] == 7
+    assert result['task_id'] == 0
+    assert result['status'] == state.ManagedJobStatus.RUNNING
+    # Columns the query did not select come back as None, not as an error.
+    assert result['dag_yaml_content'] is None
+    assert result['pool'] is None
+    # Two ambiguous columns (spot.spot_job_id and job_info.spot_job_id) are
+    # keyed by Column object and must stay on the RowMapping; nothing else
+    # may touch it.
+    assert row.direct_gets <= 2

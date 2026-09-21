@@ -606,73 +606,87 @@ async def _retry_schedule_state_update(
 def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
     # WARNING: If you update these you may also need to update GetJobTable in
     # the skylet ManagedJobsServiceImpl.
+    #
+    # Read the present columns out of a plain dict rather than off the
+    # RowMapping. This function probes every column unconditionally, but a
+    # query that was given `fields` selects only a subset, and a RowMapping
+    # miss is not a cheap lookup: it goes through _key_fallback, which
+    # *constructs* a NoSuchColumnError before the default is returned. That
+    # is one exception object per absent column per row -- on a jobs table
+    # with tens of thousands of rows and a typical `fields` list, millions of
+    # them, and the dominant cost of the whole queue. dict(r) materializes
+    # only the columns the query actually selected, so the absent ones become
+    # ordinary dict misses. The two ambiguous columns below stay on the
+    # RowMapping: their Column keys are the only thing that disambiguates
+    # them, and there are just two of them per row.
+    m = dict(r)
     return {
-        '_job_id': r.get('job_id'),  # from spot table
-        '_task_name': r.get('job_name'),  # deprecated, from spot table
-        'resources': r.get('resources'),
-        'submitted_at': r.get('submitted_at'),
-        'status': r.get('status'),
-        'run_timestamp': r.get('run_timestamp'),
-        'start_at': r.get('start_at'),
-        'end_at': r.get('end_at'),
-        'last_recovered_at': r.get('last_recovered_at'),
-        'recovery_count': r.get('recovery_count'),
-        'job_duration': r.get('job_duration'),
-        'failure_reason': r.get('failure_reason'),
+        '_job_id': m.get('job_id'),  # from spot table
+        '_task_name': m.get('job_name'),  # deprecated, from spot table
+        'resources': m.get('resources'),
+        'submitted_at': m.get('submitted_at'),
+        'status': m.get('status'),
+        'run_timestamp': m.get('run_timestamp'),
+        'start_at': m.get('start_at'),
+        'end_at': m.get('end_at'),
+        'last_recovered_at': m.get('last_recovered_at'),
+        'recovery_count': m.get('recovery_count'),
+        'job_duration': m.get('job_duration'),
+        'failure_reason': m.get('failure_reason'),
         'job_id': r.get(spot_table.c.spot_job_id
                        ),  # ambiguous, use table.column
-        'task_id': r.get('task_id'),
-        'task_name': r.get('task_name'),
-        'specs': r.get('specs'),
-        'local_log_file': r.get('local_log_file'),
-        'metadata': r.get('metadata'),
-        'links': r.get('links'),  # SQLAlchemy JSON type, already parsed
+        'task_id': m.get('task_id'),
+        'task_name': m.get('task_name'),
+        'specs': m.get('specs'),
+        'local_log_file': m.get('local_log_file'),
+        'metadata': m.get('metadata'),
+        'links': m.get('links'),  # SQLAlchemy JSON type, already parsed
         # columns from job_info table (some may be None for legacy jobs)
         '_job_info_job_id': r.get(job_info_table.c.spot_job_id
                                  ),  # ambiguous, use table.column
-        'job_name': r.get('name'),  # from job_info table
-        'schedule_state': r.get('schedule_state'),
-        'controller_pid': r.get('controller_pid'),
-        'controller_pid_started_at': r.get('controller_pid_started_at'),
+        'job_name': m.get('name'),  # from job_info table
+        'schedule_state': m.get('schedule_state'),
+        'controller_pid': m.get('controller_pid'),
+        'controller_pid_started_at': m.get('controller_pid_started_at'),
         # the _path columns are for backwards compatibility, use the _content
         # columns instead
-        'dag_yaml_path': r.get('dag_yaml_path'),
-        'env_file_path': r.get('env_file_path'),
-        'dag_yaml_content': r.get('dag_yaml_content'),
-        'env_file_content': r.get('env_file_content'),
-        'config_file_content': r.get('config_file_content'),
-        'user_hash': r.get('user_hash'),
-        'workspace': r.get('workspace'),
-        'priority': r.get('priority'),
-        'priority_class': r.get('priority_class'),
-        'entrypoint': r.get('entrypoint'),
-        'original_user_yaml_path': r.get('original_user_yaml_path'),
-        'original_user_yaml_content': r.get('original_user_yaml_content'),
-        'pool': r.get('pool'),
-        'current_cluster_name': r.get('current_cluster_name'),
-        'job_id_on_pool_cluster': r.get('job_id_on_pool_cluster'),
-        'pool_hash': r.get('pool_hash'),
+        'dag_yaml_path': m.get('dag_yaml_path'),
+        'env_file_path': m.get('env_file_path'),
+        'dag_yaml_content': m.get('dag_yaml_content'),
+        'env_file_content': m.get('env_file_content'),
+        'config_file_content': m.get('config_file_content'),
+        'user_hash': m.get('user_hash'),
+        'workspace': m.get('workspace'),
+        'priority': m.get('priority'),
+        'priority_class': m.get('priority_class'),
+        'entrypoint': m.get('entrypoint'),
+        'original_user_yaml_path': m.get('original_user_yaml_path'),
+        'original_user_yaml_content': m.get('original_user_yaml_content'),
+        'pool': m.get('pool'),
+        'current_cluster_name': m.get('current_cluster_name'),
+        'job_id_on_pool_cluster': m.get('job_id_on_pool_cluster'),
+        'pool_hash': m.get('pool_hash'),
         # Whether this task is primary (True) or auxiliary (False) in a job
         # group. NULL for non-job-group jobs.
-        'is_primary_in_job_group': r.get('is_primary_in_job_group'),
+        'is_primary_in_job_group': m.get('is_primary_in_job_group'),
         # Execution mode: 'parallel' (job group) or 'serial' (pipeline/single)
-        'execution': r.get('execution'),
+        'execution': m.get('execution'),
         # Infrastructure columns for filtering/sorting
-        'cloud': r.get('cloud'),
-        'region': r.get('region'),
-        'zone': r.get('zone'),
+        'cloud': m.get('cloud'),
+        'region': m.get('region'),
+        'zone': m.get('zone'),
         # Batch progress columns
-        'is_batch': r.get('is_batch'),
-        'batch_total_batches': r.get('batch_total_batches'),
-        'batch_completed_batches': r.get('batch_completed_batches'),
-        'node_names': common_utils.get_display_node_names(r.get('node_names')),
+        'is_batch': m.get('is_batch'),
+        'batch_total_batches': m.get('batch_total_batches'),
+        'batch_completed_batches': m.get('batch_completed_batches'),
+        'node_names': common_utils.get_display_node_names(m.get('node_names')),
         # The job/task that launched this job, when launched from inside
         # another managed job. NULL for top-level jobs.
-        'root_job_id': r.get('root_job_id'),
-        'parent_job_id': r.get('parent_job_id'),
-        'parent_task_id': r.get('parent_task_id'),
-        'dynamic_task_index': r.get('dynamic_task_index'),
-        'dynamic_task_count': r.get('dynamic_task_count'),
+        'root_job_id': m.get('root_job_id'),
+        'parent_job_id': m.get('parent_job_id'),
+        'parent_task_id': m.get('parent_task_id'),
+        'dynamic_task_index': m.get('dynamic_task_index'),
+        'dynamic_task_count': m.get('dynamic_task_count'),
     }
 
 
