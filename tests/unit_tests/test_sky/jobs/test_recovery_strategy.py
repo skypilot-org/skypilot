@@ -234,7 +234,7 @@ def _make_launch_executor():
     executor.RETRY_INIT_GAP_SECONDS = 0.01
     executor._cleanup_cluster = mock.MagicMock()
     executor._wait_until_job_starts_on_cluster = mock.AsyncMock(
-        return_value=123.45)
+        return_value=(123.45, None))
     # Each (fresh) launch attempt gets a stream future; capture them so tests
     # can assert the same future is carried across a park.
     executor._stream_futures = []
@@ -697,11 +697,12 @@ async def test_launch_retry_code_for_job_submit_failure(monkeypatch):
     executor._await_launch_request = mock.AsyncMock(return_value=None)
     # First attempt launches but the job never starts; second one works.
     executor._wait_until_job_starts_on_cluster = mock.AsyncMock(
-        side_effect=[None, 123.45])
+        side_effect=[(None, '_checks_exhausted'), (123.45, None)])
 
     assert await executor._launch(max_retry=None) == 123.45
-    assert _codes(
-        patches.set_backoff_pending) == ['launch_retry:job_submit_failed']
+    assert _codes(patches.set_backoff_pending) == [
+        'launch_retry:job_submit_failed_checks_exhausted'
+    ]
 
 
 @pytest.mark.asyncio
@@ -717,12 +718,12 @@ async def test_retry_code_resets_between_attempts(monkeypatch):
     executor._await_launch_request = mock.AsyncMock(
         side_effect=[KeyError('status'), None, None])
     executor._wait_until_job_starts_on_cluster = mock.AsyncMock(
-        side_effect=[None, 123.45])
+        side_effect=[(None, '_checks_exhausted'), (123.45, None)])
 
     assert await executor._launch(max_retry=None) == 123.45
     assert _codes(patches.set_backoff_pending) == [
         'launch_retry:KeyError',
-        'launch_retry:job_submit_failed',
+        'launch_retry:job_submit_failed_checks_exhausted',
     ]
 
 
@@ -897,3 +898,218 @@ async def test_bounded_max_retry_escalates_instead_of_coding(monkeypatch):
     # One backoff row for the attempt that retried; the attempt that exhausted
     # the budget escalates rather than being absorbed and coded.
     assert _codes(patches.set_backoff_pending) == ['launch_retry:ValueError']
+
+
+# ---------------------------------------------------------------------------
+# Attributing the give-up reason of the job-submit wait. Without it the whole
+# family is one bucket: three swallowed exceptions and two quiet exits all
+# reach the caller as a bare None.
+# ---------------------------------------------------------------------------
+
+
+def _make_submit_wait_executor(monkeypatch):
+    """An executor whose job-submit wait runs for real, with a live cluster."""
+    executor = _make_launch_executor()
+    del executor._wait_until_job_starts_on_cluster  # run the real one
+    executor.job_id_on_pool_cluster = None
+    executor.backend = mock.MagicMock()
+    monkeypatch.setattr(recovery_strategy, 'MAX_JOB_CHECKING_RETRY', 2)
+    monkeypatch.setattr(recovery_strategy.managed_job_utils,
+                        'JOB_STARTED_STATUS_CHECK_GAP_SECONDS', 0)
+    monkeypatch.setattr(
+        recovery_strategy.backend_utils, 'refresh_cluster_status_handle',
+        lambda *a, **k: (recovery_strategy.status_lib.ClusterStatus.UP, None))
+    return executor
+
+
+@pytest.mark.asyncio
+async def test_submit_wait_attributes_cluster_preemption(monkeypatch):
+    """The audit's 'preempted during provisioning' family gets its own name.
+
+    It leaves the loop by `break`, not by an exception, so nothing downstream
+    could tell it apart from a timeout without this.
+    """
+    executor = _make_submit_wait_executor(monkeypatch)
+    monkeypatch.setattr(
+        recovery_strategy.backend_utils, 'refresh_cluster_status_handle',
+        lambda *a, **k:
+        (recovery_strategy.status_lib.ClusterStatus.STOPPED, None))
+
+    assert await executor._wait_until_job_starts_on_cluster() == (
+        None, '_cluster_preempted')
+
+
+def _break_cluster_status(monkeypatch):
+
+    def boom(*args, **kwargs):
+        raise ValueError('Unable to start local API server')
+
+    monkeypatch.setattr(recovery_strategy.backend_utils,
+                        'refresh_cluster_status_handle', boom)
+
+
+def _break_job_status(monkeypatch):
+
+    async def boom(*args, **kwargs):
+        raise ValueError('Unable to start local API server')
+
+    monkeypatch.setattr(recovery_strategy.managed_job_utils, 'get_job_status',
+                        boom)
+
+
+def _break_job_timestamp(monkeypatch):
+    """Get past the status check so the timestamp fetch is reached."""
+
+    async def running(*args, **kwargs):
+        return recovery_strategy.job_lib.JobStatus.RUNNING, None
+
+    def boom(*args, **kwargs):
+        raise ValueError('Unable to start local API server')
+
+    monkeypatch.setattr(recovery_strategy.managed_job_utils, 'get_job_status',
+                        running)
+    monkeypatch.setattr(recovery_strategy.managed_job_runtime, 'is_registered',
+                        lambda: False)
+    monkeypatch.setattr(recovery_strategy.managed_job_utils,
+                        'get_job_timestamp', boom)
+
+
+@pytest.mark.parametrize(
+    'break_site',
+    [_break_cluster_status, _break_job_status, _break_job_timestamp])
+@pytest.mark.asyncio
+async def test_submit_wait_attributes_a_swallowed_exception(
+        monkeypatch, break_site):
+    """A swallowed exception reaches the caller as its kind, not as None.
+
+    Parametrised over all three sites on purpose: the same assignment is
+    written three times, and a single-site test leaves two of them free to
+    be deleted without anything going red.
+    """
+    executor = _make_submit_wait_executor(monkeypatch)
+    break_site(monkeypatch)
+
+    assert await executor._wait_until_job_starts_on_cluster() == (None,
+                                                                  ':ValueError')
+
+
+@pytest.mark.asyncio
+async def test_submit_wait_attributes_a_transient_status(monkeypatch):
+    """get_job_status can report a transient reason without raising."""
+    executor = _make_submit_wait_executor(monkeypatch)
+
+    async def transient(*args, **kwargs):
+        return None, 'pod not found'
+
+    monkeypatch.setattr(recovery_strategy.managed_job_utils, 'get_job_status',
+                        transient)
+
+    assert await executor._wait_until_job_starts_on_cluster() == (
+        None, '_status_transient')
+
+
+@pytest.mark.asyncio
+async def test_submit_wait_falls_back_to_checks_exhausted(monkeypatch):
+    """Running out of checks is its own reason, distinct from a NULL code."""
+    executor = _make_submit_wait_executor(monkeypatch)
+
+    async def still_init(*args, **kwargs):
+        return recovery_strategy.job_lib.JobStatus.INIT, None
+
+    monkeypatch.setattr(recovery_strategy.managed_job_utils, 'get_job_status',
+                        still_init)
+
+    assert await executor._wait_until_job_starts_on_cluster() == (
+        None, '_checks_exhausted')
+
+
+@pytest.mark.asyncio
+async def test_submit_wait_clears_a_stale_anomaly(monkeypatch):
+    """A clean poll means an earlier blip is not why the wait ended.
+
+    Without clearing, a first-poll exception would be reported for a wait
+    that actually timed out with the job still INIT -- attributing the retry
+    to an error that had already resolved.
+    """
+    executor = _make_submit_wait_executor(monkeypatch)
+    calls = {'n': 0}
+
+    async def flaky_then_init(*args, **kwargs):
+        calls['n'] += 1
+        if calls['n'] == 1:
+            raise ValueError('a blip on the first poll')
+        return recovery_strategy.job_lib.JobStatus.INIT, None
+
+    monkeypatch.setattr(recovery_strategy.managed_job_utils, 'get_job_status',
+                        flaky_then_init)
+    monkeypatch.setattr(recovery_strategy, 'MAX_JOB_CHECKING_RETRY', 3)
+
+    assert await executor._wait_until_job_starts_on_cluster() == (
+        None, '_checks_exhausted')
+
+
+@pytest.mark.parametrize('registered,expected', [(True, 11.0), (False, 22.0)],
+                         ids=['runtime_site', 'backend_site'])
+@pytest.mark.asyncio
+async def test_submit_wait_returns_the_timestamp_unattributed(
+        monkeypatch, registered, expected):
+    """A successful submit returns (timestamp, None), from either return site.
+
+    Parametrised because that return is written twice and no failure test
+    reaches either -- the nearest stops at the timestamp fetch. mypy does not
+    pin them either: the value comes out of asyncio.to_thread as Any, so a
+    dropped `, None` type-checks cleanly and then breaks the caller's unpack
+    on every successful launch. The two values differ so that one site falling
+    through to the other fails rather than passes.
+    """
+    executor = _make_submit_wait_executor(monkeypatch)
+
+    async def running(*args, **kwargs):
+        return recovery_strategy.job_lib.JobStatus.RUNNING, None
+
+    monkeypatch.setattr(recovery_strategy.managed_job_utils, 'get_job_status',
+                        running)
+    monkeypatch.setattr(recovery_strategy.managed_job_runtime, 'is_registered',
+                        lambda: registered)
+    monkeypatch.setattr(recovery_strategy.global_user_state,
+                        'get_handle_from_cluster_name', lambda *a, **k: None)
+    monkeypatch.setattr(recovery_strategy.managed_job_runtime,
+                        'get_job_submitted_at', lambda *a, **k: 11.0)
+    monkeypatch.setattr(recovery_strategy.managed_job_utils,
+                        'get_job_timestamp', lambda *a, **k: 22.0)
+
+    assert await executor._wait_until_job_starts_on_cluster() == (expected,
+                                                                  None)
+
+
+def test_fixed_submit_reasons_are_exempt_from_the_metric_cap():
+    """Saturate the budget, then check the fixed reasons still come back whole.
+
+    Asserted by calling the cap, not by counting colons in the composed
+    string: the rule is "any colon means open", so a colon-count assertion
+    passes for spellings the cap still charges. That is how the first attempt
+    at this fix shipped broken with a green test.
+    """
+    from sky.metrics import utils as metrics_utils
+
+    with metrics_utils._launch_retry_kinds_lock:
+        saved = set(metrics_utils._launch_retry_kinds)
+        metrics_utils._launch_retry_kinds.clear()
+        metrics_utils._launch_retry_kinds.update(
+            f'aws:Filler{i}'
+            for i in range(metrics_utils._MAX_LAUNCH_RETRY_KINDS))
+    try:
+        for reason in (recovery_strategy._SUBMIT_CLUSTER_PREEMPTED,
+                       recovery_strategy._SUBMIT_STATUS_TRANSIENT,
+                       recovery_strategy._SUBMIT_CHECKS_EXHAUSTED):
+            kind = f'{recovery_strategy._KIND_JOB_SUBMIT_FAILED}{reason}'
+            assert metrics_utils._capped_launch_retry_kind(kind) == kind, kind
+        # An exception-derived reason is open, so a full budget does fold it.
+        open_kind = (f'{recovery_strategy._KIND_JOB_SUBMIT_FAILED}'
+                     f':kubernetes:ApiException')
+        assert metrics_utils._capped_launch_retry_kind(
+            open_kind) == metrics_utils.LAUNCH_RETRY_KIND_OTHER
+    finally:
+        with metrics_utils._launch_retry_kinds_lock:
+            metrics_utils._launch_retry_kinds.clear()
+            metrics_utils._launch_retry_kinds.update(saved)
