@@ -1,0 +1,47 @@
+model_name_or_path: Qwen/Qwen3-4B-Instruct-2507
+attn_implementation: flash_attention_2
+
+dataset:
+- HuggingFaceH4/ultrachat_200k@train_sft
+conversation_field: messages
+assistant_message_template: "<|im_start|>assistant\n"
+test_size: 0.01
+
+use_peft: true
+lora_r: 64
+lora_alpha: 128
+lora_dropout: 0.05
+lora_target_modules:
+- q_proj
+- k_proj
+- v_proj
+- o_proj
+- gate_proj
+- up_proj
+- down_proj
+lora_task_type: CAUSAL_LM
+
+per_device_train_batch_size: 4
+per_device_eval_batch_size: 4
+gradient_accumulation_steps: 4
+gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+optim: adamw_torch_fused
+learning_rate: 1.0e-04
+max_steps: 20
+max_length: 4096
+packing: true
+
+output_dir: checkpoints/qwen3-4b-ultrachat-lora
+save_strategy: steps
+save_steps: 10
+save_total_limit: 2
+eval_strategy: 'no'
+logging_steps: 1
+logging_first_step: true
+report_to: none
+enable_efficiency_metrics: true
+
+dataloader_num_workers: 4
+remove_unused_columns: true
