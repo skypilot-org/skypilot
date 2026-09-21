@@ -49,11 +49,11 @@ from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
 
-# This module has a consumer outside this repository: the enterprise support
-# plugin's poller turns the same two scans into events for deployments that do
-# not scrape. The two scans, their result types and the threshold helpers are
-# an interface -- renaming or narrowing one breaks a caller that does not
-# appear in any search of this repo. Everything prefixed `_` is private.
+# This module has a consumer outside this repository: a plugin's poller turns
+# the same two scans into events for deployments that do not scrape. The two
+# scans, their result types and the threshold helpers are an interface --
+# renaming or narrowing one breaks a caller that does not appear in any search
+# of this repo. Everything prefixed `_` is private.
 
 NEVER_CLAIMED = 'never_claimed'
 UNATTENDED = 'unattended'
@@ -83,8 +83,8 @@ _RETRY_ACTIVITY_SECONDS = 900
 # the budget, so the total holds however many statements there come to be.
 #
 # Two scans per refresh, so a refresh's worst case is twice this, still inside
-# the interval. Measured cost is 0.2 ms and 14.6 ms on a tenant-sized table, so
-# the budget is three orders of magnitude of headroom, not a tuning knob.
+# the interval. Measured cost is 0.2 ms and 14.6 ms on a production-sized table,
+# so the budget is three orders of magnitude of headroom, not a tuning knob.
 #
 # It still does not bound a whole scan: the per-task attempt reads and the
 # request lookup go to other stores, and the priority lookup is on THIS engine

@@ -4,8 +4,8 @@ The scan in sky/jobs/stall.py asks, every collector refresh, for tasks the
 scheduler claimed that have neither started nor finished and whose claim is
 older than a threshold. Nothing covered that predicate, so it was a sequential
 scan of every task ever run -- measured at 4.9 ms over 9387 rows on a real
-tenant, against 2.3 ms for the indexed half next to it, and the spot table is
-never pruned.
+deployment, against 2.3 ms for the indexed half next to it, and the spot
+table is never pruned.
 
 Partial, following 027: the predicate holds in-flight claimed work and a row
 leaves it the moment it starts or ends, so the index tracks what is
