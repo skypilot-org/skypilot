@@ -1226,7 +1226,8 @@ def set_pending(
 
 async def set_backoff_pending_async(job_id: int,
                                     task_id: int,
-                                    reason: str = 'Job is in backoff'):
+                                    reason: str = 'Job is in backoff',
+                                    code: Optional[str] = None):
     """Set the task to PENDING state if its launch is waiting to continue.
 
     This is used while the launch is in retry backoff, or while the launch
@@ -1234,8 +1235,19 @@ async def set_backoff_pending_async(job_id: int,
 
     This should only be used to transition from STARTING or RECOVERING back to
     PENDING.
+
+    Args:
+        code: Why this backoff happened, as a bounded structural value (see
+            recovery_strategy._error_kind). Every caller of *this* function
+            passes one, so a NULL on a backoff row written by a current
+            controller means a path was missed. That reasoning does not
+            extend to job_events as a whole: the other add_job_event_async
+            call sites legitimately write NULL, including the submit-time
+            PENDING row, so a reader looking for missed paths must select
+            backoff rows by code prefix rather than by `code IS NULL`.
     """
-    await add_job_event_async(job_id, task_id, ManagedJobStatus.PENDING, reason)
+    await add_job_event_async(job_id, task_id, ManagedJobStatus.PENDING, reason,
+                              code)
 
     async def _op(session: sql_async.AsyncSession) -> int:
         result = await session.execute(

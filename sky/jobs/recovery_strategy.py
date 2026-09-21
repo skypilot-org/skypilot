@@ -10,6 +10,7 @@ import concurrent.futures
 import contextlib
 import logging
 import os
+import re
 import traceback
 import typing
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Set
@@ -27,6 +28,7 @@ from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
+from sky.metrics import utils as metrics_utils
 from sky.serve import serve_utils
 from sky.server import common as server_common
 from sky.server.requests import requests as requests_lib
@@ -139,6 +141,47 @@ _LIVE_REQUEST_STATUS_VALUES = frozenset(
 _LAUNCH_STREAM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=controller_utils.MAX_JOBS_PER_WORKER + 8,
     thread_name_prefix='launch-request-stream')
+
+# Kinds for the launch-retry paths that carry no exception to classify. Spelled
+# without a colon so they are exempt from the metric's open-family cap.
+_KIND_RESOURCES_UNAVAILABLE = 'resources_unavailable'
+_KIND_JOB_SUBMIT_FAILED = 'job_submit_failed'
+_KIND_POOL_NO_CLUSTER = 'pool_no_cluster'
+
+# job_events.code values. The retry prefix keeps the kinds in one namespace so
+# an inventory can select them with a single LIKE. The kind may itself contain
+# a colon (`kubernetes:ApiException`), so recover it by splitting once, not by
+# taking the last field.
+_CODE_LAUNCH_RETRY_PREFIX = 'launch_retry:'
+_CODE_LAUNCH_PARKED = 'launch_parked'
+
+# A leading token shaped like an exception class, in the message of a bare
+# Exception. See _error_kind for why this is parsed and why it is this narrow.
+_OPAQUE_CLASS = re.compile(r'^([A-Z][A-Za-z0-9_]*(?:Error|Exception)):')
+
+
+def _error_kind(e: BaseException) -> str:
+    """A bounded, structural name for an error out of the launch path.
+
+    Not `type(e).__name__`: most errors here were raised on the API server and
+    rebuilt by `exceptions.deserialize_exception`, which only resolves names
+    from `builtins` and `sky/exceptions.py`. Anything else arrives either
+    wrapped in `CloudError` (a Kubernetes ApiException, say) or as a bare
+    `Exception`, so the plain class name collapses whole families together.
+    """
+    if isinstance(e, exceptions.CloudError):
+        # wrap_exception kept the original class name in error_type.
+        return f'{e.cloud_provider}:{e.error_type}'
+    if type(e) is Exception:  # pylint: disable=unidiomatic-typecheck
+        # Two different things arrive as a bare Exception and they are not
+        # distinguishable: deserialize_exception's fallback, which prefixes
+        # the message with the original class name, and a plain
+        # `raise Exception(msg)`, whose message is untouched. Requiring a
+        # class-shaped token keeps the second from minting label values like
+        # 'Unauthorized' out of an arbitrary error string.
+        match = _OPAQUE_CLASS.match(str(e))
+        return f'opaque:{match.group(1)}' if match else 'opaque:unparsed'
+    return type(e).__name__
 
 
 def _consume_task_exception(task: 'asyncio.Future') -> None:
@@ -863,6 +906,11 @@ class StrategyExecutor:
         parked_reason: Optional[str] = None
         while True:
             retry_cnt += 1
+            # Why this attempt failed, for the backoff event below. Reset every
+            # iteration: the write happens in the NoClusterLaunchedError
+            # handler, by which point the exception is long gone, and a value
+            # left over from the previous attempt would misreport this one.
+            retry_code: Optional[str] = None
             # Whether this iteration is resuming from a park, i.e. the
             # top-of-loop block below runs and sets the task back to
             # PENDING. Reset every iteration; distinct from
@@ -881,7 +929,10 @@ class StrategyExecutor:
                         # PENDING (with the park reason) while we wait for
                         # the request to resume.
                         await state.set_backoff_pending_async(
-                            self.job_id, self.task_id, reason=parked_reason)
+                            self.job_id,
+                            self.task_id,
+                            reason=parked_reason,
+                            code=_CODE_LAUNCH_PARKED)
                         parked_reason = None
                     resumed_request_id = await self._wait_for_parked_request(
                         parked_request_id)
@@ -1071,6 +1122,13 @@ class StrategyExecutor:
                                 serve_utils.get_next_cluster_name, self.pool,
                                 self.job_id, task_resources))
                             if self.cluster_name is None:
+                                # Classified here rather than by the broad
+                                # except below: that would call the commonest
+                                # benign state in the system an unknown error,
+                                # once a second per waiting pool job. Doing it
+                                # by class instead would mislabel a real
+                                # NoClusterLaunchedError from the provisioner.
+                                retry_code = _KIND_POOL_NO_CLUSTER
                                 raise exceptions.NoClusterLaunchedError(
                                     'No cluster name found in the pool.')
                             request_id = None
@@ -1149,6 +1207,7 @@ class StrategyExecutor:
                                 raise exceptions.ProvisionPrechecksError(
                                     reasons)
                             return None
+                        retry_code = _KIND_RESOURCES_UNAVAILABLE
                         logger.info('Failed to launch a cluster with error: '
                                     f'{common_utils.format_exception(e)})')
                     except Exception as e:  # pylint: disable=broad-except
@@ -1165,6 +1224,11 @@ class StrategyExecutor:
                             with ux_utils.print_exception_no_traceback():
                                 raise exceptions.ClusterSetUpError(
                                     str(e)) from e
+                        if retry_code is None:
+                            # None unless a raise site above already said what
+                            # this is (see the pool case), which is more
+                            # precise than anything the class can tell us.
+                            retry_code = _error_kind(e)
                         logger.info('Failed to launch a cluster with error: '
                                     f'{common_utils.format_exception(e)})')
                         with ux_utils.enable_traceback():
@@ -1228,6 +1292,7 @@ class StrategyExecutor:
                         # launch.
                         # TODO(zhwu): log the unexpected error to usage
                         # collection for future debugging.
+                        retry_code = _KIND_JOB_SUBMIT_FAILED
                         logger.info(
                             'Failed to successfully submit the job to the '
                             'launched cluster, due to unexpected submission '
@@ -1303,7 +1368,16 @@ class StrategyExecutor:
                 raise
             except exceptions.NoClusterLaunchedError:
                 # Update the status to PENDING during backoff.
-                await state.set_backoff_pending_async(self.job_id, self.task_id)
+                # retry_code is None only if a path reached here without
+                # saying why; leave the column NULL and count nothing rather
+                # than inventing a kind, so that case stays visible.
+                code = (None if retry_code is None else
+                        f'{_CODE_LAUNCH_RETRY_PREFIX}{retry_code}')
+                await state.set_backoff_pending_async(self.job_id,
+                                                      self.task_id,
+                                                      code=code)
+                if retry_code is not None:
+                    metrics_utils.count_launch_retry(retry_code)
                 # Calculate the backoff time and sleep.
                 gap_seconds = (backoff.current_backoff()
                                if self.pool is None else 1)
