@@ -939,16 +939,55 @@ async def test_submit_wait_attributes_cluster_preemption(monkeypatch):
         None, '_cluster_preempted')
 
 
-@pytest.mark.asyncio
-async def test_submit_wait_attributes_a_swallowed_exception(monkeypatch):
-    """A swallowed exception reaches the caller as its kind, not as None."""
-    executor = _make_submit_wait_executor(monkeypatch)
+def _break_cluster_status(monkeypatch):
+
+    def boom(*args, **kwargs):
+        raise ValueError('Unable to start local API server')
+
+    monkeypatch.setattr(recovery_strategy.backend_utils,
+                        'refresh_cluster_status_handle', boom)
+
+
+def _break_job_status(monkeypatch):
 
     async def boom(*args, **kwargs):
         raise ValueError('Unable to start local API server')
 
     monkeypatch.setattr(recovery_strategy.managed_job_utils, 'get_job_status',
                         boom)
+
+
+def _break_job_timestamp(monkeypatch):
+    """Get past the status check so the timestamp fetch is reached."""
+
+    async def running(*args, **kwargs):
+        return recovery_strategy.job_lib.JobStatus.RUNNING, None
+
+    def boom(*args, **kwargs):
+        raise ValueError('Unable to start local API server')
+
+    monkeypatch.setattr(recovery_strategy.managed_job_utils, 'get_job_status',
+                        running)
+    monkeypatch.setattr(recovery_strategy.managed_job_runtime, 'is_registered',
+                        lambda: False)
+    monkeypatch.setattr(recovery_strategy.managed_job_utils,
+                        'get_job_timestamp', boom)
+
+
+@pytest.mark.parametrize(
+    'break_site',
+    [_break_cluster_status, _break_job_status, _break_job_timestamp])
+@pytest.mark.asyncio
+async def test_submit_wait_attributes_a_swallowed_exception(
+        monkeypatch, break_site):
+    """A swallowed exception reaches the caller as its kind, not as None.
+
+    Parametrised over all three sites on purpose: the same assignment is
+    written three times, and a single-site test leaves two of them free to
+    be deleted without anything going red.
+    """
+    executor = _make_submit_wait_executor(monkeypatch)
+    break_site(monkeypatch)
 
     assert await executor._wait_until_job_starts_on_cluster() == (None,
                                                                   'ValueError')
