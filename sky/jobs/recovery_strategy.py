@@ -152,9 +152,14 @@ _KIND_POOL_NO_CLUSTER = 'pool_no_cluster'
 # family is one opaque bucket: the loop swallows three different exceptions
 # and leaves two non-exception ways out, and by the time the caller sees
 # None they are indistinguishable.
-_SUBMIT_CLUSTER_PREEMPTED = 'cluster_preempted'
-_SUBMIT_STATUS_TRANSIENT = 'status_transient'
-_SUBMIT_CHECKS_EXHAUSTED = 'checks_exhausted'
+# Spelled with '_' rather than ':' on purpose: the metric's cap treats a colon
+# as an open family, so a colon here would make these three fixed values
+# compete for the budget with arbitrary cloud and opaque exception names, and
+# a full budget would fold them into 'other'. The exception-derived reasons
+# below do carry a colon, because they genuinely are open.
+_SUBMIT_CLUSTER_PREEMPTED = '_cluster_preempted'
+_SUBMIT_STATUS_TRANSIENT = '_status_transient'
+_SUBMIT_CHECKS_EXHAUSTED = '_checks_exhausted'
 
 # job_events.code values. The retry prefix keeps the kinds in one namespace so
 # an inventory can select them with a single LIKE. The kind may itself contain
@@ -583,6 +588,11 @@ class StrategyExecutor:
                 logger.info('Transient error when fetching the job status: '
                             f'{transient_error_reason}')
                 continue
+            # This poll came back clean, so an anomaly from an earlier one is
+            # history rather than why the wait ends. Without this, a blip on
+            # the first poll would be reported for a wait that actually timed
+            # out with the job sitting in INIT.
+            reason = None
 
             # Check the job status until it is not in initialized status
             if status is not None and status > job_lib.JobStatus.INIT:

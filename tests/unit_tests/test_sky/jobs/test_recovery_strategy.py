@@ -697,11 +697,11 @@ async def test_launch_retry_code_for_job_submit_failure(monkeypatch):
     executor._await_launch_request = mock.AsyncMock(return_value=None)
     # First attempt launches but the job never starts; second one works.
     executor._wait_until_job_starts_on_cluster = mock.AsyncMock(
-        side_effect=[(None, 'checks_exhausted'), (123.45, None)])
+        side_effect=[(None, '_checks_exhausted'), (123.45, None)])
 
     assert await executor._launch(max_retry=None) == 123.45
     assert _codes(patches.set_backoff_pending) == [
-        'launch_retry:job_submit_failed:checks_exhausted'
+        'launch_retry:job_submit_failed:_checks_exhausted'
     ]
 
 
@@ -718,12 +718,12 @@ async def test_retry_code_resets_between_attempts(monkeypatch):
     executor._await_launch_request = mock.AsyncMock(
         side_effect=[KeyError('status'), None, None])
     executor._wait_until_job_starts_on_cluster = mock.AsyncMock(
-        side_effect=[(None, 'checks_exhausted'), (123.45, None)])
+        side_effect=[(None, '_checks_exhausted'), (123.45, None)])
 
     assert await executor._launch(max_retry=None) == 123.45
     assert _codes(patches.set_backoff_pending) == [
         'launch_retry:KeyError',
-        'launch_retry:job_submit_failed:checks_exhausted',
+        'launch_retry:job_submit_failed:_checks_exhausted',
     ]
 
 
@@ -936,7 +936,7 @@ async def test_submit_wait_attributes_cluster_preemption(monkeypatch):
         (recovery_strategy.status_lib.ClusterStatus.STOPPED, None))
 
     assert await executor._wait_until_job_starts_on_cluster() == (
-        None, 'cluster_preempted')
+        None, '_cluster_preempted')
 
 
 @pytest.mark.asyncio
@@ -966,7 +966,7 @@ async def test_submit_wait_attributes_a_transient_status(monkeypatch):
                         transient)
 
     assert await executor._wait_until_job_starts_on_cluster() == (
-        None, 'status_transient')
+        None, '_status_transient')
 
 
 @pytest.mark.asyncio
@@ -981,4 +981,48 @@ async def test_submit_wait_falls_back_to_checks_exhausted(monkeypatch):
                         still_init)
 
     assert await executor._wait_until_job_starts_on_cluster() == (
-        None, 'checks_exhausted')
+        None, '_checks_exhausted')
+
+
+@pytest.mark.asyncio
+async def test_submit_wait_clears_a_stale_anomaly(monkeypatch):
+    """A clean poll means an earlier blip is not why the wait ended.
+
+    Without clearing, a first-poll exception would be reported for a wait
+    that actually timed out with the job still INIT -- attributing the retry
+    to an error that had already resolved.
+    """
+    executor = _make_submit_wait_executor(monkeypatch)
+    calls = {'n': 0}
+
+    async def flaky_then_init(*args, **kwargs):
+        calls['n'] += 1
+        if calls['n'] == 1:
+            raise ValueError('a blip on the first poll')
+        return recovery_strategy.job_lib.JobStatus.INIT, None
+
+    monkeypatch.setattr(recovery_strategy.managed_job_utils, 'get_job_status',
+                        flaky_then_init)
+    monkeypatch.setattr(recovery_strategy, 'MAX_JOB_CHECKING_RETRY', 3)
+
+    assert await executor._wait_until_job_starts_on_cluster() == (
+        None, '_checks_exhausted')
+
+
+def test_fixed_submit_reasons_are_exempt_from_the_metric_cap():
+    """The three fixed reasons must not compete for the open-family budget.
+
+    The cap reads a colon as 'open family'. Spelling these with '_' is what
+    keeps a full budget from folding a preemption into 'other', where the
+    attribution this change adds would be lost.
+    """
+    from sky.metrics import utils as metrics_utils
+    for reason in (recovery_strategy._SUBMIT_CLUSTER_PREEMPTED,
+                   recovery_strategy._SUBMIT_STATUS_TRANSIENT,
+                   recovery_strategy._SUBMIT_CHECKS_EXHAUSTED):
+        kind = f'{recovery_strategy._KIND_JOB_SUBMIT_FAILED}:{reason}'
+        assert ':' in kind  # the prefix keeps them in one namespace...
+        # ...but the reason itself must not add a second, capped one.
+        assert kind.count(':') == 1, kind
+    # An exception-derived reason stays open, and so stays capped.
+    assert ':' in f'{recovery_strategy._KIND_JOB_SUBMIT_FAILED}:kubernetes:X'
