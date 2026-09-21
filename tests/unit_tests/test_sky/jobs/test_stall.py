@@ -597,3 +597,30 @@ def test_a_pool_job_that_is_not_a_batch_job_is_still_reported(engine):
              schedule_state='LAUNCHING')
 
     assert _ids(stall.scan_never_claimed()) == {1}
+
+
+def test_the_priority_lookup_runs_on_the_scans_own_connection(
+        engine, monkeypatch):
+    """The one statement that used to sit outside the budget.
+
+    Every other query in a scan goes through `_bounded`, which sets the
+    database's own statement timeout; this one opened its own session. A raise
+    there was always handled -- the phase reports "not measured" -- but a hang
+    was not, and a hung query parks the metrics thread with nothing able to
+    interrupt it. That is the case the budget exists for.
+    """
+    seen = []
+
+    def fake_highest(conn=None):
+        seen.append(conn)
+        return 0
+
+    monkeypatch.setattr(managed_job_state, 'get_managed_jobs_highest_priority',
+                        fake_highest)
+
+    stall.scan_never_claimed()
+
+    assert seen, 'the scan never consulted the priority lookup'
+    assert seen[0] is not None, (
+        'the priority lookup got no connection, so it opened its own and ran '
+        'outside the scan budget')

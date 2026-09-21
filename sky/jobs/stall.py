@@ -76,21 +76,20 @@ _RETRY_ACTIVITY_SECONDS = 900
 
 # Budget for ALL the managed-jobs statements one scan runs, not a per-statement
 # timeout. A thread parked in a DB driver cannot be killed, so the database has
-# to be the thing that gives up -- but a per-statement bound multiplies: the
-# claimed scan runs two statements, the collector runs both scans, and three
-# statements at a per-statement 25s would be 75s against a 30s refresh interval
-# and a 90s staleness horizon. Each statement instead gets whatever is left of
-# the budget, so the total holds however many statements there come to be.
+# to be the thing that gives up -- but a per-statement bound multiplies: each
+# scan runs two statements and the collector runs both scans, so four
+# statements at a per-statement 25s would be 100s against a 30s refresh
+# interval and a 90s staleness horizon. Each statement instead gets whatever is
+# left of the budget, so the total holds however many statements there come
+# to be.
 #
 # Two scans per refresh, so a refresh's worst case is twice this, still inside
 # the interval. Measured cost is 0.2 ms and 14.6 ms on a production-sized table,
 # so the budget is three orders of magnitude of headroom, not a tuning knob.
 #
 # It still does not bound a whole scan: the per-task attempt reads and the
-# request lookup go to other stores, and the priority lookup is on THIS engine
-# but opens its own session, so routing it through here is the one change that
-# would actually extend the coverage. What stops refreshes from stacking is the
-# caller holding one in flight, not this.
+# request lookup go to other stores and have no bound of their own. What stops
+# refreshes from stacking is the caller holding one in flight, not this.
 _SCAN_BUDGET_SECONDS = 12
 # Never issue a timeout below this: a budget that has run out should fail the
 # statement outright rather than ask the database for something unservable.
@@ -390,7 +389,8 @@ def _attempt_is_working(attempt: Any, now: float, age_seconds: float) -> bool:
     return (now - started) <= age_seconds
 
 
-def _highest_blocking_priority() -> int:
+def _highest_blocking_priority(engine: sqlalchemy.engine.Engine,
+                               deadline: float) -> int:
     """The priority a job must reach to be next in line.
 
     Read from the scheduler rather than recomputed: it is the same quantity
@@ -401,7 +401,8 @@ def _highest_blocking_priority() -> int:
     an alert, and the caller reports a scan that could not run as *not
     measured* instead of as zero.
     """
-    return managed_job_state.get_managed_jobs_highest_priority()
+    with _bounded(engine, deadline) as conn:
+        return managed_job_state.get_managed_jobs_highest_priority(conn)
 
 
 def _starved(task: StalledTask, highest: int) -> bool:
@@ -508,7 +509,7 @@ def scan_never_claimed(
         candidate_limit=int(candidate_limit),
     )
     rows = _rows(engine, sql, deadline)
-    highest = _highest_blocking_priority()
+    highest = _highest_blocking_priority(engine, deadline)
     tasks = [_task(row) for row in rows]
     return _scan(NEVER_CLAIMED,
                  [task for task in tasks if not _starved(task, highest)],

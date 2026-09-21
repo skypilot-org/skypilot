@@ -1963,9 +1963,15 @@ def get_active_file_mounts_blob_ids() -> Set[str]:
     return {row[0] for row in rows if row[0] is not None}
 
 
-def get_managed_jobs_highest_priority() -> int:
-    """Get the highest priority of the managed jobs."""
-    engine = _db_manager.get_engine()
+def get_managed_jobs_highest_priority(
+        conn: Optional[sqlalchemy.engine.Connection] = None) -> int:
+    """Get the highest priority of the managed jobs.
+
+    `conn` runs the query on a connection the caller already owns, which is how
+    a caller with a statement budget keeps this inside it -- see
+    sky/jobs/stall.py, where an unbounded query on the metrics thread is the
+    thing the budget exists to prevent.
+    """
     query = sqlalchemy.select(sqlalchemy.func.max(
         job_info_table.c.priority)).where(
             sqlalchemy.and_(
@@ -1977,7 +1983,8 @@ def get_managed_jobs_highest_priority() -> int:
                 ]),
                 job_info_table.c.priority.is_not(None),
             ))
-    with orm.Session(engine) as session:
+    with orm.Session(
+            conn if conn is not None else _db_manager.get_engine()) as session:
         priority = session.execute(query).fetchone()
         return priority[0] if priority and priority[
             0] is not None else constants.MIN_PRIORITY
