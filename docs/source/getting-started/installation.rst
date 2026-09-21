@@ -1016,6 +1016,21 @@ The :code:`~/.oci/config` file should contain the following fields:
   # Note that we should avoid using full home path for the key_file configuration, e.g. use ~/.oci instead of /home/username/.oci
   key_file=~/.oci/oci_api_key.pem
 
+Profiles created by :code:`oci session authenticate` (session-token authentication, the usual choice for federated / SSO logins) are supported too. Such a profile carries :code:`security_token_file` and a session :code:`key_file` instead of :code:`user` and :code:`fingerprint`, and SkyPilot signs requests with the session token just like :code:`oci --auth security_token` does:
+
+.. code-block:: text
+
+  [DEFAULT]
+  fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:ll:mm:nn:oo:pp
+  tenancy=ocid1.tenancy.oc1..aaaaaaaa
+  region=us-sanjose-1
+  key_file=~/.oci/sessions/DEFAULT/oci_api_key.pem
+  security_token_file=~/.oci/sessions/DEFAULT/token
+
+Session tokens expire after about an hour. Run :code:`oci session refresh --profile <name>` (or :code:`oci session authenticate` again) before launching; :code:`sky check oci` reports an expired token. The token is copied to the cluster together with the config, so operations the cluster runs on its own behalf, such as autostop, stop working once that copy has expired.
+
+To use a profile other than :code:`DEFAULT`, set :code:`oci_config_profile` in :code:`~/.sky/config.yaml` (see below).
+
 By default, the provisioned nodes will be in the root `compartment <https://docs.oracle.com/en/cloud/foundation/cloud_architecture/governance/compartments.html>`__. To specify the `compartment <https://docs.oracle.com/en/cloud/foundation/cloud_architecture/governance/compartments.html>`_ other than root, create/edit the file :code:`~/.sky/config.yaml`, put the compartment's OCID there, as the following:
 
 .. code-block:: text
@@ -1024,6 +1039,8 @@ By default, the provisioned nodes will be in the root `compartment <https://docs
     region_configs:
       default:
         compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
+        # Optional: the ~/.oci/config profile to use (defaults to DEFAULT).
+        oci_config_profile: DEFAULT
 
 OCI also offers `Object Storage <https://www.oracle.com/cloud/storage/object-storage/>`__, which supports both a native API and an `S3-compatible API <https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/s3compatibleapi.htm>`__.
 SkyPilot can download/upload data to OCI buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up OCI Object Storage, first create a `Customer Secret Key <https://docs.oracle.com/en-us/iaas/Content/Identity/Tasks/managingcredentials.htm#create-secret-key>`_ from the OCI console.
