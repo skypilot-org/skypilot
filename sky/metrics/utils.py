@@ -3,6 +3,7 @@ import asyncio
 import contextlib
 import functools
 import inspect
+import math
 import os
 import queue
 import random
@@ -12,12 +13,13 @@ import shlex
 import subprocess
 import threading
 import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 import urllib.parse
 
 import httpx
 import prometheus_client as prom
 
+from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.skylet import constants
@@ -62,9 +64,40 @@ _DEFAULT_PROMETHEUS_SERVICE_PORT = 80
 # RBAC be pinned with `resourceNames: ["kube-system"]`.
 _CLUSTER_IDENTITY_NAMESPACE = 'kube-system'
 
+# Whole-attempt budget for federating one context: port-forward, /federate,
+# transfer and stamping. Lives here rather than in sky/server/metrics.py so the
+# phase budgets below can derive from it; that module imports this one. Must
+# also fit inside the deployment's scrape_timeout (45s in the bundled chart).
+PER_CONTEXT_TIMEOUT_SECONDS = 30
+
+# Share of that budget the port-forward may spend becoming ready. A fraction
+# rather than a bare number so the two move together -- whatever it takes must
+# still leave room for the request, the transfer and the teardown. 1/6 keeps
+# the 5s this was before it was derived.
+_PORT_FORWARD_STARTUP_BUDGET_FRACTION = 1 / 6
+_PORT_FORWARD_STARTUP_TIMEOUT_SECONDS = (PER_CONTEXT_TIMEOUT_SECONDS *
+                                         _PORT_FORWARD_STARTUP_BUDGET_FRACTION)
+
+# Header Prometheus sets on every scrape, carrying the scrape_timeout it will
+# actually give up at (e.g. '45.000000'). It exists so an expensive exporter
+# can stop work the scraper has already abandoned, which is exactly what the
+# per-context budget is for.
+SCRAPE_TIMEOUT_HEADER = 'X-Prometheus-Scrape-Timeout-Seconds'
+
+# Share of the scrape timeout one context may spend. The rest is headroom:
+# contexts run concurrently, so the response lands at roughly the slowest
+# one's budget plus the time to write the body, and it has to land before the
+# scraper gives up. 2/3 of the bundled chart's 45s is exactly the 30s this was
+# a fixed constant for.
+_BUDGET_FRACTION_OF_SCRAPE = 2 / 3
+
+# A context that spends this much of its budget still succeeded, but is close
+# enough to the cliff that the next growth in its Prometheus pushes it over.
+_NEAR_BUDGET_FRACTION = 0.8
+
 # Timeout for the namespace UID probes used by local-context detection.
-# Must fit within the per-context timeout budget in sky/server/metrics.py
-# (_PER_CONTEXT_TIMEOUT_SECONDS) together with the actual metrics request.
+# Must fit within PER_CONTEXT_TIMEOUT_SECONDS together with the actual
+# metrics request.
 _NAMESPACE_PROBE_TIMEOUT_SECONDS = 5
 
 # Interval between re-probes of a context whose detection concluded
@@ -1049,8 +1082,12 @@ SKY_APISERVER_FEDERATION_PAYLOAD_BYTES = prom.Histogram(
     buckets=_MEM_BUCKETS,
 )
 
-# End-to-end outcome per context+route: success | timeout | error. Alert on a
-# rising timeout rate per context to catch the silent-drop failure mode.
+# End-to-end outcome per context+route:
+# success | timeout | port-forward-error | error. Alert on a rising timeout
+# rate per context to catch the silent-drop failure mode. port-forward-error
+# is separate from error because it is a local kubectl/credential problem
+# rather than the federated Prometheus answering badly, and the two are fixed
+# by different people.
 SKY_APISERVER_FEDERATION_TOTAL = prom.Counter(
     'sky_apiserver_metrics_federation_total',
     'Count of metrics federation attempts per remote context and outcome',
@@ -1167,6 +1204,51 @@ def record_event_loop_stall(source: str) -> None:
         SKY_APISERVER_EVENT_LOOP_STALL_TOTAL.labels(source=source).inc()
 
 
+def resolve_per_context_timeout(scrape_timeout_header: Optional[str]) -> float:
+    """Per-context budget for one scrape, from what the scraper reports.
+
+    Prometheus sends the scrape_timeout it will give up at on every request,
+    so the budget can track a deployment that changes it instead of being a
+    constant that has to be kept in step by hand. Falls back to config and
+    then to the constant when the header is absent (a manual curl, or a
+    scraper that does not send one) or unparseable.
+    """
+    if scrape_timeout_header is not None:
+        try:
+            scrape_timeout = float(scrape_timeout_header)
+        except ValueError:
+            logger.warning(f'Ignoring unparseable {SCRAPE_TIMEOUT_HEADER}: '
+                           f'{scrape_timeout_header!r}')
+        else:
+            # isfinite rejects inf and nan, which both survive a > 0 test and
+            # would turn the budget into a deadline that never fires.
+            if math.isfinite(scrape_timeout) and scrape_timeout > 0:
+                return scrape_timeout * _BUDGET_FRACTION_OF_SCRAPE
+            logger.warning(f'Ignoring non-positive or non-finite '
+                           f'{SCRAPE_TIMEOUT_HEADER}: '
+                           f'{scrape_timeout_header!r}')
+    return skypilot_config.get_nested(
+        ('metrics', 'per_context_timeout_seconds'), PER_CONTEXT_TIMEOUT_SECONDS)
+
+
+def warn_if_near_budget(context: str, route: str, elapsed: float,
+                        budget: float) -> None:
+    """Logs a context that succeeded but is close to timing out.
+
+    The cliff is otherwise only visible once it has been fallen off: the
+    context starts being dropped from scrapes and its series just stop. This
+    names it while it is still working.
+    """
+    if budget <= 0 or elapsed < budget * _NEAR_BUDGET_FRACTION:
+        return
+    logger.warning(
+        f'Federating context {context} (route {route}) used '
+        f'{elapsed / budget:.0%} of its {budget:.1f}s budget ({elapsed:.1f}s). '
+        f'It will start being dropped from scrapes as its Prometheus grows; '
+        f'raise the scrape timeout for this endpoint, or reduce what it '
+        f'federates.')
+
+
 def record_federation_outcome(context: str, route: str, outcome: str) -> None:
     """Increments the per-context federation outcome counter (non-blocking)."""
     if METRICS_ENABLED:
@@ -1220,6 +1302,22 @@ class FederationStats:
         self.body_bytes: Optional[int] = None
         self.wire_bytes: Optional[int] = None
         self.content_encoding: Optional[str] = None
+        # Whole attempt, set by the collector once it returns. The phase
+        # fields stop at the transfer, but the budget also pays for the
+        # cluster-label stamping that follows it.
+        self.total_seconds: Optional[float] = None
+
+    @property
+    def elapsed_seconds(self) -> float:
+        """What the attempt charged to the budget.
+
+        total_seconds when the collector finished; otherwise the phases that
+        did complete, which is all a cancelled attempt has.
+        """
+        if self.total_seconds is not None:
+            return self.total_seconds
+        return ((self.port_forward_seconds or 0.0) +
+                (self.federate_seconds or 0.0))
 
     def summary(self) -> str:
         """A compact 'port_forward=..s, federate=..' breakdown for logs.
@@ -1638,23 +1736,41 @@ def split_local_remote_contexts(
     return local, remote
 
 
-def start_svc_port_forward(context: str, namespace: str, service: str,
-                           service_port: int) -> Tuple[subprocess.Popen, int]:
+def start_svc_port_forward(
+    context: str,
+    namespace: str,
+    service: str,
+    service_port: int,
+    on_process_start: Optional[Callable[[subprocess.Popen], None]] = None,
+    abandoned: Optional[threading.Event] = None,
+    startup_timeout: Optional[float] = None,
+) -> Tuple[subprocess.Popen, int]:
     """Starts a port forward to a service in a Kubernetes cluster.
     Args:
         context: Kubernetes context name
         namespace: Namespace where the service is located
         service: Service name to port forward to
         service_port: Port on the service to forward to
+        on_process_start: Called with the kubectl process the moment it is
+            spawned. This runs in a thread that the caller cannot stop, so a
+            caller that is cancelled mid-startup needs a handle on the child
+            to be able to reap it.
+        abandoned: Checked while waiting for the tunnel. Set by a caller that
+            has given up, so the process is torn down here rather than
+            outliving everything that knew about it.
+        startup_timeout: How long the tunnel may take to report ready.
+            Defaults to the share of the default per-context budget; a caller
+            working to a different budget passes its own share so the two
+            cannot end up inverted.
     Returns:
         Tuple of (subprocess.Popen process, local_port assigned)
     Raises:
-        RuntimeError: If port forward fails to start
+        exceptions.PortForwardStartupError: If the tunnel does not come up,
+            whether it failed to launch or was still not ready within
+            _PORT_FORWARD_STARTUP_TIMEOUT_SECONDS.
     """
-    # Must be well under the per-context timeout in
-    # metrics.py (_PER_CONTEXT_TIMEOUT_SECONDS) to leave
-    # time for the HTTP request and cleanup.
-    start_port_forward_timeout = 5
+    start_port_forward_timeout = (startup_timeout if startup_timeout is not None
+                                  else _PORT_FORWARD_STARTUP_TIMEOUT_SECONDS)
     terminate_port_forward_timeout = 5  # 5 second timeout
 
     # Use ':service_port' to let kubectl choose the local port
@@ -1690,6 +1806,8 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
                                                 stderr=subprocess.STDOUT,
                                                 text=True,
                                                 env=env)
+        if on_process_start is not None:
+            on_process_start(port_forward_process)
 
         # Use poll() instead of select() to avoid FD_SETSIZE limit
         poller = select.poll()
@@ -1701,6 +1819,13 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
         buffer = ''
         # wait for the port forward to start and extract the local port
         while time.time() - start_time < start_port_forward_timeout:
+            if abandoned is not None and abandoned.is_set():
+                # Nobody is waiting for this tunnel any more. Raising reaches
+                # the handler below, which reaps the child.
+                raise exceptions.PortForwardStartupError(
+                    f'Port forward for service {service} in namespace '
+                    f'{namespace} on context {context} was abandoned before '
+                    f'it became ready')
             if port_forward_process.poll() is not None:
                 # port forward process has terminated
                 if port_forward_process.returncode != 0:
@@ -1723,10 +1848,19 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
 
             # sleep for 100ms to avoid busy-waiting
             time.sleep(0.1)
-    except BaseException:  # pylint: disable=broad-exception-caught
+    except BaseException as e:  # pylint: disable=broad-exception-caught
         if port_forward_process:
             stop_svc_port_forward(port_forward_process,
                                   timeout=terminate_port_forward_timeout)
+        # Launching or polling kubectl failed (a missing binary raises
+        # FileNotFoundError here), so no tunnel came up and nothing was asked
+        # of the Prometheus behind it: same bucket as the failures below.
+        # BaseException keeps propagating unchanged.
+        if isinstance(e, Exception):
+            raise exceptions.PortForwardStartupError(
+                f'Port forward failed to start for service {service} in '
+                f'namespace {namespace} on context {context}: '
+                f'{common_utils.format_exception(e)}') from e
         raise
     finally:
         if poller is not None and fd is not None:
@@ -1736,17 +1870,20 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
                 # FD may already be unregistered or invalid
                 pass
     if port_forward_exit:
-        raise RuntimeError(f'Port forward failed for service {service} in '
-                           f'namespace {namespace} on context {context}')
+        raise exceptions.PortForwardStartupError(
+            f'Port forward failed for service {service} in '
+            f'namespace {namespace} on context {context}')
     if local_port is None:
         try:
             if port_forward_process:
                 stop_svc_port_forward(port_forward_process,
                                       timeout=terminate_port_forward_timeout)
         finally:
-            raise RuntimeError(
+            # Naming the budget makes the number to revisit visible in the log.
+            raise exceptions.PortForwardStartupError(
                 f'Failed to extract local port for service {service} in '
-                f'namespace {namespace} on context {context}')
+                f'namespace {namespace} on context {context} within '
+                f'{start_port_forward_timeout}s')
 
     return port_forward_process, local_port
 
@@ -1831,12 +1968,21 @@ async def send_metrics_request_with_port_forward(
     if stats is None:
         stats = FederationStats()
     port_forward_process = None
+    # start_svc_port_forward runs in a thread, which cancelling this coroutine
+    # cannot stop: the await raises while the thread goes on to spawn kubectl.
+    # These two give the teardown below a handle on that child either way --
+    # spawned is filled the moment it exists, and abandoned tells the thread to
+    # reap it itself if it has not got that far.
+    spawned: List[subprocess.Popen] = []
+    abandoned = threading.Event()
     # monotonic() so durations are immune to wall-clock adjustments.
     try:
         # Start port forward.
         pf_start = time.monotonic()
         port_forward_process, local_port = await asyncio.to_thread(
-            start_svc_port_forward, context, namespace, service, service_port)
+            start_svc_port_forward, context, namespace, service, service_port,
+            spawned.append, abandoned,
+            timeout * _PORT_FORWARD_STARTUP_BUDGET_FRACTION)
         stats.port_forward_seconds = time.monotonic() - pf_start
         record_federation_phase(context, route, 'port_forward',
                                 stats.port_forward_seconds)
@@ -1878,12 +2024,17 @@ async def send_metrics_request_with_port_forward(
             return text
 
     finally:
+        abandoned.set()
+        # On the cancelled-mid-startup path port_forward_process is still
+        # None while the thread holds a live child, so fall back to whatever
+        # it spawned.
+        process = port_forward_process or (spawned[0] if spawned else None)
         # Hand the teardown to a detached thread: it must run even when this
         # coroutine is being cancelled by asyncio.wait_for(), and it must not
         # be charged to the loop that serves /metrics. See
         # stop_svc_port_forward_off_loop.
-        if port_forward_process:
-            stop_svc_port_forward_off_loop(port_forward_process)
+        if process:
+            stop_svc_port_forward_off_loop(process)
 
 
 # Matches an existing `cluster="..."` label token in a metric line's label
@@ -2049,15 +2200,19 @@ GPU_METRICS_MATCH_PATTERNS = [
 ]
 
 
-async def get_metrics_for_context(context: str,
-                                  stats: Optional[FederationStats] = None
-                                 ) -> str:
+async def get_metrics_for_context(
+        context: str,
+        stats: Optional[FederationStats] = None,
+        timeout: float = PER_CONTEXT_TIMEOUT_SECONDS) -> str:
     """Get GPU metrics for a single Kubernetes context.
     Args:
         context: Kubernetes context name
         stats: Optional FederationStats populated with the port-forward /
             federate timing + payload size for this context (see the caller's
             timeout logging).
+        timeout: Whole-attempt budget for this context. The phase budgets
+            inside are shares of it, so passing the caller's own budget keeps
+            them in step with the deadline it will actually enforce.
     Returns:
         metrics_text: String containing the metrics
     Raises:
@@ -2067,18 +2222,26 @@ async def get_metrics_for_context(context: str,
     prometheus_namespace, prometheus_service, prometheus_port = (
         _get_prometheus_target())
 
-    metrics_text = await send_metrics_request_with_port_forward(
-        context=context,
-        namespace=prometheus_namespace,
-        service=prometheus_service,
-        service_port=prometheus_port,
-        endpoint_path='/federate',
-        match_patterns=match_patterns,
-        route='gpu-metrics',
-        stats=stats)
+    started = time.monotonic()
+    try:
+        metrics_text = await send_metrics_request_with_port_forward(
+            context=context,
+            namespace=prometheus_namespace,
+            service=prometheus_service,
+            service_port=prometheus_port,
+            endpoint_path='/federate',
+            match_patterns=match_patterns,
+            timeout=timeout,
+            route='gpu-metrics',
+            stats=stats)
 
-    # add cluster name as a label to each metric line
-    metrics_text = await add_cluster_name_label(metrics_text, context)
+        # add cluster name as a label to each metric line
+        metrics_text = await add_cluster_name_label(metrics_text, context)
+    finally:
+        # Includes the stamping above, which the phase fields stop short of
+        # but the budget still pays for.
+        if stats is not None:
+            stats.total_seconds = time.monotonic() - started
 
     return metrics_text
 
@@ -2320,6 +2483,7 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
     Raises:
         Exception: If the login-node curl or the federate request fails.
     """
+    slurm_started = time.monotonic()
     prometheus_url = _slurm_prometheus_url(cluster_name)
     if not prometheus_url:
         raise ValueError(
@@ -2370,9 +2534,13 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
     # replace_existing: the cluster's Prometheus may stamp its own
     # `cluster` external label on every federated series; that must become
     # the SkyPilot context or the series never match cluster="slurm/<name>".
-    return await add_cluster_name_label(metrics_text,
-                                        SLURM_CONTEXT_PREFIX + cluster_name,
-                                        replace_existing=True)
+    try:
+        return await add_cluster_name_label(metrics_text,
+                                            SLURM_CONTEXT_PREFIX + cluster_name,
+                                            replace_existing=True)
+    finally:
+        if stats is not None:
+            stats.total_seconds = time.monotonic() - slurm_started
 
 
 # Series federated from each context's Prometheus by /endpoints-metrics: the
@@ -2388,7 +2556,9 @@ ENDPOINT_METRICS_MATCH_PATTERNS = [
 
 
 async def get_endpoint_metrics_for_context(
-        context: str, stats: Optional[FederationStats] = None) -> str:
+        context: str,
+        stats: Optional[FederationStats] = None,
+        timeout: float = PER_CONTEXT_TIMEOUT_SECONDS) -> str:
     """Get Sky Endpoint serving-engine metrics for a single K8s context.
 
     Mirrors get_metrics_for_context() but federates the serving engines'
@@ -2400,6 +2570,8 @@ async def get_endpoint_metrics_for_context(
         context: Kubernetes context name
         stats: Optional FederationStats populated with the port-forward /
             federate timing + payload size for this context.
+        timeout: Whole-attempt budget for this context; see
+            get_metrics_for_context.
     Returns:
         metrics_text: String containing the metrics
     Raises:
@@ -2409,17 +2581,23 @@ async def get_endpoint_metrics_for_context(
     prometheus_namespace, prometheus_service, prometheus_port = (
         _get_prometheus_target())
 
-    metrics_text = await send_metrics_request_with_port_forward(
-        context=context,
-        namespace=prometheus_namespace,
-        service=prometheus_service,
-        service_port=prometheus_port,
-        endpoint_path='/federate',
-        match_patterns=match_patterns,
-        route='endpoints-metrics',
-        stats=stats)
+    started = time.monotonic()
+    try:
+        metrics_text = await send_metrics_request_with_port_forward(
+            context=context,
+            namespace=prometheus_namespace,
+            service=prometheus_service,
+            service_port=prometheus_port,
+            endpoint_path='/federate',
+            match_patterns=match_patterns,
+            timeout=timeout,
+            route='endpoints-metrics',
+            stats=stats)
 
-    # add cluster name as a label to each metric line
-    metrics_text = await add_cluster_name_label(metrics_text, context)
+        # add cluster name as a label to each metric line
+        metrics_text = await add_cluster_name_label(metrics_text, context)
+    finally:
+        if stats is not None:
+            stats.total_seconds = time.monotonic() - started
 
     return metrics_text
