@@ -1,4 +1,4 @@
-"""Add the partial index the stall scan's claimed half needs.
+"""Add the two partial indexes the stall scan's claimed half needs.
 
 The scan in sky/jobs/stall.py asks, every collector refresh, for tasks the
 scheduler claimed that have neither started nor finished and whose claim is
@@ -12,6 +12,12 @@ leaves it the moment it starts or ends, so the index tracks what is
 outstanding rather than job history. The predicate is imported from state.py,
 where the query's WHERE is built from the same constant -- an index whose
 predicate has drifted from its query is silently not used, and nothing fails.
+
+The second index serves the occupancy count that decides whether the never-
+claimed phase is looking at a stall or at a queue behind a full controller
+pool. Its predicate is one term wider -- a running job still holds its slot --
+so it cannot share the first index, and without it that count is the very
+sequential scan this migration exists to remove.
 
 Revision ID: 028
 Revises: 027
@@ -33,20 +39,26 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 _UNATTENDED_INDEX = 'ix_spot_unattended'
+_CLAIMED_LIVE_INDEX = 'ix_spot_claimed_live'
 
 
 def upgrade():
-    """Add the claimed-in-flight index."""
+    """Add the claimed-in-flight and claimed-live indexes."""
     bind = op.get_bind()
     existing = {ix['name'] for ix in sa.inspect(bind).get_indexes('spot')}
-    if _UNATTENDED_INDEX in existing:
-        return
     with op.get_context().autocommit_block():
-        op.create_index(_UNATTENDED_INDEX,
-                        'spot', ['submitted_at'],
-                        postgresql_where=sa.text(
-                            state.CLAIMED_IN_FLIGHT_PREDICATE),
-                        sqlite_where=sa.text(state.CLAIMED_IN_FLIGHT_PREDICATE))
+        if _UNATTENDED_INDEX not in existing:
+            op.create_index(
+                _UNATTENDED_INDEX,
+                'spot', ['submitted_at'],
+                postgresql_where=sa.text(state.CLAIMED_IN_FLIGHT_PREDICATE),
+                sqlite_where=sa.text(state.CLAIMED_IN_FLIGHT_PREDICATE))
+        if _CLAIMED_LIVE_INDEX not in existing:
+            op.create_index(_CLAIMED_LIVE_INDEX,
+                            'spot', ['spot_job_id'],
+                            postgresql_where=sa.text(
+                                state.CLAIMED_LIVE_PREDICATE),
+                            sqlite_where=sa.text(state.CLAIMED_LIVE_PREDICATE))
 
 
 def downgrade():

@@ -100,6 +100,11 @@ NEVER_RAN_PREDICATE = (f't_controller_queue IS NULL AND start_at IS NULL AND '
 CLAIMED_IN_FLIGHT_PREDICATE = ('submitted_at IS NOT NULL AND '
                                'start_at IS NULL AND end_at IS NULL')
 
+# Claimed and not finished, whether or not it has started: what a controller
+# process is holding. Deliberately one predicate wider than the one above --
+# a running job still occupies its slot -- so it cannot share that index.
+CLAIMED_LIVE_PREDICATE = 'submitted_at IS NOT NULL AND end_at IS NULL'
+
 spot_table = sqlalchemy.Table(
     'spot',
     Base.metadata,
@@ -274,6 +279,13 @@ spot_table = sqlalchemy.Table(
         'submitted_at',
         postgresql_where=sqlalchemy.text(CLAIMED_IN_FLIGHT_PREDICATE),
         sqlite_where=sqlalchemy.text(CLAIMED_IN_FLIGHT_PREDICATE)),
+    # Occupancy: how many jobs the controllers are holding. Counted on every
+    # refresh, and the predicate is wider than the one above, so without this
+    # the count is a sequential scan of every task ever run.
+    sqlalchemy.Index('ix_spot_claimed_live',
+                     'spot_job_id',
+                     postgresql_where=sqlalchemy.text(CLAIMED_LIVE_PREDICATE),
+                     sqlite_where=sqlalchemy.text(CLAIMED_LIVE_PREDICATE)),
 )
 
 job_info_table = sqlalchemy.Table(

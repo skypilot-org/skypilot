@@ -46,6 +46,7 @@ from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.server.requests import requests as api_requests
 from sky.skylet import constants
+from sky.utils import controller_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -76,9 +77,10 @@ _RETRY_ACTIVITY_SECONDS = 900
 
 # Budget for ALL the managed-jobs statements one scan runs, not a per-statement
 # timeout. A thread parked in a DB driver cannot be killed, so the database has
-# to be the thing that gives up -- but a per-statement bound multiplies: each
-# scan runs two statements and the collector runs both scans, so four
-# statements at a per-statement 25s would be 100s against a 30s refresh
+# to be the thing that gives up -- but a per-statement bound multiplies: the
+# never-claimed scan runs up to three statements, the unattended scan two, and
+# the collector runs both, so at a per-statement 25s that would be 125s against
+# a 30s refresh
 # interval and a 90s staleness horizon. Each statement instead gets whatever is
 # left of the budget, so the total holds however many statements there come
 # to be.
@@ -405,6 +407,95 @@ def _highest_blocking_priority(engine: sqlalchemy.engine.Engine,
         return managed_job_state.get_managed_jobs_highest_priority(conn)
 
 
+def _claim_gates(engine: sqlalchemy.engine.Engine,
+                 deadline: float) -> Tuple[bool, str]:
+    """Whether every controller process is already blocked from claiming.
+
+    A burst of submissions against a full controller pool is a queue, not a
+    stall: nothing claimed these tasks because no process could. Submitting
+    hundreds of jobs at once is ordinary, so without this every job behind the
+    pool reports -- and the report names the scheduler, which is doing exactly
+    its job.
+
+    The admission loop in `controller.py` has TWO gates, and either one stops a
+    process before it reaches `get_waiting_job_async`:
+
+    * `len(self.starting) >= LAUNCHES_PER_WORKER` -- jobs whose launch is in
+      flight. A job leaves `self.starting` only when it actually starts
+      (`set_started_async`, next to the `remove`), so a slow provision holds
+      its slot for the whole provision. `CLAIMED_IN_FLIGHT_PREDICATE` is the
+      same condition in the database.
+    * `len(self.job_tasks) >= min(MAX_JOBS_PER_WORKER,
+      MAX_TOTAL_RUNNING_JOBS // controllers)` -- jobs the process is holding at
+      all. Both sets are keyed by **job id**, not by task, so both counts here
+      are over distinct jobs.
+
+    In the field the first gate is the binding one: 8 launches per process
+    against 200 jobs held, so a burst saturates launching long before it fills
+    the pool.
+
+    Summing across processes is exact for each gate on its own: no process can
+    exceed its own limit, so a sum at N x limit means every process is at it.
+    It is not exact for the disjunction -- one process blocked by launches and
+    another by jobs held leaves both sums short -- which is accepted rather
+    than modelled, because processes in one deployment run the same shape of
+    work and the corner costs a report, never a silence.
+
+    `controllers` is the nominal count the scheduler computes for itself, not a
+    count of live processes. Two reasons, and the second is decisive:
+    overstating capacity errs toward reporting (controllers dying while jobs
+    queue is the incident, not the queue); and `get_alive_controllers()` reads
+    a pid file local to one replica and returns 0 where the file is absent, so
+    on any other replica capacity would be 0, the gate would always hold, and
+    the alert would go silent for the wrong reason.
+
+    Both of those numbers are sized from the CALLING process's memory, which
+    only answers the right question where the controllers share the host. Off
+    consolidation mode they do not: the controllers live on their own cluster,
+    and this scan would be sizing a fleet it cannot see. There the phase is
+    suppressed outright -- launching many at once is ordinary there, and the
+    metrics path does not run off consolidation either (the collector is
+    registered behind the same condition), so this keeps the two paths saying
+    the same thing rather than leaving one of them guessing.
+
+    Pool-scoped jobs ARE counted: they occupy a controller slot like any other
+    job, and a capacity question that ignored them would understate occupancy
+    and put the false positive straight back. The cost is a real gap -- a pool
+    job wedged before it starts holds the gate shut, and the unattended phase
+    excludes pool jobs (they never provision, so they have no attempt rows to
+    reason about), so nothing reports it. That gap is not introduced here: a
+    wedged pool is undetected either way, and closing it needs a pool-readiness
+    condition this module does not provide.
+    """
+    if not managed_job_utils.is_consolidation_mode():
+        return True, ('not consolidation mode, so the controller pool is '
+                      'not this process to size')
+    controllers = max(controller_utils.get_number_of_jobs_controllers(), 1)
+    launch_capacity = controllers * controller_utils.LAUNCHES_PER_WORKER
+    hold_capacity = controllers * min(
+        controller_utils.MAX_JOBS_PER_WORKER,
+        controller_utils.MAX_TOTAL_RUNNING_JOBS // controllers)
+    # One statement, two counts: two would be two round trips and two
+    # instants. The WHERE is `state.CLAIMED_LIVE_PREDICATE`, which is what the
+    # partial index serving this is built from -- wider than the in-flight one
+    # next to it, because a running job still holds its slot.
+    counts = sqlalchemy.text(
+        'SELECT COUNT(DISTINCT CASE WHEN start_at IS NULL '
+        'THEN spot_job_id END) AS launching, '
+        'COUNT(DISTINCT spot_job_id) AS held '
+        f'FROM spot WHERE {managed_job_state.CLAIMED_LIVE_PREDICATE}')
+    with _bounded(engine, deadline) as conn:
+        row = conn.execute(counts).one()
+    launching, held = int(row[0] or 0), int(row[1] or 0)
+    why = ''
+    if launching >= launch_capacity:
+        why = (f'all {launch_capacity} launch slots busy '
+               f'({launching} launching)')
+    elif held >= hold_capacity:
+        why = f'all {hold_capacity} job slots held ({held} held)'
+    return bool(why), why
+
+
 def _starved(task: StalledTask, highest: int) -> bool:
     """Waiting behind higher priority is not a stall.
 
@@ -500,6 +591,19 @@ def scan_never_claimed(
         age_seconds = never_claimed_seconds()
     deadline = time.monotonic() + _SCAN_BUDGET_SECONDS
     engine = managed_job_state.get_engine()
+    blocked, why = _claim_gates(engine, deadline)
+    if blocked:
+        # Nothing could have claimed these -- a queue, not a stall. Reported as
+        # a scan that ran and found nothing, which is a different statement
+        # from a scan that could not run. Checked before the candidate query,
+        # so a saturated deployment costs one statement rather than three.
+        # What this hides is a task individually stuck while the pool happens
+        # to be full; accepted on the same terms as `_starved`, and anything
+        # already claimed is still covered by the unattended phase -- including
+        # the wedged launches that would hold the gate shut.
+        logger.debug(f'stall: {why}, so never-claimed tasks are queued '
+                     'rather than stalled')
+        return _scan(NEVER_CLAIMED, [], truncated=False)
     sql = _NEVER_CLAIMED_SELECT.format(
         now=_now_expr(engine),
         # Coerced, not trusted: these reach the statement by interpolation.

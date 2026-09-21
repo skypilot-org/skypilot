@@ -53,6 +53,12 @@ def no_cross_store_fixture(monkeypatch):
     Neutral means "nothing is suppressing anything", so a test that wants a
     suppressor has to ask for it explicitly and cannot pass by accident.
     """
+    # The scan only runs where the controllers share the host: the collector
+    # is registered behind this condition, and off it the never-claimed phase
+    # is suppressed outright. Tests state the production mode rather than
+    # inheriting whatever the test host happens to be.
+    monkeypatch.setattr(stall.managed_job_utils, 'is_consolidation_mode',
+                        lambda: True)
     monkeypatch.setattr(stall, '_clusters_with_live_requests',
                         lambda names: set())
     monkeypatch.setattr(stall, '_tasks_active_recently',
@@ -624,3 +630,94 @@ def test_the_priority_lookup_runs_on_the_scans_own_connection(
     assert seen[0] is not None, (
         'the priority lookup got no connection, so it opened its own and ran '
         'outside the scan budget')
+
+
+def _capacity(monkeypatch, *, launches: int, held: int, controllers: int = 1):
+    """Shrink the pool the scheduler thinks it has, so a test can fill it."""
+    monkeypatch.setattr(stall.controller_utils,
+                        'get_number_of_jobs_controllers', lambda: controllers)
+    monkeypatch.setattr(stall.controller_utils, 'LAUNCHES_PER_WORKER', launches)
+    monkeypatch.setattr(stall.controller_utils, 'MAX_JOBS_PER_WORKER', held)
+    monkeypatch.setattr(stall.controller_utils, 'MAX_TOTAL_RUNNING_JOBS',
+                        held * controllers)
+
+
+def _burst(engine):
+    """Two launches in flight and one job queued behind them."""
+    _add_job(engine, 1, status='STARTING', submitted_at=_OLD)
+    _add_job(engine, 2, status='STARTING', submitted_at=_OLD)
+    _never_claimed(engine, 3, age=_OLD)
+
+
+def test_the_queue_behind_a_full_pool_reports_without_the_gate(
+        engine, monkeypatch):
+    """The bug, kept as a test: these rows really are never-claimed rows.
+
+    Without it the suppression tests below could pass for the wrong reason --
+    any clause that dropped job 3 would satisfy them. Here the gate is the only
+    thing removed, and the report comes back.
+    """
+    _capacity(monkeypatch, launches=2, held=3)
+    monkeypatch.setattr(stall, '_claim_gates', lambda engine, deadline:
+                        (False, ''))
+    _burst(engine)
+
+    assert _ids(stall.scan_never_claimed()) == {3}
+
+
+def test_a_queue_behind_busy_launch_slots_is_not_a_stall(engine, monkeypatch):
+    """The gate that binds in the field: 8 launches per controller process."""
+    _capacity(monkeypatch, launches=2, held=3)
+    _burst(engine)
+
+    assert _ids(stall.scan_never_claimed()) == set()
+
+
+def test_a_queue_behind_a_full_controller_is_not_a_stall(engine, monkeypatch):
+    """The other gate: the process is holding all the jobs it may hold.
+
+    Held separately from launching -- these two are RUNNING, so they occupy a
+    job slot without occupying a launch slot.
+    """
+    _capacity(monkeypatch, launches=5, held=2)
+    _add_job(engine, 1, status='RUNNING', submitted_at=_OLD, start_at=_OLD)
+    _add_job(engine, 2, status='RUNNING', submitted_at=_OLD, start_at=_OLD)
+    _never_claimed(engine, 3, age=_OLD)
+
+    assert _ids(stall.scan_never_claimed()) == set()
+
+
+def test_a_free_slot_in_both_gates_still_reports_the_stall(engine, monkeypatch):
+    """The negative arm: the gate must not swallow a real stall."""
+    _capacity(monkeypatch, launches=3, held=3)
+    _add_job(engine, 1, status='STARTING', submitted_at=_OLD)
+    _add_job(engine, 2, status='RUNNING', submitted_at=_OLD, start_at=_OLD)
+    _never_claimed(engine, 3, age=_OLD)
+
+    assert _ids(stall.scan_never_claimed()) == {3}
+
+
+def test_a_finished_job_holds_neither_kind_of_slot(engine, monkeypatch):
+    """Occupancy is jobs that have not finished, not jobs that ever ran."""
+    _capacity(monkeypatch, launches=2, held=2)
+    _add_job(engine, 1, status='STARTING', submitted_at=_OLD)
+    _add_job(engine,
+             2,
+             status='SUCCEEDED',
+             submitted_at=_OLD,
+             start_at=_OLD,
+             end_at=_OLD)
+    _never_claimed(engine, 3, age=_OLD)
+
+    assert _ids(stall.scan_never_claimed()) == {3}
+
+
+def test_off_consolidation_the_phase_is_suppressed(engine, monkeypatch):
+    """The capacity numbers are sized from this process, so off consolidation
+    they describe the wrong machine. Silence there matches the metrics path,
+    which is not registered off consolidation either."""
+    monkeypatch.setattr(stall.managed_job_utils, 'is_consolidation_mode',
+                        lambda: False)
+    _never_claimed(engine, 1, age=_OLD)
+
+    assert _ids(stall.scan_never_claimed()) == set()
