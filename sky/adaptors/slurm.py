@@ -23,6 +23,9 @@ SEP = r'\x1f'
 _INFO_NODES_CMD = (f'sinfo -h --Node -o '
                    f'"%N{SEP}%t{SEP}%G{SEP}%c{SEP}%m{SEP}%P"')
 _ALL_NODE_DETAILS_CMD = 'scontrol show node -o'
+# A `scontrol show node` attribute token: capitalized name, then `=`
+# (NodeName, CPUAlloc, MCS_label, ...). Anything else is value text.
+_SCONTROL_ATTR_RE = re.compile(r'^[A-Z][A-Za-z0-9_]*=')
 _ALL_JOBS_INFO_CMD = (f'squeue -h --states=running,completing '
                       f'-o "%i{SEP}%j{SEP}%u{SEP}%N{SEP}%b"')
 _PARTITIONS_INFO_CMD = 'scontrol show partitions -o'
@@ -150,17 +153,26 @@ def _parse_default_time(line: str) -> Optional[str]:
 
 
 def _parse_scontrol_node_output(output: str) -> Dict[str, str]:
-    """Parses the key=value output of 'scontrol show node'."""
-    node_info = {}
-    # Split by space, handling values that might have spaces
-    # if quoted. This is simplified; scontrol can be complex.
-    parts = output.split()
-    for part in parts:
-        if '=' in part:
+    """Parses the key=value output of 'scontrol show node'.
+
+    scontrol prints attributes as space-separated ``Key=Value`` pairs, but
+    a few values contain spaces themselves (``Reason``, ``OS``, ``Comment``,
+    ``Extra``); e.g. ``Reason=Kill task failed [root@2026-01-01T00:00:00]``.
+    Attribute names are capitalized (``NodeName``, ``CPUAlloc``,
+    ``MCS_label``), so a token that does not start with a capitalized
+    ``Key=`` continues the previous value instead of being dropped or
+    mistaken for a new attribute. That also keeps lower-case ``key=value``
+    fragments inside a reason (``job=42:``) as part of the reason.
+    """
+    node_info: Dict[str, str] = {}
+    key = None
+    for part in output.split():
+        if _SCONTROL_ATTR_RE.match(part):
             key, value = part.split('=', 1)
             # Simple quote removal, might need refinement
-            value = value.strip('\'"')
-            node_info[key] = value
+            node_info[key] = value.strip('\'"')
+        elif key is not None:
+            node_info[key] = f'{node_info[key]} {part}'.strip()
     return node_info
 
 

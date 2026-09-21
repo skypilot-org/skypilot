@@ -1081,6 +1081,53 @@ class TestGetAllNodeDetails:
         assert result['node2']['CPULoad'] == 'N/A'
         assert result['node2']['FreeMem'] == 'N/A'
 
+    def test_keeps_values_with_spaces(self):
+        """Reason and OS contain spaces; they must not be cut at the first
+        word, and lower-case key=value fragments inside a reason must stay
+        part of the reason instead of becoming attributes."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        mock_output = (
+            'NodeName=node1 Arch=x86_64 CPUTot=8 '
+            'OS=Linux 6.1.0-1.el9.x86_64 #1 SMP PREEMPT_DYNAMIC Mon Jan 1 '
+            '00:00:00 UTC 2024 State=DOWN+DRAIN '
+            'Reason=Kill task failed [root@2024-01-01T00:00:00] '
+            'Comment=(null)\n'
+            'NodeName=node2 CPUTot=8 State=MIXED+DRAIN '
+            'Reason=prolog instance=i-0123456789abcdef0 job=42: health '
+            'check failed [root@2024-01-01T00:00:00] '
+            'InstanceId=i-0123456789abcdef0 InstanceType=x1.large\n'
+            'NodeName=node3 CPUTot=8 State=IDLE+DRAIN '
+            'Reason=Static node maintenance: unhealthy node is being '
+            'replaced [root@2024-01-01T00:00:00]\n')
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, mock_output, '')
+            result = client.get_all_node_details()
+
+        assert result['node1']['Reason'] == (
+            'Kill task failed [root@2024-01-01T00:00:00]')
+        assert result['node1']['OS'] == (
+            'Linux 6.1.0-1.el9.x86_64 #1 SMP PREEMPT_DYNAMIC Mon Jan 1 '
+            '00:00:00 UTC 2024')
+        assert result['node1']['State'] == 'DOWN+DRAIN'
+        assert result['node1']['Comment'] == '(null)'
+        assert result['node2']['Reason'] == (
+            'prolog instance=i-0123456789abcdef0 job=42: health check '
+            'failed [root@2024-01-01T00:00:00]')
+        assert 'instance' not in result['node2']
+        assert 'job' not in result['node2']
+        assert result['node2']['InstanceId'] == 'i-0123456789abcdef0'
+        assert result['node2']['InstanceType'] == 'x1.large'
+        assert result['node3']['Reason'] == (
+            'Static node maintenance: unhealthy node is being replaced '
+            '[root@2024-01-01T00:00:00]')
+
     def test_skips_blank_lines_and_lines_without_node_name(self):
         client = slurm.SlurmClient(
             ssh_host='localhost',
