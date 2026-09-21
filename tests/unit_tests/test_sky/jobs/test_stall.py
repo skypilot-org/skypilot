@@ -632,14 +632,23 @@ def test_the_priority_lookup_runs_on_the_scans_own_connection(
         'outside the scan budget')
 
 
-def _capacity(monkeypatch, *, launches: int, held: int, controllers: int = 1):
-    """Shrink the pool the scheduler thinks it has, so a test can fill it."""
+def _capacity(monkeypatch,
+              *,
+              launches: int,
+              held: int,
+              controllers: int = 1,
+              total: int = 10_000):
+    """Shrink the pool the scheduler thinks it has, so a test can fill it.
+
+    `total` stays far above `held * controllers` unless a test is about the
+    fleet-wide ceiling: tying the two together makes both arms of the `min`
+    equal, and then nothing distinguishes a per-process limit from the ceiling.
+    """
     monkeypatch.setattr(stall.controller_utils,
                         'get_number_of_jobs_controllers', lambda: controllers)
     monkeypatch.setattr(stall.controller_utils, 'LAUNCHES_PER_WORKER', launches)
     monkeypatch.setattr(stall.controller_utils, 'MAX_JOBS_PER_WORKER', held)
-    monkeypatch.setattr(stall.controller_utils, 'MAX_TOTAL_RUNNING_JOBS',
-                        held * controllers)
+    monkeypatch.setattr(stall.controller_utils, 'MAX_TOTAL_RUNNING_JOBS', total)
 
 
 def _burst(engine):
@@ -670,7 +679,11 @@ def test_a_queue_behind_busy_launch_slots_is_not_a_stall(engine, monkeypatch):
     _capacity(monkeypatch, launches=2, held=3)
     _burst(engine)
 
-    assert _ids(stall.scan_never_claimed()) == set()
+    scan = stall.scan_never_claimed()
+    assert _ids(scan) == set()
+    # A suppressed phase must not read like a scanned-and-empty one: the same
+    # 0 with nothing to tell them apart is the blind spot the rules refuse.
+    assert scan.suppressed is True
 
 
 def test_a_queue_behind_a_full_controller_is_not_a_stall(engine, monkeypatch):
@@ -694,7 +707,9 @@ def test_a_free_slot_in_both_gates_still_reports_the_stall(engine, monkeypatch):
     _add_job(engine, 2, status='RUNNING', submitted_at=_OLD, start_at=_OLD)
     _never_claimed(engine, 3, age=_OLD)
 
-    assert _ids(stall.scan_never_claimed()) == {3}
+    scan = stall.scan_never_claimed()
+    assert _ids(scan) == {3}
+    assert scan.suppressed is False
 
 
 def test_a_finished_job_holds_neither_kind_of_slot(engine, monkeypatch):
@@ -719,5 +734,88 @@ def test_off_consolidation_the_phase_is_suppressed(engine, monkeypatch):
     monkeypatch.setattr(stall.managed_job_utils, 'is_consolidation_mode',
                         lambda: False)
     _never_claimed(engine, 1, age=_OLD)
+
+    assert _ids(stall.scan_never_claimed()) == set()
+
+
+def test_one_full_process_of_two_does_not_fill_the_launch_gate(
+        engine, monkeypatch):
+    """Capacity is the per-process limit times the processes, not the limit.
+
+    Three launches against two processes allowed two each: one is full and the
+    other is not, so a queued task is still a task nothing claimed. Without the
+    multiplication this reads as saturated and goes silent.
+    """
+    _capacity(monkeypatch, launches=2, held=99, controllers=2)
+    for job_id in (1, 2, 3):
+        _add_job(engine, job_id, status='STARTING', submitted_at=_OLD)
+    _never_claimed(engine, 4, age=_OLD)
+
+    assert _ids(stall.scan_never_claimed()) == {4}
+
+
+def test_one_full_process_of_two_does_not_fill_the_hold_gate(
+        engine, monkeypatch):
+    """The same for the other gate, with nothing launching."""
+    _capacity(monkeypatch, launches=99, held=2, controllers=2)
+    for job_id in (1, 2, 3):
+        _add_job(engine,
+                 job_id,
+                 status='RUNNING',
+                 submitted_at=_OLD,
+                 start_at=_OLD)
+    _never_claimed(engine, 4, age=_OLD)
+
+    assert _ids(stall.scan_never_claimed()) == {4}
+
+
+def test_both_processes_full_is_a_queue(engine, monkeypatch):
+    """The burst doubled: two processes, both at their launch limit."""
+    _capacity(monkeypatch, launches=2, held=99, controllers=2)
+    for job_id in (1, 2, 3, 4):
+        _add_job(engine, job_id, status='STARTING', submitted_at=_OLD)
+    _never_claimed(engine, 5, age=_OLD)
+
+    assert _ids(stall.scan_never_claimed()) == set()
+
+
+def test_processes_blocked_by_different_gates_still_report(engine, monkeypatch):
+    """A documented residual, not a wish: summing is exact per gate only.
+
+    One process at its launch limit and another at its job limit are both
+    blocked, but neither sum reaches its capacity, so the queue behind them is
+    reported. Asserted so that the day someone models the disjunction, this
+    test says what changed rather than a deployment saying it.
+    """
+    _capacity(monkeypatch, launches=2, held=3, controllers=2)
+    for job_id in (1, 2):
+        _add_job(engine, job_id, status='STARTING', submitted_at=_OLD)
+    for job_id in (3, 4, 5):
+        _add_job(engine,
+                 job_id,
+                 status='RUNNING',
+                 submitted_at=_OLD,
+                 start_at=_OLD)
+    _never_claimed(engine, 6, age=_OLD)
+
+    assert _ids(stall.scan_never_claimed()) == {6}
+
+
+def test_the_fleet_ceiling_can_bind_before_the_per_process_limit(
+        engine, monkeypatch):
+    """`min(MAX_JOBS_PER_WORKER, MAX_TOTAL_RUNNING_JOBS // controllers)`.
+
+    Two processes allowed 99 jobs each but four in the fleet: the ceiling wins
+    at 2 each, and four held jobs fill it. Were the per-process limit the one
+    that bound, capacity would be 198 and these four would report.
+    """
+    _capacity(monkeypatch, launches=99, held=99, controllers=2, total=4)
+    for job_id in (1, 2, 3, 4):
+        _add_job(engine,
+                 job_id,
+                 status='RUNNING',
+                 submitted_at=_OLD,
+                 start_at=_OLD)
+    _never_claimed(engine, 5, age=_OLD)
 
     assert _ids(stall.scan_never_claimed()) == set()

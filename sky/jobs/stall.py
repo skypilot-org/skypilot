@@ -146,6 +146,11 @@ class StallScan:
     # causes -- more candidates than the query returns, more than the per-task
     # pass reaches -- are folded together because no consumer separates them.
     truncated: bool
+    # The phase was not measured: no controller process could have claimed
+    # anything, so a queue is not evidence of a stall. Separate from an empty
+    # `tasks`, which means the scan looked and found none -- exporting the two
+    # as the same zero is the blind spot the rule files refuse to paper over.
+    suppressed: bool = False
 
 
 def _threshold_seconds(env_var: str, default: float) -> float:
@@ -289,10 +294,10 @@ def _bounded(engine: sqlalchemy.engine.Engine,
              deadline: float) -> Iterator[Any]:
     """A connection whose statements the database will end on its own.
 
-    See `_STATEMENT_TIMEOUT_SECONDS`: nothing above this can interrupt a query
-    once it is running, so the bound has to be set on the database. Postgres
-    only -- SQLite has no statement timeout, and the risk there is different: a
-    local file with no other writer contending for it.
+    See `_MIN_STATEMENT_TIMEOUT_SECONDS`: nothing above this can interrupt a
+    query once it is running, so the bound has to be set on the database.
+    Postgres only -- SQLite has no statement timeout, and the risk there is
+    different: a local file with no other writer contending for it.
     """
     with engine.connect() as conn:
         if engine.dialect.name != 'postgresql':
@@ -526,12 +531,16 @@ def _still_stalled(task: StalledTask, now: float, age_seconds: float,
     return (task.spot_job_id, task.task_id) not in active
 
 
-def _scan(phase: str, tasks: List[StalledTask], *,
-          truncated: bool) -> StallScan:
+def _scan(phase: str,
+          tasks: List[StalledTask],
+          *,
+          truncated: bool,
+          suppressed: bool = False) -> StallScan:
     """Assemble a scan result, oldest first."""
     return StallScan(phase=phase,
                      tasks=sorted(tasks, key=lambda task: task.stalled_since),
-                     truncated=truncated)
+                     truncated=truncated,
+                     suppressed=suppressed)
 
 
 def scan_never_claimed(
@@ -556,7 +565,7 @@ def scan_never_claimed(
         # `_starved`.
         logger.debug(f'stall: {why}, so never-claimed tasks are queued '
                      'rather than stalled')
-        return _scan(NEVER_CLAIMED, [], truncated=False)
+        return _scan(NEVER_CLAIMED, [], truncated=False, suppressed=True)
     sql = _NEVER_CLAIMED_SELECT.format(
         now=_now_expr(engine),
         # Coerced, not trusted: these reach the statement by interpolation.

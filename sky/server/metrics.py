@@ -943,6 +943,13 @@ _STALL_COUNT_HELP = (
 _STALL_AGE_HELP = (
     'Age in seconds of the oldest managed job task stalled in a phase, per '
     'workspace. Zero when the phase ran and found nothing.')
+_STALL_SUPPRESSED_HELP = (
+    '1 when a phase was not measured because no controller process could have '
+    'claimed anything, so its 0 above means "not asked" rather than "nothing '
+    'stalled". Exported rather than folded into the count, on the same '
+    'grounds as the rules refusing `or vector(0)`: a blind spot must not read '
+    'as healthy.')
+
 _STALL_TRUNCATED_HELP = (
     '1 when a stall scan hit a limit, so the count for that phase is a floor '
     'rather than a total; 0 when it is a total. Without this a fleet-wide '
@@ -1004,7 +1011,7 @@ class ManagedJobsStallCollector:
             # StallScan.phase is for, and it is one less place for the two
             # names to drift apart.
             self._cache[result.phase] = (result.tasks, time.time(),
-                                         result.truncated)
+                                         result.truncated, result.suppressed)
 
     def describe(self):
         yield prom_core.GaugeMetricFamily('sky_managed_jobs_stalled',
@@ -1015,6 +1022,9 @@ class ManagedJobsStallCollector:
                                           labels=['phase', 'workspace'])
         yield prom_core.GaugeMetricFamily('sky_managed_jobs_stall_truncated',
                                           _STALL_TRUNCATED_HELP,
+                                          labels=['phase'])
+        yield prom_core.GaugeMetricFamily('sky_managed_jobs_stall_suppressed',
+                                          _STALL_SUPPRESSED_HELP,
                                           labels=['phase'])
         yield prom_core.GaugeMetricFamily(
             'sky_managed_jobs_stall_scan_timestamp_seconds',
@@ -1045,14 +1055,19 @@ class ManagedJobsStallCollector:
             'sky_managed_jobs_stall_truncated',
             _STALL_TRUNCATED_HELP,
             labels=['phase'])
+        suppressed_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_stall_suppressed',
+            _STALL_SUPPRESSED_HELP,
+            labels=['phase'])
         scan_metric = prom_core.GaugeMetricFamily(
             'sky_managed_jobs_stall_scan_timestamp_seconds',
             _STALL_SCAN_HELP,
             labels=['phase'])
 
-        for phase, (tasks, scanned_at, truncated) in cache.items():
+        for phase, (tasks, scanned_at, truncated, suppressed) in cache.items():
             scan_metric.add_metric([phase], scanned_at)
             truncated_metric.add_metric([phase], 1 if truncated else 0)
+            suppressed_metric.add_metric([phase], 1 if suppressed else 0)
             if not tasks:
                 # The measurement is "none", and it has to be said: an absent
                 # series would otherwise mean both this and "the scan could
@@ -1078,6 +1093,7 @@ class ManagedJobsStallCollector:
         yield count_metric
         yield age_metric
         yield truncated_metric
+        yield suppressed_metric
         yield scan_metric
 
 
