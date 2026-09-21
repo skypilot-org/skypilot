@@ -234,7 +234,7 @@ def _make_launch_executor():
     executor.RETRY_INIT_GAP_SECONDS = 0.01
     executor._cleanup_cluster = mock.MagicMock()
     executor._wait_until_job_starts_on_cluster = mock.AsyncMock(
-        return_value=123.45)
+        return_value=(123.45, None))
     # Each (fresh) launch attempt gets a stream future; capture them so tests
     # can assert the same future is carried across a park.
     executor._stream_futures = []
@@ -697,11 +697,12 @@ async def test_launch_retry_code_for_job_submit_failure(monkeypatch):
     executor._await_launch_request = mock.AsyncMock(return_value=None)
     # First attempt launches but the job never starts; second one works.
     executor._wait_until_job_starts_on_cluster = mock.AsyncMock(
-        side_effect=[None, 123.45])
+        side_effect=[(None, 'checks_exhausted'), (123.45, None)])
 
     assert await executor._launch(max_retry=None) == 123.45
-    assert _codes(
-        patches.set_backoff_pending) == ['launch_retry:job_submit_failed']
+    assert _codes(patches.set_backoff_pending) == [
+        'launch_retry:job_submit_failed:checks_exhausted'
+    ]
 
 
 @pytest.mark.asyncio
@@ -717,12 +718,12 @@ async def test_retry_code_resets_between_attempts(monkeypatch):
     executor._await_launch_request = mock.AsyncMock(
         side_effect=[KeyError('status'), None, None])
     executor._wait_until_job_starts_on_cluster = mock.AsyncMock(
-        side_effect=[None, 123.45])
+        side_effect=[(None, 'checks_exhausted'), (123.45, None)])
 
     assert await executor._launch(max_retry=None) == 123.45
     assert _codes(patches.set_backoff_pending) == [
         'launch_retry:KeyError',
-        'launch_retry:job_submit_failed',
+        'launch_retry:job_submit_failed:checks_exhausted',
     ]
 
 
@@ -897,3 +898,87 @@ async def test_bounded_max_retry_escalates_instead_of_coding(monkeypatch):
     # One backoff row for the attempt that retried; the attempt that exhausted
     # the budget escalates rather than being absorbed and coded.
     assert _codes(patches.set_backoff_pending) == ['launch_retry:ValueError']
+
+
+# ---------------------------------------------------------------------------
+# Attributing the give-up reason of the job-submit wait. Without it the whole
+# family is one bucket: three swallowed exceptions and two quiet exits all
+# reach the caller as a bare None.
+# ---------------------------------------------------------------------------
+
+
+def _make_submit_wait_executor(monkeypatch):
+    """An executor whose job-submit wait runs for real, with a live cluster."""
+    executor = _make_launch_executor()
+    del executor._wait_until_job_starts_on_cluster  # run the real one
+    executor.job_id_on_pool_cluster = None
+    executor.backend = mock.MagicMock()
+    monkeypatch.setattr(recovery_strategy, 'MAX_JOB_CHECKING_RETRY', 2)
+    monkeypatch.setattr(recovery_strategy.managed_job_utils,
+                        'JOB_STARTED_STATUS_CHECK_GAP_SECONDS', 0)
+    monkeypatch.setattr(
+        recovery_strategy.backend_utils, 'refresh_cluster_status_handle',
+        lambda *a, **k: (recovery_strategy.status_lib.ClusterStatus.UP, None))
+    return executor
+
+
+@pytest.mark.asyncio
+async def test_submit_wait_attributes_cluster_preemption(monkeypatch):
+    """The audit's 'preempted during provisioning' family gets its own name.
+
+    It leaves the loop by `break`, not by an exception, so nothing downstream
+    could tell it apart from a timeout without this.
+    """
+    executor = _make_submit_wait_executor(monkeypatch)
+    monkeypatch.setattr(
+        recovery_strategy.backend_utils, 'refresh_cluster_status_handle',
+        lambda *a, **k:
+        (recovery_strategy.status_lib.ClusterStatus.STOPPED, None))
+
+    assert await executor._wait_until_job_starts_on_cluster() == (
+        None, 'cluster_preempted')
+
+
+@pytest.mark.asyncio
+async def test_submit_wait_attributes_a_swallowed_exception(monkeypatch):
+    """A swallowed exception reaches the caller as its kind, not as None."""
+    executor = _make_submit_wait_executor(monkeypatch)
+
+    async def boom(*args, **kwargs):
+        raise ValueError('Unable to start local API server')
+
+    monkeypatch.setattr(recovery_strategy.managed_job_utils, 'get_job_status',
+                        boom)
+
+    assert await executor._wait_until_job_starts_on_cluster() == (None,
+                                                                  'ValueError')
+
+
+@pytest.mark.asyncio
+async def test_submit_wait_attributes_a_transient_status(monkeypatch):
+    """get_job_status can report a transient reason without raising."""
+    executor = _make_submit_wait_executor(monkeypatch)
+
+    async def transient(*args, **kwargs):
+        return None, 'pod not found'
+
+    monkeypatch.setattr(recovery_strategy.managed_job_utils, 'get_job_status',
+                        transient)
+
+    assert await executor._wait_until_job_starts_on_cluster() == (
+        None, 'status_transient')
+
+
+@pytest.mark.asyncio
+async def test_submit_wait_falls_back_to_checks_exhausted(monkeypatch):
+    """Running out of checks is its own reason, distinct from a NULL code."""
+    executor = _make_submit_wait_executor(monkeypatch)
+
+    async def still_init(*args, **kwargs):
+        return recovery_strategy.job_lib.JobStatus.INIT, None
+
+    monkeypatch.setattr(recovery_strategy.managed_job_utils, 'get_job_status',
+                        still_init)
+
+    assert await executor._wait_until_job_starts_on_cluster() == (
+        None, 'checks_exhausted')

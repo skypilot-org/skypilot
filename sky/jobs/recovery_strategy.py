@@ -13,7 +13,7 @@ import os
 import re
 import traceback
 import typing
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Set
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple
 
 from sky import backends
 from sky import dag as dag_lib
@@ -147,6 +147,14 @@ _LAUNCH_STREAM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 _KIND_RESOURCES_UNAVAILABLE = 'resources_unavailable'
 _KIND_JOB_SUBMIT_FAILED = 'job_submit_failed'
 _KIND_POOL_NO_CLUSTER = 'pool_no_cluster'
+
+# Why _wait_until_job_starts_on_cluster gave up. Without these the whole
+# family is one opaque bucket: the loop swallows three different exceptions
+# and leaves two non-exception ways out, and by the time the caller sees
+# None they are indistinguishable.
+_SUBMIT_CLUSTER_PREEMPTED = 'cluster_preempted'
+_SUBMIT_STATUS_TRANSIENT = 'status_transient'
+_SUBMIT_CHECKS_EXHAUSTED = 'checks_exhausted'
 
 # job_events.code values. The retry prefix keeps the kinds in one namespace so
 # an inventory can select them with a single LIKE. The kind may itself contain
@@ -509,15 +517,19 @@ class StrategyExecutor:
                         'remaining job process interferes with recovery.')
             await asyncio.to_thread(self._cleanup_cluster)
 
-    async def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
+    async def _wait_until_job_starts_on_cluster(
+            self) -> Tuple[Optional[float], Optional[str]]:
         """Wait for MAX_JOB_CHECKING_RETRY times until job starts on the cluster
 
         Returns:
-            The timestamp of when the job is submitted, or None if failed to
-            submit.
+            (timestamp, reason). The timestamp of when the job is submitted,
+            or None if it failed to submit -- in which case reason says why
+            the last attempt gave up, so the caller can attribute the retry
+            rather than record an opaque failure.
         """
         assert self.cluster_name is not None
         status = None
+        reason: Optional[str] = None
         job_checking_retry_cnt = 0
         while job_checking_retry_cnt < MAX_JOB_CHECKING_RETRY:
             # Avoid the infinite loop, if any bug happens.
@@ -532,6 +544,7 @@ class StrategyExecutor:
                 # loop.
                 # TODO(zhwu): log the unexpected error to usage collection
                 # for future debugging.
+                reason = _error_kind(e)
                 logger.info(f'Unexpected exception: {e}\nFailed to get the '
                             'refresh the cluster status. Retrying.')
                 continue
@@ -544,6 +557,7 @@ class StrategyExecutor:
                             'is submitted.')
                 # TODO(zhwu): we should recover the preemption with the
                 # recovery strategy instead of the current while loop.
+                reason = _SUBMIT_CLUSTER_PREEMPTED
                 break
 
             try:
@@ -560,10 +574,12 @@ class StrategyExecutor:
                 # get_job_status, so it should not happen here.
                 # TODO(zhwu): log the unexpected error to usage collection
                 # for future debugging.
+                reason = _error_kind(e)
                 logger.info('Unexpected exception during fetching job status: '
                             f'{common_utils.format_exception(e)}')
                 continue
             if transient_error_reason is not None:
+                reason = _SUBMIT_STATUS_TRANSIENT
                 logger.info('Transient error when fetching the job status: '
                             f'{transient_error_reason}')
                 continue
@@ -578,7 +594,7 @@ class StrategyExecutor:
                         managed_job_runtime.get_job_submitted_at, handle,
                         self.cluster_name)
                     if runtime_submitted_at is not None:
-                        return runtime_submitted_at
+                        return runtime_submitted_at, None
                 try:
                     job_submitted_at = await asyncio.to_thread(
                         managed_job_utils.get_job_timestamp,
@@ -586,17 +602,20 @@ class StrategyExecutor:
                         self.cluster_name,
                         self.job_id_on_pool_cluster,
                         get_end_time=False)
-                    return job_submitted_at
+                    return job_submitted_at, None
                 except Exception as e:  # pylint: disable=broad-except
                     # If we failed to get the job timestamp, we will retry
                     # job checking loop.
+                    reason = _error_kind(e)
                     logger.info(f'Unexpected Exception: {e}\nFailed to get '
                                 'the job start timestamp. Retrying.')
                     continue
             # Wait for the job to be started
             await asyncio.sleep(
                 managed_job_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
-        return None
+        # Ran out of checks without any attempt saying why: distinct from the
+        # reasons above, and from a NULL, which means a path was missed.
+        return None, reason or _SUBMIT_CHECKS_EXHAUSTED
 
     def _cleanup_cluster(self) -> None:
         if self.cluster_name is None:
@@ -1284,7 +1303,7 @@ class StrategyExecutor:
                             else:
                                 logger.debug('Not populating instance links '
                                              'since the cluster name is None')
-                        job_submitted_at = await (
+                        job_submitted_at, submit_reason = await (
                             self._wait_until_job_starts_on_cluster())
                         if job_submitted_at is not None:
                             return job_submitted_at
@@ -1292,7 +1311,12 @@ class StrategyExecutor:
                         # launch.
                         # TODO(zhwu): log the unexpected error to usage
                         # collection for future debugging.
-                        retry_code = _KIND_JOB_SUBMIT_FAILED
+                        # Attribute the give-up reason: the three swallowed
+                        # exceptions and the two quiet exits above all reach
+                        # here the same way, and only this tells them apart.
+                        retry_code = (f'{_KIND_JOB_SUBMIT_FAILED}:'
+                                      f'{submit_reason}' if submit_reason else
+                                      _KIND_JOB_SUBMIT_FAILED)
                         logger.info(
                             'Failed to successfully submit the job to the '
                             'launched cluster, due to unexpected submission '
