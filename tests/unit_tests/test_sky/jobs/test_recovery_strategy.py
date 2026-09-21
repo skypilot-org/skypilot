@@ -1,5 +1,7 @@
 """Unit tests for sky.jobs.recovery_strategy helpers."""
+import ast
 import asyncio
+import inspect
 import types
 from unittest import mock
 
@@ -584,3 +586,314 @@ async def test_cancel_launch_request_tolerates_api_cancel_failure(monkeypatch):
     await executor._cancel_launch_request('req-1')
 
     sdk_get.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Launch-retry classification: a bounded kind on the backoff event, so an
+# error the launch path swallows is still counted somewhere.
+# ---------------------------------------------------------------------------
+
+
+def _roundtrip(exc):
+    """Send an exception through the API server boundary and back.
+
+    Errors reaching the broad except in _launch have almost always been
+    serialized on the server and rebuilt on the controller, which is what
+    makes type(e).__name__ the wrong key.
+    """
+    return exceptions.deserialize_exception(exceptions.serialize_exception(exc))
+
+
+def test_error_kind_keeps_builtin_and_sky_classes():
+    rebuilt = _roundtrip(ValueError('x'))
+    assert recovery_strategy._error_kind(rebuilt) == 'ValueError'
+    assert recovery_strategy._error_kind(
+        _roundtrip(FileNotFoundError('Blob not found'))) == 'FileNotFoundError'
+
+
+def test_error_kind_unwraps_cloud_error():
+    """A cloud SDK class survives only inside CloudError.error_type."""
+
+    class ApiException(Exception):
+        pass
+
+    ApiException.__module__ = 'kubernetes.client.exceptions'
+    rebuilt = _roundtrip(ApiException('webhook unavailable'))
+    # Precondition: the plain class name really is lost at the boundary.
+    assert type(rebuilt).__name__ == 'CloudError'
+    assert recovery_strategy._error_kind(rebuilt) == 'kubernetes:ApiException'
+
+
+def test_error_kind_recovers_opaque_prefix():
+    """A sky.* class outside sky/exceptions.py arrives as a bare Exception."""
+    from sky.provision import common as provision_common
+    rebuilt = _roundtrip(provision_common.StopFailoverError('boom'))
+    assert type(rebuilt) is Exception
+    assert recovery_strategy._error_kind(rebuilt) == 'opaque:StopFailoverError'
+
+
+def test_error_kind_does_not_fabricate_class_names():
+    """A plain `raise Exception(msg)` round-trips with its message intact.
+
+    It is indistinguishable from the deserializer's prefixed fallback, so a
+    colon alone would mint label values for classes that never existed.
+    """
+    rebuilt = _roundtrip(Exception('Unauthorized: token expired'))
+    assert recovery_strategy._error_kind(rebuilt) == 'opaque:unparsed'
+
+
+def test_error_kind_rejects_unbounded_prefix():
+    assert recovery_strategy._error_kind(
+        Exception('Failed to locate a cidr block')) == 'opaque:unparsed'
+    # An arbitrary server payload must never become a label value.
+    assert recovery_strategy._error_kind(
+        Exception('{"error": "quota exceeded"}')) == 'opaque:unparsed'
+
+
+def test_every_backoff_pending_call_site_passes_code():
+    """The primary control: no path may reach the backoff without a code.
+
+    Static, so it does not depend on any data existing -- unlike a NULL-code
+    row, which for 30 days cannot be told apart from a pre-deploy row.
+    """
+    tree = ast.parse(inspect.getsource(recovery_strategy))
+    calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and node.func.attr == 'set_backoff_pending_async'
+    ]
+    assert len(calls) == 2, 'call sites changed; update this test deliberately'
+    for call in calls:
+        assert any(kw.arg == 'code' for kw in call.keywords), (
+            f'set_backoff_pending_async at line {call.lineno} omits code=')
+
+
+def _codes(set_backoff_pending):
+    """The code= passed to every backoff write, in order."""
+    return [c.kwargs.get('code') for c in set_backoff_pending.call_args_list]
+
+
+@pytest.mark.asyncio
+async def test_launch_retry_code_for_unknown_exception(monkeypatch):
+    """An unknown error reaches the backoff row instead of vanishing.
+
+    max_retry=None is the initial-launch path, and the only one with the gap:
+    recover() passes _MAX_RETRY_CNT, so it already escapes to the controller.
+    """
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[ValueError('Unable to start local API server'), None])
+
+    assert await executor._launch(max_retry=None) == 123.45
+    assert _codes(patches.set_backoff_pending) == ['launch_retry:ValueError']
+
+
+@pytest.mark.asyncio
+async def test_launch_retry_code_for_job_submit_failure(monkeypatch):
+    """The path that carries no exception at all is still attributed."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+    # First attempt launches but the job never starts; second one works.
+    executor._wait_until_job_starts_on_cluster = mock.AsyncMock(
+        side_effect=[None, 123.45])
+
+    assert await executor._launch(max_retry=None) == 123.45
+    assert _codes(
+        patches.set_backoff_pending) == ['launch_retry:job_submit_failed']
+
+
+@pytest.mark.asyncio
+async def test_retry_code_resets_between_attempts(monkeypatch):
+    """Attempt 2 must not inherit attempt 1's kind.
+
+    The code is written in the NoClusterLaunchedError handler, long after the
+    exception is gone, so without the per-iteration reset a later attempt that
+    failed a different way reports the earlier attempt's class.
+    """
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[KeyError('status'), None, None])
+    executor._wait_until_job_starts_on_cluster = mock.AsyncMock(
+        side_effect=[None, 123.45])
+
+    assert await executor._launch(max_retry=None) == 123.45
+    assert _codes(patches.set_backoff_pending) == [
+        'launch_retry:KeyError',
+        'launch_retry:job_submit_failed',
+    ]
+
+
+@pytest.mark.asyncio
+async def test_resources_unavailable_is_not_an_unknown_error(monkeypatch):
+    """The expected path is coded distinctly from the unknowns."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    unavailable = exceptions.ResourcesUnavailableError('no capacity')
+    # A non-empty failover history of the same type is what makes _launch
+    # retry rather than fail the job at prechecks.
+    unavailable.failover_history = [
+        exceptions.ResourcesUnavailableError('zone a')
+    ]
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[unavailable, None])
+
+    assert await executor._launch(max_retry=None) == 123.45
+    assert _codes(
+        patches.set_backoff_pending) == ['launch_retry:resources_unavailable']
+
+
+@pytest.mark.asyncio
+async def test_pool_no_cluster_is_not_an_unknown_error(monkeypatch):
+    """The commonest benign state must not read as an unknown launch error.
+
+    It is raised inside the block the broad except guards, and pool jobs back
+    off every second, so left to the class it would be the whole inventory.
+    """
+    executor = _make_launch_executor()
+    executor.pool = 'my-pool'
+    executor.job_id_on_pool_cluster = None
+    patches = _patch_launch_environment(monkeypatch)
+    monkeypatch.setattr(recovery_strategy.serve_utils, 'get_next_cluster_name',
+                        lambda *a, **k: None)
+    monkeypatch.setattr(recovery_strategy.state,
+                        'set_job_id_on_pool_cluster',
+                        mock.MagicMock(),
+                        raising=False)
+
+    # A pool with no capacity never finishes, so this one cannot assert on a
+    # returned value like the others. Wait for the backoff write itself rather
+    # than for a fixed duration: a fixed window makes the result depend on how
+    # busy the machine is, and this test is the one the revert check leans on.
+    task = asyncio.create_task(executor._launch(max_retry=None))
+    for _ in range(500):
+        if patches.set_backoff_pending.call_args_list:
+            break
+        await asyncio.sleep(0.01)
+    task.cancel()
+    await _cleanup_task(task)
+
+    codes = _codes(patches.set_backoff_pending)
+    assert codes, 'the pool job never reached the backoff'
+    assert set(codes) == {'launch_retry:pool_no_cluster'}
+
+
+@pytest.mark.asyncio
+async def test_provision_no_cluster_launched_is_not_pool(monkeypatch):
+    """The second arm: the same class from the provisioner is not benign.
+
+    aws/config.py and azure/config.py raise NoClusterLaunchedError for real
+    provisioning failures. A class-based handler would file those as
+    pool_no_cluster and they would never escalate.
+    """
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(side_effect=[
+        exceptions.NoClusterLaunchedError('Failed to create security group'),
+        None,
+    ])
+
+    assert await executor._launch(max_retry=None) == 123.45
+    assert _codes(
+        patches.set_backoff_pending) == ['launch_retry:NoClusterLaunchedError']
+
+
+@pytest.mark.asyncio
+async def test_inventory_is_not_capped_when_the_metric_is(monkeypatch):
+    """Why job_events.code stays even though the Counter exists.
+
+    The metric's label budget folds rare kinds into 'other'. A rare kind is
+    exactly what this instrumentation exists to surface, so the durable row
+    must keep it by name.
+    """
+    from sky.metrics import utils as metrics_utils
+
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+
+    counter = mock.MagicMock()
+    monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', True)
+    monkeypatch.setattr(metrics_utils, 'SKY_MANAGED_JOB_LAUNCH_RETRY_TOTAL',
+                        counter)
+    # Spend the whole budget on other kinds first.
+    with metrics_utils._launch_retry_kinds_lock:
+        saved = set(metrics_utils._launch_retry_kinds)
+        metrics_utils._launch_retry_kinds.clear()
+        metrics_utils._launch_retry_kinds.update(
+            f'aws:Filler{i}'
+            for i in range(metrics_utils._MAX_LAUNCH_RETRY_KINDS))
+    try:
+        rare = _roundtrip(_rare_cloud_exception())
+        executor._await_launch_request = mock.AsyncMock(
+            side_effect=[rare, None])
+        assert await executor._launch(max_retry=None) == 123.45
+
+        # The metric folded it away...
+        assert counter.labels.call_args.kwargs == {
+            'kind': metrics_utils.LAUNCH_RETRY_KIND_OTHER
+        }
+        # ...and the inventory kept it, by name.
+        assert _codes(patches.set_backoff_pending) == [
+            'launch_retry:kubernetes:RareApiException'
+        ]
+    finally:
+        with metrics_utils._launch_retry_kinds_lock:
+            metrics_utils._launch_retry_kinds.clear()
+            metrics_utils._launch_retry_kinds.update(saved)
+
+
+def _rare_cloud_exception():
+
+    class RareApiException(Exception):
+        pass
+
+    RareApiException.__module__ = 'kubernetes.client.exceptions'
+    return RareApiException('a kind never seen before')
+
+
+@pytest.mark.asyncio
+async def test_parked_path_is_coded_but_not_counted(monkeypatch):
+    """Parking is not a launch retry; counting it would blur the metric."""
+    from sky.metrics import utils as metrics_utils
+
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    counter = mock.MagicMock()
+    monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', True)
+    monkeypatch.setattr(metrics_utils, 'SKY_MANAGED_JOB_LAUNCH_RETRY_TOTAL',
+                        counter)
+
+    executor._wait_for_parked_request = mock.AsyncMock(
+        side_effect=lambda request_id: request_id)
+    executor._await_launch_request = mock.AsyncMock(side_effect=[
+        recovery_strategy._LaunchRequestParked('req-123',
+                                               'Waiting on queue foo.'),
+        None,
+    ])
+
+    assert await executor._launch(max_retry=None) == 123.45
+    assert _codes(patches.set_backoff_pending) == ['launch_parked']
+    counter.labels.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_bounded_max_retry_escalates_instead_of_coding(monkeypatch):
+    """The gap is initial-launch-only, which the commit message claims.
+
+    recover() passes _MAX_RETRY_CNT, so the same failure that loops forever on
+    the initial launch exhausts and reaches the controller instead. Asserted
+    with a small max_retry: the real 240 is about four hours of backoff.
+    """
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=ValueError('Unable to start local API server'))
+
+    with pytest.raises(exceptions.ManagedJobReachedMaxRetriesError):
+        await executor._launch(max_retry=2, raise_on_failure=True)
+
+    # One backoff row for the attempt that retried; the attempt that exhausted
+    # the budget escalates rather than being absorbed and coded.
+    assert _codes(patches.set_backoff_pending) == ['launch_retry:ValueError']

@@ -816,6 +816,76 @@ def count_managed_job_start(outcome: str, path: str, workspace: str) -> None:
         logger.error(f'Failed to count a managed job start: {e}')
 
 
+# Launch attempts the managed-jobs controller absorbed and retried. Counted
+# even though they are retried: a job's initial launch retries forever, so an
+# error that is only logged is invisible no matter how often it happens.
+#
+# kind is structural -- an exception class, or the clause for the paths that
+# carry no exception -- never a formatted message. It is bounded per release
+# except for the two open families (`<cloud>:<class>` and `opaque:<class>`,
+# both spelled with a colon), which are capped per process below. The durable
+# job_events.code column carries the same value uncapped, and is what an
+# inventory of the real population is read from.
+SKY_MANAGED_JOB_LAUNCH_RETRY_TOTAL = prom.Counter(
+    'sky_managed_job_launch_retry_total',
+    'Managed-job launch attempts that failed and were retried, by kind',
+    ['kind'],
+)
+
+# Series budget for the open kind families. Sized per *fleet*, not per process:
+# each controller keeps its own set and the scrape exposes the union, so the
+# real bound is this times the controller count, which
+# controller_utils.MAX_CONTROLLERS puts at 64. At 8 that is ~512 series worst
+# case; the obvious 100 would have been 6400, i.e. no cap at all in the case a
+# cap exists for.
+#
+# Admission is first-seen rather than by count -- ranking needs counts, which a
+# Counter cannot read back -- so a dominant kind that arrives once the set is
+# full stays in OTHER for that process's life. Both that and the tightness here
+# are tolerable only because job_events.code is uncapped: a kind missing from
+# the metric is still in the inventory by name. Raise this deliberately if a
+# deployment's inventory shows a tail worth alerting on.
+_MAX_LAUNCH_RETRY_KINDS = 8
+LAUNCH_RETRY_KIND_OTHER = 'other'
+_launch_retry_kinds: Set[str] = set()
+_launch_retry_kinds_lock = threading.Lock()
+
+
+def _capped_launch_retry_kind(kind: str) -> str:
+    """Fold an open-family kind into OTHER once the budget is spent.
+
+    Closed families (a bare class name, or one of the fixed no-exception
+    kinds) are exempt: they change only when the tree changes, so capping
+    them would spend the budget on the one part that cannot grow.
+    """
+    if ':' not in kind:
+        return kind
+    with _launch_retry_kinds_lock:
+        if kind in _launch_retry_kinds:
+            return kind
+        if len(_launch_retry_kinds) >= _MAX_LAUNCH_RETRY_KINDS:
+            return LAUNCH_RETRY_KIND_OTHER
+        _launch_retry_kinds.add(kind)
+        return kind
+
+
+def count_launch_retry(kind: str) -> None:
+    """Record one absorbed launch failure.
+
+    Best-effort by construction, and lossy in one way worth knowing: an API
+    server restart wipes PROMETHEUS_MULTIPROC_DIR, which permanently silences
+    the metrics of jobs controllers that outlive it. Read a population from
+    job_events.code, not from this.
+    """
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_MANAGED_JOB_LAUNCH_RETRY_TOTAL.labels(
+            kind=_capped_launch_retry_kind(kind)).inc()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to count a managed job launch retry: {e}')
+
+
 def observe_managed_job_phase(phase: str, workspace: str,
                               duration_seconds: float) -> None:
     """Record one phase of a managed job reaching RUNNING."""
