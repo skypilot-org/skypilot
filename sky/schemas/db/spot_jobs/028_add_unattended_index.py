@@ -39,12 +39,9 @@ def upgrade():
     """Add the claimed-in-flight index."""
     bind = op.get_bind()
     existing = {ix['name'] for ix in sa.inspect(bind).get_indexes('spot')}
-    # Dropped first rather than skipped when present, for 027's reason: this
-    # revision is unreleased, so a deployment that ran an earlier version of it
-    # would otherwise keep that index forever.
+    if _UNATTENDED_INDEX in existing:
+        return
     with op.get_context().autocommit_block():
-        if _UNATTENDED_INDEX in existing:
-            op.drop_index(_UNATTENDED_INDEX, table_name='spot')
         op.create_index(_UNATTENDED_INDEX,
                         'spot', ['submitted_at'],
                         postgresql_where=sa.text(
