@@ -1234,9 +1234,18 @@ class SkyPilotReplicaManager(ReplicaManager):
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
             # Pull the actual cluster status from the cloud provider to
             # determine whether the cluster is preempted.
-            cluster_status, _ = backend_utils.refresh_cluster_status_handle(
-                info.cluster_name,
-                force_refresh_statuses=set(status_lib.ClusterStatus))
+            try:
+                cluster_status, _ = backend_utils.refresh_cluster_status_handle(
+                    info.cluster_name,
+                    force_refresh_statuses=set(status_lib.ClusterStatus))
+            except exceptions.ClusterStatusFetchingError as e:
+                # An unavailable status is not proof of preemption. Let the
+                # readiness probe apply its existing failure timeout rather
+                # than aborting the probe loop and skipping that timeout.
+                logger.warning(f'Could not check preemption for replica '
+                               f'{info.replica_id}: '
+                               f'{common_utils.format_exception(e)}')
+                return False
 
         if cluster_status in (status_lib.ClusterStatus.UP,
                               status_lib.ClusterStatus.AUTOSTOPPING):
