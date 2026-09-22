@@ -2247,6 +2247,14 @@ KUBERNETES_FAILURE_HINTS: List[Tuple[List[str], str]] = [
     (['ephemeral'],
      'The pod exceeded its ephemeral (local) storage limit and was evicted. '
      'To fix: Increase `resources.disk_size` in your task YAML.'),
+    # 'PodsReadyTimeout' must precede 'Evicted': Kueue's eviction reason
+    # (WorkloadEvictedDueToPodsReadyTimeout) contains both, and the first
+    # match wins -- and it is not a node-pressure eviction.
+    (['PodsReadyTimeout'],
+     'Kueue admitted the pod but its containers did not become ready within '
+     'the waitForPodsReady timeout, usually because the image took too long '
+     'to pull. To fix: Pre-pull the image on the nodes, or raise '
+     '`waitForPodsReady.timeout` in the Kueue configuration.'),
     (['Evicted'],
      'The pod was evicted by the node under resource pressure. To fix: Increase the '
      'relevant request (`resources.memory` or `resources.disk_size`) '
