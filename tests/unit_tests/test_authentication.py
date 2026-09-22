@@ -141,10 +141,10 @@ def _register_runpod_key(tmp_path, key_content):
     be registered with RunPod."""
     pub_key_path = tmp_path / 'sky-key.pub'
     pub_key_path.write_text(key_content)
-    mock_runpod = MagicMock()
+    mock_runpod_utils = MagicMock()
     with patch('sky.authentication.auth_utils.get_or_generate_keys',
                return_value=('priv', str(pub_key_path))), \
-         patch('sky.authentication.runpod', mock_runpod), \
+         patch('sky.authentication.runpod_utils', mock_runpod_utils), \
          patch('sky.authentication.configure_ssh_info',
                side_effect=lambda config: config), \
          patch('sky.utils.common_utils.get_user_hash',
@@ -152,9 +152,9 @@ def _register_runpod_key(tmp_path, key_content):
          patch('sky.utils.common_utils.get_cleaned_username',
                return_value='alice'):
         auth.setup_runpod_authentication({'auth': {}})
-    add_ssh_key = mock_runpod.runpod.cli.groups.ssh.functions.add_ssh_key
-    add_ssh_key.assert_called_once()
-    return add_ssh_key.call_args[0][0]
+    register_ssh_key = mock_runpod_utils.register_ssh_key
+    register_ssh_key.assert_called_once()
+    return register_ssh_key.call_args[0][0]
 
 
 def test_setup_runpod_authentication_labels_bare_key(tmp_path):

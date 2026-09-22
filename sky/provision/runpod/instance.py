@@ -49,7 +49,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
     del cluster_name  # unused
-    pending_status = ['CREATED', 'RESTARTING']
+    pending_status = ['PROVISIONING', 'STARTING']
 
     while True:
         instances = _filter_instances(cluster_name_on_cloud, pending_status)
@@ -170,7 +170,7 @@ def terminate_instances(
     """See sky/provision/__init__.py"""
     del provider_config  # unused
     instances = _filter_instances(cluster_name_on_cloud, None)
-    template_name, registry_auth_id = utils.get_registry_auth_resources(
+    template_id, registry_auth_id = utils.get_registry_auth_resources(
         cluster_name_on_cloud)
     for inst_id, inst in instances.items():
         logger.debug(f'Terminating instance {inst_id}: {inst}')
@@ -184,8 +184,8 @@ def terminate_instances(
                     f'Failed to terminate instance {inst_id}: '
                     f'{common_utils.format_exception(e, use_bracket=False)}'
                 ) from e
-    if template_name is not None:
-        utils.delete_pod_template(template_name)
+    if template_id is not None:
+        utils.delete_pod_template(template_id)
     if registry_auth_id is not None:
         utils.delete_register_auth(registry_auth_id)
 
@@ -202,7 +202,9 @@ def get_cluster_info(
         instances[instance_id] = [
             common.InstanceInfo(
                 instance_id=instance_id,
-                internal_ip=instance_info['internal_ip'],
+                # RunPod pods have no private network; the public IP is the
+                # only address other nodes can reach.
+                internal_ip=instance_info['external_ip'],
                 external_ip=instance_info['external_ip'],
                 ssh_port=instance_info['ssh_port'],
                 tags={},
@@ -247,16 +249,17 @@ def query_instances(
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
 
+    # ERROR and TERMINATED pods hold no compute and map to None.
     status_map = {
-        'CREATED': status_lib.ClusterStatus.INIT,
-        'RESTARTING': status_lib.ClusterStatus.INIT,
-        'PAUSED': status_lib.ClusterStatus.INIT,
+        'PROVISIONING': status_lib.ClusterStatus.INIT,
+        'STARTING': status_lib.ClusterStatus.INIT,
         'RUNNING': status_lib.ClusterStatus.UP,
+        'EXITED': status_lib.ClusterStatus.STOPPED,
     }
     statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
                               Optional[str]]] = {}
     for inst_id, inst in instances.items():
-        status = status_map[inst['status']]
+        status = status_map.get(inst['status'])
         if non_terminated_only and status is None:
             continue
         statuses[inst_id] = (status, None)
