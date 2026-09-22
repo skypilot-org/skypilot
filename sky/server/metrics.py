@@ -8,7 +8,7 @@ import os
 import re
 import threading
 import time
-from typing import Dict, FrozenSet, List, Optional, Set, Tuple
+from typing import Callable, Dict, FrozenSet, List, Optional, Set, Tuple
 
 import fastapi
 from prometheus_client import core as prom_core
@@ -28,11 +28,13 @@ from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
 from sky.server import constants as server_constants
 from sky.server import local_disk
+from sky.server import loop_stall
 from sky.server import middleware_utils
 from sky.skylet import runtime_utils
 from sky.utils import annotations
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import perf_utils
 from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -1248,6 +1250,160 @@ def metrics() -> fastapi.Response:
                             headers={'Cache-Control': 'no-cache'})
 
 
+class _FederationTargets:
+    """Which clusters a federation scrape covers, resolved off the loop.
+
+    The metrics server serves /metrics, /gpu-metrics and /endpoints-metrics
+    from one event loop, so whatever blocks that loop takes the /metrics
+    scrape down with it -- and the federation routes used to open by
+    reloading the server config (a database read on Postgres-backed
+    deployments), dropping the request-level caches and re-reading the
+    kubeconfig, inline. Exactly the outage those metrics are needed for is
+    the one that makes that work slow.
+
+    So a scrape never does it. A scrape reads ``snapshot()`` and asks for a
+    background refresh with ``start_refresh_if_idle()``; the refresh
+    publishes to the cache for a later scrape. This is the shape the
+    collectors already use (see ResilientCollector) and it is what keeps a
+    slow refresh from costing anything: merely moving the work to a thread
+    the handler awaits would leave the loop free, but every scrape would
+    still wait the full refresh, and one slower than the scrape timeout (45s
+    against a 60s interval for both federation routes) would then be
+    cancelled by Prometheus on every single scrape -- each one starting a
+    fresh attempt that completes just in time to be thrown away, so the
+    routes would federate nothing at all for as long as it lasted, with the
+    cached snapshot never reached because two scrapes never overlap.
+
+    At most one refresh runs at a time, so a refresh hung on an unreachable
+    database cannot accumulate one stuck thread per scrape and starve the
+    executor the port-forwards run in. Like ResilientCollector, a hung
+    refresh is deliberately neither cancelled nor retried: a thread blocked
+    in a DB driver cannot be killed, and retrying only adds load.
+
+    The cost is staleness: the cluster list is up to one refresh old. The
+    refresh is primed at server start (see start_metrics_server) so the
+    first scrape is not the one paying for it, and a refresh that stops
+    completing is reported rather than silent --
+    sky_apiserver_federation_targets_last_success_timestamp_seconds stops
+    advancing, and time() - it is the age of the list being served.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._refreshing = False
+        # (remote contexts, Slurm clusters) of the last successful refresh.
+        self._snapshot: Tuple[List[str], List[str]] = ([], [])
+
+    def _prologue(self) -> Tuple[List[str], List[str]]:
+        """Blocking; runs on the refresh thread.
+
+        The metrics server runs as a daemon thread, not as a normal request
+        handler, so:
+        1. The global config context (allowed_contexts, etc.) is a snapshot
+           from startup. Reload it from the DB to pick up config changes.
+        2. Request-scoped caches (kubernetes API clients, context names) are
+           never cleared automatically. Clear them to pick up new kubeconfigs.
+
+        Both reloads land where the loop thread will see them, which is what
+        makes running them off-thread safe at all: with no request context
+        set (this app installs no middleware) skypilot_config writes its
+        process-global config context, and even with one set,
+        contextvars.copy_context() -- what a worker thread is handed --
+        shares the context object rather than cloning it, so the write still
+        lands on the object the loop reads. The request-level caches are
+        process-global either way. Concurrent readers are safe because
+        _reload_config_as_server() is written for them: it builds the new
+        config fully and swaps it in with a single _set_loaded_config, and
+        says so.
+
+        Contexts that point at the API server's own cluster are dropped: the
+        central Prometheus scrapes the local cluster's exporters directly, so
+        federating them again would only duplicate the raw series under a
+        stamped copy. The dashboard matches the local cluster with cluster=""
+        (see /dashboard_config local_contexts).
+        """
+        skypilot_config.reload_config()
+        annotations.clear_request_level_cache()
+        contexts = core.get_all_contexts()
+        _, remote_contexts = metrics_utils.split_local_remote_contexts(contexts)
+        # Slurm clusters federate through their login node; only clusters
+        # with a configured prometheus_url participate. Enumeration reads
+        # local config only, and is shared by both routes so the snapshot has
+        # one shape (/endpoints-metrics ignores it).
+        return remote_contexts, metrics_utils.get_slurm_metrics_clusters()
+
+    def _run_refresh(self) -> None:
+        """Refresh thread: publish the new snapshot, then release the guard.
+
+        A failure keeps the previous snapshot rather than publishing an empty
+        one -- every cluster's series vanishing at once is worse than a stale
+        list, and the freshness gauge reports the staleness either way.
+
+        The guard is released in a ``finally``, which is load-bearing rather
+        than tidiness: every path that could leave it set leaves it set for
+        the life of the process, and that is the exact state this class
+        exists to avoid -- every later scrape serving a frozen list and
+        starting nothing. A ``finally`` covers the paths an ``except
+        Exception`` does not, namely a BaseException out of the prologue and
+        a logging call that raises while handling one.
+        """
+        try:
+            snapshot = self._prologue()
+        except Exception:  # pylint: disable=broad-except
+            logger.exception('Failed to refresh the federation targets; '
+                             'serving the previous cluster list.')
+            return
+        else:
+            with self._lock:
+                self._snapshot = snapshot
+                # Stamped and published together, so a reader cannot see a
+                # new list with the old timestamp or the reverse.
+                metrics_utils.SKY_APISERVER_FEDERATION_TARGETS_LAST_SUCCESS_TIMESTAMP_SECONDS.set(  # pylint: disable=line-too-long
+                    time.time())
+        finally:
+            with self._lock:
+                self._refreshing = False
+
+    def start_refresh_if_idle(self) -> Optional[threading.Thread]:
+        """Starts a refresh unless one is already running.
+
+        Returns the thread so start-up and tests can join it; a scrape fires
+        and forgets. The check and the flip happen together under the lock so
+        two concurrent scrapes cannot both start one.
+        """
+        with self._lock:
+            if self._refreshing:
+                return None
+            self._refreshing = True
+        thread = threading.Thread(target=self._run_refresh,
+                                  name='metrics-federation-targets',
+                                  daemon=True)
+        try:
+            thread.start()
+        except RuntimeError:
+            # Cannot start a thread (the process is out of them). Give the
+            # guard back: holding it would mean no refresh is ever attempted
+            # again, long after the pressure passed.
+            logger.exception('Could not start the federation target '
+                             'refresh; serving the previous cluster list.')
+            with self._lock:
+                self._refreshing = False
+            return None
+        return thread
+
+    def snapshot(self) -> Tuple[List[str], List[str]]:
+        """The cluster list a scrape should federate. A pure read.
+
+        Deliberately does not ask for a refresh: a reader that also mutates
+        needs a warning at every call site, and the callers pair this with an
+        explicit ``start_refresh_if_idle()`` instead.
+        """
+        with self._lock:
+            return self._snapshot
+
+
+_FEDERATION_TARGETS = _FederationTargets()
+
 # Per-context timeout for metrics collection. Must be shorter than the
 # Prometheus scrape_timeout configured on the upstream Prometheus that
 # scrapes this endpoint so the response arrives before that scrape times
@@ -1267,8 +1423,13 @@ _CREDENTIAL_MANAGER_KUBECONFIG_PATH = (
 
 
 @metrics_app.get('/debug-gpu-metrics')
-async def gpu_metrics_debug() -> dict:
-    """Debug endpoint for diagnosing GPU metrics collection issues."""
+def gpu_metrics_debug() -> dict:
+    """Debug endpoint for diagnosing GPU metrics collection issues.
+
+    Declared sync for the same reason /metrics is: every call below blocks
+    (kubeconfig reads, context discovery), and this route shares its event
+    loop with the /metrics scrape. Starlette runs it in a worker thread.
+    """
     kubeconfig_env = os.environ.get('KUBECONFIG', 'NOT_SET')
     default_path = os.path.expanduser('~/.kube/config')
 
@@ -1366,26 +1527,12 @@ def _handle_federation_result(context: str, route: str, result: object,
 @metrics_app.get('/gpu-metrics')
 async def gpu_metrics() -> fastapi.Response:
     """Gets the GPU metrics from multiple external k8s clusters"""
-    # The metrics server runs as a daemon thread, not as a normal request
-    # handler, so:
-    # 1. The global config context (allowed_contexts, etc.) is a snapshot
-    #    from startup. Reload it from the DB to pick up config changes.
-    # 2. Request-scoped caches (kubernetes API clients, context names) are
-    #    never cleared automatically. Clear them to pick up new kubeconfigs.
-    skypilot_config.reload_config()
-    annotations.clear_request_level_cache()
-    contexts = core.get_all_contexts()
+    # Served from the last refresh and asking for the next one, both off
+    # this loop; see _FederationTargets for why a scrape may neither do that
+    # work nor wait for it.
+    remote_contexts, slurm_clusters = _FEDERATION_TARGETS.snapshot()
+    _FEDERATION_TARGETS.start_refresh_if_idle()
     all_metrics: List[str] = []
-
-    # Skip contexts that point at the API server's own cluster: the central
-    # Prometheus scrapes the local cluster's exporters directly, so
-    # federating them again would only duplicate the raw series under a
-    # stamped copy. The dashboard matches the local cluster with cluster=""
-    # (see /dashboard_config local_contexts). Non-blocking: verdicts come
-    # from the detection cache and any probing happens in a background
-    # worker, so a slow or broken context cannot stall this scrape (or
-    # the co-located /metrics scrape) no matter how it fails.
-    _, remote_contexts = metrics_utils.split_local_remote_contexts(contexts)
     # One stats record per context, filled in by get_metrics_for_context even
     # if the task is later cancelled by the wait_for timeout — so the timeout
     # log can report how far the attempt got (port-forward vs. federate).
@@ -1398,14 +1545,12 @@ async def gpu_metrics() -> fastapi.Response:
             )) for context, stats in zip(remote_contexts, stats_list)
     ]
 
-    # Slurm clusters federate through their login node (see
-    # get_metrics_for_slurm_cluster); only clusters with a configured
-    # prometheus_url participate. Their series ride the same scrape,
+    # Slurm clusters (resolved above) federate through their login node (see
+    # get_metrics_for_slurm_cluster). Their series ride the same scrape,
     # stamped cluster="slurm/<name>", under the same per-context budget:
     # the budget is passed down so the SSH invocation is hard-killed at
     # the same instant wait_for() gives up on it. There is no port-forward
     # phase on this path, so its stats omit that phase.
-    slurm_clusters = metrics_utils.get_slurm_metrics_clusters()
     slurm_contexts = [
         metrics_utils.SLURM_CONTEXT_PREFIX + name for name in slurm_clusters
     ]
@@ -1447,16 +1592,11 @@ async def endpoint_metrics() -> fastapi.Response:
     DCGM/node metrics. The cluster= label is injected so the Grafana
     serving dashboards can filter by cluster.
     """
-    # Same daemon-thread caveats as /gpu-metrics: reload config from the DB
-    # (allowed_contexts etc. are a startup snapshot) and clear request-scoped
-    # caches so new kubeconfigs are picked up.
-    skypilot_config.reload_config()
-    annotations.clear_request_level_cache()
-    contexts = core.get_all_contexts()
+    # Same off-loop refresh as /gpu-metrics, sharing its snapshot; the Slurm
+    # half of it does not apply to this route.
+    remote_contexts, _ = _FEDERATION_TARGETS.snapshot()
+    _FEDERATION_TARGETS.start_refresh_if_idle()
     all_metrics: List[str] = []
-
-    # Same local-context handling as /gpu-metrics above (non-blocking).
-    _, remote_contexts = metrics_utils.split_local_remote_contexts(contexts)
     stats_list = [metrics_utils.FederationStats() for _ in remote_contexts]
     tasks = [
         asyncio.create_task(
@@ -1489,6 +1629,25 @@ def build_metrics_server(host: str, port: int) -> uvicorn.Server:
     )
     metrics_server_instance = uvicorn.Server(metrics_config)
     return metrics_server_instance
+
+
+def _metrics_loop_lag_observer() -> Callable[[float], None]:
+    """Records the metrics server loop's lag; see loop_stall.start_lag_monitor.
+
+    A closure so the threshold is read once rather than on every tick.
+    """
+    lag_threshold = perf_utils.get_loop_lag_threshold()
+
+    def observe(lag: float) -> None:
+        if not metrics_utils.METRICS_ENABLED:
+            return
+        if lag_threshold is not None and lag > lag_threshold:
+            logger.warning(
+                f'Metrics server event loop lag {lag} seconds exceeds '
+                f'threshold {lag_threshold} seconds.')
+        metrics_utils.SKY_APISERVER_METRICS_LOOP_LAG_SECONDS.observe(lag)
+
+    return observe
 
 
 # The metrics server, so stop_metrics_server() can reach the instance
@@ -1524,9 +1683,23 @@ def start_metrics_server(host: str, port: int) -> uvicorn.Server:
     server = build_metrics_server(host, port)
     _metrics_server = server
 
+    # Load the first snapshot now rather than leaving the first scrape to
+    # kick it off and federate nothing while it runs.
+    _FEDERATION_TARGETS.start_refresh_if_idle()
+
+    async def _serve_instrumented() -> None:
+        # Instrument this loop the way the request-serving loops are. It is
+        # the loop everything on this app shares, so its lag is the direct
+        # measure of "something is holding /metrics off"; without it the
+        # only symptom is the scrape target going down, which says nothing
+        # about why.
+        loop_stall.start_lag_monitor(asyncio.get_running_loop(),
+                                     _metrics_loop_lag_observer())
+        await server.serve()
+
     def _serve() -> None:
         try:
-            asyncio.run(server.serve())
+            asyncio.run(_serve_instrumented())
         except SystemExit:
             # uvicorn calls sys.exit(1) when it cannot bind, and
             # threading.excepthook drops SystemExit on the floor, so

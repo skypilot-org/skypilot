@@ -263,7 +263,8 @@ def bulk_provision(
         count=num_nodes,
         tags={},
         resume_stopped_nodes=True,
-        ports_to_open_on_launch=ports_to_open_on_launch)
+        ports_to_open_on_launch=ports_to_open_on_launch,
+        prev_cluster_ever_up=prev_cluster_ever_up)
 
     # None outside a server-side request execution, where no scheduler exists
     # to park and resume a launch -- so no attempt can ever be resumed there,
