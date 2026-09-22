@@ -79,3 +79,32 @@ To ensure your VM’s IP address remains static across stop-start operations, se
       use_static_ip_address: true
 
 Not working with `use_internal_ips`
+
+Spot VMs
+--------
+
+Set ``resources.use_spot: true`` to explicitly accept the current Nebius spot
+price. SkyPilot launches price-taking VMs; no pricing policy is required.
+Prices can change while a VM runs, and SkyPilot does not set a maximum bid.
+Displayed costs are estimates; ``max_hourly_cost`` filters estimated costs
+and does not enforce a running price limit.
+
+Use ``sky jobs launch task.yaml`` for managed recovery after preemption.
+
+Migrating existing preemptible VMs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Upgrading SkyPilot does not opt existing VMs into spot pricing. When Nebius
+enables auctions for a region and SKU, legacy preemptible VMs are stopped
+and cannot restart until their owners explicitly opt in.
+
+To preserve an existing cluster:
+
+1. Stop it with ``sky stop <cluster-name>`` if it is still running.
+2. Using the Nebius console or API, explicitly select price-taking spot pricing
+   for **each stopped VM**, including the head and workers. In the API, set
+   ``spec.follows_spot_price`` to ``{}`` and preserve the other VM settings.
+3. Run ``sky start <cluster-name>`` after every VM has been opted in.
+
+SkyPilot reports a migration error when asked to restart a legacy VM; it does
+not change the VM's pricing consent automatically.

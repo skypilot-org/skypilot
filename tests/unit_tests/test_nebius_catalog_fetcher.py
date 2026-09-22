@@ -111,6 +111,7 @@ def _install_fake_nebius_modules(monkeypatch, responses):
         InstanceSpec=_Proto,
         ResourcesSpec=_Proto,
         PreemptibleSpec=_FakePreemptibleSpec,
+        FollowsSpotPriceSpec=_Proto,
     )
     fake_common = SimpleNamespace(ResourceMetadata=_Proto)
 
@@ -186,10 +187,12 @@ def test_estimate_platforms_uses_billing_v1_request_shape(monkeypatch):
 
     regular_spec = regular_request.resource_specs[0].spec.message.spec
     assert not hasattr(regular_spec, 'preemptible')
+    assert not hasattr(regular_spec, 'follows_spot_price')
 
     spot_spec = spot_request.resource_specs[0].spec.message.spec
     assert spot_spec.preemptible.on_preemption == (
         _PREEMPTIBLE_ON_PREEMPTION_STOP)
+    assert isinstance(spot_spec.follows_spot_price, _Proto)
 
 
 def test_get_hourly_total_cost_reads_hourly_general_total():

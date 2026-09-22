@@ -269,12 +269,8 @@ cloud_dependencies: Dict[str, List[str]] = {
     'nebius': [
         # Nebius requires grpcio and protobuf, so we need to include
         # our constraints here.
-        # >=0.3.77 exposes the billing v1 calculator API used by catalog
-        # fetching.
-        # 0.4.1 and 0.4.2 pool grpc.aio channels without event loop affinity
-        # and fail with "attached to a different loop"; fixed in 0.4.3.
-        # https://github.com/nebius/pysdk/issues/178
-        'nebius>=0.3.77,!=0.4.1,!=0.4.2',
+        # 0.6.12 adds explicit spot price-taking in Compute instance specs.
+        'nebius>=0.6.12',
         GRPC,
         PROTOBUF,
     ] + aws_dependencies,
