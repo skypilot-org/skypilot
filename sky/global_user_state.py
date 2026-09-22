@@ -2422,7 +2422,7 @@ def get_cluster_name_reservations() -> List[Dict[str, Any]]:
     return [{
         'name': row.name,
         'handle': pickle.loads(row.handle),
-        'owner': json.loads(row.owner) if row.owner is not None else None,
+        'owner': _load_owner(row.owner),
         'yaml': row.yaml,
     } for row in rows]
 

@@ -182,6 +182,23 @@ def test_same_aws_account_different_principal_collides(state: None) -> None:
             pytest.fail('Principal changes must not bypass account ownership')
 
 
+@pytest.mark.parametrize('owner', ['123456789012', 'legacy-account'])
+def test_legacy_scalar_owner_reserves_cloud_name(state: None,
+                                                 owner: str) -> None:
+    rendered = config(module='sky.provision.aws', region='us-east-1')
+    save_cluster('first', rendered)
+    with global_user_state._db_manager.get_engine().begin() as connection:
+        connection.execute(global_user_state.cluster_table.update().where(
+            global_user_state.cluster_table.c.name == 'first').values(
+                owner=owner))
+
+    with pytest.raises(exceptions.ClusterNameCollisionError):
+        with reserve('second', rendered, ['role', owner]):
+            pytest.fail('Legacy owner must retain its reservation')
+    with reserve('unrelated', config('different-cloud-name'), None):
+        pass
+
+
 def test_kubernetes_context_aliases_do_not_prove_disjoint_namespaces(
         state: None) -> None:
     save_cluster(
