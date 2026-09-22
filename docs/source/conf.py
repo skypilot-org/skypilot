@@ -113,7 +113,6 @@ html_theme_options = {
     ],
     'navbar_persistent': ['search-button-field'],
     'logo': {
-        'link': 'https://skypilot.ai/',
         'svg': render_svg_logo('_static/SkyPilot_wide_light.svg'),
     },
     'icon_links': [{
