@@ -78,20 +78,28 @@ _GOLDEN_DIR = (pathlib.Path(__file__).parents[1] / 'test_sky' / 'clouds' /
                'testdata' / 'kubernetes_ray_template')
 
 
-def _provider_config(case: str):
+def _provider_config(case: str, extra: dict):
     """The provider block a rendered template actually produces."""
     rendered = json.loads((_GOLDEN_DIR / f'{case}.json').read_text())
     provider = dict(rendered['provider'])
     provider['namespace'] = 'default'
     provider['skypilot_system_namespace'] = 'skypilot-system'
+    provider.update(extra)
     return provider
 
 
-@pytest.mark.parametrize('case,service_account', [
-    ('base_cpu', 'skypilot-service-account'),
-    ('controller', 'skypilot-controller-service-account'),
-])
-def test_bootstrap_tolerates_omitted_rbac_fields(case, service_account):
+@pytest.mark.parametrize(
+    'case,service_account,extra',
+    [
+        ('base_cpu', 'skypilot-service-account', {}),
+        ('controller', 'skypilot-controller-service-account', {}),
+        # Ingress port mode is the last consumer of a now-conditional field that
+        # sits behind a condition of its own, so no other case reaches it.
+        ('base_cpu', 'skypilot-service-account', {
+            'port_mode': 'ingress'
+        }),
+    ])
+def test_bootstrap_tolerates_omitted_rbac_fields(case, service_account, extra):
     """bootstrap_instances survives whichever RBAC fields the template omits.
 
     A workload cluster renders none of the provisioner-only roles, so every
@@ -100,7 +108,7 @@ def test_bootstrap_tolerates_omitted_rbac_fields(case, service_account):
     what is rendered, not what reads it.
     """
     cfg = provision_common.ProvisionConfig(
-        provider_config=_provider_config(case),
+        provider_config=_provider_config(case, extra),
         authentication_config={},
         docker_config={},
         node_config={'spec': {
