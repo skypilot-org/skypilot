@@ -2852,16 +2852,26 @@ def _update_cluster_status(
     # We have mitigated this by again first querying the VM state from the cloud
     # provider.
     cloud = handle.launched_resources.cloud
+    runtime_metadata = handle.provision_runtime_metadata
+    uses_ray = cloud is not None and cloud.uses_ray()
+    # A fresh handle has no runtime capabilities until provisioning completes.
+    # Failed setup must not look like an intentionally Ray-free runtime, even
+    # if a retry retained IPs and a healthy Ray process from the previous run.
+    # Only the SkyPilot provisioner replaces this metadata; legacy Ray
+    # autoscaler clouds retain the defaults even after successful provisioning.
+    runtime_setup_incomplete = (
+        uses_ray and cloud is not None and
+        cloud.PROVISIONER_VERSION >= clouds.ProvisionerVersion.SKYPILOT and
+        not (runtime_metadata.has_ray or runtime_metadata.runtime_setup_done))
 
     # Skip Ray health check for clouds that don't use Ray (e.g. Slurm)
     # or when the provisioner reports no Ray runtime.
     # TODO(kevin): migrate cloud.uses_ray() -> ProvisionRuntimeMetadata, i.e.
     # from cloud -> provision layer.
-    should_check_ray = (cloud is not None and cloud.uses_ray() and
-                        handle.provision_runtime_metadata.has_ray)
-    if (all_nodes_up and (not should_check_ray or
-                          run_ray_status_to_check_ray_cluster_healthy()) and
-            not external_cluster_failures):
+    should_check_ray = uses_ray and runtime_metadata.has_ray
+    if (all_nodes_up and not runtime_setup_incomplete and
+        (not should_check_ray or run_ray_status_to_check_ray_cluster_healthy())
+            and not external_cluster_failures):
         # NOTE: all_nodes_up calculation is fast due to calling cloud CLI;
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
         # head-ip/worker-ips`.
@@ -2977,9 +2987,8 @@ def _update_cluster_status(
 
     if is_abnormal and not external_cluster_failures:
         # If all nodes are up and ray cluster is healthy, we would have returned
-        # earlier. So if all_nodes_up is True and we are here, it means the ray
-        # cluster must have been unhealthy.
-        ray_cluster_unhealthy = all_nodes_up
+        # earlier. Otherwise runtime setup is incomplete or Ray is unhealthy.
+        ray_cluster_unhealthy = all_nodes_up and not runtime_setup_incomplete
 
         # For Kubernetes clusters with unhealthy pods, check node health
         # to provide better diagnostics (e.g., "node X is NotReady").
@@ -3076,6 +3085,8 @@ def _update_cluster_status(
                 except Exception as e:  # pylint: disable=broad-except
                     logger.debug('Failed to get node state for '
                                  f'{cluster_name!r}: {e}')
+        elif all_nodes_up and runtime_setup_incomplete:
+            init_reason = 'SkyPilot runtime setup did not complete'
         elif ray_cluster_unhealthy:
             if status_reason:
                 # K8s diagnostics explain the issue — lead with that
