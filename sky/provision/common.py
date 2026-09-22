@@ -91,13 +91,18 @@ class ProvisionConfig:
 
 @dataclasses.dataclass(frozen=True)
 class ProvisionRuntimeMetadata:
-    """Record of what the provisioner set up and which runtime
-    phases it handled. Set once at provision time.
+    """The runtime a cluster runs and which runtime phases the provisioner
+    handles itself.
+
+    A cluster's handle carries this from before provisioning starts (see
+    ``provision.get_initial_runtime_metadata``), so the ``has_*`` flags
+    describe the runtime the cluster is set up to run, not whether that
+    runtime is up yet.
     """
 
-    # Whether ray is running on the cluster.
+    # Whether the cluster runs Ray.
     has_ray: bool = True
-    # Whether the skylet daemon is running on the cluster.
+    # Whether the cluster runs the skylet daemon.
     has_skylet: bool = True
     # Whether the cluster runs a job queue (ray + skylet bookkeeping) that
     # can accept multiple ``sky exec`` submissions over its lifetime. False

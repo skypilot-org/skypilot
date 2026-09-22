@@ -2859,18 +2859,15 @@ def _update_cluster_status(
     # from cloud -> provision layer.
     should_check_ray = (cloud is not None and cloud.uses_ray() and
                         handle.provision_runtime_metadata.has_ray)
-    # A handle without cached IPs is the bare pre-provision handle that
-    # `sky launch` persists (at INIT) before provisioning starts; the
-    # completed handle (with IPs and has_ray=True) is only persisted after
-    # runtime setup finishes. If the launch is interrupted in that window
+    # A handle without cached IPs comes from a launch that did not finish:
+    # `sky launch` saves the handle at INIT before provisioning starts and
+    # adds the IPs only in its final write. If that launch was interrupted
     # (process death, cancellation, a lost cluster lock) while the nodes
-    # keep running, all_nodes_up can be True here — e.g. Kubernetes pods
-    # report Running long before the runtime is set up. Never mark such a
-    # cluster UP: with has_ray=False the ray health check (which fails
-    # closed on missing IPs) is skipped entirely, and every operation on
+    # kept running, all_nodes_up can be True here, e.g. Kubernetes pods
+    # report Running long before the runtime is set up. Every operation on
     # an UP cluster requires handle.head_ip (see check_cluster_available),
-    # so promoting would only trade INIT for a ClusterNotUpError later.
-    # Fall through to the abnormal-cluster handling below to keep it INIT.
+    # and a runtime without Ray has no health check to catch this, so fall
+    # through to the abnormal-cluster handling below to keep it INIT.
     handle_has_cached_ips = handle.head_ip is not None
     if all_nodes_up and not handle_has_cached_ips:
         ray_status_details = ('no cached IPs on the cluster handle; the '

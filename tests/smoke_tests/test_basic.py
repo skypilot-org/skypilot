@@ -2275,11 +2275,9 @@ def test_cancel_launch_and_exec_async(generic_cloud: str):
 
 # Regression: a launch interrupted after its pods are Running but before the
 # SkyPilot runtime is set up leaves the DB with the bare pre-provision handle
-# (no cached IPs, has_ray=False). A status refresh used to see all pods up,
-# skip the ray health check, and promote the cluster to UP with that bare
-# handle -- wedging it in a state where `sky exec`/ssh fail with
-# ClusterNotUpError and plain `sky start` no-ops ("already up"). The refresh
-# must keep such a cluster INIT so `sky start` can recover it.
+# (no cached IPs). A status refresh must not promote such a cluster to UP:
+# `sky exec`/ssh would fail with ClusterNotUpError and plain `sky start`
+# would no-op ("already up"). It must stay INIT so `sky start` can recover it.
 # Kubernetes-only: pods report Running long before runtime setup finishes,
 # which is the window this race needs.
 @pytest.mark.kubernetes
@@ -2341,6 +2339,77 @@ def test_status_refresh_keeps_interrupted_launch_init(generic_cloud: str):
             # which the bare handle used to break.
             f's=$(ssh {name} \'echo ssh_works\' 2>&1) && '
             f'echo "$s" | grep ssh_works',
+        ],
+        teardown=(f'req=$(cat {req_file} 2>/dev/null); '
+                  f'sky api cancel "$req" -y 2>/dev/null || true; '
+                  f'sky down -y {name} 2>/dev/null || true; '
+                  f'rm -f {req_file}'),
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# Regression: relaunching an existing cluster saves its INIT handle with the
+# previous launch's IPs. If the relaunch is interrupted while the pod keeps
+# running, a status refresh must still check Ray before marking the cluster
+# UP; otherwise a cluster whose Ray is down shows UP, and plain `sky start`
+# no-ops on it ("already up").
+# Kubernetes-only: the pod stays Running through the interrupted relaunch.
+@pytest.mark.kubernetes
+def test_status_refresh_checks_ray_after_interrupted_relaunch(
+        generic_cloud: str):
+    del generic_cloud  # Kubernetes-specific.
+    name = smoke_tests_utils.get_cluster_name()
+    req_file = f'/tmp/{name}.req'
+    launch_args = (f'-c {name} --infra kubernetes '
+                   f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y')
+    # Capture the async relaunch's request id so we can cancel it mid-flight.
+    relaunch = (f'req=$(sky launch {launch_args} --async '
+                f'| grep -oE \'request: [0-9a-f-]+\' | head -1 | '
+                f'awk \'{{print $2}}\'); '
+                f'echo "captured request id: $req"; test -n "$req"; '
+                f'echo "$req" > {req_file}')
+    # 'Pod is up.' is logged after the relaunch has saved its INIT handle.
+    wait_runtime_setup = (
+        f'req=$(cat {req_file}); start=$SECONDS; '
+        f'until sky api logs "$req" --no-follow 2>&1 | '
+        f'grep -q "Pod is up."; do '
+        f'  if [ $((SECONDS - start)) -gt 480 ]; then '
+        f'    echo "timed out waiting for runtime setup to start"; '
+        f'    sky api status -a "$req"; exit 1; '
+        f'  fi; '
+        f'  sleep 2; '
+        f'done; echo "runtime setup started"')
+    # Wait for the worker to actually die, so the per-cluster lock is released
+    # and the refresh below really evaluates.
+    cancel = (f'req=$(cat {req_file}); sky api cancel "$req" -y; '
+              f'start=$SECONDS; '
+              f'until sky api status -a "$req" | grep -qw CANCELLED; do '
+              f'  if [ $((SECONDS - start)) -gt 120 ]; then '
+              f'    echo "timed out waiting for cancellation"; '
+              f'    sky api status -a "$req"; exit 1; '
+              f'  fi; '
+              f'  sleep 2; '
+              f'done; echo "request cancelled"')
+    test = smoke_tests_utils.Test(
+        'status_refresh_checks_ray_after_interrupted_relaunch',
+        [
+            f'sky launch {launch_args}',
+            relaunch,
+            wait_runtime_setup,
+            cancel,
+            # Stop Ray while the relaunch's INIT handle is in the DB. Whether
+            # the cancelled runtime setup got to restart Ray is timing-
+            # dependent, so stop it explicitly.
+            f'ssh {name} "skypilot-runtime/bin/ray stop"',
+            # The pod is Running and the handle has the previous IPs, so only
+            # the Ray check can keep the cluster INIT.
+            f's=$(sky status -r {name}); echo "$s"; '
+            f'echo "$s" | grep {name} | grep INIT',
+            f'sky start -y {name}',
+            f'sky status {name} | grep UP',
+            f'sky exec {name} \'echo recovered\'',
+            f'sky logs {name} 1 --status | grep SUCCEEDED',
         ],
         teardown=(f'req=$(cat {req_file} 2>/dev/null); '
                   f'sky api cancel "$req" -y 2>/dev/null || true; '
