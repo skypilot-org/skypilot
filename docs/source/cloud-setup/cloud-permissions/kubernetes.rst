@@ -326,6 +326,11 @@ controllers and workloads alike.
 
         $ kubectl delete clusterrolebinding skypilot-service-account-cluster-role-binding
         $ kubectl delete clusterrole skypilot-service-account-cluster-role
+        $ kubectl delete -n skypilot-system role skypilot-system-service-account-role
+        $ kubectl delete -n skypilot-system rolebinding \
+            skypilot-system-service-account-role-binding-<your namespace>
+        $ kubectl delete -n ingress-nginx role skypilot-service-account-ingress-role
+        $ kubectl delete -n ingress-nginx rolebinding skypilot-service-account-ingress-role-binding
 
     Do this only once no pod is still running under the old account — an
     existing controller cluster keeps the account it was created with, and

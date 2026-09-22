@@ -239,7 +239,7 @@
         "labels": {
           "parent": "skypilot"
         },
-        "name": "skypilot-service-account-ingress-role",
+        "name": "skypilot-controller-service-account-ingress-role",
         "namespace": "ingress-nginx"
       },
       "rules": [
@@ -280,13 +280,13 @@
         "labels": {
           "parent": "skypilot"
         },
-        "name": "skypilot-service-account-ingress-role-binding",
+        "name": "skypilot-controller-service-account-ingress-role-binding",
         "namespace": "ingress-nginx"
       },
       "roleRef": {
         "apiGroup": "rbac.authorization.k8s.io",
         "kind": "Role",
-        "name": "skypilot-service-account-ingress-role"
+        "name": "skypilot-controller-service-account-ingress-role"
       },
       "subjects": [
         {
@@ -356,7 +356,7 @@
         "labels": {
           "parent": "skypilot"
         },
-        "name": "skypilot-system-service-account-role",
+        "name": "skypilot-controller-service-account-system-role",
         "namespace": "skypilot-system"
       },
       "rules": [
@@ -380,13 +380,13 @@
         "labels": {
           "parent": "skypilot"
         },
-        "name": "skypilot-system-service-account-role-binding",
+        "name": "skypilot-controller-service-account-system-role-binding",
         "namespace": "skypilot-system"
       },
       "roleRef": {
         "apiGroup": "rbac.authorization.k8s.io",
         "kind": "Role",
-        "name": "skypilot-system-service-account-role"
+        "name": "skypilot-controller-service-account-system-role"
       },
       "subjects": [
         {

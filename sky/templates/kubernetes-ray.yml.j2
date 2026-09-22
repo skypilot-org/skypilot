@@ -72,6 +72,10 @@ provider:
     # Role created by the autoscaler for the head node pod that it runs in.
     # If this field isn't provided, the role referenced in
     # autoscaler_role_binding must exist and have at least these permissions.
+    # The one object deliberately NOT named after the account: its rules are
+    # identical for both, so they share it and differ only in their bindings.
+    # Renaming it would also rename the workload's, making an upgrade
+    # non-trivial for no benefit.
     autoscaler_role:
         kind: Role
         apiVersion: rbac.authorization.k8s.io/v1
@@ -124,7 +128,7 @@ provider:
             namespace: {{k8s_skypilot_system_namespace}}
             labels:
                 parent: skypilot
-            name: skypilot-system-service-account-role
+            name: {{k8s_service_account_name}}-system-role
         rules:
         - apiGroups: ["*"]
           resources: ["*"]
@@ -138,13 +142,13 @@ provider:
             namespace: {{k8s_skypilot_system_namespace}}
             labels:
                 parent: skypilot
-            name: skypilot-system-service-account-role-binding
+            name: {{k8s_service_account_name}}-system-role-binding
         subjects:
         - kind: ServiceAccount
           name: {{k8s_service_account_name}}
         roleRef:
             kind: Role
-            name: skypilot-system-service-account-role
+            name: {{k8s_service_account_name}}-system-role
             apiGroup: rbac.authorization.k8s.io
 
     # Provisioner-only: resolving an exposed port to the ingress-nginx
@@ -160,7 +164,7 @@ provider:
         apiVersion: rbac.authorization.k8s.io/v1
         metadata:
             namespace: ingress-nginx
-            name: skypilot-service-account-ingress-role
+            name: {{k8s_service_account_name}}-ingress-role
             labels:
                 parent: skypilot
         rules:
@@ -177,7 +181,7 @@ provider:
         kind: RoleBinding
         metadata:
             namespace: ingress-nginx
-            name: skypilot-service-account-ingress-role-binding
+            name: {{k8s_service_account_name}}-ingress-role-binding
             labels:
                 parent: skypilot
         subjects:
@@ -185,7 +189,7 @@ provider:
               name: {{k8s_service_account_name}}
         roleRef:
             kind: Role
-            name: skypilot-service-account-ingress-role
+            name: {{k8s_service_account_name}}-ingress-role
             apiGroup: rbac.authorization.k8s.io
 
     # Provisioner-only: reading node resources and bootstrapping the RBAC
