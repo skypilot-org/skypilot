@@ -13,6 +13,7 @@ import asyncio
 import subprocess
 import threading
 import time
+from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 
 import pytest
@@ -37,6 +38,31 @@ def test_gpu_metrics_keeps_gpu_semantics():
     joined = '\n'.join(metrics_utils.GPU_METRICS_MATCH_PATTERNS)
     assert 'kube_deployment_' not in joined
     assert 'kube_horizontalpodautoscaler' not in joined
+    assert 'litellm_' not in joined
+
+
+def test_endpoint_metrics_federates_litellm(monkeypatch):
+    """Router counters survive federation with their cluster attribution."""
+    selector = '{__name__=~"litellm_.*"}'
+    assert selector in metrics_utils.ENDPOINT_METRICS_MATCH_PATTERNS
+    metric = 'litellm_requests_metric_total{model="test-model"} 3\n'
+    fetch = AsyncMock(return_value=metric)
+    monkeypatch.setattr(metrics_utils, 'send_metrics_request_with_port_forward',
+                        fetch)
+    monkeypatch.setattr(metrics_utils, '_get_prometheus_target', lambda:
+                        ('monitoring', 'prometheus', 9090))
+
+    result = asyncio.run(
+        metrics_utils.get_endpoint_metrics_for_context('test-cluster'))
+
+    fetch.assert_awaited_once()
+    kwargs = fetch.call_args.kwargs
+    assert kwargs['endpoint_path'] == '/federate'
+    assert selector in kwargs['match_patterns']
+    assert 'litellm_requests_metric_total' in result
+    assert 'model="test-model"' in result
+    assert 'cluster="test-cluster"' in result
+    assert result.rstrip().endswith(' 3')
 
 
 def test_no_per_pod_phase_series():

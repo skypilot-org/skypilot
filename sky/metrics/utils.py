@@ -2383,6 +2383,7 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
 # (not /gpu-metrics) because they exist solely for endpoint observability.
 ENDPOINT_METRICS_MATCH_PATTERNS = [
     '{__name__=~"vllm:.*"}',
+    '{__name__=~"litellm_.*"}',
     '{__name__=~"kube_deployment_.*|kube_horizontalpodautoscaler_spec_target_metric"}',  # pylint: disable=line-too-long
 ]
 
@@ -2393,8 +2394,8 @@ async def get_endpoint_metrics_for_context(
 
     Mirrors get_metrics_for_context() but federates the serving engines'
     native Prometheus series instead of DCGM/node metrics. vLLM exports
-    ``vllm:*``-prefixed names; future engines append their own prefixes
-    here (e.g. ``sglang:*``).
+    ``vllm:*``-prefixed names and LiteLLM proxies export ``litellm_*``.
+    Future engines append their own prefixes here (e.g. ``sglang:*``).
 
     Args:
         context: Kubernetes context name
