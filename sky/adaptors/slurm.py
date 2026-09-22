@@ -26,6 +26,73 @@ _ALL_NODE_DETAILS_CMD = 'scontrol show node -o'
 # A `scontrol show node` attribute token: capitalized name, then `=`
 # (NodeName, CPUAlloc, MCS_label, ...). Anything else is value text.
 _SCONTROL_ATTR_RE = re.compile(r'^[A-Z][A-Za-z0-9_]*=')
+# Node fields whose value is free text supplied by an administrator, a
+# prolog script or a cloud plugin. It may contain spaces and even
+# `Word=value` fragments, so only a known field name ends it.
+_NODE_FREE_TEXT_ATTRS = frozenset({'Reason', 'Comment', 'Extra', 'OS'})
+# Field names `scontrol show node` prints, including the ones cloud
+# plugins append. Consulted only to find where a free-text value ends: a
+# field missing here is still parsed normally everywhere else, so a new
+# Slurm release does not lose attributes.
+_NODE_ATTRS = frozenset({
+    'ActiveFeatures',
+    'AllocMem',
+    'AllocTRES',
+    'Arch',
+    'AveWatts',
+    'AvailableFeatures',
+    'BcastAddr',
+    'Boards',
+    'BootTime',
+    'CapWatts',
+    'CfgTRES',
+    'Comment',
+    'CoresPerSocket',
+    'CPUAlloc',
+    'CPUEfctv',
+    'CPULoad',
+    'CPUSpecList',
+    'CPUTot',
+    'CurrentWatts',
+    'Extra',
+    'ExtSensorsJoules',
+    'ExtSensorsTemp',
+    'ExtSensorsWatts',
+    'Features',
+    'FreeMem',
+    'Gres',
+    'GresDrain',
+    'GresUsed',
+    'InstanceId',
+    'InstanceType',
+    'LastBusyTime',
+    'MCS_label',
+    'MemSpecLimit',
+    'NextState',
+    'NodeAddr',
+    'NodeHostName',
+    'NodeName',
+    'OS',
+    'Owner',
+    'Partitions',
+    'Port',
+    'RealMemory',
+    'Reason',
+    'ReasonTime',
+    'ReasonUid',
+    'ResumeAfterTime',
+    'ResvName',
+    'SlurmdStartTime',
+    'SlurmdUser',
+    'Sockets',
+    'State',
+    'ThreadsPerCore',
+    'TmpDisk',
+    'Topology',
+    'TRESUsed',
+    'Version',
+    'Weight',
+})
 _ALL_JOBS_INFO_CMD = (f'squeue -h --states=running,completing '
                       f'-o "%i{SEP}%j{SEP}%u{SEP}%N{SEP}%b"')
 _PARTITIONS_INFO_CMD = 'scontrol show partitions -o'
@@ -158,16 +225,18 @@ def _parse_scontrol_node_output(output: str) -> Dict[str, str]:
     scontrol prints attributes as space-separated ``Key=Value`` pairs, but
     a few values contain spaces themselves (``Reason``, ``OS``, ``Comment``,
     ``Extra``); e.g. ``Reason=Kill task failed [root@2026-01-01T00:00:00]``.
-    Attribute names are capitalized (``NodeName``, ``CPUAlloc``,
-    ``MCS_label``), so a token that does not start with a capitalized
-    ``Key=`` continues the previous value instead of being dropped or
-    mistaken for a new attribute. That also keeps lower-case ``key=value``
-    fragments inside a reason (``job=42:``) as part of the reason.
+    A token continues the current value unless it starts a new attribute,
+    which needs a capitalized ``Key=`` (so lower-case fragments such as
+    ``job=42:`` stay inside a reason) and, while a free-text value is open,
+    a name Slurm actually prints (so administrator text such as
+    ``Comment=Awaiting Ticket=INC123`` is kept whole).
     """
     node_info: Dict[str, str] = {}
     key = None
     for part in output.split():
-        if _SCONTROL_ATTR_RE.match(part):
+        if _SCONTROL_ATTR_RE.match(part) and (
+                key not in _NODE_FREE_TEXT_ATTRS or
+                part.split('=', 1)[0] in _NODE_ATTRS):
             key, value = part.split('=', 1)
             # Simple quote removal, might need refinement
             node_info[key] = value.strip('\'"')

@@ -1128,6 +1128,55 @@ class TestGetAllNodeDetails:
             'Static node maintenance: unhealthy node is being replaced '
             '[root@2024-01-01T00:00:00]')
 
+    def test_capitalized_text_inside_a_free_text_value(self):
+        """Administrator text may contain a capitalized `Word=` fragment;
+        only a field name scontrol actually prints ends the value."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        mock_output = (
+            'NodeName=node1 Comment=Awaiting Ticket=INC123 State=DRAIN '
+            'Reason=Bad DIMM Slot=A3 replacement Ordered=yes '
+            '[root@2024-01-01T00:00:00] InstanceId=i-0123\n')
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, mock_output, '')
+            result = client.get_all_node_details()
+
+        assert result['node1']['Comment'] == 'Awaiting Ticket=INC123'
+        assert 'Ticket' not in result['node1']
+        assert result['node1']['State'] == 'DRAIN'
+        assert result['node1']['Reason'] == (
+            'Bad DIMM Slot=A3 replacement Ordered=yes '
+            '[root@2024-01-01T00:00:00]')
+        assert 'Slot' not in result['node1']
+        assert 'Ordered' not in result['node1']
+        assert result['node1']['InstanceId'] == 'i-0123'
+
+    def test_unknown_attribute_after_a_normal_field_is_kept(self):
+        """A field name this Slurm release adds is still parsed when it does
+        not follow a free-text value, so upgrades do not lose attributes."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        mock_output = ('NodeName=node1 State=IDLE BrandNewField=42 '
+                       'CPUTot=8\n')
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, mock_output, '')
+            result = client.get_all_node_details()
+
+        assert result['node1']['BrandNewField'] == '42'
+        assert result['node1']['CPUTot'] == '8'
+
     def test_skips_blank_lines_and_lines_without_node_name(self):
         client = slurm.SlurmClient(
             ssh_host='localhost',
