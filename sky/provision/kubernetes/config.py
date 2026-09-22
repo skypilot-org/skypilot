@@ -119,22 +119,29 @@ def updating_existing_msg(resource_type: str, name: str) -> str:
 def _format_rules(rules: Optional[List[Any]]) -> List[str]:
     """Render policy rules compactly, for logs.
 
-    Accepts both API model objects and plain dicts, since the template's
-    rules are parsed into models while an object read back from the API
-    may carry either depending on the caller.
+    Tolerant by design: this only ever runs inside a warning that exists to
+    say what is being overwritten, so an unfamiliar rule shape must degrade to
+    something readable rather than raise and lose the whole message.
     """
 
-    def _get(rule: Any, field: str) -> Any:
-        if isinstance(rule, dict):
-            return rule.get(field)
-        return getattr(rule, field, None)
+    def _field(rule: Any, *names: str) -> Any:
+        for name in names:
+            value = (rule.get(name) if isinstance(rule, dict) else getattr(
+                rule, name, None))
+            if value:
+                return value
+        return None
 
     out = []
     for rule in rules or []:
-        groups = _get(rule, 'api_groups') or _get(rule, 'apiGroups') or ['']
-        resources = _get(rule, 'resources') or []
-        verbs = _get(rule, 'verbs') or []
-        out.append(f'{list(groups)}/{list(resources)}: {list(verbs)}')
+        if not isinstance(rule, (dict, str)) or isinstance(rule, dict):
+            groups = _field(rule, 'api_groups', 'apiGroups') or ['']
+            resources = _field(rule, 'resources') or []
+            verbs = _field(rule, 'verbs') or []
+            if resources or verbs:
+                out.append(f'{list(groups)}/{list(resources)}: {list(verbs)}')
+                continue
+        out.append(str(rule))
     return out
 
 
@@ -563,6 +570,17 @@ def _configure_skypilot_system_namespace(
     skypilot_system_namespace = provider_config['skypilot_system_namespace']
     context = kubernetes_utils.get_context_from_config(provider_config)
     kubernetes_utils.create_namespace(skypilot_system_namespace, context)
+
+    # Only a controller cluster is granted a role here -- it bootstraps the
+    # FUSE device manager for the clusters it launches. A workload cluster
+    # still wants the namespace to exist (_configure_fuse_mounting creates the
+    # daemonset in it), so the namespace creation above is unconditional and
+    # only the role and its binding are skipped.
+    if 'autoscaler_skypilot_system_role_binding' not in provider_config:
+        logger.info(
+            '_configure_skypilot_system_namespace: '
+            f'{not_provided_msg("autoscaler_skypilot_system_role_binding")}')
+        return
 
     # Note - this must be run only after the service account has been
     # created in the cluster (in bootstrap_instances).

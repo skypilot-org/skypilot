@@ -664,14 +664,8 @@ def test_workload_cluster_gets_no_provisioner_roles() -> None:
             spec['autoscaler_service_account']['metadata']['name'])
 
 
-def test_user_named_cluster_does_not_get_the_controller_identity() -> None:
-    """A user-named cluster carrying a controller prefix is still a workload.
-
-    Passes today because check_cluster_name_not_controller() refuses those
-    names at launch. This fails the day that guard is relaxed -- which is the
-    point: the guard is load-bearing for a permission boundary now, and
-    nothing at the guard itself says so.
-    """
+def test_controller_prefix_resolves_to_the_controller_identity() -> None:
+    """What the identity branch keys on: the display name's prefix."""
     from sky.utils import common
 
     assert common.is_controller_name('sky-jobs-controller-abc123')
@@ -680,6 +674,22 @@ def test_user_named_cluster_does_not_get_the_controller_identity() -> None:
     # instead of display_name would make the check silently always False.
     assert not common.is_controller_name('my-cluster')
     assert not common.is_controller_name('jobs-controller')
+
+
+def test_a_user_cannot_claim_the_controller_identity_by_naming() -> None:
+    """Launching under a controller prefix is refused, so naming can't escalate.
+
+    Because the identity branch keys on that prefix, this guard is now
+    load-bearing for a permission boundary rather than a naming convention --
+    and nothing at the guard itself says so. Relaxing it would silently turn
+    into privilege escalation, and this test is what fails on that day.
+    """
+    from sky import exceptions
+    from sky.utils import controller_utils
+
+    for name in ('sky-jobs-controller-mine', 'sky-serve-controller-mine'):
+        with pytest.raises(exceptions.NotSupportedError):
+            controller_utils.check_cluster_name_not_controller(name)
 
 
 @pytest.mark.parametrize('case_name', list(CASES.keys()))

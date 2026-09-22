@@ -1,12 +1,22 @@
 """Tests for how SkyPilot reconciles the RBAC objects it owns.
 
-SkyPilot upserts its own Role/ClusterRole against the template on every
-launch. That is correct for picking up a new release's rules, and it also
-silently undoes a narrowing an operator applied on purpose -- so the one
-thing these tests pin is that the overwrite is *announced*.
+Two things are pinned here. That the overwrite of an operator's Role is
+announced rather than silent, and that bootstrap tolerates the RBAC fields a
+workload cluster's template deliberately omits -- the template renders the
+provisioner-only roles for controller clusters only, so "may be absent" is a
+state every consumer of provider_config has to handle.
+
+The upsert is correct for picking up a new release's rules and equally undoes
+a narrowing an operator applied on purpose; SkyPilot cannot tell them apart,
+so it must at least say what it is doing.
 """
+import json
+import pathlib
 from unittest import mock
 
+import pytest
+
+from sky.provision import common as provision_common
 from sky.provision.kubernetes import config
 
 
@@ -62,3 +72,53 @@ def test_unchanged_rules_do_not_warn():
 
     patch_fn.assert_not_called()
     logger.warning.assert_not_called()
+
+
+_GOLDEN_DIR = (pathlib.Path(__file__).parents[1] / 'test_sky' / 'clouds' /
+               'testdata' / 'kubernetes_ray_template')
+
+
+def _provider_config(case: str):
+    """The provider block a rendered template actually produces."""
+    rendered = json.loads((_GOLDEN_DIR / f'{case}.json').read_text())
+    provider = dict(rendered['provider'])
+    provider['namespace'] = 'default'
+    provider['skypilot_system_namespace'] = 'skypilot-system'
+    return provider
+
+
+@pytest.mark.parametrize('case,service_account', [
+    ('base_cpu', 'skypilot-service-account'),
+    ('controller', 'skypilot-controller-service-account'),
+])
+def test_bootstrap_tolerates_omitted_rbac_fields(case, service_account):
+    """bootstrap_instances survives whichever RBAC fields the template omits.
+
+    A workload cluster renders none of the provisioner-only roles, so every
+    configurer reached from bootstrap must cope with the field being absent.
+    The template tests cannot catch a consumer that does not -- they assert
+    what is rendered, not what reads it.
+    """
+    cfg = provision_common.ProvisionConfig(
+        provider_config=_provider_config(case),
+        authentication_config={},
+        docker_config={},
+        node_config={'spec': {
+            'serviceAccountName': service_account
+        }},
+        count=1,
+        tags={},
+        resume_stopped_nodes=False,
+        ports_to_open_on_launch=None,
+    )
+    with mock.patch.object(config, '_configure_services'), \
+         mock.patch.object(config, '_create_or_patch_resource'), \
+         mock.patch.object(config.kubernetes_utils, 'create_namespace'), \
+         mock.patch.object(config.kubernetes_utils, 'dict_to_k8s_object'), \
+         mock.patch.object(config.kubernetes_utils,
+                           'get_namespace_from_config',
+                           return_value='default'), \
+         mock.patch.object(config.kubernetes_utils,
+                           'get_context_from_config',
+                           return_value=None):
+        config.bootstrap_instances('kubernetes', 'test-cluster', cfg)
