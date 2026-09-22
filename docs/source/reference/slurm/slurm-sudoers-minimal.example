@@ -15,5 +15,4 @@ skypilot ALL=(%skyusers) NOPASSWD: /usr/bin/mkdir ^(-p )?-- /home/[a-z_][a-z0-9_
 skypilot ALL=(%skyusers) NOPASSWD: /usr/bin/test ^(! )?-(e|f) /home/[a-z_][a-z0-9_-]*/[.]sky_(provision|clusters)(/([.][A-Za-z_]|[A-Za-z0-9_])[A-Za-z0-9_.-]*)*$
 skypilot ALL=(%skyusers) NOPASSWD: /usr/bin/cat ^-- /home/[a-z_][a-z0-9_-]*/[.]sky_(provision|clusters)(/([.][A-Za-z_]|[A-Za-z0-9_])[A-Za-z0-9_.-]*)*$
 skypilot ALL=(%skyusers) NOPASSWD: /usr/bin/tail ^-n [0-9]+ (-f )?-- /home/[a-z_][a-z0-9_-]*/[.]sky_provision/slurm-[0-9]+[.]out$
-skypilot ALL=(%skyusers) NOPASSWD: /usr/bin/rm ^-rf -- /home/[a-z_][a-z0-9_-]*/[.]sky_(provision|clusters)(/([.][A-Za-z_]|[A-Za-z0-9_])[A-Za-z0-9_.-]*)*$
 skypilot ALL=(%skyusers) NOPASSWD: /usr/bin/rsync ^--server (--sender )?-vlDtprze[.]iLsfxCIvu? (--partial )?[.] /home/[a-z_][a-z0-9_-]*/[.]sky_(provision|clusters)(/([.][A-Za-z_]|[A-Za-z0-9_])[A-Za-z0-9_.-]*)*$
