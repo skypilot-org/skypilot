@@ -2857,8 +2857,12 @@ def _update_cluster_status(
     # A fresh handle has no runtime capabilities until provisioning completes.
     # Failed setup must not look like an intentionally Ray-free runtime, even
     # if a retry retained IPs and a healthy Ray process from the previous run.
-    runtime_setup_incomplete = uses_ray and not (
-        runtime_metadata.has_ray or runtime_metadata.runtime_setup_done)
+    # Only the SkyPilot provisioner replaces this metadata; legacy Ray
+    # autoscaler clouds retain the defaults even after successful provisioning.
+    runtime_setup_incomplete = (
+        uses_ray and cloud is not None and
+        cloud.PROVISIONER_VERSION >= clouds.ProvisionerVersion.SKYPILOT and
+        not (runtime_metadata.has_ray or runtime_metadata.runtime_setup_done))
 
     # Skip Ray health check for clouds that don't use Ray (e.g. Slurm)
     # or when the provisioner reports no Ray runtime.

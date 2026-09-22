@@ -81,9 +81,11 @@ def test_failed_runtime_setup_is_not_healthy(status, has_cached_ips):
         assert 'runtime setup did not complete' in events[-1].args[2]
 
 
+@pytest.mark.parametrize('cloud', [clouds.Azure(), clouds.IBM()])
 @pytest.mark.parametrize('runtime_setup_done', [False, True])
-def test_ray_runtime_requires_successful_health_probe(runtime_setup_done):
-    handle = _make_handle(clouds.Azure())
+def test_ray_runtime_requires_successful_health_probe(cloud,
+                                                      runtime_setup_done):
+    handle = _make_handle(cloud)
     handle.provision_runtime_metadata = (
         provision_common.ProvisionRuntimeMetadata(
             runtime_setup_done=runtime_setup_done))
@@ -102,6 +104,23 @@ def test_ray_runtime_requires_successful_health_probe(runtime_setup_done):
                            return_value=[runner]):
         ready, _ = _refresh(handle, status_lib.ClusterStatus.UP)
     assert not ready
+
+
+@pytest.mark.parametrize(
+    'status', [status_lib.ClusterStatus.INIT, status_lib.ClusterStatus.UP])
+def test_legacy_provisioner_does_not_require_runtime_metadata(status):
+    # The Ray autoscaler never replaces the constructor's empty metadata,
+    # including after a successful launch. Preserve its existing refresh path.
+    handle = _make_handle(clouds.IBM())
+    assert (handle.launched_resources.cloud.PROVISIONER_VERSION ==
+            clouds.ProvisionerVersion.RAY_AUTOSCALER)
+    assert not handle.provision_runtime_metadata.has_ray
+    assert not handle.provision_runtime_metadata.runtime_setup_done
+    handle.stable_internal_external_ips = [('10.0.0.1', '10.0.0.1')]
+    with mock.patch.object(handle, 'get_command_runners') as runners:
+        ready, _ = _refresh(handle, status)
+    assert ready
+    runners.assert_not_called()
 
 
 def test_provisioner_materialized_ray_free_runtime_remains_healthy():
