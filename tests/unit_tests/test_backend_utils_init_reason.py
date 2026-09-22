@@ -236,6 +236,7 @@ class TestUpdateClusterStatusInitReason:
         assert 'one or more nodes terminated' in msg, msg
         mock_reason.assert_not_called()
 
+
 class TestUpdateClusterStatusBareHandle:
     """A bare pre-provision handle (no cached IPs, has_ray=False) must not
     be promoted to UP by a status refresh.
