@@ -27,8 +27,12 @@ def bootstrap_instances(
     _configure_services(namespace, context, config.provider_config)
 
     requested_service_account = config.node_config['spec']['serviceAccountName']
-    if (requested_service_account ==
-            kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME):
+    # Both of SkyPilot's own accounts are reconciled here. Which roles exist
+    # to bind is decided in the template: a controller cluster renders the
+    # provisioner-only ones, a workload cluster does not, and the configurers
+    # below no-op on a field the template left out.
+    if (requested_service_account
+            in kubernetes_utils.MANAGED_SERVICE_ACCOUNT_NAMES):
         # If the user has requested a different service account (via pod_config
         # in ~/.sky/config.yaml), we assume they have already set up the
         # necessary roles and role bindings.

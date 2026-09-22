@@ -288,6 +288,44 @@ above, then set the following in :ref:`~/.sky/config.yaml <config-yaml>`:
     broader permissions similar to the `Minimum Permissions Required for SkyPilot`_.
 
 
+Controller clusters use a separate service account
+--------------------------------------------------
+
+A jobs or serve controller running as its own cluster provisions the clusters it
+launches, so its pod needs cluster-scoped permissions no pod running user code
+should hold. SkyPilot gives those clusters a separate account,
+``skypilot-controller-service-account``, and leaves
+``skypilot-service-account`` to workload pods. Under
+:ref:`consolidation mode <jobs-consolidation-mode>` the controllers
+run inside the API server and no pod holds these permissions at all.
+
+If you set ``remote_identity`` to a service account of your own, SkyPilot
+creates and reconciles nothing — you own that account's permissions for
+controllers and workloads alike.
+
+.. note::
+
+    **Upgrading from an earlier version.** Clusters created before this split
+    bound the cluster-scoped roles to ``skypilot-service-account``, and SkyPilot
+    does not delete RBAC objects it created. Those bindings therefore remain
+    until you remove them:
+
+    .. code-block:: console
+
+        $ kubectl delete clusterrolebinding skypilot-service-account-cluster-role-binding
+        $ kubectl delete clusterrole skypilot-service-account-cluster-role
+
+    Do this only once no pod is still running under the old account — an
+    existing controller cluster keeps the account it was created with, and
+    removing its permissions mid-flight will fail its next provisioning
+    attempt. Check with:
+
+    .. code-block:: console
+
+        $ kubectl get pods -o custom-columns='NAME:.metadata.name,SA:.spec.serviceAccountName' \
+            | grep skypilot-service-account
+
+
 .. _k8s-sa-example:
 
 Example using custom service account

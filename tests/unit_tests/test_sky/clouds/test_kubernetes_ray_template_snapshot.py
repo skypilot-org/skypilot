@@ -113,6 +113,7 @@ def base_variables() -> Dict[str, Any]:
         'k8s_acc_label_key': None,
         'k8s_acc_label_values': None,
         'k8s_service_account_name': 'skypilot-service-account',
+        'k8s_is_controller': False,
         'k8s_automount_sa_token': 'true',
         'k8s_fuse_device_required': False,
         'k8s_kueue_local_queue_name': None,
@@ -278,6 +279,10 @@ CASES: Dict[str, Dict[str, Any]] = {
     'custom_service_account': {
         'k8s_service_account_name': 'my-custom-sa',
         'k8s_automount_sa_token': 'false',
+    },
+    'controller': {
+        'k8s_service_account_name': 'skypilot-controller-service-account',
+        'k8s_is_controller': True,
     },
     'user_labels': {
         'labels': {
@@ -605,7 +610,12 @@ def test_cluster_role_grants_no_ungated_rbac_verb(case_name: str) -> None:
     the one verb no admission check stands in front of.
     """
     rendered = yaml.safe_load(_render(_build_variables(case_name)))
-    rules = rendered['provider']['autoscaler_cluster_role']['rules']
+    cluster_role = rendered['provider'].get('autoscaler_cluster_role')
+    if cluster_role is None:
+        # Not rendered at all for a workload cluster, which is stronger than
+        # rendering it without the verb.
+        return
+    rules = cluster_role['rules']
 
     offenders = [
         rule for rule in rules if _RBAC_RESOURCES &
@@ -615,6 +625,61 @@ def test_cluster_role_grants_no_ungated_rbac_verb(case_name: str) -> None:
     assert not offenders, (
         f'ClusterRole grants an ungated deletion verb on RBAC objects: '
         f'{offenders}')
+
+
+_PROVISIONER_ONLY_ROLES = (
+    'autoscaler_cluster_role',
+    'autoscaler_cluster_role_binding',
+    'autoscaler_skypilot_system_role',
+    'autoscaler_skypilot_system_role_binding',
+    'autoscaler_ingress_role',
+    'autoscaler_ingress_role_binding',
+)
+
+
+def test_workload_cluster_gets_no_provisioner_roles() -> None:
+    """A workload cluster requests none of the provisioner-only roles.
+
+    Conditional rendering is only a boundary because the two kinds of cluster
+    also resolve to different service accounts — bindings naming one shared
+    account would re-grant every pod in the namespace regardless of which
+    cluster created them. So both halves are asserted together.
+    """
+    workload = yaml.safe_load(_render(_build_variables('base_cpu')))['provider']
+    controller = yaml.safe_load(_render(
+        _build_variables('controller')))['provider']
+
+    assert (workload['autoscaler_service_account']['metadata']['name'] !=
+            controller['autoscaler_service_account']['metadata']['name'])
+
+    for field in _PROVISIONER_ONLY_ROLES:
+        assert field not in workload, (
+            f'workload cluster should not request {field}')
+        assert field in controller, (f'controller cluster still needs {field}')
+
+    # The namespaced role is autodown's, so both keep it -- each bound to its
+    # own account rather than to one shared subject.
+    for spec in (workload, controller):
+        assert spec['autoscaler_role_binding']['subjects'][0]['name'] == (
+            spec['autoscaler_service_account']['metadata']['name'])
+
+
+def test_user_named_cluster_does_not_get_the_controller_identity() -> None:
+    """A user-named cluster carrying a controller prefix is still a workload.
+
+    Passes today because check_cluster_name_not_controller() refuses those
+    names at launch. This fails the day that guard is relaxed -- which is the
+    point: the guard is load-bearing for a permission boundary now, and
+    nothing at the guard itself says so.
+    """
+    from sky.utils import common
+
+    assert common.is_controller_name('sky-jobs-controller-abc123')
+    assert common.is_controller_name('sky-serve-controller-abc123')
+    # name_on_cloud is transformed and never carries the prefix; reading it
+    # instead of display_name would make the check silently always False.
+    assert not common.is_controller_name('my-cluster')
+    assert not common.is_controller_name('jobs-controller')
 
 
 @pytest.mark.parametrize('case_name', list(CASES.keys()))

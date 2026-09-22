@@ -67,7 +67,7 @@ provider:
         metadata:
             labels:
                 parent: skypilot
-            name: skypilot-service-account
+            name: {{k8s_service_account_name}}
 
     # Role created by the autoscaler for the head node pod that it runs in.
     # If this field isn't provided, the role referenced in
@@ -99,12 +99,16 @@ provider:
             name: skypilot-service-account-role-binding
         subjects:
         - kind: ServiceAccount
-          name: skypilot-service-account
+          name: {{k8s_service_account_name}}
         roleRef:
             kind: Role
             name: skypilot-service-account-role
             apiGroup: rbac.authorization.k8s.io
 
+    # Provisioner-only: a controller cluster bootstraps the FUSE device
+    # manager for the clusters it launches. A pod running user code never
+    # provisions, so it is not granted this.
+    {% if k8s_is_controller %}
     # Role for the skypilot-system namespace to create fusermount-server and
     # any other system components.
     autoscaler_skypilot_system_role:
@@ -131,11 +135,17 @@ provider:
             name: skypilot-system-service-account-role-binding
         subjects:
         - kind: ServiceAccount
-          name: skypilot-service-account
+          name: {{k8s_service_account_name}}
         roleRef:
             kind: Role
             name: skypilot-system-service-account-role
             apiGroup: rbac.authorization.k8s.io
+
+    # Provisioner-only: resolving an exposed port to the ingress-nginx
+    # controller IP happens on the provisioning/query path, never in a
+    # pod running user code.
+    {% if k8s_is_controller %}
+    {% endif %}
 
     # Role to access ingress services for fetching IP
     autoscaler_ingress_role:
@@ -165,11 +175,17 @@ provider:
                 parent: skypilot
         subjects:
             - kind: ServiceAccount
-              name: skypilot-service-account
+              name: {{k8s_service_account_name}}
         roleRef:
             kind: Role
             name: skypilot-service-account-ingress-role
             apiGroup: rbac.authorization.k8s.io
+
+    # Provisioner-only: reading node resources and bootstrapping the RBAC
+    # of launched clusters. Under consolidation mode the controllers are
+    # API-server processes, so no pod needs this at all.
+    {% if k8s_is_controller %}
+    {% endif %}
 
     # In addition to a role binding, we also need a cluster role binding to give
     # the SkyPilot access to the cluster-wide resources such as nodes to get
@@ -214,11 +230,13 @@ provider:
             name: skypilot-service-account-cluster-role-binding
         subjects:
         - kind: ServiceAccount
-          name: skypilot-service-account
+          name: {{k8s_service_account_name}}
         roleRef:
             kind: ClusterRole
             name: skypilot-service-account-cluster-role
             apiGroup: rbac.authorization.k8s.io
+    {% endif %}
+
 
     services:
       # Service to expose the head node pod's SSH port.

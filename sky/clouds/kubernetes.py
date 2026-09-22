@@ -30,6 +30,7 @@ from sky.provision.kubernetes.utils import KubernetesHighPerformanceNetworkType
 from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.skylet import constants
 from sky.utils import annotations
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
@@ -861,6 +862,18 @@ class Kubernetes(clouds.Cloud):
         sa = schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value
         no_upload = schemas.RemoteIdentityOptions.NO_UPLOAD.value
 
+        # A controller cluster provisions other clusters, so its pod needs
+        # cluster-scoped permissions no pod running user code should hold.
+        # Match on the *display* name: name_on_cloud is transformed and never
+        # carries the controller prefixes.
+        #
+        # This makes check_cluster_name_not_controller() (controller_utils)
+        # load-bearing for a permission boundary: it is what stops a user
+        # launching `sky-jobs-controller-mine` to be handed this identity.
+        # Relaxing that guard would turn into privilege escalation -- see the
+        # test in tests/unit_tests/kubernetes/.
+        is_controller = common.is_controller_name(cluster_name.display_name)
+
         if k8s_service_account_name in (lc, sa, no_upload):
             # Use the default service account if remote identity is not set.
             # For LOCAL_CREDENTIALS, this is for in-cluster authentication
@@ -870,7 +883,13 @@ class Kubernetes(clouds.Cloud):
             # For NO_UPLOAD, we don't upload credentials but still need a
             # service account for pod creation.
             k8s_service_account_name = (
+                kubernetes_utils.CONTROLLER_SERVICE_ACCOUNT_NAME
+                if is_controller else
                 kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME)
+        else:
+            # An operator-supplied account owns its own permissions; SkyPilot
+            # creates and reconciles nothing for it, controller or not.
+            is_controller = False
 
         fuse_device_required = bool(resources.requires_fuse)
 
@@ -1175,6 +1194,11 @@ class Kubernetes(clouds.Cloud):
             'k8s_node_affinity': kubernetes_utils.get_node_affinity(
                 k8s_acc_label_key, k8s_acc_label_values, avoid_label_keys),
             'k8s_service_account_name': k8s_service_account_name,
+            # Gates the provisioner-only roles: only a controller pod
+            # provisions, and only in non-consolidation deployments --
+            # under consolidation the controllers are API-server
+            # processes and no pod needs them at all.
+            'k8s_is_controller': is_controller,
             'k8s_automount_sa_token': 'true',
             'k8s_fuse_device_required': fuse_device_required,
             'k8s_kueue_local_queue_name': k8s_kueue_local_queue_name,
