@@ -1044,32 +1044,42 @@ class TestGetProctrackType:
 class TestGetAllNodeDetails:
     """Test SlurmClient.get_all_node_details()."""
 
-    def test_parses_one_line_per_node(self):
-        client = slurm.SlurmClient(
+    @staticmethod
+    def _client():
+        return slurm.SlurmClient(
             ssh_host='localhost',
             ssh_port=22,
             ssh_user='root',
             ssh_key=None,
         )
 
-        mock_output = (
-            'NodeName=node1 Arch=x86_64 CPUAlloc=8 CPUEfctv=72 CPUTot=72 '
-            'CPULoad=3.50 Gres=gpu:gh200:1 RealMemory=430080 AllocMem=102400 '
-            'FreeMem=421339 State=MIXED Partitions=all,gh200\n'
-            'NodeName=node2 Arch=x86_64 CPUAlloc=0 CPUEfctv=2 CPUTot=2 '
-            'CPULoad=N/A Gres=(null) RealMemory=14000 AllocMem=0 FreeMem=N/A '
-            'State=DOWN* Partitions=dev\n')
-
+    def _details(self, mock_output):
+        client = self._client()
         with mock.patch.object(client._runner, 'run') as mock_run:
             mock_run.return_value = (0, mock_output, '')
-
             result = client.get_all_node_details()
             mock_run.assert_called_once_with(
-                'scontrol show node -o',
+                'scontrol show node',
                 require_outputs=True,
                 separate_stderr=True,
                 stream_logs=False,
             )
+        return result
+
+    def test_parses_one_block_per_node(self):
+        mock_output = ('NodeName=node1 Arch=x86_64 CoresPerSocket=36\n'
+                       '   CPUAlloc=8 CPUEfctv=72 CPUTot=72 CPULoad=3.50\n'
+                       '   Gres=gpu:gh200:1\n'
+                       '   RealMemory=430080 AllocMem=102400 FreeMem=421339\n'
+                       '   State=MIXED Partitions=all,gh200\n'
+                       '\n'
+                       'NodeName=node2 Arch=x86_64 CoresPerSocket=1\n'
+                       '   CPUAlloc=0 CPUEfctv=2 CPUTot=2 CPULoad=N/A\n'
+                       '   Gres=(null)\n'
+                       '   RealMemory=14000 AllocMem=0 FreeMem=N/A\n'
+                       '   State=DOWN* Partitions=dev\n')
+
+        result = self._details(mock_output)
 
         assert set(result.keys()) == {'node1', 'node2'}
         assert result['node1']['CPUAlloc'] == '8'
@@ -1078,120 +1088,88 @@ class TestGetAllNodeDetails:
         assert result['node1']['AllocMem'] == '102400'
         assert result['node1']['FreeMem'] == '421339'
         assert result['node1']['State'] == 'MIXED'
+        assert result['node1']['Partitions'] == 'all,gh200'
         assert result['node2']['CPULoad'] == 'N/A'
         assert result['node2']['FreeMem'] == 'N/A'
+        assert result['node2']['State'] == 'DOWN*'
 
-    def test_keeps_values_with_spaces(self):
-        """Reason and OS contain spaces; they must not be cut at the first
-        word, and lower-case key=value fragments inside a reason must stay
-        part of the reason instead of becoming attributes."""
-        client = slurm.SlurmClient(
-            ssh_host='localhost',
-            ssh_port=22,
-            ssh_user='root',
-            ssh_key=None,
-        )
-
+    def test_keeps_free_text_values_whole(self):
+        """Reason, OS, Comment and Extra hold text with spaces, and nothing
+        quotes it; each gets a line of its own, so it runs to end of line."""
         mock_output = (
-            'NodeName=node1 Arch=x86_64 CPUTot=8 '
-            'OS=Linux 6.1.0-1.el9.x86_64 #1 SMP PREEMPT_DYNAMIC Mon Jan 1 '
-            '00:00:00 UTC 2024 State=DOWN+DRAIN '
-            'Reason=Kill task failed [root@2024-01-01T00:00:00] '
-            'Comment=(null)\n'
-            'NodeName=node2 CPUTot=8 State=MIXED+DRAIN '
-            'Reason=prolog instance=i-0123456789abcdef0 job=42: health '
-            'check failed [root@2024-01-01T00:00:00] '
-            'InstanceId=i-0123456789abcdef0 InstanceType=x1.large\n'
-            'NodeName=node3 CPUTot=8 State=IDLE+DRAIN '
-            'Reason=Static node maintenance: unhealthy node is being '
-            'replaced [root@2024-01-01T00:00:00]\n')
+            'NodeName=node1 Arch=aarch64\n'
+            '   CPUTot=72\n'
+            '   OS=Linux 6.8.0-1029-nvidia-64k #32-Ubuntu SMP PREEMPT_DYNAMIC '
+            'Fri May 23 23:55:03 UTC 2025 \n'
+            '   State=DOWN+DRAIN ThreadsPerCore=1\n'
+            '   Reason=Kill task failed [root@2024-01-01T00:00:00]\n'
+            '   Comment=g752bbc\n'
+            '   Extra={"Probe":"2026-09-21 23:24:35 +0000 UTC",'
+            '"Message":"OK"}\n')
 
-        with mock.patch.object(client._runner, 'run') as mock_run:
-            mock_run.return_value = (0, mock_output, '')
-            result = client.get_all_node_details()
+        result = self._details(mock_output)
 
         assert result['node1']['Reason'] == (
             'Kill task failed [root@2024-01-01T00:00:00]')
         assert result['node1']['OS'] == (
-            'Linux 6.1.0-1.el9.x86_64 #1 SMP PREEMPT_DYNAMIC Mon Jan 1 '
-            '00:00:00 UTC 2024')
+            'Linux 6.8.0-1029-nvidia-64k #32-Ubuntu SMP PREEMPT_DYNAMIC '
+            'Fri May 23 23:55:03 UTC 2025')
+        assert result['node1']['Comment'] == 'g752bbc'
+        assert result['node1']['Extra'] == (
+            '{"Probe":"2026-09-21 23:24:35 +0000 UTC","Message":"OK"}')
         assert result['node1']['State'] == 'DOWN+DRAIN'
-        assert result['node1']['Comment'] == '(null)'
-        assert result['node2']['Reason'] == (
-            'prolog instance=i-0123456789abcdef0 job=42: health check '
-            'failed [root@2024-01-01T00:00:00]')
-        assert 'instance' not in result['node2']
-        assert 'job' not in result['node2']
-        assert result['node2']['InstanceId'] == 'i-0123456789abcdef0'
-        assert result['node2']['InstanceType'] == 'x1.large'
-        assert result['node3']['Reason'] == (
-            'Static node maintenance: unhealthy node is being replaced '
-            '[root@2024-01-01T00:00:00]')
+        assert result['node1']['CPUTot'] == '72'
 
-    def test_capitalized_text_inside_a_free_text_value(self):
-        """Administrator text may contain a capitalized `Word=` fragment;
-        only a field name scontrol actually prints ends the value."""
-        client = slurm.SlurmClient(
-            ssh_host='localhost',
-            ssh_port=22,
-            ssh_user='root',
-            ssh_key=None,
-        )
-
+    def test_free_text_containing_key_value_fragments(self):
+        """A reason written by a prolog script or an administrator may itself
+        contain `key=value` text; it stays part of the reason, and the
+        attributes on the following lines are still parsed."""
         mock_output = (
-            'NodeName=node1 Comment=Awaiting Ticket=INC123 State=DRAIN '
-            'Reason=Bad DIMM Slot=A3 replacement Ordered=yes '
-            '[root@2024-01-01T00:00:00] InstanceId=i-0123\n')
+            'NodeName=node1 CPUTot=8\n'
+            '   State=MIXED+CLOUD+DRAIN\n'
+            '   Reason=gpu-prolog instance=i-0123 job=42: fabricmanager down '
+            '[root@2024-01-01T00:00:00]\n'
+            '   InstanceId=i-0123 InstanceType=x1.large\n')
 
-        with mock.patch.object(client._runner, 'run') as mock_run:
-            mock_run.return_value = (0, mock_output, '')
-            result = client.get_all_node_details()
+        result = self._details(mock_output)
+
+        assert result['node1']['Reason'] == (
+            'gpu-prolog instance=i-0123 job=42: fabricmanager down '
+            '[root@2024-01-01T00:00:00]')
+        assert 'instance' not in result['node1']
+        assert 'job' not in result['node1']
+        assert result['node1']['InstanceId'] == 'i-0123'
+        assert result['node1']['InstanceType'] == 'x1.large'
+
+    def test_free_text_containing_a_capitalized_fragment(self):
+        """Administrator text may contain a capitalized `Word=` fragment, and
+        a field this parser has never heard of may follow the free-text line;
+        neither truncates the value nor loses the field."""
+        mock_output = ('NodeName=node1 CPUTot=8\n'
+                       '   Comment=Awaiting Ticket=INC123\n'
+                       '   Reason=Bad DIMM Slot=A3 replacement Ordered=yes\n'
+                       '   ReservationName=urgent BrandNewField=42\n')
+
+        result = self._details(mock_output)
 
         assert result['node1']['Comment'] == 'Awaiting Ticket=INC123'
         assert 'Ticket' not in result['node1']
-        assert result['node1']['State'] == 'DRAIN'
         assert result['node1']['Reason'] == (
-            'Bad DIMM Slot=A3 replacement Ordered=yes '
-            '[root@2024-01-01T00:00:00]')
+            'Bad DIMM Slot=A3 replacement Ordered=yes')
         assert 'Slot' not in result['node1']
         assert 'Ordered' not in result['node1']
-        assert result['node1']['InstanceId'] == 'i-0123'
-
-    def test_unknown_attribute_after_a_normal_field_is_kept(self):
-        """A field name this Slurm release adds is still parsed when it does
-        not follow a free-text value, so upgrades do not lose attributes."""
-        client = slurm.SlurmClient(
-            ssh_host='localhost',
-            ssh_port=22,
-            ssh_user='root',
-            ssh_key=None,
-        )
-
-        mock_output = ('NodeName=node1 State=IDLE BrandNewField=42 '
-                       'CPUTot=8\n')
-
-        with mock.patch.object(client._runner, 'run') as mock_run:
-            mock_run.return_value = (0, mock_output, '')
-            result = client.get_all_node_details()
-
+        assert result['node1']['ReservationName'] == 'urgent'
         assert result['node1']['BrandNewField'] == '42'
-        assert result['node1']['CPUTot'] == '8'
 
-    def test_skips_blank_lines_and_lines_without_node_name(self):
-        client = slurm.SlurmClient(
-            ssh_host='localhost',
-            ssh_port=22,
-            ssh_user='root',
-            ssh_key=None,
-        )
-
+    def test_skips_blank_lines_and_blocks_without_node_name(self):
         mock_output = ('\n'
+                       'Arch=x86_64 CPUTot=4\n'
                        'NodeName=node1 CPUTot=8\n'
                        '   \n'
-                       'Arch=x86_64 CPUTot=4\n')
+                       '   State=IDLE\n')
 
-        with mock.patch.object(client._runner, 'run') as mock_run:
-            mock_run.return_value = (0, mock_output, '')
-            result = client.get_all_node_details()
+        result = self._details(mock_output)
 
         assert list(result.keys()) == ['node1']
+        assert result['node1']['State'] == 'IDLE'
+        assert result['node1']['CPUTot'] == '8'

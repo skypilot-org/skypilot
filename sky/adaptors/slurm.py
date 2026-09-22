@@ -22,77 +22,11 @@ SEP = r'\x1f'
 
 _INFO_NODES_CMD = (f'sinfo -h --Node -o '
                    f'"%N{SEP}%t{SEP}%G{SEP}%c{SEP}%m{SEP}%P"')
-_ALL_NODE_DETAILS_CMD = 'scontrol show node -o'
-# A `scontrol show node` attribute token: capitalized name, then `=`
-# (NodeName, CPUAlloc, MCS_label, ...). Anything else is value text.
-_SCONTROL_ATTR_RE = re.compile(r'^[A-Z][A-Za-z0-9_]*=')
-# Node fields whose value is free text supplied by an administrator, a
-# prolog script or a cloud plugin. It may contain spaces and even
-# `Word=value` fragments, so only a known field name ends it.
+# Not `-o`: the one-line form runs the free-text fields below into the
+# attributes that follow them, with nothing to mark where they end.
+_ALL_NODE_DETAILS_CMD = 'scontrol show node'
+# Node fields holding free text with spaces, each printed on its own line.
 _NODE_FREE_TEXT_ATTRS = frozenset({'Reason', 'Comment', 'Extra', 'OS'})
-# Field names `scontrol show node` prints, including the ones cloud
-# plugins append. Consulted only to find where a free-text value ends: a
-# field missing here is still parsed normally everywhere else, so a new
-# Slurm release does not lose attributes.
-_NODE_ATTRS = frozenset({
-    'ActiveFeatures',
-    'AllocMem',
-    'AllocTRES',
-    'Arch',
-    'AveWatts',
-    'AvailableFeatures',
-    'BcastAddr',
-    'Boards',
-    'BootTime',
-    'CapWatts',
-    'CfgTRES',
-    'Comment',
-    'CoresPerSocket',
-    'CPUAlloc',
-    'CPUEfctv',
-    'CPULoad',
-    'CPUSpecList',
-    'CPUTot',
-    'CurrentWatts',
-    'Extra',
-    'ExtSensorsJoules',
-    'ExtSensorsTemp',
-    'ExtSensorsWatts',
-    'Features',
-    'FreeMem',
-    'Gres',
-    'GresDrain',
-    'GresUsed',
-    'InstanceId',
-    'InstanceType',
-    'LastBusyTime',
-    'MCS_label',
-    'MemSpecLimit',
-    'NextState',
-    'NodeAddr',
-    'NodeHostName',
-    'NodeName',
-    'OS',
-    'Owner',
-    'Partitions',
-    'Port',
-    'RealMemory',
-    'Reason',
-    'ReasonTime',
-    'ReasonUid',
-    'ResumeAfterTime',
-    'ResvName',
-    'SlurmdStartTime',
-    'SlurmdUser',
-    'Sockets',
-    'State',
-    'ThreadsPerCore',
-    'TmpDisk',
-    'Topology',
-    'TRESUsed',
-    'Version',
-    'Weight',
-})
 _ALL_JOBS_INFO_CMD = (f'squeue -h --states=running,completing '
                       f'-o "%i{SEP}%j{SEP}%u{SEP}%N{SEP}%b"')
 _PARTITIONS_INFO_CMD = 'scontrol show partitions -o'
@@ -222,26 +156,28 @@ def _parse_default_time(line: str) -> Optional[str]:
 def _parse_scontrol_node_output(output: str) -> Dict[str, str]:
     """Parses the key=value output of 'scontrol show node'.
 
-    scontrol prints attributes as space-separated ``Key=Value`` pairs, but
-    a few values contain spaces themselves (``Reason``, ``OS``, ``Comment``,
-    ``Extra``); e.g. ``Reason=Kill task failed [root@2026-01-01T00:00:00]``.
-    A token continues the current value unless it starts a new attribute,
-    which needs a capitalized ``Key=`` (so lower-case fragments such as
-    ``job=42:`` stay inside a reason) and, while a free-text value is open,
-    a name Slurm actually prints (so administrator text such as
-    ``Comment=Awaiting Ticket=INC123`` is kept whole).
+    Most attributes are space-separated ``Key=Value`` pairs, but a few hold
+    free text with spaces: ``Reason=Kill task failed [root@...]``,
+    ``OS=Linux 6.8.0 #32-Ubuntu SMP ...``, ``Comment``, and ``Extra``, which
+    sites use for JSON. Nothing quotes them, so on a single line they cannot
+    be told apart from the attributes that follow. scontrol gives each of
+    them a line of its own, so a line that starts with one of those names
+    holds that value to the end of the line.
     """
     node_info: Dict[str, str] = {}
-    key = None
-    for part in output.split():
-        if _SCONTROL_ATTR_RE.match(part) and (
-                key not in _NODE_FREE_TEXT_ATTRS or
-                part.split('=', 1)[0] in _NODE_ATTRS):
-            key, value = part.split('=', 1)
-            # Simple quote removal, might need refinement
-            node_info[key] = value.strip('\'"')
-        elif key is not None:
-            node_info[key] = f'{node_info[key]} {part}'.strip()
+    for line in output.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        name = line.split('=', 1)[0] if '=' in line else None
+        if name in _NODE_FREE_TEXT_ATTRS:
+            node_info[name] = line.split('=', 1)[1].strip().strip('\'"')
+            continue
+        for part in line.split():
+            if '=' in part:
+                key, value = part.split('=', 1)
+                # Simple quote removal, might need refinement
+                node_info[key] = value.strip('\'"')
     return node_info
 
 
@@ -267,12 +203,22 @@ def _parse_info_nodes_output(stdout: str) -> List[NodeInfo]:
 
 
 def _parse_all_node_details_output(stdout: str) -> Dict[str, Dict[str, str]]:
-    details: Dict[str, Dict[str, str]] = {}
+    """One entry per node from `scontrol show node`.
+
+    Each node starts a block at an unindented ``NodeName=``; its remaining
+    attributes are indented continuation lines. A one-line-per-node output
+    (``scontrol show node -o``) is a block of one line and still parses,
+    minus the free-text handling that format cannot express.
+    """
+    blocks: List[List[str]] = []
     for line in stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        node_info = _parse_scontrol_node_output(line)
+        if line.startswith('NodeName='):
+            blocks.append([line])
+        elif blocks:
+            blocks[-1].append(line)
+    details: Dict[str, Dict[str, str]] = {}
+    for block in blocks:
+        node_info = _parse_scontrol_node_output('\n'.join(block))
         node_name = node_info.get('NodeName')
         if node_name:
             details[node_name] = node_info
