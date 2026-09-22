@@ -136,7 +136,7 @@
         "labels": {
           "parent": "skypilot"
         },
-        "name": "skypilot-service-account-cluster-role"
+        "name": "skypilot-controller-service-account-cluster-role"
       },
       "rules": [
         {
@@ -218,12 +218,12 @@
         "labels": {
           "parent": "skypilot"
         },
-        "name": "skypilot-service-account-cluster-role-binding"
+        "name": "skypilot-controller-service-account-cluster-role-binding"
       },
       "roleRef": {
         "apiGroup": "rbac.authorization.k8s.io",
         "kind": "ClusterRole",
-        "name": "skypilot-service-account-cluster-role"
+        "name": "skypilot-controller-service-account-cluster-role"
       },
       "subjects": [
         {

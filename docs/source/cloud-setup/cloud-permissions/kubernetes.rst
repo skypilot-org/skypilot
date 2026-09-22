@@ -305,6 +305,18 @@ controllers and workloads alike.
 
 .. note::
 
+    **Running** ``sky`` **commands inside a workload pod.** A client talking to
+    a remote API server needs no Kubernetes permissions of its own — the API
+    server does the work. But a pod with no API server configured starts a
+    *local* one, and that local server provisions, so it reads cluster-scoped
+    resources such as nodes and runtime classes. Workload pods are no longer
+    granted those, so such a launch now fails with a ``403`` on
+    ``list_node`` rather than proceeding. Point ``remote_identity`` at a
+    service account of your own with the permissions in
+    `Minimum Permissions Required for SkyPilot`_ if you need this.
+
+.. note::
+
     **Upgrading from an earlier version.** Clusters created before this split
     bound the cluster-scoped roles to ``skypilot-service-account``, and SkyPilot
     does not delete RBAC objects it created. Those bindings therefore remain

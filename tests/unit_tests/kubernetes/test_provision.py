@@ -1090,6 +1090,13 @@ def _make_provider_config_for_rbac():
     }
 
 
+def _policy_rule(verbs, resources, groups=('',)):
+    """A rule shaped like the API client returns, not a placeholder string."""
+    return mock.Mock(api_groups=list(groups),
+                     resources=list(resources),
+                     verbs=list(verbs))
+
+
 class TestRbac409ConflictHandling:
     """Tests that RBAC resource creation handles 409 Conflict gracefully.
 
@@ -1202,7 +1209,8 @@ class TestRbac409ConflictHandling:
         provider_config = _make_provider_config_for_rbac()
 
         # Existing role has different rules than what we want.
-        existing_role = self._make_existing_role(rules=['stale-rules'])
+        existing_role = self._make_existing_role(
+            rules=[_policy_rule(['get'], ['pods'])])
 
         auth_api_mock = mock.MagicMock()
         auth_api_mock.list_namespaced_role.side_effect = [
@@ -1308,7 +1316,8 @@ class TestRbac409ConflictHandling:
         api_exc = _make_api_exception(409, 'Conflict')
         provider_config = _make_provider_config_for_rbac()
 
-        existing_cr = self._make_existing_role(rules=['stale-rules'])
+        existing_cr = self._make_existing_role(
+            rules=[_policy_rule(['get'], ['pods'])])
 
         auth_api_mock = mock.MagicMock()
         auth_api_mock.list_cluster_role.side_effect = [

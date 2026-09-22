@@ -134,7 +134,7 @@ def _format_rules(rules: Optional[List[Any]]) -> List[str]:
 
     out = []
     for rule in rules or []:
-        if not isinstance(rule, (dict, str)) or isinstance(rule, dict):
+        if not isinstance(rule, str):
             groups = _field(rule, 'api_groups', 'apiGroups') or ['']
             resources = _field(rule, 'resources') or []
             verbs = _field(rule, 'verbs') or []

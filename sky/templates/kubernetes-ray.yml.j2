@@ -204,7 +204,7 @@ provider:
         metadata:
             labels:
                 parent: skypilot
-            name: skypilot-service-account-cluster-role
+            name: {{k8s_service_account_name}}-cluster-role
         rules:
         - apiGroups: [ "" ]
           resources: [ "nodes" ]  # Required for getting node resources.
@@ -235,13 +235,20 @@ provider:
         metadata:
             labels:
                 parent: skypilot
-            name: skypilot-service-account-cluster-role-binding
+            # Named after the account, for the same reason as the
+            # namespaced binding above. It matters most on upgrade: an
+            # existing namespace already has the fixed-name object bound to
+            # the workload account, and a controller launch would otherwise
+            # patch that live object's subject -- taking the grant from a
+            # running controller, and turning the documented cleanup command
+            # into one that strips the new account instead of the old.
+            name: {{k8s_service_account_name}}-cluster-role-binding
         subjects:
         - kind: ServiceAccount
           name: {{k8s_service_account_name}}
         roleRef:
             kind: ClusterRole
-            name: skypilot-service-account-cluster-role
+            name: {{k8s_service_account_name}}-cluster-role
             apiGroup: rbac.authorization.k8s.io
     {% endif %}
 
