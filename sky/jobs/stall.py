@@ -467,6 +467,10 @@ def _claim_gates(engine: sqlalchemy.engine.Engine,
     wedged pool is undetected either way, and closing it needs a pool-readiness
     condition this module does not provide.
     """
+    # TEMP BISECT: short-circuit the gate entirely, keeping the schema
+    # changes (predicate, indexes, migration) in place.
+    return False, ''
+    # pylint: disable=unreachable
     if not managed_job_utils.is_consolidation_mode():
         return True, ('not consolidation mode, so the controller pool is '
                       'not this process to size')
