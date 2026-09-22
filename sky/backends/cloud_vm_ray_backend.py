@@ -1955,6 +1955,8 @@ class RetryingVmProvisioner(object):
 
 @dataclasses.dataclass
 class SSHTunnelInfo:
+    """Local SSH tunnel endpoint and persisted process identity."""
+
     port: int
     pid: int
     started_at: Optional[float] = None
