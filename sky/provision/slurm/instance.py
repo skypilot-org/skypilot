@@ -619,19 +619,28 @@ def _write_snapshot_manifest(login_node_runner: command_runner.CommandRunner,
                        'Failed to publish Slurm container snapshot manifest.')
 
 
+def _run_on_login_node_best_effort(
+    login_node_runner: command_runner.CommandRunner,
+    cmd: Union[str, List[str]],
+    failure_message: str,
+) -> None:
+    """Run a login-node command without letting its failure mask the result."""
+    try:
+        _run_on_login_node(login_node_runner, cmd, failure_message)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'{failure_message} '
+                       f'{common_utils.format_exception(e, use_bracket=True)}')
+        logger.debug('Full exception details:', exc_info=True)
+
+
 def _remove_snapshot_path_best_effort(
     login_node_runner: command_runner.CommandRunner,
     path: str,
     description: str,
 ) -> None:
     """Remove an unreferenced snapshot path without masking the main result."""
-    try:
-        _run_on_login_node(login_node_runner, ['rm', '-rf', '--', path],
-                           f'Failed to remove {description}.')
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Failed to remove {description}: '
-                       f'{common_utils.format_exception(e, use_bracket=True)}')
-        logger.debug('Full exception details:', exc_info=True)
+    _run_on_login_node_best_effort(login_node_runner, ['rm', '-rf', '--', path],
+                                   f'Failed to remove {description}.')
 
 
 def _validate_snapshot_files(login_node_runner: command_runner.CommandRunner,
@@ -1886,17 +1895,19 @@ enroot export -f -o {shlex.quote(staging_snapshot_path)} "$enroot_name"
     pre_batch_cancel = None
     if not inside_slurm_cluster:
         pre_batch_cancel = lambda: _cleanup_slurm_allocation(
-            client,
-            login_node_runner,
-            cluster_name_on_cloud,
-            provider_config,
-            job_id,
-            nodes,
-            preserve_logs=True)
+            client, login_node_runner, cluster_name_on_cloud, provider_config,
+            job_id, nodes)
     _cancel_slurm_job(client,
                       cluster_name_on_cloud,
                       inside_slurm_cluster,
                       pre_batch_cancel=pre_batch_cancel)
+    if not inside_slurm_cluster:
+        _remove_leftover_shared_state(client,
+                                      login_node_runner,
+                                      cluster_name_on_cloud,
+                                      _sky_cluster_home_dir(
+                                          sky_base_dir, cluster_name_on_cloud),
+                                      preserve_logs=True)
 
 
 def _drain_slurm_workload_steps(client: 'slurm.SlurmClient',
@@ -1984,10 +1995,12 @@ def _remove_shared_state_script(
     """Build a script that empties the shared cluster home on the login node.
 
     A stop keeps the logs referenced by the jobs database that start restores;
-    teardown removes the whole home. The removal is verified and retried:
-    a stale-file-handle failure would otherwise leave a half-deleted home,
-    and the leftovers (e.g. a partially deleted uv-managed Python install)
-    break the next start's runtime setup.
+    teardown removes the whole home. Nothing left to remove is the common case,
+    because the allocation's own cleanup trap already emptied the home, so the
+    script checks that first and never reaches the removal. The removal is
+    verified and retried: a stale-file-handle failure would otherwise leave a
+    half-deleted home, and the leftovers (e.g. a partially deleted uv-managed
+    Python install) break the next start's runtime setup.
     """
     if preserve_logs:
         logs = f'{sky_cluster_home_dir}/sky_logs'
@@ -2002,13 +2015,14 @@ def _remove_shared_state_script(
         verify_cmd = f'leftovers="$({inspect_cmd})" && [ -z "$leftovers" ]'
     else:
         remove_cmd = command_builder(['rm', '-rf', '--', sky_cluster_home_dir])
-        test_cmd = command_builder(['test', '!', '-e', sky_cluster_home_dir])
-        verify_cmd = test_cmd
+        verify_cmd = command_builder(['test', '!', '-e', sky_cluster_home_dir])
     # GNU find must be able to return to its starting directory.
     return ('cd /tmp || exit $?\n'
+            f'{verify_cmd} && exit 0\n'
             f'for attempt in $(seq {_SHARED_STATE_CLEANUP_ATTEMPTS}); do\n'
             f'  {remove_cmd} && {verify_cmd} && exit 0\n'
-            f'  sleep {_SHARED_STATE_CLEANUP_RETRY_INTERVAL_SECONDS}\n'
+            f'  [ "$attempt" = {_SHARED_STATE_CLEANUP_ATTEMPTS} ] || '
+            f'sleep {_SHARED_STATE_CLEANUP_RETRY_INTERVAL_SECONDS}\n'
             'done\n'
             'exit 1')
 
@@ -2020,14 +2034,10 @@ def _cleanup_slurm_allocation(
     provider_config: Dict[str, Any],
     job_id: str,
     nodes: List[str],
-    preserve_logs: bool = False,
 ) -> None:
     """Remove per-node state while the Slurm allocation is still active."""
     skypilot_runtime_dir = _resolve_skypilot_runtime_dir(
         client, provider_config, cluster_name_on_cloud)
-    sky_base_dir = _resolve_sky_base_dir(client, provider_config)
-    sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
-                                                 cluster_name_on_cloud)
     global_enroot_name = _enroot_container_name_global_scope(
         cluster_name_on_cloud)
     job_enroot_name = _enroot_container_name_job_scope(cluster_name_on_cloud,
@@ -2073,13 +2083,36 @@ rm -rf -- {shlex.quote(skypilot_runtime_dir)}
         login_node_runner, shlex.split(cleanup_node_cmd),
         'Failed to clean up the Slurm allocation before cancellation.')
 
-    _run_on_login_node(
+
+def _remove_leftover_shared_state(
+    client: 'slurm.SlurmClient',
+    login_node_runner: command_runner.CommandRunner,
+    cluster_name_on_cloud: str,
+    sky_cluster_home_dir: str,
+    preserve_logs: bool,
+) -> None:
+    """Clean the shared cluster home if the sbatch EXIT trap could not.
+
+    The trap empties the home from inside the allocation, as the job owner, so
+    this is the fallback for an allocation that could not run it: a lost node,
+    or a job already gone when teardown started. A COMPLETING job may still
+    have processes running, the batch script among them, so wait for the job
+    to leave the queue rather than race the trap for the same directory.
+    """
+    if not _wait_for_job_states(client, cluster_name_on_cloud,
+                                _TERMINAL_JOB_STATES,
+                                _TERMINATION_GRACE_PERIOD_SECONDS):
+        logger.debug(f'Job for cluster {cluster_name_on_cloud} has not left '
+                     'the queue; leaving the shared cluster state to its '
+                     'cleanup trap.')
+        return
+    _run_on_login_node_best_effort(
         login_node_runner,
         _remove_shared_state_script(
             sky_cluster_home_dir,
             preserve_logs=preserve_logs,
             command_builder=login_node_runner.command_as_user),
-        'Failed to clean up shared Slurm cluster state before cancellation.')
+        'Failed to clean up shared Slurm cluster state.')
 
 
 def _cancel_slurm_job(
@@ -2219,10 +2252,19 @@ def terminate_instances(
                       inside_slurm_cluster,
                       pre_batch_cancel=pre_batch_cancel)
     sky_base_dir = _resolve_sky_base_dir(client, provider_config)
-    snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud,
-                                 provider_config.get('snapshot_id'))
-    _remove_snapshot_path_best_effort(login_node_runner, snapshot_dir,
-                                      'Slurm container snapshot')
+    if not inside_slurm_cluster:
+        _remove_leftover_shared_state(client,
+                                      login_node_runner,
+                                      cluster_name_on_cloud,
+                                      _sky_cluster_home_dir(
+                                          sky_base_dir, cluster_name_on_cloud),
+                                      preserve_logs=False)
+    # Only a container cluster ever creates a snapshot directory.
+    if provider_config.get('container_image') is not None:
+        snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud,
+                                     provider_config.get('snapshot_id'))
+        _remove_snapshot_path_best_effort(login_node_runner, snapshot_dir,
+                                          'Slurm container snapshot')
 
 
 def open_ports(
