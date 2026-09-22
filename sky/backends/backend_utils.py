@@ -2677,25 +2677,46 @@ def _update_cluster_status(
             require_outputs=True,
             separate_stderr=True)
         if rc == 255 and isinstance(runner, command_runner.SSHCommandRunner):
-            # A manually restarted VM can have a new address. Preserve the
+            # A manually restarted VM can have a new SSH endpoint. Preserve the
             # INIT / `sky start` recovery path only when the provider confirms
-            # that the cached head address changed. A failed connection alone
+            # that the cached head endpoint changed. A failed connection alone
             # is not evidence that the runtime is unhealthy.
             try:
                 config = global_user_state.get_cluster_yaml_dict(
                     handle.cluster_yaml)
-                use_internal_ips = config.get('provider',
-                                              {}).get('use_internal_ips', False)
-                current_ips = get_node_ips(handle.cluster_yaml,
-                                           handle.launched_nodes,
-                                           get_internal_ips=use_internal_ips)
+                provider_config = config.get('provider', {})
+                use_internal_ips = provider_config.get('use_internal_ips',
+                                                       False)
+                cloud = handle.launched_resources.cloud
+                assert cloud is not None
+                if (cloud.PROVISIONER_VERSION >=
+                        clouds.ProvisionerVersion.SKYPILOT):
+                    metadata = provision_lib.get_cluster_info(
+                        str(cloud).lower(), provider_config.get('region'),
+                        handle.cluster_name_on_cloud, provider_config)
+                    if (metadata.get_head_instance() is None or
+                            len(metadata.instances) < handle.launched_nodes):
+                        raise exceptions.FetchClusterInfoError(
+                            exceptions.FetchClusterInfoError.Reason.HEAD)
+                    current_ips = metadata.get_feasible_ips(use_internal_ips)
+                    current_port = metadata.get_ssh_ports()[0]
+                else:
+                    current_ips = get_node_ips(
+                        handle.cluster_yaml,
+                        handle.launched_nodes,
+                        get_internal_ips=use_internal_ips)
+                    # Legacy Ray provisioners use the default SSH port.
+                    current_port = 22
             except Exception as e:  # pylint: disable=broad-except
                 raise exceptions.ClusterStatusFetchingError(
-                    f'Failed to verify the address of cluster {cluster_name!r} '
+                    f'Failed to verify the SSH endpoint of cluster '
+                    f'{cluster_name!r} '
                     f'after its health probe failed (SSH exit 255): '
                     f'{stderr.strip()}') from e
             if (not current_ips or handle.head_ip is None or
-                    current_ips[0] == handle.head_ip):
+                    handle.head_ssh_port is None or
+                (current_ips[0], current_port)
+                    == (handle.head_ip, handle.head_ssh_port)):
                 raise exceptions.ClusterStatusFetchingError(
                     f'Failed to reach cluster {cluster_name!r} for its health '
                     f'probe (SSH exit 255): {stderr.strip()}')

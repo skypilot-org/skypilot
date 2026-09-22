@@ -16,6 +16,7 @@ from sky import backends
 from sky import clouds
 from sky import exceptions
 from sky.backends import backend_utils
+from sky.provision import common as provision_common
 from sky.utils import command_runner
 from sky.utils import status_lib
 
@@ -54,6 +55,7 @@ def ssh_runtime_probe(monkeypatch):
     handle = _make_handle()
     handle.launched_resources.cloud = clouds.Azure()
     handle.head_ip = '10.0.0.1'
+    handle.head_ssh_port = 22
     runner = mock.Mock(spec=command_runner.SSHCommandRunner)
     handle.get_command_runners.return_value = [runner]
     record = _make_record(handle)
@@ -70,8 +72,18 @@ def ssh_runtime_probe(monkeypatch):
                         'get_cluster_from_name', mock.Mock(return_value=record))
     monkeypatch.setattr(backend_utils.global_user_state,
                         'get_cluster_yaml_dict', mock.Mock(return_value={}))
-    monkeypatch.setattr(backend_utils, 'get_node_ips',
-                        mock.Mock(return_value=['10.0.0.1']))
+    metadata = provision_common.ClusterInfo(instances={
+        'head': [
+            provision_common.InstanceInfo(instance_id='head',
+                                          internal_ip='10.0.0.1',
+                                          external_ip=None,
+                                          tags={})
+        ]
+    },
+                                            head_instance_id='head',
+                                            provider_name='azure')
+    monkeypatch.setattr(backend_utils.provision_lib, 'get_cluster_info',
+                        mock.Mock(return_value=metadata))
     return runner, record
 
 

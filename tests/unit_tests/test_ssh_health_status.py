@@ -9,6 +9,7 @@ from sky import backends
 from sky import clouds
 from sky import exceptions
 from sky.backends import backend_utils
+from sky.provision import common as provision_common
 from sky.utils import command_runner
 from sky.utils import status_lib
 
@@ -20,6 +21,7 @@ def health_probe():
     handle.cluster_name_on_cloud = 'test-cluster-1234'
     handle.cluster_yaml = '/fake/cluster.yaml'
     handle.head_ip = '10.0.0.1'
+    handle.head_ssh_port = 22
     handle.launched_nodes = 1
     handle.num_ips_per_node = 1
     handle.launched_resources = mock.Mock(unsafe=True)
@@ -56,6 +58,20 @@ def health_probe():
             }
         }
         patch('get_node_ips', return_value=['10.0.0.1'])
+        metadata = provision_common.ClusterInfo(instances={
+            'head': [
+                provision_common.InstanceInfo(instance_id='head',
+                                              internal_ip='10.0.0.1',
+                                              external_ip='10.0.0.1',
+                                              tags={})
+            ]
+        },
+                                                head_instance_id='head',
+                                                provider_name='azure')
+        stack.enter_context(
+            mock.patch.object(backend_utils.provision_lib,
+                              'get_cluster_info',
+                              return_value=metadata))
         backend = patch('get_backend_from_handle').return_value
         backend.is_definitely_autostopping.return_value = False
         count = patch('_count_healthy_nodes_from_ray', return_value=(1, 0))
@@ -90,6 +106,8 @@ def test_unavailable_ssh_does_not_change_cluster_state(health_probe, cloud,
     state.add_cluster_event.assert_not_called()
     state.add_or_update_cluster.assert_not_called()
     runner.run.assert_called_once()
+    backend_utils.provision_lib.get_cluster_info.assert_called_once()
+    backend_utils.get_node_ips.assert_not_called()
 
 
 def test_reachable_broken_ray_still_marks_init(health_probe):
@@ -109,7 +127,10 @@ def test_changed_head_address_preserves_manual_restart_recovery(
     record, runner, state, _, _, _ = health_probe
     runner.run.return_value = (
         255, '', 'ssh: connect to host 10.0.0.1 port 22: Connection timed out')
-    backend_utils.get_node_ips.return_value = ['10.0.0.2']
+    head = backend_utils.provision_lib.get_cluster_info.return_value.get_head_instance(
+    )
+    head.internal_ip = '10.0.0.2' if use_internal_ips else '10.0.0.1'
+    head.external_ip = '10.0.0.1' if use_internal_ips else '10.0.0.2'
     state.get_cluster_yaml_dict.return_value = {
         'provider': {
             'use_internal_ips': use_internal_ips
@@ -123,14 +144,16 @@ def test_changed_head_address_preserves_manual_restart_recovery(
     assert state.add_or_update_cluster.call_args.kwargs['ready'] is False
     assert state.add_cluster_event.call_args.args[
         1] == status_lib.ClusterStatus.INIT
-    backend_utils.get_node_ips.assert_called_once_with(
-        record['handle'].cluster_yaml, 1, get_internal_ips=use_internal_ips)
+    backend_utils.provision_lib.get_cluster_info.assert_called_once_with(
+        'azure', None, record['handle'].cluster_name_on_cloud,
+        {'use_internal_ips': use_internal_ips})
+    backend_utils.get_node_ips.assert_not_called()
 
 
 def test_failed_address_lookup_preserves_cluster_state(health_probe):
     record, runner, state, _, _, _ = health_probe
     runner.run.return_value = (255, '', 'unreachable')
-    backend_utils.get_node_ips.side_effect = exceptions.FetchClusterInfoError(
+    backend_utils.provision_lib.get_cluster_info.side_effect = exceptions.FetchClusterInfoError(
         exceptions.FetchClusterInfoError.Reason.HEAD)
 
     with pytest.raises(exceptions.ClusterStatusFetchingError):
@@ -142,6 +165,83 @@ def test_failed_address_lookup_preserves_cluster_state(health_probe):
     state.add_or_update_cluster.assert_not_called()
 
 
+def test_changed_head_port_preserves_manual_restart_recovery(health_probe):
+    record, runner, state, _, _, _ = health_probe
+    handle = record['handle']
+    handle.launched_resources.cloud = clouds.Vast()
+    handle.head_ip = 'ssh3.vast.ai'
+    handle.head_ssh_port = 31001
+    backend_utils.get_node_ips.return_value = ['ssh3.vast.ai']
+    state.get_cluster_yaml_dict.return_value = {'provider': {}}
+    metadata = provision_common.ClusterInfo(instances={
+        'head': [
+            provision_common.InstanceInfo(instance_id='head',
+                                          internal_ip='10.0.0.1',
+                                          external_ip='ssh3.vast.ai',
+                                          tags={},
+                                          ssh_port=32744)
+        ]
+    },
+                                            head_instance_id='head',
+                                            provider_name='vast')
+    runner.run.return_value = (255, '', 'connection refused')
+    with mock.patch.object(backend_utils.provision_lib,
+                           'get_cluster_info',
+                           return_value=metadata) as get_info:
+        backend_utils._update_cluster_status('test-cluster',
+                                             record,
+                                             retry_if_missing=False)
+
+    assert state.add_or_update_cluster.call_args.kwargs['ready'] is False
+    assert state.add_cluster_event.call_args.args[
+        1] == status_lib.ClusterStatus.INIT
+    get_info.assert_called_once()
+    backend_utils.get_node_ips.assert_not_called()
+
+
+def test_missing_head_metadata_preserves_cluster_state(health_probe):
+    record, runner, state, _, _, _ = health_probe
+    runner.run.return_value = (255, '', 'unreachable')
+    metadata = backend_utils.provision_lib.get_cluster_info.return_value
+    metadata.head_instance_id = None
+    metadata.instances['head'][0].internal_ip = '10.0.0.2'
+
+    with pytest.raises(exceptions.ClusterStatusFetchingError):
+        backend_utils._update_cluster_status('test-cluster',
+                                             record,
+                                             retry_if_missing=False)
+
+    state.add_cluster_event.assert_not_called()
+    state.add_or_update_cluster.assert_not_called()
+
+
+@pytest.mark.parametrize('current_ip', ['10.0.0.1', '10.0.0.2'])
+def test_legacy_provisioner_preserves_address_recovery(health_probe,
+                                                       current_ip):
+    record, runner, state, _, _, _ = health_probe
+    record['handle'].launched_resources.cloud = clouds.IBM()
+    runner.run.return_value = (255, '', 'connection refused')
+    backend_utils.get_node_ips.return_value = [current_ip]
+
+    if current_ip == record['handle'].head_ip:
+        with pytest.raises(exceptions.ClusterStatusFetchingError):
+            backend_utils._update_cluster_status('test-cluster',
+                                                 record,
+                                                 retry_if_missing=False)
+        state.add_cluster_event.assert_not_called()
+        state.add_or_update_cluster.assert_not_called()
+    else:
+        backend_utils._update_cluster_status('test-cluster',
+                                             record,
+                                             retry_if_missing=False)
+        assert state.add_or_update_cluster.call_args.kwargs['ready'] is False
+        assert state.add_cluster_event.call_args.args[
+            1] == status_lib.ClusterStatus.INIT
+
+    backend_utils.get_node_ips.assert_called_once()
+    backend_utils.provision_lib.get_cluster_info.assert_not_called()
+
+
 def test_healthy_probe_does_not_fetch_addresses(health_probe):
     record, runner, state, _, _, _ = health_probe
     runner.run.return_value = (0, 'healthy', '')
@@ -151,6 +251,7 @@ def test_healthy_probe_does_not_fetch_addresses(health_probe):
 
     assert state.add_or_update_cluster.call_args.kwargs['ready'] is True
     backend_utils.get_node_ips.assert_not_called()
+    backend_utils.provision_lib.get_cluster_info.assert_not_called()
 
 
 def test_reachable_partial_ray_cluster_still_marks_init(health_probe):
