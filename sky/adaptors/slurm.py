@@ -788,10 +788,11 @@ class SlurmClient:
     def get_all_node_details(self) -> Dict[str, Dict[str, str]]:
         """Get detailed attributes for every node in a single scontrol call.
 
-        Uses ``scontrol show node -o`` (one line per node) so per-node
-        attributes that sinfo's format codes cannot express (CPUAlloc,
-        AllocMem, FreeMem, CPULoad, GresUsed, ...) are available without a
-        round-trip per node.
+        Uses ``scontrol show node`` so per-node attributes that sinfo's
+        format codes cannot express (CPUAlloc, AllocMem, FreeMem, CPULoad,
+        GresUsed, ...) are available without a round-trip per node. Not the
+        ``-o`` form: it puts the free-text fields on the same line as
+        everything else with nothing to mark where they end.
 
         Returns:
             A dictionary mapping node name to its attribute dictionary.

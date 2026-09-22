@@ -395,7 +395,7 @@ class TestInventorySnapshot:
         mock_run.assert_called_once()
         script = mock_run.call_args.args[0]
         assert 'sinfo -h --Node' in script
-        assert 'scontrol show node -o' in script
+        assert 'scontrol show node' in script
         assert script.count(' ) &') == 2
         assert node_infos[0].node == 'nœud1'
         assert node_details['nœud1']['CPUAlloc'] == '32'
@@ -425,7 +425,7 @@ class TestInventorySnapshot:
 
         mock_run.assert_called_once()
         script = mock_run.call_args.args[0]
-        for command in ('sinfo -h --Node', 'scontrol show node -o',
+        for command in ('sinfo -h --Node', 'scontrol show node',
                         'squeue -h --states=running,completing',
                         'scontrol show partitions -o'):
             assert command in script
