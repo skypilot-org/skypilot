@@ -231,6 +231,7 @@ This will produce a summary like:
     Fluidstack: enabled
     Cudo: enabled
     Shadeform: enabled
+    Lium: enabled
     IBM: enabled
     SCP: enabled
     Seeweb: enabled
@@ -1367,6 +1368,59 @@ Go to the `API Key Management <https://platform.shadeform.ai/settings/api>`_ pag
 
   mkdir -p ~/.shadeform
   echo "<your_api_key_here>" > ~/.shadeform/api_key
+
+Lium |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~
+
+`Lium <https://lium.io/>`_ is a decentralized GPU marketplace built on Bittensor
+subnet 51. To configure Lium access:
+
+Install the necessary dependencies for Lium.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[lium]"
+      # From nightly build
+      uv pip install "skypilot-nightly[lium]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[lium]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[lium]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[lium]"
+      # From nightly build
+      pip install "skypilot-nightly[lium]"
+      # From source
+      pip install -e ".[lium]"
+
+Get an API key on the `Lium API keys <https://lium.io/api-keys>`_ page, then
+write it to :code:`~/.lium/config.ini`:
+
+.. code-block:: shell
+
+  lium init
+
+You can also put the key in the :code:`LIUM_API_KEY` environment variable.
 
 IBM |community-badge|
 ~~~~~~~~~~~~~~~~~~~~~
