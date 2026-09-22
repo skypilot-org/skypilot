@@ -8,6 +8,16 @@ from sky.provision.runpod import volume as runpod_prov
 from sky.volumes import volume as volume_lib
 
 
+def _pods_rest(pods):
+    """A rest_list stand-in returning ``pods`` for GET /pods."""
+
+    def _rest_list(path, key):
+        assert (path, key) == ('/pods', 'pods')
+        return pods
+
+    return _rest_list
+
+
 class TestRunPodVolume:
 
     def _mock_infra(self, monkeypatch, zone=None):
@@ -222,7 +232,12 @@ class TestRunPodProvisionVolume:
         class _Req:
 
             @staticmethod
-            def request(method, url, headers=None, json=None, timeout=30):
+            def request(method,
+                        url,
+                        headers=None,
+                        json=None,
+                        params=None,
+                        timeout=30):
                 return response
 
         monkeypatch.setattr(runpod, 'requests', _Req)
@@ -264,7 +279,7 @@ class TestRunPodProvisionVolume:
                           text='{"foo":1}',
                           json_obj={'foo': 1})
         self._mock_requests(monkeypatch, resp)
-        out = runpod.rest_request('GET', '/networkvolumes')
+        out = runpod.rest_request('GET', '/network-volumes')
         assert out == {'foo': 1}
 
     def test_rest_request_success_plain_text(self, monkeypatch):
@@ -286,7 +301,7 @@ class TestRunPodProvisionVolume:
         monkeypatch.setattr('sky.adaptors.runpod.runpod', _SDK)
         resp = self._Resp(status_code=200, text='')
         self._mock_requests(monkeypatch, resp)
-        out = runpod.rest_request('DELETE', '/networkvolumes/x')
+        out = runpod.rest_request('DELETE', '/network-volumes/x')
         assert out is None
 
     def test_rest_request_error_raises(self, monkeypatch):
@@ -318,7 +333,12 @@ class TestRunPodProvisionVolume:
             ]
 
             @staticmethod
-            def request(method, url, headers=None, json=None, timeout=30):
+            def request(method,
+                        url,
+                        headers=None,
+                        json=None,
+                        params=None,
+                        timeout=30):
                 SeqReq.calls += 1
                 return SeqReq.seq[min(SeqReq.calls - 1, len(SeqReq.seq) - 1)]
 
@@ -338,7 +358,12 @@ class TestRunPodProvisionVolume:
             calls = 0
 
             @staticmethod
-            def request(method, url, headers=None, json=None, timeout=30):
+            def request(method,
+                        url,
+                        headers=None,
+                        json=None,
+                        params=None,
+                        timeout=30):
                 NetSeqReq.calls += 1
                 if NetSeqReq.calls < 2:
                     raise RuntimeError('net')
@@ -362,7 +387,12 @@ class TestRunPodProvisionVolume:
             calls = 0
 
             @staticmethod
-            def request(method, url, headers=None, json=None, timeout=30):
+            def request(method,
+                        url,
+                        headers=None,
+                        json=None,
+                        params=None,
+                        timeout=30):
                 AlwaysNetErr.calls += 1
                 raise RuntimeError('net')
 
@@ -382,7 +412,12 @@ class TestRunPodProvisionVolume:
             calls = 0
 
             @staticmethod
-            def request(method, url, headers=None, json=None, timeout=30):
+            def request(method,
+                        url,
+                        headers=None,
+                        json=None,
+                        params=None,
+                        timeout=30):
                 Always500.calls += 1
                 return TestRunPodProvisionVolume._Resp(status_code=500,
                                                        text='boom')
@@ -403,7 +438,12 @@ class TestRunPodProvisionVolume:
             calls = 0
 
             @staticmethod
-            def request(method, url, headers=None, json=None, timeout=30):
+            def request(method,
+                        url,
+                        headers=None,
+                        json=None,
+                        params=None,
+                        timeout=30):
                 Always400.calls += 1
                 return TestRunPodProvisionVolume._Resp(status_code=400,
                                                        text='bad')
@@ -413,53 +453,51 @@ class TestRunPodProvisionVolume:
             _ = runpod.rest_request('GET', '/bad')
         assert Always400.calls == 1
 
-    def test_list_volumes_variants(self, monkeypatch):
+    def test_list_volumes_paginated(self, monkeypatch):
+        pages = [
+            {
+                'networkVolumes': [{
+                    'id': '1'
+                }],
+                'pagination': {
+                    'nextCursor': 'c2',
+                    'hasNextPage': True
+                },
+            },
+            {
+                'networkVolumes': [{
+                    'id': '2'
+                }],
+                'pagination': {
+                    'nextCursor': None,
+                    'hasNextPage': False
+                },
+            },
+        ]
+        cursors = []
 
-        class _SDK:
-            api_key = 'k'
+        def _rest(method, path, json=None, params=None):
+            assert (method, path) == ('GET', '/network-volumes')
+            cursors.append((params or {}).get('cursor'))
+            return pages[len(cursors) - 1]
 
-        monkeypatch.setattr('sky.adaptors.runpod.runpod', _SDK)
-        # direct list
-        self._mock_requests(monkeypatch, self._Resp(200,
-                                                    text='[ ]',
-                                                    json_obj=[]))
-        assert runpod_prov._list_volumes() == []
-        # dict wrappers
-        self._mock_requests(
-            monkeypatch,
-            self._Resp(200,
-                       json_obj={'items': [{
-                           'id': '1'
-                       }]},
-                       text='{"items":[{"id":"1"}]}'))
-        assert runpod_prov._list_volumes() == [{'id': '1'}]
-        self._mock_requests(
-            monkeypatch,
-            self._Resp(200,
-                       json_obj={'data': [{
-                           'id': '2'
-                       }]},
-                       text='{"data":[{"id":"2"}]}'))
-        assert runpod_prov._list_volumes() == [{'id': '2'}]
-        self._mock_requests(
-            monkeypatch,
-            self._Resp(200,
-                       json_obj={'networkVolumes': [{
-                           'id': '3'
-                       }]},
-                       text='{"networkVolumes":[{"id":"3"}]}'))
-        assert runpod_prov._list_volumes() == [{'id': '3'}]
-        # unknown shape
-        self._mock_requests(
-            monkeypatch, self._Resp(200, json_obj={'foo': 1}, text='{"foo":1}'))
-        assert runpod_prov._list_volumes() == []
+        monkeypatch.setattr(runpod, 'rest_request', _rest)
+        assert runpod_prov._list_volumes() == [{'id': '1'}, {'id': '2'}]
+        assert cursors == [None, 'c2']
+
+    def test_list_volumes_unexpected_shape_raises(self, monkeypatch):
+        monkeypatch.setattr(runpod, 'rest_request', lambda *args, **kwargs: [{
+            'id': '1'
+        }])
+        with pytest.raises(runpod.RunPodRestError):
+            runpod_prov._list_volumes()
 
     def test_try_resolve_volume_id(self, monkeypatch):
         monkeypatch.setattr(
             runpod_prov, '_list_volumes', lambda: [{
                 'name': 'n1',
                 'id': 'i1',
-                'dataCenterId': 'iad-1'
+                'dataCenter': 'iad-1'
             }])
         assert runpod_prov._try_resolve_volume_id('n1', 'iad-1') == 'i1'
         assert runpod_prov._try_resolve_volume_id('n2', 'iad-1') is None
@@ -471,7 +509,7 @@ class TestRunPodProvisionVolume:
                 'name': 'n1',
                 'id': 'i1',
                 'size': 100,
-                'dataCenterId': 'iad-1'
+                'dataCenter': 'iad-1'
             }])
         vol = runpod_prov._try_resolve_volume_by_name('n1', 'iad-1')
         assert vol is not None
@@ -530,8 +568,8 @@ class TestRunPodProvisionVolume:
         out = runpod_prov.apply_volume(cfg)
         assert out.id_on_cloud == 'VID'
         assert created['payload'][0] == 'POST'
-        assert created['payload'][1] == '/networkvolumes'
-        assert created['payload'][2]['dataCenterId'] == 'iad-1'
+        assert created['payload'][1] == '/network-volumes'
+        assert created['payload'][2]['dataCenter'] == 'iad-1'
         assert created['payload'][2]['size'] == 100
 
     def test_apply_volume_use_existing_not_found(self, monkeypatch):
@@ -704,7 +742,7 @@ class TestRunPodProvisionVolume:
 
         cfg = Cfg()
         runpod_prov.delete_volume(cfg)
-        assert deleted['path'] == ('DELETE', '/networkvolumes/VID')
+        assert deleted['path'] == ('DELETE', '/network-volumes/VID')
         # resolve by name
         deleted['path'] = None
         cfg2 = Cfg()
@@ -712,7 +750,7 @@ class TestRunPodProvisionVolume:
         monkeypatch.setattr(runpod_prov, '_try_resolve_volume_id',
                             lambda name, data_center_id: 'VID2')
         runpod_prov.delete_volume(cfg2)
-        assert deleted['path'] == ('DELETE', '/networkvolumes/VID2')
+        assert deleted['path'] == ('DELETE', '/network-volumes/VID2')
         # not found
         deleted['path'] = None
         monkeypatch.setattr(runpod_prov, '_try_resolve_volume_id',
@@ -741,32 +779,30 @@ class TestRunPodProvisionVolume:
             zone = 'iad-1'
             config = {}
 
-        # Mock GraphQL response
-        class _API:
-
-            class api:
-
-                class graphql:
-
-                    @staticmethod
-                    def run_graphql_query(query):
-                        return {
-                            'data': {
-                                'myself': {
-                                    'pods': [{
-                                        'id': 'p1',
-                                        'name': 'cluster-a-user-hash-head',
-                                        'networkVolumeId': 'VID'
-                                    }, {
-                                        'id': 'p2',
-                                        'name': 'other',
-                                        'networkVolumeId': 'X'
-                                    }]
-                                }
-                            }
-                        }
-
-        monkeypatch.setattr('sky.adaptors.runpod.runpod', _API)
+        monkeypatch.setattr(
+            runpod, 'rest_list',
+            _pods_rest([
+                {
+                    'id': 'p1',
+                    'name': 'cluster-a-user-hash-head',
+                    'mounts': {
+                        'network': [{
+                            'volumeId': 'VID',
+                            'path': '/v'
+                        }]
+                    }
+                },
+                {
+                    'id': 'p2',
+                    'name': 'other',
+                    'mounts': {
+                        'network': [{
+                            'volumeId': 'X',
+                            'path': '/v'
+                        }]
+                    }
+                },
+            ]))
         # Mock clusters
         monkeypatch.setattr(
             'sky.global_user_state.get_clusters', lambda: [{
@@ -788,32 +824,30 @@ class TestRunPodProvisionVolume:
             zone = 'iad-1'
             config = {}
 
-        # Mock GraphQL response
-        class _API:
-
-            class api:
-
-                class graphql:
-
-                    @staticmethod
-                    def run_graphql_query(query):
-                        return {
-                            'data': {
-                                'myself': {
-                                    'pods': [{
-                                        'id': 'p1',
-                                        'name': 'cluster-a-user-hash-head',
-                                        'networkVolumeId': 'VID'
-                                    }, {
-                                        'id': 'p2',
-                                        'name': 'other',
-                                        'networkVolumeId': 'X'
-                                    }]
-                                }
-                            }
-                        }
-
-        monkeypatch.setattr('sky.adaptors.runpod.runpod', _API)
+        monkeypatch.setattr(
+            runpod, 'rest_list',
+            _pods_rest([
+                {
+                    'id': 'p1',
+                    'name': 'cluster-a-user-hash-head',
+                    'mounts': {
+                        'network': [{
+                            'volumeId': 'VID',
+                            'path': '/v'
+                        }]
+                    }
+                },
+                {
+                    'id': 'p2',
+                    'name': 'other',
+                    'mounts': {
+                        'network': [{
+                            'volumeId': 'X',
+                            'path': '/v'
+                        }]
+                    }
+                },
+            ]))
         # Mock clusters
         monkeypatch.setattr(
             'sky.global_user_state.get_clusters', lambda: [{
@@ -831,8 +865,7 @@ class TestRunPodProvisionVolume:
         assert used_pods == ['cluster-a-user-hash-head']
         assert used_clusters == ['cluster-a']
 
-    def test_get_volume_usedby_resolve_id_missing_graphql_keys(
-            self, monkeypatch):
+    def test_get_volume_usedby_resolve_id_no_mounts(self, monkeypatch):
 
         class Cfg:
             id_on_cloud = None
@@ -843,17 +876,17 @@ class TestRunPodProvisionVolume:
         monkeypatch.setattr(runpod_prov, '_try_resolve_volume_id',
                             lambda name, data_center_id: 'VIDX')
 
-        class _API:
-
-            class api:
-
-                class graphql:
-
-                    @staticmethod
-                    def run_graphql_query(query):
-                        return {}  # missing keys -> defaults to []
-
-        monkeypatch.setattr('sky.adaptors.runpod.runpod', _API)
+        monkeypatch.setattr(
+            runpod, 'rest_list',
+            _pods_rest([{
+                'id': 'p1',
+                'name': 'c-head',
+                'mounts': {}
+            }, {
+                'id': 'p2',
+                'name': 'c-worker',
+                'mounts': None
+            }]))
         used_pods, used_clusters = runpod_prov.get_volume_usedby(Cfg())
         assert used_pods == [] and used_clusters == []
 
@@ -865,54 +898,72 @@ class TestRunPodProvisionVolume:
             zone = 'iad-1'
             config = {}
 
-        class _API:
-
-            class api:
-
-                class graphql:
-
-                    @staticmethod
-                    def run_graphql_query(query):
-                        return {
-                            'data': {
-                                'myself': {
-                                    'pods': [
-                                        {
-                                            'id': 'p1',
-                                            'name': None,
-                                            'networkVolumeId': 'VID'
-                                        },
-                                        {
-                                            'id': 'p2',
-                                            'name': '',
-                                            'networkVolumeId': 'VID'
-                                        },
-                                        {
-                                            'id': 'p3',
-                                            'name': 'cluster-a-user-hash-worker',
-                                            'networkVolumeId': 'VID'
-                                        },
-                                        {
-                                            'id': 'p4',
-                                            'name': 'cluster-a-b-user-hash-head',
-                                            'networkVolumeId': 'VID'
-                                        },  # equality match
-                                        {
-                                            'id': 'p5',
-                                            'name': 'cluster-a-user-hash-head',
-                                            'networkVolumeId': 'VID'
-                                        },
-                                        {
-                                            'id': 'p6',
-                                            'name': 'other',
-                                            'networkVolumeId': 'X'
-                                        }
-                                    ]
-                                }
-                            }
-                        }
-
-        monkeypatch.setattr('sky.adaptors.runpod.runpod', _API)
+        monkeypatch.setattr(
+            runpod,
+            'rest_list',
+            _pods_rest([
+                {
+                    'id': 'p1',
+                    'name': None,
+                    'mounts': {
+                        'network': [{
+                            'volumeId': 'VID',
+                            'path': '/v'
+                        }]
+                    }
+                },
+                {
+                    'id': 'p2',
+                    'name': '',
+                    'mounts': {
+                        'network': [{
+                            'volumeId': 'VID',
+                            'path': '/v'
+                        }]
+                    }
+                },
+                {
+                    'id': 'p3',
+                    'name': 'cluster-a-user-hash-worker',
+                    'mounts': {
+                        'network': [{
+                            'volumeId': 'VID',
+                            'path': '/v'
+                        }]
+                    }
+                },
+                # equality match
+                {
+                    'id': 'p4',
+                    'name': 'cluster-a-b-user-hash-head',
+                    'mounts': {
+                        'network': [{
+                            'volumeId': 'VID',
+                            'path': '/v'
+                        }]
+                    }
+                },
+                {
+                    'id': 'p5',
+                    'name': 'cluster-a-user-hash-head',
+                    'mounts': {
+                        'network': [{
+                            'volumeId': 'VID',
+                            'path': '/v'
+                        }]
+                    }
+                },
+                {
+                    'id': 'p6',
+                    'name': 'other',
+                    'mounts': {
+                        'network': [{
+                            'volumeId': 'X',
+                            'path': '/v'
+                        }]
+                    }
+                },
+            ]))
         monkeypatch.setattr(
             'sky.global_user_state.get_clusters', lambda: [{
                 'name': 'cluster-a'
@@ -940,27 +991,18 @@ class TestRunPodProvisionVolume:
             zone = 'iad-1'
             config = {}
 
-        class _API:
-
-            class api:
-
-                class graphql:
-
-                    @staticmethod
-                    def run_graphql_query(query):
-                        return {
-                            'data': {
-                                'myself': {
-                                    'pods': [{
-                                        'id': 'p1',
-                                        'name': 'c1-head',
-                                        'networkVolumeId': 'VID'
-                                    },]
-                                }
-                            }
-                        }
-
-        monkeypatch.setattr('sky.adaptors.runpod.runpod', _API)
+        monkeypatch.setattr(
+            runpod, 'rest_list',
+            _pods_rest([{
+                'id': 'p1',
+                'name': 'c1-head',
+                'mounts': {
+                    'network': [{
+                        'volumeId': 'VID',
+                        'path': '/v'
+                    }]
+                }
+            }]))
         monkeypatch.setattr('sky.global_user_state.get_clusters', lambda: [])
         used_pods, used_clusters = runpod_prov.get_volume_usedby(Cfg())
         assert used_pods == ['c1-head']
@@ -983,35 +1025,27 @@ class TestRunPodProvisionVolume:
             zone = 'iad-1'
             config = {}
 
-        # Mock GraphQL to raise exception for one volume but succeed for another
+        # The pod listing succeeds for the first volume and fails for the
+        # second one.
         call_count = [0]
 
-        class _API:
+        def _rest_list(path, key):
+            del path, key
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return [{
+                    'id': 'p1',
+                    'name': 'cluster-a-user-hash-head',
+                    'mounts': {
+                        'network': [{
+                            'volumeId': 'VID1',
+                            'path': '/v'
+                        }]
+                    }
+                }]
+            raise runpod.RunPodRestError('listing pods failed', status_code=500)
 
-            class api:
-
-                class graphql:
-
-                    @staticmethod
-                    def run_graphql_query(query):
-                        call_count[0] += 1
-                        # First call (for vol-success) succeeds
-                        if call_count[0] == 1:
-                            return {
-                                'data': {
-                                    'myself': {
-                                        'pods': [{
-                                            'id': 'p1',
-                                            'name': 'cluster-a-user-hash-head',
-                                            'networkVolumeId': 'VID1'
-                                        }]
-                                    }
-                                }
-                            }
-                        # Second call (for vol-failure) raises exception
-                        raise RuntimeError('GraphQL query failed')
-
-        monkeypatch.setattr('sky.adaptors.runpod.runpod', _API)
+        monkeypatch.setattr(runpod, 'rest_list', _rest_list)
         monkeypatch.setattr('sky.global_user_state.get_clusters', lambda: [{
             'name': 'cluster-a'
         }])
