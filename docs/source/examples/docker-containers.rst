@@ -275,7 +275,18 @@ you can use :ref:`task environment variables <env-vars>`:
                 SKYPILOT_DOCKER_PASSWORD: ""
                 SKYPILOT_DOCKER_SERVER: <your-registry>.azurecr.io
 
-            **Important**: Ensure the cluster's managed identity has the ``AcrPull`` role on the registry (SkyPilot's default managed identity or a custom one via ``remote_identity``).
+            **Important**: Grant the cluster's managed identity (SkyPilot's default
+            managed identity or a custom one via ``remote_identity``) the pull role
+            appropriate for the registry's permissions mode:
+
+            - **RBAC Registry Permissions**: assign ``AcrPull``.
+            - **RBAC Registry + ABAC Repository Permissions**: assign
+              ``Container Registry Repository Reader`` and ensure any repository
+              conditions allow access to the image's repository.
+
+            ``AcrPull`` is not honored by ABAC-enabled registries. See Azure's
+            `managed identity authentication guide <https://learn.microsoft.com/en-us/azure/container-registry/container-registry-authentication-managed-identity>`_
+            for role assignment instructions.
 
     .. tab-item:: NVIDIA NGC
         :sync: nvidia-container-registry-tab
