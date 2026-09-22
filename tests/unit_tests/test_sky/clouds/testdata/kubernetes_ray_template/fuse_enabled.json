@@ -195,8 +195,7 @@
             "watch",
             "create",
             "update",
-            "patch",
-            "delete"
+            "patch"
           ]
         },
         {

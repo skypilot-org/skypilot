@@ -189,8 +189,14 @@ provider:
           resources: [ "namespaces" ]  # Required for creating skypilot-system namespace, which hosts fuse device manager.
           verbs: [ "get", "list", "watch", "create" ]
         - apiGroups: [ "rbac.authorization.k8s.io" ]
-          resources: [ "clusterroles", "clusterrolebindings" ]  # Required for launching more SkyPilot clusters from within the pod.
-          verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+          # Required for launching more SkyPilot clusters from within the pod:
+          # a controller pod bootstraps the RBAC of the clusters it launches.
+          # No "delete": SkyPilot never deletes a ClusterRole or
+          # ClusterRoleBinding, and unlike create/update, delete is not covered
+          # by Kubernetes' privilege-escalation prevention -- holding it would
+          # let a pod remove bindings the control plane depends on.
+          resources: [ "clusterroles", "clusterrolebindings" ]
+          verbs: [ "get", "list", "watch", "create", "update", "patch" ]
         - apiGroups: [ "node.k8s.io" ]
           resources: [ "runtimeclasses" ]   # Required for autodetecting the runtime class of the nodes.
           verbs: [ "get", "list", "watch" ]

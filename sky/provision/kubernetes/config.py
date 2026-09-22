@@ -112,6 +112,46 @@ def updating_existing_msg(resource_type: str, name: str) -> str:
     return f'updating existing {resource_type} "{name}"'
 
 
+def _format_rules(rules: Optional[List[Any]]) -> List[str]:
+    """Render policy rules compactly, for logs.
+
+    Accepts both API model objects and plain dicts, since the template's
+    rules are parsed into models while an object read back from the API
+    may carry either depending on the caller.
+    """
+
+    def _get(rule: Any, field: str) -> Any:
+        if isinstance(rule, dict):
+            return rule.get(field)
+        return getattr(rule, field, None)
+
+    out = []
+    for rule in rules or []:
+        groups = _get(rule, 'api_groups') or _get(rule, 'apiGroups') or ['']
+        resources = _get(rule, 'resources') or []
+        verbs = _get(rule, 'verbs') or []
+        out.append(f'{list(groups)}/{list(resources)}: {list(verbs)}')
+    return out
+
+
+def overwriting_rules_msg(resource_type: str, name: str, existing: Any,
+                          new: Any) -> str:
+    """Warning shown when SkyPilot rewrites the rules of an existing role.
+
+    SkyPilot cannot tell a narrowing an administrator applied on purpose
+    from a role left behind by an older version, so it says what it is
+    doing and points at the supported way to keep a narrowed set.
+    """
+    return (f'overwriting the rules of {resource_type} "{name}" with '
+            f'SkyPilot\'s own.\n'
+            f'  currently on the cluster: {_format_rules(existing)}\n'
+            f'  replacing with:           {_format_rules(new)}\n'
+            'If these rules were narrowed deliberately, that change is undone '
+            'on every launch. To run with a permission set SkyPilot does not '
+            'manage, create your own service account and point '
+            'kubernetes.remote_identity at it instead.')
+
+
 def not_found_msg(resource_type: str, name: str) -> str:
     return f'{resource_type} "{name}" not found, attempting to create it'
 
@@ -247,6 +287,7 @@ def _create_or_patch_resource(
     list_fn: Callable[[], Any],
     patch_fn: Optional[Callable[[], None]],
     needs_update_fn: Optional[Callable[[Any], bool]],
+    new_rules: Optional[List[Any]] = None,
 ) -> None:
     """Creates a K8s resource with upsert semantics and 409 race handling.
 
@@ -279,8 +320,16 @@ def _create_or_patch_resource(
         logger.info(f'{log_prefix}: '
                     f'{using_existing_msg(resource_field, name)}')
         return
-    logger.info(f'{log_prefix}: '
-                f'{updating_existing_msg(resource_field, name)}')
+    if new_rules is not None:
+        # Rewriting an existing role's rules is the one update that can
+        # silently undo an operator's change, so it is a warning rather
+        # than a debug-level breadcrumb.
+        msg = overwriting_rules_msg(resource_field, name,
+                                    getattr(existing, 'rules', None), new_rules)
+        logger.warning(f'{log_prefix}: {msg}')
+    else:
+        logger.info(f'{log_prefix}: '
+                    f'{updating_existing_msg(resource_field, name)}')
     assert patch_fn is not None, ('patch_fn must be provided when '
                                   'needs_update_fn is provided')
     patch_fn()
@@ -357,6 +406,7 @@ def _configure_autoscaler_role(namespace: str, context: Optional[str],
         patch_fn=lambda: kubernetes.auth_api(context).patch_namespaced_role(
             name, namespace, resource),
         needs_update_fn=lambda existing: new_role.rules != existing.rules,
+        new_rules=new_role.rules,
     )
 
 
@@ -451,6 +501,7 @@ def _configure_autoscaler_cluster_role(namespace, context,
         patch_fn=lambda: kubernetes.auth_api(context).patch_cluster_role(
             name, resource),
         needs_update_fn=lambda existing: new_cr.rules != existing.rules,
+        new_rules=new_cr.rules,
     )
 
 

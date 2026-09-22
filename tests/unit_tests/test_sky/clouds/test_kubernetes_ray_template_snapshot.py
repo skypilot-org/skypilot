@@ -586,6 +586,37 @@ def test_sriov_pod_is_coherent() -> None:
     assert '/dev/infiniband' not in mounts
 
 
+# Verbs Kubernetes' privilege-escalation prevention does NOT gate on RBAC
+# objects. `create` and `update` are checked against what the requester
+# already holds; deletion is not checked at all, so granting it to a workload
+# pod lets that pod remove bindings the control plane depends on.
+_UNGATED_RBAC_VERBS = {'delete', 'deletecollection', '*'}
+
+_RBAC_RESOURCES = {'clusterroles', 'clusterrolebindings', '*'}
+
+
+@pytest.mark.parametrize('case_name', list(CASES.keys()))
+def test_cluster_role_grants_no_ungated_rbac_verb(case_name: str) -> None:
+    """The workload ClusterRole never grants a deletion verb on RBAC objects.
+
+    A golden pins the verb list too, but would accept whatever a careless
+    UPDATE_SNAPSHOT=1 produces. This is the property that matters: every pod
+    SkyPilot launches holds this ClusterRole, and deletion of RBAC objects is
+    the one verb no admission check stands in front of.
+    """
+    rendered = yaml.safe_load(_render(_build_variables(case_name)))
+    rules = rendered['provider']['autoscaler_cluster_role']['rules']
+
+    offenders = [
+        rule for rule in rules if _RBAC_RESOURCES &
+        set(rule.get('resources') or []) and _UNGATED_RBAC_VERBS &
+        set(rule.get('verbs') or [])
+    ]
+    assert not offenders, (
+        f'ClusterRole grants an ungated deletion verb on RBAC objects: '
+        f'{offenders}')
+
+
 @pytest.mark.parametrize('case_name', list(CASES.keys()))
 def test_kubernetes_ray_template_render_is_deterministic(
         case_name: str) -> None:
