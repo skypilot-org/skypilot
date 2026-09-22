@@ -55,3 +55,48 @@ header_found && /^[0-9]+/ {
         echo "---"
     fi
 done
+
+# ---- TEMP DIAGNOSTIC (CLAIMGATE) ----------------------------------------
+# The jobs this investigation is about never reach FAILED: they sit in
+# PENDING with submitted_at NULL, so the loop above fetches nothing for
+# them. Everything below is about that state.
+
+echo ""
+echo "=== schedule_state distribution (job_info) ==="
+python3 - <<'PYDIAG'
+import glob, os, sqlite3
+# Fixed shallow candidates only: a recursive glob over $HOME can hang for
+# minutes here and nothing above bounds it.
+cands = [os.path.expanduser('~/.sky/spot_jobs.db')]
+cands += glob.glob(os.path.expanduser('~/runtimes/*/.sky/spot_jobs.db'))
+seen = set()
+for db in cands:
+    if db in seen or not os.path.exists(db):
+        continue
+    seen.add(db)
+    try:
+        con = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
+        ji = con.execute('select schedule_state, count(*) from job_info '
+                         'group by schedule_state').fetchall()
+        sp = con.execute('select status, count(*) from spot '
+                         'group by status').fetchall()
+        stuck = con.execute(
+            'select spot_job_id, schedule_state from job_info '
+            "where schedule_state = 'INACTIVE' limit 20").fetchall()
+        print(f'{db}\n  job_info: {ji}\n  spot: {sp}\n  INACTIVE: {stuck}')
+    except Exception as e:  # noqa: BLE001
+        print(f'{db}: {type(e).__name__}: {e}')
+PYDIAG
+
+echo ""
+echo "=== submit-job logs (where scheduler_set_waiting would fail) ==="
+for f in ~/sky_logs/managed_jobs/submit-job-*.log; do
+    [ -e "$f" ] || continue
+    echo "--- $f ---"
+    tail -n 40 "$f"
+done
+
+echo ""
+echo "=== CLAIMGATE trace (all occurrences, not just the log tail) ==="
+grep -h 'CLAIMGATE' ~/.sky/api_server/server.log 2>/dev/null | tail -n 120 \
+    || echo "(no CLAIMGATE lines in server.log)"
