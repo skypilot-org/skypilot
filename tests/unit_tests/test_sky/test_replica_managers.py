@@ -2,7 +2,10 @@
 from typing import Optional
 from unittest import mock
 
+import pytest
+
 from sky import backends
+from sky import exceptions
 from sky.serve import replica_managers
 from sky.serve import serve_state
 from sky.serve import service_spec
@@ -185,6 +188,66 @@ class TestHandlePreemption:
         assert manager._handle_preemption(info) is False
         assert refresh.call_count == 1
         assert info.status_property.preempted is False
+        manager._terminate_replica.assert_not_called()
+
+    @pytest.mark.parametrize('previously_ready', [False, True])
+    def test_unavailable_status_still_obeys_readiness_timeout(
+            self, monkeypatch, previously_ready):
+        manager, refresh = self._make_manager(
+            monkeypatch, cluster_status=status_lib.ClusterStatus.UP)
+        manager.lock = mock.MagicMock()
+        manager._uptime = 100.0
+        manager._get_initial_delay_seconds = mock.Mock(return_value=10)
+        manager._consecutive_failure_threshold_timeout = mock.Mock(
+            return_value=10)
+        refresh.side_effect = exceptions.ClusterStatusFetchingError(
+            'SSH exit 255')
+        info = _make_replica_info(is_spot=True)
+        info.status_property.sky_launch_status = common_utils.ProcessStatus.SUCCEEDED
+        if previously_ready:
+            info.status_property.first_ready_time = 100.0
+        info.probe_pool = mock.Mock(side_effect=[
+            (info, False, 1000.0),
+            (info, False, 1011.0),
+        ])
+        monkeypatch.setattr(replica_managers.serve_state, 'get_replica_infos',
+                            lambda _: [info])
+
+        manager._probe_all_replicas()
+        manager._terminate_replica.assert_not_called()
+        assert info.first_not_ready_time == 1000.0
+
+        manager._probe_all_replicas()
+        assert info.status_property.preempted is False
+        manager._terminate_replica.assert_called_once_with(
+            info.replica_id, sync_down_logs=True, replica_drain_delay_seconds=0)
+
+    def test_transient_unavailable_status_recovers_on_next_probe(
+            self, monkeypatch):
+        manager, refresh = self._make_manager(
+            monkeypatch, cluster_status=status_lib.ClusterStatus.UP)
+        manager.lock = mock.MagicMock()
+        manager._uptime = 100.0
+        manager._consecutive_failure_threshold_timeout = mock.Mock(
+            return_value=10)
+        refresh.side_effect = exceptions.ClusterStatusFetchingError(
+            'SSH exit 255')
+        info = _make_replica_info(is_spot=True)
+        info.status_property.sky_launch_status = common_utils.ProcessStatus.SUCCEEDED
+        info.status_property.first_ready_time = 100.0
+        info.probe_pool = mock.Mock(side_effect=[
+            (info, False, 1000.0),
+            (info, True, 1001.0),
+        ])
+        monkeypatch.setattr(replica_managers.serve_state, 'get_replica_infos',
+                            lambda _: [info])
+
+        manager._probe_all_replicas()
+        assert info.consecutive_failure_times == [1000.0]
+        manager._probe_all_replicas()
+
+        assert not info.consecutive_failure_times
+        assert info.is_ready
         manager._terminate_replica.assert_not_called()
 
     def test_never_ready_non_spot_replica_is_rate_limited(self, monkeypatch):

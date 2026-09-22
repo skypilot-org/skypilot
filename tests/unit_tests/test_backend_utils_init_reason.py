@@ -53,6 +53,7 @@ def _make_record(handle, status=status_lib.ClusterStatus.UP):
 def ssh_runtime_probe(monkeypatch):
     handle = _make_handle()
     handle.launched_resources.cloud = clouds.Azure()
+    handle.head_ip = '10.0.0.1'
     runner = mock.Mock(spec=command_runner.SSHCommandRunner)
     handle.get_command_runners.return_value = [runner]
     record = _make_record(handle)
@@ -67,6 +68,10 @@ def ssh_runtime_probe(monkeypatch):
                         'add_or_update_cluster', mock.Mock())
     monkeypatch.setattr(backend_utils.global_user_state,
                         'get_cluster_from_name', mock.Mock(return_value=record))
+    monkeypatch.setattr(backend_utils.global_user_state,
+                        'get_cluster_yaml_dict', mock.Mock(return_value={}))
+    monkeypatch.setattr(backend_utils, 'get_node_ips',
+                        mock.Mock(return_value=['10.0.0.1']))
     return runner, record
 
 

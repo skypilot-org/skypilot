@@ -19,6 +19,7 @@ def health_probe():
     handle.cluster_name = 'test-cluster'
     handle.cluster_name_on_cloud = 'test-cluster-1234'
     handle.cluster_yaml = '/fake/cluster.yaml'
+    handle.head_ip = '10.0.0.1'
     handle.launched_nodes = 1
     handle.num_ips_per_node = 1
     handle.launched_resources = mock.Mock(unsafe=True)
@@ -49,6 +50,12 @@ def health_probe():
         state = patch('global_user_state')
         state.ABNORMAL_STATUS_REASON_PREFIX = prefix
         state.get_cluster_from_name.return_value = record
+        state.get_cluster_yaml_dict.return_value = {
+            'provider': {
+                'use_internal_ips': True
+            }
+        }
+        patch('get_node_ips', return_value=['10.0.0.1'])
         backend = patch('get_backend_from_handle').return_value
         backend.is_definitely_autostopping.return_value = False
         count = patch('_count_healthy_nodes_from_ray', return_value=(1, 0))
@@ -94,6 +101,56 @@ def test_reachable_broken_ray_still_marks_init(health_probe):
     assert state.add_or_update_cluster.call_args.kwargs['ready'] is False
     assert state.add_cluster_event.call_args.args[
         1] == status_lib.ClusterStatus.INIT
+
+
+@pytest.mark.parametrize('use_internal_ips', [False, True])
+def test_changed_head_address_preserves_manual_restart_recovery(
+        health_probe, use_internal_ips):
+    record, runner, state, _, _, _ = health_probe
+    runner.run.return_value = (
+        255, '', 'ssh: connect to host 10.0.0.1 port 22: Connection timed out')
+    backend_utils.get_node_ips.return_value = ['10.0.0.2']
+    state.get_cluster_yaml_dict.return_value = {
+        'provider': {
+            'use_internal_ips': use_internal_ips
+        }
+    }
+
+    backend_utils._update_cluster_status('test-cluster',
+                                         record,
+                                         retry_if_missing=False)
+
+    assert state.add_or_update_cluster.call_args.kwargs['ready'] is False
+    assert state.add_cluster_event.call_args.args[
+        1] == status_lib.ClusterStatus.INIT
+    backend_utils.get_node_ips.assert_called_once_with(
+        record['handle'].cluster_yaml, 1, get_internal_ips=use_internal_ips)
+
+
+def test_failed_address_lookup_preserves_cluster_state(health_probe):
+    record, runner, state, _, _, _ = health_probe
+    runner.run.return_value = (255, '', 'unreachable')
+    backend_utils.get_node_ips.side_effect = exceptions.FetchClusterInfoError(
+        exceptions.FetchClusterInfoError.Reason.HEAD)
+
+    with pytest.raises(exceptions.ClusterStatusFetchingError):
+        backend_utils._update_cluster_status('test-cluster',
+                                             record,
+                                             retry_if_missing=False)
+
+    state.add_cluster_event.assert_not_called()
+    state.add_or_update_cluster.assert_not_called()
+
+
+def test_healthy_probe_does_not_fetch_addresses(health_probe):
+    record, runner, state, _, _, _ = health_probe
+    runner.run.return_value = (0, 'healthy', '')
+    backend_utils._update_cluster_status('test-cluster',
+                                         record,
+                                         retry_if_missing=False)
+
+    assert state.add_or_update_cluster.call_args.kwargs['ready'] is True
+    backend_utils.get_node_ips.assert_not_called()
 
 
 def test_reachable_partial_ray_cluster_still_marks_init(health_probe):

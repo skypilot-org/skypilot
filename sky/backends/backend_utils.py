@@ -2677,9 +2677,28 @@ def _update_cluster_status(
             require_outputs=True,
             separate_stderr=True)
         if rc == 255 and isinstance(runner, command_runner.SSHCommandRunner):
-            raise exceptions.ClusterStatusFetchingError(
-                f'Failed to reach cluster {cluster_name!r} for its health '
-                f'probe (SSH exit 255): {stderr.strip()}')
+            # A manually restarted VM can have a new address. Preserve the
+            # INIT / `sky start` recovery path only when the provider confirms
+            # that the cached head address changed. A failed connection alone
+            # is not evidence that the runtime is unhealthy.
+            try:
+                config = global_user_state.get_cluster_yaml_dict(
+                    handle.cluster_yaml)
+                use_internal_ips = config.get('provider',
+                                              {}).get('use_internal_ips', False)
+                current_ips = get_node_ips(handle.cluster_yaml,
+                                           handle.launched_nodes,
+                                           get_internal_ips=use_internal_ips)
+            except Exception as e:  # pylint: disable=broad-except
+                raise exceptions.ClusterStatusFetchingError(
+                    f'Failed to verify the address of cluster {cluster_name!r} '
+                    f'after its health probe failed (SSH exit 255): '
+                    f'{stderr.strip()}') from e
+            if (not current_ips or handle.head_ip is None or
+                    current_ips[0] == handle.head_ip):
+                raise exceptions.ClusterStatusFetchingError(
+                    f'Failed to reach cluster {cluster_name!r} for its health '
+                    f'probe (SSH exit 255): {stderr.strip()}')
         if rc:
             raise exceptions.CommandError(
                 rc, instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
