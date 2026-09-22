@@ -96,7 +96,13 @@ provider:
         metadata:
             labels:
                 parent: skypilot
-            name: skypilot-service-account-role-binding
+            # Named after the account, not fixed: controller and workload
+            # clusters share this Role but must not share the binding --
+            # _configure_autoscaler_role_binding patches on a subject
+            # mismatch, so one fixed name would have the two kinds of launch
+            # take the binding from each other. A workload cluster still
+            # renders the historical name, so upgrades are a no-op for it.
+            name: {{k8s_service_account_name}}-role-binding
         subjects:
         - kind: ServiceAccount
           name: {{k8s_service_account_name}}
@@ -144,8 +150,9 @@ provider:
     # Provisioner-only: resolving an exposed port to the ingress-nginx
     # controller IP happens on the provisioning/query path, never in a
     # pod running user code.
-    {% if k8s_is_controller %}
     {% endif %}
+
+    {% if k8s_is_controller %}
 
     # Role to access ingress services for fetching IP
     autoscaler_ingress_role:
@@ -184,8 +191,9 @@ provider:
     # Provisioner-only: reading node resources and bootstrapping the RBAC
     # of launched clusters. Under consolidation mode the controllers are
     # API-server processes, so no pod needs this at all.
-    {% if k8s_is_controller %}
     {% endif %}
+
+    {% if k8s_is_controller %}
 
     # In addition to a role binding, we also need a cluster role binding to give
     # the SkyPilot access to the cluster-wide resources such as nodes to get
@@ -236,6 +244,7 @@ provider:
             name: skypilot-service-account-cluster-role
             apiGroup: rbac.authorization.k8s.io
     {% endif %}
+
 
 
     services:

@@ -325,7 +325,7 @@
         "labels": {
           "parent": "skypilot"
         },
-        "name": "skypilot-service-account-role-binding"
+        "name": "skypilot-controller-service-account-role-binding"
       },
       "roleRef": {
         "apiGroup": "rbac.authorization.k8s.io",
