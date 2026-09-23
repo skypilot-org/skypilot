@@ -1083,6 +1083,9 @@ class JobController:
                         'seconds.')
                     continue
 
+            # A runtime observation can preserve a viable allocation even when
+            # recovery is forced. Without one, forced recovery skips the job
+            # status check and leaves job_status=None for recovery below.
             runtime_recovery = None
             runtime_handle = None
             if managed_job_runtime.is_registered():
@@ -1105,6 +1108,11 @@ class JobController:
                     if job_status is None and
                     not runtime_recovery.should_relaunch else None)
             elif not force_transit_to_recovering:
+                # NOTE: we do not check cluster status first because race
+                # condition can occur, i.e. cluster can be down during the job
+                # status check.
+                # A failed status fetch leaves job_status=None; the checks
+                # below distinguish transient errors from recovery conditions.
                 try:
                     job_status, transient_job_check_error_reason = (
                         await managed_job_utils.get_job_status(
