@@ -31,7 +31,7 @@ cleanup() {
     # sbatch is the same number. Otherwise, there are no guarantees
     # that this srun will run on the same subset of nodes as the srun
     # that created the sky directories.
-    srun --overlap --nodes=1 rm -rf /tmp/test-cluster-no-container /tmp/test-cluster-no-container.exitcode
+    srun --overlap --nodes=1 rm -rf /tmp/test-cluster-no-container /tmp/test-cluster-no-container.exitcode."${SLURM_JOB_ID}"
     # A stop publishes the snapshot manifest before cancellation. Keep the
     # logs referenced by the jobs database that start will restore.
     if [ -f /home/testuser/.sky_snapshots/test-cluster-no-container/manifest.json ]; then
@@ -47,10 +47,14 @@ cleanup() {
 trap cleanup EXIT
 # Preserve the last submitted task's result for Slurm dependencies.
 terminate() {
-    if [ -f /tmp/test-cluster-no-container.exitcode ]; then
-        task_exit=$(cat /tmp/test-cluster-no-container.exitcode) || exit 1
+    if [ -f /tmp/test-cluster-no-container.exitcode."${SLURM_JOB_ID}" ]; then
+        task_exit=$(cat /tmp/test-cluster-no-container.exitcode."${SLURM_JOB_ID}") || exit 1
     else
-        task_exit=$(python3 - /tmp/test-cluster-no-container/.sky/jobs.db <<'SKY_JOB_EXIT_CODE'
+        task_exit=$(export SKY_RUNTIME_DIR=/tmp/test-cluster-no-container
+if [ ! -f /tmp/test-cluster-no-container/.sky/jobs.db ]; then
+    echo 0
+else
+$([ -x /usr/bin/env ] && echo /usr/bin/env || type -P env 2>/dev/null || echo /usr/bin/env) -u PYTHONPATH $([ -s ${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path ] && cat ${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path 2> /dev/null || command -v python3) - /tmp/test-cluster-no-container/.sky/jobs.db <<'SKY_JOB_EXIT_CODE'
 import pathlib
 import sqlite3
 import sys
@@ -69,6 +73,7 @@ if path.exists():
             code = 128 - code
 print(code)
 SKY_JOB_EXIT_CODE
+fi
 ) || exit 1
     fi
     exit "$task_exit"

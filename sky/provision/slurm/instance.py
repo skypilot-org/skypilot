@@ -798,7 +798,13 @@ def _resolve_skypilot_runtime_dir(client: 'slurm.SlurmClient',
 def _allocation_exit_code_script(skypilot_runtime_dir: str) -> str:
     """Print the latest submitted job's exit code before deleting state."""
     db_path = f'{skypilot_runtime_dir}/.sky/jobs.db'
-    return f"""python3 - {shlex.quote(db_path)} <<'SKY_JOB_EXIT_CODE'
+    export_runtime = (f'export {skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
+                      f'{shlex.quote(skypilot_runtime_dir)}')
+    return f"""{export_runtime}
+if [ ! -f {shlex.quote(db_path)} ]; then
+    echo 0
+else
+{skylet_constants.SKY_SLURM_PYTHON_CMD} - {shlex.quote(db_path)} <<'SKY_JOB_EXIT_CODE'
 import pathlib
 import sqlite3
 import sys
@@ -816,7 +822,8 @@ if path.exists():
         if code < 0:
             code = 128 - code
 print(code)
-SKY_JOB_EXIT_CODE"""
+SKY_JOB_EXIT_CODE
+fi"""
 
 
 def _stop_skylet_script(skypilot_runtime_dir: str) -> str:
@@ -1296,6 +1303,8 @@ exit 1
         # GB convention.
         mem_in_mb = int(float(resources['memory']) * 1024)
         mem_directive = f'#SBATCH --mem={mem_in_mb}M\n'
+    exit_code_path = (shlex.quote(skypilot_runtime_dir + '.exitcode.') +
+                      '"${SLURM_JOB_ID}"')
     # pylint: disable=line-too-long
     # fmt: off
     provision_script = f"""\
@@ -1330,7 +1339,7 @@ cleanup() {{
     # sbatch is the same number. Otherwise, there are no guarantees
     # that this srun will run on the same subset of nodes as the srun
     # that created the sky directories.
-    srun --overlap --nodes={num_nodes} rm -rf {skypilot_runtime_dir} {shlex.quote(skypilot_runtime_dir + ".exitcode")}
+    srun --overlap --nodes={num_nodes} rm -rf {skypilot_runtime_dir} {exit_code_path}
     # A stop publishes the snapshot manifest before cancellation. Keep the
     # logs referenced by the jobs database that start will restore.
     if [ -f {shlex.quote(snapshot_manifest_path)} ]; then
@@ -1346,8 +1355,8 @@ cleanup() {{
 trap cleanup EXIT
 # Preserve the last submitted task's result for Slurm dependencies.
 terminate() {{
-    if [ -f {shlex.quote(skypilot_runtime_dir + ".exitcode")} ]; then
-        task_exit=$(cat {shlex.quote(skypilot_runtime_dir + ".exitcode")}) || exit 1
+    if [ -f {exit_code_path} ]; then
+        task_exit=$(cat {exit_code_path}) || exit 1
     else
         task_exit=$({_allocation_exit_code_script(skypilot_runtime_dir)}
 ) || exit 1
@@ -2107,7 +2116,7 @@ if command -v enroot > /dev/null; then
 fi
 # Keep the task result available to the batch TERM trap after state removal.
 ({_allocation_exit_code_script(skypilot_runtime_dir)}
-) > {shlex.quote(skypilot_runtime_dir + ".exitcode")}
+) > {shlex.quote(skypilot_runtime_dir + ".exitcode." + job_id)}
 rm -rf -- {shlex.quote(skypilot_runtime_dir)}
 """
     cleanup_node_cmd = ('srun --unbuffered --overlap --chdir=/tmp '

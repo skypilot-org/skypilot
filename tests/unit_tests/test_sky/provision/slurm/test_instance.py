@@ -4,6 +4,7 @@ import os
 import shlex
 import sqlite3
 import subprocess
+import sys
 from unittest import mock
 
 import pytest
@@ -1971,4 +1972,32 @@ def test_cleanup_preserves_exit_code_before_removing_database(
     instance._cleanup_slurm_allocation(mock.Mock(), mock.Mock(), _CLUSTER,
                                        _PROVIDER_CONFIG, '123', ['node-a'])
     assert not runtime.exists()
-    assert (tmp_path / 'runtime.exitcode').read_text().strip() == '7'
+    assert (tmp_path / 'runtime.exitcode.123').read_text().strip() == '7'
+
+
+@pytest.mark.parametrize('has_database', [False, True])
+def test_allocation_exit_code_without_system_python(tmp_path, has_database):
+    state = tmp_path / '.sky'
+    state.mkdir()
+    if has_database:
+        with sqlite3.connect(state / 'jobs.db') as conn:
+            conn.execute('CREATE TABLE jobs (job_id INTEGER PRIMARY KEY, '
+                         'status TEXT, exit_codes TEXT)')
+            conn.execute("INSERT INTO jobs VALUES (1, 'SUCCEEDED', NULL)")
+        (state / 'python_path').write_text(sys.executable)
+    # Only cat is on PATH; Python must come from the recorded runtime path.
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    (bin_dir / 'cat').symlink_to('/bin/cat')
+    result = subprocess.run([
+        '/bin/bash', '-c',
+        instance._allocation_exit_code_script(str(tmp_path))
+    ],
+                            env={
+                                **os.environ, 'PATH': str(bin_dir)
+                            },
+                            capture_output=True,
+                            text=True,
+                            check=True)
+    assert result.stdout.strip() == '0'
+    assert result.stderr == ''

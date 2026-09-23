@@ -1662,7 +1662,7 @@ class TestCreateVirtualInstance:
         end = script.index('trap terminate TERM', start)
         handler = script[start:end]
         # Substitute only the runtime path; execute the generated shell body.
-        runtime = re.search(r'python3 - (\S+)/.sky/jobs.db', handler).group(1)
+        runtime = re.search(r'export SKY_RUNTIME_DIR=(\S+)', handler).group(1)
         handler = handler.replace(runtime, str(tmp_path))
         state = tmp_path / '.sky'
         state.mkdir()
@@ -1670,11 +1670,17 @@ class TestCreateVirtualInstance:
             conn.execute('CREATE TABLE jobs (job_id INTEGER PRIMARY KEY, '
                          'status TEXT, exit_codes TEXT)')
             conn.execute("INSERT INTO jobs VALUES (1, 'FAILED', '143')")
-        cache = Path(str(tmp_path) + '.exitcode')
+        cache = Path(str(tmp_path) + '.exitcode.123')
+        stale_cache = Path(str(tmp_path) + '.exitcode.122')
+        stale_cache.write_text('0\n')
         if cached:
             cache.write_text('143\n')
+            (state / 'jobs.db').unlink()
         try:
             result = subprocess.run(['bash', '-c', handler + '\nterminate'],
+                                    env={
+                                        **os.environ, 'SLURM_JOB_ID': '123'
+                                    },
                                     capture_output=True,
                                     text=True,
                                     check=False)
@@ -1682,6 +1688,7 @@ class TestCreateVirtualInstance:
             assert result.stderr == ''
         finally:
             cache.unlink(missing_ok=True)
+            stale_cache.unlink()
 
     def _run_and_capture_script(self, cluster_name, config) -> str:
         """Run _create_virtual_instance and capture the generated script."""
