@@ -38,7 +38,6 @@ class RuntimeRecoveryStatus:
     reason: Optional[str] = None
     started_at: Optional[float] = None
     should_relaunch: bool = False
-    avoid_current_region: bool = False
     handles_user_retries: bool = False
     user_restart_count: int = 0
     recovery_reasons: Optional[Dict[int, str]] = None

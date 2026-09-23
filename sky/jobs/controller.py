@@ -1691,13 +1691,7 @@ class JobController:
                         'run to completion): '
                         f'{common_utils.format_exception(e)}')
 
-            if (runtime_recovery is not None and
-                    runtime_recovery.avoid_current_region):
-                assert runtime_handle is not None
-                recovered_time = await executor.recover_next_region(
-                    runtime_handle.launched_resources)
-            else:
-                recovered_time = await executor.recover()
+            recovered_time = await executor.recover()
 
             # Update cluster_name for pools after recovery
             if self._pool is not None:

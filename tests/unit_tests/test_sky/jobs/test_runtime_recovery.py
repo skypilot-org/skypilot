@@ -130,17 +130,19 @@ async def test_controller_observes_before_healthy_shortcut_and_refresh(
     monkeypatch.setattr(controller_module.backend_utils,
                         'refresh_cluster_status_handle', refresh)
     controller._update_live_log_links = mock.AsyncMock(return_value=True)
+    executor = mock.MagicMock()
     with pytest.raises(StopMonitoring):
         await controller._monitor_one_task_impl(
             0,
             task,
             'cluster',
-            mock.MagicMock(),
+            executor,
             mock.MagicMock(),
             callback_func=mock.AsyncMock(),
             force_transit_to_recovering=forced)
     assert task_row(database)['status'] == 'RECOVERING'
     assert task_row(database)['recovery_count'] == 2
+    executor.recover.assert_not_called()
     refresh.assert_not_called()
 
 
@@ -216,9 +218,8 @@ def test_recovery_dispatch_defers_and_preserves_explicit_record(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('avoid_current_region', [False, True])
 async def test_controller_runtime_failover_cleans_allocation_and_keeps_reason(
-        database, monkeypatch, avoid_current_region):
+        database, monkeypatch):
     controller = controller_module.JobController.__new__(
         controller_module.JobController)
     controller._job_id = 42
@@ -230,7 +231,6 @@ async def test_controller_runtime_failover_cleans_allocation_and_keeps_reason(
     handle.launched_resources.need_cleanup_after_preemption_or_failure.return_value = False
     executor = mock.MagicMock()
     executor.recover = mock.AsyncMock(side_effect=StopMonitoring())
-    executor.recover_next_region = mock.AsyncMock(side_effect=StopMonitoring())
     monkeypatch.setattr(runtime, 'is_registered', lambda: True)
     monkeypatch.setattr(
         runtime, 'get_recovery_status',
@@ -238,9 +238,8 @@ async def test_controller_runtime_failover_cleans_allocation_and_keeps_reason(
             'allocation-a',
             1,
             job_lib.JobStatus.PENDING,
-            reason='queue wait expired',
-            should_relaunch=True,
-            avoid_current_region=avoid_current_region)))
+            reason='allocation cannot recover',
+            should_relaunch=True)))
     capture = mock.Mock()
     monkeypatch.setattr(runtime, 'on_before_recovery', capture)
     monkeypatch.setattr(controller_module.global_user_state,
@@ -269,18 +268,12 @@ async def test_controller_runtime_failover_cleans_allocation_and_keeps_reason(
     controller._cleanup_cluster.assert_awaited_once_with('cluster')
     capture.assert_called_once()
     refresh.assert_not_called()
-    if avoid_current_region:
-        executor.recover_next_region.assert_awaited_once_with(
-            handle.launched_resources)
-        executor.recover.assert_not_called()
-    else:
-        executor.recover.assert_awaited_once_with()
-        executor.recover_next_region.assert_not_called()
+    executor.recover.assert_awaited_once_with()
     assert task_row(database)['recovering_from_failure'] is True
     with database.connect() as connection:
         events = connection.execute(
             state.job_events_table.select()).mappings().all()
-    assert events[-1]['reason'] == 'queue wait expired'
+    assert events[-1]['reason'] == 'allocation cannot recover'
 
 
 @pytest.mark.asyncio

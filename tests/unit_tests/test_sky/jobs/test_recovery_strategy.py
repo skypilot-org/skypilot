@@ -220,7 +220,6 @@ def _make_launch_executor():
     """Build a minimally-initialized StrategyExecutor for _launch tests."""
     executor = _make_bare_executor()
     executor.job_id = 1
-    executor.strategy_name = 'FAILOVER'
     executor.max_restarts_on_errors = 0
     executor.restart_cnt_on_failure = 0
     executor.runtime_restart_cnt_on_failure = 0
@@ -598,7 +597,6 @@ async def test_cancel_launch_request_tolerates_api_cancel_failure(monkeypatch):
 async def test_launch_forwards_remaining_runtime_recovery_budget(monkeypatch):
     executor = _make_launch_executor()
     patches = _patch_launch_environment(monkeypatch)
-    executor.strategy_name = 'EAGER_NEXT_REGION'
     executor.max_restarts_on_errors = 5
     executor.restart_cnt_on_failure = 1
     executor.recover_on_exit_codes = [137]
@@ -613,7 +611,6 @@ async def test_launch_forwards_remaining_runtime_recovery_budget(monkeypatch):
     assert context == {
         'other': 'retained',
         'managed_job_recovery': {
-            'strategy': 'EAGER_NEXT_REGION',
             'max_restarts_on_errors': 2,
             'recover_on_exit_codes': [137]
         }
@@ -638,7 +635,8 @@ async def test_resume_restores_runtime_consumed_retry_budget(monkeypatch):
     assert not executor.should_restart_on_failure([7])
 
 
-def test_make_retains_strategy_after_removing_resource_recovery(monkeypatch):
+def test_make_forwards_retry_budget_after_removing_resource_recovery(
+        monkeypatch):
     from sky import resources
     from sky import task as task_lib
     task = task_lib.Task(run='true')
@@ -653,52 +651,9 @@ def test_make_retains_strategy_after_removing_resource_recovery(monkeypatch):
     monkeypatch.setattr(
         recovery_strategy.registry.JOBS_RECOVERY_STRATEGY_REGISTRY, 'from_str',
         lambda _: factory)
-    executor = recovery_strategy.StrategyExecutor.make('cluster', mock.Mock(),
-                                                       task, 1, 0, None, set(),
-                                                       mock.Mock(), mock.Mock())
-    assert executor.strategy_name == 'EAGER_NEXT_REGION'
+    recovery_strategy.StrategyExecutor.make('cluster', mock.Mock(), task, 1,
+                                            0, None, set(), mock.Mock(),
+                                            mock.Mock())
     assert list(task.resources)[0].job_recovery is None
     assert factory.call_args.args[3] == 4
     assert factory.call_args.args[10] == [137]
-
-
-@pytest.mark.asyncio
-async def test_runtime_wait_expiry_skips_previous_region():
-    from sky import clouds
-    from sky import resources
-    from sky import task as task_lib
-    executor = recovery_strategy.FailoverStrategyExecutor.__new__(
-        recovery_strategy.FailoverStrategyExecutor)
-    task = task_lib.Task(run='true')
-    task.set_resources([
-        resources.Resources(cloud=clouds.AWS(), region='us-east-1'),
-        resources.Resources(cloud=clouds.AWS(), region='us-west-2')
-    ])
-    executor.dag = types.SimpleNamespace(tasks=[task])
-    executor._launched_resources = None
-    executor._cleanup_cluster = mock.Mock()
-    launched = resources.Resources(cloud=clouds.AWS(),
-                                   region='us-east-1',
-                                   instance_type='m5.large')
-
-    async def launch(**kwargs):
-        assert kwargs == {'raise_on_failure': False, 'recovery': True}
-        assert {r.region for r in task.resources} == {'us-east-1', 'us-west-2'}
-        blocked, = task.blocked_resources
-        assert isinstance(blocked.cloud, clouds.AWS)
-        assert blocked.region == 'us-east-1'
-        assert blocked.instance_type is None
-        return 123.0
-
-    executor._launch = mock.AsyncMock(side_effect=launch)
-    assert await executor.recover_next_region(launched) == 123.0
-    executor._launch.assert_awaited_once()
-    assert task.blocked_resources is None
-
-
-@pytest.mark.asyncio
-async def test_custom_strategy_next_region_defers_to_recover():
-    executor = _make_bare_executor()
-    executor.recover = mock.AsyncMock(return_value=123.0)
-    assert await executor.recover_next_region(mock.Mock()) == 123.0
-    executor.recover.assert_awaited_once_with()

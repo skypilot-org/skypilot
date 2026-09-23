@@ -18,7 +18,6 @@ from sky import backends
 from sky import dag as dag_lib
 from sky import exceptions
 from sky import global_user_state
-from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
 from sky.backends import backend_utils
@@ -45,6 +44,7 @@ from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from sky import resources
     from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -222,7 +222,6 @@ class StrategyExecutor:
         # the cluster names in the pool.
         self.cluster_name = cluster_name
         self.backend = backend
-        self.strategy_name = registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default
         self.max_restarts_on_errors = max_restarts_on_errors
         self.recover_on_exit_codes = recover_on_exit_codes or []
         self.job_id = job_id
@@ -384,9 +383,6 @@ class StrategyExecutor:
                                          task_id, pool, starting, starting_lock,
                                          starting_signal, recover_on_exit_codes,
                                          file_mounts_blob_id)
-        executor.strategy_name = (
-            job_recovery_name or
-            registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default)
         executor.set_strategy_config(strategy_config)
         return executor
 
@@ -415,11 +411,6 @@ class StrategyExecutor:
         Returns: The timestamp job started.
         """
         raise NotImplementedError
-
-    async def recover_next_region(
-            self, launched_resources: 'resources.Resources') -> float:
-        """Recover after the runtime has exhausted its current-region wait."""
-        return await self.recover()
 
     async def _try_cancel_jobs(self):
         if self.cluster_name is None:
@@ -982,7 +973,6 @@ class StrategyExecutor:
                                         self.job_id, self.task_id)
                                     self.runtime_restart_cnt_on_failure = runtime_restarts
                                     extra_ctx['managed_job_recovery'] = {
-                                        'strategy': self.strategy_name,
                                         'max_restarts_on_errors': max(
                                             0, self.max_restarts_on_errors -
                                             self.restart_cnt_on_failure -
@@ -1518,77 +1508,6 @@ class FailoverStrategyExecutor(StrategyExecutor):
 
             return job_submitted_at
 
-    async def recover_next_region(
-            self, launched_resources: 'resources.Resources') -> float:
-        return await self._recover_next_region(launched_resources)
-
-    async def _recover_next_region(
-            self,
-            avoid_resources: Optional['resources.Resources'] = None) -> float:
-        # 1. Terminate the current cluster
-        # 2. Launch again by explicitly blocking the previously launched region
-        # (this will failover through the entire search space except the
-        # previously launched region)
-        # 3. (If step 2 failed) Retry forever: Launch again with no blocked
-        # locations (this will failover through the entire search space)
-        #
-        # The entire search space is defined by the original task request,
-        # task.resources.
-
-        # Step 1
-        logger.debug('Terminating unhealthy cluster and reset cloud region.')
-        await asyncio.to_thread(self._cleanup_cluster)
-
-        # Step 2
-        logger.debug('Relaunch the cluster skipping the previously launched '
-                     'cloud/region.')
-        if avoid_resources is not None or self._launched_resources is not None:
-            task = self.dag.tasks[0]
-            requested_resources = avoid_resources or self._launched_resources
-            assert requested_resources is not None
-            if (avoid_resources is not None or
-                (requested_resources.region is None and
-                 requested_resources.zone is None)):
-                # Optimization: We only block the previously launched region,
-                # if the requested resources does not specify a region or zone,
-                # because, otherwise, we will spend unnecessary time for
-                # skipping the only specified region/zone.
-                launched_cloud = requested_resources.cloud
-                launched_region = requested_resources.region
-                previous_blocked = task.blocked_resources
-                blocked = (resources.Resources(cloud=launched_cloud,
-                                               region=launched_region)
-                           if avoid_resources is not None else
-                           requested_resources.copy(cloud=launched_cloud,
-                                                    region=launched_region))
-                task.blocked_resources = set(previous_blocked or ()) | {blocked}
-                # Not using self.launch to avoid the retry until up logic.
-                try:
-                    job_submitted_at = await self._launch(
-                        raise_on_failure=False, recovery=True)
-                finally:
-                    task.blocked_resources = previous_blocked
-                if job_submitted_at is not None:
-                    return job_submitted_at
-
-        while True:
-            # Step 3
-            logger.debug('Relaunch the cluster without constraining to prior '
-                         'cloud/region.')
-            # Not using self.launch to avoid the retry until up logic.
-            job_submitted_at = await self._launch(max_retry=self._MAX_RETRY_CNT,
-                                                  raise_on_failure=False,
-                                                  recovery=True)
-            if job_submitted_at is None:
-                # Failed to launch the cluster.
-                gap_seconds = self.RETRY_INIT_GAP_SECONDS
-                logger.info('Retrying to recover the cluster in '
-                            f'{gap_seconds:.1f} seconds.')
-                await asyncio.sleep(gap_seconds)
-                continue
-
-            return job_submitted_at
-
 
 @registry.JOBS_RECOVERY_STRATEGY_REGISTRY.type_register(
     name='EAGER_NEXT_REGION', default=True)
@@ -1617,7 +1536,62 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor):
     """
 
     async def recover(self) -> float:
-        return await self._recover_next_region()
+        # 1. Terminate the current cluster
+        # 2. Launch again by explicitly blocking the previously launched region
+        # (this will failover through the entire search space except the
+        # previously launched region)
+        # 3. (If step 2 failed) Retry forever: Launch again with no blocked
+        # locations (this will failover through the entire search space)
+        #
+        # The entire search space is defined by the original task request,
+        # task.resources.
+
+        # Step 1
+        logger.debug('Terminating unhealthy cluster and reset cloud region.')
+        await asyncio.to_thread(self._cleanup_cluster)
+
+        # Step 2
+        logger.debug('Relaunch the cluster skipping the previously launched '
+                     'cloud/region.')
+        if self._launched_resources is not None:
+            task = self.dag.tasks[0]
+            requested_resources = self._launched_resources
+            if (requested_resources.region is None and
+                    requested_resources.zone is None):
+                # Optimization: We only block the previously launched region,
+                # if the requested resources does not specify a region or zone,
+                # because, otherwise, we will spend unnecessary time for
+                # skipping the only specified region/zone.
+                launched_cloud = self._launched_resources.cloud
+                launched_region = self._launched_resources.region
+                task.blocked_resources = {
+                    requested_resources.copy(cloud=launched_cloud,
+                                             region=launched_region)
+                }
+                # Not using self.launch to avoid the retry until up logic.
+                job_submitted_at = await self._launch(raise_on_failure=False,
+                                                      recovery=True)
+                task.blocked_resources = None
+                if job_submitted_at is not None:
+                    return job_submitted_at
+
+        while True:
+            # Step 3
+            logger.debug('Relaunch the cluster without constraining to prior '
+                         'cloud/region.')
+            # Not using self.launch to avoid the retry until up logic.
+            job_submitted_at = await self._launch(max_retry=self._MAX_RETRY_CNT,
+                                                  raise_on_failure=False,
+                                                  recovery=True)
+            if job_submitted_at is None:
+                # Failed to launch the cluster.
+                gap_seconds = self.RETRY_INIT_GAP_SECONDS
+                logger.info('Retrying to recover the cluster in '
+                            f'{gap_seconds:.1f} seconds.')
+                await asyncio.sleep(gap_seconds)
+                continue
+
+            return job_submitted_at
 
 
 def _get_logger_file(file_logger: logging.Logger) -> Optional[str]:
