@@ -223,6 +223,7 @@ class StrategyExecutor:
         self.cluster_name = cluster_name
         self.backend = backend
         self.strategy_name = registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default
+        self.strategy_explicit = False
         self.max_restarts_on_errors = max_restarts_on_errors
         self.recover_on_exit_codes = recover_on_exit_codes or []
         self.job_id = job_id
@@ -387,6 +388,7 @@ class StrategyExecutor:
         executor.strategy_name = (
             job_recovery_name or
             registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default)
+        executor.strategy_explicit = job_recovery_name is not None
         executor.set_strategy_config(strategy_config)
         return executor
 
@@ -983,6 +985,8 @@ class StrategyExecutor:
                                     self.runtime_restart_cnt_on_failure = runtime_restarts
                                     extra_ctx['managed_job_recovery'] = {
                                         'strategy': self.strategy_name,
+                                        'strategy_explicit':
+                                            self.strategy_explicit,
                                         'max_restarts_on_errors': max(
                                             0, self.max_restarts_on_errors -
                                             self.restart_cnt_on_failure -
@@ -1545,6 +1549,7 @@ class FailoverStrategyExecutor(StrategyExecutor):
         if avoid_resources is not None or self._launched_resources is not None:
             task = self.dag.tasks[0]
             requested_resources = avoid_resources or self._launched_resources
+            assert requested_resources is not None
             if (avoid_resources is not None or
                 (requested_resources.region is None and
                  requested_resources.zone is None)):
