@@ -92,7 +92,7 @@ and does not enforce a running price limit.
 Use ``sky jobs launch task.yaml`` for managed recovery after preemption.
 
 Migrating existing preemptible VMs
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Upgrading SkyPilot does not opt existing VMs into spot pricing. When Nebius
 enables auctions for a region and SKU, legacy preemptible VMs are stopped
