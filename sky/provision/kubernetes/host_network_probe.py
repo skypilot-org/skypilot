@@ -45,10 +45,23 @@ _ENV_VAR_FOR_PORT: Dict[str, str] = {
     'sshd': 'SKYPILOT_SSHD_PORT',
 }
 
-_HEAD_PORT_NAMES: List[str] = list(_ENV_VAR_FOR_PORT)
+# Public: the server assigns these (host_network_ports) and this script binds
+# them. One list, so an added port cannot be assigned without being bound or
+# bound without being assigned.
+HEAD_PORT_NAMES: List[str] = list(_ENV_VAR_FOR_PORT)
+
+
+def env_var_for_port(name: str) -> str:
+    """The env var the bootstrap reads this port from.
+
+    Public so the server writes the same names the pod reads; one mapping,
+    so a renamed var cannot be exported under the old name.
+    """
+    return _ENV_VAR_FOR_PORT[name]
+
 
 # Workers don't run GCS/dashboard/ray-client-server, but they DO run sshd.
-_WORKER_PORT_NAMES: List[str] = [
+WORKER_PORT_NAMES: List[str] = [
     'node_manager',
     'object_manager',
     'dashboard_agent_listen',
@@ -188,7 +201,7 @@ def _head_ports_from_configmap_data(data: Dict[str, str],
     caller falls back to a fresh probe rather than reusing a partial set.
     """
     ports: Dict[str, int] = {}
-    for name in _HEAD_PORT_NAMES:
+    for name in HEAD_PORT_NAMES:
         key = f'{SSHD_KEY_PREFIX}{podname}' if name == 'sshd' else name
         raw = data.get(key)
         if raw is None:
@@ -398,7 +411,7 @@ def _run_head(env_file: str, configmap_name: str,
         held: List[socket.socket] = []
         ports = reused
     else:
-        held, ports = _probe_ports(_HEAD_PORT_NAMES)
+        held, ports = _probe_ports(HEAD_PORT_NAMES)
     # Publish before writing the env file so a failed publish prevents
     # ray start from binding ports the workers will never discover. The
     # publish is idempotent (409 → PUT), so it harmlessly re-points the
@@ -416,7 +429,7 @@ def _run_worker(env_file: str, configmap_name: str,
         raise RuntimeError(
             f'ConfigMap {configmap_namespace}/{configmap_name} is missing '
             f'the "gcs" key. Data: {head_data}')
-    held, ports = _probe_ports(_WORKER_PORT_NAMES)
+    held, ports = _probe_ports(WORKER_PORT_NAMES)
     # Publish before releasing the held sockets so a failed merge
     # aborts the bootstrap before sshd binds a port nothing can find.
     podname = os.environ['SKYPILOT_POD_NAME']
