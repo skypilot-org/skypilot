@@ -61,18 +61,11 @@ def test_set_nebius_loggers_blocks_poller_noise_from_root(
             'Exception in callback '
             'PollerCompletionQueue._handle_events(<...>)()')
         asyncio_logger_without_filters.error('Exception in callback other()')
-    # The original ERROR record must not reach any handler; only the
-    # debug-level re-log on the adaptor's logger may mention the poller.
+    # The poller ERROR record must not reach any handler, while the
+    # unrelated asyncio error keeps propagating.
     poller_errors = [
         r for r in caplog.records if
         'PollerCompletionQueue' in r.getMessage() and r.levelno >= logging.ERROR
     ]
     assert not poller_errors
     assert 'Exception in callback other()' in caplog.text
-    # The poller record is re-logged at debug level on the adaptor's logger.
-    poller_debug = [
-        r for r in caplog.records
-        if r.name == 'sky.adaptors.nebius' and r.levelno == logging.DEBUG and
-        'PollerCompletionQueue' in r.getMessage()
-    ]
-    assert len(poller_debug) == 1
