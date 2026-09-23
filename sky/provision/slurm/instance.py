@@ -1322,6 +1322,11 @@ exit 1
 # Cleanup function to remove cluster dirs on job termination.
 cleanup() {{
     saved_exit=$?
+    # Preserve the result while teardown signals arrive during cleanup.
+    trap '' TERM
+    if [ -f {exit_code_path} ]; then
+        saved_exit=$(cat {exit_code_path}) || saved_exit=1
+    fi
     # Prevent the keeper from restarting Skylet during cleanup.
     rm -f "{skypilot_runtime_dir}/{skylet_constants.SKYLET_START_FILE}"
     echo "Terminating Skylet..."
@@ -1934,14 +1939,19 @@ enroot export -f -o {shlex.quote(staging_snapshot_path)} "$enroot_name"
                                      previous_manifest['generation']),
             'previous Slurm snapshot generation')
     pre_batch_cancel = None
+    pre_step_cancel = None
     if not inside_slurm_cluster:
         pre_batch_cancel = lambda: _cleanup_slurm_allocation(
+            client, login_node_runner, cluster_name_on_cloud, provider_config,
+            job_id, nodes)
+        pre_step_cancel = lambda: _cache_slurm_allocation_exit_code(
             client, login_node_runner, cluster_name_on_cloud, provider_config,
             job_id, nodes)
     _cancel_slurm_job(client,
                       cluster_name_on_cloud,
                       inside_slurm_cluster,
-                      pre_batch_cancel=pre_batch_cancel)
+                      pre_batch_cancel=pre_batch_cancel,
+                      pre_step_cancel=pre_step_cancel)
     if not inside_slurm_cluster:
         _remove_leftover_shared_state(client,
                                       login_node_runner,
@@ -2068,6 +2078,28 @@ def _remove_shared_state_script(
             'exit 1')
 
 
+def _cache_slurm_allocation_exit_code(
+    client: 'slurm.SlurmClient',
+    login_node_runner: command_runner.CommandRunner,
+    cluster_name_on_cloud: str,
+    provider_config: Dict[str, Any],
+    job_id: str,
+    nodes: List[str],
+) -> None:
+    """Capture the result before stopping container keepers triggers EXIT."""
+    runtime_dir = _resolve_skypilot_runtime_dir(client, provider_config,
+                                                cluster_name_on_cloud)
+    script = ('set -e\n'
+              f'({_allocation_exit_code_script(runtime_dir)}\n'
+              f') > {shlex.quote(runtime_dir + ".exitcode." + job_id)}')
+    command = ('srun --unbuffered --overlap --chdir=/tmp '
+               f'--jobid={shlex.quote(job_id)} '
+               f'--nodes={len(nodes)} --ntasks-per-node=1 '
+               f'bash -c {shlex.quote(script)}')
+    _run_on_login_node(login_node_runner, shlex.split(command),
+                       'Failed to preserve the Slurm allocation exit code.')
+
+
 def _cleanup_slurm_allocation(
     client: 'slurm.SlurmClient',
     login_node_runner: command_runner.CommandRunner,
@@ -2115,8 +2147,10 @@ if command -v enroot > /dev/null; then
     done
 fi
 # Keep the task result available to the batch TERM trap after state removal.
-({_allocation_exit_code_script(skypilot_runtime_dir)}
-) > {shlex.quote(skypilot_runtime_dir + ".exitcode." + job_id)}
+if [ ! -f {shlex.quote(skypilot_runtime_dir + ".exitcode." + job_id)} ]; then
+    ({_allocation_exit_code_script(skypilot_runtime_dir)}
+    ) > {shlex.quote(skypilot_runtime_dir + ".exitcode." + job_id)}
+fi
 rm -rf -- {shlex.quote(skypilot_runtime_dir)}
 """
     cleanup_node_cmd = ('srun --unbuffered --overlap --chdir=/tmp '
@@ -2164,11 +2198,13 @@ def _cancel_slurm_job(
     cluster_name_on_cloud: str,
     inside_slurm_cluster: bool,
     pre_batch_cancel: Optional[Callable[[], None]] = None,
+    pre_step_cancel: Optional[Callable[[], None]] = None,
 ) -> None:
     """Cancel a Slurm virtual-instance allocation and verify it exits."""
-    assert not inside_slurm_cluster or pre_batch_cancel is None, (
-        'Inside-cluster cancellation must leave cleanup to the sbatch EXIT '
-        'trap.')
+    assert not inside_slurm_cluster or (
+        pre_batch_cancel is None and pre_step_cancel is None), (
+            'Inside-cluster cancellation must leave cleanup to the sbatch EXIT '
+            'trap.')
     jobs_state = client.get_jobs_state_by_name(cluster_name_on_cloud)
     if not jobs_state:
         logger.debug(f'Job for cluster {cluster_name_on_cloud} not found, '
@@ -2214,6 +2250,8 @@ def _cancel_slurm_job(
         # Both scancel invocations are needed: without --full, scancel signals
         # all job steps but not the batch script; with --full, it signals the
         # batch script and its child processes.
+        if pre_step_cancel is not None:
+            pre_step_cancel()
         client.cancel_jobs_by_name(cluster_name_on_cloud, signal='TERM')
         if pre_batch_cancel is not None:
             try:
@@ -2279,6 +2317,7 @@ def terminate_instances(
     client, login_node_runner = _make_client_and_login_runner(
         provider_config, inside_slurm_cluster)
     pre_batch_cancel = None
+    pre_step_cancel = None
     if not inside_slurm_cluster:
         running_jobs = client.query_jobs(cluster_name_on_cloud,
                                          ['running', 'suspended'])
@@ -2291,10 +2330,15 @@ def terminate_instances(
             pre_batch_cancel = lambda: _cleanup_slurm_allocation(
                 client, login_node_runner, cluster_name_on_cloud,
                 provider_config, job_id, nodes)
+            if provider_config.get('container_image') is not None:
+                pre_step_cancel = lambda: _cache_slurm_allocation_exit_code(
+                    client, login_node_runner, cluster_name_on_cloud,
+                    provider_config, job_id, nodes)
     _cancel_slurm_job(client,
                       cluster_name_on_cloud,
                       inside_slurm_cluster,
-                      pre_batch_cancel=pre_batch_cancel)
+                      pre_batch_cancel=pre_batch_cancel,
+                      pre_step_cancel=pre_step_cancel)
     sky_base_dir = _resolve_sky_base_dir(client, provider_config)
     if not inside_slurm_cluster:
         _remove_leftover_shared_state(client,

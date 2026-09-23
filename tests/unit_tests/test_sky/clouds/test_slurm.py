@@ -1690,6 +1690,33 @@ class TestCreateVirtualInstance:
             cache.unlink(missing_ok=True)
             stale_cache.unlink()
 
+    @pytest.mark.parametrize('exit_code', [0, 7])
+    def test_container_exit_cleanup_preserves_result_during_term(
+            self, tmp_path, exit_code):
+        script = (SBATCH_TESTDATA_DIR / 'containers.sh').read_text()
+        start = script.index('cleanup() {')
+        end = script.index('# Create sky home directory', start)
+        handlers = script[start:end]
+        handlers = handlers.replace('/tmp/test-cluster', str(tmp_path / 'run'))
+        handlers = handlers.replace('/home/testuser', str(tmp_path / 'home'))
+        cache = tmp_path / 'run.exitcode.123'
+        cache.write_text(f'{exit_code}\n')
+        # Deliver the batch TERM after cleanup has removed the task state.
+        stub = f"""
+srun() {{
+    command rm -f {cache}
+    kill -TERM $$
+}}
+"""
+        result = subprocess.run(['bash', '-c', stub + handlers + '\nexit 143'],
+                                env={
+                                    **os.environ, 'SLURM_JOB_ID': '123'
+                                },
+                                capture_output=True,
+                                text=True,
+                                check=False)
+        assert result.returncode == exit_code, result.stderr
+
     def _run_and_capture_script(self, cluster_name, config) -> str:
         """Run _create_virtual_instance and capture the generated script."""
         written_script = None

@@ -540,9 +540,10 @@ class TestTerminateInstances:
             client,
             _CLUSTER,
             inside_slurm_cluster=False,
-            pre_batch_cancel=lambda: events.append('cleanup'))
+            pre_batch_cancel=lambda: events.append('cleanup'),
+            pre_step_cancel=lambda: events.append('capture'))
 
-        assert events == [('TERM', False), 'cleanup', ('TERM', True)]
+        assert events == ['capture', ('TERM', False), 'cleanup', ('TERM', True)]
 
     def test_cleanup_failure_still_cancels_allocation(self, mock_client,
                                                       monkeypatch):
@@ -1951,8 +1952,9 @@ def test_allocation_exit_code_before_job_database_exists(tmp_path):
     assert result.stdout.strip() == '0'
 
 
+@pytest.mark.parametrize('cached', [False, True])
 def test_cleanup_preserves_exit_code_before_removing_database(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, cached):
     runtime = tmp_path / 'runtime'
     state = runtime / '.sky'
     state.mkdir(parents=True)
@@ -1969,6 +1971,11 @@ def test_cleanup_preserves_exit_code_before_removing_database(
         subprocess.run(['bash', '-c', command[-1]], check=True)
 
     monkeypatch.setattr(instance, '_run_on_login_node', run_node_cleanup)
+    if cached:
+        instance._cache_slurm_allocation_exit_code(mock.Mock(), mock.Mock(),
+                                                   _CLUSTER, _PROVIDER_CONFIG,
+                                                   '123', ['node-a'])
+        (state / 'jobs.db').unlink()
     instance._cleanup_slurm_allocation(mock.Mock(), mock.Mock(), _CLUSTER,
                                        _PROVIDER_CONFIG, '123', ['node-a'])
     assert not runtime.exists()

@@ -14,6 +14,11 @@
 # Cleanup function to remove cluster dirs on job termination.
 cleanup() {
     saved_exit=$?
+    # Preserve the result while teardown signals arrive during cleanup.
+    trap '' TERM
+    if [ -f /tmp/test-cluster.exitcode."${SLURM_JOB_ID}" ]; then
+        saved_exit=$(cat /tmp/test-cluster.exitcode."${SLURM_JOB_ID}") || saved_exit=1
+    fi
     # Prevent the keeper from restarting Skylet during cleanup.
     rm -f "/tmp/test-cluster/.sky/skylet_start"
     echo "Terminating Skylet..."

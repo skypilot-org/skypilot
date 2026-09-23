@@ -16,7 +16,10 @@ from sky.provision.slurm import utils as slurm_utils
 @pytest.mark.no_remote_server
 @pytest.mark.parametrize('num_nodes', [1, 2])
 @pytest.mark.parametrize('exit_code', [0, 7])
-def test_slurm_afterok(tmp_path, num_nodes: int, exit_code: int):
+@pytest.mark.parametrize('container', [False, True],
+                         ids=['no-container', 'container'])
+def test_slurm_afterok(tmp_path, num_nodes: int, exit_code: int,
+                       container: bool):
     """The second sky launch depends on the first allocation's task result."""
     name = smoke_tests_utils.get_cluster_name()
     first, second = f'{name}-a', f'{name}-b'
@@ -28,6 +31,7 @@ def test_slurm_afterok(tmp_path, num_nodes: int, exit_code: int):
                 'Set SLURM_CLUSTER when multiple clusters are configured.')
         cluster = clusters[0]
     cli = [sys.executable, '-c', 'from sky.cli import cli; cli()']
+    image_args = ['--image-id', 'docker:ubuntu:22.04'] if container else []
     ssh = [
         'ssh', '-F',
         os.path.expanduser(slurm_utils.DEFAULT_SLURM_PATH), '-o',
@@ -55,8 +59,8 @@ def test_slurm_afterok(tmp_path, num_nodes: int, exit_code: int):
         result = run(cli + [
             'launch', '-y', '-c', first, '--infra', f'slurm/{cluster}',
             '--cpus', '1', '--num-nodes',
-            str(num_nodes), '--', f'exit {exit_code}'
-        ])
+            str(num_nodes)
+        ] + image_args + ['--', f'exit {exit_code}'])
         assert result.returncode == (0 if exit_code == 0 else 100)
         records = sky.get(sky.status(cluster_names=[first]))
         assert len(records) == 1
@@ -85,7 +89,7 @@ def test_slurm_afterok(tmp_path, num_nodes: int, exit_code: int):
         with (tmp_path / 'dependent.log').open('w+') as log:
             launch = subprocess.Popen(cli +
                                       ['launch', '-y', '-c', second,
-                                       str(task)],
+                                       str(task)] + image_args,
                                       stdout=log,
                                       stderr=subprocess.STDOUT)
             deadline = time.monotonic() + 180
