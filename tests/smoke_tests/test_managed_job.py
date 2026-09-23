@@ -3958,7 +3958,7 @@ def test_managed_jobs_api_access(generic_cloud: str):
 _JOB_TREE_FIELDS = [
     'job_id', 'job_name', 'task_id', 'status', 'details',
     'is_primary_in_job_group', 'root_job_id', 'parent_job_id', 'parent_task_id',
-    'dynamic_task_index'
+    'dynamic_task_index', 'user_hash'
 ]
 # Task indices in smoke_dynamic_members.yaml.
 _TRAINER_TASK = 0
@@ -3996,14 +3996,43 @@ def _launch_from_task(name: str,
             f'{q}{cmd}{q}')
 
 
+def _wait_running_from_task(names: List[str], timeout: int = 900) -> str:
+    """Shell for a task to wait until every managed job in `names` is RUNNING.
+
+    This is how a trainer learns that the jobs the watcher launched are up,
+    so it can finish after them instead of after a fixed sleep that starts
+    at pod start and races the watcher's provisioning. It runs in its own
+    pod, so it activates the runtime itself. `-u` is needed because a task's
+    pod may be recorded as a different user from its siblings (see
+    smoke_tests_utils.endpoint_url_has_credentials); this is a wait, not an
+    ownership check, so it is unconditional. `-l 200`: the CLI shows the
+    newest N jobs and on a shared server the default N can miss a job
+    launched minutes ago by another test's worth of activity.
+    """
+    checks = ' && '.join(
+        f'echo "$q" | grep " {n} " | grep -q RUNNING' for n in names)
+    shown = ' '.join(names)
+    return (f'source ~/skypilot-runtime/bin/activate && '
+            f'for i in $(seq 1 {timeout // 10}); do '
+            f'q=$(sky jobs queue -u -l 200 2>/dev/null | '
+            f'sed "s/\\x1b\\[[0-9;]*m//g"); '
+            f'if {checks}; then echo "poll $i: {shown} running"; break; fi; '
+            f'echo "poll $i: waiting for {shown}"; sleep 10; done; '
+            f'{checks} || {{ echo "FAIL: {shown} not all RUNNING"; exit 1; }}')
+
+
 def _wait_from_task(name: str, timeout: int = 600) -> str:
-    """Shell for a task to wait until the managed job `name` is terminal."""
-    return (f'for i in $(seq 1 {timeout // 10}); do '
-            f's=$(sky jobs queue 2>/dev/null | sed "s/\\x1b\\[[0-9;]*m//g" | '
-            f'grep " {name} " | grep -oE "SUCCEEDED|FAILED[A-Z_]*|CANCELLED" | '
-            f'head -1); echo "poll $i: {name} $s"; '
-            f'if [ -n "$s" ]; then break; fi; sleep 10; done; '
-            f'test -n "$s" || {{ echo "FAIL: {name} not terminal"; exit 1; }}')
+    """Shell for a task to wait until the managed job `name` is terminal.
+
+    `-u` and `-l 200` for the same reasons as in _wait_running_from_task.
+    """
+    return (
+        f'for i in $(seq 1 {timeout // 10}); do '
+        f's=$(sky jobs queue -u -l 200 2>/dev/null | sed "s/\\x1b\\[[0-9;]*m//g" | '
+        f'grep " {name} " | grep -oE "SUCCEEDED|FAILED[A-Z_]*|CANCELLED" | '
+        f'head -1); echo "poll $i: {name} $s"; '
+        f'if [ -n "$s" ]; then break; fi; sleep 10; done; '
+        f'test -n "$s" || {{ echo "FAIL: {name} not terminal"; exit 1; }}')
 
 
 def _status(job: dict) -> sky.ManagedJobStatus:
@@ -4013,16 +4042,27 @@ def _status(job: dict) -> sky.ManagedJobStatus:
     return sky.ManagedJobStatus(status)
 
 
-def _queue_jobs() -> list:
+def _queue_jobs(name_match: Optional[str] = None,
+                job_ids: Optional[List[int]] = None) -> list:
+    """Queue rows across all users, narrowed server-side.
+
+    Always pass `name_match` (a substring of the job name) or `job_ids`: a
+    long-lived API server holds hundreds of thousands of rows and these
+    helpers poll every few seconds. Every job in these tests carries its
+    group's name as a prefix, so the group name narrows to the whole tree.
+    """
+    assert name_match is not None or job_ids is not None
     return sky.get(
         sky.jobs.queue_v2(refresh=False,
                           all_users=True,
+                          name_match=name_match,
+                          job_ids=job_ids,
                           fields=_JOB_TREE_FIELDS))[0]
 
 
 def _job_named(name: str) -> Optional[dict]:
     """The newest job with exactly this name (names are not unique)."""
-    matches = [j for j in _queue_jobs() if j['job_name'] == name]
+    matches = [j for j in _queue_jobs(name_match=name) if j['job_name'] == name]
     return max(matches, key=lambda j: j['job_id']) if matches else None
 
 
@@ -4032,10 +4072,14 @@ def _existing_job_named(name: str) -> dict:
     return job
 
 
-def _job_tree(root_job_id: int) -> Dict[str, dict]:
-    """The jobs launched under `root_job_id`, by name; one row per job."""
+def _job_tree(root_job_id: int, group_name: str) -> Dict[str, dict]:
+    """The jobs launched under `root_job_id`, by name; one row per job.
+
+    `group_name` only narrows the query; membership is decided by
+    `root_job_id`.
+    """
     tree: Dict[str, dict] = {}
-    for job in _queue_jobs():
+    for job in _queue_jobs(name_match=group_name):
         if job.get('root_job_id') == root_job_id:
             tree[job['job_name']] = job
     return tree
@@ -4069,7 +4113,9 @@ def _wait_group(name: str, statuses: List[sky.ManagedJobStatus],
     """
     start = time.time()
     while time.time() - start < timeout:
-        rows = [j for j in _queue_jobs() if j['job_name'] == name]
+        rows = [
+            j for j in _queue_jobs(name_match=name) if j['job_name'] == name
+        ]
         if rows:
             job_id = max(j['job_id'] for j in rows)
             rows = [j for j in rows if j['job_id'] == job_id]
@@ -4090,16 +4136,27 @@ def _wait_job(job_id: int, statuses: List[sky.ManagedJobStatus],
     re-read with _JOB_TREE_FIELDS afterwards: the assertions below need
     `details` (the cancel reason) and the tree fields.
     """
-    smoke_tests_utils.wait_for_managed_job_status_sdk(job_id=job_id,
-                                                      target_statuses=statuses,
-                                                      timeout=timeout)
-    rows = [j for j in _queue_jobs() if j['job_id'] == job_id]
+    # TEMPORARY: a job launched from inside a task is meant to belong to the
+    # user who launched the group, and this waiter queries as that user so
+    # the test also checks that. On an endpoint whose URL embeds basic-auth
+    # credentials the pod's token never reaches the server and the child is
+    # recorded under a made-up user, so the per-user query never sees it
+    # (see smoke_tests_utils.endpoint_url_has_credentials). Widen to all
+    # users only there. Remove the argument once the token survives such a
+    # URL.
+    smoke_tests_utils.wait_for_managed_job_status_sdk(
+        job_id=job_id,
+        target_statuses=statuses,
+        timeout=timeout,
+        all_users=smoke_tests_utils.endpoint_url_has_credentials())
+    rows = _queue_jobs(job_ids=[job_id])
     assert rows, f'Job {job_id} vanished from the queue'
     return rows[0]
 
 
 def _wait_tree(
         root_job_id: int,
+        group_name: str,
         names: List[str],
         timeout: int = 600,
         statuses: Optional[List[sky.ManagedJobStatus]] = None
@@ -4108,12 +4165,22 @@ def _wait_tree(
 
     With `statuses`, also until each has reached one of them. Polls the
     queue rather than sleeping: the launches happen inside a task whose
-    pod provisioning time is not known in advance.
+    pod provisioning time is not known in advance. Fails at once when a
+    waited-on job reaches a terminal status that is not wanted: it will
+    never reach the wanted one, and the timeout would only hide which job
+    went wrong.
     """
     start = time.time()
     while time.time() - start < timeout:
-        tree = _job_tree(root_job_id)
+        tree = _job_tree(root_job_id, group_name)
         missing = [n for n in names if n not in tree]
+        if statuses is not None:
+            wrong = [(n, _status(tree[n]).value)
+                     for n in names
+                     if n in tree and _status(tree[n]).is_terminal() and
+                     _status(tree[n]) not in statuses]
+            assert not wrong, (f'Jobs under {root_job_id} ended in a status '
+                               f'not in {[s.value for s in statuses]}: {wrong}')
         if not missing and (statuses is None or
                             all(_status(tree[n]) in statuses for n in names)):
             return tree
@@ -4144,6 +4211,32 @@ def _assert_attached(job: dict,
             f'{job.get("dynamic_task_index")}, expected {dynamic_task_index}')
 
 
+def _assert_launched_as_group_user(job: dict, root_job_id: int) -> None:
+    """The job launched from a task belongs to the user who launched the group.
+
+    The launching pod holds a service-account token created for that user,
+    so the server records the child under the same user hash as the group.
+
+    TEMPORARY exception: on an endpoint whose URL embeds basic-auth
+    credentials the token never reaches the server and the child gets a
+    made-up user (see smoke_tests_utils.endpoint_url_has_credentials). The
+    check is skipped there, with a note in the log, and must run again
+    unconditionally once that is fixed.
+    """
+    root_rows = _queue_jobs(job_ids=[root_job_id])
+    assert root_rows, f'Group {root_job_id} vanished from the queue'
+    expected = root_rows[0].get('user_hash')
+    got = job.get('user_hash')
+    if smoke_tests_utils.endpoint_url_has_credentials():
+        print(f'SKIPPED ownership check for {job["job_name"]}: endpoint URL '
+              f'has basic-auth credentials, so the in-task token is lost '
+              f'(group user {expected}, child user {got}).')
+        return
+    assert got == expected, (
+        f'{job["job_name"]}: user_hash {got}, expected the group\'s '
+        f'{expected}')
+
+
 def _assert_cancelled_because(job: dict, text: str) -> None:
     """The job's queue row must explain its cancellation with `text`."""
     assert _status(job) == sky.ManagedJobStatus.CANCELLED, (
@@ -4164,7 +4257,11 @@ def _queue_shows_member(group_name: str, member_name: str) -> str:
     A member row prints its own job id after the group marker, and the
     group row (which has no marker) comes first.
     """
-    return (f's=$(sky jobs queue); echo "$s"; '
+    # TEMPORARY: `-u` only where the member is recorded under another user
+    # (see smoke_tests_utils.endpoint_url_has_credentials). Everywhere else
+    # the plain per-user listing must show it.
+    flag = ' -u' if smoke_tests_utils.endpoint_url_has_credentials() else ''
+    return (f's=$(sky jobs queue{flag}); echo "$s"; '
             f'echo "$s" | grep "↳" | grep " {member_name} " && '
             f'echo "$s" | grep -v "↳" | grep " {group_name} "')
 
@@ -4179,7 +4276,12 @@ def _dynamic_members_teardown(name: str, children: List[str]) -> str:
         f'gid=$(sky jobs queue | grep -v "↳" | grep " {name} " | '
         f'awk \'{{print $1}}\' | head -1); '
         f'echo "=== watcher log of group $gid ==="; '
-        f'sky jobs logs $gid {_WATCHER_TASK} --no-follow --tail 200 || true')
+        # Bounded: `--no-follow` blocks while the job has not started
+        # (skypilot-org/skypilot#10253), and an unbounded wait here gets the
+        # whole teardown killed before the cancels below run, leaking the
+        # group into the next attempt (skypilot-org/skypilot#10837).
+        f'timeout 60 sky jobs logs $gid {_WATCHER_TASK} --no-follow '
+        f'--tail 200 || true')
     cancels = ' ; '.join(
         f'sky jobs cancel -y -n {name}-{child} || true' for child in children)
     return f'{watcher_log} ; sky jobs cancel -y -n {name} || true ; {cancels}'
@@ -4217,8 +4319,9 @@ def test_dynamic_job_group_watcher_primary(generic_cloud: str):
 
     def check():
         root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
-        tree = _wait_tree(root, [eval1])
+        tree = _wait_tree(root, name, [eval1])
         _assert_attached(tree[eval1], root, root, _WATCHER_TASK, 2)
+        _assert_launched_as_group_user(tree[eval1], root)
         _wait_group(name, [sky.ManagedJobStatus.SUCCEEDED], timeout=900)
         job = _wait_job(tree[eval1]['job_id'], [sky.ManagedJobStatus.SUCCEEDED],
                         timeout=120)
@@ -4274,13 +4377,19 @@ def test_dynamic_job_group_basic_terminate(generic_cloud: str):
         name,
         generic_cloud,
         primary_tasks='trainer',
-        trainer_run='sleep 120',
+        # The trainer finishes once the eval is RUNNING, plus a grace period
+        # so the test (polling every 10 s) observes the eval running before
+        # the sweep cancels it. A fixed sleep here would start at pod start
+        # and could end before the watcher has even provisioned.
+        trainer_run=_wait_running_from_task([eval1]) + '; sleep 60',
         watcher_run=(_launch_from_task(eval1, generic_cloud, _FOREVER) + '\n' +
                      _FOREVER))
 
     def check():
         root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
-        tree = _wait_tree(root, [eval1],
+        tree = _wait_tree(root,
+                          name, [eval1],
+                          timeout=900,
                           statuses=[sky.ManagedJobStatus.RUNNING])
         _assert_attached(tree[eval1], root, root, _WATCHER_TASK, 2)
         _wait_group(name, [sky.ManagedJobStatus.SUCCEEDED], timeout=900)
@@ -4319,13 +4428,17 @@ def test_dynamic_job_group_basic_primary_fails(generic_cloud: str):
         name,
         generic_cloud,
         primary_tasks='trainer',
-        trainer_run='sleep 120; echo "trainer failing"; exit 1',
+        # Same signal as basic_terminate, then a non-zero exit.
+        trainer_run=(_wait_running_from_task([eval1]) +
+                     '; sleep 60; echo "trainer failing"; exit 1'),
         watcher_run=(_launch_from_task(eval1, generic_cloud, _FOREVER) + '\n' +
                      _FOREVER))
 
     def check():
         root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
-        tree = _wait_tree(root, [eval1],
+        tree = _wait_tree(root,
+                          name, [eval1],
+                          timeout=900,
                           statuses=[sky.ManagedJobStatus.RUNNING])
         _wait_group(name, [sky.ManagedJobStatus.FAILED], timeout=900)
         job = _wait_job(tree[eval1]['job_id'], [sky.ManagedJobStatus.CANCELLED],
@@ -4375,7 +4488,8 @@ def test_dynamic_job_group_cancel_and_opt_out(generic_cloud: str):
 
     def check_before_cancel():
         root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
-        tree = _wait_tree(root, [eval1],
+        tree = _wait_tree(root,
+                          name, [eval1],
                           statuses=[sky.ManagedJobStatus.RUNNING])
         _assert_attached(tree[eval1], root, root, _WATCHER_TASK, 2)
         start = time.time()
@@ -4391,7 +4505,7 @@ def test_dynamic_job_group_cancel_and_opt_out(generic_cloud: str):
 
     def check_after_cancel():
         root = _wait_group(name, [sky.ManagedJobStatus.CANCELLED], timeout=300)
-        tree = _job_tree(root)
+        tree = _job_tree(root, name)
         job = _wait_job(tree[eval1]['job_id'], [sky.ManagedJobStatus.CANCELLED],
                         timeout=300)
         _assert_cancelled_because(job, f'(cancelled with job {root})')
@@ -4441,7 +4555,8 @@ def test_dynamic_job_group_nested_cancel_root(generic_cloud: str):
 
     def check_before_cancel():
         root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
-        tree = _wait_tree(root, [eval1, eval1a],
+        tree = _wait_tree(root,
+                          name, [eval1, eval1a],
                           timeout=900,
                           statuses=[sky.ManagedJobStatus.RUNNING])
         _assert_attached(tree[eval1], root, root, _WATCHER_TASK, 2)
@@ -4450,7 +4565,7 @@ def test_dynamic_job_group_nested_cancel_root(generic_cloud: str):
 
     def check_after_cancel():
         root = _wait_group(name, [sky.ManagedJobStatus.CANCELLED], timeout=300)
-        tree = _job_tree(root)
+        tree = _job_tree(root, name)
         child_id = tree[eval1]['job_id']
         child = _wait_job(child_id, [sky.ManagedJobStatus.CANCELLED],
                           timeout=300)
@@ -4499,15 +4614,19 @@ def test_dynamic_job_group_nested_first_level_finishes(generic_cloud: str):
         name,
         generic_cloud,
         primary_tasks='trainer',
-        # Long enough for eval-1 to finish and eval-1a to be observed
-        # running afterwards, before the group finishes.
-        trainer_run='sleep 480',
+        # The trainer must outlive eval-1 finishing and eval-1a being observed
+        # running afterwards. It waits for eval-1a to be RUNNING (eval-1
+        # exits 5 s after launching it) and then holds long enough for the
+        # test's observation window (a RUNNING check, a 30 s pause, a second
+        # check) before the group finishes.
+        trainer_run=(_wait_running_from_task([eval1a]) + ' && ' +
+                     _wait_from_task(eval1) + '; sleep 120'),
         watcher_run=(_launch_from_task(eval1, generic_cloud, eval1_cmd) + '\n' +
                      _FOREVER))
 
     def check():
         root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
-        tree = _wait_tree(root, [eval1, eval1a], timeout=900)
+        tree = _wait_tree(root, name, [eval1, eval1a], timeout=900)
         _wait_job(tree[eval1]['job_id'], [sky.ManagedJobStatus.SUCCEEDED],
                   timeout=600)
         # eval-1 is done; eval-1a must be untouched, now and a little later.
@@ -4515,7 +4634,7 @@ def test_dynamic_job_group_nested_first_level_finishes(generic_cloud: str):
                                [sky.ManagedJobStatus.RUNNING],
                                timeout=600)
         time.sleep(30)
-        _assert_not_terminal(_job_tree(root)[eval1a])
+        _assert_not_terminal(_job_tree(root, name)[eval1a])
         _wait_group(name, [sky.ManagedJobStatus.SUCCEEDED], timeout=900)
         grandchild = _wait_job(grandchild['job_id'],
                                [sky.ManagedJobStatus.CANCELLED],
@@ -4572,7 +4691,8 @@ def test_dynamic_job_group_nested_cancel_subtree(generic_cloud: str):
 
     def check_before_cancel():
         root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
-        tree = _wait_tree(root, [eval1, eval1a, eval2, eval2a],
+        tree = _wait_tree(root,
+                          name, [eval1, eval1a, eval2, eval2a],
                           timeout=900,
                           statuses=[sky.ManagedJobStatus.RUNNING])
         _assert_attached(tree[eval1a], root, tree[eval1]['job_id'], 0)
@@ -4592,7 +4712,7 @@ def test_dynamic_job_group_nested_cancel_subtree(generic_cloud: str):
     def check_after_cancel():
         pathlib.Path(child_id_file).unlink(missing_ok=True)
         root = _existing_job_named(name)['job_id']
-        tree = _job_tree(root)
+        tree = _job_tree(root, name)
         child_id = tree[eval1]['job_id']
         _assert_cancelled_because(
             _wait_job(child_id, [sky.ManagedJobStatus.CANCELLED], timeout=300),
@@ -4600,7 +4720,7 @@ def test_dynamic_job_group_nested_cancel_subtree(generic_cloud: str):
         _assert_cancelled_because(
             _wait_job(tree[eval1a]['job_id'], [sky.ManagedJobStatus.CANCELLED],
                       timeout=300), f'(cancelled with job {child_id})')
-        tree = _job_tree(root)
+        tree = _job_tree(root, name)
         _assert_not_terminal(tree[eval2])
         _assert_not_terminal(tree[eval2a])
         _assert_not_terminal(_existing_job_named(name))
@@ -4662,7 +4782,7 @@ def test_dynamic_job_group_parallel_appends(generic_cloud: str):
 
     def check():
         root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
-        tree = _wait_tree(root, evals, timeout=900)
+        tree = _wait_tree(root, name, evals, timeout=900)
         indices = sorted(tree[e]['dynamic_task_index'] for e in evals)
         assert indices == [2, 3, 4, 5, 6], indices
         for e in evals:
