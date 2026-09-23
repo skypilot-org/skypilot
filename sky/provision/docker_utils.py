@@ -197,11 +197,20 @@ def _redact_docker_password(cmd: str) -> str:
 class DockerInitializer:
     """Initializer for docker containers on a remote node."""
 
-    def __init__(self, docker_config: Dict[str, Any],
-                 runner: 'command_runner.CommandRunner', log_path: str):
+    def __init__(self,
+                 docker_config: Dict[str, Any],
+                 runner: 'command_runner.CommandRunner',
+                 log_path: str,
+                 stream_pull_logs: bool = False):
         self.docker_config = docker_config
         self.container_name = docker_config['container_name']
         self.runner = runner
+        # Whether to stream `docker pull` progress to the process stream
+        # (and thus the API server request log that `sky launch` clients
+        # render). Callers enable this for one node only: every node's
+        # initializer shares the same process stdout, so streaming all of
+        # them would interleave unlabeled copies of the pull output.
+        self.stream_pull_logs = stream_pull_logs
         self.home_dir: Optional[str] = None
         self.initialized = False
         # podman is not fully tested yet.
@@ -222,6 +231,12 @@ class DockerInitializer:
         log_err_when_fail: bool = True,
         flock_name: Optional[str] = None,
         flock_args: Optional[str] = None,
+        # Streaming tees: output shows up live in the provision log and is
+        # still returned. Only enable it for long-running commands with
+        # line-oriented output (e.g. `docker pull`); probe commands must
+        # stay quiet because their outputs are parsed and their retries
+        # can print transient errors.
+        stream_logs: bool = False,
     ) -> str:
 
         if run_env == 'docker':
@@ -247,7 +262,7 @@ class DockerInitializer:
             rc, stdout, stderr = self.runner.run(
                 cmd,
                 require_outputs=True,
-                stream_logs=False,
+                stream_logs=stream_logs,
                 separate_stderr=separate_stderr,
                 log_path=self.log_path)
             if (DOCKER_PERMISSION_DENIED_STR in stdout + stderr or
@@ -350,17 +365,25 @@ class DockerInitializer:
             # the user did not add it.
             specific_image = docker_login_config.format_image(specific_image)
 
+        # Stream the pull: it is the one docker setup step whose duration
+        # scales with image size (a multi-GB image can pull for many
+        # minutes). Its output already lands in this node's log file
+        # either way; streaming additionally echoes it to the process
+        # stream, which is what reaches the API server request log and
+        # `sky launch` clients live.
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if ' +
                                     'pull_before_run is specified')
             self._run(f'{self.docker_cmd} pull {specific_image}',
-                      wait_for_docker_daemon=True)
+                      wait_for_docker_daemon=True,
+                      stream_logs=self.stream_pull_logs)
         else:
             self._run(
                 f'{self.docker_cmd} image inspect {specific_image} '
                 '1> /dev/null  2>&1 || '
                 f'{self.docker_cmd} pull {specific_image}',
-                wait_for_docker_daemon=True)
+                wait_for_docker_daemon=True,
+                stream_logs=self.stream_pull_logs)
 
         logger.info(f'Starting container {self.container_name} with image '
                     f'{specific_image}')
