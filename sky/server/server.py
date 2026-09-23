@@ -291,6 +291,22 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return response
 
 
+def _strip_jwt_padding(jwt_token: str) -> str:
+    """Remove base64 padding from each segment of a compact JWT.
+
+    RFC 7515 compact serialization uses unpadded base64url, but some proxies
+    emit padded segments: the AWS ALB ``x-amzn-oidc-data`` header is documented
+    to include padding characters, and its 64-byte ES256 signature segment
+    always ends in ``==``. PyJWT 2.14+ enforces the compact encoding rules and
+    rejects any segment that contains ``=``, which would silently drop the
+    identity (upstream: https://github.com/jpadilla/pyjwt/issues/1209).
+    Stripping the padding is a pure normalization: the decoded bytes are
+    identical, and this code path never verifies the signature.
+    """
+    return '.'.join(
+        segment.rstrip('=') for segment in jwt_token.strip().split('.'))
+
+
 def _extract_identity_from_jwt(jwt_token: str, claim: str) -> Optional[str]:
     """Extract identity claim from a JWT token without verification.
 
@@ -307,7 +323,7 @@ def _extract_identity_from_jwt(jwt_token: str, claim: str) -> Optional[str]:
     try:
         # Trusted proxy scenario - skip all verification since the proxy
         # has already authenticated the request
-        payload = pyjwt.decode(jwt_token,
+        payload = pyjwt.decode(_strip_jwt_padding(jwt_token),
                                options={
                                    'verify_signature': False,
                                    'verify_exp': False,
@@ -315,7 +331,9 @@ def _extract_identity_from_jwt(jwt_token: str, claim: str) -> Optional[str]:
                                })
         return payload.get(claim)
     except pyjwt.exceptions.DecodeError as e:
-        logger.debug(f'Failed to decode JWT from header: {e}')
+        # The proxy set the header but it cannot be parsed, so the request
+        # proceeds without an identity. That must not be silent.
+        logger.warning(f'Failed to decode JWT from header: {e}')
         return None
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Unexpected error decoding JWT: {e}')
