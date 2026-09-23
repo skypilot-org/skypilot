@@ -419,7 +419,11 @@ def test_the_reserved_range_is_part_of_the_on_cluster_format():
     listening on the old ports while the client is handed new ones. Nothing
     fails loudly.
 
-    Widening the range is the safe direction; moving or narrowing it needs a
-    migration. If this fails, do not update it to match.
+    Widening is the safe direction for the *read* path -- an existing block
+    stays inside a wider range -- but not for the write path: a user whose
+    `pod_config` declares a port that the widened range now covers launches
+    fine today and is refused on their next launch. So widening needs a
+    release note, and moving or narrowing needs a migration. If this fails,
+    do not update it to match.
     """
     assert (ports.PORT_RANGE_START, ports.PORT_RANGE_END) == (20000, 29999)
