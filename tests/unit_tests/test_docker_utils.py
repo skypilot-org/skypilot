@@ -1,4 +1,7 @@
 """Tests for docker container initialization on a remote node."""
+import os
+from pathlib import Path
+import subprocess
 from unittest import mock
 
 import pytest
@@ -118,3 +121,76 @@ def test_acr_password_takes_precedence_over_managed_identity(
     assert any(
         f'login --username token-name --password secret {_ACR_SERVER}' in c
         for c in commands)
+
+
+@pytest.mark.parametrize('with_identity,modern_cli,login_status,docker_status',
+                         [
+                             (True, True, 0, 0),
+                             (True, False, 0, 0),
+                             (False, True, 0, 0),
+                             (True, True, 7, 0),
+                             (True, True, 0, 9),
+                         ])
+def test_acr_login_shell_and_profile_cleanup(tmp_path, with_identity,
+                                             modern_cli, login_status,
+                                             docker_status):
+    runs = []
+    initializer = _make_initializer(
+        _acr_docker_config(with_identity=with_identity), runs)
+    initializer.initialize()
+    login_command = next(cmd for cmd, _ in runs if 'az login --identity' in cmd)
+    original_profile = tmp_path / 'original-profile'
+    original_profile.mkdir()
+    sentinel = original_profile / 'keep'
+    sentinel.write_text('original account state')
+    env = dict(os.environ,
+               AZURE_CONFIG_DIR=str(original_profile),
+               ACR_TEST_DIR=str(tmp_path),
+               ACR_TEST_MODERN=str(int(modern_cli)),
+               ACR_TEST_LOGIN_STATUS=str(login_status),
+               ACR_TEST_DOCKER_STATUS=str(docker_status))
+    # Execute the generated shell command; stub only the external executables.
+    shell_functions = r"""
+az() {
+    if [ "$2" = "--help" ]; then
+        [ "$ACR_TEST_MODERN" = 1 ] && echo --resource-id
+        return 0
+    fi
+    printf '%s\n' "$*" >> "$ACR_TEST_DIR/az-commands"
+    printf '%s' "$AZURE_CONFIG_DIR" > "$ACR_TEST_DIR/profile"
+    if [ "$1" = login ]; then
+        return "$ACR_TEST_LOGIN_STATUS"
+    fi
+    printf '%s' test-access-token
+}
+sudo() { "$@"; }
+docker() {
+    printf '%s\n' "$*" > "$ACR_TEST_DIR/docker-command"
+    cat > "$ACR_TEST_DIR/token"
+    return "$ACR_TEST_DOCKER_STATUS"
+}
+"""
+    result = subprocess.run(['bash', '-c', shell_functions + login_command],
+                            env=env,
+                            capture_output=True,
+                            text=True,
+                            check=False)
+    assert result.returncode == (login_status or docker_status), result.stderr
+    temporary_profile = Path((tmp_path / 'profile').read_text())
+    assert temporary_profile != original_profile
+    assert not temporary_profile.exists()
+    assert sentinel.read_text() == 'original account state'
+    identity_login = (tmp_path / 'az-commands').read_text().splitlines()[0]
+    if with_identity:
+        flag = '--resource-id' if modern_cli else '--username'
+        assert f'{flag} {_MSI_ID}' in identity_login
+    else:
+        assert '--resource-id' not in identity_login
+        assert '--username' not in identity_login
+    if login_status:
+        assert not (tmp_path / 'docker-command').exists()
+    else:
+        assert (tmp_path / 'token').read_text() == 'test-access-token'
+        assert (tmp_path / 'docker-command').read_text().strip() == (
+            f'login {_ACR_SERVER} --username {docker_utils.ACR_TOKEN_USERNAME} '
+            '--password-stdin')
