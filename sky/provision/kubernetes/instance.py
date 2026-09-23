@@ -2332,6 +2332,14 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         # instead would be handed a GCS port the head is not listening on.
         # Workers need no fallback: an existing one is not recreated, and a
         # new one is new.
+        #
+        # This is reached by RECOVERY, not by scaling: `sky launch --num-nodes`
+        # against an existing cluster is refused before provisioning
+        # (cloud_vm_ray_backend.py:3297). The live path is a pod lost to node
+        # failure or manual termination, where a launch at the SAME node count
+        # recreates it against a Running head -- the case the comment at the
+        # parallel dispatch below describes. Do not read "you cannot scale a
+        # cluster" as "a worker is never created next to an existing head".
         head_block = host_network_ports.resolve_block(
             running_pods.get(head_name),
             _head_block_from_configmap(cluster_name_on_cloud, namespace,
