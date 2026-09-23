@@ -117,17 +117,18 @@ def test_slurm_afterok(tmp_path, num_nodes: int, exit_code: int):
                 assert 'AFTEROK_DEPENDENT_RAN' in result.stdout
             else:
                 assert launch.returncode != 0, output
-                # Accounting retains the cancelled allocation after it leaves
-                # the active queue. It must never have started executing.
-                result = run(ssh + [
-                    f'sacct -X -n -P -j {dependent[0]} '
-                    '--format=JobIDRaw,State,Start'
-                ])
+                # Query the controller so accounting need not be enabled.
+                result = run(ssh + [f'scontrol -o show job {dependent[0]}'])
                 assert result.returncode == 0
-                rows = [line.split('|') for line in result.stdout.splitlines()]
-                assert len(rows) == 1, rows
-                assert rows[0][:2] == [dependent[0], 'CANCELLED'], rows
-                assert rows[0][2] in ('None', 'Unknown'), rows
+                fields = dict(
+                    field.split('=', 1)
+                    for field in result.stdout.split()
+                    if '=' in field)
+                assert fields['JobId'] == dependent[0], fields
+                assert fields['JobState'] == 'CANCELLED', fields
+                assert fields['Reason'] == 'DependencyNeverSatisfied', fields
+                assert fields['NodeList'] in ('', '(null)'), fields
+
     finally:
         if launch is not None and launch.poll() is None:
             launch.terminate()
