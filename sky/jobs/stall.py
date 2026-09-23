@@ -421,13 +421,22 @@ def _pool_capacity() -> Optional[Tuple[int, int]]:
 
     Both inputs are fixed for the life of the process -- consolidation mode
     needs an API server restart to change, and the controller count is derived
-    from the machine's memory -- so resolving them on every scan only put
-    request-scoped caches and a `global_user_state` query on a polling path.
+    from the machine's memory -- so resolving them per scan bought nothing.
 
-    The negative answer is deliberately not cached: plugins are loaded before
-    the server writes the consolidation signal file, so an early scan sees
-    `False` legitimately, and pinning it would silence this phase for the life
-    of the process.
+    Two conditions keep this safe, and ONLY the pair does:
+
+    1. The negative answer is never memoized. Plugins load before the API
+       server writes the consolidation signal file, so an early scan sees
+       `False` legitimately; pinning that would silence the phase for the life
+       of the process.
+    2. Nothing on the capacity path runs until the gate has answered yes.
+       `get_number_of_jobs_controllers` still reaches the request-scoped
+       `is_consolidation_mode` several frames down (via `_get_parallelism` ->
+       `compute_server_config` -> `_min_avail_mem_gb`), and that cache is
+       process-global. Resolving it only after the gate says yes means the
+       value it pins is `True`; pinning `False` is what took the refresh
+       daemon down. Swapping the two statements below silently restores that
+       outage, which is why a test forbids both readers on a suppressed scan.
     """
     global _POOL_CAPACITY
     if _POOL_CAPACITY is not None:

@@ -17,6 +17,11 @@ from sky.jobs import state as managed_job_state
 from sky.skylet import constants as skylet_constants
 from sky.utils.db import db_utils
 
+# Captured at import, before the autouse fixture patches the name: the
+# probe below has to run the real body, not the fixture's stand-in.
+_REAL_CONSOLIDATION_READER = (
+    stall.controller_utils.effective_jobs_consolidation_mode)
+
 # Captured at import, before the autouse fixture below replaces them. A test
 # that wants the real body has to use these names: reaching for the module
 # attribute inside a test gets the stub and asserts nothing, which is the
@@ -751,6 +756,38 @@ def test_a_scan_before_the_signal_file_does_not_pin_the_phase(
     recovered = stall.scan_never_claimed()
     assert recovered.suppressed is False
     assert _ids(recovered) == {1}
+
+
+def test_a_suppressed_scan_reaches_no_request_scoped_reader(
+        engine, monkeypatch):
+    """The capacity path reaches the cached `is_consolidation_mode` several
+    frames down, and pinning `False` there is what took the refresh daemon
+    down. Only statement order keeps that safe, so forbid both cached readers
+    and run the real gate: a scan taken while the signal file is absent must
+    reach neither. Swapping the two statements in `_pool_capacity`, or
+    delegating the gate back to the cached reader, both fail here."""
+    monkeypatch.setattr(stall, '_POOL_CAPACITY', None)
+    monkeypatch.setattr(stall.controller_utils,
+                        'effective_jobs_consolidation_mode',
+                        _REAL_CONSOLIDATION_READER)
+    monkeypatch.delenv(skylet_constants.OVERRIDE_CONSOLIDATION_MODE,
+                       raising=False)
+    monkeypatch.setattr(stall.controller_utils,
+                        '_read_jobs_consolidation_signal', lambda: False)
+
+    def _forbidden(*_args, **_kwargs):
+        raise AssertionError(
+            'a suppressed scan reached a request-scoped cached reader')
+
+    monkeypatch.setattr(stall.managed_job_utils, 'is_consolidation_mode',
+                        _forbidden)
+    monkeypatch.setattr(stall.controller_utils, 'is_jobs_consolidation_mode',
+                        _forbidden)
+    monkeypatch.setattr(stall.controller_utils,
+                        'get_number_of_jobs_controllers', _forbidden)
+    _never_claimed(engine, 1, age=_OLD)
+
+    assert stall.scan_never_claimed().suppressed is True
 
 
 def test_off_consolidation_the_phase_is_suppressed(engine, monkeypatch):
