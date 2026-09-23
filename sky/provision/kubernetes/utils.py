@@ -326,7 +326,17 @@ KIND_CONTEXT_NAME = 'kind-skypilot'  # Context name used by sky local up
 PORT_FORWARD_PROXY_CMD_TEMPLATE = 'kubernetes-port-forward-proxy-command.sh'
 # We add a version suffix to the port-forward proxy command to ensure backward
 # compatibility and avoid overwriting the older version.
-PORT_FORWARD_PROXY_CMD_VERSION = 3
+#
+# v4 reads a hostNetwork pod's sshd port off the pod spec instead of the
+# cluster's ray-ports ConfigMap. The bump is load-bearing, not cosmetic: this
+# script lives at ONE path per user and is re-copied on every auth setup, so
+# without it, upgrading and launching any Kubernetes cluster would replace the
+# script that every *pre-existing* hostNetwork cluster's stored
+# ssh_proxy_command points at. Those clusters' pods declare no ports, so the
+# new lookup finds nothing and SSH would fall back to 22 -- the node's own
+# sshd. Keeping v3 on disk leaves them on the script that still reads the
+# ConfigMap they did publish to.
+PORT_FORWARD_PROXY_CMD_VERSION = 4
 PORT_FORWARD_PROXY_CMD_PATH = ('~/.sky/kubernetes-port-forward-proxy-command-'
                                f'v{PORT_FORWARD_PROXY_CMD_VERSION}.sh')
 

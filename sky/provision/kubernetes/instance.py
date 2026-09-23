@@ -3117,9 +3117,11 @@ def get_cluster_info(
     # that -- so the SSH config writer needs the real port per pod. Read it
     # off the pod, which declares it; a pod created before ports moved into
     # the spec declares nothing, so fall back to the ConfigMap its probe
-    # published. Same order as the assignment side, and deliberately the
-    # same helper: if the two disagreed, a worker would be told a port the
-    # head is not listening on.
+    # published. Same order as the assignment side -- pod first, ConfigMap
+    # second -- but per pod rather than head-only: the ConfigMap carries
+    # sshd_<pod> for every pod, and SSH to a pre-existing *worker* needs its
+    # own entry. (The assignment side only ever needs the head's block, which
+    # is the only full block the ConfigMap holds.)
     pod_sshd_ports: Dict[str, int] = {}
     legacy_pods = []
     for name, pod in running_pods.items():

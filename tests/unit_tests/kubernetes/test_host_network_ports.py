@@ -165,3 +165,60 @@ class TestProbeMakesNoApiCall:
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     assert not alias.name.startswith('sky')
+
+
+class TestLegacyConfigMapFallback:
+    """The one-release fallback for clusters created before this change.
+
+    Deleting this read outright would send every pre-existing hostNetwork
+    cluster's SSH to port 22 -- the node's own sshd -- which is the failure
+    this PR exists to remove.
+    """
+
+    def _cm(self, data):
+        cm = mock.Mock()
+        cm.data = data
+        return cm
+
+    def _call(self, cm_or_exc, head='c-head'):
+        from sky.provision.kubernetes import instance
+        api = mock.Mock()
+        if isinstance(cm_or_exc, Exception):
+            api.read_namespaced_config_map.side_effect = cm_or_exc
+        else:
+            api.read_namespaced_config_map.return_value = cm_or_exc
+        with mock.patch.object(instance.kubernetes,
+                               'core_api',
+                               return_value=api):
+            return instance._head_block_from_configmap('c', 'ns', None, head)
+
+    def _full_data(self):
+        data = {
+            name: str(40000 + i)
+            for i, name in enumerate(host_network_probe.HEAD_PORT_NAMES)
+            if name != 'sshd'
+        }
+        data[f'{host_network_probe.SSHD_KEY_PREFIX}c-head'] = '40099'
+        return data
+
+    def test_reads_the_heads_block_including_its_pod_keyed_sshd(self):
+        block = self._call(self._cm(self._full_data()))
+        assert block is not None
+        assert set(block) == set(host_network_probe.HEAD_PORT_NAMES)
+        assert block['sshd'] == 40099
+
+    def test_absent_configmap_is_not_an_error(self):
+        """A cluster created *after* this change has none, which is normal."""
+        from sky.adaptors import kubernetes as k8s_adaptor
+        exc = k8s_adaptor.api_exception()(status=404)
+        assert self._call(exc) is None
+
+    def test_partial_data_allocates_rather_than_guessing(self):
+        data = self._full_data()
+        del data['gcs']
+        assert self._call(self._cm(data)) is None
+
+    def test_a_non_integer_value_does_not_raise(self):
+        data = self._full_data()
+        data['gcs'] = 'not-a-port'
+        assert self._call(self._cm(data)) is None
