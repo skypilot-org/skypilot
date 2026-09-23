@@ -375,6 +375,44 @@ class TestCloudVmRayBackendGetGrpcChannel:
             raise socket.error("Connection error")
         return None
 
+    @pytest.mark.parametrize('has_stale_tunnel', [False, True])
+    @pytest.mark.parametrize('concurrent_tunnel_created', [False, True])
+    def test_get_grpc_channel_rechecks_tunnel_after_acquiring_lock(
+            self, has_stale_tunnel, concurrent_tunnel_created):
+        """Reuse a tunnel created after the initial read but before locking."""
+        handle = CloudVmRayResourceHandle(**self.MOCK_HANDLE_KWARGS)
+        stale_tunnel = SSHTunnelInfo(port=self.INITIAL_TUNNEL_PORT,
+                                     pid=self.INITIAL_TUNNEL_PID)
+        healthy_tunnel = SSHTunnelInfo(port=self.INITIAL_TUNNEL_PORT + 1,
+                                       pid=self.INITIAL_TUNNEL_PID + 1)
+        tunnel_state = {'tunnel': stale_tunnel if has_stale_tunnel else None}
+
+        def acquire_lock():
+            # Another process finishes opening a tunnel just before this
+            # process acquires the exclusive lock.
+            if concurrent_tunnel_created:
+                tunnel_state['tunnel'] = healthy_tunnel
+
+        exclusive_lock = MagicMock()
+        exclusive_lock.acquire.return_value.__enter__.side_effect = acquire_lock
+        with patch.object(handle, '_get_skylet_ssh_tunnel',
+                          side_effect=lambda: tunnel_state['tunnel']), \
+                patch.object(handle, '_open_and_update_skylet_tunnel',
+                             return_value=healthy_tunnel) as open_tunnel, \
+                patch.object(locks, 'get_lock', return_value=exclusive_lock), \
+                patch('grpc.insecure_channel') as channel, \
+                patch('socket.socket') as mock_socket:
+            mock_socket.return_value.__enter__.return_value.connect.side_effect = (
+                self._socket_connect_side_effect)
+
+            assert handle.get_grpc_channel() == channel.return_value
+            assert channel.call_args.args[
+                0] == f'localhost:{healthy_tunnel.port}'
+            if concurrent_tunnel_created:
+                open_tunnel.assert_not_called()
+            else:
+                open_tunnel.assert_called_once_with()
+
     def test_get_grpc_channel_multiprocess_race_condition(self):
         """Test get_grpc_channel with multiple processes racing for tunnel creation."""
         tunnel_creation_count = multiprocessing.Value('i', 0)
