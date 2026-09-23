@@ -292,3 +292,33 @@ class TestPartialDeclarationIsNotLegacy:
 
     def test_no_ports_at_all_is_still_legacy(self):
         assert ports.ports_from_pod(_pod(host_ports=[])) is None
+
+
+def test_port_name_order_is_part_of_the_on_cluster_format():
+    """Pinned because reordering this list is silent and destructive.
+
+    A pod's ports are reconstructed positionally: the block's start plus each
+    name's index. So the order is not a style choice, it is the on-cluster
+    format. Reorder it -- alphabetise the dict literal, say -- and every
+    existing pod still declares BLOCK_SIZE contiguous in-range ports, so
+    ports_from_pod accepts them and maps `sshd` to a different offset than the
+    pod actually has. SSH to every pre-existing pod breaks and no new worker
+    joins. Verified: with the list sorted, all 1261 tests in this area still
+    pass, because they all derive their expectations from the same list.
+
+    **To add a port, append it.** A longer list makes every existing pod's
+    block fail the contiguity check loudly, which is the outcome you want.
+    Reordering is the one edit with no loud failure, so this is the only thing
+    standing in front of it -- if it fails, do not update it to match.
+    """
+    assert host_network_probe.HEAD_PORT_NAMES == [
+        'gcs',
+        'dashboard',
+        'node_manager',
+        'object_manager',
+        'ray_client_server',
+        'dashboard_agent_listen',
+        'runtime_env_agent',
+        'metrics_export',
+        'sshd',
+    ]
