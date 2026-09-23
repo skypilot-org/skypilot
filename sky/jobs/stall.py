@@ -33,6 +33,8 @@ use would undo that.
 """
 import contextlib
 import dataclasses
+import threading
+import traceback
 import math
 import os
 import time
@@ -467,10 +469,30 @@ def _claim_gates(engine: sqlalchemy.engine.Engine,
     wedged pool is undetected either way, and closing it needs a pool-readiness
     condition this module does not provide.
     """
-    if not managed_job_utils.is_consolidation_mode():
-        return True, ('not consolidation mode, so the controller pool is '
-                      'not this process to size')
-    controllers = max(controller_utils.get_number_of_jobs_controllers(), 1)
+    # TEMP DIAGNOSTIC (CLAIMGATE): trace every call in the real deployment.
+    # error level so it survives log-level config; single prefix to grep.
+    _tag = (f'CLAIMGATE pid={os.getpid()} '
+            f'thread={threading.current_thread().name}')
+    _callers = '|'.join(
+        f'{f.name}:{f.lineno}' for f in traceback.extract_stack()[-6:-1])
+    try:
+        _t0 = time.time()
+        _consolidated = managed_job_utils.is_consolidation_mode()
+        _t1 = time.time()
+        logger.error(f'{_tag} callers={_callers} '
+                     f'is_consolidation_mode={_consolidated} '
+                     f'({(_t1 - _t0) * 1000:.1f}ms)')
+        if not _consolidated:
+            return True, ('not consolidation mode, so the controller pool is '
+                          'not this process to size')
+        controllers = max(controller_utils.get_number_of_jobs_controllers(), 1)
+        _t2 = time.time()
+        logger.error(f'{_tag} controllers={controllers} '
+                     f'({(_t2 - _t1) * 1000:.1f}ms)')
+    except Exception as _e:  # pylint: disable=broad-except
+        logger.error(f'{_tag} RAISED {type(_e).__name__}: {_e}\n'
+                     f'{traceback.format_exc()}')
+        raise
     launch_capacity = controllers * controller_utils.LAUNCHES_PER_WORKER
     hold_capacity = controllers * min(
         controller_utils.MAX_JOBS_PER_WORKER,
@@ -487,12 +509,15 @@ def _claim_gates(engine: sqlalchemy.engine.Engine,
     with _bounded(engine, deadline) as conn:
         row = conn.execute(counts).one()
     launching, held = int(row[0] or 0), int(row[1] or 0)
+    logger.error(f'{_tag} launching={launching} held={held} '
+                 f'launch_cap={launch_capacity} hold_cap={hold_capacity}')
     why = ''
     if launching >= launch_capacity:
         why = (f'all {launch_capacity} launch slots busy '
                f'({launching} launching)')
     elif held >= hold_capacity:
         why = f'all {hold_capacity} job slots held ({held} held)'
+    logger.error(f'{_tag} RESULT blocked={bool(why)} why={why!r}')
     return bool(why), why
 
 

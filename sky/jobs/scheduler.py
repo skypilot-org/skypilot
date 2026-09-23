@@ -311,12 +311,15 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
             if alive is None:
                 return
             wanted = controller_utils.get_number_of_jobs_controllers()
+            import threading as _th
+            logger.error(f"STARTCTL thread={_th.current_thread().name} alive={alive} wanted={wanted}")
             started = 0
 
             while alive + started < wanted:
                 start_controller()
                 started += 1
 
+            logger.error(f"STARTCTL done started={started} total={alive+started}")
             if started > 0:
                 logger.info(f'Started {started} controllers')
 
