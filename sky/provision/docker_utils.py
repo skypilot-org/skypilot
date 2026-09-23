@@ -356,8 +356,11 @@ class DockerInitializer:
                 self._run('sudo gcloud auth configure-docker '
                           f'{shlex.quote(docker_login_config.server)} '
                           '--quiet || true')
-            elif docker_login_config.server.endswith('.azurecr.io'):
-                # Azure ACR: an empty password means the VM's managed
+            elif (docker_login_config.server.endswith('.azurecr.io') and
+                  self.docker_config.get('azure_use_managed_identity', False)):
+                # Only Azure VMs can use managed identity. Other clouds may
+                # pull anonymously from ACR without invoking the Azure CLI.
+                # On Azure, an empty password means the VM's managed
                 # identity is the credential, mirroring the ECR branch
                 # above. Feed the minted token to `{docker_cmd} login` so
                 # the credential lands in the docker config the sudo'd

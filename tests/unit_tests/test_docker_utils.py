@@ -1,6 +1,8 @@
 """Tests for docker container initialization on a remote node."""
 from unittest import mock
 
+import pytest
+
 from sky.provision import docker_utils
 
 _ACR_SERVER = 'myregistry.azurecr.io'
@@ -31,6 +33,7 @@ def _acr_docker_config(password='', with_identity=True):
         'container_name': 'sky_container',
         'image': 'myimage:latest',
         'pull_before_run': True,
+        'azure_use_managed_identity': True,
         'docker_login_config': {
             'username': '' if not password else 'token-name',
             'password': password,
@@ -82,9 +85,33 @@ def test_acr_login_without_identity_omits_resource_id():
     assert '--username' not in managed_identity_login
 
 
-def test_acr_password_takes_precedence_over_managed_identity():
+@pytest.mark.parametrize('azure_use_managed_identity', [None, False])
+@pytest.mark.parametrize('with_identity', [False, True])
+def test_acr_without_azure_flag_pulls_anonymously(azure_use_managed_identity,
+                                                  with_identity):
     runs = []
-    initializer = _make_initializer(_acr_docker_config(password='secret'), runs)
+    config = _acr_docker_config(with_identity=with_identity)
+    if azure_use_managed_identity is None:
+        config.pop('azure_use_managed_identity')
+    else:
+        config['azure_use_managed_identity'] = azure_use_managed_identity
+    initializer = _make_initializer(config, runs)
+    initializer.initialize()
+    commands = [cmd for cmd, _ in runs]
+
+    assert not any('InstallAzureCLIDeb' in cmd for cmd in commands)
+    assert not any('az ' in cmd for cmd in commands)
+    assert not any(' login ' in cmd for cmd in commands)
+    assert any(f' pull {_ACR_SERVER}/myimage:latest' in cmd for cmd in commands)
+
+
+@pytest.mark.parametrize('azure_use_managed_identity', [False, True])
+def test_acr_password_takes_precedence_over_managed_identity(
+        azure_use_managed_identity):
+    runs = []
+    config = _acr_docker_config(password='secret')
+    config['azure_use_managed_identity'] = azure_use_managed_identity
+    initializer = _make_initializer(config, runs)
     initializer.initialize()
     commands = [cmd for cmd, _ in runs]
     assert not any('az login' in c for c in commands)

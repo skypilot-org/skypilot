@@ -275,6 +275,9 @@ you can use :ref:`task environment variables <env-vars>`:
                 SKYPILOT_DOCKER_PASSWORD: ""
                 SKYPILOT_DOCKER_SERVER: <your-registry>.azurecr.io
 
+            On other clouds, empty credentials skip Azure CLI authentication and
+            allow pulls from ACR registries with anonymous pull enabled.
+
             **Important**: Grant the cluster's managed identity (SkyPilot's default
             managed identity or a custom one via ``remote_identity``) the pull role
             appropriate for the registry's permissions mode:

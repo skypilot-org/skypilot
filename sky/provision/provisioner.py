@@ -496,6 +496,7 @@ def _post_provision_setup(
         handle_cluster_yaml, ssh_user=cluster_info.ssh_user)
     docker_config = config_from_yaml.get('docker', {})
     if docker_config and cloud_name.lower() == 'azure':
+        docker_config['azure_use_managed_identity'] = True
         # Pass the VM's managed identity through so a private ACR pull can
         # authenticate as that exact identity on the host, before the task
         # container exists. See DockerInitializer.initialize.
