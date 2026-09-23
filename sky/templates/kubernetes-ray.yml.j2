@@ -150,14 +150,11 @@ provider:
             kind: Role
             name: {{k8s_service_account_name}}-system-role
             apiGroup: rbac.authorization.k8s.io
-
+    {% endif %}
     # Provisioner-only: resolving an exposed port to the ingress-nginx
     # controller IP happens on the provisioning/query path, never in a
     # pod running user code.
-    {% endif %}
-
     {% if k8s_is_controller %}
-
     # Role to access ingress services for fetching IP
     autoscaler_ingress_role:
         kind: Role
@@ -191,14 +188,11 @@ provider:
             kind: Role
             name: {{k8s_service_account_name}}-ingress-role
             apiGroup: rbac.authorization.k8s.io
-
+    {% endif %}
     # Provisioner-only: reading node resources and bootstrapping the RBAC
     # of launched clusters. Under consolidation mode the controllers are
     # API-server processes, so no pod needs this at all.
-    {% endif %}
-
     {% if k8s_is_controller %}
-
     # In addition to a role binding, we also need a cluster role binding to give
     # the SkyPilot access to the cluster-wide resources such as nodes to get
     # node resources.
@@ -255,8 +249,6 @@ provider:
             name: {{k8s_service_account_name}}-cluster-role
             apiGroup: rbac.authorization.k8s.io
     {% endif %}
-
-
 
     services:
       # Service to expose the head node pod's SSH port.

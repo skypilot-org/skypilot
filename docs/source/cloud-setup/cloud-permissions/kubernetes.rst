@@ -303,58 +303,6 @@ If you set ``remote_identity`` to a service account of your own, SkyPilot
 creates and reconciles nothing — you own that account's permissions for
 controllers and workloads alike.
 
-.. note::
-
-    **Running** ``sky`` **commands inside a workload pod.** A client talking to
-    a remote API server needs no Kubernetes permissions of its own — the API
-    server does the work. But a pod with no API server configured starts a
-    *local* one, and that local server provisions, so it reads cluster-scoped
-    resources such as nodes and runtime classes. Workload pods are no longer
-    granted those, so such a launch now fails with a ``403`` on
-    ``list_node`` rather than proceeding. Point ``remote_identity`` at a
-    service account of your own with the permissions in
-    `Minimum Permissions Required for SkyPilot`_ if you need this.
-
-.. note::
-
-    **Upgrading from an earlier version.** Clusters created before this split
-    bound the cluster-scoped roles to ``skypilot-service-account``, and SkyPilot
-    does not delete RBAC objects it created. Those bindings therefore remain
-    until you remove them -- though on a cluster running SkyPilot in more than
-    one namespace, a launch from another namespace may repoint a cluster-scoped
-    binding's subject before you get to it, since such a binding is shared by
-    every namespace on the cluster:
-
-    .. code-block:: console
-
-        $ kubectl delete clusterrolebinding skypilot-service-account-cluster-role-binding
-        $ kubectl delete clusterrole skypilot-service-account-cluster-role
-        $ kubectl delete -n skypilot-system role skypilot-system-service-account-role
-        $ kubectl delete -n skypilot-system rolebinding \
-            skypilot-system-service-account-role-binding-<your namespace>
-        $ kubectl delete -n ingress-nginx role skypilot-service-account-ingress-role
-        $ kubectl delete -n ingress-nginx rolebinding skypilot-service-account-ingress-role-binding
-
-    Do this only once no pod is still running under the old account — an
-    existing controller cluster keeps the account it was created with, and
-    removing its permissions mid-flight will fail its next provisioning
-    attempt, without the pod ever looking unhealthy. Check **every** namespace,
-    not just yours -- the cluster-scoped binding is shared, so a pod in another
-    namespace may be relying on it:
-
-    .. code-block:: console
-
-        $ kubectl get pods -A \
-            -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,SA:.spec.serviceAccountName' \
-            | grep skypilot-service-account
-
-    If that command is forbidden to you, you are not in a position to judge
-    whether the deletion is safe -- the authority to remove a cluster-scoped
-    object should come with the authority to see who is using it. Ask a cluster
-    administrator rather than running the deletion against your own namespace's
-    view.
-
-
 .. _k8s-sa-example:
 
 Example using custom service account
