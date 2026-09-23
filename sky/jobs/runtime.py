@@ -13,6 +13,7 @@ Callers use the module-level dispatch (``runtime.get_job_status(...)``,
 ``runtime.tail_logs(...)``, etc.) — the chain is private to this
 module.
 """
+import dataclasses
 import typing
 from typing import Dict, List, Optional, Protocol, Tuple
 
@@ -25,6 +26,50 @@ if typing.TYPE_CHECKING:
     from sky.skylet import job_lib
 
 logger = sky_logging.init_logger(__name__)
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeRecoveryStatus:
+    """An authoritative observation of recovery within a runtime allocation."""
+
+    runtime_id: str
+    restart_count: int
+    job_status: Optional['job_lib.JobStatus']
+    reason: Optional[str] = None
+    started_at: Optional[float] = None
+    should_relaunch: bool = False
+    avoid_current_region: bool = False
+    handles_user_retries: bool = False
+    user_restart_count: int = 0
+    recovery_reasons: Optional[Dict[int, str]] = None
+
+
+def get_recovery_status(
+    handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+    cluster_name: str,
+    *,
+    job_id: int,
+    task_id: int,
+    task: 'task_lib.Task',
+) -> Optional[RuntimeRecoveryStatus]:
+    """Observe in-place recovery before refreshing or tearing down a cluster.
+
+    None defers to normal monitoring. An explicit observation owns monitoring
+    until terminal, or until should_relaunch requests controller recovery.
+    """
+    if not _is_runtime_candidate(handle):
+        return None
+    for runtime in _claimants(handle):
+        hook = getattr(runtime, 'get_recovery_status', None)
+        if hook is not None:
+            result = hook(handle,
+                          cluster_name,
+                          job_id=job_id,
+                          task_id=task_id,
+                          task=task)
+            if result is not None:
+                return result
+    return None
 
 
 class ManagedJobRuntime(Protocol):
@@ -55,6 +100,18 @@ class ManagedJobRuntime(Protocol):
         returncode: Optional[int] = None,
     ) -> Optional[Tuple[Optional['job_lib.JobStatus'], Optional[str]]]:
         """Query job status from the underlying runtime."""
+        ...
+
+    def get_recovery_status(
+        self,
+        handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+        cluster_name: str,
+        *,
+        job_id: int,
+        task_id: int,
+        task: 'task_lib.Task',
+    ) -> Optional[RuntimeRecoveryStatus]:
+        """Observe runtime recovery, or defer to controller recovery."""
         ...
 
     def get_job_submitted_at(

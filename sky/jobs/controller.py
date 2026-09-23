@@ -1137,6 +1137,43 @@ class JobController:
             else:
                 status_check_window.reset()
 
+            runtime_recovery = None
+            runtime_handle = None
+            if managed_job_runtime.is_registered():
+                runtime_handle = await asyncio.to_thread(
+                    global_user_state.get_handle_from_cluster_name,
+                    cluster_name)
+                runtime_recovery = await asyncio.to_thread(
+                    managed_job_runtime.get_recovery_status,
+                    runtime_handle,
+                    cluster_name,
+                    job_id=self._job_id,
+                    task_id=task_id,
+                    task=task)
+            if runtime_recovery is not None:
+                job_status = runtime_recovery.job_status
+                await managed_job_state.observe_runtime_recovery_async(
+                    self._job_id,
+                    task_id,
+                    runtime_recovery.runtime_id,
+                    runtime_recovery.restart_count,
+                    user_restart_count=runtime_recovery.user_restart_count,
+                    running=job_status == job_lib.JobStatus.RUNNING,
+                    waiting=job_status
+                    in (job_lib.JobStatus.INIT, job_lib.JobStatus.PENDING,
+                        job_lib.JobStatus.SETTING_UP),
+                    terminal=(job_status is not None and
+                              job_status.is_terminal()),
+                    reason=runtime_recovery.reason,
+                    recovery_reasons=runtime_recovery.recovery_reasons,
+                    started_at=runtime_recovery.started_at,
+                    callback_func=callback_func)
+                if runtime_recovery.should_relaunch:
+                    job_status = None
+                elif job_status is None or not job_status.is_terminal():
+                    force_transit_to_recovering = False
+                    continue
+
             # Handle success
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 logger.info(f'Task {task_id} succeeded! '
@@ -1222,11 +1259,17 @@ class JobController:
                     global_user_state.get_handle_from_cluster_name,
                     cluster_name)
             try:
-                (cluster_status, handle) = await asyncio.to_thread(
-                    cloud_api_retries.with_cloud_api_retries,
-                    lambda: backend_utils.refresh_cluster_status_handle(
-                        cluster_name,
-                        force_refresh_statuses=set(status_lib.ClusterStatus)))
+                if runtime_recovery is not None:
+                    handle = runtime_handle
+                    cluster_status = (None if runtime_recovery.should_relaunch
+                                      else status_lib.ClusterStatus.UP)
+                else:
+                    (cluster_status, handle) = await asyncio.to_thread(
+                        cloud_api_retries.with_cloud_api_retries,
+                        lambda: backend_utils.refresh_cluster_status_handle(
+                            cluster_name,
+                            force_refresh_statuses=set(status_lib.ClusterStatus
+                                                      )))
             except exceptions.ClusterStatusFetchingError as e:
                 # The refresh kept failing after retries. Treat it as a
                 # transient condition and back off, reusing the transient
@@ -1258,7 +1301,8 @@ class JobController:
                 continue
 
             external_failures: Optional[List[ExternalClusterFailure]] = None
-            cluster_event_reason = None
+            cluster_event_reason = (runtime_recovery.reason
+                                    if runtime_recovery is not None else None)
             # Set when recovery is triggered by the user job exiting non-zero
             # (cluster still UP), so the RECOVERING job event can say what
             # actually happened instead of the generic preemption copy.
@@ -1300,7 +1344,8 @@ class JobController:
                                 f'  {timestamp}: {event["reason"]}')
                         events_str = '\n'.join(event_strs)
                         logger.info(f'Recent cluster events:\n{events_str}')
-                        cluster_event_reason = str(events[-1]['reason'])
+                        if cluster_event_reason is None:
+                            cluster_event_reason = str(events[-1]['reason'])
                 except Exception as e:  # pylint: disable=broad-except
                     logger.debug('Failed to fetch cluster events: '
                                  f'{common_utils.format_exception(e)}')
@@ -1393,6 +1438,8 @@ class JobController:
                                               f'{exit_codes}')
 
                     should_restart_on_failure = (
+                        not (runtime_recovery is not None and
+                             runtime_recovery.handles_user_retries) and
                         executor.should_restart_on_failure(
                             exit_codes=exit_codes))
                     if should_restart_on_failure:
@@ -1537,7 +1584,9 @@ class JobController:
                 # Challenge: race condition when the worker cluster thought it
                 # does not have a running job yet but later the job is launched.
                 if (resources.need_cleanup_after_preemption_or_failure() or
-                        force_transit_to_recovering):
+                        force_transit_to_recovering or
+                    (runtime_recovery is not None and
+                     runtime_recovery.should_relaunch)):
                     # Some spot resource (e.g., Spot TPU VM) may need to be
                     # cleaned up after preemption, as running launch again on
                     # those clusters again may fail.
@@ -1589,7 +1638,7 @@ class JobController:
                 await managed_job_state.set_recovering_async(
                     job_id=self._job_id,
                     task_id=task_id,
-                    force_transit_to_recovering=False,
+                    force_transit_to_recovering=(runtime_recovery is not None),
                     callback_func=callback_func,
                     external_failures=external_failures,
                     cluster_event_reason=cluster_event_reason,
@@ -1623,7 +1672,13 @@ class JobController:
                         'run to completion): '
                         f'{common_utils.format_exception(e)}')
 
-            recovered_time = await executor.recover()
+            if (runtime_recovery is not None and
+                    runtime_recovery.avoid_current_region):
+                assert runtime_handle is not None
+                recovered_time = await executor.recover_next_region(
+                    runtime_handle.launched_resources)
+            else:
+                recovered_time = await executor.recover()
 
             # Update cluster_name for pools after recovery
             if self._pool is not None:

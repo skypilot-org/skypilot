@@ -3835,6 +3835,240 @@ async def set_recovering_async(
     await callback_func('RECOVERING')
 
 
+@db_retries.retry
+def observe_runtime_recovery_during_provisioning(
+    job_id: int,
+    task_id: int,
+    runtime_id: str,
+    restart_count: int,
+    *,
+    user_restart_count: int = 0,
+    reason: Optional[str] = None,
+    recovery_reasons: Optional[Dict[int, str]] = None,
+) -> None:
+    """Account for platform restarts while the controller awaits provisioning.
+
+    The controller owns launch status transitions. Persisting the same cursor
+    used by monitoring counts failed allocations even if no handle is returned.
+    """
+    if restart_count < 0:
+        raise ValueError('Runtime restart count must be nonnegative')
+    engine = _db_manager.get_engine()
+    task_filter = sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                                  spot_table.c.task_id == task_id)
+    for _ in range(20):
+        with orm.Session(engine) as session:
+            row = session.execute(
+                sqlalchemy.select(spot_table).where(
+                    task_filter)).mappings().one()
+            if (row['end_at'] is not None or row['status'] not in [
+                    status.value
+                    for status in ManagedJobStatus.processing_statuses()
+            ]):
+                return
+            metadata = json.loads(row['metadata'] or '{}')
+            cursor = metadata.get('runtime_recovery', {})
+            if cursor.get('runtime_id') != runtime_id:
+                cursor = {'runtime_id': runtime_id, 'restarts': 0}
+            observed = cursor['restarts']
+            previous_user_restarts = cursor.get('user_restarts', 0)
+            user_delta = max(0, user_restart_count - previous_user_restarts)
+            if restart_count < observed or (restart_count == observed and
+                                            user_delta == 0):
+                return
+            cursor.update(restarts=restart_count,
+                          user_restarts=max(previous_user_restarts,
+                                            user_restart_count),
+                          pending=cursor.get('pending', False) or
+                          restart_count > observed)
+            metadata['runtime_user_restarts'] = (
+                metadata.get('runtime_user_restarts', 0) + user_delta)
+            metadata['runtime_recovery'] = cursor
+            result = session.execute(
+                sqlalchemy.update(spot_table).where(
+                    task_filter, spot_table.c.metadata == row['metadata'],
+                    spot_table.c.status == row['status'],
+                    spot_table.c.end_at.is_(None)).values(
+                        metadata=json.dumps(metadata),
+                        recovery_count=(row['recovery_count'] or 0) +
+                        restart_count - observed))
+            if result.rowcount != 1:
+                session.rollback()
+                continue
+            for count in range(observed + 1, restart_count + 1):
+                session.execute(job_events_table.insert().values(
+                    spot_job_id=job_id,
+                    task_id=task_id,
+                    new_status=ManagedJobStatus.RECOVERING.value,
+                    reason=(recovery_reasons or {}).get(count) or reason or
+                    'Runtime restarted during provisioning',
+                    recovery_source=RecoverySource.FAILURE.value,
+                    timestamp=datetime.datetime.now()))
+            session.commit()
+            return
+    raise RuntimeError('Concurrent runtime recovery updates did not settle')
+
+
+@db_retries.retry_async
+async def get_runtime_user_restarts_async(job_id: int, task_id: int) -> int:
+    """Return budget-consuming retries performed by task runtimes."""
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.select(spot_table.c.metadata).where(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id))
+        metadata = result.scalar_one_or_none()
+    return json.loads(metadata or '{}').get('runtime_user_restarts', 0)
+
+
+@db_retries.retry_async
+async def observe_runtime_recovery_async(
+    job_id: int,
+    task_id: int,
+    runtime_id: str,
+    restart_count: int,
+    *,
+    user_restart_count: int,
+    running: bool,
+    terminal: bool,
+    waiting: bool,
+    reason: Optional[str],
+    recovery_reasons: Optional[Dict[int, str]],
+    started_at: Optional[float],
+    callback_func: AsyncCallbackType,
+) -> None:
+    """Persist an allocation's recovery cursor and events in one transaction.
+
+    Absolute counters make repeated observations, skipped polls and controller
+    restarts idempotent. Metadata compare-and-swap preserves concurrent writers.
+    """
+    if restart_count < 0:
+        raise ValueError('Runtime restart count must be nonnegative')
+    engine = await _db_manager.get_async_engine()
+    task_filter = sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                                  spot_table.c.task_id == task_id)
+    for _ in range(20):
+        callbacks = []
+        async with sql_async.AsyncSession(engine) as session:
+            result = await session.execute(
+                sqlalchemy.select(spot_table).where(task_filter))
+            row = result.mappings().one()
+            if (row['end_at'] is not None or row['status'] not in [
+                    status.value
+                    for status in ManagedJobStatus.processing_statuses()
+            ]):
+                return
+            metadata = json.loads(row['metadata'] or '{}')
+            cursor = metadata.get('runtime_recovery', {})
+            previous_user_restarts = (cursor.get('user_restarts', 0)
+                                      if cursor.get('runtime_id') == runtime_id
+                                      else 0)
+            user_delta = max(0, user_restart_count - previous_user_restarts)
+            observed = (cursor.get('restarts', 0)
+                        if cursor.get('runtime_id') == runtime_id else 0)
+            if restart_count < observed:
+                return
+            delta = restart_count - observed
+            pending = bool(
+                cursor.get('pending', False) and
+                cursor.get('runtime_id') == runtime_id)
+            queued = waiting and restart_count > 0 and not pending
+            resumed = pending and (running or terminal)
+            controller_resumed = (not pending and delta == 0 and
+                                  (running or terminal) and row['status']
+                                  == ManagedJobStatus.RECOVERING.value)
+            if (delta == 0 and user_delta == 0 and not resumed and
+                    not controller_resumed and not queued and not running and
+                    cursor.get('runtime_id') == runtime_id):
+                return
+            now = time.time()
+            resume_time = min(now, started_at or now)
+            values = {}
+            events = []
+            if delta:
+                values['recovery_count'] = (row['recovery_count'] or 0) + delta
+                for count in range(observed + 1, restart_count + 1):
+                    events.append((ManagedJobStatus.RECOVERING,
+                                   (recovery_reasons or {}).get(count) or
+                                   reason or 'Runtime restarted the job'))
+                callbacks.append('RECOVERING')
+                pending = True
+            if delta or queued:
+                if row['status'] in (ManagedJobStatus.RUNNING.value,
+                                     ManagedJobStatus.WINDING_DOWN.value):
+                    last = row['last_recovered_at']
+                    if last is not None and last >= 0:
+                        # A missed poll cannot establish when prior work ended.
+                        # Count only the interval confirmed by observation.
+                        stopped_at = cursor.get('last_running_at') or last
+                        if running or terminal:
+                            stopped_at = min(stopped_at, resume_time)
+                        values['job_duration'] = ((row['job_duration'] or 0) +
+                                                  max(0, stopped_at - last))
+                pending = True
+            if pending:
+                if running or terminal:
+                    values.update(status=ManagedJobStatus.RUNNING.value,
+                                  last_recovered_at=resume_time,
+                                  recovering_from_failure=None)
+                    events.append((ManagedJobStatus.RUNNING,
+                                   'Runtime recovery completed'))
+                    callbacks.append('RECOVERED')
+                    pending = False
+                else:
+                    values.update(status=ManagedJobStatus.RECOVERING.value,
+                                  recovering_from_failure=False)
+            elif controller_resumed:
+                # The runtime kept running while the controller was recovering.
+                # Restore its baseline to avoid counting that interval twice.
+                values.update(status=ManagedJobStatus.RUNNING.value,
+                              job_duration=cursor.get('running_duration',
+                                                      row['job_duration']),
+                              last_recovered_at=cursor.get(
+                                  'running_since', resume_time),
+                              recovering_from_failure=None)
+                events.append(
+                    (ManagedJobStatus.RUNNING, 'Runtime is still running'))
+                callbacks.append('RECOVERED')
+            metadata['runtime_user_restarts'] = (
+                metadata.get('runtime_user_restarts', 0) + user_delta)
+            metadata['runtime_recovery'] = dict(
+                runtime_id=runtime_id,
+                restarts=restart_count,
+                user_restarts=max(previous_user_restarts, user_restart_count),
+                pending=pending,
+                running_duration=values.get('job_duration',
+                                            row['job_duration']),
+                running_since=values.get('last_recovered_at',
+                                         row['last_recovered_at']),
+                last_running_at=(
+                    now if running else cursor.get('last_running_at')
+                    if cursor.get('runtime_id') == runtime_id else None))
+            values['metadata'] = json.dumps(metadata)
+            result = await session.execute(
+                sqlalchemy.update(spot_table).where(
+                    task_filter, spot_table.c.metadata == row['metadata'],
+                    spot_table.c.status == row['status'],
+                    spot_table.c.end_at.is_(None)).values(**values))
+            if result.rowcount != 1:
+                await session.rollback()
+                continue
+            for status, event_reason in events:
+                await session.execute(job_events_table.insert().values(
+                    spot_job_id=job_id,
+                    task_id=task_id,
+                    new_status=status.value,
+                    reason=event_reason,
+                    recovery_source=RecoverySource.FAILURE.value,
+                    timestamp=datetime.datetime.now()))
+            await session.commit()
+        for callback in callbacks:
+            await callback_func(callback)
+        return
+    raise RuntimeError('Concurrent runtime recovery updates did not settle')
+
+
 async def set_recovered_async(job_id: int,
                               task_id: int,
                               recovered_time: float,
