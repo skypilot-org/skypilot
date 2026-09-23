@@ -336,6 +336,14 @@ PORT_FORWARD_PROXY_CMD_TEMPLATE = 'kubernetes-port-forward-proxy-command.sh'
 # new lookup finds nothing and SSH would fall back to 22 -- the node's own
 # sshd. Keeping v3 on disk leaves them on the script that still reads the
 # ConfigMap they did publish to.
+#
+# INVARIANT, new as of v4: versions may now read *different sources* for the
+# same value. Earlier bumps changed the script while every version still read
+# the same place, so re-deriving an existing cluster's proxy command with
+# current code was harmless. It is not any more -- handing an existing
+# cluster a v4 script points it at a pod spec that declares no ports. A
+# stored ssh_proxy_command must never be re-derived for a cluster that
+# already exists; it is written once, at provisioning.
 PORT_FORWARD_PROXY_CMD_VERSION = 4
 PORT_FORWARD_PROXY_CMD_PATH = ('~/.sky/kubernetes-port-forward-proxy-command-'
                                f'v{PORT_FORWARD_PROXY_CMD_VERSION}.sh')
