@@ -1,6 +1,7 @@
 """Controller: handles scheduling and the life cycle of a managed job.
 """
 import asyncio
+import sqlalchemy
 import io
 import json
 import os
@@ -3668,6 +3669,13 @@ class ControllerManager:
                     pid=pid_str).set(max_jobs)
 
             if len(running_tasks) >= max_jobs:
+                # TEMP DIAGNOSTIC: this branch continues before the
+                # waiting-job lookup, so NOCLAIM below never sees it.
+                logger.error(
+                    f'NOCLAIM-CAP pid={self._pid} '
+                    f'running={len(running_tasks)} max_jobs={max_jobs} '
+                    f'controllers='
+                    f'{controller_utils.get_number_of_jobs_controllers()}')
                 logger.info('Too many jobs running, waiting for 60 seconds')
                 await asyncio.sleep(60)
                 continue
@@ -3682,6 +3690,25 @@ class ControllerManager:
                 continue
 
             if waiting_job is None:
+                # TEMP DIAGNOSTIC (NOCLAIM): only fires when the database
+                # actually holds WAITING rows, i.e. exactly the broken state.
+                try:
+                    _eng = managed_job_state.get_engine()
+                    with _eng.connect() as _c:
+                        _w = _c.execute(
+                            sqlalchemy.text(
+                                'SELECT COUNT(*) FROM job_info '
+                                "WHERE schedule_state = 'WAITING'")).scalar()
+                    if _w:
+                        logger.error(
+                            f'NOCLAIM pid={self._pid} waiting_in_db={_w} '
+                            f'running_tasks={len(running_tasks)} '
+                            f'max_jobs={max_jobs} '
+                            f'controllers='
+                            f'{controller_utils.get_number_of_jobs_controllers()}'
+                        )
+                except Exception as _e:  # pylint: disable=broad-except
+                    logger.error(f'NOCLAIM diag failed: {_e}')
                 logger.info('No waiting job, waiting for 10 seconds')
                 await asyncio.sleep(10)
                 continue
