@@ -320,7 +320,10 @@ controllers and workloads alike.
     **Upgrading from an earlier version.** Clusters created before this split
     bound the cluster-scoped roles to ``skypilot-service-account``, and SkyPilot
     does not delete RBAC objects it created. Those bindings therefore remain
-    until you remove them:
+    until you remove them -- though on a cluster running SkyPilot in more than
+    one namespace, a launch from another namespace may repoint a cluster-scoped
+    binding's subject before you get to it, since such a binding is shared by
+    every namespace on the cluster:
 
     .. code-block:: console
 
@@ -335,12 +338,21 @@ controllers and workloads alike.
     Do this only once no pod is still running under the old account — an
     existing controller cluster keeps the account it was created with, and
     removing its permissions mid-flight will fail its next provisioning
-    attempt. Check with:
+    attempt, without the pod ever looking unhealthy. Check **every** namespace,
+    not just yours -- the cluster-scoped binding is shared, so a pod in another
+    namespace may be relying on it:
 
     .. code-block:: console
 
-        $ kubectl get pods -o custom-columns='NAME:.metadata.name,SA:.spec.serviceAccountName' \
+        $ kubectl get pods -A \
+            -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,SA:.spec.serviceAccountName' \
             | grep skypilot-service-account
+
+    If that command is forbidden to you, you are not in a position to judge
+    whether the deletion is safe -- the authority to remove a cluster-scoped
+    object should come with the authority to see who is using it. Ask a cluster
+    administrator rather than running the deletion against your own namespace's
+    view.
 
 
 .. _k8s-sa-example:
