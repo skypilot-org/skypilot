@@ -57,8 +57,11 @@ def no_cross_store_fixture(monkeypatch):
     # is registered behind this condition, and off it the never-claimed phase
     # is suppressed outright. Tests state the production mode rather than
     # inheriting whatever the test host happens to be.
-    monkeypatch.setattr(stall.managed_job_utils, 'is_consolidation_mode',
-                        lambda: True)
+    monkeypatch.setattr(stall.controller_utils,
+                        'effective_jobs_consolidation_mode', lambda: True)
+    # Capacity is resolved once per process and memoized, so it has to be
+    # dropped between tests or the first one to run fixes it for the rest.
+    monkeypatch.setattr(stall, '_POOL_CAPACITY', None)
     monkeypatch.setattr(stall, '_clusters_with_live_requests',
                         lambda names: set())
     monkeypatch.setattr(stall, '_tasks_active_recently',
@@ -729,12 +732,33 @@ def test_a_finished_job_holds_neither_kind_of_slot(engine, monkeypatch):
     assert _ids(stall.scan_never_claimed()) == {3}
 
 
+def test_a_scan_before_the_signal_file_does_not_pin_the_phase(
+        engine, monkeypatch):
+    """Plugins are loaded before the API server writes the consolidation
+    signal file, so a scan can legitimately run while it still reads as off.
+    Memoizing that answer would silence the phase for the life of the
+    process -- the capacity is cached, the negative deliberately is not."""
+    _capacity(monkeypatch, launches=8, held=200)
+    consolidated = {'yet': False}
+    monkeypatch.setattr(stall.controller_utils,
+                        'effective_jobs_consolidation_mode',
+                        lambda: consolidated['yet'])
+    _never_claimed(engine, 1, age=_OLD)
+
+    assert stall.scan_never_claimed().suppressed is True
+
+    consolidated['yet'] = True  # the server finishes writing the signal file
+    recovered = stall.scan_never_claimed()
+    assert recovered.suppressed is False
+    assert _ids(recovered) == {1}
+
+
 def test_off_consolidation_the_phase_is_suppressed(engine, monkeypatch):
     """The capacity numbers are sized from this process, so off consolidation
     they describe the wrong machine. Silence there matches the metrics path,
     which is not registered off consolidation either."""
-    monkeypatch.setattr(stall.managed_job_utils, 'is_consolidation_mode',
-                        lambda: False)
+    monkeypatch.setattr(stall.controller_utils,
+                        'effective_jobs_consolidation_mode', lambda: False)
     _never_claimed(engine, 1, age=_OLD)
 
     scan = stall.scan_never_claimed()

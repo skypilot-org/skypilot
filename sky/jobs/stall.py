@@ -412,6 +412,36 @@ def _highest_blocking_priority(engine: sqlalchemy.engine.Engine,
         return managed_job_state.get_managed_jobs_highest_priority(conn)
 
 
+# Resolved once per process by `_pool_capacity`.
+_POOL_CAPACITY: Optional[Tuple[int, int]] = None
+
+
+def _pool_capacity() -> Optional[Tuple[int, int]]:
+    """Launch and hold capacity of the pool, or None off consolidation.
+
+    Both inputs are fixed for the life of the process -- consolidation mode
+    needs an API server restart to change, and the controller count is derived
+    from the machine's memory -- so resolving them on every scan only put
+    request-scoped caches and a `global_user_state` query on a polling path.
+
+    The negative answer is deliberately not cached: plugins are loaded before
+    the server writes the consolidation signal file, so an early scan sees
+    `False` legitimately, and pinning it would silence this phase for the life
+    of the process.
+    """
+    global _POOL_CAPACITY
+    if _POOL_CAPACITY is not None:
+        return _POOL_CAPACITY
+    if not controller_utils.effective_jobs_consolidation_mode():
+        return None
+    controllers = max(controller_utils.get_number_of_jobs_controllers(), 1)
+    _POOL_CAPACITY = (
+        controllers * controller_utils.LAUNCHES_PER_WORKER, controllers *
+        min(controller_utils.MAX_JOBS_PER_WORKER,
+            controller_utils.MAX_TOTAL_RUNNING_JOBS // controllers))
+    return _POOL_CAPACITY
+
+
 def _claim_gates(engine: sqlalchemy.engine.Engine,
                  deadline: float) -> Tuple[bool, str]:
     """Whether every controller process is already blocked from claiming.
@@ -431,14 +461,11 @@ def _claim_gates(engine: sqlalchemy.engine.Engine,
     consolidation mode it describes the wrong machine and the phase is
     suppressed instead -- which is what the metrics path does there anyway.
     """
-    if not managed_job_utils.is_consolidation_mode():
+    capacity = _pool_capacity()
+    if capacity is None:
         return True, ('not consolidation mode, so the controller pool is '
                       'not this process to size')
-    controllers = max(controller_utils.get_number_of_jobs_controllers(), 1)
-    launch_capacity = controllers * controller_utils.LAUNCHES_PER_WORKER
-    hold_capacity = controllers * min(
-        controller_utils.MAX_JOBS_PER_WORKER,
-        controller_utils.MAX_TOTAL_RUNNING_JOBS // controllers)
+    launch_capacity, hold_capacity = capacity
     # One statement so the two counts share an instant. The WHERE is the
     # predicate its partial index is built from.
     counts = sqlalchemy.text(
