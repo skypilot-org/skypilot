@@ -765,7 +765,12 @@ def test_a_suppressed_scan_reaches_no_request_scoped_reader(
     down. Only statement order keeps that safe, so forbid both cached readers
     and run the real gate: a scan taken while the signal file is absent must
     reach neither. Swapping the two statements in `_pool_capacity`, or
-    delegating the gate back to the cached reader, both fail here."""
+    delegating the gate back to the cached reader, both fail here.
+
+    Named readers rather than "no request-scoped cache was filled": the
+    registration shim wrapping those caches exposes only `cache_clear`, with
+    no `cache_info` to ask. A future caller reaching one by another route is
+    therefore not covered here."""
     monkeypatch.setattr(stall, '_POOL_CAPACITY', None)
     monkeypatch.setattr(stall.controller_utils,
                         'effective_jobs_consolidation_mode',
