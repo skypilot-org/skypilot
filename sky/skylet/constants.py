@@ -832,6 +832,27 @@ ENV_VAR_AUTH_DB_TIMEOUT_SECONDS = (
     f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_DB_TIMEOUT_SECONDS')
 DEFAULT_AUTH_DB_TIMEOUT_SECONDS = 5.0
 
+# How long a managed-job task may sit in each of the two stall phases before
+# `sky.jobs.stall` reports it. Overridable so a deployment that disagrees with
+# the defaults can say so through its helm values instead of waiting for a
+# release; read through `sky.jobs.stall`, which validates them, rather than
+# from the environment directly.
+#
+# Under SKYPILOT_SERVER_ so a client cannot supply them: `request_body_env_vars`
+# forwards SKYPILOT_ variables except those carrying this prefix.
+ENV_VAR_MANAGED_JOBS_NEVER_CLAIMED_SECONDS = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}MANAGED_JOBS_NEVER_CLAIMED_SECONDS')
+# A fully drained controller pool is only topped up on the managed-job daemon
+# tick (~300s), and the replacement then has to start and claim on its own
+# ~10s poll, so anything much shorter fires on routine pool churn.
+DEFAULT_MANAGED_JOBS_NEVER_CLAIMED_SECONDS = 10 * 60
+
+ENV_VAR_MANAGED_JOBS_UNATTENDED_SECONDS = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}MANAGED_JOBS_UNATTENDED_SECONDS')
+# Above the launch retry backoff, which caps at five times its 60s base plus
+# jitter.
+DEFAULT_MANAGED_JOBS_UNATTENDED_SECONDS = 15 * 60
+
 # Environment variable that is set to 'true' if basic
 # authentication is enabled in the API server.
 ENV_VAR_ENABLE_BASIC_AUTH = 'ENABLE_BASIC_AUTH'

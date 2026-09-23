@@ -25,6 +25,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
+from sky.jobs import stall
 from sky.metrics import utils as metrics_utils
 from sky.server import constants as server_constants
 from sky.server import local_disk
@@ -931,6 +932,171 @@ class ManagedJobsCollector:
         yield episode_metric
 
 
+_STALL_COUNT_HELP = (
+    'Managed job tasks stalled in a phase: never_claimed (nothing has claimed '
+    'the task) or unattended (something claimed it and stopped driving the '
+    'launch). Age-filtered and suppressed in the API server, so any value '
+    'above zero is already past the phase threshold and not a legitimate '
+    'wait. A phase that ran and found nothing reports 0 under an empty '
+    'workspace label; a phase that could not run reports nothing at all, so '
+    'absence means not measured, never healthy.')
+_STALL_AGE_HELP = (
+    'Age in seconds of the oldest managed job task stalled in a phase, per '
+    'workspace. Zero when the phase ran and found nothing.')
+_STALL_SUPPRESSED_HELP = (
+    '1 when a phase was not measured because no controller process could have '
+    'claimed anything, so its 0 above means "not asked" rather than "nothing '
+    'stalled". Exported rather than folded into the count, on the same '
+    'grounds as the rules refusing `or vector(0)`: a blind spot must not read '
+    'as healthy.')
+
+_STALL_TRUNCATED_HELP = (
+    '1 when a stall scan hit a limit, so the count for that phase is a floor '
+    'rather than a total; 0 when it is a total. Without this a fleet-wide '
+    'stall reads as exactly the cap, which is a number that looks precise and '
+    'is not.')
+_STALL_SCAN_HELP = (
+    'Unix time of the last stall scan that completed for a phase. The '
+    'companion to the count: it is what distinguishes a phase that is '
+    'reporting zero from one that is not reporting.')
+
+# Only ever set on the zero a phase emits when it ran and found nothing. A real
+# row cannot collide with it: those go through _label_or_default, which turns a
+# missing workspace into _NULL_WORKSPACE_LABEL ('default') rather than ''.
+_STALL_NO_ROWS_WORKSPACE = ''
+
+
+class ManagedJobsStallCollector:
+    """Managed job tasks that stopped making progress before they ever ran.
+
+    Separate from ManagedJobsCollector rather than folded into it, for two
+    reasons that the other collector's shape cannot provide:
+
+    * **Isolation from the existing gauges.** Its _refresh is deliberately
+      all-or-nothing, and a ResilientCollector can neither time out nor cancel
+      a refresh in flight. Putting these scans there would let a wedged stall
+      query freeze sky_managed_jobs_count, which an existing page depends on.
+    * **Isolation between the phases.** The two scans read different stores --
+      never_claimed the managed-jobs DB alone, unattended also the cluster
+      state DB and the requests DB -- so they fail in different ways and must
+      be able to go dormant separately. That breaks the "no mixed-age cache"
+      invariant the other collector holds, deliberately: it is replaced by a
+      stronger one, that every cache states its own age and a cache that has
+      never been filled is not exported at all.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._last_scrape_time = 0.0
+        self._cache_ttl = _COLLECTOR_CACHE_TTL_SECONDS
+        # phase -> (tasks, scanned_at, truncated). A phase absent from this
+        # dict has never completed a scan and is exported as nothing at all.
+        # A phase whose refresh fails keeps its last good entry, and therefore
+        # its old timestamp, which is what the staleness alert reads.
+        self._cache: dict = {}
+
+    def _refresh(self):
+        # One try per phase, not one around both: the whole point of the
+        # separate caches is that either phase can fail without silencing the
+        # other, and a shared try would hand that back.
+        for phase, scan in ((stall.NEVER_CLAIMED, stall.scan_never_claimed),
+                            (stall.UNATTENDED, stall.scan_unattended)):
+            try:
+                result = scan()
+            except Exception:  # pylint: disable=broad-except
+                logger.exception(
+                    'Failed to scan managed jobs stalled in phase %s', phase)
+                continue
+            # Labelled from the result, not from the loop: that is what
+            # StallScan.phase is for, and it is one less place for the two
+            # names to drift apart.
+            self._cache[result.phase] = (result.tasks, time.time(),
+                                         result.truncated, result.suppressed)
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily('sky_managed_jobs_stalled',
+                                          _STALL_COUNT_HELP,
+                                          labels=['phase', 'workspace'])
+        yield prom_core.GaugeMetricFamily('sky_managed_jobs_stall_seconds_max',
+                                          _STALL_AGE_HELP,
+                                          labels=['phase', 'workspace'])
+        yield prom_core.GaugeMetricFamily('sky_managed_jobs_stall_truncated',
+                                          _STALL_TRUNCATED_HELP,
+                                          labels=['phase'])
+        yield prom_core.GaugeMetricFamily('sky_managed_jobs_stall_suppressed',
+                                          _STALL_SUPPRESSED_HELP,
+                                          labels=['phase'])
+        yield prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_stall_scan_timestamp_seconds',
+            _STALL_SCAN_HELP,
+            labels=['phase'])
+
+    def collect(self):
+        now = time.time()
+        with self._lock:
+            if now - self._last_scrape_time >= self._cache_ttl:
+                try:
+                    self._refresh()
+                except Exception:  # pylint: disable=broad-except
+                    logger.exception(
+                        'Failed to collect managed jobs stall metrics')
+                self._last_scrape_time = now
+            cache = dict(self._cache)
+
+        count_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_stalled',
+            _STALL_COUNT_HELP,
+            labels=['phase', 'workspace'])
+        age_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_stall_seconds_max',
+            _STALL_AGE_HELP,
+            labels=['phase', 'workspace'])
+        truncated_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_stall_truncated',
+            _STALL_TRUNCATED_HELP,
+            labels=['phase'])
+        suppressed_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_stall_suppressed',
+            _STALL_SUPPRESSED_HELP,
+            labels=['phase'])
+        scan_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_stall_scan_timestamp_seconds',
+            _STALL_SCAN_HELP,
+            labels=['phase'])
+
+        for phase, (tasks, scanned_at, truncated, suppressed) in cache.items():
+            scan_metric.add_metric([phase], scanned_at)
+            truncated_metric.add_metric([phase], 1 if truncated else 0)
+            suppressed_metric.add_metric([phase], 1 if suppressed else 0)
+            if not tasks:
+                # The measurement is "none", and it has to be said: an absent
+                # series would otherwise mean both this and "the scan could
+                # not run", and no rule could tell them apart.
+                count_metric.add_metric([phase, _STALL_NO_ROWS_WORKSPACE], 0)
+                age_metric.add_metric([phase, _STALL_NO_ROWS_WORKSPACE], 0)
+                continue
+            counts: dict = {}
+            oldest: dict = {}
+            for task in tasks:
+                workspace = _label_or_default(task.workspace,
+                                              _NULL_WORKSPACE_LABEL)
+                counts[workspace] = counts.get(workspace, 0) + 1
+                # Age is computed against now at collect time, not cached, so
+                # a stall keeps ageing between refreshes.
+                age = max(0.0, now - task.stalled_since)
+                oldest[workspace] = max(oldest.get(workspace, 0.0), age)
+            for workspace, count in counts.items():
+                count_metric.add_metric([phase, workspace], count)
+            for workspace, age in oldest.items():
+                age_metric.add_metric([phase, workspace], age)
+
+        yield count_metric
+        yield age_metric
+        yield truncated_metric
+        yield suppressed_metric
+        yield scan_metric
+
+
 # Transient statuses we report time-in-state for. UP / STOPPED are steady
 # states by design (no upper bound on residence time, alerting on age is
 # meaningless). PENDING is display-only per status_lib.ClusterStatus.
@@ -1191,6 +1357,7 @@ except ValueError:
     pass
 
 _MANAGED_JOBS_COLLECTOR: Optional[ResilientCollector] = None
+_MANAGED_JOBS_STALL_COLLECTOR: Optional[ResilientCollector] = None
 
 
 def maybe_register_managed_jobs_collector():
@@ -1210,6 +1377,15 @@ def maybe_register_managed_jobs_collector():
     _MANAGED_JOBS_COLLECTOR = _wrap_collector(ManagedJobsCollector())
     try:
         prom.REGISTRY.register(_MANAGED_JOBS_COLLECTOR)
+    except ValueError:
+        pass
+    # Registered alongside rather than inside, so a wedged stall scan cannot
+    # freeze the gauges above it. Same consolidation guard: both read the
+    # managed-jobs database directly.
+    global _MANAGED_JOBS_STALL_COLLECTOR
+    _MANAGED_JOBS_STALL_COLLECTOR = _wrap_collector(ManagedJobsStallCollector())
+    try:
+        prom.REGISTRY.register(_MANAGED_JOBS_STALL_COLLECTOR)
     except ValueError:
         pass
 
@@ -1237,6 +1413,8 @@ def metrics() -> fastapi.Response:
         registry.register(_SERVER_START_TIME_COLLECTOR)
         if _MANAGED_JOBS_COLLECTOR is not None:
             registry.register(_MANAGED_JOBS_COLLECTOR)
+        if _MANAGED_JOBS_STALL_COLLECTOR is not None:
+            registry.register(_MANAGED_JOBS_STALL_COLLECTOR)
         for c in _plugin_collectors:
             try:
                 registry.register(c)
