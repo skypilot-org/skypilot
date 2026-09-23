@@ -277,6 +277,7 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
         logger.info('Consolidation mode: controller startup is owned by the '
                     'managed-job refresh daemon; skipping in-request start.')
         return
+    logger.error(f'STARTCTL enter from_scheduler={from_scheduler}')
     try:
         with filelock.FileLock(JOB_CONTROLLER_PID_LOCK, blocking=False):
             if from_scheduler and not managed_job_utils.is_consolidation_mode():
@@ -311,16 +312,20 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
             if alive is None:
                 return
             wanted = controller_utils.get_number_of_jobs_controllers()
+            import threading as _th
+            logger.error(f"STARTCTL thread={_th.current_thread().name} alive={alive} wanted={wanted}")
             started = 0
 
             while alive + started < wanted:
                 start_controller()
                 started += 1
 
+            logger.error(f"STARTCTL done started={started} total={alive+started}")
             if started > 0:
                 logger.info(f'Started {started} controllers')
 
     except filelock.Timeout:
+        logger.error('STARTCTL lock busy -> skipped (this path was silent)')
         # If we can't get the lock, just exit. The process holding the lock
         # should launch any pending jobs.
         pass
