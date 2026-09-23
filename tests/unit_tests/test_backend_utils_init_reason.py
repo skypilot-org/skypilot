@@ -315,3 +315,30 @@ class TestUpdateClusterStatusBareHandle:
         assert add_or_update.call_args.kwargs['ready'] is True
         assert any(status == status_lib.ClusterStatus.UP
                    for status, _ in events), events
+
+    def test_stopped_then_manually_restarted_still_runs_ray_check(self):
+        # Stopping a cluster clears head_ip, so a cluster that was stopped
+        # and then restarted outside SkyPilot has head_ip=None but
+        # has_ray=True. The ray health check must still run: it is what
+        # detects the unreachable (stale) IP and prints the
+        # "sky start ... to recover from INIT status" hint.
+        handle = _make_handle()
+        handle.launched_resources.cloud = clouds.AWS()
+        handle.provision_runtime_metadata.has_ray = True
+        handle.head_ip = None
+        # The stale head IP from before the stop is unreachable.
+        head_runner = mock.Mock()
+        head_runner.run.return_value = (
+            255, '',
+            'ssh: connect to host 1.2.3.4 port 22: Connection timed out')
+        handle.get_command_runners.return_value = [head_runner]
+
+        with mock.patch.object(backend_utils.logger, 'warning') as warning:
+            add_or_update, events = self._refresh(handle)
+
+        head_runner.run.assert_called_once()
+        assert any('to recover from INIT status' in str(c)
+                   for c in warning.call_args_list), warning.call_args_list
+        assert add_or_update.call_args.kwargs['ready'] is False
+        assert not any(status == status_lib.ClusterStatus.UP
+                       for status, _ in events), events
