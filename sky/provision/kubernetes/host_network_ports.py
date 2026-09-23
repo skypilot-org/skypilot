@@ -13,6 +13,7 @@ them, this module assigns them, and one list serves both.
 import random
 from typing import Any, Dict, List, Optional
 
+from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import host_network_probe
 
 # Below the node's ephemeral range (Linux default 32768-60999) and below the
@@ -51,23 +52,49 @@ def allocate_block() -> Dict[str, int]:
 
 
 def ports_from_pod(pod: Any) -> Optional[Dict[str, int]]:
-    """The block a live pod declares, or None if it declares no ports.
+    """The block a live pod declares, or None if it declares none.
 
-    A pod created before this change declares none at all -- the template's
-    ``ports:`` block was rendered only for non-hostNetwork pods -- so "no
-    ports" is a state every caller has to handle, not an error.
+    Reads the **ray-node** container specifically. A user's ``pod_config`` can
+    add containers, and a sidecar declaring its own hostPort would otherwise
+    be folded into the block -- a lower one would become its start, and every
+    port would reconstruct to something nothing is listening on. For a head
+    that number is handed to every worker in the launch.
+
+    Three states, kept distinct:
+
+    * no ports at all -> ``None``. A pod created before this change declares
+      none (the template rendered ``ports:`` only for non-hostNetwork pods),
+      so the caller falls back and then allocates.
+    * exactly one contiguous in-range block -> that block.
+    * anything else -> raise. Treating a partial read as "legacy" would
+      allocate a fresh block for a pod that is running and listening on the
+      old one. That is not hypothetical: ``BLOCK_SIZE`` is
+      ``len(HEAD_PORT_NAMES)``, so adding a tenth port name would make every
+      existing pod's nine ports look partial, cluster-wide, on upgrade.
     """
     spec = getattr(pod, 'spec', None)
-    containers = getattr(spec, 'containers', None) or []
     declared: List[int] = []
-    for container in containers:
+    for container in (getattr(spec, 'containers', None) or []):
+        if getattr(container, 'name',
+                   None) != k8s_constants.RAY_NODE_CONTAINER_NAME:
+            continue
         for port in (getattr(container, 'ports', None) or []):
             host_port = getattr(port, 'host_port', None)
             if host_port is not None:
                 declared.append(int(host_port))
-    if len(declared) < BLOCK_SIZE:
+    if not declared:
         return None
     start = min(declared)
+    expected = list(range(start, start + BLOCK_SIZE))
+    if (sorted(declared) != expected or start < PORT_RANGE_START or
+            expected[-1] > PORT_RANGE_END):
+        pod_name = getattr(getattr(pod, 'metadata', None), 'name', '<unknown>')
+        raise RuntimeError(
+            f'Pod {pod_name!r} declares host ports {sorted(declared)}, which '
+            f'is not one contiguous block of {BLOCK_SIZE} within '
+            f'{PORT_RANGE_START}-{PORT_RANGE_END}. Refusing to guess: '
+            'allocating a new block would point the cluster at ports nothing '
+            'is listening on.')
     return {
         name: start + offset
         for offset, name in enumerate(host_network_probe.HEAD_PORT_NAMES)
@@ -136,8 +163,14 @@ def apply_to_pod_spec(pod_spec: Dict[str, Any], ports: Dict[str, int],
     it because head and workers are created concurrently, so a worker cannot
     read it off a head pod that may not exist yet.
     """
+    # The ray-node container specifically, matching ports_from_pod: a user's
+    # pod_config can add containers, and writing into the wrong one would put
+    # the ports where nothing reads them.
     containers = pod_spec.setdefault('spec', {}).setdefault('containers', [{}])
-    container = containers[0]
+    container = next(
+        (c for c in containers
+         if c.get('name') == k8s_constants.RAY_NODE_CONTAINER_NAME),
+        containers[0])
     # Only the sshd port is named: the client's SSH proxy command selects it
     # by name (`ports[?(@.name=="ssh")]`) because it is built during auth
     # setup, before the pod exists and before a port has been assigned, so it

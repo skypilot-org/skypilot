@@ -19,11 +19,21 @@ _EPHEMERAL_FLOOR = 32768
 _NODEPORT_FLOOR = 30000
 
 
-def _pod(host_ports=None, phase='Running', conditions=()):
-    container = mock.Mock()
-    container.ports = [mock.Mock(host_port=p) for p in (host_ports or [])]
+def _container(name, host_ports):
+    c = mock.Mock()
+    c.name = name
+    c.ports = [mock.Mock(host_port=p) for p in host_ports]
+    return c
+
+
+def _pod(host_ports=None, phase='Running', conditions=(), sidecar_ports=()):
+    containers = []
+    if sidecar_ports:
+        containers.append(_container('my-sidecar', sidecar_ports))
+    containers.append(_container('ray-node', host_ports or []))
     pod = mock.Mock()
-    pod.spec.containers = [container]
+    pod.spec.containers = containers
+    pod.metadata.name = 'c-head'
     pod.status.phase = phase
     pod.status.conditions = list(conditions)
     return pod
@@ -222,3 +232,63 @@ class TestLegacyConfigMapFallback:
         data = self._full_data()
         data['gcs'] = 'not-a-port'
         assert self._call(self._cm(data)) is None
+
+
+class TestBlockIsReadFromTheRayContainerOnly:
+    """A user's pod_config can add containers; the block is not theirs."""
+
+    def test_a_sidecars_host_port_does_not_shift_the_block(self):
+        """Taking min() across containers would make a low sidecar port the
+        start, and every reconstructed port would be one nothing listens on --
+        for a head, handed to every worker in the launch."""
+        block = ports.allocate_block()
+        pod = _pod(host_ports=sorted(block.values()), sidecar_ports=[8080])
+        assert ports.ports_from_pod(pod) == block
+
+    def test_a_pod_with_only_a_sidecars_ports_reads_as_legacy(self):
+        assert ports.ports_from_pod(_pod(host_ports=[],
+                                         sidecar_ports=[8080])) is None
+
+    def test_the_writer_targets_the_same_container(self):
+        spec = {
+            'spec': {
+                'containers': [{
+                    'name': 'my-sidecar'
+                }, {
+                    'name': 'ray-node'
+                }]
+            }
+        }
+        block = ports.allocate_block()
+        ports.apply_to_pod_spec(spec, block, head_gcs_port=block['gcs'])
+        assert 'ports' not in spec['spec']['containers'][0]
+        assert len(spec['spec']['containers'][1]['ports']) == ports.BLOCK_SIZE
+
+
+class TestPartialDeclarationIsNotLegacy:
+    """`None` means "predates the change"; a half-read pod is not that.
+
+    Conflating them allocates a fresh block for a pod that is running and
+    listening on the old one.
+    """
+
+    def test_a_short_block_raises_rather_than_reallocating(self):
+        block = ports.allocate_block()
+        short = sorted(block.values())[:-1]
+        with pytest.raises(RuntimeError, match='contiguous'):
+            ports.ports_from_pod(_pod(host_ports=short))
+
+    def test_a_gap_in_the_block_raises(self):
+        start = ports.PORT_RANGE_START
+        holey = [start + i for i in range(ports.BLOCK_SIZE + 1) if i != 2]
+        with pytest.raises(RuntimeError):
+            ports.ports_from_pod(_pod(host_ports=holey))
+
+    def test_a_block_outside_the_range_raises(self):
+        """The shape a NodePort or ephemeral overlap would leave behind."""
+        with pytest.raises(RuntimeError):
+            ports.ports_from_pod(
+                _pod(host_ports=[40000 + i for i in range(ports.BLOCK_SIZE)]))
+
+    def test_no_ports_at_all_is_still_legacy(self):
+        assert ports.ports_from_pod(_pod(host_ports=[])) is None

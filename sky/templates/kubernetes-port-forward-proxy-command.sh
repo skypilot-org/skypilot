@@ -90,8 +90,12 @@ fi
 # does not already have.
 POD_PORT=22
 if [ "${HOST_NETWORK}" = "true" ]; then
+    # The ray-node container by name, not index 0: a user's pod_config can
+    # add containers, and with a sidecar first this selector returns empty --
+    # verified against a live API server -- which would silently fall back to
+    # 22 and SSH to the K8s node's own sshd.
     DECLARED_PORT=$(kubectl "${KUBECTL_ARGS[@]}" get pod "${POD_NAME}" \
-        -o jsonpath='{.spec.containers[0].ports[?(@.name=="ssh")].containerPort}' \
+        -o jsonpath='{.spec.containers[?(@.name=="ray-node")].ports[?(@.name=="ssh")].containerPort}' \
         2>/dev/null)
     if [ -n "${DECLARED_PORT}" ]; then
         POD_PORT="${DECLARED_PORT}"
