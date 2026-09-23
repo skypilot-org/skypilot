@@ -2334,16 +2334,22 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         # new one is new.
         #
         # This is reached by RECOVERY, not by scaling: `sky launch --num-nodes`
-        # against an existing cluster is refused before provisioning
-        # (cloud_vm_ray_backend.py:3297). The live path is a pod lost to node
+        # against an existing cluster is refused before provisioning, by
+        # check_resources_fit_cluster ("specify a new cluster name, or down
+        # the existing cluster first"). The live path is a pod lost to node
         # failure or manual termination, where a launch at the SAME node count
         # recreates it against a Running head -- the case the comment at the
         # parallel dispatch below describes. Do not read "you cannot scale a
         # cluster" as "a worker is never created next to an existing head".
+        head_pod = running_pods.get(head_name)
         head_block = host_network_ports.resolve_block(
-            running_pods.get(head_name),
+            head_pod,
+            # Only a live pre-change head can be served by the ConfigMap, so
+            # there is nothing to read when there is no head pod -- and every
+            # post-change launch would otherwise pay for the lookup.
             _head_block_from_configmap(cluster_name_on_cloud, namespace,
-                                       context, head_name))
+                                       context, head_name)
+            if head_pod is not None else None)
         host_network_port_blocks[head_name] = head_block
         head_gcs_port = head_block['gcs']
         for i in range(1, config.count):

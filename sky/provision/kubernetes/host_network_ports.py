@@ -127,7 +127,12 @@ def resolve_block(
 
     Order:
       1. the live pod's declared hostPorts -- it is bound and depended on
-      2. else the ConfigMap the pre-change probe published
+      2. else, *only if that pod exists*, the ConfigMap the pre-change probe
+         published. A ConfigMap with no pod behind it is not compatibility,
+         it is garbage: it is owned by the head pod, so one outliving its
+         head is a stale object whose GC has not caught up, and its ports may
+         already be taken on the new pod's node. The in-pod probe this
+         replaces guarded the same case by owner UID.
       3. else a fresh block
 
     ``pod`` may be None (no such pod yet).
@@ -136,8 +141,8 @@ def resolve_block(
         declared = ports_from_pod(pod)
         if declared is not None:
             return declared
-    if configmap_ports:
-        return dict(configmap_ports)
+        if configmap_ports:
+            return dict(configmap_ports)
     return allocate_block()
 
 
@@ -169,7 +174,36 @@ def apply_to_pod_spec(pod_spec: Dict[str, Any], ports: Dict[str, int],
     # cannot be handed the number. The rest need no name and a K8s port name
     # is capped at 15 characters, which several of these would exceed.
     sshd_port = ports.get('sshd')
-    container['ports'] = [{
+    # Keep the container's existing ports. `combine_pod_config_fields`
+    # appends a user's `pod_config` ports here, and under hostNetwork the
+    # template renders none of its own, so before this change they were this
+    # container's *only* ports -- replacing the list deleted them.
+    #
+    # Nothing of ours is ever already present: this runs on a deepcopy that is
+    # never written back, and `node_config` is restored from the rendered
+    # template, which declares no ports under hostNetwork. So an entry inside
+    # the reserved range is the user's, and it is refused rather than dropped
+    # -- under hostNetwork it would contend with the assigned block for real,
+    # and a silent drop would leave them no way to find out why.
+    kept = []
+    for entry in (container.get('ports') or []):
+        if not isinstance(entry, dict):
+            continue
+        declared_port = entry.get('hostPort', entry.get('containerPort'))
+        if (isinstance(declared_port, int) and
+                PORT_RANGE_START <= declared_port <= PORT_RANGE_END):
+            raise ValueError(
+                f'Container port {declared_port} falls inside '
+                f'{PORT_RANGE_START}-{PORT_RANGE_END}, which SkyPilot reserves '
+                'for the host ports it assigns to hostNetwork pods. Pick a '
+                'port outside that range in pod_config.')
+        if entry.get('name') == SSHD_PORT_NAME:
+            raise ValueError(
+                f'A port named {SSHD_PORT_NAME!r} is already declared on '
+                f'container {container.get("name")!r}. SkyPilot selects the '
+                'pod\'s sshd port by that name, so it cannot be reused.')
+        kept.append(entry)
+    container['ports'] = kept + [{
         'containerPort': port,
         'hostPort': port,
         'protocol': 'TCP',

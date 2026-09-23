@@ -110,6 +110,85 @@ class TestResolutionOrder:
         resolved = ports.resolve_block(None, configmap_ports=None)
         assert len(resolved) == ports.BLOCK_SIZE
 
+    def test_a_configmap_with_no_pod_behind_it_is_ignored(self):
+        """The ConfigMap is owned by the head pod, so one that outlives its
+        head is a stale object mid-GC -- reusing it hands a fresh pod ports
+        chosen for a dead one, which may be taken on its new node. Relaunching
+        a downed cluster under the same name is the live case."""
+        cm = {
+            name: 40000 + i
+            for i, name in enumerate(host_network_probe.HEAD_PORT_NAMES)
+        }
+        resolved = ports.resolve_block(None, configmap_ports=cm)
+        assert resolved != cm
+        assert min(resolved.values()) >= ports.PORT_RANGE_START
+
+
+class TestUserDeclaredPortsSurvive:
+    """`pod_config` ports are appended to this container by the config merge,
+    and before this change they were a hostNetwork pod's only ports."""
+
+    def test_a_users_port_is_kept_alongside_the_block(self):
+        spec = {
+            'spec': {
+                'containers': [{
+                    'name': 'ray-node',
+                    'ports': [{
+                        'name': 'metrics',
+                        'containerPort': 9090,
+                        'hostPort': 9090
+                    }],
+                }]
+            }
+        }
+        block = ports.allocate_block()
+        ports.apply_to_pod_spec(spec, block, head_gcs_port=block['gcs'])
+        declared = spec['spec']['containers'][0]['ports']
+        assert {
+            'metrics'
+        } == {p.get('name') for p in declared} - {ports.SSHD_PORT_NAME, None}
+        assert len(declared) == ports.BLOCK_SIZE + 1
+
+    def test_a_user_port_inside_the_reserved_range_is_refused(self):
+        """Refused, not dropped. Nothing of ours is ever already on the spec:
+        this runs on a deepcopy that is never persisted, and node_config is
+        restored from a template that declares no ports under hostNetwork. So
+        an in-range entry is the user's, and under hostNetwork it would
+        contend with the assigned block for real."""
+        spec = {
+            'spec': {
+                'containers': [{
+                    'name': 'ray-node',
+                    'ports': [{
+                        'name': 'metrics',
+                        'containerPort': 25000,
+                        'hostPort': 25000
+                    }],
+                }]
+            }
+        }
+        block = ports.allocate_block()
+        with pytest.raises(ValueError, match='reserves'):
+            ports.apply_to_pod_spec(spec, block, head_gcs_port=block['gcs'])
+
+    def test_a_user_port_named_ssh_is_refused(self):
+        """The SSH proxy command selects the sshd port by that name."""
+        spec = {
+            'spec': {
+                'containers': [{
+                    'name': 'ray-node',
+                    'ports': [{
+                        'name': ports.SSHD_PORT_NAME,
+                        'containerPort': 2222,
+                        'hostPort': 2222
+                    }],
+                }]
+            }
+        }
+        block = ports.allocate_block()
+        with pytest.raises(ValueError, match='sshd port'):
+            ports.apply_to_pod_spec(spec, block, head_gcs_port=block['gcs'])
+
 
 class TestProbeMakesNoApiCall:
     """The point of the change: a workload pod needs no K8s API access."""
