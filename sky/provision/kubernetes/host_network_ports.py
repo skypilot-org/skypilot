@@ -91,7 +91,13 @@ def ports_from_pod(pod: Any) -> Optional[Dict[str, int]]:
             continue
         for port in (getattr(container, 'ports', None) or []):
             host_port = getattr(port, 'host_port', None)
-            if host_port is not None:
+            # In-range only. The container also carries the user's pod_config
+            # ports, which apply_to_pod_spec keeps; it refuses any of theirs
+            # inside the reserved range, so everything in range here is ours.
+            # Without this the user's port joins the block and the run stops
+            # being contiguous, and every read of the cluster raises.
+            if (host_port is not None and
+                    PORT_RANGE_START <= int(host_port) <= PORT_RANGE_END):
                 declared.append(int(host_port))
     if not declared:
         return None
@@ -185,6 +191,11 @@ def apply_to_pod_spec(pod_spec: Dict[str, Any], ports: Dict[str, int],
     # the reserved range is the user's, and it is refused rather than dropped
     # -- under hostNetwork it would contend with the assigned block for real,
     # and a silent drop would leave them no way to find out why.
+    #
+    # Scoped to this container on purpose, though contention is node-wide: a
+    # sidecar taking a reserved port is not refused here, but it degrades
+    # loudly on its own -- duplicate hostPort in one pod is rejected by the
+    # API server, and across pods the scheduler's predicate catches it.
     kept = []
     for entry in (container.get('ports') or []):
         if not isinstance(entry, dict):

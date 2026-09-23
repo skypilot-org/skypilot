@@ -171,6 +171,32 @@ class TestUserDeclaredPortsSurvive:
         with pytest.raises(ValueError, match='reserves'):
             ports.apply_to_pod_spec(spec, block, head_gcs_port=block['gcs'])
 
+    def test_a_kept_port_survives_the_round_trip_back_through_the_reader(self):
+        """The write half and the read half are one pair; testing the write
+        alone is how they drifted. Keeping the user's port made
+        ports_from_pod fold it into the block, so the run stopped being
+        contiguous and every read of the cluster raised -- breaking exactly
+        the config that keeping it was meant to support."""
+        spec = {
+            'spec': {
+                'containers': [{
+                    'name': 'ray-node',
+                    'ports': [{
+                        'name': 'metrics',
+                        'containerPort': 8080,
+                        'hostPort': 8080
+                    }],
+                }]
+            }
+        }
+        block = ports.allocate_block()
+        ports.apply_to_pod_spec(spec, block, head_gcs_port=block['gcs'])
+        declared = [
+            p['hostPort'] for p in spec['spec']['containers'][0]['ports']
+        ]
+        assert 8080 in declared
+        assert ports.ports_from_pod(_pod(host_ports=declared)) == block
+
     def test_a_user_port_named_ssh_is_refused(self):
         """The SSH proxy command selects the sshd port by that name."""
         spec = {
@@ -337,11 +363,16 @@ class TestPartialDeclarationIsNotLegacy:
         with pytest.raises(RuntimeError):
             ports.ports_from_pod(_pod(host_ports=holey))
 
-    def test_a_block_outside_the_range_raises(self):
-        """The shape a NodePort or ephemeral overlap would leave behind."""
-        with pytest.raises(RuntimeError):
-            ports.ports_from_pod(
-                _pod(host_ports=[40000 + i for i in range(ports.BLOCK_SIZE)]))
+    def test_ports_entirely_outside_the_range_read_as_legacy(self):
+        """Not an error: our writer cannot produce an out-of-range block, so
+        out-of-range ports on this container are the user's `pod_config`
+        ones. A pre-change pod is exactly that -- no block of ours, possibly
+        some of theirs -- and `None` sends the caller to the ConfigMap, which
+        is the right answer for it. Raising here would refuse to read a
+        pre-change cluster that merely configured a port."""
+        assert ports.ports_from_pod(
+            _pod(host_ports=[40000 + i
+                             for i in range(ports.BLOCK_SIZE)])) is None
 
     def test_no_ports_at_all_is_still_legacy(self):
         assert ports.ports_from_pod(_pod(host_ports=[])) is None
@@ -375,3 +406,20 @@ def test_port_name_order_is_part_of_the_on_cluster_format():
         'metrics_export',
         'sshd',
     ]
+
+
+def test_the_reserved_range_is_part_of_the_on_cluster_format():
+    """Pinned for the same reason as the port-name order: moving it is silent.
+
+    `ports_from_pod` now collects only in-range hostPorts, which is what lets
+    a user's `pod_config` port sit on the same container without corrupting
+    the block. The cost is that the range became load-bearing on read: shift
+    or narrow it and every existing pod's block falls outside, reads as "no
+    block", and is silently re-allocated -- the running cluster keeps
+    listening on the old ports while the client is handed new ones. Nothing
+    fails loudly.
+
+    Widening the range is the safe direction; moving or narrowing it needs a
+    migration. If this fails, do not update it to match.
+    """
+    assert (ports.PORT_RANGE_START, ports.PORT_RANGE_END) == (20000, 29999)
