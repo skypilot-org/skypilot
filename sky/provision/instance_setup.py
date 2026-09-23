@@ -104,7 +104,6 @@ DUMP_RAY_PORTS = (f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
                   f'"{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", '
                   'encoding="utf-8"))\';')
 
-_HOST_NETWORK_ENV_FILE = '/tmp/sky_host_network_ports.env'
 _HOST_NETWORK_PROBE_TARGET = '/tmp/sky_host_network_probe.py'
 
 _RAY_PATCHES_TARGET_DIR = '/tmp/sky_ray_patches'
@@ -196,18 +195,20 @@ def _host_network_probe_b64() -> str:
 
 
 def _host_network_probe_cmd(mode: str) -> str:
-    """Bash snippet that probes Ray + sshd ports when running with hostNetwork.
+    """Bash snippet verifying the assigned host ports under hostNetwork.
 
     Returns a runtime-gated snippet: a no-op shell branch unless
-    SKYPILOT_HOST_NETWORK=1 and SKYPILOT_RAY_PORTS_CONFIGMAP_NAME are
-    set in the pod env. Non-hostNetwork bootstraps see no change — env
-    vars stay unset and ``${VAR:-default}`` in the ray flags falls back
-    to the constants.
+    SKYPILOT_HOST_NETWORK=1 is set in the pod env. Non-hostNetwork
+    bootstraps see no change — env vars stay unset and ``${VAR:-default}``
+    in the ray flags falls back to the constants.
 
-    Also rebinds the pod's sshd to the probed SKYPILOT_SSHD_PORT. Under
+    The ports themselves arrive in the pod env, written into the spec by
+    the server; this only proves they are free before ray takes them.
+
+    Also rebinds the pod's sshd to the assigned SKYPILOT_SSHD_PORT. Under
     hostNetwork the node's own sshd already owns host:22 so the pod's
     sshd silently failed to bind in apt-ssh-setup; rewriting Port in
-    sshd_config and restarting picks up the probed port instead.
+    sshd_config and restarting picks up the assigned port instead.
 
     The probe is shipped gzip+base64-inline rather than invoked as a
     module because the K8s template installs stable skypilot from PyPI
@@ -220,17 +221,16 @@ def _host_network_probe_cmd(mode: str) -> str:
     """
     assert mode in ('head', 'worker'), mode
     return (
-        'if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ] && '
-        '[ -n "${SKYPILOT_RAY_PORTS_CONFIGMAP_NAME:-}" ]; then '
+        # Gated on SKYPILOT_HOST_NETWORK alone. It used to also require
+        # SKYPILOT_RAY_PORTS_CONFIGMAP_NAME, and the sshd_config rewrite below
+        # is inside this same `fi` -- so dropping that env var without
+        # rewriting the gate would silently no-op the whole branch and leave
+        # sshd on 22, where the K8s node's own sshd listens.
+        'if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ]; then '
         f'echo \'{_host_network_probe_b64()}\' | base64 -d | gunzip > '
         f'{_HOST_NETWORK_PROBE_TARGET}; '
         f'{constants.SKY_PYTHON_CMD} {_HOST_NETWORK_PROBE_TARGET} '
-        f'--mode {mode} '
-        f'--env-file {_HOST_NETWORK_ENV_FILE} '
-        '--configmap-name "$SKYPILOT_RAY_PORTS_CONFIGMAP_NAME" '
-        '--configmap-namespace '
-        '"$SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE" || exit 1; '
-        f'set -a; . {_HOST_NETWORK_ENV_FILE}; set +a; '
+        f'--mode {mode} || exit 1; '
         # Delete-then-append rather than sed-in-place: sshd_config files
         # without an existing Port directive would otherwise keep the
         # default 22 (where the K8s node's own sshd already listens).
