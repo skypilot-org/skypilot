@@ -2,6 +2,7 @@
 import json
 import os
 import shlex
+import sqlite3
 import subprocess
 from unittest import mock
 
@@ -1909,3 +1910,65 @@ class TestWaitForJobNodes:
         with mock.patch.object(instance.time, 'sleep'):
             instance._wait_for_job_nodes(client, '17269', 60, 'dev', on_pending)
         on_pending.assert_called_once_with('PENDING', 'Resources', 2)
+
+
+@pytest.mark.parametrize('rows,expected', [
+    ([], 0),
+    ([('FAILED', '7')], 7),
+    ([('FAILED', '0,7,0')], 7),
+    ([('FAILED', '-15')], 143),
+    ([('FAILED_SETUP', None)], 1),
+    ([('CANCELLED', None)], 1),
+    ([('RUNNING', None)], 1),
+    ([('SUCCEEDED', None)], 0),
+    ([('FAILED', '7'), ('SUCCEEDED', None)], 0),
+    ([('SUCCEEDED', None), ('FAILED', '9')], 9),
+])
+def test_allocation_exit_code_uses_latest_job(tmp_path, rows, expected):
+    state = tmp_path / '.sky'
+    state.mkdir()
+    with sqlite3.connect(state / 'jobs.db') as conn:
+        conn.execute('CREATE TABLE jobs (job_id INTEGER PRIMARY KEY, '
+                     'status TEXT, exit_codes TEXT)')
+        conn.executemany('INSERT INTO jobs(status, exit_codes) VALUES (?, ?)',
+                         rows)
+    script = instance._allocation_exit_code_script(str(tmp_path))
+    result = subprocess.run(['bash', '-c', script],
+                            capture_output=True,
+                            text=True,
+                            check=True)
+    assert int(result.stdout) == expected
+
+
+def test_allocation_exit_code_before_job_database_exists(tmp_path):
+    result = subprocess.run(
+        ['bash', '-c',
+         instance._allocation_exit_code_script(str(tmp_path))],
+        capture_output=True,
+        text=True,
+        check=True)
+    assert result.stdout.strip() == '0'
+
+
+def test_cleanup_preserves_exit_code_before_removing_database(
+        tmp_path, monkeypatch):
+    runtime = tmp_path / 'runtime'
+    state = runtime / '.sky'
+    state.mkdir(parents=True)
+    with sqlite3.connect(state / 'jobs.db') as conn:
+        conn.execute('CREATE TABLE jobs (job_id INTEGER PRIMARY KEY, '
+                     'status TEXT, exit_codes TEXT)')
+        conn.execute("INSERT INTO jobs VALUES (1, 'FAILED', '7')")
+    monkeypatch.setattr(instance, '_resolve_skypilot_runtime_dir',
+                        lambda *args: str(runtime))
+
+    def run_node_cleanup(runner, command, error_message):
+        del runner, error_message
+        # Execute the production node cleanup without an actual Slurm launcher.
+        subprocess.run(['bash', '-c', command[-1]], check=True)
+
+    monkeypatch.setattr(instance, '_run_on_login_node', run_node_cleanup)
+    instance._cleanup_slurm_allocation(mock.Mock(), mock.Mock(), _CLUSTER,
+                                       _PROVIDER_CONFIG, '123', ['node-a'])
+    assert not runtime.exists()
+    assert (tmp_path / 'runtime.exitcode').read_text().strip() == '7'

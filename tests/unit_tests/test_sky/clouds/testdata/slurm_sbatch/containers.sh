@@ -31,7 +31,7 @@ cleanup() {
     # sbatch is the same number. Otherwise, there are no guarantees
     # that this srun will run on the same subset of nodes as the srun
     # that created the sky directories.
-    srun --overlap --nodes=1 rm -rf /tmp/test-cluster
+    srun --overlap --nodes=1 rm -rf /tmp/test-cluster /tmp/test-cluster.exitcode
     # A stop publishes the snapshot manifest before cancellation. Keep the
     # logs referenced by the jobs database that start will restore.
     if [ -f /home/testuser/.sky_snapshots/test-cluster/manifest.json ]; then
@@ -45,9 +45,35 @@ cleanup() {
 }
 # Run cleanup on any exit, including container init failures.
 trap cleanup EXIT
-# On SIGTERM (job cancellation via scancel), exit 0 so cleanup treats
-# it as a graceful shutdown rather than propagating an error code.
-trap 'exit 0' TERM
+# Preserve the last submitted task's result for Slurm dependencies.
+terminate() {
+    if [ -f /tmp/test-cluster.exitcode ]; then
+        task_exit=$(cat /tmp/test-cluster.exitcode) || exit 1
+    else
+        task_exit=$(python3 - /tmp/test-cluster/.sky/jobs.db <<'SKY_JOB_EXIT_CODE'
+import pathlib
+import sqlite3
+import sys
+
+path = pathlib.Path(sys.argv[1])
+code = 0
+if path.exists():
+    with sqlite3.connect(path.as_uri() + '?mode=ro', uri=True) as conn:
+        row = conn.execute(
+            'SELECT status, exit_codes FROM jobs ORDER BY job_id DESC LIMIT 1'
+        ).fetchone()
+    if row is not None and row[0] != 'SUCCEEDED':
+        codes = [int(value) for value in (row[1] or '').split(',') if value]
+        code = next((value for value in codes if value != 0), 1)
+        if code < 0:
+            code = 128 - code
+print(code)
+SKY_JOB_EXIT_CODE
+) || exit 1
+    fi
+    exit "$task_exit"
+}
+trap terminate TERM
 
 # Create sky home directory and subdirectories for the cluster.
 mkdir -p /home/testuser/.sky_clusters/test-cluster/sky_logs /home/testuser/.sky_clusters/test-cluster/sky_workdir /home/testuser/.sky_clusters/test-cluster/.sky

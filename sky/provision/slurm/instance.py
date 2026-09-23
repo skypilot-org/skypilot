@@ -795,6 +795,30 @@ def _resolve_skypilot_runtime_dir(client: 'slurm.SlurmClient',
     return _skypilot_runtime_dir(tmpdir, cluster_name_on_cloud)
 
 
+def _allocation_exit_code_script(skypilot_runtime_dir: str) -> str:
+    """Print the latest submitted job's exit code before deleting state."""
+    db_path = f'{skypilot_runtime_dir}/.sky/jobs.db'
+    return f"""python3 - {shlex.quote(db_path)} <<'SKY_JOB_EXIT_CODE'
+import pathlib
+import sqlite3
+import sys
+
+path = pathlib.Path(sys.argv[1])
+code = 0
+if path.exists():
+    with sqlite3.connect(path.as_uri() + '?mode=ro', uri=True) as conn:
+        row = conn.execute(
+            'SELECT status, exit_codes FROM jobs ORDER BY job_id DESC LIMIT 1'
+        ).fetchone()
+    if row is not None and row[0] != 'SUCCEEDED':
+        codes = [int(value) for value in (row[1] or '').split(',') if value]
+        code = next((value for value in codes if value != 0), 1)
+        if code < 0:
+            code = 128 - code
+print(code)
+SKY_JOB_EXIT_CODE"""
+
+
 def _stop_skylet_script(skypilot_runtime_dir: str) -> str:
     """Script that stops Skylet and keeps the keeper from restarting it."""
     skylet_start_file = (
@@ -1306,7 +1330,7 @@ cleanup() {{
     # sbatch is the same number. Otherwise, there are no guarantees
     # that this srun will run on the same subset of nodes as the srun
     # that created the sky directories.
-    srun --overlap --nodes={num_nodes} rm -rf {skypilot_runtime_dir}
+    srun --overlap --nodes={num_nodes} rm -rf {skypilot_runtime_dir} {shlex.quote(skypilot_runtime_dir + ".exitcode")}
     # A stop publishes the snapshot manifest before cancellation. Keep the
     # logs referenced by the jobs database that start will restore.
     if [ -f {shlex.quote(snapshot_manifest_path)} ]; then
@@ -1320,9 +1344,17 @@ cleanup() {{
 }}
 # Run cleanup on any exit, including container init failures.
 trap cleanup EXIT
-# On SIGTERM (job cancellation via scancel), exit 0 so cleanup treats
-# it as a graceful shutdown rather than propagating an error code.
-trap 'exit 0' TERM
+# Preserve the last submitted task's result for Slurm dependencies.
+terminate() {{
+    if [ -f {shlex.quote(skypilot_runtime_dir + ".exitcode")} ]; then
+        task_exit=$(cat {shlex.quote(skypilot_runtime_dir + ".exitcode")}) || exit 1
+    else
+        task_exit=$({_allocation_exit_code_script(skypilot_runtime_dir)}
+) || exit 1
+    fi
+    exit "$task_exit"
+}}
+trap terminate TERM
 
 # Create sky home directory and subdirectories for the cluster.
 mkdir -p {sky_cluster_home_dir}/sky_logs {sky_cluster_home_dir}/sky_workdir {sky_cluster_home_dir}/.sky
@@ -2073,6 +2105,9 @@ if command -v enroot > /dev/null; then
         fi
     done
 fi
+# Keep the task result available to the batch TERM trap after state removal.
+({_allocation_exit_code_script(skypilot_runtime_dir)}
+) > {shlex.quote(skypilot_runtime_dir + ".exitcode")}
 rm -rf -- {shlex.quote(skypilot_runtime_dir)}
 """
     cleanup_node_cmd = ('srun --unbuffered --overlap --chdir=/tmp '

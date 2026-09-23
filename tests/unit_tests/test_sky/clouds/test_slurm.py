@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 import re
 import shlex
+import sqlite3
+import subprocess
 from unittest.mock import call
 from unittest.mock import patch
 import unittest.mock as mock
@@ -1650,8 +1652,36 @@ class TestCreateVirtualInstance:
         mock_slurm_client.return_value.submit_job.assert_called_once()
         assert '--container-image=ubuntu:24.04' in script
         assert 'rank0.sqsh' not in script
-        assert 'jobs.db' not in script
+        assert 'cp -f ' not in script
         assert f'/test-cluster/{"b" * 32}/manifest.json' in script
+
+    @pytest.mark.parametrize('cached', [False, True])
+    def test_generated_term_handler_preserves_exit_code(self, tmp_path, cached):
+        script = (SBATCH_TESTDATA_DIR / 'basic.sh').read_text()
+        start = script.index('terminate() {')
+        end = script.index('trap terminate TERM', start)
+        handler = script[start:end]
+        # Substitute only the runtime path; execute the generated shell body.
+        runtime = re.search(r'python3 - (\S+)/.sky/jobs.db', handler).group(1)
+        handler = handler.replace(runtime, str(tmp_path))
+        state = tmp_path / '.sky'
+        state.mkdir()
+        with sqlite3.connect(state / 'jobs.db') as conn:
+            conn.execute('CREATE TABLE jobs (job_id INTEGER PRIMARY KEY, '
+                         'status TEXT, exit_codes TEXT)')
+            conn.execute("INSERT INTO jobs VALUES (1, 'FAILED', '143')")
+        cache = Path(str(tmp_path) + '.exitcode')
+        if cached:
+            cache.write_text('143\n')
+        try:
+            result = subprocess.run(['bash', '-c', handler + '\nterminate'],
+                                    capture_output=True,
+                                    text=True,
+                                    check=False)
+            assert result.returncode == 143
+            assert result.stderr == ''
+        finally:
+            cache.unlink(missing_ok=True)
 
     def _run_and_capture_script(self, cluster_name, config) -> str:
         """Run _create_virtual_instance and capture the generated script."""
