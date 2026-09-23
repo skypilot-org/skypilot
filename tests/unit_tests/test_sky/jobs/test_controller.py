@@ -1794,6 +1794,46 @@ class TestTransientJobStatusRecoveryWindow:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('num_nodes', [1, 2])
+    async def test_runtime_cancellation_uses_controller_cleanup(
+            self, num_nodes):
+        task = MagicMock()
+        task.num_nodes = num_nodes
+        instance = MagicMock()
+        instance._job_id = 1
+        instance._pool = None
+        executor = MagicMock()
+        observation = controller_module.managed_job_runtime.RuntimeRecoveryStatus(
+            runtime_id='allocation',
+            restart_count=0,
+            job_status=job_lib.JobStatus.CANCELLED)
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection', new=AsyncMock()), \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name', return_value=MagicMock()), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=True), \
+             patch.object(controller_module.managed_job_runtime,
+                          'get_recovery_status', return_value=observation), \
+             patch.object(managed_job_state, 'observe_runtime_recovery_async',
+                          new=AsyncMock()) as observe, \
+             patch.object(managed_job_state, 'set_failed_async',
+                          new=AsyncMock()) as fail, \
+             patch.object(controller_module.asyncio, 'sleep', new=AsyncMock()):
+            with pytest.raises(asyncio.CancelledError):
+                await JobController._monitor_one_task_impl(
+                    instance,
+                    task_id=0,
+                    task=task,
+                    cluster_name='cluster',
+                    executor=executor,
+                    status_logger=managed_job_utils.JobStatusLogger(),
+                    callback_func=AsyncMock())
+        assert observe.await_args.kwargs['terminal']
+        fail.assert_not_called()
+        executor.recover.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('num_nodes', [1, 2])
     @pytest.mark.parametrize(
         'healthy_status',
         [None, job_lib.JobStatus.PENDING, job_lib.JobStatus.RUNNING])

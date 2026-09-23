@@ -377,17 +377,17 @@ class StrategyExecutor:
         strategy_config = dict(job_recovery) if isinstance(job_recovery,
                                                            dict) else {}
 
+        resolved_strategy = (job_recovery_name or
+                             registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default)
         job_recovery_strategy = (registry.JOBS_RECOVERY_STRATEGY_REGISTRY.
-                                 from_str(job_recovery_name))
+                                 from_str(resolved_strategy))
         assert job_recovery_strategy is not None, job_recovery_name
         executor = job_recovery_strategy(cluster_name, backend, task,
                                          max_restarts_on_errors, job_id,
                                          task_id, pool, starting, starting_lock,
                                          starting_signal, recover_on_exit_codes,
                                          file_mounts_blob_id)
-        executor.strategy_name = (
-            job_recovery_name or
-            registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default)
+        executor.strategy_name = resolved_strategy
         executor.strategy_explicit = job_recovery_name is not None
         executor.set_strategy_config(strategy_config)
         return executor

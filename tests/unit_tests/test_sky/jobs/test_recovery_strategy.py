@@ -663,9 +663,14 @@ def test_make_retains_strategy_after_removing_resource_recovery(
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
     task = task_lib.Task.from_yaml_config(dag.tasks[0].to_yaml_config())
     factory = mock.Mock(return_value=mock.Mock())
-    monkeypatch.setattr(
-        recovery_strategy.registry.JOBS_RECOVERY_STRATEGY_REGISTRY, 'from_str',
-        lambda _: factory)
+    registry = recovery_strategy.registry.JOBS_RECOVERY_STRATEGY_REGISTRY
+    resolve = registry.from_str
+
+    def checked_factory(name):
+        assert resolve(name) is not None
+        return factory
+
+    monkeypatch.setattr(registry, 'from_str', checked_factory)
     executor = recovery_strategy.StrategyExecutor.make('cluster', mock.Mock(),
                                                        task, 1, 0, None, set(),
                                                        mock.Mock(), mock.Mock())

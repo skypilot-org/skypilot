@@ -1174,6 +1174,10 @@ class JobController:
                     callback_func=callback_func)
                 if runtime_recovery.should_relaunch:
                     job_status = None
+                elif job_status == job_lib.JobStatus.CANCELLED:
+                    logger.info(f'Task {task_id} was cancelled by its runtime. '
+                                'Cleaning up the managed job.')
+                    raise asyncio.CancelledError()
                 elif job_status is None or not job_status.is_terminal():
                     if job_status is None:
                         if status_check_window.exhausted:
