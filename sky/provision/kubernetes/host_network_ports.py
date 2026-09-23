@@ -10,6 +10,7 @@ rather than a runtime failure.
 The port *names* live in ``host_network_probe`` -- the in-pod script binds
 them, this module assigns them, and one list serves both.
 """
+import os
 import random
 from typing import Any, Dict, List, Optional
 
@@ -41,10 +42,20 @@ _MAX_START = PORT_RANGE_END - BLOCK_SIZE + 1
 # The client's SSH proxy command finds the pod's sshd port by this name.
 SSHD_PORT_NAME = 'ssh'
 
+# Test-only: pin the block start so two clusters are handed the same one.
+# The collision this design exists to arbitrate has a ~0.17% chance of
+# occurring naturally over the range, so an e2e case that waits for it tests
+# nothing. Unset in every normal run.
+_PINNED_START_ENV = 'SKYPILOT_HOST_NETWORK_PORT_START'
+
 
 def allocate_block() -> Dict[str, int]:
     """Assign a fresh contiguous block, keyed by port name."""
-    start = random.randint(PORT_RANGE_START, _MAX_START)
+    pinned = os.environ.get(_PINNED_START_ENV)
+    if pinned:
+        start = int(pinned)
+    else:
+        start = random.randint(PORT_RANGE_START, _MAX_START)
     return {
         name: start + offset
         for offset, name in enumerate(host_network_probe.HEAD_PORT_NAMES)
@@ -128,25 +139,6 @@ def resolve_block(
     if configmap_ports:
         return dict(configmap_ports)
     return allocate_block()
-
-
-def is_unschedulable(pod: Any) -> bool:
-    """Whether this pod is Pending *because the scheduler refused it*.
-
-    Deliberately narrower than "Pending": a pod pending on an image pull or a
-    GPU is making progress, and deleting it on every relaunch would throw that
-    progress away. Only a pod the scheduler could not place is worth
-    recreating with a different block.
-    """
-    status = getattr(pod, 'status', None)
-    if getattr(status, 'phase', None) != 'Pending':
-        return False
-    for condition in (getattr(status, 'conditions', None) or []):
-        if (getattr(condition, 'type', None) == 'PodScheduled' and
-                getattr(condition, 'status', None) == 'False' and
-                getattr(condition, 'reason', None) == 'Unschedulable'):
-            return True
-    return False
 
 
 def apply_to_pod_spec(pod_spec: Dict[str, Any], ports: Dict[str, int],

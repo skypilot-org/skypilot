@@ -111,32 +111,6 @@ class TestResolutionOrder:
         assert len(resolved) == ports.BLOCK_SIZE
 
 
-class TestUnschedulableGate:
-    """Deleting any Pending pod would churn one that is merely slow."""
-
-    def _cond(self, type_, status, reason):
-        return mock.Mock(type=type_, status=status, reason=reason)
-
-    def test_unschedulable_pending_pod_is_recreated(self):
-        pod = _pod(
-            phase='Pending',
-            conditions=[self._cond('PodScheduled', 'False', 'Unschedulable')])
-        assert ports.is_unschedulable(pod)
-
-    def test_pod_pending_on_an_image_pull_is_left_alone(self):
-        pod = _pod(phase='Pending',
-                   conditions=[
-                       self._cond('PodScheduled', 'True', None),
-                   ])
-        assert not ports.is_unschedulable(pod)
-
-    def test_running_pod_is_never_deleted(self):
-        pod = _pod(
-            phase='Running',
-            conditions=[self._cond('PodScheduled', 'False', 'Unschedulable')])
-        assert not ports.is_unschedulable(pod)
-
-
 class TestProbeMakesNoApiCall:
     """The point of the change: a workload pod needs no K8s API access."""
 

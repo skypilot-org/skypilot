@@ -2293,38 +2293,6 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 resource_type='pod',
                 resource_name=pod_name)
 
-    # A hostNetwork pod the scheduler refused is holding a port block that no
-    # node can satisfy; delete it so it is recreated below with a fresh one.
-    # This must happen BEFORE the Pending/Running filter: a pod still in
-    # running_pods is skipped by the creation loop AND counted against
-    # to_start_count, so deleting it later would leave the cluster a node
-    # short with nothing recreated -- worse than leaving it alone.
-    #
-    # Narrower than "any Pending pod" on purpose: one waiting on an image pull
-    # or a GPU is making progress, and churning it every relaunch throws that
-    # progress away.
-    unschedulable = {
-        name: pod
-        for name, pod in kubernetes_utils.filter_pods(namespace, context, tags,
-                                                      ['Pending']).items()
-        if host_network_ports.is_unschedulable(pod)
-    }
-    if unschedulable:
-        logger.info(f'Found {len(unschedulable)} unschedulable pods: '
-                    f'{list(unschedulable.keys())}. Deleting them so they are '
-                    'recreated with a different host port block.')
-        for pod_name in unschedulable:
-            # pylint: disable=cell-var-from-loop
-            kubernetes_utils.delete_k8s_resource_with_retry(
-                delete_func=lambda name=pod_name: kubernetes.core_api(
-                    context).delete_namespaced_pod(name,
-                                                   namespace,
-                                                   _request_timeout=config_lib.
-                                                   DELETION_TIMEOUT,
-                                                   grace_period_seconds=0),
-                resource_type='pod',
-                resource_name=pod_name)
-
     running_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                 ['Pending', 'Running'])
     head_pod_name = _get_head_pod_name(running_pods)
