@@ -1083,12 +1083,28 @@ class JobController:
                         'seconds.')
                     continue
 
-                # NOTE: we do not check cluster status first because race
-                # condition can occur, i.e. cluster can be down during the job
-                # status check.
-                # NOTE: If fetching the job status fails or we force to transit
-                # to recovering, we will set the job status to None, which will
-                # force enter the recovering logic.
+            runtime_recovery = None
+            runtime_handle = None
+            if managed_job_runtime.is_registered():
+                runtime_handle = await asyncio.to_thread(
+                    global_user_state.get_handle_from_cluster_name,
+                    cluster_name)
+                runtime_recovery = await asyncio.to_thread(
+                    managed_job_runtime.get_recovery_status,
+                    runtime_handle,
+                    cluster_name,
+                    job_id=self._job_id,
+                    task_id=task_id,
+                    task=task)
+            if runtime_recovery is not None:
+                job_status = runtime_recovery.job_status
+                status_logger.log('No job found.' if job_status is None else
+                                  f'Job status: {job_status}')
+                transient_job_check_error_reason = (
+                    runtime_recovery.reason or 'Runtime job status unavailable'
+                    if job_status is None and
+                    not runtime_recovery.should_relaunch else None)
+            elif not force_transit_to_recovering:
                 try:
                     job_status, transient_job_check_error_reason = (
                         await managed_job_utils.get_job_status(
@@ -1105,6 +1121,7 @@ class JobController:
                         f'Traceback: {traceback.format_exc()}')
                     # Fall through to recovery logic below
 
+            if not force_transit_to_recovering:
                 # While the job is running, surface external links harvested
                 # from its logs (best-effort; the terminal-state scan is the
                 # guarantee). Throttled and capped so a job that never prints a
@@ -1119,27 +1136,6 @@ class JobController:
                         live_link_done = await self._update_live_log_links(
                             task_id, cluster_name, job_id_on_pool_cluster,
                             live_link_labels)
-
-            runtime_recovery = None
-            runtime_handle = None
-            if managed_job_runtime.is_registered():
-                runtime_handle = await asyncio.to_thread(
-                    global_user_state.get_handle_from_cluster_name,
-                    cluster_name)
-                runtime_recovery = await asyncio.to_thread(
-                    managed_job_runtime.get_recovery_status,
-                    runtime_handle,
-                    cluster_name,
-                    job_id=self._job_id,
-                    task_id=task_id,
-                    task=task)
-            if runtime_recovery is not None:
-                # The runtime observation is authoritative, including when the
-                # preliminary job-status probe succeeded but this query failed.
-                transient_job_check_error_reason = (
-                    runtime_recovery.reason or 'Runtime job status unavailable'
-                    if runtime_recovery.job_status is None and
-                    not runtime_recovery.should_relaunch else None)
 
             # When job status check fails, we need to retry to avoid false alarm
             # for job failure, as it could be a transient error for

@@ -1794,19 +1794,16 @@ class TestTransientJobStatusRecoveryWindow:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('num_nodes', [1, 2])
-    @pytest.mark.parametrize('probe_succeeds', [False, True])
     @pytest.mark.parametrize(
         'healthy_status',
         [None, job_lib.JobStatus.PENDING, job_lib.JobStatus.RUNNING])
     async def test_owned_unknown_status_exhausts_window(self, monkeypatch,
                                                         num_nodes,
-                                                        probe_succeeds,
                                                         healthy_status):
         """Unknown runtime observations retry, then escape to emergency recovery.
 
         A known runtime state resets the window, including a queued recovery.
-        The runtime's authoritative observation controls this even if the
-        preceding job-status probe succeeded.
+        Each poll obtains status and recovery from one runtime observation.
         """
         monkeypatch.setattr(managed_job_utils,
                             'JOB_STATUS_FETCH_MIN_ELAPSED_SECONDS', 60)
@@ -1817,14 +1814,12 @@ class TestTransientJobStatusRecoveryWindow:
             statuses = [None, None, healthy_status] + statuses
         clock = {'t': 1000.0, 'polls': 0}
 
-        async def get_status(*args, **kwargs):
+        def get_observation(*args, **kwargs):
             clock['polls'] += 1
             if clock['polls'] > len(statuses):
                 raise self._StopLoop('unknown runtime status retried forever')
             clock['t'] += 100
-            if probe_succeeds:
-                return job_lib.JobStatus.RUNNING, None
-            return None, 'job-status query unavailable'
+            return observations[clock['polls'] - 1]
 
         observations = [
             controller_module.managed_job_runtime.RuntimeRecoveryStatus(
@@ -1844,7 +1839,7 @@ class TestTransientJobStatusRecoveryWindow:
         with patch.object(controller_module.time, 'time',
                           side_effect=lambda: clock['t']), \
              patch.object(managed_job_utils, 'get_job_status',
-                          side_effect=get_status), \
+                          new=AsyncMock()) as ordinary_probe, \
              patch.object(controller_module.backend_utils,
                           'async_check_network_connection', new=AsyncMock()), \
              patch.object(controller_module.backend_utils,
@@ -1854,7 +1849,7 @@ class TestTransientJobStatusRecoveryWindow:
              patch.object(controller_module.managed_job_runtime,
                           'is_registered', return_value=True), \
              patch.object(controller_module.managed_job_runtime,
-                          'get_recovery_status', side_effect=observations), \
+                          'get_recovery_status', side_effect=get_observation), \
              patch.object(managed_job_state, 'observe_runtime_recovery_async',
                           new=AsyncMock()), \
              patch.object(controller_module.asyncio, 'sleep', new=AsyncMock()):
@@ -1868,11 +1863,14 @@ class TestTransientJobStatusRecoveryWindow:
                     status_logger=managed_job_utils.JobStatusLogger(),
                     callback_func=AsyncMock())
         assert clock['polls'] == len(statuses)
+        ordinary_probe.assert_not_called()
         refresh.assert_not_called()
         executor.recover.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_window_reset_after_recovery(self, monkeypatch):
+    @pytest.mark.parametrize('runtime_registered', [False, True])
+    async def test_window_reset_after_recovery(self, monkeypatch,
+                                               runtime_registered):
         """A transient failure after a recovery starts a fresh retry window.
 
         Drives ``_monitor_one_task_impl`` through: transient failure (retry) ->
@@ -1943,7 +1941,11 @@ class TestTransientJobStatusRecoveryWindow:
                           'async_check_network_connection',
                           new=AsyncMock(return_value=None)), \
              patch.object(controller_module.managed_job_runtime,
-                          'is_registered', return_value=False), \
+                          'is_registered', return_value=runtime_registered), \
+             patch.object(controller_module.managed_job_runtime,
+                          'get_recovery_status', return_value=None) as observation, \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name', return_value=handle), \
              patch.object(state, 'set_recovering_async',
                           new=AsyncMock(return_value=None)), \
              patch.object(state, 'set_recovered_async',
@@ -1966,6 +1968,8 @@ class TestTransientJobStatusRecoveryWindow:
         assert recover_calls == 1, (
             'expected exactly one recovery; a second recovery means the '
             'transient retry window was not reset after the first recovery')
+
+        assert observation.call_count == (4 if runtime_registered else 0)
 
     @pytest.mark.asyncio
     async def test_slow_check_still_gets_its_retries(self, monkeypatch):
