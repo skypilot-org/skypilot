@@ -67,11 +67,15 @@ provider:
         metadata:
             labels:
                 parent: skypilot
-            name: skypilot-service-account
+            name: {{k8s_service_account_name}}
 
     # Role created by the autoscaler for the head node pod that it runs in.
     # If this field isn't provided, the role referenced in
     # autoscaler_role_binding must exist and have at least these permissions.
+    # The one object deliberately NOT named after the account: its rules are
+    # identical for both, so they share it and differ only in their bindings.
+    # Renaming it would also rename the workload's, making an upgrade
+    # non-trivial for no benefit.
     autoscaler_role:
         kind: Role
         apiVersion: rbac.authorization.k8s.io/v1
@@ -96,15 +100,25 @@ provider:
         metadata:
             labels:
                 parent: skypilot
-            name: skypilot-service-account-role-binding
+            # Named after the account, not fixed: controller and workload
+            # clusters share this Role but must not share the binding --
+            # _configure_autoscaler_role_binding patches on a subject
+            # mismatch, so one fixed name would have the two kinds of launch
+            # take the binding from each other. A workload cluster still
+            # renders the historical name, so upgrades are a no-op for it.
+            name: {{k8s_service_account_name}}-role-binding
         subjects:
         - kind: ServiceAccount
-          name: skypilot-service-account
+          name: {{k8s_service_account_name}}
         roleRef:
             kind: Role
             name: skypilot-service-account-role
             apiGroup: rbac.authorization.k8s.io
 
+    # Provisioner-only: a controller cluster bootstraps the FUSE device
+    # manager for the clusters it launches. A pod running user code never
+    # provisions, so it is not granted this.
+    {% if k8s_is_controller %}
     # Role for the skypilot-system namespace to create fusermount-server and
     # any other system components.
     autoscaler_skypilot_system_role:
@@ -114,7 +128,7 @@ provider:
             namespace: {{k8s_skypilot_system_namespace}}
             labels:
                 parent: skypilot
-            name: skypilot-system-service-account-role
+            name: {{k8s_service_account_name}}-system-role
         rules:
         - apiGroups: ["*"]
           resources: ["*"]
@@ -128,22 +142,26 @@ provider:
             namespace: {{k8s_skypilot_system_namespace}}
             labels:
                 parent: skypilot
-            name: skypilot-system-service-account-role-binding
+            name: {{k8s_service_account_name}}-system-role-binding
         subjects:
         - kind: ServiceAccount
-          name: skypilot-service-account
+          name: {{k8s_service_account_name}}
         roleRef:
             kind: Role
-            name: skypilot-system-service-account-role
+            name: {{k8s_service_account_name}}-system-role
             apiGroup: rbac.authorization.k8s.io
-
+    {% endif %}
+    # Provisioner-only: resolving an exposed port to the ingress-nginx
+    # controller IP happens on the provisioning/query path, never in a
+    # pod running user code.
+    {% if k8s_is_controller %}
     # Role to access ingress services for fetching IP
     autoscaler_ingress_role:
         kind: Role
         apiVersion: rbac.authorization.k8s.io/v1
         metadata:
             namespace: ingress-nginx
-            name: skypilot-service-account-ingress-role
+            name: {{k8s_service_account_name}}-ingress-role
             labels:
                 parent: skypilot
         rules:
@@ -160,17 +178,21 @@ provider:
         kind: RoleBinding
         metadata:
             namespace: ingress-nginx
-            name: skypilot-service-account-ingress-role-binding
+            name: {{k8s_service_account_name}}-ingress-role-binding
             labels:
                 parent: skypilot
         subjects:
             - kind: ServiceAccount
-              name: skypilot-service-account
+              name: {{k8s_service_account_name}}
         roleRef:
             kind: Role
-            name: skypilot-service-account-ingress-role
+            name: {{k8s_service_account_name}}-ingress-role
             apiGroup: rbac.authorization.k8s.io
-
+    {% endif %}
+    # Provisioner-only: reading node resources and bootstrapping the RBAC
+    # of launched clusters. Under consolidation mode the controllers are
+    # API-server processes, so no pod needs this at all.
+    {% if k8s_is_controller %}
     # In addition to a role binding, we also need a cluster role binding to give
     # the SkyPilot access to the cluster-wide resources such as nodes to get
     # node resources.
@@ -180,7 +202,7 @@ provider:
         metadata:
             labels:
                 parent: skypilot
-            name: skypilot-service-account-cluster-role
+            name: {{k8s_service_account_name}}-cluster-role
         rules:
         - apiGroups: [ "" ]
           resources: [ "nodes" ]  # Required for getting node resources.
@@ -189,8 +211,14 @@ provider:
           resources: [ "namespaces" ]  # Required for creating skypilot-system namespace, which hosts fuse device manager.
           verbs: [ "get", "list", "watch", "create" ]
         - apiGroups: [ "rbac.authorization.k8s.io" ]
-          resources: [ "clusterroles", "clusterrolebindings" ]  # Required for launching more SkyPilot clusters from within the pod.
-          verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+          # Required for launching more SkyPilot clusters from within the pod:
+          # a controller pod bootstraps the RBAC of the clusters it launches.
+          # No "delete": SkyPilot never deletes a ClusterRole or
+          # ClusterRoleBinding, and unlike create/update, delete is not covered
+          # by Kubernetes' privilege-escalation prevention -- holding it would
+          # let a pod remove bindings the control plane depends on.
+          resources: [ "clusterroles", "clusterrolebindings" ]
+          verbs: [ "get", "list", "watch", "create", "update", "patch" ]
         - apiGroups: [ "node.k8s.io" ]
           resources: [ "runtimeclasses" ]   # Required for autodetecting the runtime class of the nodes.
           verbs: [ "get", "list", "watch" ]
@@ -205,14 +233,22 @@ provider:
         metadata:
             labels:
                 parent: skypilot
-            name: skypilot-service-account-cluster-role-binding
+            # Named after the account, for the same reason as the
+            # namespaced binding above. It matters most on upgrade: an
+            # existing namespace already has the fixed-name object bound to
+            # the workload account, and a controller launch would otherwise
+            # patch that live object's subject -- taking the grant from a
+            # running controller, and turning the documented cleanup command
+            # into one that strips the new account instead of the old.
+            name: {{k8s_service_account_name}}-cluster-role-binding
         subjects:
         - kind: ServiceAccount
-          name: skypilot-service-account
+          name: {{k8s_service_account_name}}
         roleRef:
             kind: ClusterRole
-            name: skypilot-service-account-cluster-role
+            name: {{k8s_service_account_name}}-cluster-role
             apiGroup: rbac.authorization.k8s.io
+    {% endif %}
 
     services:
       # Service to expose the head node pod's SSH port.
