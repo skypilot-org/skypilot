@@ -12,6 +12,19 @@ from sky.utils import common_utils
 SKY_SERVE_CONTROLLER_PREFIX: str = 'sky-serve-controller-'
 JOB_CONTROLLER_PREFIX: str = 'sky-jobs-controller-'
 
+
+def is_controller_name(cluster_name: str) -> bool:
+    """Whether a cluster's *display* name is one of SkyPilot's controllers.
+
+    Lives next to the prefixes so the two stay in step; ``Controllers.
+    from_name`` matches on the same two constants. Takes the display name --
+    ``name_on_cloud`` is transformed and never carries these prefixes, so
+    passing it yields a check that is silently always False.
+    """
+    return cluster_name.startswith(
+        (SKY_SERVE_CONTROLLER_PREFIX, JOB_CONTROLLER_PREFIX))
+
+
 # We use the user hash (machine-specific) for the controller name. It will be
 # the same across the whole lifecycle of the server, including:
 # 1. all requests, because all the server processes share the same user hash

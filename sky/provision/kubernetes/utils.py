@@ -278,6 +278,14 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
 DEFAULT_NAMESPACE = 'default'
 
 DEFAULT_SERVICE_ACCOUNT_NAME = 'skypilot-service-account'
+# Controller clusters provision other clusters, so they need permissions no
+# pod running user code should hold. They get their own account; the name
+# above stays with workload pods, because operator-written policy (quotas,
+# admission rules, their own RoleBindings) references it by string.
+CONTROLLER_SERVICE_ACCOUNT_NAME = 'skypilot-controller-service-account'
+# Service accounts SkyPilot creates and reconciles itself.
+MANAGED_SERVICE_ACCOUNT_NAMES = (DEFAULT_SERVICE_ACCOUNT_NAME,
+                                 CONTROLLER_SERVICE_ACCOUNT_NAME)
 
 MEMORY_SIZE_UNITS = {
     'm': 0.001,
