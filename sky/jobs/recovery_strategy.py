@@ -223,7 +223,6 @@ class StrategyExecutor:
         self.cluster_name = cluster_name
         self.backend = backend
         self.strategy_name = registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default
-        self.strategy_explicit = False
         self.max_restarts_on_errors = max_restarts_on_errors
         self.recover_on_exit_codes = recover_on_exit_codes or []
         self.job_id = job_id
@@ -377,18 +376,17 @@ class StrategyExecutor:
         strategy_config = dict(job_recovery) if isinstance(job_recovery,
                                                            dict) else {}
 
-        resolved_strategy = (job_recovery_name or
-                             registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default)
         job_recovery_strategy = (registry.JOBS_RECOVERY_STRATEGY_REGISTRY.
-                                 from_str(resolved_strategy))
+                                 from_str(job_recovery_name))
         assert job_recovery_strategy is not None, job_recovery_name
         executor = job_recovery_strategy(cluster_name, backend, task,
                                          max_restarts_on_errors, job_id,
                                          task_id, pool, starting, starting_lock,
                                          starting_signal, recover_on_exit_codes,
                                          file_mounts_blob_id)
-        executor.strategy_name = resolved_strategy
-        executor.strategy_explicit = job_recovery_name is not None
+        executor.strategy_name = (
+            job_recovery_name or
+            registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default)
         executor.set_strategy_config(strategy_config)
         return executor
 
@@ -985,8 +983,6 @@ class StrategyExecutor:
                                     self.runtime_restart_cnt_on_failure = runtime_restarts
                                     extra_ctx['managed_job_recovery'] = {
                                         'strategy': self.strategy_name,
-                                        'strategy_explicit':
-                                            self.strategy_explicit,
                                         'max_restarts_on_errors': max(
                                             0, self.max_restarts_on_errors -
                                             self.restart_cnt_on_failure -

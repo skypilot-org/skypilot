@@ -6,6 +6,7 @@ import yaml
 
 from sky import task as task_lib
 from sky.utils import dag_utils
+from sky.utils import registry
 
 
 def test_jobs_recovery_fill_default_values():
@@ -21,7 +22,8 @@ def test_jobs_recovery_fill_default_values():
 
     resources = list(dag.tasks[0].resources)
     assert len(resources) == 1
-    assert resources[0].job_recovery['strategy'] is None
+    assert resources[0].job_recovery['strategy'].lower(
+    ) == registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default
 
     task_str = textwrap.dedent("""\
         resources:
@@ -37,7 +39,8 @@ def test_jobs_recovery_fill_default_values():
 
     resources = list(dag.tasks[0].resources)
     assert len(resources) == 1
-    assert resources[0].job_recovery['strategy'] is None
+    assert resources[0].job_recovery['strategy'].lower(
+    ) == registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default
     assert resources[0].job_recovery['max_restarts_on_errors'] == 3
 
     task_str = textwrap.dedent(f"""\
@@ -74,7 +77,8 @@ def test_jobs_recovery_fill_default_values():
 
     resources = list(dag.tasks[0].resources)
     assert len(resources) == 1
-    assert resources[0].job_recovery['strategy'] is None
+    assert resources[0].job_recovery['strategy'].lower(
+    ) == registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default
     assert resources[0].job_recovery['max_restarts_on_errors'] == 3
     assert resources[0].job_recovery['recover_on_exit_codes'] == [33, 137]
 
@@ -94,7 +98,8 @@ def test_jobs_recovery_fill_default_values():
 
     resources = list(dag.tasks[0].resources)
     assert len(resources) == 1
-    assert resources[0].job_recovery['strategy'] is None
+    assert resources[0].job_recovery['strategy'].lower(
+    ) == registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default
     assert resources[0].job_recovery['max_restarts_on_errors'] == 2
     # Single integer should remain as is in the YAML, normalization happens
     # in the recovery strategy executor
@@ -113,7 +118,8 @@ def test_jobs_recovery_fill_default_values():
 
     resources = list(dag.tasks[0].resources)
     assert len(resources) == 1
-    assert resources[0].job_recovery['strategy'] is None
+    assert resources[0].job_recovery['strategy'].lower(
+    ) == registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default
 
     task_str = textwrap.dedent("""\
         resources:

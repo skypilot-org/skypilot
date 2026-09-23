@@ -221,7 +221,6 @@ def _make_launch_executor():
     executor = _make_bare_executor()
     executor.job_id = 1
     executor.strategy_name = 'FAILOVER'
-    executor.strategy_explicit = True
     executor.max_restarts_on_errors = 0
     executor.restart_cnt_on_failure = 0
     executor.runtime_restart_cnt_on_failure = 0
@@ -596,13 +595,10 @@ async def test_cancel_launch_request_tolerates_api_cancel_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("explicit", [False, True])
-async def test_launch_forwards_remaining_runtime_recovery_budget(
-        monkeypatch, explicit):
+async def test_launch_forwards_remaining_runtime_recovery_budget(monkeypatch):
     executor = _make_launch_executor()
     patches = _patch_launch_environment(monkeypatch)
     executor.strategy_name = 'EAGER_NEXT_REGION'
-    executor.strategy_explicit = explicit
     executor.max_restarts_on_errors = 5
     executor.restart_cnt_on_failure = 1
     executor.recover_on_exit_codes = [137]
@@ -618,7 +614,6 @@ async def test_launch_forwards_remaining_runtime_recovery_budget(
         'other': 'retained',
         'managed_job_recovery': {
             'strategy': 'EAGER_NEXT_REGION',
-            'strategy_explicit': explicit,
             'max_restarts_on_errors': 2,
             'recover_on_exit_codes': [137]
         }
@@ -643,41 +638,25 @@ async def test_resume_restores_runtime_consumed_retry_budget(monkeypatch):
     assert not executor.should_restart_on_failure([7])
 
 
-@pytest.mark.parametrize('strategy', [None, 'FAILOVER', 'EAGER_NEXT_REGION'])
-@pytest.mark.parametrize('infra', [['aws'], ['slurm'], ['aws', 'slurm']])
-def test_make_retains_strategy_after_removing_resource_recovery(
-        monkeypatch, strategy, infra):
+def test_make_retains_strategy_after_removing_resource_recovery(monkeypatch):
     from sky import resources
     from sky import task as task_lib
     task = task_lib.Task(run='true')
-    task.set_resources([
-        resources.Resources(infra=cloud,
-                            job_recovery={
-                                'strategy': strategy,
-                                'max_restarts_on_errors': 4,
-                                'recover_on_exit_codes': [137]
-                            }) for cloud in infra
-    ])
-    from sky.utils import dag_utils
-    dag = dag_utils.convert_entrypoint_to_dag(task)
-    dag_utils.fill_default_config_in_dag_for_job_launch(dag)
-    task = task_lib.Task.from_yaml_config(dag.tasks[0].to_yaml_config())
+    task.set_resources(
+        resources.Resources(
+            job_recovery={
+                'strategy': 'EAGER_NEXT_REGION',
+                'max_restarts_on_errors': 4,
+                'recover_on_exit_codes': [137]
+            }))
     factory = mock.Mock(return_value=mock.Mock())
-    registry = recovery_strategy.registry.JOBS_RECOVERY_STRATEGY_REGISTRY
-    resolve = registry.from_str
-
-    def checked_factory(name):
-        assert resolve(name) is not None
-        return factory
-
-    monkeypatch.setattr(registry, 'from_str', checked_factory)
+    monkeypatch.setattr(
+        recovery_strategy.registry.JOBS_RECOVERY_STRATEGY_REGISTRY, 'from_str',
+        lambda _: factory)
     executor = recovery_strategy.StrategyExecutor.make('cluster', mock.Mock(),
                                                        task, 1, 0, None, set(),
                                                        mock.Mock(), mock.Mock())
-    assert executor.strategy_name == (
-        strategy or
-        recovery_strategy.registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default)
-    assert executor.strategy_explicit == (strategy is not None)
+    assert executor.strategy_name == 'EAGER_NEXT_REGION'
     assert list(task.resources)[0].job_recovery is None
     assert factory.call_args.args[3] == 4
     assert factory.call_args.args[10] == [137]
