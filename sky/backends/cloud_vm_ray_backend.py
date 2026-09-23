@@ -2554,7 +2554,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     logger.debug(f'Acquired exclusive lock for {lock_id} after '
                                  f'{wait_elapsed:.2f}s')
                     try:
-                        tunnel = self._open_and_update_skylet_tunnel()
+                        # Another process may have opened a healthy tunnel
+                        # since our last read, before we acquired the lock.
+                        tunnel = self._get_skylet_ssh_tunnel()
+                        if tunnel is None or not _is_tunnel_healthy(tunnel):
+                            tunnel = self._open_and_update_skylet_tunnel()
                         return grpc.insecure_channel(f'localhost:{tunnel.port}',
                                                      options=grpc_options)
                     except Exception as e:  # pylint: disable=broad-except
