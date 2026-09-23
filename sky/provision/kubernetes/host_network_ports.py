@@ -37,6 +37,9 @@ BLOCK_SIZE = len(host_network_probe.HEAD_PORT_NAMES)
 
 _MAX_START = PORT_RANGE_END - BLOCK_SIZE + 1
 
+# The client's SSH proxy command finds the pod's sshd port by this name.
+SSHD_PORT_NAME = 'ssh'
+
 
 def allocate_block() -> Dict[str, int]:
     """Assign a fresh contiguous block, keyed by port name."""
@@ -135,10 +138,19 @@ def apply_to_pod_spec(pod_spec: Dict[str, Any], ports: Dict[str, int],
     """
     containers = pod_spec.setdefault('spec', {}).setdefault('containers', [{}])
     container = containers[0]
+    # Only the sshd port is named: the client's SSH proxy command selects it
+    # by name (`ports[?(@.name=="ssh")]`) because it is built during auth
+    # setup, before the pod exists and before a port has been assigned, so it
+    # cannot be handed the number. The rest need no name and a K8s port name
+    # is capped at 15 characters, which several of these would exceed.
+    sshd_port = ports.get('sshd')
     container['ports'] = [{
         'containerPort': port,
         'hostPort': port,
         'protocol': 'TCP',
+        **({
+            'name': SSHD_PORT_NAME
+        } if port == sshd_port else {}),
     } for port in sorted(ports.values())]
 
     exported = dict(ports)

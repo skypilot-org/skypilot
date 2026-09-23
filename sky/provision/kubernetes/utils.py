@@ -3789,11 +3789,12 @@ def get_ssh_proxy_command(
             This key must be authorized to access the SSH jump pod.
         namespace: Kubernetes namespace to use.
         host_network: bool; Whether the target pod runs with
-            ``hostNetwork: true``. When True the proxy script discovers
-            the pod's probed sshd port from the cluster's ConfigMap;
-            when False it skips that lookup and uses port 22. Passed as
-            a flag so the script needs no per-connection `kubectl get
-            pod` probe to determine this.
+            ``hostNetwork: true``. When True the proxy script reads the
+            pod's assigned sshd port off the pod spec; when False it
+            skips that lookup and uses port 22. Passed as a flag so the
+            common path makes no kubectl call at all -- the port itself
+            cannot be passed, since this command is built during auth
+            setup, before the pod exists.
     """
     ssh_jump_ip = '127.0.0.1'  # Local end of the port-forward tunnel
     assert private_key_path is not None, 'Private key path must be provided'

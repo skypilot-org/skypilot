@@ -3113,16 +3113,27 @@ def get_cluster_info(
         port = kubernetes_utils.get_head_ssh_port(cluster_name_on_cloud,
                                                   namespace, context)
 
-    # Each hostNetwork pod's sshd binds a probed port (host:22 is the
-    # K8s node's own sshd). The SSH config writer needs that port per
-    # pod, so wait for every hostNetwork pod's entry to land in the
-    # ConfigMap before caching the result.
-    host_network_pods = [
-        name for name, pod in running_pods.items() if pod.spec.host_network
-    ]
-    pod_sshd_ports = _read_host_network_sshd_ports(cluster_name_on_cloud,
-                                                   namespace, context,
-                                                   host_network_pods)
+    # A hostNetwork pod's sshd is not on 22 -- the K8s node's own sshd owns
+    # that -- so the SSH config writer needs the real port per pod. Read it
+    # off the pod, which declares it; a pod created before ports moved into
+    # the spec declares nothing, so fall back to the ConfigMap its probe
+    # published. Same order as the assignment side, and deliberately the
+    # same helper: if the two disagreed, a worker would be told a port the
+    # head is not listening on.
+    pod_sshd_ports: Dict[str, int] = {}
+    legacy_pods = []
+    for name, pod in running_pods.items():
+        if not pod.spec.host_network:
+            continue
+        declared = host_network_ports.ports_from_pod(pod)
+        if declared is not None:
+            pod_sshd_ports[name] = declared['sshd']
+        else:
+            legacy_pods.append(name)
+    if legacy_pods:
+        pod_sshd_ports.update(
+            _read_host_network_sshd_ports(cluster_name_on_cloud, namespace,
+                                          context, legacy_pods))
 
     head_pod_name = None
     cpu_request = None

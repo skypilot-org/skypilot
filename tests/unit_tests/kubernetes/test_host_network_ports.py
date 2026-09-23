@@ -125,3 +125,43 @@ class TestUnschedulableGate:
             phase='Running',
             conditions=[self._cond('PodScheduled', 'False', 'Unschedulable')])
         assert not ports.is_unschedulable(pod)
+
+
+class TestProbeMakesNoApiCall:
+    """The point of the change: a workload pod needs no K8s API access."""
+
+    def test_the_probe_does_not_import_an_http_stack(self):
+        """Asserted on the imports, not on a call never being reached.
+
+        "urlopen is never called" passes for any test that simply does not
+        walk the removal path -- it is satisfied by a dead branch as readily
+        as by a deleted one. A half-finished removal leaves the import
+        behind; that is the thing with no innocent explanation.
+        """
+        import ast
+        import pathlib
+
+        source = pathlib.Path(
+            host_network_probe.__file__).read_text(encoding='utf-8')
+        imported = set()
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Import):
+                imported.update(a.name.split('.')[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module.split('.')[0])
+        assert not imported & {'urllib', 'ssl', 'json', 'kubernetes'}
+
+    def test_the_probe_is_stdlib_only(self):
+        """It runs while the pod's skypilot install is still in flux, so it
+        cannot import sky -- inlined or not."""
+        import ast
+        import pathlib
+
+        source = pathlib.Path(
+            host_network_probe.__file__).read_text(encoding='utf-8')
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                assert not node.module.startswith('sky')
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    assert not alias.name.startswith('sky')

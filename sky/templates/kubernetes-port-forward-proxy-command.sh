@@ -77,23 +77,24 @@ fi
 
 # Under hostNetwork the pod shares the K8s node's net namespace, so its
 # sshd cannot bind to port 22 (the node's own sshd is there on managed
-# K8s; even on kind there's no SkyPilot-owned listener on 22 once the
-# probe rebinds). The host_network_probe writes the probed sshd port
-# to the cluster's <cluster>-ray-ports ConfigMap under sshd_<pod>;
-# discover it here so port-forward routes to the right pod-internal
-# port. Falls back to 22 for non-hostNetwork pods (the common case),
-# which take this branch's `false` and make no kubectl calls at all.
-# The ConfigMap is still read live (not passed as a flag) because the
-# probed port can change across a pod restart.
+# K8s). The pod declares its assigned sshd port in its own spec, so read
+# it from there. Falls back to 22 for non-hostNetwork pods (the common
+# case), which take this branch's `false` and make no kubectl calls.
+#
+# Read live rather than passed as a flag, because this proxy command is
+# built during auth setup -- before the pod exists and before the server
+# has assigned it a port.
+#
+# The pod, not the cluster's ray-ports ConfigMap: that ConfigMap is going
+# away, and reading the spec means this needs no permission the SSH path
+# does not already have.
 POD_PORT=22
 if [ "${HOST_NETWORK}" = "true" ]; then
-    # SkyPilot pod names are <cluster>-head or <cluster>-worker<N>.
-    CLUSTER_NAME=$(echo "${POD_NAME}" | sed -E 's/-head$//; s/-worker[0-9]+$//')
-    PROBED_PORT=$(kubectl "${KUBECTL_ARGS[@]}" get configmap \
-        "${CLUSTER_NAME}-ray-ports" \
-        -o jsonpath="{.data.sshd_${POD_NAME}}" 2>/dev/null)
-    if [ -n "${PROBED_PORT}" ]; then
-        POD_PORT="${PROBED_PORT}"
+    DECLARED_PORT=$(kubectl "${KUBECTL_ARGS[@]}" get pod "${POD_NAME}" \
+        -o jsonpath='{.spec.containers[0].ports[?(@.name=="ssh")].containerPort}' \
+        2>/dev/null)
+    if [ -n "${DECLARED_PORT}" ]; then
+        POD_PORT="${DECLARED_PORT}"
     fi
 fi
 
