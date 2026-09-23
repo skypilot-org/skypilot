@@ -18,6 +18,7 @@ from sky.provision import constants
 from sky.provision import docker_utils
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
+from sky.provision.kubernetes import host_network_ports
 from sky.provision.kubernetes import host_network_probe
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
@@ -2292,6 +2293,38 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 resource_type='pod',
                 resource_name=pod_name)
 
+    # A hostNetwork pod the scheduler refused is holding a port block that no
+    # node can satisfy; delete it so it is recreated below with a fresh one.
+    # This must happen BEFORE the Pending/Running filter: a pod still in
+    # running_pods is skipped by the creation loop AND counted against
+    # to_start_count, so deleting it later would leave the cluster a node
+    # short with nothing recreated -- worse than leaving it alone.
+    #
+    # Narrower than "any Pending pod" on purpose: one waiting on an image pull
+    # or a GPU is making progress, and churning it every relaunch throws that
+    # progress away.
+    unschedulable = {
+        name: pod
+        for name, pod in kubernetes_utils.filter_pods(namespace, context, tags,
+                                                      ['Pending']).items()
+        if host_network_ports.is_unschedulable(pod)
+    }
+    if unschedulable:
+        logger.info(f'Found {len(unschedulable)} unschedulable pods: '
+                    f'{list(unschedulable.keys())}. Deleting them so they are '
+                    'recreated with a different host port block.')
+        for pod_name in unschedulable:
+            # pylint: disable=cell-var-from-loop
+            kubernetes_utils.delete_k8s_resource_with_retry(
+                delete_func=lambda name=pod_name: kubernetes.core_api(
+                    context).delete_namespaced_pod(name,
+                                                   namespace,
+                                                   _request_timeout=config_lib.
+                                                   DELETION_TIMEOUT,
+                                                   grace_period_seconds=0),
+                resource_type='pod',
+                resource_name=pod_name)
+
     running_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                 ['Pending', 'Running'])
     head_pod_name = _get_head_pod_name(running_pods)
@@ -2310,6 +2343,37 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             f'requested by the user ({config.count}). '
             'This is likely a resource leak. '
             'Use "sky down" to terminate the cluster.')
+
+    # hostNetwork port blocks, assigned per pod BEFORE the parallel dispatch
+    # below. Head and workers are created concurrently, so a worker cannot read
+    # the head's ports off a live head pod that may not exist yet -- but it
+    # needs the head's GCS port to join. So the server resolves every pod's
+    # block up front and hands the head's GCS port to all of them.
+    #
+    # Per pod rather than per cluster: podAntiAffinity already keeps
+    # same-cluster pods off one node, so sharing a block buys nothing, while a
+    # shared block means one pod that cannot schedule can never be given a
+    # different one without moving a healthy head.
+    host_network_port_blocks: Dict[str, Dict[str, int]] = {}
+    head_gcs_port: Optional[int] = None
+    if pod_spec.get('spec', {}).get('hostNetwork', False):
+        head_name = f'{cluster_name_on_cloud}-head'
+        # Only the head needs a ConfigMap fallback. A cluster created before
+        # this change declares no ports, so its head's block is only knowable
+        # from what the old probe published -- and a new worker that guesses
+        # instead would be handed a GCS port the head is not listening on.
+        # Workers need no fallback: an existing one is not recreated, and a
+        # new one is new.
+        head_block = host_network_ports.resolve_block(
+            running_pods.get(head_name),
+            _head_block_from_configmap(cluster_name_on_cloud, namespace,
+                                       context, head_name))
+        host_network_port_blocks[head_name] = head_block
+        head_gcs_port = head_block['gcs']
+        for i in range(1, config.count):
+            name = f'{cluster_name_on_cloud}-worker{i}'
+            host_network_port_blocks[name] = host_network_ports.resolve_block(
+                running_pods.get(name))
 
     # Add nvidia runtime class if it exists
     nvidia_runtime_exists = False
@@ -2370,6 +2434,16 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 return
             pod_spec_copy['metadata']['name'] = pod_name
             pod_spec_copy['metadata']['labels']['component'] = pod_name
+
+        if host_network_port_blocks:
+            assert head_gcs_port is not None
+            # Read the name back off the spec rather than tracking it in a
+            # second variable: only the worker branch above binds pod_name,
+            # while both branches set metadata.name.
+            this_pod = pod_spec_copy['metadata']['name']
+            host_network_ports.apply_to_pod_spec(
+                pod_spec_copy, host_network_port_blocks[this_pod],
+                head_gcs_port)
 
         # Inject cache volume + volumeMount for the Docker sidecar container.
         if docker_config:
@@ -2930,6 +3004,41 @@ def cleanup_cluster_resources(
 # every status refresh during a pod restart to a multi-minute hang.
 _HOST_NETWORK_SSHD_WAIT_TIMEOUT_S = 60
 _HOST_NETWORK_SSHD_WAIT_INTERVAL_S = 2
+
+
+def _head_block_from_configmap(cluster_name_on_cloud: str, namespace: str,
+                               context: Optional[str],
+                               head_name: str) -> Optional[Dict[str, int]]:
+    """The head's port block as the pre-change probe published it.
+
+    Kept for one release so a cluster created before ports moved into the pod
+    spec can still be added to. Absent ConfigMap, or a cluster created after
+    the change, returns None and the caller allocates.
+    """
+    name = host_network_probe.ray_ports_configmap_name(cluster_name_on_cloud)
+    try:
+        cm = kubernetes.core_api(context).read_namespaced_config_map(
+            name=name, namespace=namespace)
+    except kubernetes.api_exception() as e:
+        if e.status != 404:
+            raise
+        return None
+    data = cm.data or {}
+    block: Dict[str, int] = {}
+    for port_name in host_network_probe.HEAD_PORT_NAMES:
+        key = (f'{host_network_probe.SSHD_KEY_PREFIX}{head_name}'
+               if port_name == 'sshd' else port_name)
+        value = data.get(key)
+        if value is None:
+            return None
+        try:
+            block[port_name] = int(value)
+        except ValueError:
+            logger.warning(f'ConfigMap {namespace}/{name} has a non-integer '
+                           f'value for {key!r}: {value!r}. Ignoring it and '
+                           'allocating a fresh host port block.')
+            return None
+    return block
 
 
 def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
