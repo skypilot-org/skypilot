@@ -1214,6 +1214,13 @@ class JobController:
             # iteration rather than escalating to run()'s unexpected-error
             # handling (emergency recovery), which would tear down and
             # relaunch a healthy cluster.
+            # Refresh may remove a terminated cluster from local state. Keep
+            # its identity available to the recovery log-capture hook.
+            recovery_handle = None
+            if managed_job_runtime.is_registered():
+                recovery_handle = await asyncio.to_thread(
+                    global_user_state.get_handle_from_cluster_name,
+                    cluster_name)
             try:
                 (cluster_status, handle) = await asyncio.to_thread(
                     cloud_api_retries.with_cloud_api_retries,
@@ -1508,7 +1515,8 @@ class JobController:
             if managed_job_runtime.is_registered():
                 try:
                     await asyncio.to_thread(
-                        managed_job_runtime.on_before_recovery, handle,
+                        managed_job_runtime.on_before_recovery,
+                        handle if handle is not None else recovery_handle,
                         self._backend, self._job_id, task_id, exit_codes,
                         job_id_on_pool_cluster)
                 except Exception as e:  # pylint: disable=broad-except

@@ -1667,6 +1667,52 @@ class TestUserJobFailureRecoveryEventReason:
 
         assert kwargs['user_job_failure_reason'] is None
 
+    @pytest.mark.asyncio
+    async def test_recovery_capture_retains_handle_removed_by_refresh(self):
+        # pylint: disable=protected-access
+        controller = self._make_controller(exit_codes=None)
+        executor = self._make_executor()
+        task = MagicMock(name='task')
+        task.num_nodes = 1
+        handle = MagicMock(name='pre_refresh_handle')
+        current_handle = [handle]
+
+        def refresh(*_args, **_kwargs):
+            current_handle[0] = None
+            return None, None
+
+        with patch('asyncio.sleep', new=AsyncMock()), \
+             patch('sky.backends.backend_utils.async_check_network_connection',
+                   new=AsyncMock()), \
+             patch('sky.jobs.utils.get_job_status',
+                   new=AsyncMock(return_value=(job_lib.JobStatus.CANCELLED,
+                                              None))), \
+             patch('sky.backends.backend_utils.refresh_cluster_status_handle',
+                   side_effect=refresh), \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name',
+                          side_effect=lambda _: current_handle[0]), \
+             patch.object(controller_module.global_user_state,
+                          'get_cluster_events', return_value=[]), \
+             patch.object(controller_module.ExternalFailureSource,
+                          'is_registered', return_value=False), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=True), \
+             patch.object(controller_module.managed_job_runtime,
+                          'on_before_recovery') as capture, \
+             patch.object(managed_job_state, 'set_recovering_async',
+                          new=AsyncMock()):
+            with pytest.raises(self._StopLoop):
+                await controller._monitor_one_task(task_id=0,
+                                                   task=task,
+                                                   cluster_name='test-cluster',
+                                                   executor=executor,
+                                                   callback_func=MagicMock())
+
+        assert current_handle[0] is None
+        capture.assert_called_once_with(handle, controller._backend, 42, 0,
+                                        None, None)
+
 
 class TestDunderMainDispatchesToImportedModule:
     """Regression: running this file as `__main__` must dispatch into the
