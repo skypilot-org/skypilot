@@ -27,6 +27,7 @@ from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
+from sky.provision import observation as provision_observation
 from sky.serve import serve_utils
 from sky.server import common as server_common
 from sky.server.requests import requests as requests_lib
@@ -258,6 +259,12 @@ class StrategyExecutor:
         ``template_override()``.
         """
         return {}
+
+    def _observation_context(self) -> Dict[str, Any]:
+        """Route provisioning-time runtime observations to this task."""
+        target = state.provisioning_observation_target(self.job_id,
+                                                       self.task_id)
+        return {provision_observation.LAUNCH_CONTEXT_KEY: target}
 
     def task_specs(self) -> Dict[str, Any]:
         """Return strategy-specific keys for the persisted task specs.
@@ -991,6 +998,8 @@ class StrategyExecutor:
                                     runtime_restarts = await state.get_runtime_user_restarts_async(
                                         self.job_id, self.task_id)
                                     self.runtime_restart_cnt_on_failure = runtime_restarts
+                                    extra_ctx.update(
+                                        self._observation_context())
                                     extra_ctx['managed_job_recovery'] = {
                                         'max_restarts_on_errors': max(
                                             0, self.max_restarts_on_errors -

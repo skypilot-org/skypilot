@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sky.jobs import controller as controller_module
 from sky.jobs import runtime
 from sky.jobs import state
+from sky.provision import observation as provision_observation
 from sky.skylet import job_lib
 
 
@@ -43,21 +44,39 @@ def task_row(engine):
         return connection.execute(state.spot_table.select()).mappings().one()
 
 
+def observation(count, **kwargs):
+    running = kwargs.pop('running', False)
+    terminal = kwargs.pop('terminal', False)
+    waiting = kwargs.pop('waiting', False)
+    if running:
+        status = job_lib.JobStatus.RUNNING
+    elif terminal:
+        status = job_lib.JobStatus.SUCCEEDED
+    elif waiting:
+        status = job_lib.JobStatus.PENDING
+    else:
+        status = None
+    return runtime.RuntimeObservation(kwargs.pop('runtime_id', 'allocation-a'),
+                                      count,
+                                      status,
+                                      reason=kwargs.pop('reason',
+                                                        'platform restart'),
+                                      recovery_reasons=kwargs.pop(
+                                          'recovery_reasons', {1: 'exit 7'}),
+                                      **kwargs)
+
+
 async def observe(count, **kwargs):
-    await state.observe_runtime_recovery_async(
-        42,
-        0,
-        kwargs.pop('runtime_id', 'allocation-a'),
-        count,
-        user_restart_count=kwargs.pop('user_restart_count', 0),
-        running=kwargs.pop('running', False),
-        terminal=kwargs.pop('terminal', False),
-        waiting=kwargs.pop('waiting', False),
-        reason='platform restart',
-        recovery_reasons={1: 'exit 7'},
-        started_at=kwargs.pop('started_at', None),
-        callback_func=mock.AsyncMock(),
-        **kwargs)
+    await state.observe_runtime_async(42,
+                                      0,
+                                      observation(count, **kwargs),
+                                      callback_func=mock.AsyncMock())
+
+
+def provision(count, runtime_id='allocation-a', **kwargs):
+    provision_observation.report(
+        state.provisioning_observation_target(42, 0),
+        runtime.RuntimeObservation(runtime_id, count, None, **kwargs))
 
 
 @pytest.mark.asyncio
@@ -114,8 +133,8 @@ async def test_controller_observes_before_healthy_shortcut_and_refresh(
     controller._job_id = 42
     controller._backend = mock.MagicMock()
     task = mock.MagicMock(num_nodes=nodes)
-    observation = runtime.RuntimeRecoveryStatus('allocation-a', 2,
-                                                job_lib.JobStatus.PENDING)
+    observation = runtime.RuntimeObservation('allocation-a', 2,
+                                             job_lib.JobStatus.PENDING)
     monkeypatch.setattr(runtime, 'is_registered', lambda: True)
     observations = [observation, observation, StopMonitoring()]
     if query_error:
@@ -173,11 +192,11 @@ async def test_controller_fast_terminal_does_not_repeat_user_retry(
     monkeypatch.setattr(runtime, 'is_registered', lambda: True)
     monkeypatch.setattr(
         runtime, 'get_recovery_status',
-        mock.Mock(return_value=runtime.RuntimeRecoveryStatus(
-            'allocation-a',
-            restarts,
-            terminal_status,
-            handles_user_retries=True)))
+        mock.Mock(
+            return_value=runtime.RuntimeObservation('allocation-a',
+                                                    restarts,
+                                                    terminal_status,
+                                                    handles_user_retries=True)))
     monkeypatch.setattr(controller_module.global_user_state,
                         'get_handle_from_cluster_name',
                         mock.Mock(return_value=handle))
@@ -218,7 +237,7 @@ def test_recovery_dispatch_defers_and_preserves_explicit_record(monkeypatch):
     first.get_recovery_status.return_value = None
     second = mock.Mock()
     second.owns.return_value = True
-    record = runtime.RuntimeRecoveryStatus('allocation', 0, None)
+    record = runtime.RuntimeObservation('allocation', 0, None)
     second.get_recovery_status.return_value = record
     monkeypatch.setattr(runtime, '_runtimes', [first, second])
     assert runtime.get_recovery_status(
@@ -245,7 +264,7 @@ async def test_controller_runtime_failover_cleans_allocation_and_keeps_reason(
     monkeypatch.setattr(runtime, 'is_registered', lambda: True)
     monkeypatch.setattr(
         runtime, 'get_recovery_status',
-        mock.Mock(return_value=runtime.RuntimeRecoveryStatus(
+        mock.Mock(return_value=runtime.RuntimeObservation(
             'allocation-a',
             1,
             job_lib.JobStatus.PENDING,
@@ -384,13 +403,9 @@ async def test_provisioning_restarts_count_before_handle_exists(
         connection.execute(state.spot_table.update().values(
             status='STARTING', start_at=None, last_recovered_at=-1))
     for count in (1, 2, 3, 3):
-        state.observe_runtime_recovery_during_provisioning(
-            42,
-            0,
-            'allocation-a',
-            count,
-            reason='launch failed requeued held',
-            recovery_reasons={3: 'launch hold release limit reached'})
+        provision(count,
+                  reason='launch failed requeued held',
+                  recovery_reasons={3: 'launch hold release limit reached'})
     row = task_row(database)
     assert row['status'] == 'STARTING'
     assert row['recovery_count'] == 3
@@ -422,7 +437,7 @@ def test_provisioning_observation_preserves_cancellation(database):
     with database.begin() as connection:
         connection.execute(
             state.spot_table.update().values(status='CANCELLING'))
-    state.observe_runtime_recovery_during_provisioning(42, 0, 'allocation-a', 3)
+    provision(3)
     row = task_row(database)
     assert row['status'] == 'CANCELLING'
     assert row['recovery_count'] == 0
@@ -431,24 +446,12 @@ def test_provisioning_observation_preserves_cancellation(database):
 @pytest.mark.asyncio
 async def test_provisioning_user_budget_survives_monitor_and_new_allocation(
         database):
-    state.observe_runtime_recovery_during_provisioning(42,
-                                                       0,
-                                                       'allocation-a',
-                                                       3,
-                                                       user_restart_count=1)
-    state.observe_runtime_recovery_during_provisioning(42,
-                                                       0,
-                                                       'allocation-a',
-                                                       3,
-                                                       user_restart_count=2)
+    provision(3, user_restart_count=1)
+    provision(3, user_restart_count=2)
     assert await state.get_runtime_user_restarts_async(42, 0) == 2
     await observe(3, user_restart_count=2, running=True)
     assert await state.get_runtime_user_restarts_async(42, 0) == 2
-    state.observe_runtime_recovery_during_provisioning(42,
-                                                       0,
-                                                       'allocation-b',
-                                                       1,
-                                                       user_restart_count=1)
+    provision(1, runtime_id='allocation-b', user_restart_count=1)
     await observe(1,
                   runtime_id='allocation-b',
                   user_restart_count=1,
@@ -516,7 +519,7 @@ async def test_provisioning_restarts_do_not_emit_recovered_after_start(
         database):
     with database.begin() as connection:
         connection.execute(state.spot_table.update().values(status='STARTING'))
-    state.observe_runtime_recovery_during_provisioning(42, 0, 'allocation-a', 1)
+    provision(1)
     await state.set_started_async(42, 0, 300, mock.AsyncMock())
     with database.connect() as connection:
         before = connection.execute(state.job_events_table.select()).all()
@@ -525,3 +528,120 @@ async def test_provisioning_restarts_do_not_emit_recovered_after_start(
     with database.connect() as connection:
         assert connection.execute(
             state.job_events_table.select()).all() == before
+
+
+@pytest.mark.parametrize('status,should_relaunch,phase', [
+    (job_lib.JobStatus.RUNNING, False, runtime.RuntimePhase.RUNNING),
+    (job_lib.JobStatus.PENDING, False, runtime.RuntimePhase.WAITING),
+    (job_lib.JobStatus.SETTING_UP, False, runtime.RuntimePhase.WAITING),
+    (job_lib.JobStatus.FAILED, False, runtime.RuntimePhase.TERMINATED),
+    (None, False, runtime.RuntimePhase.UNAVAILABLE),
+    (job_lib.JobStatus.PENDING, True, runtime.RuntimePhase.NEEDS_REPLACEMENT),
+    (None, True, runtime.RuntimePhase.NEEDS_REPLACEMENT),
+])
+def test_observation_phase(status, should_relaunch, phase):
+    assert runtime.RuntimeObservation(
+        'allocation', 0, status, should_relaunch=should_relaunch).phase == phase
+
+
+@pytest.mark.asyncio
+async def test_cursor_keeps_last_running_placement(database):
+    assert state.get_runtime_cursor(42, 0) is None
+    await observe(1, waiting=True, nodes=['node-a'])
+    assert state.get_runtime_cursor(42, 0) == runtime.RuntimeCursor(
+        'allocation-a', 1, 0, None)
+    await observe(1, running=True, nodes=['node-a', 'node-b'])
+    await observe(2, waiting=True, user_restart_count=1)
+    cursor = await state.get_runtime_cursor_async(42, 0)
+    assert cursor == runtime.RuntimeCursor('allocation-a', 2, 1,
+                                           ['node-a', 'node-b'])
+    assert cursor.baseline('allocation-a') is cursor
+    assert cursor.baseline('allocation-b') == runtime.RuntimeCursor(
+        'allocation-b')
+
+
+@pytest.mark.asyncio
+async def test_placement_is_merged_with_accepted_running_observations(database):
+    with database.begin() as connection:
+        connection.execute(state.job_info_table.insert().values(spot_job_id=42,
+                                                                name='task'))
+    infra = {'cloud': 'Slurm', 'region': 'cluster', 'zone': None}
+
+    async def record(count, status, nodes, **kwargs):
+        await state.observe_runtime_async(42,
+                                          0,
+                                          runtime.RuntimeObservation(
+                                              'allocation-a',
+                                              count,
+                                              status,
+                                              nodes=nodes,
+                                              **kwargs),
+                                          callback_func=mock.AsyncMock(),
+                                          infra=infra)
+
+    def placement():
+        with database.connect() as connection:
+            row = connection.execute(
+                state.job_info_table.select()).mappings().one()
+        return json.loads(row['node_names']), row['cloud'], row['zone']
+
+    running = job_lib.JobStatus.RUNNING
+    await record(0, running, ['node-a'])
+    assert placement() == ([['node-a']], 'Slurm', None)
+    await record(0, running, ['node-a'])
+    await record(1, job_lib.JobStatus.PENDING, ['node-b'])
+    # Stale: fewer restarts than the cursor.
+    await record(0, running, ['node-old'])
+    await record(1, running, ['node-b'], should_relaunch=True)
+    assert placement()[0] == [['node-a']]
+    await record(1, running, ['node-b'])
+    assert placement()[0] == [['node-a', 'node-b']]
+
+
+def test_recovery_dispatch_passes_previous_cursor(monkeypatch):
+    handle = mock.Mock()
+    handle.provision_runtime_metadata.has_ray = False
+    owner = mock.Mock()
+    owner.owns.return_value = True
+    owner.get_recovery_status.return_value = None
+    monkeypatch.setattr(runtime, '_runtimes', [owner])
+    previous = runtime.RuntimeCursor('allocation', 2)
+    runtime.get_recovery_status(handle,
+                                'cluster',
+                                job_id=42,
+                                task_id=0,
+                                task=mock.Mock(),
+                                previous=previous)
+    assert owner.get_recovery_status.call_args.kwargs['previous'] is previous
+
+
+@pytest.mark.asyncio
+async def test_replacement_observation_does_not_record_placement(database):
+    await observe(1, running=True, nodes=['node-a'], should_relaunch=True)
+    assert state.get_runtime_cursor(42, 0).nodes is None
+
+
+def test_provisioning_observations_reach_the_managed_task(database):
+    with database.begin() as connection:
+        connection.execute(state.spot_table.update().values(status='STARTING'))
+    target = state.provisioning_observation_target(42, 0)
+    assert provision_observation.previous(target) is None
+    provision_observation.report(
+        target,
+        runtime.RuntimeObservation('allocation-a',
+                                   2,
+                                   None,
+                                   user_restart_count=1,
+                                   recovery_reasons={2: 'exit 7'}))
+    assert provision_observation.previous(target) == runtime.RuntimeCursor(
+        'allocation-a', 2, 1, None)
+    row = task_row(database)
+    assert row['status'] == 'STARTING'
+    assert row['recovery_count'] == 2
+    provision_observation.report(
+        None, runtime.RuntimeObservation('allocation-a', 5, None))
+    assert provision_observation.previous(None) is None
+    assert task_row(database)['recovery_count'] == 2
+    with pytest.raises(ValueError, match='No runtime observation sink'):
+        provision_observation.report({'kind': 'unknown'},
+                                     runtime.RuntimeObservation('a', 1, None))

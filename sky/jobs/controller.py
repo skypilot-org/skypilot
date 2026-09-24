@@ -191,6 +191,19 @@ def _build_task_specs(
 _EMERGENCY_BOOKKEEPING_ROUNDS = 5
 
 
+def _runtime_infra(
+    handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle']
+) -> Dict[str, Optional[str]]:
+    """Cloud, region and zone recorded with a runtime's placement."""
+    resources = getattr(handle, 'launched_resources', None)
+    cloud = getattr(resources, 'cloud', None)
+    return {
+        'cloud': str(cloud) if cloud is not None else None,
+        'region': getattr(resources, 'region', None),
+        'zone': getattr(resources, 'zone', None),
+    }
+
+
 class JobController:
     """Controls the lifecycle of a single managed job.
 
@@ -1087,6 +1100,7 @@ class JobController:
             # recovery is forced. Without one, forced recovery skips the job
             # status check and leaves job_status=None for recovery below.
             runtime_recovery = None
+            runtime_cursor = None
             runtime_handle = None
             runtime_error = None
             if managed_job_runtime.is_registered():
@@ -1094,13 +1108,17 @@ class JobController:
                     global_user_state.get_handle_from_cluster_name,
                     cluster_name)
                 try:
+                    runtime_cursor = (
+                        await managed_job_state.get_runtime_cursor_async(
+                            self._job_id, task_id))
                     runtime_recovery = await asyncio.to_thread(
                         managed_job_runtime.get_recovery_status,
                         runtime_handle,
                         cluster_name,
                         job_id=self._job_id,
                         task_id=task_id,
-                        task=task)
+                        task=task,
+                        previous=runtime_cursor)
                 except Exception as exc:  # pylint: disable=broad-except
                     runtime_error = common_utils.format_exception(exc)
                     transient_job_check_error_reason = runtime_error
@@ -1179,30 +1197,21 @@ class JobController:
 
             if runtime_recovery is not None:
                 job_status = runtime_recovery.job_status
-                await managed_job_state.observe_runtime_recovery_async(
+                phase = runtime_recovery.phase
+                await managed_job_state.observe_runtime_async(
                     self._job_id,
                     task_id,
-                    runtime_recovery.runtime_id,
-                    runtime_recovery.restart_count,
-                    user_restart_count=runtime_recovery.user_restart_count,
-                    running=job_status == job_lib.JobStatus.RUNNING,
-                    waiting=job_status
-                    in (job_lib.JobStatus.INIT, job_lib.JobStatus.PENDING,
-                        job_lib.JobStatus.SETTING_UP),
-                    terminal=(job_status is not None and
-                              job_status.is_terminal()),
-                    reason=runtime_recovery.reason,
-                    recovery_reasons=runtime_recovery.recovery_reasons,
-                    started_at=runtime_recovery.started_at,
-                    callback_func=callback_func)
-                if runtime_recovery.should_relaunch:
+                    runtime_recovery,
+                    callback_func=callback_func,
+                    infra=_runtime_infra(runtime_handle))
+                if phase == managed_job_runtime.RuntimePhase.NEEDS_REPLACEMENT:
                     job_status = None
                 elif job_status == job_lib.JobStatus.CANCELLED:
                     logger.info(f'Task {task_id} was cancelled by its runtime. '
                                 'Cleaning up the managed job.')
                     raise asyncio.CancelledError()
-                elif job_status is None or not job_status.is_terminal():
-                    if job_status is None:
+                elif phase != managed_job_runtime.RuntimePhase.TERMINATED:
+                    if phase == managed_job_runtime.RuntimePhase.UNAVAILABLE:
                         if status_check_window.exhausted:
                             raise RuntimeError(
                                 'Failed to fetch runtime job status after '
