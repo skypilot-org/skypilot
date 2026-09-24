@@ -14,6 +14,7 @@ Callers use the module-level dispatch (``runtime.get_job_status(...)``,
 module.
 """
 import dataclasses
+import functools
 import typing
 from typing import Dict, List, Optional, Protocol, Tuple
 
@@ -55,6 +56,8 @@ def get_recovery_status(
 
     None defers to normal monitoring. An explicit observation owns monitoring
     until terminal, or until should_relaunch requests controller recovery.
+    Exceptions indicate an unavailable observation; callers retry within their
+    transient-error window before escalating controller failure.
     """
     if not _is_runtime_candidate(handle):
         return None
@@ -271,6 +274,7 @@ def _claimants(handle) -> List[ManagedJobRuntime]:
     """Return explicit owners followed by runtimes without an owns method."""
     explicit = []
     fallback = []
+    failures = []
     for r in _runtimes:
         owns = getattr(r, 'owns', None)
         if owns is None:
@@ -280,15 +284,26 @@ def _claimants(handle) -> List[ManagedJobRuntime]:
             if owns(handle):
                 explicit.append(r)
         except Exception as e:  # pylint: disable=broad-except
-            logger.debug('ManagedJobRuntime.owns() raised on %s: %s',
-                         type(r).__name__, e)
+            failures.append((type(r).__name__, str(e)))
+    if failures:
+        _warn_ownership(tuple(failures))
+        if not explicit:
+            raise RuntimeError(f'Runtime ownership unavailable: {failures}')
     if len(explicit) > 1:
-        logger.warning(
-            'Multiple ManagedJobRuntime instances claimed the same '
-            'handle: %s. Dispatch will resolve in registration order; '
-            'this is usually a configuration bug.',
-            [type(r).__name__ for r in explicit])
+        _warn_conflict(tuple(type(r).__qualname__ for r in explicit))
     return explicit + fallback
+
+
+@functools.lru_cache(maxsize=64)
+def _warn_ownership(failures):
+    logger.warning('Runtime ownership checks failed: %s', failures)
+
+
+@functools.lru_cache(maxsize=64)
+def _warn_conflict(owners):
+    logger.warning(
+        'Multiple ManagedJobRuntime instances claimed the same '
+        'handle: %s. Dispatch uses registration order.', owners)
 
 
 # Module-level dispatch. Each function returns ``None`` when no
@@ -379,13 +394,16 @@ def on_before_recovery(
         hook = getattr(r, 'on_before_recovery', None)
         if hook is None:
             continue
-        hook(  # pylint: disable=not-callable
-            handle,
-            backend,
-            job_id,
-            task_id,
-            exit_codes=exit_codes,
-            job_id_on_pool_cluster=job_id_on_pool_cluster)
+        try:
+            hook(  # pylint: disable=not-callable
+                handle,
+                backend,
+                job_id,
+                task_id,
+                exit_codes=exit_codes,
+                job_id_on_pool_cluster=job_id_on_pool_cluster)
+        except Exception:  # pylint: disable=broad-except
+            logger.exception('Recovery hook failed for %s', type(r).__name__)
 
 
 def tail_logs(

@@ -633,6 +633,9 @@ async def get_job_status(
     cluster_name: str,
     job_id: Optional[int],
     status_logger: Optional[JobStatusLogger] = None,
+    *,
+    handle: Optional['backends.CloudVmRayResourceHandle'] = None,
+    runtime_checked: bool = False,
 ) -> Tuple[Optional['job_lib.JobStatus'], Optional[str]]:
     """Check the status of the job running on a managed job cluster.
 
@@ -643,6 +646,8 @@ async def get_job_status(
         status_logger: If provided, the result is logged through it, so that
             consecutive identical results are collapsed into one logline. If
             None, every result is logged.
+        handle: Reuse the caller's cluster handle when available.
+        runtime_checked: The caller already asked the runtime for job status.
 
     Returns:
         job_status: The status of the job.
@@ -652,8 +657,9 @@ async def get_job_status(
     # TODO(zhwu, cooperc): Make this get job status aware of cluster status, so
     # that it can exit retry early if the cluster is down.
     # TODO(luca) make this async
-    handle = await asyncio.to_thread(
-        global_user_state.get_handle_from_cluster_name, cluster_name)
+    if handle is None:
+        handle = await asyncio.to_thread(
+            global_user_state.get_handle_from_cluster_name, cluster_name)
 
     def _log(message: str) -> None:
         if status_logger is not None:
@@ -664,7 +670,7 @@ async def get_job_status(
     def _log_job_status(status: Optional['job_lib.JobStatus']) -> None:
         _log('No job found.' if status is None else f'Job status: {status}')
 
-    if managed_job_runtime.is_registered():
+    if not runtime_checked and managed_job_runtime.is_registered():
         result = await asyncio.to_thread(managed_job_runtime.get_job_status,
                                          handle, cluster_name)
         if result is not None:

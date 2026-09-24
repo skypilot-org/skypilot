@@ -1088,17 +1088,22 @@ class JobController:
             # status check and leaves job_status=None for recovery below.
             runtime_recovery = None
             runtime_handle = None
+            runtime_error = None
             if managed_job_runtime.is_registered():
                 runtime_handle = await asyncio.to_thread(
                     global_user_state.get_handle_from_cluster_name,
                     cluster_name)
-                runtime_recovery = await asyncio.to_thread(
-                    managed_job_runtime.get_recovery_status,
-                    runtime_handle,
-                    cluster_name,
-                    job_id=self._job_id,
-                    task_id=task_id,
-                    task=task)
+                try:
+                    runtime_recovery = await asyncio.to_thread(
+                        managed_job_runtime.get_recovery_status,
+                        runtime_handle,
+                        cluster_name,
+                        job_id=self._job_id,
+                        task_id=task_id,
+                        task=task)
+                except Exception as exc:  # pylint: disable=broad-except
+                    runtime_error = common_utils.format_exception(exc)
+                    transient_job_check_error_reason = runtime_error
             if runtime_recovery is not None:
                 job_status = runtime_recovery.job_status
                 status_logger.log('No job found.' if job_status is None else
@@ -1107,7 +1112,7 @@ class JobController:
                     runtime_recovery.reason or 'Runtime job status unavailable'
                     if job_status is None and
                     not runtime_recovery.should_relaunch else None)
-            elif not force_transit_to_recovering:
+            elif not force_transit_to_recovering and runtime_error is None:
                 # NOTE: we do not check cluster status first because race
                 # condition can occur, i.e. cluster can be down during the job
                 # status check.
@@ -1120,6 +1125,7 @@ class JobController:
                             cluster_name,
                             job_id=job_id_on_pool_cluster,
                             status_logger=status_logger,
+                            handle=runtime_handle,
                         ))
                 except exceptions.FetchClusterInfoError as fetch_e:
                     status_logger.reset()
@@ -1161,6 +1167,15 @@ class JobController:
                 status_check_window.record_failure()
             else:
                 status_check_window.reset()
+
+            if runtime_error is not None:
+                if status_check_window.exhausted:
+                    raise RuntimeError(
+                        'Failed to observe runtime after '
+                        f'{status_check_window.summary()}: {runtime_error}')
+                await asyncio.sleep(status_check_window.next_backoff())
+                force_transit_to_recovering = False
+                continue
 
             if runtime_recovery is not None:
                 job_status = runtime_recovery.job_status
@@ -1280,11 +1295,7 @@ class JobController:
             # relaunch a healthy cluster.
             # Refresh may remove a terminated cluster from local state. Keep
             # its identity available to the recovery log-capture hook.
-            recovery_handle = None
-            if managed_job_runtime.is_registered():
-                recovery_handle = await asyncio.to_thread(
-                    global_user_state.get_handle_from_cluster_name,
-                    cluster_name)
+            recovery_handle = runtime_handle
             try:
                 if runtime_recovery is not None:
                     handle = runtime_handle

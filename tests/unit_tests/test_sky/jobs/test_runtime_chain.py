@@ -16,6 +16,8 @@ from sky.jobs import runtime as runtime_chain
 def _reset_runtimes(monkeypatch):
     """Isolate ``_runtimes`` per test so registrations don't leak."""
     monkeypatch.setattr(runtime_chain, '_runtimes', [])
+    runtime_chain._warn_conflict.cache_clear()
+    runtime_chain._warn_ownership.cache_clear()
     yield
 
 
@@ -365,3 +367,30 @@ def test_handle_hooks_fall_through(hook, args, kwargs):
     handle = _make_handle()
     assert getattr(runtime_chain, hook)(handle, *args, **kwargs) is result
     getattr(second, hook).assert_called_once()
+
+
+def test_recovery_hook_failure_does_not_skip_later_runtime():
+    first = _make_runtime('first')
+    second = _make_runtime('second')
+    first.on_before_recovery.side_effect = RuntimeError('capture unavailable')
+    runtime_chain.register(first)
+    runtime_chain.register(second)
+    runtime_chain.on_before_recovery(_make_handle(), None, 1, 0)
+    second.on_before_recovery.assert_called_once()
+
+
+def test_ownership_failure_does_not_defer_to_default():
+    owner = _make_runtime('owner')
+    owner.owns.side_effect = RuntimeError('config unavailable')
+    runtime_chain.register(owner)
+    with pytest.raises(RuntimeError, match='ownership unavailable'):
+        runtime_chain.get_job_status(_make_handle(), 'cluster')
+
+
+def test_conflict_warns_once():
+    runtime_chain.register(_make_runtime('first', owns_return=True))
+    runtime_chain.register(_make_runtime('second', owns_return=True))
+    with mock.patch.object(runtime_chain.logger, 'warning') as warning:
+        for _ in range(3):
+            runtime_chain._claimants(_make_handle())
+    warning.assert_called_once()

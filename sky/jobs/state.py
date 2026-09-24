@@ -3878,9 +3878,7 @@ def observe_runtime_recovery_during_provisioning(
                 return
             cursor.update(restarts=restart_count,
                           user_restarts=max(previous_user_restarts,
-                                            user_restart_count),
-                          pending=cursor.get('pending', False) or
-                          restart_count > observed)
+                                            user_restart_count))
             metadata['runtime_user_restarts'] = (
                 metadata.get('runtime_user_restarts', 0) + user_delta)
             metadata['runtime_recovery'] = cursor
@@ -3961,6 +3959,8 @@ async def observe_runtime_recovery_async(
                 return
             metadata = json.loads(row['metadata'] or '{}')
             cursor = metadata.get('runtime_recovery', {})
+            if cursor.get('runtime_id') != runtime_id:
+                cursor = {}
             previous_user_restarts = (cursor.get('user_restarts', 0)
                                       if cursor.get('runtime_id') == runtime_id
                                       else 0)
@@ -3978,11 +3978,17 @@ async def observe_runtime_recovery_async(
             controller_resumed = (not pending and delta == 0 and
                                   (running or terminal) and row['status']
                                   == ManagedJobStatus.RECOVERING.value)
+            starting = ((running or terminal) and
+                        row['status'] == ManagedJobStatus.STARTING.value)
+            now = time.time()
+            refresh_running = running and (
+                cursor.get('last_running_at') is None or
+                now - cursor['last_running_at'] >= 60)
             if (delta == 0 and user_delta == 0 and not resumed and
-                    not controller_resumed and not queued and not running and
+                    not controller_resumed and not starting and not queued and
+                    not refresh_running and
                     cursor.get('runtime_id') == runtime_id):
                 return
-            now = time.time()
             resume_time = min(now, started_at or now)
             values = {}
             events = []
@@ -4007,7 +4013,18 @@ async def observe_runtime_recovery_async(
                         values['job_duration'] = ((row['job_duration'] or 0) +
                                                   max(0, stopped_at - last))
                 pending = True
-            if pending:
+            if starting:
+                values.update(status=ManagedJobStatus.RUNNING.value,
+                              start_at=row['start_at'] or resume_time,
+                              last_recovered_at=resume_time,
+                              recovering_from_failure=None)
+                if row['recovering_from_failure']:
+                    values['recovery_count'] = (values.get(
+                        'recovery_count', row['recovery_count'] or 0) + 1)
+                events.append((ManagedJobStatus.RUNNING, 'Job has started'))
+                callbacks.append('STARTED')
+                pending = False
+            elif pending:
                 if running or terminal:
                     values.update(status=ManagedJobStatus.RUNNING.value,
                                   last_recovered_at=resume_time,

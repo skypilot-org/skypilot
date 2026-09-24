@@ -483,6 +483,7 @@ class StrategyExecutor:
             # Avoid the infinite loop, if any bug happens.
             job_checking_retry_cnt += 1
             runtime_status = None
+            handle = None
             try:
                 if managed_job_runtime.is_registered():
                     handle = await asyncio.to_thread(
@@ -530,7 +531,9 @@ class StrategyExecutor:
                         await managed_job_utils.get_job_status(
                             self.backend,
                             self.cluster_name,
-                            job_id=self.job_id_on_pool_cluster))
+                            job_id=self.job_id_on_pool_cluster,
+                            handle=handle,
+                            runtime_checked=True))
             except Exception as e:  # pylint: disable=broad-except
                 transient_error_reason = common_utils.format_exception(e)
                 # If any unexpected error happens, retry the job checking
@@ -550,9 +553,6 @@ class StrategyExecutor:
             # Check the job status until it is not in initialized status
             if status is not None and status > job_lib.JobStatus.INIT:
                 if managed_job_runtime.is_registered():
-                    handle = await asyncio.to_thread(
-                        global_user_state.get_handle_from_cluster_name,
-                        self.cluster_name)
                     runtime_submitted_at = await asyncio.to_thread(
                         managed_job_runtime.get_job_submitted_at, handle,
                         self.cluster_name)

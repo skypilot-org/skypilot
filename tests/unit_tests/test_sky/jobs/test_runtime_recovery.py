@@ -99,15 +99,16 @@ async def test_initial_pending_is_not_recovery(database):
     assert task_row(database)['recovery_count'] == 0
 
 
-class StopMonitoring(Exception):
+class StopMonitoring(BaseException):
     pass
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('nodes', [1, 2])
 @pytest.mark.parametrize('forced', [False, True])
+@pytest.mark.parametrize('query_error', [False, True])
 async def test_controller_observes_before_healthy_shortcut_and_refresh(
-        database, monkeypatch, nodes, forced):
+        database, monkeypatch, nodes, forced, query_error):
     controller = controller_module.JobController.__new__(
         controller_module.JobController)
     controller._job_id = 42
@@ -116,7 +117,10 @@ async def test_controller_observes_before_healthy_shortcut_and_refresh(
     observation = runtime.RuntimeRecoveryStatus('allocation-a', 2,
                                                 job_lib.JobStatus.PENDING)
     monkeypatch.setattr(runtime, 'is_registered', lambda: True)
-    hook = mock.Mock(side_effect=[observation, observation, StopMonitoring()])
+    observations = [observation, observation, StopMonitoring()]
+    if query_error:
+        observations.insert(0, RuntimeError('shared storage unavailable'))
+    hook = mock.Mock(side_effect=observations)
     monkeypatch.setattr(runtime, 'get_recovery_status', hook)
     monkeypatch.setattr(controller_module.global_user_state,
                         'get_handle_from_cluster_name', mock.Mock())
@@ -149,8 +153,13 @@ async def test_controller_observes_before_healthy_shortcut_and_refresh(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     'terminal_status', [job_lib.JobStatus.SUCCEEDED, job_lib.JobStatus.FAILED])
+@pytest.mark.parametrize('initial_status', ['STARTING', 'RUNNING'])
+@pytest.mark.parametrize('restarts', [0, 3])
 async def test_controller_fast_terminal_does_not_repeat_user_retry(
-        database, monkeypatch, terminal_status):
+        database, monkeypatch, terminal_status, initial_status, restarts):
+    with database.begin() as connection:
+        connection.execute(
+            state.spot_table.update().values(status=initial_status))
     controller = controller_module.JobController.__new__(
         controller_module.JobController)
     controller._job_id = 42
@@ -165,7 +174,10 @@ async def test_controller_fast_terminal_does_not_repeat_user_retry(
     monkeypatch.setattr(
         runtime, 'get_recovery_status',
         mock.Mock(return_value=runtime.RuntimeRecoveryStatus(
-            'allocation-a', 3, terminal_status, handles_user_retries=True)))
+            'allocation-a',
+            restarts,
+            terminal_status,
+            handles_user_retries=True)))
     monkeypatch.setattr(controller_module.global_user_state,
                         'get_handle_from_cluster_name',
                         mock.Mock(return_value=handle))
@@ -184,7 +196,6 @@ async def test_controller_fast_terminal_does_not_repeat_user_retry(
     monkeypatch.setattr(controller_module.backend_utils,
                         'refresh_cluster_status_handle', refresh)
     monkeypatch.setattr(state, 'set_failed_async', mock.AsyncMock())
-    monkeypatch.setattr(state, 'set_succeeded_async', mock.AsyncMock())
     result = await controller._monitor_one_task_impl(
         0,
         mock.MagicMock(num_nodes=2),
@@ -193,7 +204,7 @@ async def test_controller_fast_terminal_does_not_repeat_user_retry(
         mock.MagicMock(),
         callback_func=mock.AsyncMock())
     assert result == (terminal_status == job_lib.JobStatus.SUCCEEDED)
-    assert task_row(database)['recovery_count'] == 3
+    assert task_row(database)['recovery_count'] == restarts
     executor.should_restart_on_failure.assert_not_called()
     executor.recover.assert_not_called()
     refresh.assert_not_called()
@@ -444,3 +455,66 @@ async def test_provisioning_user_budget_survives_monitor_and_new_allocation(
                   running=True)
     assert await state.get_runtime_user_restarts_async(42, 0) == 3
     assert task_row(database)['recovery_count'] == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('terminal', [False, True])
+async def test_starting_observation_can_finish(database, monkeypatch, terminal):
+    with database.begin() as connection:
+        connection.execute(state.spot_table.update().values(
+            status='STARTING', start_at=None, last_recovered_at=-1))
+    monkeypatch.setattr(state.time, 'time', lambda: 300)
+    await observe(0, running=not terminal, terminal=terminal, started_at=280)
+    row = task_row(database)
+    assert row['status'] == 'RUNNING'
+    assert row['start_at'] == row['last_recovered_at'] == 280
+    await state.set_succeeded_async(42,
+                                    0,
+                                    end_time=290,
+                                    callback_func=mock.AsyncMock())
+    assert task_row(database)['status'] == 'SUCCEEDED'
+
+
+@pytest.mark.asyncio
+async def test_new_allocation_does_not_restore_previous_baseline(
+        database, monkeypatch):
+    monkeypatch.setattr(state.time, 'time', lambda: 200)
+    await observe(0, running=True, started_at=100)
+    await state.set_emergency_recovering_async(42, 0, 'interrupted',
+                                               mock.AsyncMock())
+    monkeypatch.setattr(state.time, 'time', lambda: 400)
+    await observe(0, runtime_id='allocation-b', running=True, started_at=350)
+    row = task_row(database)
+    assert row['job_duration'] == 100
+    assert row['last_recovered_at'] == 350
+
+
+@pytest.mark.asyncio
+async def test_healthy_observation_throttles_metadata_writes(
+        database, monkeypatch):
+    monkeypatch.setattr(state.time, 'time', lambda: 200)
+    await observe(0, running=True)
+    before = task_row(database)['metadata']
+    monkeypatch.setattr(state.time, 'time', lambda: 205)
+    await observe(0, running=True)
+    assert task_row(database)['metadata'] == before
+    monkeypatch.setattr(state.time, 'time', lambda: 260)
+    await observe(0, running=True)
+    assert json.loads(task_row(
+        database)['metadata'])['runtime_recovery']['last_running_at'] == 260
+
+
+@pytest.mark.asyncio
+async def test_provisioning_restarts_do_not_emit_recovered_after_start(
+        database):
+    with database.begin() as connection:
+        connection.execute(state.spot_table.update().values(status='STARTING'))
+    state.observe_runtime_recovery_during_provisioning(42, 0, 'allocation-a', 1)
+    await state.set_started_async(42, 0, 300, mock.AsyncMock())
+    with database.connect() as connection:
+        before = connection.execute(state.job_events_table.select()).all()
+    await observe(1, running=True, started_at=310)
+    assert task_row(database)['last_recovered_at'] == 300
+    with database.connect() as connection:
+        assert connection.execute(
+            state.job_events_table.select()).all() == before
