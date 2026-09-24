@@ -3962,6 +3962,43 @@ async def set_recovering_async(
     await callback_func('RECOVERING')
 
 
+_RUNTIME_ALLOCATIONS_KEY = 'runtime_allocations'
+# Bounds the per-task history; far above the allocations a task plausibly uses.
+_MAX_RUNTIME_ALLOCATIONS = 50
+
+
+def _record_runtime_allocation(
+        metadata: Dict[str, Any],
+        allocation: Optional[managed_job_runtime.RuntimeAllocation]) -> bool:
+    """Append a newly reported allocation to the task's history, oldest first.
+
+    Returns whether the history changed.
+    """
+    if allocation is None:
+        return False
+    entry = dataclasses.asdict(allocation)
+    history = metadata.get(_RUNTIME_ALLOCATIONS_KEY, [])
+    if entry in history:
+        return False
+    metadata[_RUNTIME_ALLOCATIONS_KEY] = (history +
+                                          [entry])[-_MAX_RUNTIME_ALLOCATIONS:]
+    return True
+
+
+def runtime_allocations(
+    metadata: Optional[Dict[str, Any]]
+) -> List[managed_job_runtime.RuntimeAllocation]:
+    """Return the allocations a task's runtimes reported, oldest first.
+
+    metadata is a task record's parsed metadata, as returned by
+    get_managed_job_tasks.
+    """
+    return [
+        managed_job_runtime.RuntimeAllocation(**entry)
+        for entry in (metadata or {}).get(_RUNTIME_ALLOCATIONS_KEY, [])
+    ]
+
+
 @dataclasses.dataclass
 class _RuntimeObservationPlan:
     values: Dict[str, Any]
@@ -3994,6 +4031,8 @@ def _plan_runtime_observation(
         return None
     runtime_id = observation.runtime_id
     metadata = json.loads(row['metadata'] or '{}')
+    allocation_recorded = _record_runtime_allocation(metadata,
+                                                     observation.allocation)
     cursor = metadata.get('runtime_recovery', {})
     same_runtime = cursor.get('runtime_id') == runtime_id
     if not same_runtime:
@@ -4026,7 +4065,7 @@ def _plan_runtime_observation(
                            default_reason))
 
     if provisioning:
-        if delta == 0 and user_delta == 0:
+        if delta == 0 and user_delta == 0 and not allocation_recorded:
             return None
         cursor = dict(cursor, runtime_id=runtime_id, restarts=restart_count)
     else:
@@ -4044,7 +4083,8 @@ def _plan_runtime_observation(
                                        now - cursor['last_running_at'] >= 60)
         if (delta == 0 and user_delta == 0 and not resumed and
                 not controller_resumed and not starting and not queued and
-                not refresh_running and not nodes_changed and same_runtime):
+                not refresh_running and not nodes_changed and same_runtime and
+                not allocation_recorded):
             return None
         resume_time = min(now, observation.started_at or now)
         if delta:
