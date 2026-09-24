@@ -427,3 +427,29 @@ def test_the_reserved_range_is_part_of_the_on_cluster_format():
     do not update it to match.
     """
     assert (ports.PORT_RANGE_START, ports.PORT_RANGE_END) == (20000, 29999)
+
+
+def test_a_port_clash_tells_the_user_to_retry_before_telling_them_to_debug():
+    """The recovery action comes first, because it is what almost always works.
+
+    A block is random, so a clash is rarely hit twice -- but SkyPilot does not
+    retry this by itself: the failure surfaces during runtime setup, which
+    raises rather than re-provisioning, so the user has to launch again. An
+    error that opens with "a node daemon, a pod from an older version, or your
+    NodePort range" sends them to inspect a node for something that one more
+    launch would have stepped over.
+    """
+    import socket
+
+    from sky.provision.kubernetes import host_network_probe
+
+    held = socket.socket()
+    held.bind(('0.0.0.0', 0))
+    try:
+        with pytest.raises(RuntimeError) as excinfo:
+            host_network_probe._verify_free(
+                {'node_manager': held.getsockname()[1]})
+    finally:
+        held.close()
+    message = str(excinfo.value)
+    assert message.index('Launching again') < message.index('node daemon')

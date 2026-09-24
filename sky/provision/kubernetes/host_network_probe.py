@@ -126,11 +126,17 @@ def _verify_free(ports: Dict[str, int]) -> List[socket.socket]:
             sock.close()
             raise RuntimeError(
                 f'Assigned host port {port} ({name}) is already in use on '
-                f'this node: {e}. The Kubernetes scheduler only accounts for '
-                'ports a pod *declares*, so this is held by something that '
-                'did not declare one -- a node daemon, a SkyPilot pod created '
-                'before host ports moved into the pod spec, or an overlap '
-                'with the cluster\'s NodePort range.') from e
+                f'this node: {e}.\n'
+                'Launching again assigns a different block and usually '
+                'succeeds -- blocks are chosen at random, so a clash is '
+                'rarely hit twice.\n'
+                'If it keeps failing, something on this node holds a port in '
+                'the range SkyPilot reserves for host-networked pods. The '
+                'Kubernetes scheduler only accounts for ports a pod '
+                '*declares*, so such a holder is invisible to it: a node '
+                'daemon, a SkyPilot pod created before host ports moved into '
+                'the pod spec, or an overlap with the cluster\'s NodePort '
+                'range.') from e
         held.append(sock)
     return held
 

@@ -74,6 +74,38 @@ class TestRayStartCommands:
                 f'{instance_setup._HOST_NETWORK_PROBE_TARGET}') in cmd
         assert '--mode worker' in cmd
 
+    def test_no_restart_worker_probes_only_when_it_starts_ray(self):
+        """The probe must sit inside the already-running guard, not before it.
+
+        The probe asserts the assigned ports are free *before ray binds
+        them*. With no_restart, ray may already be up from an earlier
+        attempt and holding exactly those ports -- so a probe outside the
+        guard fails against our own raylet, and the retry can never
+        succeed. Observed on the recovery path: the worker rejoined and
+        the cluster was healthy, but `sky launch` reported failure.
+
+        Asserted structurally rather than by substring order: the probe
+        has to be inside the `|| { ... }` that also holds `ray start`,
+        which is the property, whatever the command's spelling.
+        """
+        cmd = instance_setup.ray_worker_start_command(custom_resource=None,
+                                                      custom_ray_options=None,
+                                                      no_restart=True)
+        guard, _, guarded = cmd.partition('|| {')
+        assert guarded, 'expected the already-running guard for no_restart'
+        assert '--mode worker' in guarded
+        assert '--mode worker' not in guard
+
+    def test_restarting_worker_still_probes_unconditionally(self):
+        """Without no_restart the command runs `ray stop` first, so the
+        ports really are free and the assertion is meaningful. Moving the
+        probe for the guarded case must not disarm it here."""
+        cmd = instance_setup.ray_worker_start_command(custom_resource=None,
+                                                      custom_ray_options=None,
+                                                      no_restart=False)
+        assert '--mode worker' in cmd
+        assert '|| {' not in cmd
+
     def test_probe_command_has_no_unencoded_newlines(self):
         # Newlines in the bash command land at column 0 of the rendered
         # cluster YAML and break block-scalar parsing — the b64 payload
