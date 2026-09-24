@@ -39,13 +39,12 @@ from sky.provision.kubernetes import host_network_probe
 # per-context chain as `namespace` and `remote_identity`, workspace override
 # included; there is nothing special about it.
 #
-# Changing it is not free. `ports_from_pod` uses the range to tell our block
-# apart from a user's pod_config ports, so a context whose range moves reads
-# every existing pod's block as "not ours" and hands out new ones while the
-# pods keep listening on the old. Widening is not exempt either:
-# `apply_to_pod_spec` refuses a user's pod_config port inside the range, so
-# widening turns a port that launched yesterday into a launch-time error.
-# Change it with that context's clusters drained.
+# Changing it is not free: `ports_from_pod` reads only in-range hostPorts as
+# ours. Moving or narrowing it puts an existing block (partly) outside --
+# wholly outside reads as "no block" (SSH falls back to 22, a relaunch
+# re-allocates under a live head), straddling raises. Widening keeps every
+# block, but a user pod_config hostPort in the newly covered band then breaks
+# every read of that cluster, and is refused at launch. Drain first.
 _RANGE_KEY = 'host_network_port_range'
 _DEFAULT_RANGE = (20000, 29999)
 

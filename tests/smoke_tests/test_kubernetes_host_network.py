@@ -322,6 +322,14 @@ def test_kubernetes_host_network_block_shape():
             '| tr " " "\\n" | grep -v "^$" | '
             'awk -F: \'$1!=$2 {print "MISMATCH",$0; bad=1} '
             'END {exit bad+0}\'',
+            # The head's GCS env is the first port of its declared block.
+            # This pair is what a restarted container reads its ports from, so
+            # it is what keeps them stable across a container restart.
+            _RESOLVE_PODC.format(name=name) + ' && ' +
+            f'GCS=$({_head_env("SKYPILOT_RAY_PORT")}) && '
+            f'FIRST=$({_HEAD_PORTS} | cut -d" " -f1) && '
+            'echo "gcs_env=$GCS first_port=$FIRST" && '
+            '[ -n "$GCS" ] && [ "$GCS" = "$FIRST" ]',
         ],
         teardown=f'sky down -y {name}; rm -f {cfg}',
         timeout=smoke_tests_utils.get_timeout('kubernetes'),
