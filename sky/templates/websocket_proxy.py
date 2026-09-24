@@ -35,15 +35,19 @@ MAX_UNANSWERED_PINGS = 100
 # insufficient when many concurrent SSH connections are established under load,
 # causing intermittent "timed out during opening handshake" errors.
 OPEN_TIMEOUT_SECONDS = 60
+# How long a redirect target may stay silent before we fall back. sshd sends
+# its banner at once; a healthy target that cannot serve closes well within it.
+FIRST_DATA_TIMEOUT_SECONDS = 30
 
 
 class _RedirectTargetFailed(Exception):
     """The redirect target could not serve this session; fall back.
 
-    Raised when it refuses the handshake, or accepts and closes before
-    sending anything back. ``sent`` is what was already read from stdin and
-    sent to it -- ssh writes its version banner first, before hearing
-    anything -- so the fallback has to replay it: stdin cannot be read twice.
+    Raised when it refuses the handshake, or accepts and then closes or stays
+    silent before sending anything back. ``sent`` is what was already read
+    from stdin and sent to it -- ssh writes its version banner first, before
+    hearing anything -- so the fallback has to replay it: stdin cannot be read
+    twice.
     """
 
     def __init__(self, reason: str, sent: bytes = b'') -> None:
@@ -110,9 +114,12 @@ async def main(
                            ping_interval=None,
                            open_timeout=OPEN_TIMEOUT_SECONDS,
                            additional_headers=headers) as websocket:
-            session = await run_websocket_proxy(websocket,
-                                                timestamps_supported,
-                                                replay=replay)
+            session = await run_websocket_proxy(
+                websocket,
+                timestamps_supported,
+                replay=replay,
+                first_data_timeout=(FIRST_DATA_TIMEOUT_SECONDS
+                                    if redirect_target else None))
     except websockets.exceptions.InvalidStatus as e:
         if redirect_target:
             raise _RedirectTargetFailed(f'refused: {e}') from e
@@ -123,14 +130,16 @@ async def main(
             print(f'Error ssh into cluster: {e}', file=sys.stderr)
         sys.exit(1)
     if redirect_target and not session.got_data:
-        raise _RedirectTargetFailed('closed before sending anything',
+        raise _RedirectTargetFailed('served nothing',
                                     bytes(session.sent_before_data))
 
 
-async def run_websocket_proxy(websocket: ClientConnection,
-                              timestamps_supported: bool,
-                              first_message: Optional[bytes] = None,
-                              replay: bytes = b'') -> _Session:
+async def run_websocket_proxy(
+        websocket: ClientConnection,
+        timestamps_supported: bool,
+        first_message: Optional[bytes] = None,
+        replay: bytes = b'',
+        first_data_timeout: Optional[float] = None) -> _Session:
     session = _Session()
     if os.isatty(sys.stdin.fileno()):
         # pylint: disable=import-outside-toplevel
@@ -161,7 +170,8 @@ async def run_websocket_proxy(websocket: ClientConnection,
         output = asyncio.create_task(
             websocket_to_stdout(websocket, stdio.writer, timestamps_supported,
                                 last_ping_time_dict, websocket_closed_event,
-                                websocket_lock, first_message, session))
+                                websocket_lock, first_message, session,
+                                first_data_timeout))
         others = [
             asyncio.create_task(
                 stdin_to_websocket(stdio.reader, websocket,
@@ -269,7 +279,11 @@ async def websocket_to_stdout(websocket: ClientConnection,
                               websocket_closed_event: asyncio.Event,
                               websocket_lock: asyncio.Lock,
                               first_message: Optional[bytes] = None,
-                              session: Optional[_Session] = None):
+                              session: Optional[_Session] = None,
+                              first_data_timeout: Optional[float] = None):
+    loop = asyncio.get_running_loop()
+    deadline = (None if first_data_timeout is None else loop.time() +
+                first_data_timeout)
     try:
         # If we already received a first message (e.g. from redirect check),
         # process it before entering the recv loop.
@@ -278,6 +292,14 @@ async def websocket_to_stdout(websocket: ClientConnection,
             if pending_message is not None:
                 message = pending_message
                 pending_message = None
+            elif (deadline is not None and session is not None and
+                  not session.got_data):
+                # A deadline, not a per-recv timeout: PONGs are not data.
+                try:
+                    message = await asyncio.wait_for(websocket.recv(),
+                                                     deadline - loop.time())
+                except asyncio.TimeoutError:
+                    return
             else:
                 message = await websocket.recv()
             if (timestamps_supported and len(message) > 0 and

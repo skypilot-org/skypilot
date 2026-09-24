@@ -92,10 +92,16 @@ class _Servers:
         self.target_received.append((await ws.recv())[1:])
         if self.target_mode == 'serve':
             await ws.send(_DATA + _TARGET_BANNER)
+        elif self.target_mode == 'silent':
+            await ws.wait_closed()
+            return
         await ws.close(1011)
 
 
-def _run_client(api_port: int, expect: bytes, timeout: float = 30) -> bytes:
+def _run_client(api_port: int,
+                expect: bytes,
+                timeout: float = 30,
+                script: pathlib.Path = _SCRIPT) -> bytes:
     """Run the proxy as ssh does: write its banner, keep stdin open until the
     server's banner arrives, then close stdin and let the proxy exit.
 
@@ -109,7 +115,7 @@ def _run_client(api_port: int, expect: bytes, timeout: float = 30) -> bytes:
     proc = subprocess.Popen(
         [
             sys.executable,
-            str(_SCRIPT), f'http://127.0.0.1:{api_port}', 'c',
+            str(script), f'http://127.0.0.1:{api_port}', 'c',
             'kubernetes-pod-ssh-proxy'
         ],
         stdin=subprocess.PIPE,
@@ -142,6 +148,21 @@ def test_a_failed_redirect_falls_back_and_replays_what_ssh_sent(
     monkeypatch.setenv('HOME', str(tmp_path))
     with _Servers(mode) as servers:
         out = _run_client(servers.api_port, _FALLBACK_BANNER)
+    assert out == _FALLBACK_BANNER
+    assert servers.fallback_received == [_CLIENT_BANNER]
+
+
+def test_a_silent_redirect_target_falls_back(tmp_path, monkeypatch):
+    """A wedged target accepts and never sends or closes."""
+    monkeypatch.setenv('HOME', str(tmp_path))
+    source = _SCRIPT.read_text()
+    assert 'FIRST_DATA_TIMEOUT_SECONDS = 30\n' in source
+    script = tmp_path / 'websocket_proxy.py'
+    script.write_text(
+        source.replace('FIRST_DATA_TIMEOUT_SECONDS = 30\n',
+                       'FIRST_DATA_TIMEOUT_SECONDS = 1\n'))
+    with _Servers('silent') as servers:
+        out = _run_client(servers.api_port, _FALLBACK_BANNER, script=script)
     assert out == _FALLBACK_BANNER
     assert servers.fallback_received == [_CLIENT_BANNER]
 
