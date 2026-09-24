@@ -22,7 +22,11 @@ SEP = r'\x1f'
 
 _INFO_NODES_CMD = (f'sinfo -h --Node -o '
                    f'"%N{SEP}%t{SEP}%G{SEP}%c{SEP}%m{SEP}%P"')
-_ALL_NODE_DETAILS_CMD = 'scontrol show node -o'
+# Not `-o`: the one-line form runs the free-text fields below into the
+# attributes that follow them, with nothing to mark where they end.
+_ALL_NODE_DETAILS_CMD = 'scontrol show node'
+# Node fields holding free text with spaces, each printed on its own line.
+_NODE_FREE_TEXT_ATTRS = frozenset({'Reason', 'Comment', 'Extra', 'OS'})
 _ALL_JOBS_INFO_CMD = (f'squeue -h --states=running,completing '
                       f'-o "%i{SEP}%j{SEP}%u{SEP}%N{SEP}%b"')
 _PARTITIONS_INFO_CMD = 'scontrol show partitions -o'
@@ -150,17 +154,30 @@ def _parse_default_time(line: str) -> Optional[str]:
 
 
 def _parse_scontrol_node_output(output: str) -> Dict[str, str]:
-    """Parses the key=value output of 'scontrol show node'."""
-    node_info = {}
-    # Split by space, handling values that might have spaces
-    # if quoted. This is simplified; scontrol can be complex.
-    parts = output.split()
-    for part in parts:
-        if '=' in part:
-            key, value = part.split('=', 1)
-            # Simple quote removal, might need refinement
-            value = value.strip('\'"')
-            node_info[key] = value
+    """Parses the key=value output of 'scontrol show node'.
+
+    Most attributes are space-separated ``Key=Value`` pairs, but a few hold
+    free text with spaces: ``Reason=Kill task failed [root@...]``,
+    ``OS=Linux 6.8.0 #32-Ubuntu SMP ...``, ``Comment``, and ``Extra``, which
+    sites use for JSON. Nothing quotes them, so on a single line they cannot
+    be told apart from the attributes that follow. scontrol gives each of
+    them a line of its own, so a line that starts with one of those names
+    holds that value to the end of the line.
+    """
+    node_info: Dict[str, str] = {}
+    for line in output.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        name = line.split('=', 1)[0] if '=' in line else None
+        if name in _NODE_FREE_TEXT_ATTRS:
+            node_info[name] = line.split('=', 1)[1].strip().strip('\'"')
+            continue
+        for part in line.split():
+            if '=' in part:
+                key, value = part.split('=', 1)
+                # Simple quote removal, might need refinement
+                node_info[key] = value.strip('\'"')
     return node_info
 
 
@@ -186,12 +203,22 @@ def _parse_info_nodes_output(stdout: str) -> List[NodeInfo]:
 
 
 def _parse_all_node_details_output(stdout: str) -> Dict[str, Dict[str, str]]:
-    details: Dict[str, Dict[str, str]] = {}
+    """One entry per node from `scontrol show node`.
+
+    Each node starts a block at an unindented ``NodeName=``; its remaining
+    attributes are indented continuation lines. A one-line-per-node output
+    (``scontrol show node -o``) is a block of one line and still parses,
+    minus the free-text handling that format cannot express.
+    """
+    blocks: List[List[str]] = []
     for line in stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        node_info = _parse_scontrol_node_output(line)
+        if line.startswith('NodeName='):
+            blocks.append([line])
+        elif blocks:
+            blocks[-1].append(line)
+    details: Dict[str, Dict[str, str]] = {}
+    for block in blocks:
+        node_info = _parse_scontrol_node_output('\n'.join(block))
         node_name = node_info.get('NodeName')
         if node_name:
             details[node_name] = node_info
@@ -761,10 +788,11 @@ class SlurmClient:
     def get_all_node_details(self) -> Dict[str, Dict[str, str]]:
         """Get detailed attributes for every node in a single scontrol call.
 
-        Uses ``scontrol show node -o`` (one line per node) so per-node
-        attributes that sinfo's format codes cannot express (CPUAlloc,
-        AllocMem, FreeMem, CPULoad, GresUsed, ...) are available without a
-        round-trip per node.
+        Uses ``scontrol show node`` so per-node attributes that sinfo's
+        format codes cannot express (CPUAlloc, AllocMem, FreeMem, CPULoad,
+        GresUsed, ...) are available without a round-trip per node. Not the
+        ``-o`` form: it puts the free-text fields on the same line as
+        everything else with nothing to mark where they end.
 
         Returns:
             A dictionary mapping node name to its attribute dictionary.

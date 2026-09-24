@@ -1303,6 +1303,13 @@ function JobDetailsContent({
     return jobData.status;
   }, [allTasks, jobData.status]);
 
+  // The connector only sets statusTooltip when it is meaningful (PENDING
+  // reason, FAILED* attribution), but only show it when the aggregated
+  // status matches the row's own status so a tooltip computed for another
+  // state is not shown.
+  const statusTooltip =
+    computedStatus === jobData.status ? jobData.statusTooltip : null;
+
   const toggleYamlExpanded = () => {
     setIsYamlExpanded(!isYamlExpanded);
   };
@@ -1713,20 +1720,18 @@ function JobDetailsContent({
             return (
               <PluginSlot
                 name="jobs.detail.status.badge"
-                context={jobData}
+                // The slot must see the status the fallback renders:
+                // jobData is the first task's row, not the group's
+                // aggregate.
+                context={{
+                  ...jobData,
+                  status: computedStatus,
+                  statusTooltip,
+                }}
                 fallback={
                   <StatusBadge
                     status={computedStatus}
-                    statusTooltip={
-                      // The connector only sets statusTooltip when it is
-                      // meaningful (PENDING reason, FAILED* attribution),
-                      // but only pass it through when the aggregated
-                      // status matches the connector's row status so a
-                      // tooltip computed for another state is not shown.
-                      computedStatus === jobData.status
-                        ? jobData.statusTooltip
-                        : null
-                    }
+                    statusTooltip={statusTooltip}
                   />
                 }
               />
