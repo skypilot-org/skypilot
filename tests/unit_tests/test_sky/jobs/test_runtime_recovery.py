@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from sky.jobs import controller as controller_module
+from sky.jobs import recovery_strategy
 from sky.jobs import runtime
 from sky.jobs import state
 from sky.provision import observation as provision_observation
@@ -645,3 +646,93 @@ def test_provisioning_observations_reach_the_managed_task(database):
     with pytest.raises(ValueError, match='No runtime observation sink'):
         provision_observation.report({'kind': 'unknown'},
                                      runtime.RuntimeObservation('a', 1, None))
+
+
+def _monitor_controller(monkeypatch, handle, hook):
+    controller = controller_module.JobController.__new__(
+        controller_module.JobController)
+    controller._job_id = 42
+    controller._pool = None
+    controller._backend = mock.MagicMock()
+    controller._cleanup_cluster = mock.AsyncMock()
+    controller._update_live_log_links = mock.AsyncMock(return_value=True)
+    controller._get_cluster_job_exit_codes = mock.AsyncMock(return_value=[7])
+    controller.download_log_and_stream = mock.Mock()
+    monkeypatch.setattr(runtime, 'is_registered', lambda: True)
+    monkeypatch.setattr(runtime, 'get_recovery_status', hook)
+    monkeypatch.setattr(runtime, 'on_before_recovery', mock.Mock())
+    monkeypatch.setattr(controller_module.global_user_state,
+                        'get_handle_from_cluster_name',
+                        mock.Mock(return_value=handle))
+    monkeypatch.setattr(controller_module.global_user_state,
+                        'get_cluster_events', mock.Mock(return_value=[]))
+    monkeypatch.setattr(controller_module.ExternalFailureSource,
+                        'is_registered', lambda: False)
+    monkeypatch.setattr(controller_module.asyncio, 'sleep', mock.AsyncMock())
+    monkeypatch.setattr(controller_module.backend_utils,
+                        'async_check_network_connection', mock.AsyncMock())
+    monkeypatch.setattr(controller_module.managed_job_utils, 'get_job_status',
+                        mock.AsyncMock(return_value=(None, None)))
+    monkeypatch.setattr(controller_module.managed_job_utils,
+                        'try_to_get_job_end_time',
+                        mock.Mock(return_value=12345))
+    monkeypatch.setattr(controller_module.backend_utils,
+                        'refresh_cluster_status_handle',
+                        mock.Mock(return_value=(None, None)))
+    return controller
+
+
+@pytest.mark.asyncio
+async def test_forced_resume_survives_runtime_observation_error(
+        database, monkeypatch):
+    with database.begin() as connection:
+        connection.execute(state.spot_table.update().values(status='STARTING'))
+    hook = mock.Mock(side_effect=[RuntimeError('storage unavailable'), None])
+    controller = _monitor_controller(monkeypatch, None, hook)
+    executor = mock.MagicMock()
+    executor.recover = mock.AsyncMock(side_effect=StopMonitoring())
+    with pytest.raises(StopMonitoring):
+        await controller._monitor_one_task_impl(
+            0,
+            mock.MagicMock(num_nodes=1),
+            'cluster',
+            executor,
+            mock.MagicMock(),
+            callback_func=mock.AsyncMock(),
+            force_transit_to_recovering=True)
+    assert hook.call_count == 2
+    executor.recover.assert_awaited_once_with()
+    assert task_row(database)['status'] == 'STARTING'
+
+
+@pytest.mark.asyncio
+async def test_restart_limit_counts_live_runtime_user_retries(
+        database, monkeypatch):
+    hook = mock.Mock(
+        return_value=runtime.RuntimeObservation('allocation-a',
+                                                0,
+                                                job_lib.JobStatus.FAILED,
+                                                user_restart_count=2,
+                                                handles_user_retries=False))
+    controller = _monitor_controller(monkeypatch, mock.MagicMock(), hook)
+    set_failed = mock.AsyncMock()
+    monkeypatch.setattr(state, 'set_failed_async', set_failed)
+    executor = recovery_strategy.StrategyExecutor.__new__(
+        recovery_strategy.StrategyExecutor)
+    executor.max_restarts_on_errors = 2
+    executor.recover_on_exit_codes = []
+    executor.restart_cnt_on_failure = 0
+    executor.runtime_restart_cnt_on_failure = 0
+    executor.job_id = 42
+    executor.task_id = 0
+    executor.recover = mock.AsyncMock(side_effect=StopMonitoring())
+    result = await controller._monitor_one_task_impl(
+        0,
+        mock.MagicMock(num_nodes=1),
+        'cluster',
+        executor,
+        mock.MagicMock(),
+        callback_func=mock.AsyncMock())
+    assert result is False
+    set_failed.assert_awaited_once()
+    executor.recover.assert_not_called()
