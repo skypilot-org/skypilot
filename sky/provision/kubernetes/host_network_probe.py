@@ -25,7 +25,7 @@ import os
 import socket
 import sys
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 # SKYPILOT_RAY_PORT is the head's GCS port; a worker is handed the *head's*
 # value here, because that is what it must dial to join.
@@ -109,6 +109,53 @@ def _assigned_ports(names: List[str]) -> Dict[str, int]:
     return ports
 
 
+_EPHEMERAL_RANGE_PATH = '/proc/sys/net/ipv4/ip_local_port_range'
+
+
+def _node_ephemeral_range() -> Optional[Tuple[int, int]]:
+    """The node's ephemeral port range, or None if it cannot be read.
+
+    Valid only from a hostNetwork pod: the sysctl is per network namespace,
+    so an ordinary pod reports its own namespace's default (32768-60999)
+    rather than the node's. Measured on one node both ways: 10240-65535
+    with hostNetwork, 32768-60999 without.
+
+    No Kubernetes API call -- a file read, which a zero-permission pod can
+    still do.
+    """
+    try:
+        with open(_EPHEMERAL_RANGE_PATH, encoding='utf-8') as f:
+            lo, hi = (int(x) for x in f.read().split()[:2])
+        return lo, hi
+    except Exception:  # pylint: disable=broad-except
+        # Non-Linux, a masked /proc, or an unexpected format. The caller is
+        # already reporting a failure; losing the hint must not replace it.
+        return None
+
+
+def _clash_hint(port: int) -> str:
+    """Why this clash happened, in the terms that decide what to do next.
+
+    Three causes share one symptom, and they need different responses:
+    relaunch, reconfigure the range, or go inspect the node. Without this
+    the message lists all three and the reader has to guess.
+    """
+    rng = _node_ephemeral_range()
+    if rng is None:
+        return ''
+    lo, hi = rng
+    if lo <= port <= hi:
+        return (f'\nThis node\'s ephemeral port range is {lo}-{hi}, which '
+                f'covers port {port}: the kernel hands ports from that range '
+                'to outbound connections, so clashes here are a matter of how '
+                'busy the node is rather than a fixed obstacle. Relaunching '
+                'still helps, but a range outside the ephemeral pool avoids '
+                'the contention entirely.')
+    return (f'\nThis node\'s ephemeral port range is {lo}-{hi}, which does '
+            f'NOT cover port {port}, so something on the node is holding it '
+            'rather than the kernel having handed it out.')
+
+
 def _verify_free(ports: Dict[str, int]) -> List[socket.socket]:
     """Bind every assigned port, proving it is free.
 
@@ -136,7 +183,7 @@ def _verify_free(ports: Dict[str, int]) -> List[socket.socket]:
                 '*declares*, so such a holder is invisible to it: a node '
                 'daemon, a SkyPilot pod created before host ports moved into '
                 'the pod spec, or an overlap with the cluster\'s NodePort '
-                'range.') from e
+                'range.' + _clash_hint(port)) from e
         held.append(sock)
     return held
 

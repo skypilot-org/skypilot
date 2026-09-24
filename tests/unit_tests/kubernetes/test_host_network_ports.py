@@ -453,3 +453,40 @@ def test_a_port_clash_tells_the_user_to_retry_before_telling_them_to_debug():
         held.close()
     message = str(excinfo.value)
     assert message.index('Launching again') < message.index('node daemon')
+
+
+class TestClashHintSeparatesTheCauses:
+    """One symptom, three causes, three different things for the user to do.
+
+    A port inside the node's ephemeral range was handed out by the kernel --
+    load-dependent, and the durable fix is a range outside that pool. A port
+    outside it is held by something on the node, which is a different
+    investigation. The message used to list both plus a third and leave the
+    reader to guess.
+
+    The range is per netns, so this is only meaningful from a hostNetwork
+    pod; measured on one node as 10240-65535 with hostNetwork and
+    32768-60999 without.
+    """
+
+    def _hint(self, rng, port):
+        from sky.provision.kubernetes import host_network_probe
+        with mock.patch.object(host_network_probe,
+                               '_node_ephemeral_range',
+                               return_value=rng):
+            return host_network_probe._clash_hint(port)
+
+    def test_inside_the_pool_points_at_the_range(self):
+        hint = self._hint((10240, 65535), 25000)
+        assert 'covers port 25000' in hint
+        assert 'does NOT cover' not in hint
+
+    def test_outside_the_pool_points_at_the_node(self):
+        hint = self._hint((32768, 60999), 25000)
+        assert 'does NOT cover' in hint
+        assert 'holding it' in hint
+
+    def test_an_unreadable_range_costs_nothing(self):
+        """The caller is already reporting a failure; losing the hint must
+        not replace it with an exception."""
+        assert self._hint(None, 25000) == ''
