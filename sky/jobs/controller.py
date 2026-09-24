@@ -201,9 +201,13 @@ async def _record_runtime_placement(
     if (not observation.nodes or
             observation.phase != managed_job_runtime.RuntimePhase.RUNNING):
         return
-    if (previous is not None and previous.baseline(observation.runtime_id).nodes
-            == observation.nodes):
-        return
+    if previous is not None:
+        baseline = previous.baseline(observation.runtime_id)
+        # The planner drops a stale observation; its nodes must not overwrite
+        # the placement of the persisted cursor.
+        if (observation.restart_count < baseline.restart_count or
+                baseline.nodes == observation.nodes):
+            return
     resources = getattr(handle, 'launched_resources', None)
     cloud = getattr(resources, 'cloud', None)
     await asyncio.to_thread(managed_job_state.set_job_infra,

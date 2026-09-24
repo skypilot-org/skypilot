@@ -585,6 +585,13 @@ async def test_placement_is_recorded_once_per_running_node_set(monkeypatch):
                                    1,
                                    job_lib.JobStatus.PENDING,
                                    nodes=['node-b']))
+    await record(
+        42, handle, runtime.RuntimeCursor('allocation-a', 2,
+                                          nodes=['node-new']),
+        runtime.RuntimeObservation('allocation-a',
+                                   1,
+                                   job_lib.JobStatus.RUNNING,
+                                   nodes=['node-old']))
     assert infra.call_count == 2
     infra.assert_called_with(42,
                              cloud='Slurm',
