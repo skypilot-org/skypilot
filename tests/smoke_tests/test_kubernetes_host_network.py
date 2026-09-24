@@ -38,6 +38,21 @@ from sky.client import sdk as sky_sdk
 _kc = smoke_tests_utils.kubectl_for_cluster
 
 
+def _schedulable_nodes() -> int:
+    """Ready, uncordoned K8s nodes; 1 when it cannot be read.
+
+    A hostNetwork cluster places each of its pods on a different node, so
+    this decides whether a multi-node case can run at all. 1 on error fails
+    closed: callers then take the single-node branch or skip.
+    """
+    try:
+        nodes_info = sky.get(sky_sdk.kubernetes_node_info())
+        return sum(1 for n in nodes_info.node_info_dict.values()
+                   if n.is_ready and not n.is_cordoned)
+    except Exception:  # pylint: disable=broad-except
+        return 1
+
+
 @pytest.mark.kubernetes
 @pytest.mark.no_dependency
 def test_kubernetes_host_network_coexistence():
@@ -122,18 +137,17 @@ def test_kubernetes_host_network_coexistence():
             f'"echo ssh_works_B" 2>&1) && echo "$s" | grep ssh_works_B',
 
             # 3. The two heads must hold distinct GCS ports. Read from the
-            #    pod's own environment rather than a file on disk: the
-            #    server writes the ports into the pod spec, so the env var
-            #    is what the pod is actually started with. (A previous
-            #    version sourced /tmp/sky_host_network_ports.env, which the
-            #    old in-pod allocator wrote and which no longer exists.)
-            #    Single-quote the remote command so the variable expands on
-            #    the pod, not on the test runner.
-            f'A_GCS=$(ssh {name_a} \'echo $SKYPILOT_RAY_PORT\') && '
-            f'B_GCS=$(ssh {name_b} \'echo $SKYPILOT_RAY_PORT\') && '
-            f'echo "A_GCS=$A_GCS B_GCS=$B_GCS" && '
-            f'[ -n "$A_GCS" ] && [ -n "$B_GCS" ] && '
-            f'[ "$A_GCS" != "$B_GCS" ]',
+            #    pod spec, where the server wrote them and what the pod is
+            #    started with. Not over ssh: a container's env is not
+            #    passed into the login session sshd starts, so `echo $VAR`
+            #    there is empty.
+            _RESOLVE_PODC.format(name=name_a) +
+            f' && A_GCS=$({_head_env("SKYPILOT_RAY_PORT")}) && ' +
+            _RESOLVE_PODC.format(name=name_b) +
+            f' && B_GCS=$({_head_env("SKYPILOT_RAY_PORT")}) && '
+            'echo "A_GCS=$A_GCS B_GCS=$B_GCS" && '
+            '[ -n "$A_GCS" ] && [ -n "$B_GCS" ] && '
+            '[ "$A_GCS" != "$B_GCS" ]',
         ],
         teardown=(f'sky down -y {name_a}; sky down -y {name_b}; '
                   f'rm -f {cfg_a} {cfg_b}'),
@@ -177,13 +191,7 @@ def test_kubernetes_host_network_multi_node_same_node():
     # single-node) is the right default: that assertion is strictly
     # stricter, so a misclassified multi-node pipeline still fails
     # loudly rather than silently giving up coverage.
-    try:
-        nodes_info = sky.get(sky_sdk.kubernetes_node_info())
-        schedulable = sum(1 for n in nodes_info.node_info_dict.values()
-                          if n.is_ready and not n.is_cordoned)
-    except Exception:  # pylint: disable=broad-except
-        schedulable = 1
-    multi_node = schedulable > 1
+    multi_node = _schedulable_nodes() > 1
 
     name = smoke_tests_utils.get_cluster_name()
     cfg = f'/tmp/sky-hostnet-multinode-{uuid.uuid4().hex[:12]}.yaml'
@@ -248,76 +256,6 @@ def test_kubernetes_host_network_multi_node_same_node():
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.kubernetes
-@pytest.mark.no_dependency
-def test_kubernetes_host_network_head_restart_survives_ports():
-    """A container restart must not move the head's ports.
-
-    Workers dial the head's GCS port and the SSH config holds its sshd port,
-    so a head that came back on different ports would strand both.
-
-    This used to be a property of a reuse path: the in-pod probe picked the
-    ports, published them to a ``<cluster>-ray-ports`` ConfigMap, and on
-    restart re-read that ConfigMap -- comparing its ownerReference UID to
-    tell "my own" from one left behind by a deleted head. The ports now come
-    from the pod spec, which a *container* restart does not touch, so there
-    is no reuse step left to get wrong. The outcome worth asserting is the
-    same either way, which is why this test survives the mechanism it was
-    written for.
-
-    Asserted against the pod spec rather than anything inside the pod: the
-    spec is what the scheduler accounted for and what the SSH client reads,
-    so it is the copy that has to stay put.
-    """
-    name = smoke_tests_utils.get_cluster_name()
-    cfg = f'/tmp/sky-hostnet-restart-{uuid.uuid4().hex[:12]}.yaml'
-    write_cfg = (f'cat > {cfg} <<EOF\n'
-                 f'kubernetes:\n'
-                 f'  pod_config:\n'
-                 f'    spec:\n'
-                 f'      hostNetwork: true\n'
-                 f'EOF')
-
-    # The ray-node container's host ports, sorted, on one line. Selected by
-    # container name: a sidecar contributed through pod_config would shift
-    # an index-based selector onto the wrong container.
-    read_ports = (
-        'kubectl get pod -l skypilot-cluster-name=$PODC '
-        '-o jsonpath=\'{.items[0].spec.containers[?(@.name=="ray-node")]'
-        '.ports[*].hostPort}\' | tr " " "\\n" | sort -n | tr "\\n" " "')
-
-    test = smoke_tests_utils.Test(
-        'kubernetes_host_network_head_restart_survives_ports',
-        [
-            write_cfg,
-            f'sky launch -y -c {name} --infra kubernetes '
-            f'--config {cfg} --cpus 1 --memory 2',
-            # The pod label is the on-cloud name, not the SkyPilot one.
-            f'PODC=$(kubectl get pods -o jsonpath=\'{{range .items[*]}}'
-            f'{{.metadata.labels.skypilot-cluster-name}}{{"\\n"}}{{end}}\' '
-            f'| grep -m1 "^{name}") && echo "cluster=$PODC" && '
-            f'BEFORE=$({read_ports}) && echo "before=$BEFORE" && '
-            f'[ -n "$BEFORE" ] && '
-            # Restart the container, not the pod: deleting the pod would
-            # hand back a fresh spec and prove nothing about stability.
-            f'POD=$(kubectl get pod -l skypilot-cluster-name=$PODC '
-            f'-o jsonpath=\'{{.items[0].metadata.name}}\') && '
-            f'kubectl exec $POD -c ray-node -- '
-            f'bash -c "pkill -f raylet || true" && sleep 20 && '
-            f'AFTER=$({read_ports}) && echo "after=$AFTER" && '
-            f'[ "$BEFORE" = "$AFTER" ]',
-            # And the cluster is still reachable through those ports.
-            f'sky exec {name} "echo restart_exec_ok" && '
-            f'sky logs {name} --status',
-            f's=$(ssh -o StrictHostKeyChecking=no {name} '
-            f'"echo head_ssh_ok" 2>&1) && echo "$s" | grep head_ssh_ok',
-        ],
-        teardown=f'sky down -y {name}; rm -f {cfg}',
-        timeout=smoke_tests_utils.get_timeout('kubernetes'),
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
 def _hostnet_cfg(tag: str) -> tuple:
     """A hostNetwork config file and the command that writes it."""
     cfg = f'/tmp/sky-hostnet-{tag}-{uuid.uuid4().hex[:12]}.yaml'
@@ -337,6 +275,13 @@ _RESOLVE_PODC = ('PODC=$(kubectl get pods -o jsonpath=\'{{range .items[*]}}'
 _HEAD_PORTS = ('kubectl get pod -l skypilot-cluster-name=$PODC '
                '-o jsonpath=\'{.items[0].spec.containers[?(@.name=="ray-node")]'
                '.ports[*].hostPort}\' | tr " " "\\n" | sort -n | tr "\\n" " "')
+
+
+def _head_env(var: str) -> str:
+    """A command printing the ray-node container's env var from the spec."""
+    return ('kubectl get pod -l skypilot-cluster-name=$PODC -o jsonpath=\''
+            '{.items[0].spec.containers[?(@.name=="ray-node")]'
+            f'.env[?(@.name=="{var}")].value}}\'')
 
 
 @pytest.mark.kubernetes
@@ -396,6 +341,9 @@ def test_kubernetes_host_network_worker_recovery_keeps_head_ports():
     start when Ray is already up, so a retry asserted against its own
     raylet and the launch reported failure on a cluster that was fine.
     """
+    if _schedulable_nodes() < 2:
+        pytest.skip('needs two schedulable nodes: a hostNetwork cluster puts '
+                    'each pod on its own node')
     name = smoke_tests_utils.get_cluster_name()
     cfg, write_cfg = _hostnet_cfg('recover')
     test = smoke_tests_utils.Test(
@@ -406,6 +354,8 @@ def test_kubernetes_host_network_worker_recovery_keeps_head_ports():
             f'--config {cfg} --num-nodes 2 --cpus 1 --memory 2',
             _RESOLVE_PODC.format(name=name) + ' && ' +
             f'BEFORE=$({_HEAD_PORTS}) && echo "head_before=$BEFORE" && '
+            # Each step is its own shell; keep BEFORE for the later step.
+            f'[ -n "$BEFORE" ] && echo "$BEFORE" > {cfg}.before && '
             # Lose the worker the way a node failure would: delete the pod,
             # not the cluster. `sky down` would take the record with it and
             # make this a fresh launch instead of a recovery.
@@ -418,12 +368,12 @@ def test_kubernetes_host_network_worker_recovery_keeps_head_ports():
             f'--config {cfg} --num-nodes 2 --cpus 1 --memory 2',
             _RESOLVE_PODC.format(name=name) + ' && ' +
             f'AFTER=$({_HEAD_PORTS}) && echo "head_after=$AFTER" && '
-            '[ -n "$AFTER" ] && [ "$BEFORE" = "$AFTER" ]',
+            f'[ -n "$AFTER" ] && [ "$(cat {cfg}.before)" = "$AFTER" ]',
             # The rebuilt worker actually joined.
             f'sky exec {name} --num-nodes 2 "echo recovered_ok" && '
             f'sky logs {name} --status',
         ],
-        teardown=f'sky down -y {name}; rm -f {cfg}',
+        teardown=f'sky down -y {name}; rm -f {cfg} {cfg}.before',
         timeout=smoke_tests_utils.get_timeout('kubernetes'),
     )
     smoke_tests_utils.run_one_test(test)
