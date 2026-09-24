@@ -343,7 +343,7 @@ def _claimants(handle) -> List[ManagedJobRuntime]:
             if owns(handle):
                 explicit.append(r)
         except Exception as e:  # pylint: disable=broad-except
-            failures.append((type(r).__name__, str(e)))
+            failures.append((type(r).__name__, f'{type(e).__name__}: {e}'))
     if failures:
         _warn_ownership(tuple(failures))
         if not explicit:

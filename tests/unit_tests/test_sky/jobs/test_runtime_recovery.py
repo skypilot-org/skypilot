@@ -480,6 +480,33 @@ async def test_starting_observation_can_finish(database, monkeypatch, terminal):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('recovery_path', ['controller', 'requeue', 'strategy'])
+@pytest.mark.parametrize('start_at', [None, 100])
+async def test_emergency_from_starting_records_first_start(
+        database, monkeypatch, recovery_path, start_at):
+    with database.begin() as connection:
+        connection.execute(state.spot_table.update().values(
+            status='STARTING', start_at=start_at, last_recovered_at=-1))
+    monkeypatch.setattr(state.time, 'time', lambda: 200)
+    await observe(0)
+    await state.set_emergency_recovering_async(42, 0, 'controller interrupted',
+                                               mock.AsyncMock())
+    assert task_row(database)['status'] == 'RECOVERING'
+    assert task_row(database)['start_at'] == start_at
+    monkeypatch.setattr(state.time, 'time', lambda: 300)
+    if recovery_path == 'strategy':
+        await state.set_recovered_async(42, 0, 280, mock.AsyncMock())
+    else:
+        count = int(recovery_path == 'requeue')
+        if count:
+            await observe(count, waiting=True)
+        await observe(count, running=True, started_at=280)
+    row = task_row(database)
+    assert row['status'] == 'RUNNING'
+    assert row['start_at'] == (280 if start_at is None else start_at)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('failure_recovery', [False, True])
 async def test_new_allocation_does_not_restore_previous_baseline(
         database, monkeypatch, failure_recovery):

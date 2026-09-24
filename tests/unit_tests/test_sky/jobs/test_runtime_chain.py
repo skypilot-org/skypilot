@@ -387,6 +387,16 @@ def test_ownership_failure_does_not_defer_to_default():
         runtime_chain.get_job_status(_make_handle(), 'cluster')
 
 
+def test_ownership_failure_includes_exception_type():
+    owner = _make_runtime('owner')
+    owner.owns.side_effect = AssertionError()
+    runtime_chain.register(owner)
+    with mock.patch.object(runtime_chain.logger, 'warning') as warning:
+        with pytest.raises(RuntimeError, match='AssertionError:'):
+            runtime_chain.get_job_status(_make_handle(), 'cluster')
+    assert warning.call_args.args[1] == (('MagicMock', 'AssertionError: '),)
+
+
 def test_conflict_warns_once():
     runtime_chain.register(_make_runtime('first', owns_return=True))
     runtime_chain.register(_make_runtime('second', owns_return=True))

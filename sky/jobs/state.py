@@ -4077,6 +4077,7 @@ def _plan_runtime_observation(
         elif pending:
             if running or terminal:
                 values.update(status=ManagedJobStatus.RUNNING.value,
+                              start_at=row['start_at'] or resume_time,
                               last_recovered_at=resume_time,
                               recovering_from_failure=None)
                 events.append(
@@ -4090,6 +4091,7 @@ def _plan_runtime_observation(
             # The runtime kept running while the controller was recovering.
             # Restore its baseline to avoid counting that interval twice.
             values.update(status=ManagedJobStatus.RUNNING.value,
+                          start_at=row['start_at'] or resume_time,
                           job_duration=cursor.get('running_duration',
                                                   row['job_duration']),
                           last_recovered_at=cursor.get('running_since',
@@ -4364,6 +4366,8 @@ async def set_recovered_async(job_id: int,
                 )).
             values({
                 spot_table.c.status: ManagedJobStatus.RUNNING.value,
+                spot_table.c.start_at: sqlalchemy.func.coalesce(
+                    spot_table.c.start_at, recovered_time),
                 spot_table.c.last_recovered_at: recovered_time,
                 spot_table.c.recovery_count: count_expr,
                 # Close the episode: this task has left RECOVERING, so a
