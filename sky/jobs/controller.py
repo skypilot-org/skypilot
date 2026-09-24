@@ -191,31 +191,17 @@ def _build_task_specs(
 _EMERGENCY_BOOKKEEPING_ROUNDS = 5
 
 
-async def _record_runtime_placement(
-    job_id: int,
-    handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
-    previous: Optional[managed_job_runtime.RuntimeCursor],
-    observation: managed_job_runtime.RuntimeObservation,
-) -> None:
-    """Merge a running allocation's nodes into the job's infra lineage."""
-    if (not observation.nodes or
-            observation.phase != managed_job_runtime.RuntimePhase.RUNNING):
-        return
-    if previous is not None:
-        baseline = previous.baseline(observation.runtime_id)
-        # The planner drops a stale observation; its nodes must not overwrite
-        # the placement of the persisted cursor.
-        if (observation.restart_count < baseline.restart_count or
-                baseline.nodes == observation.nodes):
-            return
+def _runtime_infra(
+    handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle']
+) -> Dict[str, Optional[str]]:
+    """Cloud, region and zone recorded with a runtime's placement."""
     resources = getattr(handle, 'launched_resources', None)
     cloud = getattr(resources, 'cloud', None)
-    await asyncio.to_thread(managed_job_state.set_job_infra,
-                            job_id,
-                            cloud=str(cloud) if cloud is not None else None,
-                            region=getattr(resources, 'region', None),
-                            zone=getattr(resources, 'zone', None),
-                            current_node_names=list(observation.nodes))
+    return {
+        'cloud': str(cloud) if cloud is not None else None,
+        'region': getattr(resources, 'region', None),
+        'zone': getattr(resources, 'zone', None),
+    }
 
 
 class JobController:
@@ -1212,16 +1198,12 @@ class JobController:
             if runtime_recovery is not None:
                 job_status = runtime_recovery.job_status
                 phase = runtime_recovery.phase
-                # Placement is recorded before the cursor so a failed write is
-                # retried on the next observation.
-                await _record_runtime_placement(self._job_id, runtime_handle,
-                                                runtime_cursor,
-                                                runtime_recovery)
                 await managed_job_state.observe_runtime_async(
                     self._job_id,
                     task_id,
                     runtime_recovery,
-                    callback_func=callback_func)
+                    callback_func=callback_func,
+                    infra=_runtime_infra(runtime_handle))
                 if phase == managed_job_runtime.RuntimePhase.NEEDS_REPLACEMENT:
                     job_status = None
                 elif job_status == job_lib.JobStatus.CANCELLED:

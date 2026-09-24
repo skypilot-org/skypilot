@@ -3842,6 +3842,8 @@ class _RuntimeObservationPlan:
     values: Dict[str, Any]
     events: List[Tuple[ManagedJobStatus, str]]
     callbacks: List[str]
+    # Nodes to merge into the job's infra lineage, when placement changed.
+    placement: Optional[List[str]] = None
 
 
 def _plan_runtime_observation(
@@ -3989,7 +3991,8 @@ def _plan_runtime_observation(
         metadata.get('runtime_user_restarts', 0) + user_delta)
     metadata['runtime_recovery'] = cursor
     values['metadata'] = json.dumps(metadata)
-    return _RuntimeObservationPlan(values, events, callbacks)
+    placement = list(nodes) if nodes_changed and nodes is not None else None
+    return _RuntimeObservationPlan(values, events, callbacks, placement)
 
 
 def _runtime_task_filter(job_id: int, task_id: int):
@@ -4053,6 +4056,22 @@ def observe_runtime_during_provisioning(
     raise RuntimeError('Concurrent runtime recovery updates did not settle')
 
 
+async def _record_placement_async(session: sql_async.AsyncSession, job_id: int,
+                                  nodes: List[str],
+                                  infra: Optional[Dict[str, Optional[str]]]):
+    result = await session.execute(
+        sqlalchemy.select(job_info_table.c.node_names).where(
+            job_info_table.c.spot_job_id == job_id).with_for_update())
+    values: Dict[str, Any] = {
+        key: value for key, value in (infra or {}).items() if value is not None
+    }
+    values['node_names'] = common_utils.merge_node_names_lineage(
+        result.scalar_one_or_none(), nodes)
+    await session.execute(
+        sqlalchemy.update(job_info_table).where(
+            job_info_table.c.spot_job_id == job_id).values(**values))
+
+
 @db_retries.retry_async
 async def observe_runtime_async(
     job_id: int,
@@ -4060,11 +4079,15 @@ async def observe_runtime_async(
     observation: managed_job_runtime.RuntimeObservation,
     *,
     callback_func: AsyncCallbackType,
+    infra: Optional[Dict[str, Optional[str]]] = None,
 ) -> None:
-    """Persist a monitoring observation's counters, status and events.
+    """Persist a monitoring observation, including its placement.
 
-    callback_func receives RECOVERING, STARTED or RECOVERED after commit for
-    each transition this observation caused.
+    A running observation whose nodes differ from the cursor merges them into
+    the job's infra lineage in the same transaction; infra supplies the cloud,
+    region and zone recorded with them. callback_func receives RECOVERING,
+    STARTED or RECOVERED after commit for each transition this observation
+    caused.
     """
     engine = await _db_manager.get_async_engine()
     for _ in range(20):
@@ -4086,6 +4109,9 @@ async def observe_runtime_async(
                 continue
             for statement in _runtime_observation_events(job_id, task_id, plan):
                 await session.execute(statement)
+            if plan.placement is not None:
+                await _record_placement_async(session, job_id, plan.placement,
+                                              infra)
             await session.commit()
         for callback in plan.callbacks:
             await callback_func(callback)

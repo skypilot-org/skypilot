@@ -560,45 +560,41 @@ async def test_cursor_keeps_last_running_placement(database):
 
 
 @pytest.mark.asyncio
-async def test_placement_is_recorded_once_per_running_node_set(monkeypatch):
-    infra = mock.Mock()
-    monkeypatch.setattr(controller_module.managed_job_state, 'set_job_infra',
-                        infra)
-    handle = mock.Mock()
-    handle.launched_resources.cloud = 'Slurm'
-    handle.launched_resources.region = 'cluster'
-    handle.launched_resources.zone = 'partition'
-    running = runtime.RuntimeObservation('allocation-a',
-                                         0,
-                                         job_lib.JobStatus.RUNNING,
-                                         nodes=['node-a'])
-    record = controller_module._record_runtime_placement
-    await record(42, handle, None, running)
-    await record(42, handle,
-                 runtime.RuntimeCursor('allocation-a', nodes=['node-a']),
-                 running)
-    await record(42, handle,
-                 runtime.RuntimeCursor('allocation-b', nodes=['node-a']),
-                 running)
-    await record(
-        42, handle, None,
-        runtime.RuntimeObservation('allocation-a',
-                                   1,
-                                   job_lib.JobStatus.PENDING,
-                                   nodes=['node-b']))
-    await record(
-        42, handle, runtime.RuntimeCursor('allocation-a', 2,
-                                          nodes=['node-new']),
-        runtime.RuntimeObservation('allocation-a',
-                                   1,
-                                   job_lib.JobStatus.RUNNING,
-                                   nodes=['node-old']))
-    assert infra.call_count == 2
-    infra.assert_called_with(42,
-                             cloud='Slurm',
-                             region='cluster',
-                             zone='partition',
-                             current_node_names=['node-a'])
+async def test_placement_is_merged_with_accepted_running_observations(database):
+    with database.begin() as connection:
+        connection.execute(state.job_info_table.insert().values(spot_job_id=42,
+                                                                name='task'))
+    infra = {'cloud': 'Slurm', 'region': 'cluster', 'zone': None}
+
+    async def record(count, status, nodes, **kwargs):
+        await state.observe_runtime_async(42,
+                                          0,
+                                          runtime.RuntimeObservation(
+                                              'allocation-a',
+                                              count,
+                                              status,
+                                              nodes=nodes,
+                                              **kwargs),
+                                          callback_func=mock.AsyncMock(),
+                                          infra=infra)
+
+    def placement():
+        with database.connect() as connection:
+            row = connection.execute(
+                state.job_info_table.select()).mappings().one()
+        return json.loads(row['node_names']), row['cloud'], row['zone']
+
+    running = job_lib.JobStatus.RUNNING
+    await record(0, running, ['node-a'])
+    assert placement() == ([['node-a']], 'Slurm', None)
+    await record(0, running, ['node-a'])
+    await record(1, job_lib.JobStatus.PENDING, ['node-b'])
+    # Stale: fewer restarts than the cursor.
+    await record(0, running, ['node-old'])
+    await record(1, running, ['node-b'], should_relaunch=True)
+    assert placement()[0] == [['node-a']]
+    await record(1, running, ['node-b'])
+    assert placement()[0] == [['node-a', 'node-b']]
 
 
 def test_recovery_dispatch_passes_previous_cursor(monkeypatch):
