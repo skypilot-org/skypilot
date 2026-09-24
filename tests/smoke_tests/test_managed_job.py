@@ -4056,13 +4056,14 @@ def _status(job: dict) -> sky.ManagedJobStatus:
 
 
 def _queue_jobs(name_match: Optional[str] = None,
-                job_ids: Optional[List[int]] = None) -> list:
+                job_ids: Optional[List[int]] = None,
+                include_tree: bool = False) -> list:
     """Queue rows across all users, narrowed server-side.
 
     Always pass `name_match` (a substring of the job name) or `job_ids`: a
     long-lived API server holds hundreds of thousands of rows and these
-    helpers poll every few seconds. Every job in these tests carries its
-    group's name as a prefix, so the group name narrows to the whole tree.
+    helpers poll every few seconds. `include_tree` (with `job_ids` only)
+    also returns every job launched under those jobs, at any depth.
     """
     assert name_match is not None or job_ids is not None
     return sky.get(
@@ -4070,6 +4071,7 @@ def _queue_jobs(name_match: Optional[str] = None,
                           all_users=True,
                           name_match=name_match,
                           job_ids=job_ids,
+                          include_tree=include_tree,
                           fields=_JOB_TREE_FIELDS))[0]
 
 
@@ -4085,14 +4087,10 @@ def _existing_job_named(name: str) -> dict:
     return job
 
 
-def _job_tree(root_job_id: int, group_name: str) -> Dict[str, dict]:
-    """The jobs launched under `root_job_id`, by name; one row per job.
-
-    `group_name` only narrows the query; membership is decided by
-    `root_job_id`.
-    """
+def _job_tree(root_job_id: int) -> Dict[str, dict]:
+    """The jobs launched under `root_job_id`, by name; one row per job."""
     tree: Dict[str, dict] = {}
-    for job in _queue_jobs(name_match=group_name):
+    for job in _queue_jobs(job_ids=[root_job_id], include_tree=True):
         if job.get('root_job_id') == root_job_id:
             tree[job['job_name']] = job
     return tree
@@ -4169,7 +4167,6 @@ def _wait_job(job_id: int, statuses: List[sky.ManagedJobStatus],
 
 def _wait_tree(
         root_job_id: int,
-        group_name: str,
         names: List[str],
         timeout: int = 600,
         statuses: Optional[List[sky.ManagedJobStatus]] = None
@@ -4185,7 +4182,7 @@ def _wait_tree(
     """
     start = time.time()
     while time.time() - start < timeout:
-        tree = _job_tree(root_job_id, group_name)
+        tree = _job_tree(root_job_id)
         missing = [n for n in names if n not in tree]
         if statuses is not None:
             wrong = [(n, _status(tree[n]).value)
@@ -4332,7 +4329,7 @@ def test_dynamic_job_group_watcher_primary(generic_cloud: str):
 
     def check():
         root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
-        tree = _wait_tree(root, name, [eval1])
+        tree = _wait_tree(root, [eval1])
         _assert_attached(tree[eval1], root, root, _WATCHER_TASK, 2)
         _assert_launched_as_group_user(tree[eval1], root)
         _wait_group(name, [sky.ManagedJobStatus.SUCCEEDED], timeout=900)
@@ -4398,15 +4395,14 @@ def test_dynamic_job_group_basic_terminate(generic_cloud: str):
 
     def check_before_signal():
         root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
-        tree = _wait_tree(root,
-                          name, [eval1],
+        tree = _wait_tree(root, [eval1],
                           timeout=900,
                           statuses=[sky.ManagedJobStatus.RUNNING])
         _assert_attached(tree[eval1], root, root, _WATCHER_TASK, 2)
 
     def check_after_signal():
         root = _wait_group(name, [sky.ManagedJobStatus.SUCCEEDED], timeout=900)
-        job = _wait_job(_job_tree(root, name)[eval1]['job_id'],
+        job = _wait_job(_job_tree(root)[eval1]['job_id'],
                         [sky.ManagedJobStatus.CANCELLED],
                         timeout=300)
         _assert_cancelled_because(
@@ -4452,14 +4448,13 @@ def test_dynamic_job_group_basic_primary_fails(generic_cloud: str):
 
     def check_before_signal():
         root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
-        _wait_tree(root,
-                   name, [eval1],
+        _wait_tree(root, [eval1],
                    timeout=900,
                    statuses=[sky.ManagedJobStatus.RUNNING])
 
     def check_after_signal():
         root = _wait_group(name, [sky.ManagedJobStatus.FAILED], timeout=900)
-        job = _wait_job(_job_tree(root, name)[eval1]['job_id'],
+        job = _wait_job(_job_tree(root)[eval1]['job_id'],
                         [sky.ManagedJobStatus.CANCELLED],
                         timeout=300)
         _assert_cancelled_because(
@@ -4509,8 +4504,7 @@ def test_dynamic_job_group_cancel_and_opt_out(generic_cloud: str):
 
     def check_before_cancel():
         root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
-        tree = _wait_tree(root,
-                          name, [eval1],
+        tree = _wait_tree(root, [eval1],
                           statuses=[sky.ManagedJobStatus.RUNNING])
         _assert_attached(tree[eval1], root, root, _WATCHER_TASK, 2)
         start = time.time()
@@ -4526,7 +4520,7 @@ def test_dynamic_job_group_cancel_and_opt_out(generic_cloud: str):
 
     def check_after_cancel():
         root = _wait_group(name, [sky.ManagedJobStatus.CANCELLED], timeout=300)
-        tree = _job_tree(root, name)
+        tree = _job_tree(root)
         job = _wait_job(tree[eval1]['job_id'], [sky.ManagedJobStatus.CANCELLED],
                         timeout=300)
         _assert_cancelled_because(job, f'(cancelled with job {root})')
@@ -4576,8 +4570,7 @@ def test_dynamic_job_group_nested_cancel_root(generic_cloud: str):
 
     def check_before_cancel():
         root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
-        tree = _wait_tree(root,
-                          name, [eval1, eval1a],
+        tree = _wait_tree(root, [eval1, eval1a],
                           timeout=900,
                           statuses=[sky.ManagedJobStatus.RUNNING])
         _assert_attached(tree[eval1], root, root, _WATCHER_TASK, 2)
@@ -4586,7 +4579,7 @@ def test_dynamic_job_group_nested_cancel_root(generic_cloud: str):
 
     def check_after_cancel():
         root = _wait_group(name, [sky.ManagedJobStatus.CANCELLED], timeout=300)
-        tree = _job_tree(root, name)
+        tree = _job_tree(root)
         child_id = tree[eval1]['job_id']
         child = _wait_job(child_id, [sky.ManagedJobStatus.CANCELLED],
                           timeout=300)
@@ -4643,7 +4636,7 @@ def test_dynamic_job_group_nested_first_level_finishes(generic_cloud: str):
 
     def check_before_signal():
         root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
-        tree = _wait_tree(root, name, [eval1, eval1a], timeout=900)
+        tree = _wait_tree(root, [eval1, eval1a], timeout=900)
         _wait_job(tree[eval1]['job_id'], [sky.ManagedJobStatus.SUCCEEDED],
                   timeout=600)
         # eval-1 is done; eval-1a must be untouched, now and a little later.
@@ -4651,11 +4644,11 @@ def test_dynamic_job_group_nested_first_level_finishes(generic_cloud: str):
         _wait_job(tree[eval1a]['job_id'], [sky.ManagedJobStatus.RUNNING],
                   timeout=600)
         time.sleep(30)
-        _assert_not_terminal(_job_tree(root, name)[eval1a])
+        _assert_not_terminal(_job_tree(root)[eval1a])
 
     def check_after_signal():
         root = _wait_group(name, [sky.ManagedJobStatus.SUCCEEDED], timeout=900)
-        grandchild = _wait_job(_job_tree(root, name)[eval1a]['job_id'],
+        grandchild = _wait_job(_job_tree(root)[eval1a]['job_id'],
                                [sky.ManagedJobStatus.CANCELLED],
                                timeout=300)
         _assert_cancelled_because(
@@ -4712,8 +4705,7 @@ def test_dynamic_job_group_nested_cancel_subtree(generic_cloud: str):
 
     def check_before_cancel():
         root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
-        tree = _wait_tree(root,
-                          name, [eval1, eval1a, eval2, eval2a],
+        tree = _wait_tree(root, [eval1, eval1a, eval2, eval2a],
                           timeout=900,
                           statuses=[sky.ManagedJobStatus.RUNNING])
         _assert_attached(tree[eval1a], root, tree[eval1]['job_id'], 0)
@@ -4733,7 +4725,7 @@ def test_dynamic_job_group_nested_cancel_subtree(generic_cloud: str):
     def check_after_cancel():
         pathlib.Path(child_id_file).unlink(missing_ok=True)
         root = _existing_job_named(name)['job_id']
-        tree = _job_tree(root, name)
+        tree = _job_tree(root)
         child_id = tree[eval1]['job_id']
         _assert_cancelled_because(
             _wait_job(child_id, [sky.ManagedJobStatus.CANCELLED], timeout=300),
@@ -4741,7 +4733,7 @@ def test_dynamic_job_group_nested_cancel_subtree(generic_cloud: str):
         _assert_cancelled_because(
             _wait_job(tree[eval1a]['job_id'], [sky.ManagedJobStatus.CANCELLED],
                       timeout=300), f'(cancelled with job {child_id})')
-        tree = _job_tree(root, name)
+        tree = _job_tree(root)
         _assert_not_terminal(tree[eval2])
         _assert_not_terminal(tree[eval2a])
         _assert_not_terminal(_existing_job_named(name))
@@ -4803,7 +4795,7 @@ def test_dynamic_job_group_parallel_appends(generic_cloud: str):
 
     def check():
         root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
-        tree = _wait_tree(root, name, evals, timeout=900)
+        tree = _wait_tree(root, evals, timeout=900)
         indices = sorted(tree[e]['dynamic_task_index'] for e in evals)
         assert indices == [2, 3, 4, 5, 6], indices
         for e in evals:
