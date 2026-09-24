@@ -618,6 +618,12 @@ RCLONE_CACHE_REFRESH_INTERVAL = 10
 
 # The keys that can be overridden in the `~/.sky/config.yaml` file. The
 # overrides are specified in task YAMLs.
+# Heads the container output that a terminated-pod diagnosis appends. What
+# follows is the workload's own free text, so classifiers that grep a failure
+# message for its cause (e.g. OOM detection in managed-job recovery) must stop
+# here, or a program that merely prints "out of memory" reads as OOM-killed.
+CONTAINER_OUTPUT_MARKER = 'Last output from container'
+
 OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('docker', 'run_options'),
     ('nvidia_gpus', 'disable_ecc'),

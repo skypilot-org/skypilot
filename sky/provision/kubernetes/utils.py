@@ -2585,7 +2585,7 @@ def _self_exit_output(context: Optional[str], namespace: str, pod_name: str,
             tail = '\n'.join(lines[first:]).strip()
             if not tail:
                 return None
-            return f'Last output from container {cs.name}:\n{tail}'
+            return f'{constants.CONTAINER_OUTPUT_MARKER} {cs.name}:\n{tail}'
     return None
 
 

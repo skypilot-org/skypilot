@@ -24,6 +24,7 @@ from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.catalog import kubernetes_catalog
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils
+from sky.skylet import constants
 
 
 # Test for exception on permanent errors like 401 (Unauthorized)
@@ -5351,6 +5352,8 @@ def test_diagnose_self_exit_surfaces_the_exception_not_the_traceback(
     msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
     assert 'Error (exit code 1)' in msg
     assert 'Assigned host port 33499 (gcs) is already in use' in msg
+    # Recovery's OOM classifier stops at this marker; the pair must agree.
+    assert constants.CONTAINER_OUTPUT_MARKER in msg
     assert 'which covers port 33499' in msg
     # From the last exception on, not the chained one above it.
     assert 'OSError' not in msg
