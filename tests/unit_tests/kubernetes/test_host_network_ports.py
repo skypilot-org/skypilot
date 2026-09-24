@@ -48,7 +48,7 @@ def test_range_avoids_both_allocators_we_do_not_control():
 
 @pytest.mark.parametrize('_', range(200))
 def test_allocated_blocks_are_contiguous_and_in_range(_):
-    block = ports.allocate_block()
+    block = ports.allocate_block(None)
     assert len(block) == ports.BLOCK_SIZE
     values = sorted(block.values())
     assert values == list(range(values[0], values[0] + len(values)))
@@ -58,9 +58,12 @@ def test_allocated_blocks_are_contiguous_and_in_range(_):
 
 def test_worker_is_told_the_heads_gcs_and_keeps_its_own_sshd():
     """The property that makes a worker join: one port from the head, rest its own."""
-    head, worker = ports.allocate_block(), ports.allocate_block()
+    head, worker = ports.allocate_block(None), ports.allocate_block(None)
     spec = {'spec': {'containers': [{'name': 'ray-node'}]}}
-    ports.apply_to_pod_spec(spec, worker, head_gcs_port=head['gcs'])
+    ports.apply_to_pod_spec(spec,
+                            worker,
+                            head_gcs_port=head['gcs'],
+                            context=None)
 
     env = {e['name']: e['value'] for e in spec['spec']['containers'][0]['env']}
     assert env[host_network_probe.env_var_for_port('gcs')] == str(head['gcs'])
@@ -74,16 +77,22 @@ def test_declared_ports_are_host_ports_not_only_container_ports():
     """containerPort alone is what the pre-change template rendered; hostPort
     is what makes the scheduler refuse to co-schedule."""
     spec = {'spec': {'containers': [{}]}}
-    block = ports.allocate_block()
-    ports.apply_to_pod_spec(spec, block, head_gcs_port=block['gcs'])
+    block = ports.allocate_block(None)
+    ports.apply_to_pod_spec(spec,
+                            block,
+                            head_gcs_port=block['gcs'],
+                            context=None)
     for port in spec['spec']['containers'][0]['ports']:
         assert port['hostPort'] == port['containerPort']
 
 
 def test_existing_env_is_preserved():
     spec = {'spec': {'containers': [{'env': [{'name': 'KEEP', 'value': '1'}]}]}}
-    block = ports.allocate_block()
-    ports.apply_to_pod_spec(spec, block, head_gcs_port=block['gcs'])
+    block = ports.allocate_block(None)
+    ports.apply_to_pod_spec(spec,
+                            block,
+                            head_gcs_port=block['gcs'],
+                            context=None)
     env = {e['name']: e['value'] for e in spec['spec']['containers'][0]['env']}
     assert env['KEEP'] == '1'
 
@@ -92,9 +101,10 @@ class TestResolutionOrder:
     """One helper, one order -- the two callers must not disagree."""
 
     def test_a_live_pods_declared_ports_win(self):
-        block = ports.allocate_block()
+        block = ports.allocate_block(None)
         resolved = ports.resolve_block(_pod(sorted(block.values())),
-                                       configmap_ports={'gcs': 1})
+                                       configmap_ports={'gcs': 1},
+                                       context=None)
         assert resolved == block
 
     def test_a_pre_change_pod_declares_nothing_so_the_configmap_answers(self):
@@ -105,10 +115,11 @@ class TestResolutionOrder:
             for i, name in enumerate(host_network_probe.HEAD_PORT_NAMES)
         }
         assert ports.resolve_block(_pod(host_ports=[]),
-                                   configmap_ports=cm) == cm
+                                   configmap_ports=cm,
+                                   context=None) == cm
 
     def test_no_pod_and_no_configmap_allocates(self):
-        resolved = ports.resolve_block(None, configmap_ports=None)
+        resolved = ports.resolve_block(None, configmap_ports=None, context=None)
         assert len(resolved) == ports.BLOCK_SIZE
 
     def test_a_configmap_with_no_pod_behind_it_is_ignored(self):
@@ -120,7 +131,7 @@ class TestResolutionOrder:
             name: 40000 + i
             for i, name in enumerate(host_network_probe.HEAD_PORT_NAMES)
         }
-        resolved = ports.resolve_block(None, configmap_ports=cm)
+        resolved = ports.resolve_block(None, configmap_ports=cm, context=None)
         assert resolved != cm
         assert min(resolved.values()) >= ports.PORT_RANGE_START
 
@@ -142,8 +153,11 @@ class TestUserDeclaredPortsSurvive:
                 }]
             }
         }
-        block = ports.allocate_block()
-        ports.apply_to_pod_spec(spec, block, head_gcs_port=block['gcs'])
+        block = ports.allocate_block(None)
+        ports.apply_to_pod_spec(spec,
+                                block,
+                                head_gcs_port=block['gcs'],
+                                context=None)
         declared = spec['spec']['containers'][0]['ports']
         assert {
             'metrics'
@@ -168,9 +182,12 @@ class TestUserDeclaredPortsSurvive:
                 }]
             }
         }
-        block = ports.allocate_block()
+        block = ports.allocate_block(None)
         with pytest.raises(ValueError, match='reserves'):
-            ports.apply_to_pod_spec(spec, block, head_gcs_port=block['gcs'])
+            ports.apply_to_pod_spec(spec,
+                                    block,
+                                    head_gcs_port=block['gcs'],
+                                    context=None)
 
     def test_a_kept_port_survives_the_round_trip_back_through_the_reader(self):
         """The write half and the read half are one pair; testing the write
@@ -190,13 +207,16 @@ class TestUserDeclaredPortsSurvive:
                 }]
             }
         }
-        block = ports.allocate_block()
-        ports.apply_to_pod_spec(spec, block, head_gcs_port=block['gcs'])
+        block = ports.allocate_block(None)
+        ports.apply_to_pod_spec(spec,
+                                block,
+                                head_gcs_port=block['gcs'],
+                                context=None)
         declared = [
             p['hostPort'] for p in spec['spec']['containers'][0]['ports']
         ]
         assert 8080 in declared
-        assert ports.ports_from_pod(_pod(host_ports=declared)) == block
+        assert ports.ports_from_pod(_pod(host_ports=declared), None) == block
 
     def test_a_user_port_named_ssh_is_refused(self):
         """The SSH proxy command selects the sshd port by that name."""
@@ -212,9 +232,12 @@ class TestUserDeclaredPortsSurvive:
                 }]
             }
         }
-        block = ports.allocate_block()
+        block = ports.allocate_block(None)
         with pytest.raises(ValueError, match='sshd port'):
-            ports.apply_to_pod_spec(spec, block, head_gcs_port=block['gcs'])
+            ports.apply_to_pod_spec(spec,
+                                    block,
+                                    head_gcs_port=block['gcs'],
+                                    context=None)
 
 
 class TestProbeMakesNoApiCall:
@@ -321,13 +344,13 @@ class TestBlockIsReadFromTheRayContainerOnly:
         """Taking min() across containers would make a low sidecar port the
         start, and every reconstructed port would be one nothing listens on --
         for a head, handed to every worker in the launch."""
-        block = ports.allocate_block()
+        block = ports.allocate_block(None)
         pod = _pod(host_ports=sorted(block.values()), sidecar_ports=[8080])
-        assert ports.ports_from_pod(pod) == block
+        assert ports.ports_from_pod(pod, None) == block
 
     def test_a_pod_with_only_a_sidecars_ports_reads_as_legacy(self):
-        assert ports.ports_from_pod(_pod(host_ports=[],
-                                         sidecar_ports=[8080])) is None
+        assert ports.ports_from_pod(_pod(host_ports=[], sidecar_ports=[8080]),
+                                    None) is None
 
     def test_the_writer_targets_the_same_container(self):
         spec = {
@@ -339,8 +362,11 @@ class TestBlockIsReadFromTheRayContainerOnly:
                 }]
             }
         }
-        block = ports.allocate_block()
-        ports.apply_to_pod_spec(spec, block, head_gcs_port=block['gcs'])
+        block = ports.allocate_block(None)
+        ports.apply_to_pod_spec(spec,
+                                block,
+                                head_gcs_port=block['gcs'],
+                                context=None)
         assert 'ports' not in spec['spec']['containers'][0]
         assert len(spec['spec']['containers'][1]['ports']) == ports.BLOCK_SIZE
 
@@ -353,16 +379,16 @@ class TestPartialDeclarationIsNotLegacy:
     """
 
     def test_a_short_block_raises_rather_than_reallocating(self):
-        block = ports.allocate_block()
+        block = ports.allocate_block(None)
         short = sorted(block.values())[:-1]
         with pytest.raises(RuntimeError, match='contiguous'):
-            ports.ports_from_pod(_pod(host_ports=short))
+            ports.ports_from_pod(_pod(host_ports=short), None)
 
     def test_a_gap_in_the_block_raises(self):
         start = ports.PORT_RANGE_START
         holey = [start + i for i in range(ports.BLOCK_SIZE + 1) if i != 2]
         with pytest.raises(RuntimeError):
-            ports.ports_from_pod(_pod(host_ports=holey))
+            ports.ports_from_pod(_pod(host_ports=holey), None)
 
     def test_ports_entirely_outside_the_range_read_as_legacy(self):
         """Not an error: our writer cannot produce an out-of-range block, so
@@ -372,11 +398,11 @@ class TestPartialDeclarationIsNotLegacy:
         is the right answer for it. Raising here would refuse to read a
         pre-change cluster that merely configured a port."""
         assert ports.ports_from_pod(
-            _pod(host_ports=[40000 + i
-                             for i in range(ports.BLOCK_SIZE)])) is None
+            _pod(host_ports=[40000 + i for i in range(ports.BLOCK_SIZE)]),
+            None) is None
 
     def test_no_ports_at_all_is_still_legacy(self):
-        assert ports.ports_from_pod(_pod(host_ports=[])) is None
+        assert ports.ports_from_pod(_pod(host_ports=[]), None) is None
 
 
 def test_port_name_order_is_part_of_the_on_cluster_format():

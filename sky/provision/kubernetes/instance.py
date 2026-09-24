@@ -2356,7 +2356,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         for i in range(1, config.count):
             name = f'{cluster_name_on_cloud}-worker{i}'
             host_network_port_blocks[name] = host_network_ports.resolve_block(
-                running_pods.get(name), context=context)
+                running_pods.get(name), configmap_ports=None, context=context)
 
     # Add nvidia runtime class if it exists
     nvidia_runtime_exists = False

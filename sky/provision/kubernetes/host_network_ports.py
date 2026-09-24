@@ -83,8 +83,12 @@ def resolve_range(context: Optional[str]) -> Tuple[int, int]:
     return start, end
 
 
-# The default, used where a context is not in hand -- and the value the
-# tripwire pins. Callers that can name a context should resolve for it.
+# The default, and the value the tripwire pins. Every function below takes
+# `context` as a required argument rather than defaulting to this: the range
+# decides which hostPorts read back as ours, so a caller that resolves the
+# default while its counterpart resolved a context's range hands out fresh
+# ports while the pods keep listening on the old ones. Required means mypy
+# says so; a default means a test has to happen to cover that pair.
 PORT_RANGE_START, PORT_RANGE_END = _DEFAULT_RANGE
 
 # One contiguous block per pod, sized for the head; a worker not using three of
@@ -105,7 +109,7 @@ SSHD_PORT_NAME = 'ssh'
 _PINNED_START_ENV = 'SKYPILOT_HOST_NETWORK_PORT_START'
 
 
-def allocate_block(context: Optional[str] = None) -> Dict[str, int]:
+def allocate_block(context: Optional[str]) -> Dict[str, int]:
     """Assign a fresh contiguous block, keyed by port name."""
     pinned = os.environ.get(_PINNED_START_ENV)
     if pinned:
@@ -120,7 +124,7 @@ def allocate_block(context: Optional[str] = None) -> Dict[str, int]:
 
 
 def ports_from_pod(pod: Any,
-                   context: Optional[str] = None) -> Optional[Dict[str, int]]:
+                   context: Optional[str]) -> Optional[Dict[str, int]]:
     """The block a live pod declares, or None if it declares none.
 
     Reads the **ray-node** container specifically. A user's ``pod_config`` can
@@ -177,8 +181,8 @@ def ports_from_pod(pod: Any,
 
 def resolve_block(
     pod: Any,
-    configmap_ports: Optional[Dict[str, int]] = None,
-    context: Optional[str] = None,
+    configmap_ports: Optional[Dict[str, int]],
+    context: Optional[str],
 ) -> Dict[str, int]:
     """The block for one pod, resolved in the only order that is correct.
 
@@ -210,10 +214,8 @@ def resolve_block(
     return allocate_block(context)
 
 
-def apply_to_pod_spec(pod_spec: Dict[str, Any],
-                      ports: Dict[str, int],
-                      head_gcs_port: int,
-                      context: Optional[str] = None) -> None:
+def apply_to_pod_spec(pod_spec: Dict[str, Any], ports: Dict[str, int],
+                      head_gcs_port: int, context: Optional[str]) -> None:
     """Declare ``ports`` on the pod spec and export them to the bootstrap.
 
     Declaring hostPort is what makes the assignment safe: the scheduler's
