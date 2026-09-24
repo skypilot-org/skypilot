@@ -26,6 +26,8 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.dag import DagExecution
+from sky.jobs import runtime as managed_job_runtime
+from sky.provision import observation as provision_observation
 from sky.skylet import constants
 from sky.utils import asyncio_utils
 from sky.utils import common_utils
@@ -3960,6 +3962,373 @@ async def set_recovering_async(
     await callback_func('RECOVERING')
 
 
+@dataclasses.dataclass
+class _RuntimeObservationPlan:
+    values: Dict[str, Any]
+    events: List[Tuple[ManagedJobStatus, str]]
+    callbacks: List[str]
+    # Nodes to merge into the job's infra lineage, when placement changed.
+    placement: Optional[List[str]] = None
+
+
+def _plan_runtime_observation(
+    row: Dict[str, Any],
+    observation: managed_job_runtime.RuntimeObservation,
+    *,
+    provisioning: bool,
+    now: float,
+) -> Optional[_RuntimeObservationPlan]:
+    """Plan the task update for one runtime observation, or None to skip.
+
+    Restarts newer than the persisted cursor are recovery facts: they increment
+    recovery_count and add RECOVERING events in every phase. Status transitions
+    are decided separately, and only while monitoring, because the controller
+    owns status during launch.
+    """
+    restart_count = observation.restart_count
+    if restart_count < 0:
+        raise ValueError('Runtime restart count must be nonnegative')
+    if (row['end_at'] is not None or row['status'] not in [
+            status.value for status in ManagedJobStatus.processing_statuses()
+    ]):
+        return None
+    runtime_id = observation.runtime_id
+    metadata = json.loads(row['metadata'] or '{}')
+    cursor = metadata.get('runtime_recovery', {})
+    same_runtime = cursor.get('runtime_id') == runtime_id
+    if not same_runtime:
+        cursor = {}
+    observed = cursor.get('restarts', 0)
+    previous_user_restarts = cursor.get('user_restarts', 0)
+    user_delta = max(0, observation.user_restart_count - previous_user_restarts)
+    if restart_count < observed:
+        return None
+    delta = restart_count - observed
+    job_status = observation.job_status
+    running = job_status is not None and job_status.value == 'RUNNING'
+    # The cursor keeps the nodes of the last running observation, which is the
+    # placement recorded in the job's infra lineage.
+    placed = observation.phase == managed_job_runtime.RuntimePhase.RUNNING
+    nodes = (observation.nodes
+             if placed and observation.nodes else cursor.get('nodes'))
+    nodes_changed = nodes != cursor.get('nodes')
+    reasons = observation.recovery_reasons or {}
+    default_reason = observation.reason or (
+        'Runtime restarted during provisioning'
+        if provisioning else 'Runtime restarted the job')
+    values: Dict[str, Any] = {}
+    events: List[Tuple[ManagedJobStatus, str]] = []
+    callbacks: List[str] = []
+    if delta:
+        values['recovery_count'] = (row['recovery_count'] or 0) + delta
+        for count in range(observed + 1, restart_count + 1):
+            events.append((ManagedJobStatus.RECOVERING, reasons.get(count) or
+                           default_reason))
+
+    if provisioning:
+        if delta == 0 and user_delta == 0:
+            return None
+        cursor = dict(cursor, runtime_id=runtime_id, restarts=restart_count)
+    else:
+        terminal = job_status is not None and job_status.is_terminal()
+        waiting = job_status is not None and not running and not terminal
+        pending = bool(cursor.get('pending', False))
+        queued = waiting and restart_count > 0 and not pending
+        resumed = pending and (running or terminal)
+        controller_resumed = (not pending and delta == 0 and
+                              (running or terminal) and row['status']
+                              == ManagedJobStatus.RECOVERING.value)
+        starting = ((running or terminal) and
+                    row['status'] == ManagedJobStatus.STARTING.value)
+        refresh_running = running and (cursor.get('last_running_at') is None or
+                                       now - cursor['last_running_at'] >= 60)
+        if (delta == 0 and user_delta == 0 and not resumed and
+                not controller_resumed and not starting and not queued and
+                not refresh_running and not nodes_changed and same_runtime):
+            return None
+        resume_time = min(now, observation.started_at or now)
+        if delta:
+            callbacks.append('RECOVERING')
+        if delta or queued:
+            if row['status'] in (ManagedJobStatus.RUNNING.value,
+                                 ManagedJobStatus.WINDING_DOWN.value):
+                last = row['last_recovered_at']
+                if last is not None and last >= 0:
+                    # A missed poll cannot establish when prior work ended.
+                    # Count only the interval confirmed by observation.
+                    stopped_at = cursor.get('last_running_at') or last
+                    if running or terminal:
+                        stopped_at = min(stopped_at, resume_time)
+                    values['job_duration'] = ((row['job_duration'] or 0) +
+                                              max(0, stopped_at - last))
+            pending = True
+        if starting:
+            values.update(status=ManagedJobStatus.RUNNING.value,
+                          start_at=row['start_at'] or resume_time,
+                          last_recovered_at=resume_time,
+                          recovering_from_failure=None)
+            if row['recovering_from_failure']:
+                values['recovery_count'] = (
+                    values.get('recovery_count', row['recovery_count'] or 0) +
+                    1)
+            events.append((ManagedJobStatus.RUNNING, 'Job has started'))
+            callbacks.append('STARTED')
+            pending = False
+        elif pending:
+            if running or terminal:
+                values.update(status=ManagedJobStatus.RUNNING.value,
+                              start_at=row['start_at'] or resume_time,
+                              last_recovered_at=resume_time,
+                              recovering_from_failure=None)
+                events.append(
+                    (ManagedJobStatus.RUNNING, 'Runtime recovery completed'))
+                callbacks.append('RECOVERED')
+                pending = False
+            else:
+                values.update(status=ManagedJobStatus.RECOVERING.value,
+                              recovering_from_failure=False)
+        elif controller_resumed:
+            # The runtime kept running while the controller was recovering.
+            # Restore its baseline to avoid counting that interval twice.
+            values.update(status=ManagedJobStatus.RUNNING.value,
+                          start_at=row['start_at'] or resume_time,
+                          job_duration=cursor.get('running_duration',
+                                                  row['job_duration']),
+                          last_recovered_at=cursor.get('running_since',
+                                                       resume_time),
+                          recovering_from_failure=None)
+            if row['recovering_from_failure']:
+                values['recovery_count'] = (row['recovery_count'] or 0) + 1
+            events.append(
+                (ManagedJobStatus.RUNNING, 'Runtime is still running'))
+            callbacks.append('RECOVERED')
+        cursor = dict(
+            runtime_id=runtime_id,
+            restarts=restart_count,
+            pending=pending,
+            running_duration=values.get('job_duration', row['job_duration']),
+            running_since=values.get('last_recovered_at',
+                                     row['last_recovered_at']),
+            last_running_at=(now if running else cursor.get('last_running_at')))
+    cursor['user_restarts'] = max(previous_user_restarts,
+                                  observation.user_restart_count)
+    if nodes is not None:
+        cursor['nodes'] = nodes
+    metadata['runtime_user_restarts'] = (
+        metadata.get('runtime_user_restarts', 0) + user_delta)
+    metadata['runtime_recovery'] = cursor
+    values['metadata'] = json.dumps(metadata)
+    placement = list(nodes) if nodes_changed and nodes is not None else None
+    return _RuntimeObservationPlan(values, events, callbacks, placement)
+
+
+def _runtime_task_filter(job_id: int, task_id: int):
+    return sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                           spot_table.c.task_id == task_id)
+
+
+def _runtime_observation_update(job_id: int, task_id: int, row: Dict[str, Any],
+                                plan: _RuntimeObservationPlan):
+    return sqlalchemy.update(spot_table).where(
+        _runtime_task_filter(job_id,
+                             task_id), spot_table.c.metadata == row['metadata'],
+        spot_table.c.status == row['status'],
+        spot_table.c.end_at.is_(None)).values(**plan.values)
+
+
+def _runtime_observation_events(job_id: int, task_id: int,
+                                plan: _RuntimeObservationPlan):
+    return [
+        job_events_table.insert().values(
+            spot_job_id=job_id,
+            task_id=task_id,
+            new_status=status.value,
+            reason=reason,
+            recovery_source=RecoverySource.FAILURE.value,
+            timestamp=datetime.datetime.now()) for status, reason in plan.events
+    ]
+
+
+@db_retries.retry
+def _observe_runtime_during_provisioning(
+        job_id: int, task_id: int,
+        observation: managed_job_runtime.RuntimeObservation) -> None:
+    """Record runtime restarts while the controller awaits provisioning.
+
+    The controller owns launch status transitions, so this records restart
+    counts, retry budget and events only. They persist even if provisioning
+    later fails, and monitoring resumes from the same cursor.
+    """
+    engine = _db_manager.get_engine()
+    for _ in range(20):
+        with orm.Session(engine) as session:
+            row = session.execute(
+                sqlalchemy.select(spot_table).where(
+                    _runtime_task_filter(job_id, task_id))).mappings().one()
+            plan = _plan_runtime_observation(dict(row),
+                                             observation,
+                                             provisioning=True,
+                                             now=time.time())
+            if plan is None:
+                return
+            result = session.execute(
+                _runtime_observation_update(job_id, task_id, dict(row), plan))
+            if result.rowcount != 1:
+                session.rollback()
+                continue
+            for statement in _runtime_observation_events(job_id, task_id, plan):
+                session.execute(statement)
+            session.commit()
+            return
+    raise RuntimeError('Concurrent runtime recovery updates did not settle')
+
+
+async def _record_placement_async(session: sql_async.AsyncSession, job_id: int,
+                                  nodes: List[str],
+                                  infra: Optional[Dict[str, Optional[str]]]):
+    result = await session.execute(
+        sqlalchemy.select(job_info_table.c.node_names).where(
+            job_info_table.c.spot_job_id == job_id).with_for_update())
+    values: Dict[str, Any] = {
+        key: value for key, value in (infra or {}).items() if value is not None
+    }
+    values['node_names'] = common_utils.merge_node_names_lineage(
+        result.scalar_one_or_none(), nodes)
+    await session.execute(
+        sqlalchemy.update(job_info_table).where(
+            job_info_table.c.spot_job_id == job_id).values(**values))
+
+
+@db_retries.retry_async
+async def observe_runtime_async(
+    job_id: int,
+    task_id: int,
+    observation: managed_job_runtime.RuntimeObservation,
+    *,
+    callback_func: AsyncCallbackType,
+    infra: Optional[Dict[str, Optional[str]]] = None,
+) -> None:
+    """Persist a monitoring observation, including its placement.
+
+    A running observation whose nodes differ from the cursor merges them into
+    the job's infra lineage in the same transaction; infra supplies the cloud,
+    region and zone recorded with them. callback_func receives RECOVERING,
+    STARTED or RECOVERED after commit for each transition this observation
+    caused.
+    """
+    engine = await _db_manager.get_async_engine()
+    for _ in range(20):
+        async with sql_async.AsyncSession(engine) as session:
+            result = await session.execute(
+                sqlalchemy.select(spot_table).where(
+                    _runtime_task_filter(job_id, task_id)))
+            row = dict(result.mappings().one())
+            plan = _plan_runtime_observation(row,
+                                             observation,
+                                             provisioning=False,
+                                             now=time.time())
+            if plan is None:
+                return
+            result = await session.execute(
+                _runtime_observation_update(job_id, task_id, row, plan))
+            if result.rowcount != 1:
+                await session.rollback()
+                continue
+            for statement in _runtime_observation_events(job_id, task_id, plan):
+                await session.execute(statement)
+            if plan.placement is not None:
+                await _record_placement_async(session, job_id, plan.placement,
+                                              infra)
+            await session.commit()
+        for callback in plan.callbacks:
+            await callback_func(callback)
+        return
+    raise RuntimeError('Concurrent runtime recovery updates did not settle')
+
+
+def _runtime_cursor_from_metadata(
+        metadata: Optional[str]) -> Optional[managed_job_runtime.RuntimeCursor]:
+    cursor = json.loads(metadata or '{}').get('runtime_recovery')
+    if not cursor or 'runtime_id' not in cursor:
+        return None
+    return managed_job_runtime.RuntimeCursor(
+        runtime_id=cursor['runtime_id'],
+        restart_count=cursor.get('restarts', 0),
+        user_restart_count=cursor.get('user_restarts', 0),
+        nodes=cursor.get('nodes'))
+
+
+@db_retries.retry
+def get_runtime_cursor(
+        job_id: int,
+        task_id: int) -> Optional[managed_job_runtime.RuntimeCursor]:
+    """Return the task's last persisted runtime observation, if any."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        metadata = session.execute(
+            sqlalchemy.select(spot_table.c.metadata).where(
+                _runtime_task_filter(job_id, task_id))).scalar_one_or_none()
+    return _runtime_cursor_from_metadata(metadata)
+
+
+@db_retries.retry_async
+async def get_runtime_cursor_async(
+        job_id: int,
+        task_id: int) -> Optional[managed_job_runtime.RuntimeCursor]:
+    """Return the task's last persisted runtime observation, if any."""
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.select(spot_table.c.metadata).where(
+                _runtime_task_filter(job_id, task_id)))
+        metadata = result.scalar_one_or_none()
+    return _runtime_cursor_from_metadata(metadata)
+
+
+_MANAGED_TASK_OBSERVATION = 'managed_task'
+
+
+def provisioning_observation_target(
+        job_id: int, task_id: int) -> provision_observation.Target:
+    """Name a managed task as the target of provisioning-time observations."""
+    return {
+        'kind': _MANAGED_TASK_OBSERVATION,
+        'job_id': job_id,
+        'task_id': task_id,
+    }
+
+
+class _ManagedTaskObservationSink:
+    """Persists provisioning-time observations of a managed task."""
+
+    def previous(
+        self, target: provision_observation.Target
+    ) -> Optional[managed_job_runtime.RuntimeCursor]:
+        return get_runtime_cursor(target['job_id'], target['task_id'])
+
+    def report(self, target: provision_observation.Target,
+               observation: managed_job_runtime.RuntimeObservation) -> None:
+        _observe_runtime_during_provisioning(target['job_id'],
+                                             target['task_id'], observation)
+
+
+provision_observation.register_sink(_MANAGED_TASK_OBSERVATION,
+                                    _ManagedTaskObservationSink())
+
+
+@db_retries.retry_async
+async def get_runtime_user_restarts_async(job_id: int, task_id: int) -> int:
+    """Return budget-consuming retries performed by task runtimes."""
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.select(spot_table.c.metadata).where(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id))
+        metadata = result.scalar_one_or_none()
+    return json.loads(metadata or '{}').get('runtime_user_restarts', 0)
+
+
 async def set_recovered_async(job_id: int,
                               task_id: int,
                               recovered_time: float,
@@ -3997,6 +4366,8 @@ async def set_recovered_async(job_id: int,
                 )).
             values({
                 spot_table.c.status: ManagedJobStatus.RUNNING.value,
+                spot_table.c.start_at: sqlalchemy.func.coalesce(
+                    spot_table.c.start_at, recovered_time),
                 spot_table.c.last_recovered_at: recovered_time,
                 spot_table.c.recovery_count: count_expr,
                 # Close the episode: this task has left RECOVERING, so a

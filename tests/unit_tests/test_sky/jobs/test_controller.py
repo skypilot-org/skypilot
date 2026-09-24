@@ -1786,6 +1786,52 @@ class TestUserJobFailureRecoveryEventReason:
 
         assert kwargs['user_job_failure_reason'] is None
 
+    @pytest.mark.asyncio
+    async def test_recovery_capture_retains_handle_removed_by_refresh(self):
+        # pylint: disable=protected-access
+        controller = self._make_controller(exit_codes=None)
+        executor = self._make_executor()
+        task = MagicMock(name='task')
+        task.num_nodes = 1
+        handle = MagicMock(name='pre_refresh_handle')
+        current_handle = [handle]
+
+        def refresh(*_args, **_kwargs):
+            current_handle[0] = None
+            return None, None
+
+        with patch('asyncio.sleep', new=AsyncMock()), \
+             patch('sky.backends.backend_utils.async_check_network_connection',
+                   new=AsyncMock()), \
+             patch('sky.jobs.utils.get_job_status',
+                   new=AsyncMock(return_value=(job_lib.JobStatus.CANCELLED,
+                                              None))), \
+             patch('sky.backends.backend_utils.refresh_cluster_status_handle',
+                   side_effect=refresh), \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name',
+                          side_effect=lambda _: current_handle[0]), \
+             patch.object(controller_module.global_user_state,
+                          'get_cluster_events', return_value=[]), \
+             patch.object(controller_module.ExternalFailureSource,
+                          'is_registered', return_value=False), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=True), \
+             patch.object(controller_module.managed_job_runtime,
+                          'on_before_recovery') as capture, \
+             patch.object(managed_job_state, 'set_recovering_async',
+                          new=AsyncMock()):
+            with pytest.raises(self._StopLoop):
+                await controller._monitor_one_task(task_id=0,
+                                                   task=task,
+                                                   cluster_name='test-cluster',
+                                                   executor=executor,
+                                                   callback_func=MagicMock())
+
+        assert current_handle[0] is None
+        capture.assert_called_once_with(handle, controller._backend, 42, 0,
+                                        None, None)
+
 
 class TestDunderMainDispatchesToImportedModule:
     """Regression: running this file as `__main__` must dispatch into the
@@ -1866,7 +1912,129 @@ class TestTransientJobStatusRecoveryWindow:
         """Sentinel to break the otherwise-infinite monitoring loop."""
 
     @pytest.mark.asyncio
-    async def test_window_reset_after_recovery(self, monkeypatch):
+    @pytest.mark.parametrize('num_nodes', [1, 2])
+    async def test_runtime_cancellation_uses_controller_cleanup(
+            self, num_nodes):
+        task = MagicMock()
+        task.num_nodes = num_nodes
+        instance = MagicMock()
+        instance._job_id = 1
+        instance._pool = None
+        executor = MagicMock()
+        observation = controller_module.managed_job_runtime.RuntimeObservation(
+            runtime_id='allocation',
+            restart_count=0,
+            job_status=job_lib.JobStatus.CANCELLED)
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection', new=AsyncMock()), \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name', return_value=MagicMock()), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=True), \
+             patch.object(managed_job_state, 'get_runtime_cursor_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.managed_job_runtime,
+                          'get_recovery_status', return_value=observation), \
+             patch.object(managed_job_state, 'observe_runtime_async',
+                          new=AsyncMock()) as observe, \
+             patch.object(managed_job_state, 'set_failed_async',
+                          new=AsyncMock()) as fail, \
+             patch.object(controller_module.asyncio, 'sleep', new=AsyncMock()):
+            with pytest.raises(asyncio.CancelledError):
+                await JobController._monitor_one_task_impl(
+                    instance,
+                    task_id=0,
+                    task=task,
+                    cluster_name='cluster',
+                    executor=executor,
+                    status_logger=managed_job_utils.JobStatusLogger(),
+                    callback_func=AsyncMock())
+        assert (observe.await_args.args[2].phase ==
+                controller_module.managed_job_runtime.RuntimePhase.TERMINATED)
+        fail.assert_not_called()
+        executor.recover.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('num_nodes', [1, 2])
+    @pytest.mark.parametrize(
+        'healthy_status',
+        [None, job_lib.JobStatus.PENDING, job_lib.JobStatus.RUNNING])
+    async def test_owned_unknown_status_exhausts_window(self, monkeypatch,
+                                                        num_nodes,
+                                                        healthy_status):
+        """Unknown runtime observations retry, then escape to emergency recovery.
+
+        A known runtime state resets the window, including a queued recovery.
+        Each poll obtains status and recovery from one runtime observation.
+        """
+        monkeypatch.setattr(managed_job_utils,
+                            'JOB_STATUS_FETCH_MIN_ELAPSED_SECONDS', 60)
+        monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_FETCH_MIN_RETRIES',
+                            2)
+        statuses = [None, None, None]
+        if healthy_status is not None:
+            statuses = [None, None, healthy_status] + statuses
+        clock = {'t': 1000.0, 'polls': 0}
+
+        def get_observation(*args, **kwargs):
+            clock['polls'] += 1
+            if clock['polls'] > len(statuses):
+                raise self._StopLoop('unknown runtime status retried forever')
+            clock['t'] += 100
+            return observations[clock['polls'] - 1]
+
+        observations = [
+            controller_module.managed_job_runtime.RuntimeObservation(
+                runtime_id='allocation',
+                restart_count=1,
+                job_status=status,
+                reason='runtime query unavailable' if status is None else None)
+            for status in statuses
+        ]
+        task = MagicMock()
+        task.num_nodes = num_nodes
+        instance = MagicMock()
+        instance._job_id = 1
+        instance._pool = None
+        instance._update_live_log_links = AsyncMock(return_value=True)
+        executor = MagicMock()
+        with patch.object(controller_module.time, 'time',
+                          side_effect=lambda: clock['t']), \
+             patch.object(managed_job_utils, 'get_job_status',
+                          new=AsyncMock()) as ordinary_probe, \
+             patch.object(controller_module.backend_utils,
+                          'async_check_network_connection', new=AsyncMock()), \
+             patch.object(controller_module.backend_utils,
+                          'refresh_cluster_status_handle') as refresh, \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name', return_value=MagicMock()), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=True), \
+             patch.object(managed_job_state, 'get_runtime_cursor_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.managed_job_runtime,
+                          'get_recovery_status', side_effect=get_observation), \
+             patch.object(managed_job_state, 'observe_runtime_async',
+                          new=AsyncMock()), \
+             patch.object(controller_module.asyncio, 'sleep', new=AsyncMock()):
+            with pytest.raises(RuntimeError, match='runtime query unavailable'):
+                await JobController._monitor_one_task_impl(
+                    instance,
+                    task_id=0,
+                    task=task,
+                    cluster_name='cluster',
+                    executor=executor,
+                    status_logger=managed_job_utils.JobStatusLogger(),
+                    callback_func=AsyncMock())
+        assert clock['polls'] == len(statuses)
+        ordinary_probe.assert_not_called()
+        refresh.assert_not_called()
+        executor.recover.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('runtime_registered', [False, True])
+    async def test_window_reset_after_recovery(self, monkeypatch,
+                                               runtime_registered):
         """A transient failure after a recovery starts a fresh retry window.
 
         Drives ``_monitor_one_task_impl`` through: transient failure (retry) ->
@@ -1937,7 +2105,13 @@ class TestTransientJobStatusRecoveryWindow:
                           'async_check_network_connection',
                           new=AsyncMock(return_value=None)), \
              patch.object(controller_module.managed_job_runtime,
-                          'is_registered', return_value=False), \
+                          'is_registered', return_value=runtime_registered), \
+             patch.object(managed_job_state, 'get_runtime_cursor_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.managed_job_runtime,
+                          'get_recovery_status', return_value=None) as observation, \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name', return_value=handle), \
              patch.object(state, 'set_recovering_async',
                           new=AsyncMock(return_value=None)), \
              patch.object(state, 'set_recovered_async',
@@ -1960,6 +2134,8 @@ class TestTransientJobStatusRecoveryWindow:
         assert recover_calls == 1, (
             'expected exactly one recovery; a second recovery means the '
             'transient retry window was not reset after the first recovery')
+
+        assert observation.call_count == (4 if runtime_registered else 0)
 
     @pytest.mark.asyncio
     async def test_slow_check_still_gets_its_retries(self, monkeypatch):
