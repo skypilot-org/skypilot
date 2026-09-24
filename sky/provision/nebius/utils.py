@@ -6,6 +6,7 @@ import uuid
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import nebius
+from sky.exceptions import ProvisionUnsupportedError
 from sky.provision.nebius import constants as nebius_constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
@@ -519,7 +520,7 @@ def start(instance_id: str) -> None:
                     timeout=nebius.READ_TIMEOUT))
     if (instance.spec.check_presence('preemptible') and
             instance.spec.which_field_in_oneof('pricing_model') is None):
-        raise ValueError(
+        raise ProvisionUnsupportedError(
             f'Nebius VM {instance_id} requires explicit spot pricing opt-in. '
             'While the VM is stopped, select price-taking spot pricing in '
             'its Nebius spec, then retry sky start. Do this for every legacy '
