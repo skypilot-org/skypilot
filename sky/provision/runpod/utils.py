@@ -6,7 +6,6 @@ still go through the GraphQL API (``sky.provision.runpod.api``).
 """
 
 import base64
-import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
@@ -14,7 +13,6 @@ from sky.adaptors import runpod
 from sky.provision import docker_utils
 from sky.provision.runpod.api import commands as runpod_commands
 from sky.skylet import constants
-from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -91,44 +89,6 @@ def _construct_docker_login_template_name(cluster_name: str) -> str:
 
 def _construct_registry_auth_name(cluster_name: str) -> str:
     return f'{cluster_name}-registry-auth'
-
-
-def _is_auth_error(e: Exception) -> bool:
-    if isinstance(e, runpod.RunPodRestError):
-        return e.is_auth_error()
-    error_msg = str(e).lower()
-    auth_keywords = ['unauthorized', 'forbidden', '401', '403']
-    return any(keyword in error_msg for keyword in auth_keywords)
-
-
-def retry(func):
-    """Decorator to retry a function.
-
-    Only retries on transient errors. Does not retry on authorization errors
-    (Unauthorized, Forbidden) as these are not recoverable.
-    """
-
-    def wrapper(*args, **kwargs):
-        """Wrapper for retrying a function."""
-        cnt = 0
-        while True:
-            try:
-                return func(*args, **kwargs)
-            except (runpod.RunPodRestError,
-                    runpod.runpod.error.QueryError) as e:
-                # Don't retry on authorization errors - these won't recover
-                if _is_auth_error(e):
-                    logger.error(f'RunPod authorization error (not retrying): '
-                                 f'{common_utils.format_exception(e)}')
-                    raise
-                cnt += 1
-                if cnt >= 3:
-                    raise
-                logger.warning('Retrying for exception: '
-                               f'{common_utils.format_exception(e)}.')
-                time.sleep(1)
-
-    return wrapper
 
 
 def _list_pods() -> List[Dict[str, Any]]:
