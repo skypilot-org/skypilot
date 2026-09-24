@@ -4,6 +4,7 @@
 
 import collections
 import copy
+import datetime
 import os
 import re
 import tempfile
@@ -5442,6 +5443,215 @@ def test_match_kubernetes_failure_hint_generic_eviction():
     assert hint is not None
     assert hint.startswith(
         'The pod was evicted by the node under resource pressure.')
+
+
+def test_match_kubernetes_failure_hint_ignores_a_token_inside_a_longer_word():
+    """A queue controller's eviction must not trip the node-pressure hint.
+
+    A queue admission controller that evicts an admitted workload names the
+    eviction `WorkloadEvictedDueToPodsReadyTimeout`, which contains 'Evicted'
+    as part of a camelCase identifier. Matched as a substring, the provision
+    failure told the user to increase `resources.memory` / `resources.disk_size`
+    -- advice that cannot fix a workload a queue evicted.
+    """
+    pod_names = ['sky-cluster-head']
+    cluster = 'sky-cluster'
+    reason = (f'Pod(s) {pod_names} of cluster {cluster!r} were deleted while '
+              'SkyPilot was waiting for them to be scheduled: '
+              'sky-cluster-head: Preempted by Kueue: '
+              'WorkloadEvictedDueToPodsReadyTimeout (Exceeded the PodsReady '
+              'timeout default/sky-cluster).')
+    assert utils.match_kubernetes_failure_hint(reason) is None
+
+
+def test_reason_matches_failure_token_word_boundaries():
+    # Named as a word of its own, whatever punctuation surrounds it.
+    assert utils.reason_matches_failure_token('Evicted: low on memory',
+                                              'Evicted')
+    assert utils.reason_matches_failure_token('pod-0 (Evicted)', 'Evicted')
+    assert utils.reason_matches_failure_token('Evicted', 'Evicted')
+    # Buried in a longer word: not this failure.
+    assert not utils.reason_matches_failure_token(
+        'WorkloadEvictedDueToPodsReadyTimeout', 'Evicted')
+    assert not utils.reason_matches_failure_token('PodEvicted', 'Evicted')
+    assert not utils.reason_matches_failure_token('Evicted2', 'Evicted')
+    # Only alphanumeric edges are anchored, so a multi-word marker wrapped in
+    # punctuation still matches.
+    assert utils.reason_matches_failure_token(
+        f'OOMKilled (exit code 137, {utils.NO_MEMORY_LIMIT_MARKER})',
+        utils.NO_MEMORY_LIMIT_MARKER)
+
+
+# ---------------------------------------------------------------------------
+#  Deriving a reason from a pod's own events (reason_from_pod_events,
+#  last_pod_event_context), which outlive the pod they describe.
+# ---------------------------------------------------------------------------
+
+_POD_CREATED_AT = datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc)
+
+
+def _make_pod_event(reason, message, type_='Normal', at=0):
+    """A pod event, shaped like what the API server returns.
+
+    *at* is seconds relative to _POD_CREATED_AT; a negative value is an event
+    left behind by whatever held the same pod name before this pod.
+    """
+    event = mock.MagicMock()
+    event.reason = reason
+    event.message = message
+    event.type = type_
+    # event_last_observed prefers these over the creation timestamp; leaving
+    # them as auto-created MagicMocks would make the event read as undated.
+    event.series = None
+    event.last_timestamp = None
+    event.event_time = None
+    event.metadata.creation_timestamp = (_POD_CREATED_AT +
+                                         datetime.timedelta(seconds=at))
+    return event
+
+
+def test_a_deletion_cause_outranks_a_newer_generic_event():
+    """The informative event is usually not the last one: the kubelet's
+    Killing follows whatever actually caused the deletion."""
+    events = [
+        _make_pod_event('Killing', 'Stopping container ray-node', at=12),
+        _make_pod_event('Stopped',
+                        'Exceeded the PodsReady timeout default/wl',
+                        at=10),
+    ]
+    assert utils.reason_from_pod_events(events) == (
+        'Stopped by Kueue: Exceeded the PodsReady timeout default/wl')
+
+
+def test_events_that_do_not_name_a_deletion_cause_do_not_count():
+    """Callers report whatever comes back as an identified cause, so the
+    scheduler's complaint and the kubelet's kill notice must not."""
+    assert utils.reason_from_pod_events([
+        _make_pod_event('FailedScheduling',
+                        '0/1 nodes are available: 1 Insufficient cpu.',
+                        type_='Warning',
+                        at=5),
+        _make_pod_event('Scheduled', 'Successfully assigned ns/p to n'),
+    ]) is None
+    assert utils.reason_from_pod_events(
+        [_make_pod_event('Killing', 'Stopping container ray-node')]) is None
+    assert utils.reason_from_pod_events([]) is None
+
+
+def test_a_reason_reads_like_a_pod_status_reason():
+    """The shape is '<Reason>: <message>', the same as what
+    get_condensed_pod_reason produces, so the two are interchangeable in a
+    failure message. The kubelet is not the only thing that emits Evicted --
+    node autoscalers emit it for every pod they drain -- so the message is
+    left to name the actor."""
+    assert utils.reason_from_pod_events([
+        _make_pod_event('Evicted',
+                        'The node was low on resource: ephemeral-storage',
+                        type_='Warning')
+    ]) == 'Evicted: The node was low on resource: ephemeral-storage'
+    # 'Stopped' alone reads like the user stopped something, so that one
+    # reason is reported with its actor.
+    assert utils.reason_from_pod_events([_make_pod_event('Stopped', '')
+                                        ]) == 'Stopped by Kueue'
+
+
+def test_events_from_before_the_pod_are_not_evidence():
+    """An event older than the pod describes whatever held its name before
+    it."""
+    old = [
+        _make_pod_event('Stopped',
+                        'Exceeded the PodsReady timeout default/old',
+                        at=-1800)
+    ]
+    assert utils.reason_from_pod_events(old, _POD_CREATED_AT) is None
+    # Without a creation time to compare against, nothing is filtered.
+    assert utils.reason_from_pod_events(old) is not None
+    # Clock skew between this process and the API server that stamps the
+    # events must not throw away the pod's own events.
+    recent = [
+        _make_pod_event('Stopped',
+                        'Exceeded the PodsReady timeout default/wl',
+                        at=-5)
+    ]
+    assert utils.reason_from_pod_events(recent, _POD_CREATED_AT) is not None
+
+
+def test_an_undated_event_is_not_assumed_to_be_stale():
+    event = _make_pod_event('Stopped', 'Exceeded the PodsReady timeout')
+    event.metadata.creation_timestamp = None
+    assert utils.reason_from_pod_events([event], _POD_CREATED_AT) is not None
+
+
+def test_the_last_event_is_offered_as_context():
+    """Not as a cause -- see the tests above -- but it is still the last thing
+    anything said about the pod."""
+    assert utils.last_pod_event_context([
+        _make_pod_event('Scheduled', 'Successfully assigned ns/p to n', at=6),
+        _make_pod_event('FailedScheduling',
+                        '0/1 nodes are available',
+                        type_='Warning',
+                        at=5),
+    ]) == 'FailedScheduling: 0/1 nodes are available'
+    assert utils.last_pod_event_context(
+        [_make_pod_event('Killing', 'Stopping container ray-node',
+                         at=5)]) == 'Killing: Stopping container ray-node'
+    assert utils.last_pod_event_context([
+        _make_pod_event('Scheduled', 'Successfully assigned ns/p to n')
+    ]) is None
+
+
+def _patch_pod_events(monkeypatch, core_api, events):
+    core_api.list_namespaced_event.return_value = mock.MagicMock(items=events)
+    monkeypatch.setattr(utils.kubernetes, 'core_api', lambda context: core_api)
+
+
+def test_diagnose_terminated_pod_deleted_pod_reports_its_events(monkeypatch):
+    """The runtime-setup path shares the gap this change is about: a pod that
+    something else deleted reads back as a 404, and the diagnosis used to
+    return nothing at all. Its events outlive it and say who did it."""
+    core_api = _patch_read_pod(monkeypatch,
+                               side_effect=kubernetes.client.rest.ApiException(
+                                   status=404, reason='Not Found'))
+    _patch_pod_events(monkeypatch, core_api, [
+        _make_pod_event('Stopped', 'Exceeded the PodsReady timeout default/wl')
+    ])
+    msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert msg == ('Pod mypod was deleted: Stopped by Kueue: Exceeded the '
+                   'PodsReady timeout default/wl.')
+
+
+def test_diagnose_terminated_pod_deleted_pod_keeps_its_hint(monkeypatch):
+    core_api = _patch_read_pod(monkeypatch,
+                               side_effect=kubernetes.client.rest.ApiException(
+                                   status=404, reason='Not Found'))
+    _patch_pod_events(monkeypatch, core_api, [
+        _make_pod_event('Evicted',
+                        'The node was low on resource: ephemeral-storage.',
+                        type_='Warning')
+    ])
+    msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert msg is not None
+    assert 'was deleted: Evicted' in msg
+    assert 'Hint:' in msg
+    assert 'resources.disk_size' in msg
+
+
+def test_diagnose_terminated_pod_deleted_pod_with_nothing_to_say(monkeypatch):
+    """Every `sky down` leaves a pod that reads back as a 404; only one whose
+    events name a cause is worth reporting."""
+    core_api = _patch_read_pod(monkeypatch,
+                               side_effect=kubernetes.client.rest.ApiException(
+                                   status=404, reason='Not Found'))
+    _patch_pod_events(monkeypatch, core_api,
+                      [_make_pod_event('Killing', 'Stopping container ray')])
+    assert utils.diagnose_terminated_pod('ctx', 'ns', 'mypod') is None
+
+
+def test_diagnose_terminated_pod_other_api_error_returns_none(monkeypatch):
+    _patch_read_pod(monkeypatch,
+                    side_effect=kubernetes.client.rest.ApiException(
+                        status=500, reason='Internal Server Error'))
+    assert utils.diagnose_terminated_pod('ctx', 'ns', 'mypod') is None
 
 
 def test_get_failure_hint_reasons_flattens_table():

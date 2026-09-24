@@ -1,6 +1,7 @@
 """Util constants/functions for the backends."""
 import asyncio
 from datetime import datetime
+from datetime import timezone
 import enum
 import fnmatch
 import hashlib
@@ -3048,9 +3049,26 @@ def _update_cluster_status(
                     handle.cluster_yaml)
                 if ray_config and 'provider' in ray_config:
                     pod_names = list(node_statuses.keys())
+                    # Only read events from this cluster's launch onwards.
+                    # Pod names are a function of the cluster name and
+                    # Kubernetes keeps Events for an hour, so a cluster that
+                    # reuses the name of one that was torn down would
+                    # otherwise be told why the pods of that earlier cluster
+                    # were deleted. launched_at is the right bound: it is
+                    # written again every time the cluster is launched, and
+                    # the earlier cluster's record has to be removed before
+                    # its name can be reused, so everything that cluster left
+                    # behind was written before this one was launched. The
+                    # pods themselves are not in hand here to give a tighter
+                    # bound -- the status query returns a status and a reason
+                    # per pod, not the pod objects.
+                    launched_at = record.get('launched_at')
+                    since = (datetime.fromtimestamp(launched_at,
+                                                    tz=timezone.utc)
+                             if launched_at is not None else None)
                     status_reason = (
                         k8s_instance.get_cluster_failure_reason_from_events(
-                            ray_config['provider'], pod_names) or
+                            ray_config['provider'], pod_names, since=since) or
                         k8s_instance.get_cluster_failure_reason_from_pods(
                             ray_config['provider'], pod_names) or '')
                     # Lands in status_reason, not node_statuses, so the
