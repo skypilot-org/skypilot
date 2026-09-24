@@ -4,6 +4,8 @@ from unittest import mock
 
 import pytest
 
+from sky.exceptions import ProvisionUnsupportedError
+
 pytest.importorskip('nebius')
 
 # pylint: disable=wrong-import-position
@@ -107,7 +109,8 @@ def test_restart_requires_existing_opt_in(instance_service, mode):
     instance_service.get.side_effect = [stopped, running]
 
     if mode == 'legacy':
-        with pytest.raises(ValueError, match='explicit spot pricing opt-in'):
+        with pytest.raises(ProvisionUnsupportedError,
+                           match='explicit spot pricing opt-in'):
             utils.start('instance-id')
         instance_service.start.assert_not_called()
         assert instance_service.get.call_count == 1
