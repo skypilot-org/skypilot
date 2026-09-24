@@ -1244,7 +1244,6 @@ class JobController:
                         'Failed to observe runtime after '
                         f'{status_check_window.summary()}: {runtime_error}')
                 await asyncio.sleep(status_check_window.next_backoff())
-                force_transit_to_recovering = False
                 continue
 
             if runtime_recovery is not None:
@@ -1536,6 +1535,12 @@ class JobController:
                             exit_code_desc = ('Job exited with exit codes '
                                               f'{exit_codes}')
 
+                    if managed_job_runtime.is_registered():
+                        # Runtime retries since launch count toward the
+                        # max_restarts_on_errors budget.
+                        executor.runtime_restart_cnt_on_failure = await (
+                            managed_job_state.get_runtime_user_restarts_async(
+                                self._job_id, task_id))
                     should_restart_on_failure = (
                         not (runtime_recovery is not None and
                              runtime_recovery.handles_user_retries) and
