@@ -4023,7 +4023,7 @@ def _runtime_observation_events(job_id: int, task_id: int,
 
 
 @db_retries.retry
-def observe_runtime_during_provisioning(
+def _observe_runtime_during_provisioning(
         job_id: int, task_id: int,
         observation: managed_job_runtime.RuntimeObservation) -> None:
     """Record runtime restarts while the controller awaits provisioning.
@@ -4181,8 +4181,8 @@ class _ManagedTaskObservationSink:
 
     def report(self, target: provision_observation.Target,
                observation: managed_job_runtime.RuntimeObservation) -> None:
-        observe_runtime_during_provisioning(target['job_id'], target['task_id'],
-                                            observation)
+        _observe_runtime_during_provisioning(target['job_id'],
+                                             target['task_id'], observation)
 
 
 provision_observation.register_sink(_MANAGED_TASK_OBSERVATION,

@@ -74,8 +74,9 @@ async def observe(count, **kwargs):
 
 
 def provision(count, runtime_id='allocation-a', **kwargs):
-    state.observe_runtime_during_provisioning(
-        42, 0, runtime.RuntimeObservation(runtime_id, count, None, **kwargs))
+    provision_observation.report(
+        state.provisioning_observation_target(42, 0),
+        runtime.RuntimeObservation(runtime_id, count, None, **kwargs))
 
 
 @pytest.mark.asyncio
