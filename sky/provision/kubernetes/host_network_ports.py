@@ -38,8 +38,10 @@ from sky.provision.kubernetes import host_network_probe
 # Changing it is not free. `ports_from_pod` uses the range to tell our block
 # apart from a user's pod_config ports, so a cluster whose range moves reads
 # every existing pod's block as "not ours" and hands out new ones while the
-# pods keep listening on the old. Widen freely; move or narrow only with the
-# clusters drained.
+# pods keep listening on the old. Widening is safe for that read, but not for
+# the write: `apply_to_pod_spec` refuses a user's `pod_config` port inside
+# the range, so widening turns a port that launched yesterday into a
+# launch-time error. Change it with the clusters drained, either way.
 _RANGE_ENV = 'SKYPILOT_HOST_NETWORK_PORT_RANGE'
 _DEFAULT_RANGE = (20000, 29999)
 
@@ -71,7 +73,28 @@ def _resolve_range() -> Tuple[int, int]:
     return start, end
 
 
-PORT_RANGE_START, PORT_RANGE_END = _resolve_range()
+# Resolved at import for the common case, but a bad value must not raise
+# here: this module is imported by instance.py, so a typo would surface as an
+# import traceback from an unrelated command rather than as a setting error
+# from the path that reads it. Hold the message and raise it where the range
+# is actually used.
+_RANGE_ERROR: Optional[str] = None
+try:
+    PORT_RANGE_START, PORT_RANGE_END = _resolve_range()
+except ValueError as e:
+    PORT_RANGE_START, PORT_RANGE_END = _DEFAULT_RANGE
+    _RANGE_ERROR = str(e)
+
+
+def _require_valid_range() -> None:
+    """Refuse to assign ports under a range we could not parse.
+
+    Falling back to the default would be worse than failing: the operator
+    set the variable because the default does not work on their nodes.
+    """
+    if _RANGE_ERROR is not None:
+        raise ValueError(_RANGE_ERROR)
+
 
 # One contiguous block per pod, sized for the head; a worker not using three of
 # them costs nothing and keeps a single pod spec for every pod in the cluster.
@@ -95,6 +118,7 @@ _PINNED_START_ENV = 'SKYPILOT_HOST_NETWORK_PORT_START'
 
 def allocate_block() -> Dict[str, int]:
     """Assign a fresh contiguous block, keyed by port name."""
+    _require_valid_range()
     pinned = os.environ.get(_PINNED_START_ENV)
     if pinned:
         start = int(pinned)

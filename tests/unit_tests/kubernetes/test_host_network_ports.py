@@ -6,6 +6,7 @@ worker is told the *head's* GCS port while keeping its own everything else,
 and that the resolution order falls back rather than inventing a block for a
 pod that already has one.
 """
+import os
 from unittest import mock
 
 import pytest
@@ -518,6 +519,30 @@ class TestRangeOverride:
 
     def test_a_valid_range_is_taken(self, monkeypatch):
         assert self._resolve('8000-9999', monkeypatch) == (8000, 9999)
+
+    def test_a_bad_value_does_not_break_importing_the_module(self):
+        """instance.py imports this, so an import-time raise would surface a
+        typo'd variable as a traceback from an unrelated command. The
+        failure belongs on the path that reads the range."""
+        import subprocess
+        import sys
+        env = dict(os.environ, SKYPILOT_HOST_NETWORK_PORT_RANGE='garbage')
+        r = subprocess.run([
+            sys.executable, '-c',
+            'from sky.provision.kubernetes import instance; print("ok")'
+        ],
+                           capture_output=True,
+                           text=True,
+                           env=env,
+                           check=False)
+        assert r.returncode == 0, r.stderr[-400:]
+
+    def test_but_assigning_a_block_refuses(self, monkeypatch):
+        """Falling back to the default would be worse than failing: the
+        operator set the variable because the default does not work."""
+        monkeypatch.setattr(ports, '_RANGE_ERROR', 'bad range')
+        with pytest.raises(ValueError, match='bad range'):
+            ports.allocate_block()
 
     @pytest.mark.parametrize(
         'bad', ['abc', '8000', '8000-9', '0-100', '100-70000', '9999-8000'])
