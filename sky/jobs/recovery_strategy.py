@@ -482,36 +482,55 @@ class StrategyExecutor:
         while job_checking_retry_cnt < MAX_JOB_CHECKING_RETRY:
             # Avoid the infinite loop, if any bug happens.
             job_checking_retry_cnt += 1
+            runtime_status = None
             try:
-                cluster_status, _ = (await asyncio.to_thread(
-                    backend_utils.refresh_cluster_status_handle,
-                    self.cluster_name,
-                    force_refresh_statuses=set(status_lib.ClusterStatus)))
+                if managed_job_runtime.is_registered():
+                    handle = await asyncio.to_thread(
+                        global_user_state.get_handle_from_cluster_name,
+                        self.cluster_name)
+                    runtime_status = await asyncio.to_thread(
+                        managed_job_runtime.get_job_status, handle,
+                        self.cluster_name)
             except Exception as e:  # pylint: disable=broad-except
-                # If any unexpected error happens, retry the job checking
-                # loop.
-                # TODO(zhwu): log the unexpected error to usage collection
-                # for future debugging.
-                logger.info(f'Unexpected exception: {e}\nFailed to get the '
-                            'refresh the cluster status. Retrying.')
+                logger.info('Unexpected exception during fetching job status: '
+                            f'{common_utils.format_exception(e)}')
                 continue
-            if cluster_status not in (status_lib.ClusterStatus.UP,
-                                      status_lib.ClusterStatus.AUTOSTOPPING):
-                # The cluster can be preempted before the job is
-                # launched.
-                # Break to let the retry launch kick in.
-                logger.info('The cluster is preempted before the job '
-                            'is submitted.')
-                # TODO(zhwu): we should recover the preemption with the
-                # recovery strategy instead of the current while loop.
-                break
-
-            try:
-                status, transient_error_reason = (
-                    await managed_job_utils.get_job_status(
-                        self.backend,
+            # A submitted runtime job can requeue or finish before launch
+            # returns. Its owner determines whether submission succeeded.
+            if runtime_status is None:
+                try:
+                    cluster_status, _ = (await asyncio.to_thread(
+                        backend_utils.refresh_cluster_status_handle,
                         self.cluster_name,
-                        job_id=self.job_id_on_pool_cluster))
+                        force_refresh_statuses=set(status_lib.ClusterStatus)))
+                except Exception as e:  # pylint: disable=broad-except
+                    # If any unexpected error happens, retry the job checking
+                    # loop.
+                    # TODO(zhwu): log the unexpected error to usage collection
+                    # for future debugging.
+                    logger.info(f'Unexpected exception: {e}\nFailed to get the '
+                                'refresh the cluster status. Retrying.')
+                    continue
+                if cluster_status not in (
+                        status_lib.ClusterStatus.UP,
+                        status_lib.ClusterStatus.AUTOSTOPPING):
+                    # The cluster can be preempted before the job is
+                    # launched.
+                    # Break to let the retry launch kick in.
+                    logger.info('The cluster is preempted before the job '
+                                'is submitted.')
+                    # TODO(zhwu): we should recover the preemption with the
+                    # recovery strategy instead of the current while loop.
+                    break
+            try:
+                if runtime_status is not None:
+                    status, transient_error_reason = runtime_status
+                else:
+                    status, transient_error_reason = (
+                        await managed_job_utils.get_job_status(
+                            self.backend,
+                            self.cluster_name,
+                            job_id=self.job_id_on_pool_cluster))
             except Exception as e:  # pylint: disable=broad-except
                 transient_error_reason = common_utils.format_exception(e)
                 # If any unexpected error happens, retry the job checking

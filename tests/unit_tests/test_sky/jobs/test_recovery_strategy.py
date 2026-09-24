@@ -657,3 +657,25 @@ def test_make_forwards_retry_budget_after_removing_resource_recovery(
     assert list(task.resources)[0].job_recovery is None
     assert factory.call_args.args[3] == 4
     assert factory.call_args.args[10] == [137]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status_name', ['PENDING', 'SUCCEEDED', 'CANCELLED'])
+async def test_start_wait_uses_runtime_before_cluster_refresh(
+        monkeypatch, status_name):
+    from sky.skylet import job_lib
+    executor = _make_bare_executor()
+    executor.cluster_name = 'test-cluster'
+    runtime = recovery_strategy.managed_job_runtime
+    monkeypatch.setattr(runtime, 'is_registered', lambda: True)
+    monkeypatch.setattr(recovery_strategy.global_user_state,
+                        'get_handle_from_cluster_name', lambda _: object())
+    monkeypatch.setattr(
+        runtime, 'get_job_status', lambda *_:
+        (getattr(job_lib.JobStatus, status_name), None))
+    monkeypatch.setattr(runtime, 'get_job_submitted_at', lambda *_: 123.45)
+    refresh = mock.Mock(side_effect=AssertionError('must retain allocation'))
+    monkeypatch.setattr(recovery_strategy.backend_utils,
+                        'refresh_cluster_status_handle', refresh)
+    assert await executor._wait_until_job_starts_on_cluster() == 123.45
+    refresh.assert_not_called()
