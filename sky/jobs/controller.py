@@ -191,6 +191,29 @@ def _build_task_specs(
 _EMERGENCY_BOOKKEEPING_ROUNDS = 5
 
 
+async def _record_runtime_placement(
+    job_id: int,
+    handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+    previous: Optional[managed_job_runtime.RuntimeCursor],
+    observation: managed_job_runtime.RuntimeObservation,
+) -> None:
+    """Merge a running allocation's nodes into the job's infra lineage."""
+    if (not observation.nodes or
+            observation.phase != managed_job_runtime.RuntimePhase.RUNNING):
+        return
+    if (previous is not None and previous.baseline(observation.runtime_id).nodes
+            == observation.nodes):
+        return
+    resources = getattr(handle, 'launched_resources', None)
+    cloud = getattr(resources, 'cloud', None)
+    await asyncio.to_thread(managed_job_state.set_job_infra,
+                            job_id,
+                            cloud=str(cloud) if cloud is not None else None,
+                            region=getattr(resources, 'region', None),
+                            zone=getattr(resources, 'zone', None),
+                            current_node_names=list(observation.nodes))
+
+
 class JobController:
     """Controls the lifecycle of a single managed job.
 
@@ -1087,6 +1110,7 @@ class JobController:
             # recovery is forced. Without one, forced recovery skips the job
             # status check and leaves job_status=None for recovery below.
             runtime_recovery = None
+            runtime_cursor = None
             runtime_handle = None
             runtime_error = None
             if managed_job_runtime.is_registered():
@@ -1094,13 +1118,17 @@ class JobController:
                     global_user_state.get_handle_from_cluster_name,
                     cluster_name)
                 try:
+                    runtime_cursor = (
+                        await managed_job_state.get_runtime_cursor_async(
+                            self._job_id, task_id))
                     runtime_recovery = await asyncio.to_thread(
                         managed_job_runtime.get_recovery_status,
                         runtime_handle,
                         cluster_name,
                         job_id=self._job_id,
                         task_id=task_id,
-                        task=task)
+                        task=task,
+                        previous=runtime_cursor)
                 except Exception as exc:  # pylint: disable=broad-except
                     runtime_error = common_utils.format_exception(exc)
                     transient_job_check_error_reason = runtime_error
@@ -1179,30 +1207,25 @@ class JobController:
 
             if runtime_recovery is not None:
                 job_status = runtime_recovery.job_status
-                await managed_job_state.observe_runtime_recovery_async(
+                phase = runtime_recovery.phase
+                # Placement is recorded before the cursor so a failed write is
+                # retried on the next observation.
+                await _record_runtime_placement(self._job_id, runtime_handle,
+                                                runtime_cursor,
+                                                runtime_recovery)
+                await managed_job_state.observe_runtime_async(
                     self._job_id,
                     task_id,
-                    runtime_recovery.runtime_id,
-                    runtime_recovery.restart_count,
-                    user_restart_count=runtime_recovery.user_restart_count,
-                    running=job_status == job_lib.JobStatus.RUNNING,
-                    waiting=job_status
-                    in (job_lib.JobStatus.INIT, job_lib.JobStatus.PENDING,
-                        job_lib.JobStatus.SETTING_UP),
-                    terminal=(job_status is not None and
-                              job_status.is_terminal()),
-                    reason=runtime_recovery.reason,
-                    recovery_reasons=runtime_recovery.recovery_reasons,
-                    started_at=runtime_recovery.started_at,
+                    runtime_recovery,
                     callback_func=callback_func)
-                if runtime_recovery.should_relaunch:
+                if phase == managed_job_runtime.RuntimePhase.NEEDS_REPLACEMENT:
                     job_status = None
                 elif job_status == job_lib.JobStatus.CANCELLED:
                     logger.info(f'Task {task_id} was cancelled by its runtime. '
                                 'Cleaning up the managed job.')
                     raise asyncio.CancelledError()
-                elif job_status is None or not job_status.is_terminal():
-                    if job_status is None:
+                elif phase != managed_job_runtime.RuntimePhase.TERMINATED:
+                    if phase == managed_job_runtime.RuntimePhase.UNAVAILABLE:
                         if status_check_window.exhausted:
                             raise RuntimeError(
                                 'Failed to fetch runtime job status after '

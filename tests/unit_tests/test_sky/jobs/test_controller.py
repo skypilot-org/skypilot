@@ -1802,7 +1802,7 @@ class TestTransientJobStatusRecoveryWindow:
         instance._job_id = 1
         instance._pool = None
         executor = MagicMock()
-        observation = controller_module.managed_job_runtime.RuntimeRecoveryStatus(
+        observation = controller_module.managed_job_runtime.RuntimeObservation(
             runtime_id='allocation',
             restart_count=0,
             job_status=job_lib.JobStatus.CANCELLED)
@@ -1812,9 +1812,11 @@ class TestTransientJobStatusRecoveryWindow:
                           'get_handle_from_cluster_name', return_value=MagicMock()), \
              patch.object(controller_module.managed_job_runtime,
                           'is_registered', return_value=True), \
+             patch.object(managed_job_state, 'get_runtime_cursor_async',
+                          new=AsyncMock(return_value=None)), \
              patch.object(controller_module.managed_job_runtime,
                           'get_recovery_status', return_value=observation), \
-             patch.object(managed_job_state, 'observe_runtime_recovery_async',
+             patch.object(managed_job_state, 'observe_runtime_async',
                           new=AsyncMock()) as observe, \
              patch.object(managed_job_state, 'set_failed_async',
                           new=AsyncMock()) as fail, \
@@ -1828,7 +1830,8 @@ class TestTransientJobStatusRecoveryWindow:
                     executor=executor,
                     status_logger=managed_job_utils.JobStatusLogger(),
                     callback_func=AsyncMock())
-        assert observe.await_args.kwargs['terminal']
+        assert (observe.await_args.args[2].phase ==
+                controller_module.managed_job_runtime.RuntimePhase.TERMINATED)
         fail.assert_not_called()
         executor.recover.assert_not_called()
 
@@ -1862,7 +1865,7 @@ class TestTransientJobStatusRecoveryWindow:
             return observations[clock['polls'] - 1]
 
         observations = [
-            controller_module.managed_job_runtime.RuntimeRecoveryStatus(
+            controller_module.managed_job_runtime.RuntimeObservation(
                 runtime_id='allocation',
                 restart_count=1,
                 job_status=status,
@@ -1888,9 +1891,11 @@ class TestTransientJobStatusRecoveryWindow:
                           'get_handle_from_cluster_name', return_value=MagicMock()), \
              patch.object(controller_module.managed_job_runtime,
                           'is_registered', return_value=True), \
+             patch.object(managed_job_state, 'get_runtime_cursor_async',
+                          new=AsyncMock(return_value=None)), \
              patch.object(controller_module.managed_job_runtime,
                           'get_recovery_status', side_effect=get_observation), \
-             patch.object(managed_job_state, 'observe_runtime_recovery_async',
+             patch.object(managed_job_state, 'observe_runtime_async',
                           new=AsyncMock()), \
              patch.object(controller_module.asyncio, 'sleep', new=AsyncMock()):
             with pytest.raises(RuntimeError, match='runtime query unavailable'):
@@ -1982,6 +1987,8 @@ class TestTransientJobStatusRecoveryWindow:
                           new=AsyncMock(return_value=None)), \
              patch.object(controller_module.managed_job_runtime,
                           'is_registered', return_value=runtime_registered), \
+             patch.object(managed_job_state, 'get_runtime_cursor_async',
+                          new=AsyncMock(return_value=None)), \
              patch.object(controller_module.managed_job_runtime,
                           'get_recovery_status', return_value=None) as observation, \
              patch.object(controller_module.global_user_state,

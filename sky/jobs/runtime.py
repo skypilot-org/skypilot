@@ -14,6 +14,7 @@ Callers use the module-level dispatch (``runtime.get_job_status(...)``,
 module.
 """
 import dataclasses
+import enum
 import functools
 import typing
 from typing import Dict, List, Optional, Protocol, Tuple
@@ -29,9 +30,45 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 
+class RuntimePhase(enum.Enum):
+    """How the lifecycle layer should treat a runtime observation."""
+    # The job is executing on the allocation.
+    RUNNING = 'RUNNING'
+    # The allocation is queued or restarting in place.
+    WAITING = 'WAITING'
+    # The job reached a terminal status on the allocation.
+    TERMINATED = 'TERMINATED'
+    # The allocation cannot continue; the controller must replace it.
+    NEEDS_REPLACEMENT = 'NEEDS_REPLACEMENT'
+    # The runtime could not observe the job; retry within the transient window.
+    UNAVAILABLE = 'UNAVAILABLE'
+
+
 @dataclasses.dataclass(frozen=True)
-class RuntimeRecoveryStatus:
-    """An authoritative observation of recovery within a runtime allocation."""
+class RuntimeCursor:
+    """The last runtime observation the lifecycle layer persisted for a task."""
+
+    runtime_id: str
+    restart_count: int = 0
+    user_restart_count: int = 0
+    nodes: Optional[List[str]] = None
+
+    def baseline(self, runtime_id: str) -> 'RuntimeCursor':
+        """Return this cursor for runtime_id, or an empty one for a new id."""
+        if self.runtime_id == runtime_id:
+            return self
+        return RuntimeCursor(runtime_id)
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeObservation:
+    """An authoritative observation of one runtime allocation.
+
+    Counters are absolute within ``runtime_id`` so repeated observations,
+    skipped polls and controller restarts are idempotent. ``recovery_reasons``
+    maps a restart number to its cause and only needs restarts newer than the
+    ``previous`` cursor passed to the runtime.
+    """
 
     runtime_id: str
     restart_count: int
@@ -42,6 +79,20 @@ class RuntimeRecoveryStatus:
     handles_user_retries: bool = False
     user_restart_count: int = 0
     recovery_reasons: Optional[Dict[int, str]] = None
+    # Node names of the allocation, head first; None when not yet placed.
+    nodes: Optional[List[str]] = None
+
+    @property
+    def phase(self) -> RuntimePhase:
+        if self.should_relaunch:
+            return RuntimePhase.NEEDS_REPLACEMENT
+        if self.job_status is None:
+            return RuntimePhase.UNAVAILABLE
+        if self.job_status.is_terminal():
+            return RuntimePhase.TERMINATED
+        if self.job_status.value == 'RUNNING':
+            return RuntimePhase.RUNNING
+        return RuntimePhase.WAITING
 
 
 def get_recovery_status(
@@ -51,7 +102,8 @@ def get_recovery_status(
     job_id: int,
     task_id: int,
     task: 'task_lib.Task',
-) -> Optional[RuntimeRecoveryStatus]:
+    previous: Optional[RuntimeCursor] = None,
+) -> Optional[RuntimeObservation]:
     """Observe in-place recovery before refreshing or tearing down a cluster.
 
     None defers to normal monitoring. An explicit observation owns monitoring
@@ -68,7 +120,8 @@ def get_recovery_status(
                           cluster_name,
                           job_id=job_id,
                           task_id=task_id,
-                          task=task)
+                          task=task,
+                          previous=previous)
             if result is not None:
                 return result
     return None
@@ -112,8 +165,14 @@ class ManagedJobRuntime(Protocol):
         job_id: int,
         task_id: int,
         task: 'task_lib.Task',
-    ) -> Optional[RuntimeRecoveryStatus]:
-        """Observe runtime recovery, or defer to controller recovery."""
+        previous: Optional[RuntimeCursor] = None,
+    ) -> Optional[RuntimeObservation]:
+        """Observe runtime recovery, or defer to controller recovery.
+
+        ``previous`` is the last persisted observation of the task and may
+        belong to another allocation; use ``previous.baseline(runtime_id)``.
+        Runtimes keep only the private progress their recovery actions need
+        and report everything else through the returned observation."""
         ...
 
     def get_job_submitted_at(
