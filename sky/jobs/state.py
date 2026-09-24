@@ -3880,8 +3880,9 @@ def _plan_runtime_observation(
     running = job_status is not None and job_status.value == 'RUNNING'
     # The cursor keeps the nodes of the last running observation, which is the
     # placement recorded in the job's infra lineage.
+    placed = observation.phase == managed_job_runtime.RuntimePhase.RUNNING
     nodes = (observation.nodes
-             if running and observation.nodes else cursor.get('nodes'))
+             if placed and observation.nodes else cursor.get('nodes'))
     nodes_changed = nodes != cursor.get('nodes')
     reasons = observation.recovery_reasons or {}
     default_reason = observation.reason or (

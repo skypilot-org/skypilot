@@ -608,3 +608,9 @@ def test_recovery_dispatch_passes_previous_cursor(monkeypatch):
                                 task=mock.Mock(),
                                 previous=previous)
     assert owner.get_recovery_status.call_args.kwargs['previous'] is previous
+
+
+@pytest.mark.asyncio
+async def test_replacement_observation_does_not_record_placement(database):
+    await observe(1, running=True, nodes=['node-a'], should_relaunch=True)
+    assert state.get_runtime_cursor(42, 0).nodes is None
