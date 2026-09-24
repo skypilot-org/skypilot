@@ -1,5 +1,7 @@
 import os
 import pathlib
+import shlex
+import subprocess
 from unittest import mock
 
 import pytest
@@ -665,3 +667,25 @@ def test_make_safe_symlink_command_leaves_target_unquoted():
         source='/etc/config', target='~/.sky/file_mounts/etc/config')
     assert 'ln -s ~/.sky/file_mounts/etc/config /etc/config' in cmd
     assert "'~/.sky/file_mounts/etc/config'" not in cmd
+
+
+@pytest.mark.parametrize('target_in_home', [False, True])
+def test_make_safe_symlink_command_spaces(tmp_path, target_in_home):
+    target = tmp_path / 'payload \'with spaces\''
+    target.write_text('payload')
+    source = tmp_path / 'nested dir' / 'link \'with spaces\''
+    expression = ('~/' + shlex.quote(target.name)
+                  if target_in_home else shlex.quote(str(target)))
+    cmd = backend_utils.FileMountHelper.make_safe_symlink_command(
+        source=str(source), target=expression, sudo_cmd='')
+    # Exercise mkdir, path traversal, removal and linking without changing
+    # ownership of the test machine's parent directories.
+    script = 'chown() { :; }; ' + cmd
+    for _ in range(2):
+        subprocess.run(['bash', '-c', script],
+                       check=True,
+                       env={
+                           **os.environ, 'HOME': str(tmp_path)
+                       })
+        assert source.is_symlink()
+        assert source.read_text() == 'payload'

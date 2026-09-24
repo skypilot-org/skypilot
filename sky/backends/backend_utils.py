@@ -502,7 +502,8 @@ class FileMountHelper(object):
         excluding the root directory (/).
 
         'source' must be an absolute path; both 'source' and 'target' must not
-        end with a slash (/).
+        end with a slash (/). 'target' is a shell expression so callers can
+        expand the remote home directory; quote literal paths before passing it.
 
         This function is needed because a simple 'ln -s target source' may
         fail: 'source' can have multiple levels (/a/b/c), its parent dirs may
@@ -532,16 +533,16 @@ class FileMountHelper(object):
         sudo = f'{sudo_cmd} ' if sudo_cmd else ''
         # Prepare to create the symlink:
         #  1. make sure its dir(s) exist & are owned by $(whoami).
-        dir_of_symlink = os.path.dirname(source)
+        dir_of_symlink = shlex.quote(os.path.dirname(source))
+        failure_message = shlex.quote(
+            f'!!! Failed mounting because path exists ({source})')
+        source = shlex.quote(source)
         commands = [
-            # mkdir, then loop over '/a/b/c' as /a, /a/b, /a/b/c.  For each,
-            # chown $(whoami) on it so user can use these intermediate dirs
-            # (excluding /).
+            # Own each parent directory, excluding the filesystem root.
             f'{sudo}mkdir -p {dir_of_symlink}',
-            # p: path so far
-            ('(p=""; '
-             f'for w in $(echo {dir_of_symlink} | tr "/" " "); do '
-             f'p=${{p}}/${{w}}; {sudo}chown $(whoami) $p; done)')
+            (f'(p={dir_of_symlink}; '
+             f'while [ "$p" != / ]; do {sudo}chown $(whoami) "$p"; '
+             'p=$(dirname -- "$p"); done)')
         ]
         #  2. remove any existing symlink (ln -f may throw 'cannot
         #     overwrite directory', if the link exists and points to a
@@ -550,7 +551,7 @@ class FileMountHelper(object):
             # Error out if source is an existing, non-symlink directory/file.
             f'((test -L {source} && {sudo}rm {source} >/dev/null 2>&1) || '
             f'(test ! -e {source} || '
-            f'(echo "!!! Failed mounting because path exists ({source})"; '
+            f'(echo {failure_message}; '
             'exit 1)))',
         ]
         commands += [
