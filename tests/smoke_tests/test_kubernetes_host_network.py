@@ -4,9 +4,16 @@ Under ``kubernetes.pod_config.spec.hostNetwork = true`` the pod
 shares the K8s node's net namespace, so a second SkyPilot pod
 landing on the same node would collide on Ray's default ports
 (6380, 8266, 8076, ...) and on the node's own sshd (host:22).
-SkyPilot's host_network_probe picks a free Ray port set per pod
-and rebinds the pod's sshd to a probed port; these tests prove
-both work end-to-end.
+The API server assigns each pod a contiguous block and declares it
+as ``hostPort`` in the pod spec, so the scheduler refuses to
+co-schedule two pods wanting the same port; the pod then binds each
+one to prove it is free before Ray takes it, and rebinds its sshd to
+the assigned port. These tests prove that works end-to-end.
+
+The assignment moved server-side so that a workload pod needs no
+Kubernetes API access: it used to pick ports itself and publish them
+to a ConfigMap, which required ``configmaps: create/update`` on the
+pod's service account.
 
 SkyPilot also injects a required, per-cluster ``podAntiAffinity``
 for every hostNetwork pod (mode b: one cluster pod per K8s node),
@@ -106,25 +113,24 @@ def test_kubernetes_host_network_coexistence():
             f'--config {cfg_b} --cpus 1 --memory 2',
 
             # 2. SSH to both heads. Exercises:
-            #    - sshd_<podname> ConfigMap entry -> InstanceInfo.ssh_port
+            #    - the pod spec's named `ssh` port -> InstanceInfo.ssh_port
             #    - /etc/ssh/sshd_config Port rewrite by the probe
-            #    - SkyPilot SSH config writer using the probed port
+            #    - SkyPilot SSH config writer using the assigned port
             f's=$(ssh -o StrictHostKeyChecking=no {name_a} '
             f'"echo ssh_works_A" 2>&1) && echo "$s" | grep ssh_works_A',
             f's=$(ssh -o StrictHostKeyChecking=no {name_b} '
             f'"echo ssh_works_B" 2>&1) && echo "$s" | grep ssh_works_B',
 
-            # 3. The probe must have assigned distinct GCS ports to the
-            #    two heads. The env file written by the probe is the
-            #    authoritative source on each pod. Single-quote the
-            #    ssh remote command so $SKYPILOT_RAY_PORT expands on
-            #    the pod, not on the local test runner.
-            f'A_GCS=$(ssh {name_a} '
-            f'\'. /tmp/sky_host_network_ports.env && '
-            f'echo $SKYPILOT_RAY_PORT\') && '
-            f'B_GCS=$(ssh {name_b} '
-            f'\'. /tmp/sky_host_network_ports.env && '
-            f'echo $SKYPILOT_RAY_PORT\') && '
+            # 3. The two heads must hold distinct GCS ports. Read from the
+            #    pod's own environment rather than a file on disk: the
+            #    server writes the ports into the pod spec, so the env var
+            #    is what the pod is actually started with. (A previous
+            #    version sourced /tmp/sky_host_network_ports.env, which the
+            #    old in-pod allocator wrote and which no longer exists.)
+            #    Single-quote the remote command so the variable expands on
+            #    the pod, not on the test runner.
+            f'A_GCS=$(ssh {name_a} \'echo $SKYPILOT_RAY_PORT\') && '
+            f'B_GCS=$(ssh {name_b} \'echo $SKYPILOT_RAY_PORT\') && '
             f'echo "A_GCS=$A_GCS B_GCS=$B_GCS" && '
             f'[ -n "$A_GCS" ] && [ -n "$B_GCS" ] && '
             f'[ "$A_GCS" != "$B_GCS" ]',
@@ -244,46 +250,27 @@ def test_kubernetes_host_network_multi_node_same_node():
 
 @pytest.mark.kubernetes
 @pytest.mark.no_dependency
-def test_kubernetes_host_network_head_restart_reuses_ports():
-    """A head *container* restart must reuse the published port set.
+def test_kubernetes_host_network_head_restart_survives_ports():
+    """A container restart must not move the head's ports.
 
-    The probe's ``<cluster>-ray-ports`` ConfigMap carries an
-    ``ownerReference`` to the *head Pod object*. A container restart
-    (crash / OOM / ``ray stop``-then-up) keeps the Pod object — and its
-    UID — so the ConfigMap is **not** garbage-collected (only deleting
-    the Pod object triggers GC). When the head bootstrap re-runs after
-    such a restart it must therefore reuse the already-published
-    GCS/dashboard/sshd ports rather than probe a fresh ephemeral set:
-    workers and the SkyPilot SSH client are still dialing the old ports.
+    Workers dial the head's GCS port and the SSH config holds its sshd port,
+    so a head that came back on different ports would strand both.
 
-    The smoke clusters use ``restartPolicy: Never`` (non-HA), so we
-    cannot make kubelet truly restart the container. Instead we re-run
-    the inlined probe (``/tmp/sky_host_network_probe.py --mode head``)
-    against the surviving ConfigMap, in the *same* pod-identity env the
-    real bootstrap uses. An SSH session does **not** inherit the pod
-    container's Downward-API env, and a Kubernetes container cannot
-    read ``/proc/1/environ`` even via ``sudo`` (no ``CAP_SYS_PTRACE``
-    in the default capability set, and the node's
-    ``yama.ptrace_scope`` blocks reading an ancestor's environ). So
-    rather than scraping PID 1, we recover the pod identity from the
-    pod's own *bound* ServiceAccount-token JWT (its
-    ``kubernetes.io.{namespace,pod.name,pod.uid}`` claims) and locate
-    the ``<cluster>-ray-ports`` ConfigMap by its ``ownerReference`` to
-    that UID. On a real container restart the Pod object is unchanged,
-    so its name/UID are exactly what the Downward API would re-inject
-    — these claims are equivalent. Verifies:
+    This used to be a property of a reuse path: the in-pod probe picked the
+    ports, published them to a ``<cluster>-ray-ports`` ConfigMap, and on
+    restart re-read that ConfigMap -- comparing its ownerReference UID to
+    tell "my own" from one left behind by a deleted head. The ports now come
+    from the pod spec, which a *container* restart does not touch, so there
+    is no reuse step left to get wrong. The outcome worth asserting is the
+    same either way, which is why this test survives the mechanism it was
+    written for.
 
-    1. The ConfigMap survived (the reuse path requires it to exist and
-       to be owned by this pod's UID — both encoded in the assertion).
-    2. The re-run reuses the *identical* published port set
-       (``/tmp/sky_host_network_ports.env`` unchanged). Pre-fix this
-       step re-probed and the port set would differ.
-    3. SSH still works afterward — the re-publish preserved the head's
-       ``sshd_<pod>`` ConfigMap entry the SSH config writer relies on.
+    Asserted against the pod spec rather than anything inside the pod: the
+    spec is what the scheduler accounted for and what the SSH client reads,
+    so it is the copy that has to stay put.
     """
     name = smoke_tests_utils.get_cluster_name()
     cfg = f'/tmp/sky-hostnet-restart-{uuid.uuid4().hex[:12]}.yaml'
-
     write_cfg = (f'cat > {cfg} <<EOF\n'
                  f'kubernetes:\n'
                  f'  pod_config:\n'
@@ -291,109 +278,224 @@ def test_kubernetes_host_network_head_restart_reuses_ports():
                  f'      hostNetwork: true\n'
                  f'EOF')
 
-    # Discovery script run *on the head pod*. An SSH session has
-    # neither the pod container's Downward-API env nor a readable
-    # /proc/1/environ (see the docstring), so we reconstruct the
-    # pod-identity env the head probe needs from authoritative on-pod
-    # sources: the bound ServiceAccount-token JWT (this pod's
-    # name/uid/namespace claims) and the surviving ray-ports ConfigMap
-    # selected by ownerReference == our pod UID. Selecting by our UID
-    # (not just the skypilot-ray-ports label) keeps this correct when
-    # other concurrent hostNetwork tests share the namespace. Stdlib
-    # only; no single quotes (the whole script is single-quoted to
-    # ssh) and no f-string/{} so it is heredoc/format safe.
-    discover = (
-        'import base64, json, ssl, sys, urllib.request\n'
-        'b = "/var/run/secrets/kubernetes.io/serviceaccount/"\n'
-        'tok = open(b + "token").read().strip()\n'
-        'ctx = ssl.create_default_context(cafile=b + "ca.crt")\n'
-        'seg = tok.split(".")[1]\n'
-        'seg += "=" * (-len(seg) % 4)\n'
-        'kio = json.loads(base64.urlsafe_b64decode(seg))["kubernetes.io"]\n'
-        'ns = kio["namespace"]\n'
-        'uid = kio["pod"]["uid"]\n'
-        'pname = kio["pod"]["name"]\n'
-        'u = ("https://kubernetes.default.svc:443/api/v1/namespaces/"\n'
-        '     + ns + "/configmaps"\n'
-        '     "?labelSelector=skypilot-ray-ports%3Dtrue")\n'
-        'r = urllib.request.Request(u)\n'
-        'r.add_header("Authorization", "Bearer " + tok)\n'
-        'data = urllib.request.urlopen(r, context=ctx, timeout=10).read()\n'
-        'items = json.loads(data)["items"]\n'
-        'mine = [c for c in items\n'
-        '        if any(o.get("uid") == uid\n'
-        '               for o in (c["metadata"].get("ownerReferences")\n'
-        '                          or []))]\n'
-        'if len(mine) != 1:\n'
-        '    sys.exit("want exactly 1 ray-ports ConfigMap owned by pod "\n'
-        '             + uid + ", got " + str(len(mine)) + " of "\n'
-        '             + str(len(items)) + " labeled")\n'
-        'm = mine[0]["metadata"]\n'
-        'print("export SKYPILOT_RAY_PORTS_CONFIGMAP_NAME=" + m["name"])\n'
-        'print("export SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE=" + ns)\n'
-        'print("export SKYPILOT_POD_NAME=" + pname)\n'
-        'print("export SKYPILOT_POD_UID=" + uid)\n')
-
-    # The probe is run under ``sudo`` (production parity: the bootstrap
-    # runs it as root, and root reliably reads the SA token regardless
-    # of its file mode), with the recovered identity passed explicitly
-    # via ``env``. ``<<\PYEOF`` is a literal heredoc so the shell does
-    # not touch the embedded Python. ``set -e``: any failed step (an
-    # unreadable token, a deleted ConfigMap, a regressed re-probe)
-    # fails the test loudly. BEFORE != AFTER means the head re-probed
-    # instead of reusing the published ports.
-    remote = (
-        'set -e; '
-        'PROBE=/tmp/sky_host_network_probe.py; '
-        'ENVF=/tmp/sky_host_network_ports.env; '
-        'test -s "$ENVF"; test -s "$PROBE"; '
-        'cat > /tmp/sky_cm_discover.py <<\\PYEOF\n' + discover + 'PYEOF\n'
-        'if ! OUT="$(sudo python3 /tmp/sky_cm_discover.py '
-        '2>/tmp/sky_cm_discover.err)"; then '
-        'echo "FAIL: ray-ports ConfigMap discovery failed:"; '
-        'cat /tmp/sky_cm_discover.err; exit 1; fi; '
-        'eval "$OUT"; '
-        'export KUBERNETES_SERVICE_HOST=kubernetes.default.svc; '
-        'export KUBERNETES_SERVICE_PORT=443; '
-        'test -n "$SKYPILOT_RAY_PORTS_CONFIGMAP_NAME"; '
-        'test -n "$SKYPILOT_POD_UID"; '
-        'BEFORE=$(sort "$ENVF"); '
-        'sudo env KUBERNETES_SERVICE_HOST="$KUBERNETES_SERVICE_HOST" '
-        'KUBERNETES_SERVICE_PORT="$KUBERNETES_SERVICE_PORT" '
-        'SKYPILOT_POD_NAME="$SKYPILOT_POD_NAME" '
-        'SKYPILOT_POD_UID="$SKYPILOT_POD_UID" '
-        'python3 "$PROBE" --mode head '
-        '--env-file /tmp/sky_restart_check.env '
-        '--configmap-name "$SKYPILOT_RAY_PORTS_CONFIGMAP_NAME" '
-        '--configmap-namespace "$SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE"; '
-        'AFTER=$(sort /tmp/sky_restart_check.env); '
-        'echo "BEFORE=[$BEFORE]"; echo "AFTER=[$AFTER]"; '
-        'if [ -z "$BEFORE" ]; then echo "FAIL: empty env file"; exit 1; fi; '
-        'if [ "$BEFORE" != "$AFTER" ]; then '
-        'echo "FAIL: head re-run did NOT reuse the published ports '
-        '(ConfigMap deleted or re-probed instead of reused)"; exit 1; fi; '
-        'echo HEAD_RESTART_REUSED_PORTS')
+    # The ray-node container's host ports, sorted, on one line. Selected by
+    # container name: a sidecar contributed through pod_config would shift
+    # an index-based selector onto the wrong container.
+    read_ports = (
+        'kubectl get pod -l skypilot-cluster-name=$PODC '
+        '-o jsonpath=\'{.items[0].spec.containers[?(@.name=="ray-node")]'
+        '.ports[*].hostPort}\' | tr " " "\\n" | sort -n | tr "\\n" " "')
 
     test = smoke_tests_utils.Test(
-        'kubernetes_host_network_head_restart_reuses_ports',
+        'kubernetes_host_network_head_restart_survives_ports',
         [
             write_cfg,
-
-            # 1 CPU / 2 GB: same headroom rationale as coexistence.
             f'sky launch -y -c {name} --infra kubernetes '
             f'--config {cfg} --cpus 1 --memory 2',
-
-            # Re-run the head probe against the surviving ConfigMap and
-            # assert the published port set is reused verbatim.
-            f's=$(ssh -o StrictHostKeyChecking=no {name} \'{remote}\' '
-            f'2>&1); echo "$s"; '
-            f'echo "$s" | grep -q HEAD_RESTART_REUSED_PORTS',
-
-            # SSH must still work after the re-publish (the head's
-            # sshd_<pod> ConfigMap entry — read by the SkyPilot SSH
-            # config writer — was preserved on the reuse path).
+            # The pod label is the on-cloud name, not the SkyPilot one.
+            f'PODC=$(kubectl get pods -o jsonpath=\'{{range .items[*]}}'
+            f'{{.metadata.labels.skypilot-cluster-name}}{{"\\n"}}{{end}}\' '
+            f'| grep -m1 "^{name}") && echo "cluster=$PODC" && '
+            f'BEFORE=$({read_ports}) && echo "before=$BEFORE" && '
+            f'[ -n "$BEFORE" ] && '
+            # Restart the container, not the pod: deleting the pod would
+            # hand back a fresh spec and prove nothing about stability.
+            f'POD=$(kubectl get pod -l skypilot-cluster-name=$PODC '
+            f'-o jsonpath=\'{{.items[0].metadata.name}}\') && '
+            f'kubectl exec $POD -c ray-node -- '
+            f'bash -c "pkill -f raylet || true" && sleep 20 && '
+            f'AFTER=$({read_ports}) && echo "after=$AFTER" && '
+            f'[ "$BEFORE" = "$AFTER" ]',
+            # And the cluster is still reachable through those ports.
+            f'sky exec {name} "echo restart_exec_ok" && '
+            f'sky logs {name} --status',
             f's=$(ssh -o StrictHostKeyChecking=no {name} '
             f'"echo head_ssh_ok" 2>&1) && echo "$s" | grep head_ssh_ok',
+        ],
+        teardown=f'sky down -y {name}; rm -f {cfg}',
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+def _hostnet_cfg(tag: str) -> tuple:
+    """A hostNetwork config file and the command that writes it."""
+    cfg = f'/tmp/sky-hostnet-{tag}-{uuid.uuid4().hex[:12]}.yaml'
+    return cfg, (f'cat > {cfg} <<EOF\n'
+                 f'kubernetes:\n'
+                 f'  pod_config:\n'
+                 f'    spec:\n'
+                 f'      hostNetwork: true\n'
+                 f'EOF')
+
+
+# The on-cloud cluster name, which is what the pod label carries.
+_RESOLVE_PODC = ('PODC=$(kubectl get pods -o jsonpath=\'{{range .items[*]}}'
+                 '{{.metadata.labels.skypilot-cluster-name}}{{"\\n"}}{{end}}\' '
+                 '| grep -m1 "^{name}")')
+
+_HEAD_PORTS = ('kubectl get pod -l skypilot-cluster-name=$PODC '
+               '-o jsonpath=\'{.items[0].spec.containers[?(@.name=="ray-node")]'
+               '.ports[*].hostPort}\' | tr " " "\\n" | sort -n | tr "\\n" " "')
+
+
+@pytest.mark.kubernetes
+@pytest.mark.no_dependency
+def test_kubernetes_host_network_block_shape():
+    """The assigned block reaches the pod spec in the shape everything
+    downstream assumes.
+
+    Contiguous, and ``hostPort == containerPort`` on every entry: the
+    first is how a pod's ports are reconstructed (block start plus each
+    name's index), the second is what makes the scheduler account for
+    them at all. A block that is neither still runs -- until a second
+    cluster lands on the node, or the SSH client reconstructs a port
+    nothing is listening on.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    cfg, write_cfg = _hostnet_cfg('shape')
+    test = smoke_tests_utils.Test(
+        'kubernetes_host_network_block_shape',
+        [
+            write_cfg,
+            f'sky launch -y -c {name} --infra kubernetes '
+            f'--config {cfg} --cpus 1 --memory 2',
+            _RESOLVE_PODC.format(name=name) + ' && ' +
+            f'PORTS=$({_HEAD_PORTS}) && echo "ports=$PORTS" && '
+            'python3 -c "'
+            'import sys; p=[int(x) for x in sys.argv[1].split()]; '
+            'assert p, \'no hostPorts declared\'; '
+            'assert p==list(range(p[0],p[0]+len(p))), (\'not contiguous\',p); '
+            'print(\'contiguous\', p[0], p[-1])" "$PORTS"',
+            # hostPort must equal containerPort on every entry. Under
+            # hostNetwork the API server defaults one to the other, so a
+            # spec that relied on the default would pass a weaker check.
+            _RESOLVE_PODC.format(name=name) + ' && ' +
+            'kubectl get pod -l skypilot-cluster-name=$PODC -o jsonpath='
+            '\'{range .items[0].spec.containers[?(@.name=="ray-node")]'
+            '.ports[*]}{.hostPort}:{.containerPort}{" "}{end}\' '
+            '| tr " " "\\n" | grep -v "^$" | '
+            'awk -F: \'$1!=$2 {print "MISMATCH",$0; bad=1} '
+            'END {exit bad+0}\'',
+        ],
+        teardown=f'sky down -y {name}; rm -f {cfg}',
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.no_dependency
+def test_kubernetes_host_network_worker_recovery_keeps_head_ports():
+    """A worker lost to node failure is recreated without moving the head.
+
+    The head's ports are read back off the live head pod, not re-drawn:
+    re-drawing would hand the new worker a GCS port the head is not
+    listening on, and it would never join. This is the path that found a
+    real defect -- the in-pod probe ran outside the guard that skips Ray
+    start when Ray is already up, so a retry asserted against its own
+    raylet and the launch reported failure on a cluster that was fine.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    cfg, write_cfg = _hostnet_cfg('recover')
+    test = smoke_tests_utils.Test(
+        'kubernetes_host_network_worker_recovery_keeps_head_ports',
+        [
+            write_cfg,
+            f'sky launch -y -c {name} --infra kubernetes '
+            f'--config {cfg} --num-nodes 2 --cpus 1 --memory 2',
+            _RESOLVE_PODC.format(name=name) + ' && ' +
+            f'BEFORE=$({_HEAD_PORTS}) && echo "head_before=$BEFORE" && '
+            # Lose the worker the way a node failure would: delete the pod,
+            # not the cluster. `sky down` would take the record with it and
+            # make this a fresh launch instead of a recovery.
+            'W=$(kubectl get pod -l skypilot-cluster-name=$PODC '
+            '-o name | grep -- "-worker" | head -1) && '
+            'kubectl delete $W --wait=true',
+            # Same node count: this is recovery, not scaling. Scaling an
+            # existing cluster is refused before provisioning.
+            f'sky launch -y -c {name} --infra kubernetes '
+            f'--config {cfg} --num-nodes 2 --cpus 1 --memory 2',
+            _RESOLVE_PODC.format(name=name) + ' && ' +
+            f'AFTER=$({_HEAD_PORTS}) && echo "head_after=$AFTER" && '
+            '[ -n "$AFTER" ] && [ "$BEFORE" = "$AFTER" ]',
+            # The rebuilt worker actually joined.
+            f'sky exec {name} --num-nodes 2 "echo recovered_ok" && '
+            f'sky logs {name} --status',
+        ],
+        teardown=f'sky down -y {name}; rm -f {cfg}',
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.no_dependency
+def test_kubernetes_host_network_relaunch_after_all_pods_gone():
+    """With no pod left to read, the cluster gets a fresh block.
+
+    The failure this guards against is a wedge: a block resolved from
+    something stale rather than from a live pod would be handed out again
+    and again, and a cluster whose ports are taken could never come back.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    cfg, write_cfg = _hostnet_cfg('wedge')
+    test = smoke_tests_utils.Test(
+        'kubernetes_host_network_relaunch_after_all_pods_gone',
+        [
+            write_cfg,
+            f'sky launch -y -c {name} --infra kubernetes '
+            f'--config {cfg} --cpus 1 --memory 2',
+            _RESOLVE_PODC.format(name=name) + ' && ' +
+            f'BEFORE=$({_HEAD_PORTS}) && echo "before=$BEFORE" && '
+            'kubectl delete pod -l skypilot-cluster-name=$PODC '
+            '--wait=true',
+            f'sky launch -y -c {name} --infra kubernetes '
+            f'--config {cfg} --cpus 1 --memory 2',
+            _RESOLVE_PODC.format(name=name) + ' && ' +
+            f'AFTER=$({_HEAD_PORTS}) && echo "after=$AFTER" && '
+            '[ -n "$AFTER" ]',
+            f'sky exec {name} "echo relaunch_ok" && sky logs {name} --status',
+        ],
+        teardown=f'sky down -y {name}; rm -f {cfg}',
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.no_dependency
+def test_kubernetes_host_network_ssh_port_needs_no_configmap():
+    """The sshd port is discoverable from the pod alone.
+
+    This is the reason the assignment moved server-side, and nothing was
+    guarding it: a client that can read pods and nothing else must still
+    find the port. Both halves are asserted, because either alone passes
+    for the wrong reason -- reading the pod proves nothing if no ConfigMap
+    would have been consulted anyway, and "no ConfigMap exists" proves
+    nothing if the port were coming from somewhere else again.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    cfg, write_cfg = _hostnet_cfg('nocm')
+    test = smoke_tests_utils.Test(
+        'kubernetes_host_network_ssh_port_needs_no_configmap',
+        [
+            write_cfg,
+            f'sky launch -y -c {name} --infra kubernetes '
+            f'--config {cfg} --cpus 1 --memory 2',
+            # The port the SSH proxy command selects, by name, from the pod.
+            _RESOLVE_PODC.format(name=name) + ' && ' +
+            'P=$(kubectl get pod -l skypilot-cluster-name=$PODC -o jsonpath='
+            '\'{.items[0].spec.containers[?(@.name=="ray-node")]'
+            '.ports[?(@.name=="ssh")].containerPort}\') && '
+            'echo "ssh_port=$P" && [ -n "$P" ] && [ "$P" != 22 ]',
+            # And no ray-ports ConfigMap is left to read.
+            _RESOLVE_PODC.format(name=name) + ' && ' +
+            'N=$(kubectl get configmap -o name | grep -c -- '
+            '"$PODC-ray-ports" || true) && echo "configmaps=$N" && '
+            '[ "$N" = 0 ]',
+            f's=$(ssh -o StrictHostKeyChecking=no {name} '
+            f'"echo ssh_no_cm_ok" 2>&1) && echo "$s" | grep ssh_no_cm_ok',
         ],
         teardown=f'sky down -y {name}; rm -f {cfg}',
         timeout=smoke_tests_utils.get_timeout('kubernetes'),
