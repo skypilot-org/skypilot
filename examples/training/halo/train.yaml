@@ -5,7 +5,6 @@ dataset:
 - HuggingFaceH4/ultrachat_200k@train_sft
 conversation_field: messages
 assistant_message_template: "<|im_start|>assistant\n"
-test_size: 0.01
 
 use_peft: true
 lora_r: 64

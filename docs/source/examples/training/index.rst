@@ -11,10 +11,10 @@ Training
    Fairseq2 <fairseq2.md>
    Finetuning Cosmos 3 <cosmos3-finetuning.md>
    Finetuning GPT-OSS <gpt-oss-finetuning.md>
-   Halo <https://github.com/skypilot-org/skypilot/tree/master/examples/training/halo>
    Finetuning Llama 4 <llama-4-finetuning.md>
    Finetuning Llama 3 <llama-3_1-finetuning.md>
    Finetuning Llama 2 <llama-2-finetuning.md>
+   Halo <halo.md>
    nanochat <nanochat.md>
    NeMo <nemo.md>
    NeMo RL <nemorl.md>
