@@ -427,6 +427,89 @@ class TestRunPodProvisionVolume:
             _ = runpod.rest_request('GET', '/exhaust')
         assert Always500.calls == runpod._MAX_RETRIES
 
+    def test_rest_request_post_not_retried_on_5xx(self, monkeypatch):
+
+        class _SDK:
+            api_key = 'k'
+
+        monkeypatch.setattr('sky.adaptors.runpod.runpod', _SDK)
+
+        class Post500:
+            calls = 0
+
+            @staticmethod
+            def request(method,
+                        url,
+                        headers=None,
+                        json=None,
+                        params=None,
+                        timeout=30):
+                Post500.calls += 1
+                return TestRunPodProvisionVolume._Resp(status_code=502,
+                                                       text='bad gateway')
+
+        monkeypatch.setattr(runpod, 'requests', Post500)
+        with pytest.raises(runpod.RunPodRestError) as exc_info:
+            _ = runpod.rest_request('POST', '/pods', json={'name': 'x'})
+        assert exc_info.value.status_code == 502
+        assert Post500.calls == 1
+
+    def test_rest_request_post_not_retried_on_network_error(self, monkeypatch):
+
+        class _SDK:
+            api_key = 'k'
+
+        monkeypatch.setattr('sky.adaptors.runpod.runpod', _SDK)
+
+        class PostNetErr:
+            calls = 0
+
+            @staticmethod
+            def request(method,
+                        url,
+                        headers=None,
+                        json=None,
+                        params=None,
+                        timeout=30):
+                PostNetErr.calls += 1
+                raise RuntimeError('connection reset')
+
+        monkeypatch.setattr(runpod, 'requests', PostNetErr)
+        with pytest.raises(runpod.RunPodRestError):
+            _ = runpod.rest_request('POST', '/pods', json={'name': 'x'})
+        assert PostNetErr.calls == 1
+
+    def test_rest_request_post_retried_on_429(self, monkeypatch):
+
+        class _SDK:
+            api_key = 'k'
+
+        monkeypatch.setattr('sky.adaptors.runpod.runpod', _SDK)
+        monkeypatch.setattr(runpod.time, 'sleep', lambda _: None)
+
+        class Post429:
+            calls = 0
+
+            @staticmethod
+            def request(method,
+                        url,
+                        headers=None,
+                        json=None,
+                        params=None,
+                        timeout=30):
+                Post429.calls += 1
+                if Post429.calls == 1:
+                    return TestRunPodProvisionVolume._Resp(status_code=429,
+                                                           text='slow down')
+                return TestRunPodProvisionVolume._Resp(status_code=201,
+                                                       text='{"id":"p1"}',
+                                                       json_obj={'id': 'p1'})
+
+        monkeypatch.setattr(runpod, 'requests', Post429)
+        out = runpod.rest_request('POST', '/pods', json={'name': 'x'})
+        assert out == {'id': 'p1'}
+        assert Post429.calls == 2
+
     def test_rest_request_non_retryable_4xx_single_attempt(self, monkeypatch):
 
         class _SDK:

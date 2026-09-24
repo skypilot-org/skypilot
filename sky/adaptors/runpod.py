@@ -24,6 +24,10 @@ _MAX_RETRIES = 3
 _TIMEOUT = 10
 _RETRY_SLEEP_SECONDS = 1
 _MAX_RETRY_AFTER_SECONDS = 30
+# Repeating one of these after a lost response cannot leave a duplicate
+# resource behind. A POST is only repeated on 429, which RunPod returns before
+# processing the request.
+_IDEMPOTENT_METHODS = frozenset({'GET', 'PUT', 'DELETE'})
 
 
 class RunPodRestError(RuntimeError):
@@ -85,11 +89,16 @@ def rest_request(method: str,
         The decoded JSON body, the raw text if it is not JSON, or None for
         an empty body (e.g. 204 No Content).
 
+    Idempotent methods (GET, PUT, DELETE) are retried on network errors, 5xx
+    and 429. A POST is retried on 429 only, so a create whose response was
+    lost is never repeated.
+
     Raises:
-        RunPodRestError: on a 4xx response, or after exhausting retries on
-            network errors, 5xx and 429 responses.
+        RunPodRestError: on a 4xx response, on a failed POST, or after
+            exhausting retries.
     """
     url = f'{_REST_BASE}{path}'
+    idempotent = method.upper() in _IDEMPOTENT_METHODS
     headers = {
         'Authorization': f'Bearer {_get_api_key()}',
         'Content-Type': 'application/json',
@@ -106,13 +115,13 @@ def rest_request(method: str,
                                     timeout=_TIMEOUT)
         except Exception as e:  # pylint: disable=broad-except
             # Retry on transient network errors
-            if attempt >= _MAX_RETRIES:
+            if not idempotent or attempt >= _MAX_RETRIES:
                 raise RunPodRestError(f'RunPod REST network error: {e}') from e
             time.sleep(_RETRY_SLEEP_SECONDS)
             continue
 
         # Retry on 5xx and 429
-        if resp.status_code >= 500 or resp.status_code == 429:
+        if resp.status_code == 429 or (resp.status_code >= 500 and idempotent):
             if attempt >= _MAX_RETRIES:
                 raise RunPodRestError(
                     f'RunPod REST error {resp.status_code}: {resp.text}',
