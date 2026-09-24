@@ -7,6 +7,7 @@ and handle.launched_nodes == 1. The previous logic fell through to
 INIT node. _update_cluster_status should now recognize nodes in
 unexpected (non-UP, non-STOPPED) states and report them distinctly.
 """
+import datetime
 import time
 from unittest import mock
 
@@ -161,6 +162,53 @@ class TestUpdateClusterStatusInitReason:
             msg = _capture_init_log_message(
                 {'pod-0': (status_lib.ClusterStatus.UP, None)})
         assert 'OOMKilled' in msg, msg
+
+    def test_recovered_reason_is_bounded_by_the_cluster_launch(self):
+        # Pod names are a function of the cluster name and Kubernetes keeps
+        # events for an hour, so a cluster that reuses the name of one that
+        # was torn down would otherwise be told why the earlier cluster's
+        # pods were deleted. This cluster's own history starts when it was
+        # launched.
+        launched_at = 1700000000
+        handle = _make_handle()
+        record = _make_record(handle)
+        record['launched_at'] = launched_at
+        events_lookup = mock.Mock(return_value=None)
+        external_failure = mock.Mock()
+        external_failure.get.return_value = None
+        with mock.patch.object(backend_utils,
+                               '_query_cluster_status_via_cloud_api',
+                               return_value={
+                                   'pod-0': (status_lib.ClusterStatus.UP, None)
+                               }), \
+             mock.patch.object(backend_utils, 'ExternalFailureSource',
+                               external_failure), \
+             mock.patch.object(backend_utils.global_user_state,
+                               'add_cluster_event'), \
+             mock.patch.object(backend_utils.global_user_state,
+                               'add_or_update_cluster'), \
+             mock.patch.object(backend_utils.global_user_state,
+                               'get_cluster_from_name',
+                               return_value=record), \
+             mock.patch.object(backend_utils.global_user_state,
+                               'get_cluster_yaml_dict',
+                               return_value={'provider': {
+                                   'namespace': 'default',
+                                   'context': 'ctx'
+                               }}), \
+             mock.patch.object(backend_utils.k8s_instance,
+                               'get_cluster_failure_reason_from_events',
+                               events_lookup), \
+             mock.patch.object(backend_utils.k8s_instance,
+                               'get_cluster_failure_reason_from_pods',
+                               return_value=None):
+            backend_utils._update_cluster_status('test-cluster',
+                                                 record,
+                                                 retry_if_missing=False)
+        assert events_lookup.call_count == 1
+        assert events_lookup.call_args.kwargs['since'] == (
+            datetime.datetime.fromtimestamp(launched_at,
+                                            tz=datetime.timezone.utc))
 
     def test_some_nodes_terminated(self):
         # 1 of 2 launched nodes is missing from node_statuses.
