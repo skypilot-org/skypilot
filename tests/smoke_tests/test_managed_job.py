@@ -3996,43 +3996,56 @@ def _launch_from_task(name: str,
             f'{q}{cmd}{q}')
 
 
-def _wait_running_from_task(names: List[str], timeout: int = 900) -> str:
-    """Shell for a task to wait until every managed job in `names` is RUNNING.
+def _signal_job(name: str) -> str:
+    """Name of the marker job the test launches to tell the trainer to end."""
+    return f'{name}-go'
 
-    This is how a trainer learns that the jobs the watcher launched are up,
-    so it can finish after them instead of after a fixed sleep that starts
-    at pod start and races the watcher's provisioning. It runs in its own
-    pod, so it activates the runtime itself. `-u` is needed because a task's
-    pod may be recorded as a different user from its siblings (see
-    smoke_tests_utils.endpoint_url_has_credentials); this is a wait, not an
-    ownership check, so it is unconditional. `-l 200`: the CLI shows the
-    newest N jobs and on a shared server the default N can miss a job
-    launched minutes ago by another test's worth of activity.
+
+def _send_signal(name: str, cloud: str) -> str:
+    """Shell for the test to end the trainer: launch the marker job.
+
+    The row is in the queue as soon as the launch is accepted, so the
+    trainer sees it without waiting for a pod. The marker is a plain
+    top-level job (the test process is not inside a group) and the
+    teardown cancels it.
     """
-    checks = ' && '.join(
-        f'echo "$q" | grep " {n} " | grep -q RUNNING' for n in names)
-    shown = ' '.join(names)
-    return (f'source ~/skypilot-runtime/bin/activate && '
+    return (f'sky jobs launch -y -d -n {_signal_job(name)} --cpus 0.5+ '
+            f'--memory 1+ --infra {cloud} "echo go"')
+
+
+def _wait_signal_from_task(name: str, timeout: int = 1500) -> str:
+    """Shell for the trainer to wait until the test has sent its signal.
+
+    The trainer decides when the group finishes, and the test needs to
+    observe intermediate states (a child RUNNING, a finished child left
+    alone) before that. A fixed sleep here would start at pod start and
+    race the watcher's provisioning, so the trainer instead waits for the
+    marker job from _send_signal to appear. It runs in its own pod, so it
+    activates the runtime itself. `-u` because under the auth gap in
+    smoke_tests_utils.endpoint_url_has_credentials the marker (launched by
+    the test user) and this pod are different users; this is a wait, not
+    an ownership check, so it is unconditional. `-l 200` because the CLI
+    shows the newest N jobs and the default 50 can miss a job on a busy
+    shared server. The timeout only bounds a test that already failed.
+    """
+    marker = _signal_job(name)
+    return (f'source ~/skypilot-runtime/bin/activate && got=""; '
             f'for i in $(seq 1 {timeout // 10}); do '
-            f'q=$(sky jobs queue -u -l 200 2>/dev/null | '
-            f'sed "s/\\x1b\\[[0-9;]*m//g"); '
-            f'if {checks}; then echo "poll $i: {shown} running"; break; fi; '
-            f'echo "poll $i: waiting for {shown}"; sleep 10; done; '
-            f'{checks} || {{ echo "FAIL: {shown} not all RUNNING"; exit 1; }}')
+            f'if sky jobs queue -u -l 200 2>/dev/null | '
+            f'sed "s/\\x1b\\[[0-9;]*m//g" | grep -q " {marker} "; then '
+            f'echo "poll $i: signal {marker} received"; got=1; break; fi; '
+            f'echo "poll $i: waiting for signal {marker}"; sleep 10; done; '
+            f'test -n "$got" || {{ echo "FAIL: no signal {marker}"; exit 1; }}')
 
 
 def _wait_from_task(name: str, timeout: int = 600) -> str:
-    """Shell for a task to wait until the managed job `name` is terminal.
-
-    `-u` and `-l 200` for the same reasons as in _wait_running_from_task.
-    """
-    return (
-        f'for i in $(seq 1 {timeout // 10}); do '
-        f's=$(sky jobs queue -u -l 200 2>/dev/null | sed "s/\\x1b\\[[0-9;]*m//g" | '
-        f'grep " {name} " | grep -oE "SUCCEEDED|FAILED[A-Z_]*|CANCELLED" | '
-        f'head -1); echo "poll $i: {name} $s"; '
-        f'if [ -n "$s" ]; then break; fi; sleep 10; done; '
-        f'test -n "$s" || {{ echo "FAIL: {name} not terminal"; exit 1; }}')
+    """Shell for a task to wait until the managed job `name` is terminal."""
+    return (f'for i in $(seq 1 {timeout // 10}); do '
+            f's=$(sky jobs queue 2>/dev/null | sed "s/\\x1b\\[[0-9;]*m//g" | '
+            f'grep " {name} " | grep -oE "SUCCEEDED|FAILED[A-Z_]*|CANCELLED" | '
+            f'head -1); echo "poll $i: {name} $s"; '
+            f'if [ -n "$s" ]; then break; fi; sleep 10; done; '
+            f'test -n "$s" || {{ echo "FAIL: {name} not terminal"; exit 1; }}')
 
 
 def _status(job: dict) -> sky.ManagedJobStatus:
@@ -4377,23 +4390,24 @@ def test_dynamic_job_group_basic_terminate(generic_cloud: str):
         name,
         generic_cloud,
         primary_tasks='trainer',
-        # The trainer finishes once the eval is RUNNING, plus a grace period
-        # so the test (polling every 10 s) observes the eval running before
-        # the sweep cancels it. A fixed sleep here would start at pod start
-        # and could end before the watcher has even provisioned.
-        trainer_run=_wait_running_from_task([eval1]) + '; sleep 60',
+        # The trainer ends when the test says so (see _wait_signal_from_task),
+        # after the test has seen the eval running.
+        trainer_run=_wait_signal_from_task(name),
         watcher_run=(_launch_from_task(eval1, generic_cloud, _FOREVER) + '\n' +
                      _FOREVER))
 
-    def check():
+    def check_before_signal():
         root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
         tree = _wait_tree(root,
                           name, [eval1],
                           timeout=900,
                           statuses=[sky.ManagedJobStatus.RUNNING])
         _assert_attached(tree[eval1], root, root, _WATCHER_TASK, 2)
-        _wait_group(name, [sky.ManagedJobStatus.SUCCEEDED], timeout=900)
-        job = _wait_job(tree[eval1]['job_id'], [sky.ManagedJobStatus.CANCELLED],
+
+    def check_after_signal():
+        root = _wait_group(name, [sky.ManagedJobStatus.SUCCEEDED], timeout=900)
+        job = _wait_job(_job_tree(root, name)[eval1]['job_id'],
+                        [sky.ManagedJobStatus.CANCELLED],
                         timeout=300)
         _assert_cancelled_because(
             job, f'with job group {root}: all primary tasks finished')
@@ -4402,10 +4416,12 @@ def test_dynamic_job_group_basic_terminate(generic_cloud: str):
         'dynamic_job_group_basic_terminate',
         [
             f'sky jobs launch {yaml_path} -y -d',
-            check,
+            check_before_signal,
             _queue_shows_member(name, eval1),
+            _send_signal(name, generic_cloud),
+            check_after_signal,
         ],
-        _dynamic_members_teardown(name, ['eval-1']),
+        _dynamic_members_teardown(name, ['eval-1', 'go']),
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60,
     )
@@ -4429,19 +4445,22 @@ def test_dynamic_job_group_basic_primary_fails(generic_cloud: str):
         generic_cloud,
         primary_tasks='trainer',
         # Same signal as basic_terminate, then a non-zero exit.
-        trainer_run=(_wait_running_from_task([eval1]) +
-                     '; sleep 60; echo "trainer failing"; exit 1'),
+        trainer_run=(_wait_signal_from_task(name) +
+                     '; echo "trainer failing"; exit 1'),
         watcher_run=(_launch_from_task(eval1, generic_cloud, _FOREVER) + '\n' +
                      _FOREVER))
 
-    def check():
+    def check_before_signal():
         root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
-        tree = _wait_tree(root,
-                          name, [eval1],
-                          timeout=900,
-                          statuses=[sky.ManagedJobStatus.RUNNING])
-        _wait_group(name, [sky.ManagedJobStatus.FAILED], timeout=900)
-        job = _wait_job(tree[eval1]['job_id'], [sky.ManagedJobStatus.CANCELLED],
+        _wait_tree(root,
+                   name, [eval1],
+                   timeout=900,
+                   statuses=[sky.ManagedJobStatus.RUNNING])
+
+    def check_after_signal():
+        root = _wait_group(name, [sky.ManagedJobStatus.FAILED], timeout=900)
+        job = _wait_job(_job_tree(root, name)[eval1]['job_id'],
+                        [sky.ManagedJobStatus.CANCELLED],
                         timeout=300)
         _assert_cancelled_because(
             job, f'with job group {root}: all primary tasks ended '
@@ -4451,9 +4470,11 @@ def test_dynamic_job_group_basic_primary_fails(generic_cloud: str):
         'dynamic_job_group_basic_primary_fails',
         [
             f'sky jobs launch {yaml_path} -y -d',
-            check,
+            check_before_signal,
+            _send_signal(name, generic_cloud),
+            check_after_signal,
         ],
-        _dynamic_members_teardown(name, ['eval-1']),
+        _dynamic_members_teardown(name, ['eval-1', 'go']),
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60,
     )
@@ -4615,28 +4636,26 @@ def test_dynamic_job_group_nested_first_level_finishes(generic_cloud: str):
         generic_cloud,
         primary_tasks='trainer',
         # The trainer must outlive eval-1 finishing and eval-1a being observed
-        # running afterwards. It waits for eval-1a to be RUNNING (eval-1
-        # exits 5 s after launching it) and then holds long enough for the
-        # test's observation window (a RUNNING check, a 30 s pause, a second
-        # check) before the group finishes.
-        trainer_run=(_wait_running_from_task([eval1a]) + ' && ' +
-                     _wait_from_task(eval1) + '; sleep 120'),
+        # running afterwards, so it ends on the test's signal.
+        trainer_run=_wait_signal_from_task(name),
         watcher_run=(_launch_from_task(eval1, generic_cloud, eval1_cmd) + '\n' +
                      _FOREVER))
 
-    def check():
+    def check_before_signal():
         root = _wait_group(name, [sky.ManagedJobStatus.RUNNING], timeout=600)
         tree = _wait_tree(root, name, [eval1, eval1a], timeout=900)
         _wait_job(tree[eval1]['job_id'], [sky.ManagedJobStatus.SUCCEEDED],
                   timeout=600)
         # eval-1 is done; eval-1a must be untouched, now and a little later.
-        grandchild = _wait_job(tree[eval1a]['job_id'],
-                               [sky.ManagedJobStatus.RUNNING],
-                               timeout=600)
+        # The pause is the assertion: nothing is expected to happen to it.
+        _wait_job(tree[eval1a]['job_id'], [sky.ManagedJobStatus.RUNNING],
+                  timeout=600)
         time.sleep(30)
         _assert_not_terminal(_job_tree(root, name)[eval1a])
-        _wait_group(name, [sky.ManagedJobStatus.SUCCEEDED], timeout=900)
-        grandchild = _wait_job(grandchild['job_id'],
+
+    def check_after_signal():
+        root = _wait_group(name, [sky.ManagedJobStatus.SUCCEEDED], timeout=900)
+        grandchild = _wait_job(_job_tree(root, name)[eval1a]['job_id'],
                                [sky.ManagedJobStatus.CANCELLED],
                                timeout=300)
         _assert_cancelled_because(
@@ -4646,9 +4665,11 @@ def test_dynamic_job_group_nested_first_level_finishes(generic_cloud: str):
         'dynamic_job_group_nested_first_level_finishes',
         [
             f'sky jobs launch {yaml_path} -y -d',
-            check,
+            check_before_signal,
+            _send_signal(name, generic_cloud),
+            check_after_signal,
         ],
-        _dynamic_members_teardown(name, ['eval-1', 'eval-1a']),
+        _dynamic_members_teardown(name, ['eval-1', 'eval-1a', 'go']),
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=30 * 60,
     )
