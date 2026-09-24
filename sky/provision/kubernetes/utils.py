@@ -2322,6 +2322,54 @@ def get_failure_hint_reasons() -> List[str]:
     return [s for substrings, _ in KUBERNETES_FAILURE_HINTS for s in substrings]
 
 
+# A container's own output explains a failure only when the process exited by
+# itself. OOMKilled and evictions are decided outside it, so its log would be
+# noise there.
+_SELF_EXIT_REASON = 'Error'
+_ERROR_LOG_TAIL_LINES = 50
+# The last line of a Python traceback, where its message starts.
+_EXCEPTION_LINE = re.compile(r'^[A-Za-z_][\w.]*(Error|Exception): ')
+
+
+def _self_exit_output(context: Optional[str], namespace: str, pod_name: str,
+                      pod: 'kubernetes_models.V1Pod') -> Optional[str]:
+    """What a container that exited with an error last printed, or None.
+
+    A failure raised in a container's own command -- not an exec -- leaves
+    its explanation only in the container log; the caller would otherwise
+    report just "Error (exit code 1)".
+    """
+    for cs in (pod.status.container_statuses or []):
+        for state, previous in ((cs.state, False), (cs.last_state, True)):
+            term = state.terminated if state else None
+            if (term is None or term.exit_code == 0 or
+                    term.reason != _SELF_EXIT_REASON):
+                continue
+            try:
+                log = kubernetes.core_api(context).read_namespaced_pod_log(
+                    pod_name,
+                    namespace,
+                    container=cs.name,
+                    previous=previous,
+                    tail_lines=_ERROR_LOG_TAIL_LINES,
+                    _request_timeout=kubernetes.API_TIMEOUT)
+            except Exception:  # pylint: disable=broad-except
+                return None
+            if not isinstance(log, str):
+                return None
+            lines = log.rstrip().splitlines()
+            first = max(0, len(lines) - 10)
+            for i in range(len(lines) - 1, -1, -1):
+                if _EXCEPTION_LINE.match(lines[i]):
+                    first = i
+                    break
+            tail = '\n'.join(lines[first:]).strip()
+            if not tail:
+                return None
+            return f'Last output from container {cs.name}:\n{tail}'
+    return None
+
+
 def diagnose_terminated_pod(context: Optional[str], namespace: str,
                             pod_name: str) -> Optional[str]:
     """Best-effort diagnosis of a pod that an exec/attach found already gone.
@@ -2344,6 +2392,9 @@ def diagnose_terminated_pod(context: Optional[str], namespace: str,
     hint = match_kubernetes_failure_hint_text(reason)
     if hint is not None:
         msg += f'\nHint: {hint}'
+    output = _self_exit_output(context, namespace, pod_name, pod)
+    if output is not None:
+        msg += f'\n{output}'
     return msg
 
 
