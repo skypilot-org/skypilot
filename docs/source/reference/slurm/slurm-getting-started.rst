@@ -318,7 +318,9 @@ rejects these rules, so select the classic build with
 locations, group name, and paths,
 install the file with root ownership and mode ``0440``, and check it
 with ``visudo -cf``. The rsync rule lists explicit server arguments; different
-rsync versions may require an adjusted rule based on sudo's log.
+rsync versions may require an adjusted rule based on sudo's log. The ``rm`` rule
+also permits ``--one-file-system`` so recursive cleanup can skip nested
+filesystems, such as bucket mounts that could not be unmounted.
 
 :download:`Download a smaller policy <slurm-sudoers-minimal.example>` if you
 only need fresh launches, ``sky exec``, ``sky logs``, managed jobs, and
