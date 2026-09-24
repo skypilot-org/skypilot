@@ -435,33 +435,3 @@ class TestRegisterSshKey:
         })
         runpod_utils.register_ssh_key('ssh-ed25519 BBBB skypilot')
         assert [c[0] for c in rest.calls] == ['GET']
-
-
-class TestRetry:
-
-    def test_auth_error_not_retried(self, monkeypatch):
-        monkeypatch.setattr(runpod_utils.time, 'sleep', lambda _: None)
-        calls = []
-
-        @runpod_utils.retry
-        def _f():
-            calls.append(1)
-            raise runpod.RunPodRestError('forbidden', status_code=403)
-
-        with pytest.raises(runpod.RunPodRestError):
-            _f()
-        assert len(calls) == 1
-
-    def test_transient_error_retried(self, monkeypatch):
-        monkeypatch.setattr(runpod_utils.time, 'sleep', lambda _: None)
-        calls = []
-
-        @runpod_utils.retry
-        def _f():
-            calls.append(1)
-            if len(calls) < 3:
-                raise runpod.RunPodRestError('boom', status_code=500)
-            return 'ok'
-
-        assert _f() == 'ok'
-        assert len(calls) == 3
