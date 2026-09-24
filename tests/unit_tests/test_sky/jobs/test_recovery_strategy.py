@@ -610,6 +610,11 @@ async def test_launch_forwards_remaining_runtime_recovery_budget(monkeypatch):
     context = patches.sdk_launch.call_args.kwargs['_extra_launch_context']
     assert context == {
         'other': 'retained',
+        'runtime_observation_target': {
+            'kind': 'managed_task',
+            'job_id': executor.job_id,
+            'task_id': executor.task_id,
+        },
         'managed_job_recovery': {
             'max_restarts_on_errors': 2,
             'recover_on_exit_codes': [137]

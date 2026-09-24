@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sky.jobs import controller as controller_module
 from sky.jobs import runtime
 from sky.jobs import state
+from sky.provision import observation as provision_observation
 from sky.skylet import job_lib
 
 
@@ -621,3 +622,29 @@ def test_recovery_dispatch_passes_previous_cursor(monkeypatch):
 async def test_replacement_observation_does_not_record_placement(database):
     await observe(1, running=True, nodes=['node-a'], should_relaunch=True)
     assert state.get_runtime_cursor(42, 0).nodes is None
+
+
+def test_provisioning_observations_reach_the_managed_task(database):
+    with database.begin() as connection:
+        connection.execute(state.spot_table.update().values(status='STARTING'))
+    target = state.provisioning_observation_target(42, 0)
+    assert provision_observation.previous(target) is None
+    provision_observation.report(
+        target,
+        runtime.RuntimeObservation('allocation-a',
+                                   2,
+                                   None,
+                                   user_restart_count=1,
+                                   recovery_reasons={2: 'exit 7'}))
+    assert provision_observation.previous(target) == runtime.RuntimeCursor(
+        'allocation-a', 2, 1, None)
+    row = task_row(database)
+    assert row['status'] == 'STARTING'
+    assert row['recovery_count'] == 2
+    provision_observation.report(
+        None, runtime.RuntimeObservation('allocation-a', 5, None))
+    assert provision_observation.previous(None) is None
+    assert task_row(database)['recovery_count'] == 2
+    with pytest.raises(ValueError, match='No runtime observation sink'):
+        provision_observation.report({'kind': 'unknown'},
+                                     runtime.RuntimeObservation('a', 1, None))

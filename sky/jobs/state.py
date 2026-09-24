@@ -27,6 +27,7 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.dag import DagExecution
 from sky.jobs import runtime as managed_job_runtime
+from sky.provision import observation as provision_observation
 from sky.skylet import constants
 from sky.utils import asyncio_utils
 from sky.utils import common_utils
@@ -4129,6 +4130,37 @@ async def get_runtime_cursor_async(
                 _runtime_task_filter(job_id, task_id)))
         metadata = result.scalar_one_or_none()
     return _runtime_cursor_from_metadata(metadata)
+
+
+_MANAGED_TASK_OBSERVATION = 'managed_task'
+
+
+def provisioning_observation_target(
+        job_id: int, task_id: int) -> provision_observation.Target:
+    """Name a managed task as the target of provisioning-time observations."""
+    return {
+        'kind': _MANAGED_TASK_OBSERVATION,
+        'job_id': job_id,
+        'task_id': task_id,
+    }
+
+
+class _ManagedTaskObservationSink:
+    """Persists provisioning-time observations of a managed task."""
+
+    def previous(
+        self, target: provision_observation.Target
+    ) -> Optional[managed_job_runtime.RuntimeCursor]:
+        return get_runtime_cursor(target['job_id'], target['task_id'])
+
+    def report(self, target: provision_observation.Target,
+               observation: managed_job_runtime.RuntimeObservation) -> None:
+        observe_runtime_during_provisioning(target['job_id'], target['task_id'],
+                                            observation)
+
+
+provision_observation.register_sink(_MANAGED_TASK_OBSERVATION,
+                                    _ManagedTaskObservationSink())
 
 
 @db_retries.retry_async
