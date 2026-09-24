@@ -476,17 +476,24 @@ async def test_starting_observation_can_finish(database, monkeypatch, terminal):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('failure_recovery', [False, True])
 async def test_new_allocation_does_not_restore_previous_baseline(
-        database, monkeypatch):
+        database, monkeypatch, failure_recovery):
     monkeypatch.setattr(state.time, 'time', lambda: 200)
     await observe(0, running=True, started_at=100)
     await state.set_emergency_recovering_async(42, 0, 'interrupted',
                                                mock.AsyncMock())
+    with database.begin() as connection:
+        connection.execute(state.spot_table.update().values(
+            recovering_from_failure=failure_recovery))
     monkeypatch.setattr(state.time, 'time', lambda: 400)
     await observe(0, runtime_id='allocation-b', running=True, started_at=350)
     row = task_row(database)
     assert row['job_duration'] == 100
     assert row['last_recovered_at'] == 350
+    assert row['recovery_count'] == int(failure_recovery)
+    await observe(0, runtime_id='allocation-b', running=True, started_at=350)
+    assert task_row(database)['recovery_count'] == int(failure_recovery)
 
 
 @pytest.mark.asyncio

@@ -4045,6 +4045,8 @@ async def observe_runtime_recovery_async(
                               last_recovered_at=cursor.get(
                                   'running_since', resume_time),
                               recovering_from_failure=None)
+                if row['recovering_from_failure']:
+                    values['recovery_count'] = (row['recovery_count'] or 0) + 1
                 events.append(
                     (ManagedJobStatus.RUNNING, 'Runtime is still running'))
                 callbacks.append('RECOVERED')
