@@ -5,6 +5,7 @@ background thread, so a test that went through it would assert against
 whichever snapshot happened to be current.
 """
 import errno
+import functools
 import os
 
 import pytest
@@ -33,6 +34,26 @@ def roots(tmp_path, monkeypatch):
     }
     monkeypatch.setattr(local_disk, 'local_roots', lambda: mapping)
     return present, other
+
+
+@pytest.fixture
+def statvfs_once(monkeypatch):
+    """One real statvfs per path for the whole test, and the paths asked.
+
+    Two live reads of a shared filesystem disagree whenever another
+    process writes in between, so a test comparing them would be flaky.
+    """
+    asked = []
+    real_statvfs = os.statvfs
+
+    @functools.lru_cache(maxsize=None)
+    def once(path):
+        stats = real_statvfs(path)
+        asked.append(path)
+        return stats
+
+    monkeypatch.setattr(os, 'statvfs', once)
+    return asked
 
 
 @pytest.fixture(autouse=True)
@@ -458,12 +479,19 @@ def test_a_charged_destination_is_bounded_by_the_budget_too(
     assert local_disk.available_for_path(str(tmp_path)) == 4096
 
 
-def test_availability_resolves_a_path_that_does_not_exist_yet(tmp_path):
+def test_availability_resolves_a_path_that_does_not_exist_yet(
+        tmp_path, statvfs_once):
     """An extraction target may not have been created yet."""
     missing = tmp_path / 'not' / 'created' / 'yet'
 
     assert local_disk.available_for_path(str(missing)) == \
         local_disk.available_for_path(str(tmp_path))
+    # Both were measured once, at the mount point of the filesystem that
+    # holds tmp_path: where the missing path would be created.
+    assert len(statvfs_once) == 1
+    mountpoint = statvfs_once[0]
+    assert os.path.ismount(mountpoint)
+    assert os.stat(mountpoint).st_dev == tmp_path.stat().st_dev
 
 
 def test_use_is_read_from_the_filesystem_holding_the_path(
@@ -480,12 +508,16 @@ def test_use_is_read_from_the_filesystem_holding_the_path(
     assert local_disk.used_for_path(str(tmp_path)) == 750
 
 
-def test_use_resolves_a_path_that_does_not_exist_yet(tmp_path):
+def test_use_resolves_a_path_that_does_not_exist_yet(tmp_path, statvfs_once):
     """A store's directory is created on the first upload into it."""
     missing = tmp_path / 'not' / 'created' / 'yet'
 
     assert local_disk.used_for_path(str(missing)) == \
         local_disk.used_for_path(str(tmp_path))
+    assert len(statvfs_once) == 1
+    mountpoint = statvfs_once[0]
+    assert os.path.ismount(mountpoint)
+    assert os.stat(mountpoint).st_dev == tmp_path.stat().st_dev
 
 
 def test_use_is_unknown_when_the_filesystem_cannot_be_measured(
