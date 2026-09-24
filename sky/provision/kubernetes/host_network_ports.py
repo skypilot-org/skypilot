@@ -14,6 +14,7 @@ import os
 import random
 from typing import Any, Dict, List, Optional, Tuple
 
+from sky import skypilot_config
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import host_network_probe
 
@@ -30,71 +31,61 @@ from sky.provision.kubernetes import host_network_probe
 # The default is right where both of those hold, but neither is guaranteed:
 # the ephemeral floor is a per-node sysctl, and a cluster measured during
 # this work sets it to 10240, putting the whole default range inside the
-# kernel's pool. So the range is overridable, by environment variable rather
-# than config: it is a deployment-time property of the cluster, it belongs in
-# the same helmfile that sets everything else about the API server, and it
-# needs no reload path -- a restart is the natural moment for it to change.
+# kernel's pool.
+#
+# So the range is configurable **per Kubernetes context**, because that is
+# what it varies with -- one API server serves many contexts, and two of the
+# three clusters measured need different values. It reads through the same
+# per-context chain as `namespace` and `remote_identity`, workspace override
+# included; there is nothing special about it.
 #
 # Changing it is not free. `ports_from_pod` uses the range to tell our block
-# apart from a user's pod_config ports, so a cluster whose range moves reads
+# apart from a user's pod_config ports, so a context whose range moves reads
 # every existing pod's block as "not ours" and hands out new ones while the
-# pods keep listening on the old. Widening is safe for that read, but not for
-# the write: `apply_to_pod_spec` refuses a user's `pod_config` port inside
-# the range, so widening turns a port that launched yesterday into a
-# launch-time error. Change it with the clusters drained, either way.
-_RANGE_ENV = 'SKYPILOT_HOST_NETWORK_PORT_RANGE'
+# pods keep listening on the old. Widening is not exempt either:
+# `apply_to_pod_spec` refuses a user's pod_config port inside the range, so
+# widening turns a port that launched yesterday into a launch-time error.
+# Change it with that context's clusters drained.
+_RANGE_KEY = 'host_network_port_range'
 _DEFAULT_RANGE = (20000, 29999)
 
 
-def _resolve_range() -> Tuple[int, int]:
-    """The reserved range, from the environment or the default."""
-    raw = os.environ.get(_RANGE_ENV)
+def resolve_range(context: Optional[str]) -> Tuple[int, int]:
+    """The reserved range for one context, from config or the default.
+
+    Malformed and too-narrow values are refused here rather than surfacing
+    later as a failure about the block, which would point at the wrong
+    thing: a range one port short of a block fails every launch, and the
+    error would name the block rather than the setting.
+    """
+    raw = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        keys=(_RANGE_KEY,),
+        region=context,
+        default_value=None)
     if not raw:
         return _DEFAULT_RANGE
     try:
-        start_s, _, end_s = raw.partition('-')
+        start_s, _, end_s = str(raw).partition('-')
         start, end = int(start_s), int(end_s)
     except ValueError:
-        raise ValueError(
-            f'{_RANGE_ENV}={raw!r} is not of the form "<start>-<end>", '
-            'e.g. "8000-9999".') from None
-    # Checked rather than assumed: a range that cannot hold a block, or that
-    # runs off the end of the port space, fails at every launch with an error
-    # about the block rather than about the setting that caused it.
+        raise ValueError(f'kubernetes.{_RANGE_KEY}={raw!r} is not of the form '
+                         '"<start>-<end>", e.g. "8000-9999".') from None
     if not 1 <= start < end <= 65535:
-        raise ValueError(
-            f'{_RANGE_ENV}={raw!r} must satisfy 1 <= start < end <= 65535.')
+        raise ValueError(f'kubernetes.{_RANGE_KEY}={raw!r} must satisfy '
+                         '1 <= start < end <= 65535.')
     width = end - start + 1
     need = len(host_network_probe.HEAD_PORT_NAMES)
     if width < need:
         raise ValueError(
-            f'{_RANGE_ENV}={raw!r} spans {width} ports; a pod needs a '
-            f'contiguous block of {need}.')
+            f'kubernetes.{_RANGE_KEY}={raw!r} spans {width} ports; a pod '
+            f'needs a contiguous block of {need}.')
     return start, end
 
 
-# Resolved at import for the common case, but a bad value must not raise
-# here: this module is imported by instance.py, so a typo would surface as an
-# import traceback from an unrelated command rather than as a setting error
-# from the path that reads it. Hold the message and raise it where the range
-# is actually used.
-_RANGE_ERROR: Optional[str] = None
-try:
-    PORT_RANGE_START, PORT_RANGE_END = _resolve_range()
-except ValueError as e:
-    PORT_RANGE_START, PORT_RANGE_END = _DEFAULT_RANGE
-    _RANGE_ERROR = str(e)
-
-
-def _require_valid_range() -> None:
-    """Refuse to assign ports under a range we could not parse.
-
-    Falling back to the default would be worse than failing: the operator
-    set the variable because the default does not work on their nodes.
-    """
-    if _RANGE_ERROR is not None:
-        raise ValueError(_RANGE_ERROR)
-
+# The default, used where a context is not in hand -- and the value the
+# tripwire pins. Callers that can name a context should resolve for it.
+PORT_RANGE_START, PORT_RANGE_END = _DEFAULT_RANGE
 
 # One contiguous block per pod, sized for the head; a worker not using three of
 # them costs nothing and keeps a single pod spec for every pod in the cluster.
@@ -103,8 +94,6 @@ def _require_valid_range() -> None:
 # blocks overlap only if their starts are within BLOCK_SIZE-1 (~0.17% over this
 # range), where N independent ports collide if any single one does (~0.81%).
 BLOCK_SIZE = len(host_network_probe.HEAD_PORT_NAMES)
-
-_MAX_START = PORT_RANGE_END - BLOCK_SIZE + 1
 
 # The client's SSH proxy command finds the pod's sshd port by this name.
 SSHD_PORT_NAME = 'ssh'
@@ -116,21 +105,22 @@ SSHD_PORT_NAME = 'ssh'
 _PINNED_START_ENV = 'SKYPILOT_HOST_NETWORK_PORT_START'
 
 
-def allocate_block() -> Dict[str, int]:
+def allocate_block(context: Optional[str] = None) -> Dict[str, int]:
     """Assign a fresh contiguous block, keyed by port name."""
-    _require_valid_range()
     pinned = os.environ.get(_PINNED_START_ENV)
     if pinned:
         start = int(pinned)
     else:
-        start = random.randint(PORT_RANGE_START, _MAX_START)
+        lo, hi = resolve_range(context)
+        start = random.randint(lo, hi - BLOCK_SIZE + 1)
     return {
         name: start + offset
         for offset, name in enumerate(host_network_probe.HEAD_PORT_NAMES)
     }
 
 
-def ports_from_pod(pod: Any) -> Optional[Dict[str, int]]:
+def ports_from_pod(pod: Any,
+                   context: Optional[str] = None) -> Optional[Dict[str, int]]:
     """The block a live pod declares, or None if it declares none.
 
     Reads the **ray-node** container specifically. A user's ``pod_config`` can
@@ -151,6 +141,7 @@ def ports_from_pod(pod: Any) -> Optional[Dict[str, int]]:
       ``len(HEAD_PORT_NAMES)``, so adding a tenth port name would make every
       existing pod's nine ports look partial, cluster-wide, on upgrade.
     """
+    lo, hi = resolve_range(context)
     spec = getattr(pod, 'spec', None)
     declared: List[int] = []
     for container in (getattr(spec, 'containers', None) or []):
@@ -164,20 +155,18 @@ def ports_from_pod(pod: Any) -> Optional[Dict[str, int]]:
             # inside the reserved range, so everything in range here is ours.
             # Without this the user's port joins the block and the run stops
             # being contiguous, and every read of the cluster raises.
-            if (host_port is not None and
-                    PORT_RANGE_START <= int(host_port) <= PORT_RANGE_END):
+            if (host_port is not None and lo <= int(host_port) <= hi):
                 declared.append(int(host_port))
     if not declared:
         return None
     start = min(declared)
     expected = list(range(start, start + BLOCK_SIZE))
-    if (sorted(declared) != expected or start < PORT_RANGE_START or
-            expected[-1] > PORT_RANGE_END):
+    if sorted(declared) != expected or start < lo or expected[-1] > hi:
         pod_name = getattr(getattr(pod, 'metadata', None), 'name', '<unknown>')
         raise RuntimeError(
             f'Pod {pod_name!r} declares host ports {sorted(declared)}, which '
             f'is not one contiguous block of {BLOCK_SIZE} within '
-            f'{PORT_RANGE_START}-{PORT_RANGE_END}. Refusing to guess: '
+            f'{lo}-{hi}. Refusing to guess: '
             'allocating a new block would point the cluster at ports nothing '
             'is listening on.')
     return {
@@ -189,6 +178,7 @@ def ports_from_pod(pod: Any) -> Optional[Dict[str, int]]:
 def resolve_block(
     pod: Any,
     configmap_ports: Optional[Dict[str, int]] = None,
+    context: Optional[str] = None,
 ) -> Dict[str, int]:
     """The block for one pod, resolved in the only order that is correct.
 
@@ -212,16 +202,18 @@ def resolve_block(
     ``pod`` may be None (no such pod yet).
     """
     if pod is not None:
-        declared = ports_from_pod(pod)
+        declared = ports_from_pod(pod, context)
         if declared is not None:
             return declared
         if configmap_ports:
             return dict(configmap_ports)
-    return allocate_block()
+    return allocate_block(context)
 
 
-def apply_to_pod_spec(pod_spec: Dict[str, Any], ports: Dict[str, int],
-                      head_gcs_port: int) -> None:
+def apply_to_pod_spec(pod_spec: Dict[str, Any],
+                      ports: Dict[str, int],
+                      head_gcs_port: int,
+                      context: Optional[str] = None) -> None:
     """Declare ``ports`` on the pod spec and export them to the bootstrap.
 
     Declaring hostPort is what makes the assignment safe: the scheduler's
@@ -264,16 +256,16 @@ def apply_to_pod_spec(pod_spec: Dict[str, Any], ports: Dict[str, int],
     # sidecar taking a reserved port is not refused here, but it degrades
     # loudly on its own -- duplicate hostPort in one pod is rejected by the
     # API server, and across pods the scheduler's predicate catches it.
+    lo, hi = resolve_range(context)
     kept = []
     for entry in (container.get('ports') or []):
         if not isinstance(entry, dict):
             continue
         declared_port = entry.get('hostPort', entry.get('containerPort'))
-        if (isinstance(declared_port, int) and
-                PORT_RANGE_START <= declared_port <= PORT_RANGE_END):
+        if (isinstance(declared_port, int) and lo <= declared_port <= hi):
             raise ValueError(
                 f'Container port {declared_port} falls inside '
-                f'{PORT_RANGE_START}-{PORT_RANGE_END}, which SkyPilot reserves '
+                f'{lo}-{hi}, which SkyPilot reserves '
                 'for the host ports it assigns to hostNetwork pods. Pick a '
                 'port outside that range in pod_config.')
         if entry.get('name') == SSHD_PORT_NAME:

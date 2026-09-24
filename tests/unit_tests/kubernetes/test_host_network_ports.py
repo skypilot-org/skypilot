@@ -498,65 +498,78 @@ class TestClashHintSeparatesTheCauses:
         assert self._hint(None, 25000) == ''
 
 
-class TestRangeOverride:
-    """The range is overridable because its premise is not universal.
+class TestRangeIsPerContext:
+    """The range is configurable because its premise is not universal, and
+    per *context* because that is the axis it varies on.
 
-    It rests on sitting below the node's ephemeral floor, and that floor is
-    a per-node sysctl: one cluster measured during this work sets it to
-    10240, which swallows the default range whole. An operator on such a
-    cluster needs a way out that is not a code change.
+    It has to sit outside the node's ephemeral pool, and that pool's floor
+    is a per-node sysctl: measured 32768 on GKE and OCI, 10240 on
+    CoreWeave. One API server serves many contexts, so a single value
+    cannot serve a deployment spanning both.
     """
 
-    def _resolve(self, value, monkeypatch):
-        if value is None:
-            monkeypatch.delenv(ports._RANGE_ENV, raising=False)
-        else:
-            monkeypatch.setenv(ports._RANGE_ENV, value)
-        return ports._resolve_range()
+    def _with_config(self, value, monkeypatch):
+        """Stand in for the per-context config lookup."""
+        seen = {}
+
+        def fake(cloud, keys, region=None, default_value=None, **kw):
+            del kw
+            seen['cloud'] = cloud
+            seen['keys'] = keys
+            seen['region'] = region
+            return value if value is not None else default_value
+
+        monkeypatch.setattr(ports.skypilot_config,
+                            'get_effective_workspace_region_config', fake)
+        return seen
 
     def test_unset_gives_the_default(self, monkeypatch):
-        assert self._resolve(None, monkeypatch) == ports._DEFAULT_RANGE
+        self._with_config(None, monkeypatch)
+        assert ports.resolve_range('ctx') == ports._DEFAULT_RANGE
 
     def test_a_valid_range_is_taken(self, monkeypatch):
-        assert self._resolve('8000-9999', monkeypatch) == (8000, 9999)
+        self._with_config('8000-9999', monkeypatch)
+        assert ports.resolve_range('ctx') == (8000, 9999)
 
-    def test_a_bad_value_does_not_break_importing_the_module(self):
-        """instance.py imports this, so an import-time raise would surface a
-        typo'd variable as a traceback from an unrelated command. The
-        failure belongs on the path that reads the range."""
-        import subprocess
-        import sys
-        env = dict(os.environ, SKYPILOT_HOST_NETWORK_PORT_RANGE='garbage')
-        r = subprocess.run([
-            sys.executable, '-c',
-            'from sky.provision.kubernetes import instance; print("ok")'
-        ],
-                           capture_output=True,
-                           text=True,
-                           env=env,
-                           check=False)
-        assert r.returncode == 0, r.stderr[-400:]
-
-    def test_but_assigning_a_block_refuses(self, monkeypatch):
-        """Falling back to the default would be worse than failing: the
-        operator set the variable because the default does not work."""
-        monkeypatch.setattr(ports, '_RANGE_ERROR', 'bad range')
-        with pytest.raises(ValueError, match='bad range'):
-            ports.allocate_block()
+    def test_the_lookup_is_keyed_on_the_context(self, monkeypatch):
+        """Keyed on the context, not global: two clusters under one API
+        server need different values, which is the whole point."""
+        seen = self._with_config('8000-9999', monkeypatch)
+        ports.resolve_range('some-context')
+        assert seen['region'] == 'some-context'
+        assert seen['cloud'] == 'kubernetes'
+        assert seen['keys'] == (ports._RANGE_KEY,)
 
     @pytest.mark.parametrize(
         'bad', ['abc', '8000', '8000-9', '0-100', '100-70000', '9999-8000'])
     def test_malformed_values_are_refused(self, bad, monkeypatch):
-        """Refused at resolution rather than surfacing later as a confusing
-        failure about the block, which would point at the wrong thing."""
-        with pytest.raises(ValueError, match=ports._RANGE_ENV):
-            self._resolve(bad, monkeypatch)
+        """Refused where the setting is read rather than surfacing later as
+        a failure about the block, which would point at the wrong thing."""
+        self._with_config(bad, monkeypatch)
+        with pytest.raises(ValueError, match=ports._RANGE_KEY):
+            ports.resolve_range('ctx')
 
     def test_a_range_too_narrow_for_one_block_is_refused(self, monkeypatch):
-        """Off by one: a block needs BLOCK_SIZE ports, and a range one short
-        would otherwise fail on every single launch."""
+        """Off by one: a block needs BLOCK_SIZE ports, and a range one
+        short would otherwise fail on every single launch."""
         need = ports.BLOCK_SIZE
+        self._with_config(f'8000-{8000 + need - 2}', monkeypatch)
         with pytest.raises(ValueError, match='contiguous block'):
-            self._resolve(f'8000-{8000 + need - 2}', monkeypatch)
-        assert self._resolve(f'8000-{8000 + need - 1}',
-                             monkeypatch) == (8000, 8000 + need - 1)
+            ports.resolve_range('ctx')
+        self._with_config(f'8000-{8000 + need - 1}', monkeypatch)
+        assert ports.resolve_range('ctx') == (8000, 8000 + need - 1)
+
+    def test_the_writer_and_the_reader_use_the_same_range(self, monkeypatch):
+        """Both halves resolve for the same context, or a block written
+        under one range reads as "not ours" under another -- new ports
+        handed out while the pods keep listening on the old."""
+        self._with_config('8000-9999', monkeypatch)
+        block = ports.allocate_block('ctx')
+        assert 8000 <= min(block.values())
+        assert max(block.values()) <= 9999
+        spec = {'spec': {'containers': [{'name': 'ray-node'}]}}
+        ports.apply_to_pod_spec(spec, block, block['gcs'], 'ctx')
+        declared = [
+            p['hostPort'] for p in spec['spec']['containers'][0]['ports']
+        ]
+        assert ports.ports_from_pod(_pod(host_ports=declared), 'ctx') == block

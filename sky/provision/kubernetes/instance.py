@@ -2349,13 +2349,14 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             # post-change launch would otherwise pay for the lookup.
             _head_block_from_configmap(cluster_name_on_cloud, namespace,
                                        context, head_name)
-            if head_pod is not None else None)
+            if head_pod is not None else None,
+            context)
         host_network_port_blocks[head_name] = head_block
         head_gcs_port = head_block['gcs']
         for i in range(1, config.count):
             name = f'{cluster_name_on_cloud}-worker{i}'
             host_network_port_blocks[name] = host_network_ports.resolve_block(
-                running_pods.get(name))
+                running_pods.get(name), context=context)
 
     # Add nvidia runtime class if it exists
     nvidia_runtime_exists = False
@@ -2425,7 +2426,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             this_pod = pod_spec_copy['metadata']['name']
             host_network_ports.apply_to_pod_spec(
                 pod_spec_copy, host_network_port_blocks[this_pod],
-                head_gcs_port)
+                head_gcs_port, context)
 
         # Inject cache volume + volumeMount for the Docker sidecar container.
         if docker_config:
@@ -3109,7 +3110,7 @@ def get_cluster_info(
     for name, pod in running_pods.items():
         if not pod.spec.host_network:
             continue
-        declared = host_network_ports.ports_from_pod(pod)
+        declared = host_network_ports.ports_from_pod(pod, context)
         if declared is not None:
             pod_sshd_ports[name] = declared['sshd']
         else:
