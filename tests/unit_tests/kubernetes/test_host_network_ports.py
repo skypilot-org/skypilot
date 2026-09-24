@@ -425,8 +425,13 @@ def test_the_reserved_range_is_part_of_the_on_cluster_format():
     fine today and is refused on their next launch. So widening needs a
     release note, and moving or narrowing needs a migration. If this fails,
     do not update it to match.
+
+    The environment override carries the same hazard and does not excuse it:
+    an operator who moves the range on a live deployment gets the same
+    silent re-allocation, which is why the docstring on _RANGE_ENV says to
+    drain first.
     """
-    assert (ports.PORT_RANGE_START, ports.PORT_RANGE_END) == (20000, 29999)
+    assert ports._DEFAULT_RANGE == (20000, 29999)
 
 
 def test_a_port_clash_tells_the_user_to_retry_before_telling_them_to_debug():
@@ -490,3 +495,43 @@ class TestClashHintSeparatesTheCauses:
         """The caller is already reporting a failure; losing the hint must
         not replace it with an exception."""
         assert self._hint(None, 25000) == ''
+
+
+class TestRangeOverride:
+    """The range is overridable because its premise is not universal.
+
+    It rests on sitting below the node's ephemeral floor, and that floor is
+    a per-node sysctl: one cluster measured during this work sets it to
+    10240, which swallows the default range whole. An operator on such a
+    cluster needs a way out that is not a code change.
+    """
+
+    def _resolve(self, value, monkeypatch):
+        if value is None:
+            monkeypatch.delenv(ports._RANGE_ENV, raising=False)
+        else:
+            monkeypatch.setenv(ports._RANGE_ENV, value)
+        return ports._resolve_range()
+
+    def test_unset_gives_the_default(self, monkeypatch):
+        assert self._resolve(None, monkeypatch) == ports._DEFAULT_RANGE
+
+    def test_a_valid_range_is_taken(self, monkeypatch):
+        assert self._resolve('8000-9999', monkeypatch) == (8000, 9999)
+
+    @pytest.mark.parametrize(
+        'bad', ['abc', '8000', '8000-9', '0-100', '100-70000', '9999-8000'])
+    def test_malformed_values_are_refused(self, bad, monkeypatch):
+        """Refused at resolution rather than surfacing later as a confusing
+        failure about the block, which would point at the wrong thing."""
+        with pytest.raises(ValueError, match=ports._RANGE_ENV):
+            self._resolve(bad, monkeypatch)
+
+    def test_a_range_too_narrow_for_one_block_is_refused(self, monkeypatch):
+        """Off by one: a block needs BLOCK_SIZE ports, and a range one short
+        would otherwise fail on every single launch."""
+        need = ports.BLOCK_SIZE
+        with pytest.raises(ValueError, match='contiguous block'):
+            self._resolve(f'8000-{8000 + need - 2}', monkeypatch)
+        assert self._resolve(f'8000-{8000 + need - 1}',
+                             monkeypatch) == (8000, 8000 + need - 1)

@@ -12,7 +12,7 @@ them, this module assigns them, and one list serves both.
 """
 import os
 import random
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import host_network_probe
@@ -26,8 +26,52 @@ from sky.provision.kubernetes import host_network_probe
 # assignment is not: under hostNetwork the competing allocator is the node's
 # entire outbound connection load, drawing from that same pool, and it can
 # take an assigned port between admission and the pod's bind.
-PORT_RANGE_START = 20000
-PORT_RANGE_END = 29999
+#
+# The default is right where both of those hold, but neither is guaranteed:
+# the ephemeral floor is a per-node sysctl, and a cluster measured during
+# this work sets it to 10240, putting the whole default range inside the
+# kernel's pool. So the range is overridable, by environment variable rather
+# than config: it is a deployment-time property of the cluster, it belongs in
+# the same helmfile that sets everything else about the API server, and it
+# needs no reload path -- a restart is the natural moment for it to change.
+#
+# Changing it is not free. `ports_from_pod` uses the range to tell our block
+# apart from a user's pod_config ports, so a cluster whose range moves reads
+# every existing pod's block as "not ours" and hands out new ones while the
+# pods keep listening on the old. Widen freely; move or narrow only with the
+# clusters drained.
+_RANGE_ENV = 'SKYPILOT_HOST_NETWORK_PORT_RANGE'
+_DEFAULT_RANGE = (20000, 29999)
+
+
+def _resolve_range() -> Tuple[int, int]:
+    """The reserved range, from the environment or the default."""
+    raw = os.environ.get(_RANGE_ENV)
+    if not raw:
+        return _DEFAULT_RANGE
+    try:
+        start_s, _, end_s = raw.partition('-')
+        start, end = int(start_s), int(end_s)
+    except ValueError:
+        raise ValueError(
+            f'{_RANGE_ENV}={raw!r} is not of the form "<start>-<end>", '
+            'e.g. "8000-9999".') from None
+    # Checked rather than assumed: a range that cannot hold a block, or that
+    # runs off the end of the port space, fails at every launch with an error
+    # about the block rather than about the setting that caused it.
+    if not 1 <= start < end <= 65535:
+        raise ValueError(
+            f'{_RANGE_ENV}={raw!r} must satisfy 1 <= start < end <= 65535.')
+    width = end - start + 1
+    need = len(host_network_probe.HEAD_PORT_NAMES)
+    if width < need:
+        raise ValueError(
+            f'{_RANGE_ENV}={raw!r} spans {width} ports; a pod needs a '
+            f'contiguous block of {need}.')
+    return start, end
+
+
+PORT_RANGE_START, PORT_RANGE_END = _resolve_range()
 
 # One contiguous block per pod, sized for the head; a worker not using three of
 # them costs nothing and keeps a single pod spec for every pod in the cluster.
