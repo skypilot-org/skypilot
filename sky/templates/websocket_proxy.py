@@ -35,6 +35,64 @@ MAX_UNANSWERED_PINGS = 100
 # insufficient when many concurrent SSH connections are established under load,
 # causing intermittent "timed out during opening handshake" errors.
 OPEN_TIMEOUT_SECONDS = 60
+# How long a redirect target may stay silent before we fall back. sshd sends
+# its banner at once; a healthy target that cannot serve closes well within it.
+FIRST_DATA_TIMEOUT_SECONDS = 30
+
+
+class _RedirectTargetFailed(Exception):
+    """The redirect target could not serve this session; fall back.
+
+    Raised when it refuses the handshake, or accepts and then closes or stays
+    silent before sending anything back. ``sent`` is what was already read
+    from stdin and sent to it -- ssh writes its version banner first, before
+    hearing anything -- so the fallback has to replay it: stdin cannot be read
+    twice.
+    """
+
+    def __init__(self, reason: str, sent: bytes = b'') -> None:
+        super().__init__(reason)
+        self.sent = sent
+
+
+class _Session:
+    """What one connection saw: whether the backend sent anything, and the
+    stdin bytes sent to it before that (kept only until it does)."""
+
+    def __init__(self) -> None:
+        self.got_data = False
+        self.sent_before_data = bytearray()
+
+
+class _Stdio:
+    """stdin/stdout, wrapped once for the whole process.
+
+    A fallback connects again after the first connection already read from
+    stdin. Wrapping the same pipe twice fails, and would lose what is still
+    buffered.
+    """
+    _instance: Optional['_Stdio'] = None
+
+    def __init__(self, reader: asyncio.StreamReader,
+                 writer: asyncio.StreamWriter) -> None:
+        self.reader = reader
+        self.writer = writer
+
+    @classmethod
+    async def get(cls) -> '_Stdio':
+        if cls._instance is None:
+            loop = asyncio.get_running_loop()
+            # Use asyncio.Stream primitives to wrap stdin and stdout, this is
+            # to avoid creating a new thread for each read/write operation
+            # excessively.
+            reader = asyncio.StreamReader()
+            protocol = asyncio.StreamReaderProtocol(reader)
+            await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+            transport, write_protocol = await loop.connect_write_pipe(
+                asyncio.streams.FlowControlMixin, sys.stdout)  # type: ignore
+            writer = asyncio.StreamWriter(transport, write_protocol, None, loop)
+            cls._instance = cls(reader, writer)
+        return cls._instance
 
 
 async def main(
@@ -42,6 +100,8 @@ async def main(
     timestamps_supported: bool,
     login_url: str,
     override_headers: Optional[Dict[str, str]] = None,
+    redirect_target: bool = False,
+    replay: bytes = b'',
 ) -> None:
     headers = {}
     if override_headers:
@@ -54,19 +114,33 @@ async def main(
                            ping_interval=None,
                            open_timeout=OPEN_TIMEOUT_SECONDS,
                            additional_headers=headers) as websocket:
-            await run_websocket_proxy(websocket, timestamps_supported)
+            session = await run_websocket_proxy(
+                websocket,
+                timestamps_supported,
+                replay=replay,
+                first_data_timeout=(FIRST_DATA_TIMEOUT_SECONDS
+                                    if redirect_target else None))
     except websockets.exceptions.InvalidStatus as e:
+        if redirect_target:
+            raise _RedirectTargetFailed(f'refused: {e}') from e
         if e.response.status_code == 403:
             print(str(exceptions.ApiServerAuthenticationError(login_url)),
                   file=sys.stderr)
         else:
             print(f'Error ssh into cluster: {e}', file=sys.stderr)
         sys.exit(1)
+    if redirect_target and not session.got_data:
+        raise _RedirectTargetFailed('served nothing',
+                                    bytes(session.sent_before_data))
 
 
-async def run_websocket_proxy(websocket: ClientConnection,
-                              timestamps_supported: bool,
-                              first_message: Optional[bytes] = None) -> None:
+async def run_websocket_proxy(
+        websocket: ClientConnection,
+        timestamps_supported: bool,
+        first_message: Optional[bytes] = None,
+        replay: bytes = b'',
+        first_data_timeout: Optional[float] = None) -> _Session:
+    session = _Session()
     if os.isatty(sys.stdin.fileno()):
         # pylint: disable=import-outside-toplevel
         import termios
@@ -77,16 +151,7 @@ async def run_websocket_proxy(websocket: ClientConnection,
         old_settings = None
 
     try:
-        loop = asyncio.get_running_loop()
-        # Use asyncio.Stream primitives to wrap stdin and stdout, this is to
-        # avoid creating a new thread for each read/write operation
-        # excessively.
-        stdin_reader = asyncio.StreamReader()
-        protocol = asyncio.StreamReaderProtocol(stdin_reader)
-        await loop.connect_read_pipe(lambda: protocol, sys.stdin)
-        transport, protocol = await loop.connect_write_pipe(
-            asyncio.streams.FlowControlMixin, sys.stdout)  # type: ignore
-        stdout_writer = asyncio.StreamWriter(transport, protocol, None, loop)
+        stdio = await _Stdio.get()
         # Dictionary to store last ping time for latency measurement
         last_ping_time_dict: Optional[Dict[int, float]] = None
         if timestamps_supported:
@@ -96,19 +161,45 @@ async def run_websocket_proxy(websocket: ClientConnection,
         websocket_closed_event = asyncio.Event()
         websocket_lock = asyncio.Lock()
 
-        await asyncio.gather(
-            stdin_to_websocket(stdin_reader, websocket, timestamps_supported,
-                               websocket_closed_event, websocket_lock),
-            websocket_to_stdout(websocket, stdout_writer, timestamps_supported,
+        if replay:
+            # What an earlier, failed connection already took from stdin.
+            session.sent_before_data += replay
+            async with websocket_lock:
+                await websocket.send(_frame(replay, timestamps_supported))
+
+        output = asyncio.create_task(
+            websocket_to_stdout(websocket, stdio.writer, timestamps_supported,
                                 last_ping_time_dict, websocket_closed_event,
-                                websocket_lock, first_message),
-            latency_monitor(websocket, last_ping_time_dict,
-                            websocket_closed_event, websocket_lock),
-            return_exceptions=True)
+                                websocket_lock, first_message, session,
+                                first_data_timeout))
+        others = [
+            asyncio.create_task(
+                stdin_to_websocket(stdio.reader, websocket,
+                                   timestamps_supported, websocket_closed_event,
+                                   websocket_lock, session)),
+            asyncio.create_task(
+                latency_monitor(websocket, last_ping_time_dict,
+                                websocket_closed_event, websocket_lock)),
+        ]
+        await asyncio.gather(output, return_exceptions=True)
+        # The socket is closed. The stdin reader may be blocked waiting for
+        # ssh, which is itself waiting for the server -- a deadlock that used
+        # to hang ssh forever. Stop it; unread bytes stay in the buffer.
+        for task in others:
+            task.cancel()
+        await asyncio.gather(*others, return_exceptions=True)
     finally:
         if old_settings:
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN,
                               old_settings)
+    return session
+
+
+def _frame(data: bytes, timestamps_supported: bool) -> bytes:
+    if timestamps_supported:
+        # Send message with type 0 to indicate data.
+        return struct.pack('!B', SSHMessageType.REGULAR_DATA.value) + data
+    return data
 
 
 async def latency_monitor(websocket: ClientConnection,
@@ -154,7 +245,8 @@ async def stdin_to_websocket(reader: asyncio.StreamReader,
                              websocket: ClientConnection,
                              timestamps_supported: bool,
                              websocket_closed_event: asyncio.Event,
-                             websocket_lock: asyncio.Lock):
+                             websocket_lock: asyncio.Lock,
+                             session: Optional[_Session] = None):
     try:
         while not websocket_closed_event.is_set():
             # Read at most BUFFER_SIZE bytes, this not affect
@@ -166,13 +258,11 @@ async def stdin_to_websocket(reader: asyncio.StreamReader,
 
             if not data:
                 break
-            if timestamps_supported:
-                # Send message with type 0 to indicate data.
-                message_type_bytes = struct.pack(
-                    '!B', SSHMessageType.REGULAR_DATA.value)
-                data = message_type_bytes + data
+            if session is not None and not session.got_data:
+                # Kept, before the send, for a fallback to replay.
+                session.sent_before_data += data
             async with websocket_lock:
-                await websocket.send(data)
+                await websocket.send(_frame(data, timestamps_supported))
 
     except Exception as e:  # pylint: disable=broad-except
         print(f'Error in stdin_to_websocket: {e}', file=sys.stderr)
@@ -188,7 +278,12 @@ async def websocket_to_stdout(websocket: ClientConnection,
                               last_ping_time_dict: Optional[dict],
                               websocket_closed_event: asyncio.Event,
                               websocket_lock: asyncio.Lock,
-                              first_message: Optional[bytes] = None):
+                              first_message: Optional[bytes] = None,
+                              session: Optional[_Session] = None,
+                              first_data_timeout: Optional[float] = None):
+    loop = asyncio.get_running_loop()
+    deadline = (None if first_data_timeout is None else loop.time() +
+                first_data_timeout)
     try:
         # If we already received a first message (e.g. from redirect check),
         # process it before entering the recv loop.
@@ -197,6 +292,14 @@ async def websocket_to_stdout(websocket: ClientConnection,
             if pending_message is not None:
                 message = pending_message
                 pending_message = None
+            elif (deadline is not None and session is not None and
+                  not session.got_data):
+                # A deadline, not a per-recv timeout: PONGs are not data.
+                try:
+                    message = await asyncio.wait_for(websocket.recv(),
+                                                     deadline - loop.time())
+                except asyncio.TimeoutError:
+                    return
             else:
                 message = await websocket.recv()
             if (timestamps_supported and len(message) > 0 and
@@ -231,6 +334,9 @@ async def websocket_to_stdout(websocket: ClientConnection,
                         await websocket.send(message)
                     continue
             # No timestamps support, write directly
+            if session is not None and message and not session.got_data:
+                session.got_data = True
+                session.sent_before_data.clear()
             writer.write(message)
             await writer.drain()
     except websockets.exceptions.ConnectionClosed:
@@ -296,15 +402,22 @@ async def _handle_redirect(redirect_info: dict,
             timestamps_supported,
             login_url,
             override_headers=headers,
+            redirect_target=True,
         )
     except (OSError, websockets.exceptions.InvalidURI,
-            websockets.exceptions.InvalidHandshake, asyncio.TimeoutError):
-        # The redirect target is unreachable, fallback to the API server
+            websockets.exceptions.InvalidHandshake, asyncio.TimeoutError,
+            _RedirectTargetFailed) as e:
+        # The redirect target is unreachable, refused us, or closed before
+        # serving anything: fall back to the API server, which can serve the
+        # session itself.
         if not original_url:
             raise
         separator = '&' if '?' in original_url else '?'
         fallback_url = f'{original_url}{separator}no_redirect=1'
-        await main(fallback_url, timestamps_supported, login_url)
+        await main(fallback_url,
+                   timestamps_supported,
+                   login_url,
+                   replay=getattr(e, 'sent', b''))
 
 
 if __name__ == '__main__':
