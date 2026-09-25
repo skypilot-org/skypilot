@@ -178,6 +178,10 @@ _SUBMIT_CHECKS_EXHAUSTED = '_checks_exhausted'
 _CODE_LAUNCH_RETRY_PREFIX = 'launch_retry:'
 _CODE_LAUNCH_PARKED = 'launch_parked'
 
+# Consecutive failed launch attempts that may keep a runtime-owned cluster
+# before a failure tears the cluster down again.
+_MAX_LAUNCH_RETRIES_KEEPING_CLUSTER = 3
+
 # A leading token shaped like an exception class, in the message of a bare
 # Exception. See _error_kind for why this is parsed and why it is this narrow.
 _OPAQUE_CLASS = re.compile(r'^([A-Z][A-Za-z0-9_]*(?:Error|Exception)):')
@@ -672,6 +676,22 @@ class StrategyExecutor:
         if self.pool is None:
             managed_job_utils.terminate_cluster(self.cluster_name)
 
+    def _runtime_keeps_cluster(self, error: Exception) -> bool:
+        """Whether the cluster's runtime keeps it after a launch failure."""
+        if (self.cluster_name is None or self.pool is not None or
+                not managed_job_runtime.is_registered()):
+            return False
+        try:
+            handle = global_user_state.get_handle_from_cluster_name(
+                self.cluster_name)
+            return managed_job_runtime.keep_cluster_on_launch_failure(
+                handle, error)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Failed to ask the runtime whether to keep cluster '
+                           f'{self.cluster_name}: '
+                           f'{common_utils.format_exception(e)}')
+            return False
+
     async def _refresh_priority_from_persisted_dag(self) -> None:
         """Re-read the persisted job DAG and apply any updated priority.
 
@@ -961,6 +981,7 @@ class StrategyExecutor:
             await self._refresh_priority_from_persisted_dag()
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
+        kept_cluster_retries = 0
         backoff = common_utils.Backoff(self.RETRY_INIT_GAP_SECONDS)
         # Request id (and its carried log-stream future) of a launch request
         # that was parked (WAITING) while we were waiting for it, to re-attach
@@ -979,6 +1000,8 @@ class StrategyExecutor:
             # handler, by which point the exception is long gone, and a value
             # left over from the previous attempt would misreport this one.
             retry_code: Optional[str] = None
+            # The exception of this attempt's failed launch, if any.
+            launch_error: Optional[Exception] = None
             # Whether this iteration is resuming from a park, i.e. the
             # top-of-loop block below runs and sets the task back to
             # PENDING. Reset every iteration; distinct from
@@ -1307,6 +1330,7 @@ class StrategyExecutor:
                             with ux_utils.print_exception_no_traceback():
                                 raise exceptions.ClusterSetUpError(
                                     str(e)) from e
+                        launch_error = e
                         if retry_code is None:
                             # None unless a raise site above already said what
                             # this is (see the pool case), which is more
@@ -1388,7 +1412,18 @@ class StrategyExecutor:
                             'job submission.')
 
                     # If we get here, the launch did not succeed. Tear down the
-                    # cluster and retry.
+                    # cluster and retry, unless its runtime keeps it.
+                    if (launch_error is not None and kept_cluster_retries <
+                            _MAX_LAUNCH_RETRIES_KEEPING_CLUSTER and
+                            await asyncio.to_thread(self._runtime_keeps_cluster,
+                                                    launch_error)):
+                        kept_cluster_retries += 1
+                        logger.info('Keeping the cluster for the next launch '
+                                    f'attempt ({kept_cluster_retries}/'
+                                    f'{_MAX_LAUNCH_RETRIES_KEEPING_CLUSTER}).')
+                        retry_cnt -= 1
+                        raise exceptions.NoClusterLaunchedError()
+                    kept_cluster_retries = 0
                     await asyncio.to_thread(self._cleanup_cluster)
                     if max_retry is not None and retry_cnt >= max_retry:
                         # Retry forever if max_retry is None.

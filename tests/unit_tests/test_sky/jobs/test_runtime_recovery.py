@@ -763,3 +763,23 @@ async def test_restart_limit_counts_live_runtime_user_retries(
     assert result is False
     set_failed.assert_awaited_once()
     executor.recover.assert_not_called()
+
+
+def test_keep_cluster_dispatch_asks_the_owning_runtime(monkeypatch):
+    handle = mock.Mock()
+    handle.provision_runtime_metadata.has_ray = False
+    error = RuntimeError('status unknown')
+    legacy = mock.Mock(spec=['owns'])
+    legacy.owns.return_value = True
+    owner = mock.Mock()
+    owner.owns.return_value = True
+    owner.keep_cluster_on_launch_failure.return_value = True
+    monkeypatch.setattr(runtime, '_runtimes', [legacy, owner])
+    assert runtime.keep_cluster_on_launch_failure(handle, error) is True
+    owner.keep_cluster_on_launch_failure.assert_called_once_with(handle, error)
+    owner.owns.return_value = False
+    assert runtime.keep_cluster_on_launch_failure(handle, error) is False
+    handle.provision_runtime_metadata.has_ray = True
+    owner.owns.return_value = True
+    assert runtime.keep_cluster_on_launch_failure(handle, error) is False
+    assert runtime.keep_cluster_on_launch_failure(None, error) is False

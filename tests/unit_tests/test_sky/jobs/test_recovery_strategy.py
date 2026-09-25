@@ -357,6 +357,68 @@ async def test_launch_parking_does_not_consume_retry_budget(monkeypatch):
     assert executor._start_stream_task.call_count == 2
 
 
+def _patch_runtime_keep(monkeypatch, keep):
+    monkeypatch.setattr(recovery_strategy.managed_job_runtime, 'is_registered',
+                        lambda: True)
+    hook = mock.MagicMock(return_value=keep)
+    monkeypatch.setattr(recovery_strategy.managed_job_runtime,
+                        'keep_cluster_on_launch_failure', hook)
+    return hook
+
+
+@pytest.mark.asyncio
+async def test_launch_keeps_cluster_when_runtime_asks(monkeypatch):
+    """A runtime-kept cluster retries the launch without a teardown."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    hook = _patch_runtime_keep(monkeypatch, True)
+    error = exceptions.ClusterStatusFetchingError('ssh returned 255')
+    executor._await_launch_request = mock.AsyncMock(side_effect=[error, None])
+
+    result = await executor._launch(max_retry=1, raise_on_failure=True)
+
+    assert result == 123.45
+    assert patches.sdk_launch.call_count == 2
+    hook.assert_called_once_with(None, error)
+    patches.set_backoff_pending.assert_awaited_once()
+    assert (patches.set_backoff_pending.await_args.kwargs['code'] ==
+            'launch_retry:ClusterStatusFetchingError')
+    executor._cleanup_cluster.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_launch_tears_down_when_runtime_does_not_keep(monkeypatch):
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    _patch_runtime_keep(monkeypatch, False)
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[exceptions.ClusterStatusFetchingError('down'), None])
+
+    result = await executor._launch(max_retry=2, raise_on_failure=True)
+
+    assert result == 123.45
+    assert patches.sdk_launch.call_count == 2
+    executor._cleanup_cluster.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_launch_tears_down_after_repeated_kept_failures(monkeypatch):
+    """Kept failures beyond the limit fall back to teardown and count."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    _patch_runtime_keep(monkeypatch, True)
+    limit = recovery_strategy._MAX_LAUNCH_RETRIES_KEEPING_CLUSTER
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[exceptions.ClusterStatusFetchingError('down')] *
+        (limit + 1) + [None])
+
+    result = await executor._launch(max_retry=2, raise_on_failure=True)
+
+    assert result == 123.45
+    assert patches.sdk_launch.call_count == limit + 2
+    executor._cleanup_cluster.assert_called_once()
+
+
 @pytest.mark.asyncio
 async def test_launch_relaunches_when_parked_request_vanishes(monkeypatch):
     """If the parked request disappears, a fresh launch attempt is made."""

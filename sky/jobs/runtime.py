@@ -175,6 +175,19 @@ class ManagedJobRuntime(Protocol):
         and report everything else through the returned observation."""
         ...
 
+    def keep_cluster_on_launch_failure(
+        self,
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+        error: Exception,
+    ) -> Optional[bool]:
+        """Return True to retry a failed launch without a teardown.
+
+        Called with the cluster's handle after a managed-job launch fails with
+        ``error``. True keeps the cluster, and the resources it holds, for the
+        next launch attempt on the same cluster. The controller bounds the
+        consecutive retries that keep a cluster."""
+        ...
+
     def get_job_submitted_at(
         self,
         handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
@@ -381,6 +394,23 @@ def get_job_status(
         if result is not None:
             return result
     return None
+
+
+def keep_cluster_on_launch_failure(
+    handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+    error: Exception,
+) -> bool:
+    """Whether the runtime owning ``handle`` keeps it after ``error``."""
+    if not _is_runtime_candidate(handle):
+        return False
+    for r in _claimants(handle):
+        hook = getattr(r, 'keep_cluster_on_launch_failure', None)
+        if hook is None:
+            continue
+        result = hook(handle, error)
+        if result is not None:
+            return result
+    return False
 
 
 def get_job_submitted_at(
