@@ -42,6 +42,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import status_lib
 from sky.utils.plugin_extensions import LogDeliverySource
 
@@ -3085,3 +3086,49 @@ class TestJobGroupResumeWithFinishedPrimaries:
         for task in asyncio.all_tasks():
             if task is not asyncio.current_task():
                 task.cancel()
+
+
+class TestStartJobLaunchSlots:
+    """Only cluster-launching jobs occupy a controller launch slot.
+
+    ControllerManager.starting is capped at LAUNCHES_PER_WORKER and gates the
+    claim loop. A pool job does not call sky.launch - it waits for a ready
+    pool worker - so it must not occupy a slot while it waits, otherwise a
+    large pool batch blocks every other managed job from being claimed.
+    """
+
+    @pytest.fixture
+    def manager(self, monkeypatch, tmp_path) -> ControllerManager:
+        monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                            str(tmp_path))
+        monkeypatch.setattr(controller_module, 'create_background_task',
+                            AsyncMock())
+        manager = ControllerManager('test-uuid')
+        manager.run_job_loop = MagicMock()
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_regular_job_takes_a_launch_slot(self, manager):
+        await manager.start_job(1, pool=None)
+
+        assert manager.starting == {1}
+        manager.run_job_loop.assert_called_once()
+        assert manager.run_job_loop.call_args.args[2] is None
+
+    @pytest.mark.asyncio
+    async def test_pool_job_does_not_take_a_launch_slot(self, manager):
+        await manager.start_job(2, pool='my-pool')
+
+        assert manager.starting == set()
+        manager.run_job_loop.assert_called_once()
+        assert manager.run_job_loop.call_args.args[2] == 'my-pool'
+
+    @pytest.mark.asyncio
+    async def test_pool_backlog_does_not_block_regular_job(self, manager):
+        """A pool batch larger than LAUNCHES_PER_WORKER leaves slots free."""
+        for job_id in range(10, 10 + controller_utils.LAUNCHES_PER_WORKER + 5):
+            await manager.start_job(job_id, pool='my-pool')
+        assert len(manager.starting) < controller_utils.LAUNCHES_PER_WORKER
+
+        await manager.start_job(1, pool=None)
+        assert manager.starting == {1}
