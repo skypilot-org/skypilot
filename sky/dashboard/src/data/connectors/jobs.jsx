@@ -95,6 +95,7 @@ const DEFAULT_FIELDS = [
   'parent_job_id',
   'parent_task_id',
   'dynamic_task_index',
+  'depends_on',
 ];
 
 /**
@@ -397,6 +398,8 @@ export async function getManagedJobs(options = {}) {
         // A dynamic task's ordinal within its root's tree (declared tasks are
         // 0..n-1, dynamic tasks number on); `<root>-<index>` names it.
         dynamic_task_index: job.dynamic_task_index ?? null,
+        // Managed job IDs this job waits for; null without dependencies.
+        depends_on: job.depends_on ?? null,
         // Batch progress
         batch_total_batches: job.batch_total_batches,
         batch_completed_batches: job.batch_completed_batches,

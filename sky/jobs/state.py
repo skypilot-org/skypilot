@@ -476,6 +476,37 @@ batch_state_table = sqlalchemy.Table(
     sqlalchemy.PrimaryKeyConstraint('job_id', 'batch_idx'),
 )
 
+# Jobs a managed job waits for: it is claimed by a controller only once all of
+# them are DONE, and runs only if all of them succeeded.
+job_dependencies_table = sqlalchemy.Table(
+    'job_dependencies',
+    Base.metadata,
+    sqlalchemy.Column('spot_job_id', sqlalchemy.Integer, nullable=False),
+    sqlalchemy.Column('depends_on_job_id', sqlalchemy.Integer, nullable=False),
+    sqlalchemy.PrimaryKeyConstraint('spot_job_id', 'depends_on_job_id'),
+)
+
+
+def _unfinished_dependency_exists() -> sqlalchemy.sql.elements.ColumnElement:
+    """True for a job_info row with a dependency that is not DONE yet.
+
+    Correlates to ``job_info_table`` in the enclosing query. A NULL
+    schedule_state (a job from before schedule states existed) does not count
+    as unfinished, and neither does a dependency whose row is gone; the
+    controller then finds it did not succeed.
+    """
+    dependency_info = job_info_table.alias('dependency_info')
+    return sqlalchemy.exists().where(
+        sqlalchemy.and_(
+            job_dependencies_table.c.spot_job_id ==
+            job_info_table.c.spot_job_id,
+            dependency_info.c.spot_job_id ==
+            job_dependencies_table.c.depends_on_job_id,
+            dependency_info.c.schedule_state !=
+            ManagedJobScheduleState.DONE.value,
+        ))
+
+
 # Subquery that aggregates batch_state into per-job progress counts.
 # Used by jobs-queue queries to supply batch_total_batches and
 # batch_completed_batches without denormalized columns on job_info.
@@ -2000,17 +2031,21 @@ def get_managed_jobs_highest_priority(
     sky/jobs/stall.py, where an unbounded query on the metrics thread is the
     thing the budget exists to prevent.
     """
-    query = sqlalchemy.select(sqlalchemy.func.max(
-        job_info_table.c.priority)).where(
-            sqlalchemy.and_(
-                job_info_table.c.schedule_state.in_([
-                    ManagedJobScheduleState.LAUNCHING.value,
-                    ManagedJobScheduleState.ALIVE_BACKOFF.value,
-                    ManagedJobScheduleState.WAITING.value,
-                    ManagedJobScheduleState.ALIVE_WAITING.value,
-                ]),
-                job_info_table.c.priority.is_not(None),
-            ))
+    query = sqlalchemy.select(
+        sqlalchemy.func.max(job_info_table.c.priority)
+    ).where(
+        sqlalchemy.and_(
+            job_info_table.c.schedule_state.in_([
+                ManagedJobScheduleState.LAUNCHING.value,
+                ManagedJobScheduleState.ALIVE_BACKOFF.value,
+                ManagedJobScheduleState.WAITING.value,
+                ManagedJobScheduleState.ALIVE_WAITING.value,
+            ]),
+            job_info_table.c.priority.is_not(None),
+            # A job waiting on its dependencies does not contend for a
+            # controller, so it blocks nobody.
+            ~_unfinished_dependency_exists(),
+        ))
     with orm.Session(
             conn if conn is not None else _db_manager.get_engine()) as session:
         priority = session.execute(query).fetchone()
@@ -3610,6 +3645,8 @@ async def get_waiting_job_async(
                     # Batch jobs: only if pool has no active batch job.
                     ~job_info_table.c.pool.in_(busy_batch_pools_subq),
                 ),
+                # A job waits until every job it depends on is DONE.
+                ~_unfinished_dependency_exists(),
             )).order_by(
                 job_info_table.c.priority.desc(),
                 job_info_table.c.spot_job_id.asc(),
@@ -5117,6 +5154,164 @@ class JobInfoRow:
     @property
     def is_job_group(self) -> bool:
         return self.execution == 'parallel'
+
+
+def set_job_dependencies(job_id: int, depends_on: List[int]) -> None:
+    """Record the jobs ``job_id`` waits for. Called before it is WAITING."""
+    if not depends_on:
+        return
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(sqlalchemy.insert(job_dependencies_table), [{
+            'spot_job_id': job_id,
+            'depends_on_job_id': dependency
+        } for dependency in depends_on])
+        session.commit()
+
+
+def get_job_dependencies(job_id: int) -> List[int]:
+    """The jobs ``job_id`` waits for, in ascending order."""
+    return get_jobs_dependencies([job_id]).get(job_id, [])
+
+
+def get_jobs_dependencies(job_ids: List[int]) -> Dict[int, List[int]]:
+    """For each of ``job_ids`` that has any, the jobs it waits for, in
+    ascending order."""
+    if not job_ids:
+        return {}
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(
+                job_dependencies_table.c.spot_job_id,
+                job_dependencies_table.c.depends_on_job_id).where(
+                    job_dependencies_table.c.spot_job_id.in_(job_ids)).order_by(
+                        job_dependencies_table.c.spot_job_id,
+                        job_dependencies_table.c.depends_on_job_id)).fetchall()
+    dependencies: Dict[int, List[int]] = {}
+    for job_id, dependency in rows:
+        dependencies.setdefault(job_id, []).append(dependency)
+    return dependencies
+
+
+def get_unfinished_dependencies(job_ids: List[int]) -> Dict[int, List[int]]:
+    """For each of ``job_ids`` that has any, its dependencies not DONE yet."""
+    if not job_ids:
+        return {}
+    dependency_info = job_info_table.alias('dependency_info')
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(
+                job_dependencies_table.c.spot_job_id,
+                job_dependencies_table.c.depends_on_job_id).select_from(
+                    job_dependencies_table.join(
+                        dependency_info, dependency_info.c.spot_job_id ==
+                        job_dependencies_table.c.depends_on_job_id)).
+            where(
+                sqlalchemy.and_(
+                    job_dependencies_table.c.spot_job_id.in_(job_ids),
+                    dependency_info.c.schedule_state !=
+                    ManagedJobScheduleState.DONE.value,
+                )).order_by(
+                    job_dependencies_table.c.spot_job_id,
+                    job_dependencies_table.c.depends_on_job_id)).fetchall()
+    unfinished: Dict[int, List[int]] = {}
+    for job_id, dependency in rows:
+        unfinished.setdefault(job_id, []).append(dependency)
+    return unfinished
+
+
+async def get_dependencies_finished_at_async(job_id: int) -> Optional[float]:
+    """When the last of ``job_id``'s dependencies ended; None without any."""
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.select(sqlalchemy.func.max(spot_table.c.end_at)).where(
+                spot_table.c.spot_job_id.in_(
+                    sqlalchemy.select(
+                        job_dependencies_table.c.depends_on_job_id).where(
+                            job_dependencies_table.c.spot_job_id == job_id))))
+        return result.scalar()
+
+
+def _job_outcome(
+    statuses: List[Tuple[str, Optional[bool]]]
+) -> Tuple[bool, Optional[ManagedJobStatus]]:
+    """Whether a job succeeded, from its tasks' (status, is_primary) pairs.
+
+    Like the job status, only primary tasks count: a job group's auxiliary
+    task ends CANCELLED when its primaries succeed. Returns (succeeded, the
+    first primary status that is not SUCCEEDED); a job without tasks has not
+    succeeded.
+    """
+    primary = [
+        ManagedJobStatus(status)
+        for status, is_primary in statuses
+        if is_primary is None or is_primary
+    ]
+    if not primary:
+        return False, None
+    for status in primary:
+        if status != ManagedJobStatus.SUCCEEDED:
+            return False, status
+    return True, ManagedJobStatus.SUCCEEDED
+
+
+def get_job_outcome(job_id: int) -> Tuple[bool, Optional[ManagedJobStatus]]:
+    """See ``_job_outcome``."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(spot_table.c.status,
+                              spot_table.c.is_primary_in_job_group).where(
+                                  spot_table.c.spot_job_id == job_id).order_by(
+                                      spot_table.c.task_id)).fetchall()
+    return _job_outcome([(row[0], row[1]) for row in rows])
+
+
+async def get_unsucceeded_dependencies_async(
+        job_id: int) -> List[Tuple[int, Optional[ManagedJobStatus]]]:
+    """The jobs ``job_id`` depends on that did not succeed, with the status
+    that decided it (None for a job that no longer exists)."""
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.select(
+                job_dependencies_table.c.depends_on_job_id, spot_table.c.status,
+                spot_table.c.is_primary_in_job_group).select_from(
+                    job_dependencies_table.outerjoin(
+                        spot_table, spot_table.c.spot_job_id ==
+                        job_dependencies_table.c.depends_on_job_id)).
+            where(job_dependencies_table.c.spot_job_id == job_id).order_by(
+                job_dependencies_table.c.depends_on_job_id,
+                spot_table.c.task_id))
+        rows = result.fetchall()
+    by_dependency: Dict[int, List[Tuple[str, Optional[bool]]]] = {}
+    for dependency, status, is_primary in rows:
+        tasks = by_dependency.setdefault(dependency, [])
+        if status is not None:
+            tasks.append((status, is_primary))
+    unsucceeded = []
+    for dependency, tasks in by_dependency.items():
+        succeeded, status = _job_outcome(tasks)
+        if not succeeded:
+            unsucceeded.append((dependency, status))
+    return unsucceeded
+
+
+async def set_pending_tasks_failure_reason_async(job_id: int,
+                                                 failure_reason: str) -> None:
+    """Set the failure reason of a job's PENDING tasks."""
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        await session.execute(
+            sqlalchemy.update(spot_table).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.status == ManagedJobStatus.PENDING.value,
+                )).values({spot_table.c.failure_reason: failure_reason}))
+        await session.commit()
 
 
 def get_job_info_row(job_id: int) -> Optional[JobInfoRow]:

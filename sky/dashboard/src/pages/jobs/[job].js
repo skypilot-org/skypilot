@@ -1943,6 +1943,25 @@ function JobDetailsContent({
         </div>
       </div>
 
+      {jobData.depends_on?.length > 0 && (
+        <div>
+          <div className="text-gray-600 font-medium text-base">Depends On</div>
+          <div className="text-base mt-1">
+            {jobData.depends_on.map((dependency, index) => (
+              <span key={dependency}>
+                {index > 0 && ', '}
+                <Link
+                  href={`/jobs/${dependency}`}
+                  className="text-blue-600 hover:underline"
+                >
+                  {dependency}
+                </Link>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Batch Progress section - only for batch jobs */}
       {jobData.batch_total_batches != null && (
         <div>

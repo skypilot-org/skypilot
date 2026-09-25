@@ -632,6 +632,8 @@ class JobsLaunchBody(RequestBody):
     # False when it came from the in-job-group default. Decides whether a
     # server that cannot record attachments errors or launches top-level.
     job_group_explicit: bool = False
+    # Managed jobs this job waits for.
+    depends_on: Optional[List[int]] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()

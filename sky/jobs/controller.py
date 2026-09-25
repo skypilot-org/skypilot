@@ -2681,6 +2681,37 @@ class JobController:
                             f'{self._job_id}')
                         await asyncio.sleep(backoff)
 
+                    # The scheduler claims a job only once every job it
+                    # depends on is DONE. If any of them did not succeed, the
+                    # job does not run: its tasks are cancelled in the finally
+                    # below, with this reason.
+                    unsucceeded = await (
+                        managed_job_state.get_unsucceeded_dependencies_async(
+                            self._job_id))
+                    if unsucceeded:
+                        failure_reason = 'Dependency did not succeed: ' + (
+                            ', '.join(
+                                f'job {dependency} '
+                                f'({status.value if status else "not found"})'
+                                for dependency, status in unsucceeded))
+                        logger.info(failure_reason)
+                        await (managed_job_state.
+                               set_pending_tasks_failure_reason_async(
+                                   self._job_id, failure_reason))
+                        return
+                    # The moment the last dependency ended is when the tasks
+                    # that start first could first have started.
+                    dependencies_finished_at = await (
+                        managed_job_state.get_dependencies_finished_at_async(
+                            self._job_id))
+                    if dependencies_finished_at is not None:
+                        first_task_ids = (range(len(self._dag.tasks))
+                                          if self._dag.is_job_group() else [0])
+                        for first_task_id in first_task_ids:
+                            await managed_job_state.set_eligible_at_async(
+                                self._job_id, first_task_id,
+                                dependencies_finished_at)
+
                     succeeded = True
 
                     # Check if this is a JobGroup (parallel execution)

@@ -461,7 +461,8 @@ def _maybe_submit_job_locally(
         file_mounts_blob_id: Optional[str] = None,
         parent_job_id: Optional[int] = None,
         parent_task_id: Optional[int] = None,
-        root_job_id: Optional[int] = None) -> Optional[List[int]]:
+        root_job_id: Optional[int] = None,
+        depends_on: Optional[List[int]] = None) -> Optional[List[int]]:
     """Submit the managed job locally if in consolidation mode.
 
     In normal mode the managed job submission is done in the ray job submission.
@@ -521,6 +522,9 @@ def _maybe_submit_job_locally(
                 parent_task_id=parent_task_id,
                 root_job_id=root_job_id,
                 dynamic_task_index=dynamic_task_index))
+        if depends_on:
+            managed_job_state.set_job_dependencies(consolidation_mode_job_id,
+                                                   depends_on)
         for task_id, task in enumerate(dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
@@ -534,9 +538,12 @@ def _maybe_submit_job_locally(
             assert task.name is not None, 'task must have a name'
             # A job group's tasks all start waiting now; so does task 0 of
             # anything. A pipeline's later tasks are waiting on the task before
-            # them, not on us, so their origin is written at the handoff.
-            eligible_at = (time.time()
-                           if task_id == 0 or dag.is_job_group() else None)
+            # them, not on us, so their origin is written at the handoff. A job
+            # with dependencies waits on them; the controller writes its origin
+            # once they have succeeded.
+            eligible_at = (time.time() if
+                           (task_id == 0 or dag.is_job_group()) and
+                           not depends_on else None)
             managed_job_state.set_pending(consolidation_mode_job_id, task_id,
                                           task.name, resources_str,
                                           task.metadata_json,
@@ -802,6 +809,47 @@ def _check_job_group_attachment(
     return parent_job_id, parent_task_id, parent.tree_root_job_id, workspace
 
 
+def _check_job_dependencies(depends_on: Optional[List[int]]) -> List[int]:
+    """Validate the jobs a launch depends on; returns them deduplicated.
+
+    Raises:
+        exceptions.NotSupportedError: dependencies with a separate jobs
+            controller (non-consolidation mode).
+        ValueError: a dependency does not exist, is in another workspace than
+            the launch, or has already ended without succeeding.
+    """
+    if not depends_on:
+        return []
+    if not managed_job_utils.is_consolidation_mode():
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Job dependencies require the API server to run managed jobs '
+                'in consolidation mode (a remote API server). This server '
+                'uses a separate jobs controller.')
+    dependencies = sorted(set(depends_on))
+    active_workspace = skypilot_config.get_active_workspace()
+    for dependency in dependencies:
+        row = managed_job_state.get_job_info_row(dependency)
+        status = managed_job_state.get_status(dependency)
+        if row is None or status is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Cannot depend on job {dependency}: no such '
+                                 'managed job.')
+        if row.workspace != active_workspace:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot depend on job {dependency}: it is in workspace '
+                    f'{row.workspace!r}, not {active_workspace!r}.')
+        if status.is_terminal():
+            succeeded, outcome = managed_job_state.get_job_outcome(dependency)
+            if not succeeded:
+                outcome_str = outcome.value if outcome is not None else None
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Cannot depend on job {dependency}: it '
+                                     f'ended as {outcome_str}.')
+    return dependencies
+
+
 def _create_job_api_token(creator_user_id: str, job_name: Optional[str],
                           dag_uuid: str) -> Tuple[str, str]:
     """Create a service account token for a managed job with api_server_access.
@@ -848,6 +896,7 @@ def launch(
     parent_job_id: Optional[int] = None,
     parent_task_id: Optional[int] = None,
     job_group_explicit: bool = False,
+    depends_on: Optional[List[int]] = None,
 ) -> Tuple[Optional[Union[int, List[int]]], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launches a managed job.
@@ -867,10 +916,13 @@ def launch(
           opposed to the in-job-group default). Only matters where
           attachments are unsupported (non-consolidation mode): explicit
           errors, automatic launches top-level.
+        depends_on: Managed jobs this job waits for. It starts once all of
+          them succeed, and is cancelled if any of them ends otherwise. The
+          launch fails if one of them has already ended without succeeding.
 
     Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
-            chain dag.
+            chain dag. Or, a job in depends_on cannot be depended on.
         sky.exceptions.NotSupportedError: the feature is not supported.
         sky.exceptions.CachedClusterUnavailable: cached jobs controller cluster
             is unavailable
@@ -891,6 +943,7 @@ def launch(
     workspace_ctx = (skypilot_config.local_active_workspace_ctx(workspace)
                      if workspace is not None else contextlib.nullcontext())
     with workspace_ctx:
+        dependencies = _check_job_dependencies(depends_on)
         return _launch(task,
                        name=name,
                        pool=pool,
@@ -899,7 +952,8 @@ def launch(
                        file_mounts_blob_id=file_mounts_blob_id,
                        parent_job_id=parent_job_id,
                        parent_task_id=parent_task_id,
-                       root_job_id=root_job_id)
+                       root_job_id=root_job_id,
+                       depends_on=dependencies)
 
 
 def _launch(
@@ -912,8 +966,10 @@ def _launch(
     parent_job_id: Optional[int],
     parent_task_id: Optional[int],
     root_job_id: Optional[int],
+    depends_on: List[int],
 ) -> Tuple[Optional[Union[int, List[int]]], Optional[backends.ResourceHandle]]:
-    """``launch`` after the attachment is resolved; ids are recorded as-is."""
+    """``launch`` after the attachment and dependencies are resolved; ids are
+    recorded as-is."""
     entrypoint = task
     # using hasattr instead of isinstance to avoid importing sky
     if hasattr(task, 'metadata'):
@@ -1131,7 +1187,8 @@ def _launch(
                                         file_mounts_blob_id=file_mounts_blob_id,
                                         parent_job_id=parent_job_id,
                                         parent_task_id=parent_task_id,
-                                        root_job_id=root_job_id)
+                                        root_job_id=root_job_id,
+                                        depends_on=depends_on)
     is_consolidation_mode = job_ids is not None
     if not is_consolidation_mode:
         job_ids = _submit_remotely(controller, dag, pool, num_jobs)
@@ -1750,6 +1807,11 @@ def queue_v2(
     # ones asking for a tree. Pass the keyword only to a runner that takes it.
     # If the runner does not take it and a tree was asked for, refuse the
     # request the way an old controller does.
+    # Only consolidation mode records dependencies, and a separate jobs
+    # controller may be too old to know the field.
+    if (fields is not None and 'depends_on' in fields and
+            not managed_job_utils.is_consolidation_mode()):
+        fields = [field for field in fields if field != 'depends_on']
     tree_kwargs: Dict[str, Any] = {}
     if _runner_accepts(runner.fetch_managed_job_table, 'include_tree'):
         tree_kwargs['include_tree'] = include_tree
