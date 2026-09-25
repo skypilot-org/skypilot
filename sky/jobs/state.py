@@ -5131,13 +5131,27 @@ def set_job_dependencies(job_id: int, depends_on: List[int]) -> None:
 
 def get_job_dependencies(job_id: int) -> List[int]:
     """The jobs ``job_id`` waits for, in ascending order."""
+    return get_jobs_dependencies([job_id]).get(job_id, [])
+
+
+def get_jobs_dependencies(job_ids: List[int]) -> Dict[int, List[int]]:
+    """For each of ``job_ids`` that has any, the jobs it waits for, in
+    ascending order."""
+    if not job_ids:
+        return {}
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         rows = session.execute(
-            sqlalchemy.select(job_dependencies_table.c.depends_on_job_id).where(
-                job_dependencies_table.c.spot_job_id == job_id).order_by(
-                    job_dependencies_table.c.depends_on_job_id)).fetchall()
-    return [row[0] for row in rows]
+            sqlalchemy.select(
+                job_dependencies_table.c.spot_job_id,
+                job_dependencies_table.c.depends_on_job_id).where(
+                    job_dependencies_table.c.spot_job_id.in_(job_ids)).order_by(
+                        job_dependencies_table.c.spot_job_id,
+                        job_dependencies_table.c.depends_on_job_id)).fetchall()
+    dependencies: Dict[int, List[int]] = {}
+    for job_id, dependency in rows:
+        dependencies.setdefault(job_id, []).append(dependency)
+    return dependencies
 
 
 def get_unfinished_dependencies(job_ids: List[int]) -> Dict[int, List[int]]:

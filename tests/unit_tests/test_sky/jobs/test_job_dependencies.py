@@ -144,8 +144,11 @@ class TestClaim:
     def test_dependencies_round_trip(self, _db):
         state.set_job_dependencies(5, [3, 1])
         state.set_job_dependencies(6, [])
+        state.set_job_dependencies(7, [5])
         assert state.get_job_dependencies(5) == [1, 3]
         assert state.get_job_dependencies(6) == []
+        assert state.get_jobs_dependencies([5, 6, 7]) == {5: [1, 3], 7: [5]}
+        assert state.get_jobs_dependencies([]) == {}
 
 
 class TestOutcome:

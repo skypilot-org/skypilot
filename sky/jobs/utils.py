@@ -170,6 +170,8 @@ _NON_DB_FIELDS = _CLUSTER_HANDLE_FIELDS + [
     'details',
     # is_job_group is derived from execution column (execution == 'parallel')
     'is_job_group',
+    # From the job_dependencies table.
+    'depends_on',
 ]
 
 
@@ -3583,6 +3585,10 @@ def get_managed_job_queue(
     cancel_reasons: Dict[int, str] = {}
     launch_reasons: Dict[Tuple[int, Optional[int]], str] = {}
     unfinished_dependencies: Dict[int, List[int]] = {}
+    dependencies: Dict[int, List[int]] = {}
+    if not fields or 'depends_on' in fields:
+        dependencies = managed_job_state.get_jobs_dependencies(
+            list({job['job_id'] for job in jobs}))
     if not fields or 'details' in fields:
         recovering_job_ids = [
             job['job_id'] for job in jobs if job['status'] ==
@@ -3643,6 +3649,8 @@ def get_managed_job_queue(
         # Derive is_job_group from execution column
         job['is_job_group'] = (
             job.get('execution') == DagExecution.PARALLEL.value)
+        if not fields or 'depends_on' in fields:
+            job['depends_on'] = dependencies.get(job['job_id'])
 
     return {
         'jobs': jobs,

@@ -418,6 +418,7 @@ def queue_v2(
         server_constants.MIN_JOBS_DYNAMIC_TASK_INDEX_API_VERSION: {
             'dynamic_task_index'
         },
+        server_constants.MIN_JOBS_DEPENDS_ON_API_VERSION: {'depends_on'},
     }
     if fields is not None:
         remote_api_version = versions.get_remote_api_version()

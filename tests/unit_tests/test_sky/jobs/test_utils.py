@@ -233,7 +233,8 @@ class TestGetManagedJobQueue:
             self,
             monkeypatch: pytest.MonkeyPatch,
             jobs: List[Dict[str, Any]],
-            unfinished_dependencies: Optional[Dict[int, List[int]]] = None):
+            unfinished_dependencies: Optional[Dict[int, List[int]]] = None,
+            dependencies: Optional[Dict[int, List[int]]] = None):
         """Patch managed_job_state functions for testing."""
 
         def fake_get_managed_jobs_total():
@@ -274,6 +275,13 @@ class TestGetManagedJobQueue:
             lambda job_ids: {
                 job_id: deps
                 for job_id, deps in (unfinished_dependencies or {}).items()
+                if job_id in job_ids
+            })
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state, 'get_jobs_dependencies',
+            lambda job_ids: {
+                job_id: deps
+                for job_id, deps in (dependencies or {}).items()
                 if job_id in job_ids
             })
 
@@ -506,6 +514,24 @@ class TestGetManagedJobQueue:
         result = jobs_utils.get_managed_job_queue()
 
         assert result['jobs'][0]['details'] == expected
+
+    def test_depends_on_field(self, monkeypatch):
+        jobs = [self._make_test_job(1), self._make_test_job(2)]
+        self._patch_managed_job_state(monkeypatch,
+                                      jobs,
+                                      dependencies={1: [7, 8]})
+        self._patch_global_user_state(monkeypatch)
+
+        by_id = {
+            job['job_id']: job
+            for job in jobs_utils.get_managed_job_queue()['jobs']
+        }
+        assert by_id[1]['depends_on'] == [7, 8]
+        assert by_id[2]['depends_on'] is None
+
+        only_status = jobs_utils.get_managed_job_queue(
+            fields=['job_id', 'status'])['jobs']
+        assert all('depends_on' not in job for job in only_status)
 
     def test_details_for_waiting_state_with_same_priority(self, monkeypatch):
         """Test details generation for WAITING state with same priority."""

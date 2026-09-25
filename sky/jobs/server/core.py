@@ -1806,6 +1806,11 @@ def queue_v2(
     # ones asking for a tree. Pass the keyword only to a runner that takes it.
     # If the runner does not take it and a tree was asked for, refuse the
     # request the way an old controller does.
+    # Only consolidation mode records dependencies, and a separate jobs
+    # controller may be too old to know the field.
+    if (fields is not None and 'depends_on' in fields and
+            not managed_job_utils.is_consolidation_mode()):
+        fields = [field for field in fields if field != 'depends_on']
     tree_kwargs: Dict[str, Any] = {}
     if _runner_accepts(runner.fetch_managed_job_table, 'include_tree'):
         tree_kwargs['include_tree'] = include_tree
