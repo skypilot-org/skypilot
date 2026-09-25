@@ -3,7 +3,7 @@
 HTTPS Encryption
 ================
 
-SkyServe enables secure serving of models over HTTPS, which is essential for handling sensitive data or for models that require secure communication with other services. Currently, SkyServe supports HTTPS encrypted endpoint (for communication between the client and the load balancer); HTTPS between the load balancer and the service replicas is not yet supported.
+SkyServe enables secure serving of models over HTTPS, which is essential for handling sensitive data or for models that require secure communication with other services. Currently, SkyServe supports HTTPS encrypted endpoint (for communication between the client and the load balancer) and HTTPS readiness probes from the controller to replicas. HTTPS between the load balancer and the service replicas is not yet supported.
 
 .. tip::
 

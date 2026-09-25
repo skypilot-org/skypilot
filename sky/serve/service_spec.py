@@ -24,6 +24,7 @@ class SkyServiceSpec:
     def __init__(
         self,
         readiness_path: str,
+        readiness_scheme: Optional[str],
         initial_delay_seconds: int,
         readiness_timeout_seconds: int,
         endpoint_probe_interval_seconds: int,
@@ -129,6 +130,7 @@ class SkyServiceSpec:
                     f'Unknown load balancing policy: {load_balancing_policy}. '
                     f'Available policies: {list(serve.LB_POLICIES.keys())}')
         self._readiness_path: str = readiness_path
+        self._readiness_scheme: Optional[str] = readiness_scheme
         self._initial_delay_seconds: int = initial_delay_seconds
         self._readiness_timeout_seconds: int = readiness_timeout_seconds
         self._endpoint_probe_interval_seconds: int = (
@@ -169,6 +171,8 @@ class SkyServiceSpec:
         # SkyServiceSpec objects in the serve DB.
         state.setdefault('_endpoint_probe_interval_seconds',
                          constants.DEFAULT_ENDPOINT_PROBE_INTERVAL_SECONDS)
+        state.setdefault('_readiness_scheme',
+                         constants.DEFAULT_READINESS_PROBE_SCHEME)
         state.setdefault('_lb_stream_timeout_seconds',
                          constants.DEFAULT_LB_STREAM_TIMEOUT)
         state.setdefault('_consecutive_failure_threshold_timeout', None)
@@ -189,6 +193,7 @@ class SkyServiceSpec:
         readiness_section = config.get('readiness_probe', '/')
         if isinstance(readiness_section, str):
             service_config['readiness_path'] = readiness_section
+            readiness_scheme = None
             initial_delay_seconds = None
             post_data = None
             readiness_timeout_seconds = None
@@ -197,6 +202,7 @@ class SkyServiceSpec:
             readiness_headers = None
         else:
             service_config['readiness_path'] = readiness_section['path']
+            readiness_scheme = readiness_section.get('scheme', None)
             initial_delay_seconds = readiness_section.get(
                 'initial_delay_seconds', None)
             post_data = readiness_section.get('post_data', None)
@@ -207,6 +213,9 @@ class SkyServiceSpec:
             consecutive_failure_threshold_timeout = readiness_section.get(
                 'consecutive_failure_threshold_timeout', None)
             readiness_headers = readiness_section.get('headers', None)
+        if readiness_scheme is None:
+            readiness_scheme = constants.DEFAULT_READINESS_PROBE_SCHEME
+        service_config['readiness_scheme'] = readiness_scheme
         if initial_delay_seconds is None:
             initial_delay_seconds = constants.DEFAULT_INITIAL_DELAY_SECONDS
         service_config['initial_delay_seconds'] = initial_delay_seconds
@@ -457,6 +466,8 @@ class SkyServiceSpec:
             return config
 
         add_if_not_none('readiness_probe', 'path', self.readiness_path)
+        if self.readiness_scheme != constants.DEFAULT_READINESS_PROBE_SCHEME:
+            add_if_not_none('readiness_probe', 'scheme', self.readiness_scheme)
         add_if_not_none('readiness_probe', 'initial_delay_seconds',
                         self.initial_delay_seconds)
         add_if_not_none('readiness_probe', 'post_data', self.post_data)
@@ -593,6 +604,10 @@ class SkyServiceSpec:
         return self._readiness_path
 
     @property
+    def readiness_scheme(self) -> Optional[str]:
+        return self._readiness_scheme
+
+    @property
     def initial_delay_seconds(self) -> int:
         return self._initial_delay_seconds
 
@@ -694,6 +709,8 @@ class SkyServiceSpec:
     def copy(self, **override) -> 'SkyServiceSpec':
         return SkyServiceSpec(
             readiness_path=override.pop('readiness_path', self._readiness_path),
+            readiness_scheme=override.pop('readiness_scheme',
+                                          self._readiness_scheme),
             initial_delay_seconds=override.pop('initial_delay_seconds',
                                                self._initial_delay_seconds),
             readiness_timeout_seconds=override.pop(
