@@ -683,7 +683,10 @@ def dashboard(starting_page: Optional[str] = None) -> None:
     api_server_url = server_common.get_server_url()
     url = server_common.get_dashboard_url(api_server_url,
                                           starting_page=starting_page)
-    logger.info(f'Opening dashboard in browser: {url}')
+    # The browser needs the real URL for basic auth to complete, but the log
+    # line is just for the user to read, so mask the password there.
+    logger.info('Opening dashboard in browser: '
+                f'{server_common.redact_url_password(url)}')
     common_utils.open_browser(url)
 
 
@@ -2812,12 +2815,13 @@ def api_start(
     if not is_local_api_server:
         server_url = server_common.get_server_url()
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Unable to start local API server: '
-                             f'server endpoint is set to {server_url}. '
-                             'To start a local API server, remove the endpoint '
-                             'from the config file and/or unset the '
-                             'SKYPILOT_API_SERVER_ENDPOINT environment '
-                             'variable.')
+            raise ValueError(
+                f'Unable to start local API server: server endpoint is set to '
+                f'{server_common.redact_url_password(server_url)}. '
+                'To start a local API server, remove the endpoint '
+                'from the config file and/or unset the '
+                'SKYPILOT_API_SERVER_ENDPOINT environment '
+                'variable.')
     server_common.check_server_healthy_or_start_fn(deploy, host, foreground,
                                                    metrics, metrics_port,
                                                    enable_basic_auth)
@@ -2826,7 +2830,7 @@ def api_start(
         logger.info('API server is already running:')
     api_server_url = server_common.get_server_url(host)
     logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server and dashboard: '
-                f'{api_server_url}\n'
+                f'{server_common.redact_url_password(api_server_url)}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}'
                 f'View API server logs at: {constants.API_SERVER_LOGS}')
     local_port = server_common.get_local_api_server_port()
@@ -2852,8 +2856,9 @@ def api_stop() -> None:
     if not server_common.is_api_server_local():
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
-                f'Cannot kill the API server at {server_url} because it is not '
-                f'the default SkyPilot API server started locally.')
+                'Cannot kill the API server at '
+                f'{server_common.redact_url_password(server_url)} because it '
+                'is not the default SkyPilot API server started locally.')
 
     # Acquire the api server creation lock to prevent multiple processes from
     # stopping and starting the API server at the same time.
@@ -3392,8 +3397,10 @@ def api_login(endpoint: Optional[str] = None,
         """Show the logged in message."""
         if server_status != server_common.ApiServerStatus.HEALTHY:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Cannot log in API server at '
-                                 f'{endpoint} (status: {server_status.value})')
+                raise ValueError(
+                    'Cannot log in API server at '
+                    f'{server_common.redact_url_password(endpoint)} '
+                    f'(status: {server_status.value})')
 
         identity_info = f'\n{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}User: '
         if user:
@@ -3405,9 +3412,11 @@ def api_login(endpoint: Optional[str] = None,
                 identity_info += user_id
         else:
             identity_info = ''
-        dashboard_msg = f'Dashboard: {dashboard_url}'
+        dashboard_msg = (
+            f'Dashboard: {server_common.redact_url_password(dashboard_url)}')
         click.secho(
-            f'Logged into SkyPilot API server at: {endpoint}'
+            'Logged into SkyPilot API server at: '
+            f'{server_common.redact_url_password(endpoint)}'
             f'{identity_info}'
             f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
             f'{dashboard_msg}',
@@ -3460,7 +3469,8 @@ def api_login(endpoint: Optional[str] = None,
         except exceptions.ApiServerConnectionError as e:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
-                    f'Failed to connect to API server at {endpoint}: {e}'
+                    'Failed to connect to API server at '
+                    f'{server_common.redact_url_password(endpoint)}: {e}'
                 ) from e
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
