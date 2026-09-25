@@ -22,6 +22,7 @@ import tempfile
 import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Union
+import urllib.parse
 import uuid
 
 import jsonschema
@@ -115,6 +116,52 @@ def get_git_commit(path: Optional[str] = None) -> Optional[str]:
         raise
     except subprocess.CalledProcessError:
         return None
+
+
+def get_git_workdir_metadata(path: str) -> Dict[str, Any]:
+    """Read repository identity and working-tree state for a local workdir."""
+
+    def run(*args: str) -> str:
+        return subprocess.run(['git', '-C', path, *args],
+                              capture_output=True,
+                              text=True,
+                              check=True,
+                              timeout=5,
+                              env={
+                                  **os.environ, 'GIT_OPTIONAL_LOCKS': '0'
+                              }).stdout.strip()
+
+    try:
+        prefix = run('rev-parse', '--show-prefix')
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    metadata: Dict[str, Any] = {'git_workdir_relpath': prefix.rstrip('/')}
+    try:
+        origin = run('config', '--get', 'remote.origin.url')
+        if '://' not in origin:
+            match = re.fullmatch(r'(?:[^/@:]+@)?([^/:]+):(.+)', origin)
+            origin = f'ssh://{match[1]}/{match[2]}' if match else ''
+        parsed = urllib.parse.urlsplit(origin)
+        if parsed.scheme in ('http', 'https', 'ssh', 'git') and parsed.hostname:
+            host = parsed.hostname.lower()
+            if ':' in host:
+                host = f'[{host}]'
+            port = parsed.port
+            if port and port not in (22, 80, 443, 9418):
+                host += f':{port}'
+            repo_path = parsed.path.rstrip('/')
+            if repo_path.endswith('.git'):
+                repo_path = repo_path[:-4]
+            if repo_path:
+                metadata['git_origin_url'] = f'https://{host}{repo_path}'
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    try:
+        metadata['git_dirty'] = bool(
+            run('status', '--porcelain', '--untracked-files=normal', '--', '.'))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return metadata
 
 
 def get_user_hash() -> str:

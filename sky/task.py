@@ -644,6 +644,8 @@ class Task:
         # blob directory is not a git repo.
         if git_commit is not None:
             self._metadata['git_commit'] = git_commit
+        self._metadata.update(
+            common_utils.get_git_workdir_metadata(self.workdir))
 
     @staticmethod
     def from_yaml_config(
