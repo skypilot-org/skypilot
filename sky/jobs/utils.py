@@ -400,6 +400,7 @@ def ha_recovery_for_consolidation_mode() -> None:
             'job_id', 'controller_pid', 'controller_pid_started_at',
             'schedule_state', 'status'
         ])
+        requeued = False
         for job in jobs:
             job_id = job['job_id']
             controller_pid = job['controller_pid']
@@ -444,10 +445,13 @@ def ha_recovery_for_consolidation_mode() -> None:
                     managed_job_state.ManagedJobScheduleState.INACTIVE,
             ]:
                 managed_job_state.reset_job_for_recovery(job_id)
+                requeued = True
                 message = (f'Job {job_id} completed recovery at '
                            f'{datetime.now()}\n')
                 logger.info(message)
                 f.write(message)
+        if requeued:
+            touch_waiting_jobs_marker()
         f.write(f'HA recovery completed at {datetime.now()}\n')
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
 
@@ -4400,6 +4404,94 @@ def _job_proto_to_dict(
     if 'internal_services' in job_dict and not job_dict['internal_services']:
         job_dict['internal_services'] = None
     return job_dict
+
+
+def _waiting_jobs_marker_path() -> str:
+    return os.path.join(managed_job_constants.CONSOLIDATED_SIGNAL_PATH,
+                        managed_job_constants.WAITING_JOBS_MARKER_NAME)
+
+
+def touch_waiting_jobs_marker() -> None:
+    """Wake idle controllers: a job was just (re)queued as WAITING.
+
+    Best effort. The controllers' periodic DB poll is the fallback, so a
+    failure here must never fail the submission.
+
+    The fast path reaches controllers on another API server replica only
+    when the signals directory is shared between replicas (the same
+    requirement the cancel signal files in this directory already have).
+    Where it is per-pod, submissions from a non-leader replica are still
+    claimed by the leader's fallback poll, i.e. the pre-existing behavior.
+    """
+    path = _waiting_jobs_marker_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'a', encoding='utf-8'):
+            pass
+        os.utime(path, None)
+    except OSError as e:
+        logger.warning('Failed to touch the waiting-jobs marker at '
+                       f'{path}: {common_utils.format_exception(e)}')
+
+
+def ensure_waiting_jobs_marker_exists() -> None:
+    """Create the waiting-jobs marker if it is missing, without touching it.
+
+    Called once at controller start-up. On NFS-backed signals directories
+    (e.g. a shared volume in a multi-replica API server deployment), the
+    client caches negative lookups: if the marker does not exist yet when a
+    controller first looks for it, the first touch from another replica can
+    stay invisible for up to the directory attribute-cache timeout (60s by
+    default). Pre-creating the file sidesteps that; from then on only the
+    inode's mtime matters, and open() revalidates that on every call (see
+    get_waiting_jobs_marker_mtime). Creating must not bump an existing
+    marker, or every controller start would look like a submission to its
+    peers.
+
+    Best effort, like touch_waiting_jobs_marker.
+    """
+    path = _waiting_jobs_marker_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fd = os.open(path, os.O_CREAT | os.O_WRONLY, 0o644)
+        os.close(fd)
+    except OSError as e:
+        logger.warning('Failed to create the waiting-jobs marker at '
+                       f'{path}: {common_utils.format_exception(e)}')
+
+
+def get_waiting_jobs_marker_mtime() -> Optional[int]:
+    """mtime (ns) of the waiting-jobs marker, or None if it does not exist.
+
+    Reads the mtime through open()+fstat() rather than stat(): on NFS a bare
+    stat() may be served from the client's attribute cache, which for a file
+    that rarely changes grows to acregmax (60s by default), so a touch made
+    on another replica could go unseen for that long. Under close-to-open
+    cache consistency the client revalidates the inode's attributes with the
+    server on open(), so the mtime returned here is fresh. On a local
+    filesystem the difference is nil.
+
+    Blocking (one or two round trips on NFS); call it via asyncio.to_thread
+    from an event loop.
+
+    Any OSError, at open or at fstat (e.g. ESTALE from an NFS client whose
+    handle went stale between the two), reads as "no signal": the caller
+    keeps its periodic DB poll, so a flaky mount can only delay a wake-up,
+    never take the controller down.
+    """
+    try:
+        fd = os.open(_waiting_jobs_marker_path(), os.O_RDONLY)
+    except OSError:
+        return None
+    try:
+        return os.fstat(fd).st_mtime_ns
+    except OSError:
+        return None
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
 
 
 def parse_job_cancel_file(content: str) -> Tuple[bool, Optional[int]]:
