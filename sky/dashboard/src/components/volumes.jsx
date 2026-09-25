@@ -923,22 +923,44 @@ export function VolumesTable({
   );
   const totalColSpan = visibleColumns.length;
 
+  // Default filter input and active-filter chips.
+  const filterInput = (
+    <FilterDropdown
+      propertyList={PROPERTY_OPTIONS}
+      valueList={valueList}
+      setFilters={setFilters}
+      addFilter={addFilter}
+      placeholder="Filter volumes"
+    />
+  );
+  const filterChips = <Filters filters={filters} setFilters={setFilters} />;
+
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
         <div className="w-full sm:w-auto max-w-xl">
-          <FilterDropdown
-            propertyList={PROPERTY_OPTIONS}
-            valueList={valueList}
-            setFilters={setFilters}
-            addFilter={addFilter}
-            placeholder="Filter volumes"
+          <PluginSlot
+            name="volumes.filters.input"
+            context={{
+              filters,
+              setFilters,
+              addFilter,
+              propertyList: PROPERTY_OPTIONS,
+              valueList,
+              placeholder: 'Filter volumes',
+              defaultContent: filterInput,
+            }}
+            fallback={filterInput}
           />
         </div>
       </div>
       {filters.length > 0 && (
         <div className="mb-2">
-          <Filters filters={filters} setFilters={setFilters} />
+          <PluginSlot
+            name="volumes.filters.active"
+            context={{ filters, setFilters, defaultContent: filterChips }}
+            fallback={filterChips}
+          />
         </div>
       )}
 

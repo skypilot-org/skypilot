@@ -522,6 +522,18 @@ export function Clusters() {
     });
   };
 
+  // Default filter input and active-filter chips.
+  const filterInput = (
+    <FilterDropdown
+      propertyList={PROPERTY_OPTIONS}
+      valueList={optionValues}
+      setFilters={setFilters}
+      placeholder="Filter clusters"
+      filters={filters}
+    />
+  );
+  const filterChips = <Filters filters={filters} setFilters={setFilters} />;
+
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 mb-1 min-h-[20px]">
@@ -534,17 +546,26 @@ export function Clusters() {
           </Link>
         </div>
         <div className="w-full sm:w-auto max-w-xl">
-          <FilterDropdown
-            propertyList={PROPERTY_OPTIONS}
-            valueList={optionValues}
-            setFilters={setFilters}
-            placeholder="Filter clusters"
-            filters={filters}
+          <PluginSlot
+            name="clusters.filters.input"
+            context={{
+              filters,
+              setFilters,
+              propertyList: PROPERTY_OPTIONS,
+              valueList: optionValues,
+              placeholder: 'Filter clusters',
+              defaultContent: filterInput,
+            }}
+            fallback={filterInput}
           />
         </div>
       </div>
 
-      <Filters filters={filters} setFilters={setFilters} />
+      <PluginSlot
+        name="clusters.filters.active"
+        context={{ filters, setFilters, defaultContent: filterChips }}
+        fallback={filterChips}
+      />
 
       {/* Toggles live on their own row (mirrors the Managed Jobs layout) so
           they read consistently across pages and stay clear of the search

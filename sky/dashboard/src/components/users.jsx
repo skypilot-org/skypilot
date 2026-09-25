@@ -752,6 +752,21 @@ export function Users() {
     );
   }
 
+  // Default filter input and active-filter chips.
+  const trackNewFilter = (property, value) =>
+    trackFilterUsed('user', { property, value });
+  const filterInput = (
+    <FilterDropdown
+      propertyList={PROPERTY_OPTIONS}
+      valueList={valueList}
+      setFilters={setFilters}
+      addFilter={addFilter}
+      onFilterAdd={trackNewFilter}
+      placeholder="Filter users"
+    />
+  );
+  const filterChips = <Filters filters={filters} setFilters={setFilters} />;
+
   return (
     <>
       {/* Main Tabs with Controls */}
@@ -846,15 +861,19 @@ export function Users() {
       <div className="flex items-center justify-between mb-4">
         {activeMainTab === 'users' ? (
           <div className="w-full sm:w-auto max-w-xl">
-            <FilterDropdown
-              propertyList={PROPERTY_OPTIONS}
-              valueList={valueList}
-              setFilters={setFilters}
-              addFilter={addFilter}
-              onFilterAdd={(property, value) =>
-                trackFilterUsed('user', { property, value })
-              }
-              placeholder="Filter users"
+            <PluginSlot
+              name="users.filters.input"
+              context={{
+                filters,
+                setFilters,
+                addFilter,
+                propertyList: PROPERTY_OPTIONS,
+                valueList,
+                placeholder: 'Filter users',
+                onFilterAdd: trackNewFilter,
+                defaultContent: filterInput,
+              }}
+              fallback={filterInput}
             />
           </div>
         ) : activeMainTab === 'service-accounts' ? (
@@ -954,7 +973,11 @@ export function Users() {
 
       {/* Display Active Filters - only for users tab */}
       {activeMainTab === 'users' && (
-        <Filters filters={filters} setFilters={setFilters} />
+        <PluginSlot
+          name="users.filters.active"
+          context={{ filters, setFilters, defaultContent: filterChips }}
+          fallback={filterChips}
+        />
       )}
 
       {/* Error/Success messages positioned at top right, below navigation bar */}

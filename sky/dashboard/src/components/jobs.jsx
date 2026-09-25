@@ -532,6 +532,23 @@ export function ManagedJobs() {
     [setFilters]
   );
 
+  // Default filter input and active-filter chips.
+  const filterPropertyList = filterSchema.map(({ key, label }) => ({
+    label,
+    value: key,
+  }));
+  const filterInput = (
+    <FilterDropdown
+      propertyList={filterPropertyList}
+      valueList={valueList}
+      setFilters={setFilters}
+      addFilter={addFilter}
+      onFilterAdd={trackNewFilter}
+      placeholder="Filter jobs"
+    />
+  );
+  const filterChips = <Filters filters={filters} setFilters={setFilters} />;
+
   return (
     <>
       {/* Jobs section */}
@@ -551,21 +568,28 @@ export function ManagedJobs() {
           wrapperClassName="flex items-center"
         />
         <div className="w-full sm:w-auto max-w-xl">
-          <FilterDropdown
-            propertyList={filterSchema.map(({ key, label }) => ({
-              label,
-              value: key,
-            }))}
-            valueList={valueList}
-            setFilters={setFilters}
-            addFilter={addFilter}
-            onFilterAdd={trackNewFilter}
-            placeholder="Filter jobs"
+          <PluginSlot
+            name="jobs.filters.input"
+            context={{
+              filters,
+              setFilters,
+              addFilter,
+              propertyList: filterPropertyList,
+              valueList,
+              placeholder: 'Filter jobs',
+              onFilterAdd: trackNewFilter,
+              defaultContent: filterInput,
+            }}
+            fallback={filterInput}
           />
         </div>
       </div>
 
-      <Filters filters={filters} setFilters={setFilters} />
+      <PluginSlot
+        name="jobs.filters.active"
+        context={{ filters, setFilters, defaultContent: filterChips }}
+        fallback={filterChips}
+      />
 
       <ManagedJobsTable
         refreshInterval={REFRESH_INTERVAL}
