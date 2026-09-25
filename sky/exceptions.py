@@ -661,6 +661,16 @@ class APINotSupportedError(RuntimeError):
     pass
 
 
+class PortForwardStartupError(RuntimeError):
+    """Raised when `kubectl port-forward` never becomes ready.
+
+    Subclasses RuntimeError, which is what these call sites raised before, so
+    existing broad handlers keep working. Lets the metrics federation separate
+    "the tunnel never came up" from "the Prometheus behind it answered badly".
+    """
+    pass
+
+
 class JobExitCode(enum.IntEnum):
     """Job exit code enum.
 

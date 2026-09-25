@@ -7,7 +7,8 @@ counts + the HPA target via the /gpu-metrics federation.
 
 Also covers the federation observability helpers: FederationStats.summary()
 (the timing/size breakdown surfaced in logs) and _handle_federation_result()
-(the per-context success/timeout/error classification).
+(the per-context success/timeout/port-forward-error/error classification),
+plus the phase budgets carved out of the per-context timeout.
 """
 import asyncio
 import subprocess
@@ -18,6 +19,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from sky import exceptions
 from sky.metrics import utils as metrics_utils
 from sky.server import metrics as server_metrics
 
@@ -184,6 +186,105 @@ def test_handle_result_base_exception_reraised():
             'ctx', 'gpu-metrics', KeyboardInterrupt(),
             metrics_utils.FederationStats(), out)
     assert out == []
+
+
+def test_handle_result_port_forward_startup_not_appended():
+    out = []
+    server_metrics._handle_federation_result(
+        'ctx', 'gpu-metrics', exceptions.PortForwardStartupError('no tunnel'),
+        metrics_utils.FederationStats(), out)
+    assert out == []
+
+
+def test_port_forward_startup_error_recorded_under_its_own_outcome(monkeypatch):
+    """The tunnel failing to come up is not folded into 'error'.
+
+    PortForwardStartupError subclasses RuntimeError, so without an explicit
+    branch ahead of the generic one it classifies as 'error' and the locally
+    actionable failure disappears into the one that is not.
+    """
+    recorded = []
+    monkeypatch.setattr(
+        metrics_utils, 'record_federation_outcome',
+        lambda context, route, outcome: recorded.append(outcome))
+
+    server_metrics._handle_federation_result(
+        'ctx', 'gpu-metrics', exceptions.PortForwardStartupError('no tunnel'),
+        metrics_utils.FederationStats(), [])
+    server_metrics._handle_federation_result('ctx', 'gpu-metrics',
+                                             ValueError('bad body'),
+                                             metrics_utils.FederationStats(),
+                                             [])
+
+    assert recorded == ['port-forward-error', 'error']
+
+
+# --- phase budgets derived from the per-context timeout ---
+
+
+def test_port_forward_startup_budget_is_a_fraction_of_the_context_budget():
+    # The relationship is the point: a startup wait only means something
+    # relative to the budget it has to leave time inside of.
+    assert (metrics_utils._PORT_FORWARD_STARTUP_TIMEOUT_SECONDS ==
+            metrics_utils.PER_CONTEXT_TIMEOUT_SECONDS *
+            metrics_utils._PORT_FORWARD_STARTUP_BUDGET_FRACTION)
+
+
+def test_port_forward_startup_budget_preserves_five_seconds():
+    # Deriving the constant was a refactor, not a retune.
+    assert metrics_utils._PORT_FORWARD_STARTUP_TIMEOUT_SECONDS == 5.0
+
+
+def test_port_forward_startup_budget_leaves_room_for_the_request():
+    # A startup wait at or above the whole budget would leave the /federate
+    # request, transfer and teardown with nothing.
+    assert (0 < metrics_utils._PORT_FORWARD_STARTUP_TIMEOUT_SECONDS <
+            metrics_utils.PER_CONTEXT_TIMEOUT_SECONDS)
+
+
+def test_server_context_budget_is_the_shared_one():
+    # The alias must track the definition, or the phase budgets are
+    # fractions of a number the routes no longer use.
+    assert (server_metrics._PER_CONTEXT_TIMEOUT_SECONDS ==
+            metrics_utils.PER_CONTEXT_TIMEOUT_SECONDS)
+
+
+def test_port_forward_that_never_reports_ready_raises_its_own_error(
+        monkeypatch):
+    # kubectl alive but silent: the loop runs out of budget with no local
+    # port. Used to raise a bare RuntimeError.
+    monkeypatch.setattr(metrics_utils, '_PORT_FORWARD_STARTUP_TIMEOUT_SECONDS',
+                        0.3)
+
+    # Bound before patching, or the replacement would recurse into itself.
+    real_popen = subprocess.Popen
+
+    def silent_process(cmd, **kwargs):
+        del cmd
+        return real_popen(['sleep', '30'], **kwargs)
+
+    monkeypatch.setattr(metrics_utils.subprocess, 'Popen', silent_process)
+
+    with pytest.raises(exceptions.PortForwardStartupError) as excinfo:
+        metrics_utils.start_svc_port_forward('ctx', 'ns', 'svc', 80)
+
+    assert '0.3s' in str(excinfo.value)
+
+
+def test_port_forward_that_cannot_launch_raises_its_own_error(monkeypatch):
+    # No tunnel and no request either, so it belongs in the same bucket as a
+    # tunnel that came up but never reported ready.
+    def missing_kubectl(cmd, **kwargs):
+        del cmd, kwargs
+        raise FileNotFoundError('kubectl')
+
+    monkeypatch.setattr(metrics_utils.subprocess, 'Popen', missing_kubectl)
+
+    with pytest.raises(exceptions.PortForwardStartupError) as excinfo:
+        metrics_utils.start_svc_port_forward('ctx', 'ns', 'svc', 80)
+
+    assert isinstance(excinfo.value.__cause__, FileNotFoundError)
+    assert 'kubectl' in str(excinfo.value)
 
 
 # ── port-forward teardown stays off the metrics event loop ──────────
