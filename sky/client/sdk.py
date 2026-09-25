@@ -3125,6 +3125,10 @@ def _resolve_login_endpoint(endpoint: Optional[str]) -> Tuple[str, bool]:
 # a server too slow to say so is the regular health check's story to tell.
 _REDIRECT_PROBE_TIMEOUT_SECONDS = 2.5
 
+# Keep persisted OAuth cookies for the expected server-side session lifetime.
+# The server remains authoritative and may reject a cookie before this expires.
+_OAUTH_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
+
 
 def _detect_https_redirect(endpoint: str) -> Optional[str]:
     """Returns the HTTPS endpoint an ``http://`` one redirects to, if any.
@@ -3548,8 +3552,7 @@ def api_login(endpoint: Optional[str] = None,
                                      f'{name}: {value}')
 
                 # See CookieJar._cookie_from_cookie_tuple
-                # oauth2proxy default is Max-Age 604800
-                expires = int(time.time()) + 604800
+                expires = int(time.time()) + _OAUTH_COOKIE_MAX_AGE_SECONDS
                 domain = str(parsed_url.hostname)
                 domain_initial_dot = domain.startswith('.')
                 secure = parsed_url.scheme == 'https'
