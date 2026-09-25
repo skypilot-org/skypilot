@@ -53,6 +53,9 @@ DEFAULT_ENDPOINT_PROBE_INTERVAL_SECONDS = 10
 # Backward compatibility alias.
 ENDPOINT_PROBE_INTERVAL_SECONDS = DEFAULT_ENDPOINT_PROBE_INTERVAL_SECONDS
 
+# By default, use the scheme returned by the replica endpoint.
+DEFAULT_READINESS_PROBE_SCHEME = None
+
 # The default timeout in seconds for a readiness probe request. We set the
 # timeout to 15s since using actual generation in LLM services as readiness
 # probe is very time-consuming (33B, 70B, ...).
