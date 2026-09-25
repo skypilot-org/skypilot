@@ -2681,6 +2681,25 @@ class JobController:
                             f'{self._job_id}')
                         await asyncio.sleep(backoff)
 
+                    # The scheduler claims a job only once every job it
+                    # depends on is DONE. If any of them did not succeed, the
+                    # job does not run: its tasks are cancelled in the finally
+                    # below, with this reason.
+                    unsucceeded = await (
+                        managed_job_state.get_unsucceeded_dependencies_async(
+                            self._job_id))
+                    if unsucceeded:
+                        failure_reason = 'Dependency did not succeed: ' + (
+                            ', '.join(
+                                f'job {dependency} '
+                                f'({status.value if status else "not found"})'
+                                for dependency, status in unsucceeded))
+                        logger.info(failure_reason)
+                        await (managed_job_state.
+                               set_pending_tasks_failure_reason_async(
+                                   self._job_id, failure_reason))
+                        return
+
                     succeeded = True
 
                     # Check if this is a JobGroup (parallel execution)

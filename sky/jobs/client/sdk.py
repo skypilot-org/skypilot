@@ -164,6 +164,7 @@ def launch(
     pool: Optional[str] = None,
     num_jobs: Optional[int] = None,
     job_group: Union[int, str, None, _AutoJobGroup] = AUTO_JOB_GROUP,
+    depends_on: Optional[List[int]] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -183,6 +184,10 @@ def launch(
             attachment otherwise). Pass ``None`` to launch a top-level job
             even from inside a job group, or a job id / unique running job
             name to attach explicitly.
+        depends_on: Managed job IDs this job waits for. It starts once all of
+            them succeed, and is cancelled if any of them ends otherwise.
+            Requires an API server that runs managed jobs in consolidation
+            mode.
         _need_confirmation: (Internal only) Whether to show a confirmation
             prompt before launching the job.
 
@@ -205,6 +210,12 @@ def launch(
         raise click.UsageError('Pools are not supported in your API server. '
                                'Please upgrade to a newer API server to use '
                                'pools.')
+    if depends_on and (remote_api_version is None or remote_api_version <
+                       server_constants.MIN_JOBS_DEPENDS_ON_API_VERSION):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'depends_on is not supported by your API server. Please '
+                'upgrade the API server.')
     dag = dag_utils.convert_entrypoint_to_dag(task)
 
     if name is not None:
@@ -300,6 +311,7 @@ def launch(
             parent_job_id=attachment.parent_job_id,
             parent_task_id=attachment.parent_task_id,
             job_group_explicit=attachment.attaches and not attachment.auto,
+            depends_on=depends_on or None,
         )
         response = server_common.make_authenticated_request(
             'POST',

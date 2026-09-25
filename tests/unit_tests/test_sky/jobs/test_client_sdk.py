@@ -295,3 +295,18 @@ class TestResolveJobGroup:
             self._resolve_with('dup',
                                [self._record(5, 'dup'),
                                 self._record(9, 'dup')])
+
+
+def test_launch_depends_on_refuses_an_old_server():
+    from sky import exceptions
+    from sky.server import constants as server_constants
+    raw_launch = _unwrap(jobs_sdk.launch)
+    too_old = server_constants.MIN_JOBS_DEPENDS_ON_API_VERSION - 1
+    with mock.patch.object(jobs_sdk.versions,
+                           'get_remote_api_version',
+                           return_value=too_old), \
+         mock.patch.object(jobs_sdk.server_common,
+                           'make_authenticated_request') as mock_request:
+        with pytest.raises(exceptions.NotSupportedError, match='depends_on'):
+            raw_launch(mock.MagicMock(), depends_on=[1])
+        mock_request.assert_not_called()
