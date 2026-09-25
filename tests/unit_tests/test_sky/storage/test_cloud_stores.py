@@ -190,3 +190,47 @@ def test_gcs_directory_copy_keeps_rsync_arguments(monkeypatch):
         'gs://private-bucket/prefix', '/tmp/prefix')
 
     assert 'rsync -e -r gs://private-bucket/prefix /tmp/prefix' in command
+
+
+# Stores that install the AWS CLI and drive it for their sync/copy commands.
+_AWSCLI_STORES = [
+    cloud_stores.R2CloudStorage,
+    cloud_stores.OciS3CloudStorage,
+    cloud_stores.NebiusCloudStorage,
+    cloud_stores.CoreWeaveCloudStorage,
+    cloud_stores.VastDataCloudStorage,
+]
+
+
+@pytest.mark.parametrize('store_cls', _AWSCLI_STORES)
+def test_awscli_stores_share_s3_bootstrap(store_cls):
+    """Every awscli-based store bootstraps the CLI the same way S3 does.
+
+    Regression test for #10125. These stores used to check `aws --version` on
+    PATH but then execute the venv's aws binary. On an image that already ships
+    `aws`, the install was skipped and the sync died with
+    `.../bin/aws: No such file or directory`. The check and the exec target
+    have to agree, so they should reuse S3's `awscli_path` bootstrap.
+    """
+    assert store_cls._GET_AWSCLI == cloud_stores.S3CloudStorage._GET_AWSCLI
+    bootstrap = '\n'.join(store_cls._GET_AWSCLI)
+    assert 'awscli_path=$(which aws)' in bootstrap
+    assert 'aws --version' not in bootstrap
+
+
+def test_r2_sync_commands_execute_resolved_awscli(monkeypatch):
+    """R2 sync/copy must run `$awscli_path`, not a hardcoded venv binary."""
+    monkeypatch.setattr(cloud_stores.cloudflare, 'create_endpoint',
+                        lambda: 'https://fake.r2.endpoint')
+    store = cloud_stores.R2CloudStorage()
+    commands = [
+        store.make_sync_dir_command('r2://bucket/src', '/dst'),
+        store.make_sync_file_command('r2://bucket/obj', '/dst/obj'),
+    ]
+    for command in commands:
+        # Bootstrap resolves the binary into $awscli_path...
+        assert 'awscli_path=$(which aws)' in command
+        # ...and the sync/copy actually executes it.
+        assert '$awscli_path s3 ' in command
+        # The old hardcoded exec target must be gone.
+        assert '/bin/aws s3 ' not in command
