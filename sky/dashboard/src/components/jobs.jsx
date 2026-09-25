@@ -164,6 +164,21 @@ const STATUS_PRIORITY = {
   FAILED_CONTROLLER: 12,
 };
 
+/**
+ * Returns the key that marks a row as expanded. The Details cell's show-more
+ * toggle stores this key and the row renderer compares against it. The base
+ * Details column calls this directly. A plugin Details column receives the
+ * same value as context.rowId, because the plugin bundle cannot import this
+ * function. Group children and external rows use task_job_id. A group child
+ * shares its parent's id. An external row's id is the Slurm cluster's id,
+ * which can equal another cluster's id or a managed job id.
+ */
+export function detailsRowId(item, renderMode) {
+  return renderMode === 'groupChild' || item.is_external
+    ? item.task_job_id
+    : item.id;
+}
+
 // Helper function to aggregate status for a job group
 // Returns the "worst" status based on priority
 // For job groups with primary/auxiliary tasks, status is determined only by primary tasks
@@ -181,13 +196,13 @@ const STATUS_PRIORITY = {
  *
  * External rows never form job groups; they are keyed by their globally
  * unique task_job_id so equal Slurm ids across clusters (or a Slurm id
- * matching a managed id) can't collapse into one group, with a prefixed id
- * as a fallback if a producer ever omits task_job_id.
+ * matching a managed id) can't collapse into one group. The jobs cache
+ * manager guarantees task_job_id on every external row before rows reach
+ * this page.
  */
 export function groupJobRowsByTree(rows) {
   const groups = new Map();
-  const ownKey = (job) =>
-    job.is_external ? (job.task_job_id ?? `external:${job.id}`) : job.id;
+  const ownKey = (job) => (job.is_external ? job.task_job_id : job.id);
   const isMember = (job) =>
     !job.is_external && job.root_job_id != null && job.root_job_id !== job.id;
   // Top-level jobs and their declared tasks first, so every group starts with
@@ -2237,14 +2252,7 @@ export function ManagedJobsTable({
             return <TableCell>-</TableCell>;
           }
 
-          // Use task_job_id for group children to avoid conflicts, and for
-          // external rows always: their raw id is the Slurm cluster's id
-          // space, so equal ids across clusters (or against a managed id)
-          // would co-expand on plain item.id.
-          const rowId =
-            ctx?.renderMode === 'groupChild' || item.is_external
-              ? item.task_job_id
-              : item.id;
+          const rowId = detailsRowId(item, renderMode);
 
           return (
             <TableCell>
@@ -2341,13 +2349,32 @@ export function ManagedJobsTable({
         );
       },
       renderCell: (item, ctx) => {
+        // The key this row's ExpandedDetailsRow checks against. See
+        // detailsRowId. A plugin Details cell may store either this key or
+        // item.id; item.id is translated here, per row, so a plugin never
+        // needs to know which rows are keyed by task_job_id.
+        const rowId = detailsRowId(item, ctx?.renderMode);
         // Merge job group context with plugin context
         const context = {
           item,
           shouldShowWorkspace,
           shouldShowPool,
-          expandedRowId,
-          setExpandedRowId,
+          rowId,
+          // What the plugin compares against item.id or rowId to decide
+          // whether this row is expanded. Equals item.id only when this row
+          // is the expanded one. A stored key that happens to equal this
+          // row's item.id but is another row's key is hidden, so a plugin
+          // comparing against item.id does not flip on the wrong row.
+          expandedRowId:
+            expandedRowId === rowId
+              ? item.id
+              : expandedRowId === item.id
+                ? undefined
+                : expandedRowId,
+          // Stores this row's key when the plugin passes item.id or rowId.
+          // null (collapse) and anything else pass through.
+          setExpandedRowId: (value) =>
+            setExpandedRowId(value === item.id ? rowId : value),
           expandedRowRef,
           // Forward job group context for plugins that need it
           ...(ctx || {}),
@@ -2815,7 +2842,7 @@ export function ManagedJobsTable({
                                 : null;
                             })}
                           </TableRow>
-                          {expandedRowId === item.id && (
+                          {expandedRowId === detailsRowId(item, 'single') && (
                             <ExpandedDetailsRow
                               text={item.details}
                               colSpan={totalColSpan}
