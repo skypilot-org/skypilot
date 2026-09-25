@@ -5,6 +5,7 @@ import hashlib
 import math
 import os
 import tempfile
+import threading
 import time
 import typing
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
@@ -165,9 +166,16 @@ class LazyDataFrame:
         self._filename = filename
         self._df: Optional['pd.DataFrame'] = None
         self._update_if_stale_func = update_if_stale_func
+        self._load_lock = threading.RLock()
+
+    def _load_df(self) -> 'pd.DataFrame':
+        # lru_cache allows concurrent misses. Lock before the cache lookup so
+        # threads share one catalog read and freshness check per request.
+        with self._load_lock:
+            return self._load_df_cached()
 
     @annotations.lru_cache(scope='request')
-    def _load_df(self) -> 'pd.DataFrame':
+    def _load_df_cached(self) -> 'pd.DataFrame':
         if self._update_if_stale_func() or self._df is None:
             try:
                 self._df = pd.read_csv(self._filename)
