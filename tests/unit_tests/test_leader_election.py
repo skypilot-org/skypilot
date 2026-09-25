@@ -6,6 +6,7 @@ exercised where a Postgres fixture is available.
 """
 import os
 import re
+import time
 from unittest import mock
 
 import pytest
@@ -256,3 +257,171 @@ def test_pg_release_hands_over_immediately(lease_db):
     assert a.fencing_token() is None
     assert b.try_acquire() is True
     assert b.fencing_token() == 2
+
+
+def test_get_elector_passes_timing_to_the_lease_backend(monkeypatch):
+    """A role whose failover is expensive tunes all three knobs together, so
+    ``get_elector`` must carry them through rather than silently shipping the
+    module defaults with only the TTL overridden."""
+    monkeypatch.setenv(leader_election.ENV_VAR_BACKEND,
+                       leader_election.BACKEND_LEASE)
+    with mock.patch.object(leader_election,
+                           '_postgres_available',
+                           return_value=True):
+        elector = leader_election.get_elector('lock',
+                                              ttl_seconds=150,
+                                              renew_interval_seconds=5,
+                                              renew_deadline_seconds=90)
+    assert isinstance(elector, leader_election.PgLeaseElector)
+    assert elector.renew_interval_seconds == 5
+    assert elector.renew_deadline_seconds == 90
+
+
+def test_get_elector_passes_the_probe_cadence_to_the_advisory_backend(
+        monkeypatch):
+    """Asking for a cadence must give the same answer on either backend, so a
+    caller that has always probed at its own interval keeps doing so when the
+    deployment is on the default advisory path. The deadline is still None --
+    advisory leadership is not time-bounded, so a failed probe is terminal."""
+    monkeypatch.delenv(leader_election.ENV_VAR_BACKEND, raising=False)
+    elector = leader_election.get_elector('lock',
+                                          ttl_seconds=150,
+                                          renew_interval_seconds=5,
+                                          renew_deadline_seconds=90)
+    assert isinstance(elector, leader_election.AdvisoryLockElector)
+    assert elector.renew_interval_seconds == 5
+    assert elector.renew_deadline_seconds is None
+
+
+class _ScriptedElector(leader_election.LeaderElector):
+    """An elector whose ``renew`` replays a scripted sequence of outcomes.
+
+    ``True``/``False`` are returned; an exception instance is raised. When the
+    script runs out the renewer is stopped, so ``run()`` returns instead of
+    looping forever -- which lets these tests drive the loop synchronously.
+    """
+
+    def __init__(self, script, interval=0.0, deadline=None):
+        super().__init__('scripted-role')
+        self._script = list(script)
+        self._interval = interval
+        self._deadline = deadline
+        self.renewer: 'leader_election.LeadershipRenewer' = None  # type: ignore
+        self.calls = 0
+        self.released = False
+
+    def try_acquire(self) -> bool:
+        return True
+
+    def renew(self) -> bool:
+        self.calls += 1
+        if not self._script:
+            # Out of script: end the term the way a caller would.
+            self.renewer.stop()
+            return True
+        outcome = self._script.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    def release(self) -> None:
+        self.released = True
+
+    @property
+    def renew_interval_seconds(self) -> float:
+        return self._interval
+
+    @property
+    def renew_deadline_seconds(self):
+        return self._deadline
+
+
+def _renewer_for(script, **kwargs):
+    elector = _ScriptedElector(script, **kwargs)
+    renewer = leader_election.LeadershipRenewer(elector)
+    elector.renewer = renewer
+    return elector, renewer
+
+
+class TestLeadershipRenewer:
+    """The renewer decouples a role's liveness from the leader's work."""
+
+    def test_holds_the_role_while_renews_succeed(self):
+        elector, renewer = _renewer_for([True, True, True], deadline=30)
+        renewer.run()
+        assert elector.calls == 4  # three scripted, then the stop
+        assert renewer.holding is True
+
+    def test_rides_out_a_transient_failure_within_the_deadline(
+            self, monkeypatch):
+        """One failed renew must not cost the role: the lease is still valid
+        until its deadline, so retry rather than hand over on a database blip.
+        """
+        monkeypatch.setattr(leader_election, '_RENEW_RETRY_SECONDS', 0.0)
+        elector, renewer = _renewer_for([False, False, True], deadline=30)
+        renewer.run()
+        assert elector.calls == 4
+        assert renewer.holding is True
+
+    def test_a_raising_renew_is_treated_as_a_failed_renew(self, monkeypatch):
+        monkeypatch.setattr(leader_election, '_RENEW_RETRY_SECONDS', 0.0)
+        elector, renewer = _renewer_for([RuntimeError('db blip'), True],
+                                        deadline=30)
+        renewer.run()
+        assert elector.calls == 3
+        assert renewer.holding is True
+
+    def test_gives_up_once_the_deadline_is_exceeded(self, monkeypatch):
+        monkeypatch.setattr(leader_election, '_RENEW_RETRY_SECONDS', 0.0)
+        # A deadline already in the past on the first failure: give up at once
+        # rather than retrying forever.
+        elector, renewer = _renewer_for([False], deadline=30)
+        renewer._last_renew = time.monotonic() - 1000
+        renewer.run()
+        assert elector.calls == 1
+        assert renewer.holding is False
+
+    def test_gives_up_on_the_first_failure_with_no_deadline(self):
+        """The advisory backend's ``renew`` is a session-liveness probe, not an
+        extension: there is no lease left to ride out, so a failed probe is
+        terminal -- the behaviour that backend has always had."""
+        elector, renewer = _renewer_for([False], deadline=None)
+        renewer.run()
+        assert elector.calls == 1
+        assert renewer.holding is False
+
+    def test_holding_is_false_when_the_renewer_itself_is_wedged(self):
+        """Safety net: a renewer blocked past the deadline (socket blackhole,
+        CPU starvation) leaves no failed renew to notice, so judge the role by
+        the clock. Without this the caller would keep acting as leader while
+        another replica is free to take the lease."""
+        _, renewer = _renewer_for([True], deadline=30)
+        assert renewer.holding is True
+        renewer._last_renew = time.monotonic() - 31
+        assert renewer.holding is False
+
+    def test_an_unexpected_crash_marks_the_role_lost(self):
+        """Nothing is renewing after the thread dies, so the caller must not be
+        left believing it still leads -- on the advisory backend there is no
+        clock that would catch it."""
+        _, renewer = _renewer_for([True], deadline=None)
+        renewer._stop_event = mock.Mock()
+        renewer._stop_event.is_set.return_value = False
+        renewer._stop_event.wait.side_effect = RuntimeError('boom')
+        with pytest.raises(RuntimeError, match='boom'):
+            renewer.run()
+        assert renewer.holding is False
+
+    def test_stop_keeps_the_role_and_never_releases_it(self):
+        """``stop`` means "quit renewing", not "hand over". Whether a
+        step-down should release or sit out the rest of the lease is the
+        caller's decision, and the two differ by exactly the safety margin."""
+        elector, renewer = _renewer_for([True, True], deadline=30)
+        renewer.run()
+        assert renewer.holding is True
+        assert elector.released is False
+
+    def test_thread_is_a_daemon_named_after_the_role(self):
+        _, renewer = _renewer_for([True])
+        assert renewer.daemon is True
+        assert 'scripted-role' in renewer.name
