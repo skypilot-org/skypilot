@@ -500,8 +500,8 @@ class TestGetManagedJobQueue:
         assert 'Waiting for higher priority jobs to launch' in job1['details']
 
     @pytest.mark.parametrize(('dependencies', 'expected'), [
-        ([7], 'Waiting for dependency job 7 to succeed'),
-        ([7, 8], 'Waiting for dependency jobs 7, 8 to succeed'),
+        ([7], 'Dependency: 7'),
+        ([7, 8], 'Dependencies: 7, 8'),
     ])
     def test_details_for_job_waiting_on_dependencies(self, monkeypatch,
                                                      dependencies, expected):

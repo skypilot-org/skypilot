@@ -3225,10 +3225,10 @@ def _format_job_details(
     if job['schedule_state'] == 'ALIVE_BACKOFF':
         state_details = 'In backoff, waiting for resources'
     elif job['schedule_state'] == 'WAITING' and unfinished_dependencies:
-        noun = 'job' if len(unfinished_dependencies) == 1 else 'jobs'
+        label = ('Dependency'
+                 if len(unfinished_dependencies) == 1 else 'Dependencies')
         state_details = (
-            f'Waiting for dependency {noun} '
-            f'{", ".join(str(d) for d in unfinished_dependencies)} to succeed')
+            f'{label}: {", ".join(str(d) for d in unfinished_dependencies)}')
     elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
         priority = job.get('priority')
         if (priority is not None and priority < highest_blocking_priority):
