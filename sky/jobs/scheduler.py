@@ -5,13 +5,16 @@ the business logic of deciding when they are allowed to start, and choosing the
 right one to start. The scheduler will also schedule jobs that are already live
 but waiting to launch a new task or recover.
 
-The scheduler is not its own process - instead, maybe_schedule_next_jobs() can
-be called from any code running on the managed jobs controller instance to
-trigger scheduling of new jobs if possible. This function should be called
-immediately after any state change that could result in jobs newly being able to
-be scheduled. If the job is running in a pool, the scheduler will only schedule
-jobs for the same pool, because the resources limitations are per-pool (see the
-following section for more details).
+The scheduler is not its own process. submit_jobs() marks jobs as WAITING in
+the DB, and each long-lived controller process (sky/jobs/controller.py,
+ControllerManager.monitor_loop) claims WAITING jobs from there. An idle
+controller re-polls the DB periodically, but to keep submission latency low it
+also watches a marker file in the signals directory: every code path that makes
+a job WAITING must call utils.touch_waiting_jobs_marker() right after the
+state change so idle controllers wake up immediately. If the job is running in
+a pool, the scheduler will only schedule jobs for the same pool, because the
+resources limitations are per-pool (see the following section for more
+details).
 
 The scheduling logic limits #running jobs according to three limits:
 1. The number of jobs that can be launching (that is, STARTING or RECOVERING) at
@@ -384,6 +387,9 @@ def submit_jobs(job_ids: List[int],
     state.scheduler_set_waiting(job_ids, dag_yaml_content,
                                 original_user_yaml_content, env_file_content,
                                 config_file_content, priority, priority_class)
+    # Wake idle controllers so they claim the job now rather than on their
+    # next periodic poll. Must come after the WAITING commit above.
+    managed_job_utils.touch_waiting_jobs_marker()
     maybe_start_controllers(from_scheduler=True)
 
 

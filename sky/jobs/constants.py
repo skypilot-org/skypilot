@@ -30,6 +30,12 @@ JOB_CONTROLLER_INDICATOR_FILE = '~/.sky/is_jobs_controller'
 
 CONSOLIDATED_SIGNAL_PATH = runtime_utils.expanduser('~/.sky/signals/')
 SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
+# Marker file under CONSOLIDATED_SIGNAL_PATH whose mtime is bumped whenever a
+# job is (re)queued as WAITING. Idle controllers stat it to wake their claim
+# loop right away instead of on the next DB poll (see controller.monitor_loop).
+# The signals directory is on the shared HA volume, so a touch on any replica
+# is visible to the controllers on the leader.
+WAITING_JOBS_MARKER_NAME = 'waiting_jobs.marker'
 
 # The consolidation mode lock ensures that if multiple API servers are running
 # at the same time (e.g. during a rolling update), recovery can only happen once

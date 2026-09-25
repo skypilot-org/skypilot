@@ -81,6 +81,50 @@ _background_tasks_lock: asyncio.Lock = asyncio.Lock()
 _LIVE_LINK_POLL_EVERY = 4  # ~1 attempt per 4 status polls (~60s)
 _LIVE_LINK_MAX_ATTEMPTS = 30  # give up live updates after ~30 attempts
 
+# Idle claim-loop cadence. When there is no WAITING job, a controller waits up
+# to WAITING_JOB_POLL_TIMEOUT_SECONDS before querying the DB again (the
+# fallback), but wakes early when the waiting-jobs marker file changes. The
+# marker is checked with a cheap stat() every
+# WAITING_JOBS_MARKER_CHECK_INTERVAL_SECONDS (jittered), so submission latency
+# is ~1s without adding DB load: the claim query only runs on a real signal or
+# on the fallback tick. See jobs.utils.touch_waiting_jobs_marker.
+WAITING_JOB_POLL_TIMEOUT_SECONDS = 10.0
+WAITING_JOBS_MARKER_CHECK_INTERVAL_SECONDS = 1.0
+
+
+async def wait_for_waiting_jobs_signal(marker_before: Optional[int],
+                                       timeout: float,
+                                       check_interval: float) -> None:
+    """Sleep until the waiting-jobs marker changes or ``timeout`` elapses.
+
+    Args:
+        marker_before: The marker mtime observed *before* the last (empty)
+            claim query. Comparing against that snapshot, rather than the
+            time we start waiting, means a touch that lands between the
+            query and this call is not lost.
+        timeout: Upper bound on the wait; the caller re-polls the DB after.
+        check_interval: Nominal stat() cadence. Each sleep is jittered by
+            +/-50% so that many idle controllers do not all observe a touch,
+            and all hit the DB, in the same instant.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        # Off the event loop: on an NFS-backed signals directory this is a
+        # server round trip, and a slow or hung mount must not stall every
+        # job task in this process.
+        current = await asyncio.to_thread(
+            managed_job_utils.get_waiting_jobs_marker_mtime)
+        # Only a *different* mtime is a wake-up. None (marker missing or
+        # transiently unreadable) is not: waking on it would spin the claim
+        # query for as long as the condition lasts.
+        if current is not None and current != marker_before:
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        interval = check_interval * random.uniform(0.5, 1.5)
+        await asyncio.sleep(min(remaining, interval))
+
 
 async def create_background_task(coro: typing.Coroutine) -> None:
     """Create a background task and add it to the set of background tasks.
@@ -3749,9 +3793,10 @@ class ControllerManager:
             for cancel in cancels:
                 if not cancel.isdigit():
                     # There maybe unexpected files that are written to the
-                    # signal directory. We for sure write filelocks to the
-                    # directory, so we need to skip.
-                    if not cancel.endswith('.lock'):
+                    # signal directory. We for sure write filelocks and the
+                    # waiting-jobs marker to the directory, so we need to skip.
+                    if (not cancel.endswith('.lock') and
+                            cancel != jobs_constants.WAITING_JOBS_MARKER_NAME):
                         logger.debug('Detected unexpected file in signal '
                                      f'directory: {cancel}. Skipping...')
                     continue
@@ -3834,7 +3879,11 @@ class ControllerManager:
                 await asyncio.sleep(60)
                 continue
 
-            # Check if there are any jobs that are waiting to launch
+            # Check if there are any jobs that are waiting to launch. Snapshot
+            # the marker *before* querying so a submission that lands during
+            # the query still wakes us (see wait_for_waiting_jobs_signal).
+            marker_before = await asyncio.to_thread(
+                managed_job_utils.get_waiting_jobs_marker_mtime)
             try:
                 waiting_job = await managed_job_state.get_waiting_job_async(
                     pid=self._pid, pid_started_at=self._pid_started_at)
@@ -3844,8 +3893,13 @@ class ControllerManager:
                 continue
 
             if waiting_job is None:
-                logger.info('No waiting job, waiting for 10 seconds')
-                await asyncio.sleep(10)
+                logger.info('No waiting job, waiting for a submission signal '
+                            f'or up to {WAITING_JOB_POLL_TIMEOUT_SECONDS:.0f} '
+                            'seconds')
+                await wait_for_waiting_jobs_signal(
+                    marker_before,
+                    timeout=WAITING_JOB_POLL_TIMEOUT_SECONDS,
+                    check_interval=WAITING_JOBS_MARKER_CHECK_INTERVAL_SECONDS)
                 continue
 
             logger.info(f'Claiming job {waiting_job["job_id"]}')
@@ -3884,6 +3938,7 @@ async def main(controller_uuid: str):
 
     # Will happen multiple times, who cares though
     os.makedirs(jobs_constants.CONSOLIDATED_SIGNAL_PATH, exist_ok=True)
+    managed_job_utils.ensure_waiting_jobs_marker_exists()
 
     # Increase number of files we can open
     soft = None
