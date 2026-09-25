@@ -76,8 +76,11 @@ _PULL_FREQUENCY_HOURS = 7
 #   - _user_dfs: account-specific catalogs (i.e., regions that the account
 #     doesn't have enabled are dropped; AZ mapping is applied, etc.),
 #     keyed by the hash of the identity they were built for.
-#     Creating one requires AWS credentials. Each is created at most once
-#     (and cached) per a process' lifetime.
+#     Creating one requires AWS credentials. Each is cached, and rebuilt if
+#     it is evicted -- see `_MAX_CACHED_USER_DFS` below. (The single
+#     `_user_df` this replaced WAS built at most once per a process'
+#     lifetime; with an unbounded number of possible identities that is no
+#     longer a property worth keeping.)
 #     The AvailabilityZone column is a zone name (e.g. us-east-1a).
 #
 #     Keyed, because a single API server process can serve more than one
