@@ -1915,6 +1915,10 @@ def get_config_schema():
                     'task_logs_gc_retention_hours': {
                         'type': 'integer',
                     },
+                    'max_concurrent_launches_per_user': {
+                        'type': 'integer',
+                        'minimum': 1,
+                    },
                 },
             },
             'bucket': {
