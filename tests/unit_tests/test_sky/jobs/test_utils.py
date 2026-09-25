@@ -529,6 +529,11 @@ class TestGetManagedJobQueue:
         assert by_id[1]['depends_on'] == [7, 8]
         assert by_id[2]['depends_on'] is None
 
+        # get_managed_job_queue rewrites the job records in place.
+        self._patch_managed_job_state(
+            monkeypatch, [self._make_test_job(1),
+                          self._make_test_job(2)],
+            dependencies={1: [7, 8]})
         only_status = jobs_utils.get_managed_job_queue(
             fields=['job_id', 'status'])['jobs']
         assert all('depends_on' not in job for job in only_status)
