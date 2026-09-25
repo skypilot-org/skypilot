@@ -22,7 +22,6 @@ from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
 from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import fuse as kubernetes_fuse
-from sky.provision.kubernetes import host_network_probe
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.utils import is_tpu_on_gke
@@ -1171,12 +1170,10 @@ class Kubernetes(clouds.Cloud):
                                          k8s_rdma_nic_count)
 
         if k8s_host_network:
-            cluster_name_on_cloud = cluster_name.name_on_cloud
+            # The port values themselves are written into the pod spec per pod
+            # (host_network_ports), not templated here: they are assigned once
+            # the existing pods are known, which this render cannot see.
             k8s_env_vars['SKYPILOT_HOST_NETWORK'] = '1'
-            k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAME'] = (
-                host_network_probe.ray_ports_configmap_name(
-                    cluster_name_on_cloud))
-            k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE'] = namespace
 
         deploy_vars = {
             'instance_type': resources.instance_type,

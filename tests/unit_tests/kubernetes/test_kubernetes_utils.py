@@ -24,6 +24,7 @@ from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.catalog import kubernetes_catalog
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils
+from sky.skylet import constants
 
 
 # Test for exception on permanent errors like 401 (Unauthorized)
@@ -5314,6 +5315,90 @@ def test_diagnose_terminated_pod_non_oom_has_no_hint(monkeypatch):
     assert msg is not None
     assert 'Error (exit code 1)' in msg
     assert 'Hint:' not in msg
+
+
+# The shape a host port clash leaves in the container log: a traceback whose
+# last frame is the explanation the user needs.
+_CLASH_LOG = """+ python -m sky.provision.kubernetes.host_network_probe --mode head
+Traceback (most recent call last):
+  File "/opt/sky/host_network_probe.py", line 170, in _verify_free
+    sock.bind(('0.0.0.0', port))
+OSError: [Errno 98] Address already in use
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/sky/host_network_probe.py", line 174, in _verify_free
+    raise RuntimeError(
+RuntimeError: Assigned host port 33499 (gcs) is already in use on this node.
+Launching again assigns a different block and usually succeeds.
+This node's ephemeral port range is 32768-60999, which covers port 33499.
+"""
+
+
+def _error_pod(**status_kwargs):
+    return _make_pod(
+        phase='Failed',
+        container_statuses=[_make_container_status(**status_kwargs)])
+
+
+def test_diagnose_self_exit_surfaces_the_exception_not_the_traceback(
+        monkeypatch):
+    """The clash message was only reachable through kubectl logs."""
+    core_api = _patch_read_pod(monkeypatch,
+                               pod=_error_pod(terminated_reason='Error',
+                                              terminated_exit_code=1))
+    core_api.read_namespaced_pod_log.return_value = _CLASH_LOG
+    msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert 'Error (exit code 1)' in msg
+    assert 'Assigned host port 33499 (gcs) is already in use' in msg
+    # Recovery's OOM classifier stops at this marker; the pair must agree.
+    assert constants.CONTAINER_OUTPUT_MARKER in msg
+    assert 'which covers port 33499' in msg
+    # From the last exception on, not the chained one above it.
+    assert 'OSError' not in msg
+    assert 'Traceback' not in msg
+    assert core_api.read_namespaced_pod_log.call_args.kwargs['previous'] is False
+
+
+def test_diagnose_self_exit_without_a_traceback_keeps_the_last_lines(
+        monkeypatch):
+    core_api = _patch_read_pod(monkeypatch,
+                               pod=_error_pod(terminated_reason='Error',
+                                              terminated_exit_code=2))
+    core_api.read_namespaced_pod_log.return_value = '\n'.join(
+        f'line {i}' for i in range(30)) + '\n'
+    msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert 'line 29' in msg and 'line 20' in msg
+    assert 'line 19' not in msg
+
+
+def test_diagnose_a_restarted_container_reads_the_previous_run(monkeypatch):
+    core_api = _patch_read_pod(monkeypatch,
+                               pod=_error_pod(last_terminated_reason='Error',
+                                              last_terminated_exit_code=1))
+    core_api.read_namespaced_pod_log.return_value = _CLASH_LOG
+    utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert core_api.read_namespaced_pod_log.call_args.kwargs['previous'] is True
+
+
+def test_diagnose_oom_does_not_read_the_log(monkeypatch):
+    """Killed from outside: the container's output does not say why."""
+    core_api = _patch_read_pod(monkeypatch,
+                               pod=_error_pod(terminated_reason='OOMKilled',
+                                              terminated_exit_code=137))
+    utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    core_api.read_namespaced_pod_log.assert_not_called()
+
+
+def test_diagnose_log_read_failure_keeps_the_reason(monkeypatch):
+    """The log is extra context; losing it must not lose the reason."""
+    core_api = _patch_read_pod(monkeypatch,
+                               pod=_error_pod(terminated_reason='Error',
+                                              terminated_exit_code=1))
+    core_api.read_namespaced_pod_log.side_effect = RuntimeError('forbidden')
+    msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert msg == 'Pod mypod terminated: Error (exit code 1).'
 
 
 def test_diagnose_terminated_pod_evicted_ephemeral(monkeypatch):

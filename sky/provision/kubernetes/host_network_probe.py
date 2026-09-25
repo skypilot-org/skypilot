@@ -1,36 +1,34 @@
-"""Free-port probe and ConfigMap publish/discover for hostNetwork pods.
+"""Verify the host ports assigned to a hostNetwork pod, before Ray binds them.
 
 When a K8s pod has ``hostNetwork: true`` it shares the host's network
-namespace, so a sibling SkyPilot pod scheduled to the same node would
-collide on Ray's default ports. This script binds ephemeral sockets to
-pick a free port set for the local Ray daemon, then either publishes
-them (head) to a ``<cluster>-ray-ports`` ConfigMap or reads the head's
-port from that ConfigMap (worker). Stdlib-only so it can run during the
-window when the pod's skypilot install is in flux.
+namespace, so a sibling SkyPilot pod scheduled to the same node would collide
+on Ray's default ports. The server assigns each pod a block and declares it as
+``hostPort`` (see ``host_network_ports``), which makes the scheduler refuse to
+co-schedule two pods wanting the same port.
 
-Same-cluster pods never share a K8s node (SkyPilot injects a required
-per-cluster ``podAntiAffinity`` for hostNetwork clusters), so each
-pod's host IP is unique and routable. The worker dials the head over
-the headless Service DNS (``SKYPILOT_RAY_HEAD_IP``, set by the pod
-template) plus the head's probed GCS port from the ConfigMap — no
-loopback-IP disambiguation is needed.
+This script is the pod-side half, and it is an **assertion**, not an
+allocator: it binds each assigned port to prove it is actually free, then
+releases it just before ``ray start`` takes it. It makes no Kubernetes API
+call, which is the point -- a workload pod needs no API access for this.
+
+The scheduler only knows about *declared* hostPorts, so a port held by
+something that never declared one -- a node daemon, or a SkyPilot pod created
+before ports moved into the pod spec -- is invisible to it. That is what this
+bind catches, and why it fails loudly rather than re-probing: a silent
+re-probe would paper over a mis-chosen port range instead of surfacing it.
+
+Stdlib-only so it can run during the window when the pod's skypilot install is
+in flux.
 """
 import argparse
-import functools
-import json
 import os
-import random
 import socket
-import ssl
 import sys
 import time
-from typing import Any, Dict, List, Optional, Tuple
-import urllib.error
-import urllib.request
+from typing import Dict, List, Optional, Tuple
 
-# SKYPILOT_RAY_PORT is the head's GCS port; the worker template already
-# uses that name to dial the head, so we reuse it rather than introduce
-# a parallel SKYPILOT_RAY_GCS_PORT.
+# SKYPILOT_RAY_PORT is the head's GCS port; a worker is handed the *head's*
+# value here, because that is what it must dial to join.
 _ENV_VAR_FOR_PORT: Dict[str, str] = {
     'gcs': 'SKYPILOT_RAY_PORT',
     'dashboard': 'SKYPILOT_RAY_DASHBOARD_PORT',
@@ -41,14 +39,25 @@ _ENV_VAR_FOR_PORT: Dict[str, str] = {
     'runtime_env_agent': 'SKYPILOT_RAY_RUNTIME_ENV_AGENT_PORT',
     'metrics_export': 'SKYPILOT_RAY_METRICS_EXPORT_PORT',
     # Pod sshd port. host:22 is owned by the K8s node's own sshd under
-    # hostNetwork, so the pod must bind sshd to a probed port instead.
+    # hostNetwork, so the pod must bind sshd to its assigned port instead.
     'sshd': 'SKYPILOT_SSHD_PORT',
 }
 
-_HEAD_PORT_NAMES: List[str] = list(_ENV_VAR_FOR_PORT)
+# Public: the server assigns these (host_network_ports) and this script
+# verifies them. One list, so a port cannot be assigned without being checked
+# or checked without being assigned.
+#
+# THE ORDER IS THE ON-CLUSTER FORMAT. A pod's ports are reconstructed
+# positionally -- block start plus index -- so reordering silently re-maps
+# every running pod's ports while every check still passes: the block is
+# still BLOCK_SIZE contiguous ports in range. Append to add one; a longer
+# list fails loudly against existing pods, which is what you want.
+HEAD_PORT_NAMES: List[str] = list(_ENV_VAR_FOR_PORT)
 
-# Workers don't run GCS/dashboard/ray-client-server, but they DO run sshd.
-_WORKER_PORT_NAMES: List[str] = [
+# A worker runs neither GCS, dashboard nor ray-client-server, so those three
+# slots of its block go unused -- every pod is given the head-sized block so
+# one pod spec serves every pod in the cluster.
+WORKER_PORT_NAMES: List[str] = [
     'node_manager',
     'object_manager',
     'dashboard_agent_listen',
@@ -57,290 +66,126 @@ _WORKER_PORT_NAMES: List[str] = [
     'sshd',
 ]
 
-# Public so the SkyPilot client (sky/provision/kubernetes/instance.py)
-# can read the same key when assembling InstanceInfo.ssh_port.
+# Deprecation window only. This pod no longer reads or writes the ConfigMap;
+# the API server still reads the one a pre-change cluster published, because
+# such a cluster's pods declare no ports and their head's block is knowable
+# from nowhere else. Delete both with that read, one release on.
 SSHD_KEY_PREFIX = 'sshd_'
 
 
 def ray_ports_configmap_name(cluster_name_on_cloud: str) -> str:
-    """Name of the per-cluster ConfigMap the head publishes Ray ports to."""
+    """Name of the ConfigMap a pre-change cluster's head published to."""
     return f'{cluster_name_on_cloud}-ray-ports'
 
 
-_SA_TOKEN_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/token'
-_SA_CA_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
-
-_CONFIGMAP_POLL_TIMEOUT_S = 600
-_CONFIGMAP_POLL_INTERVAL_S = 2
-
-# Bridges the gap between the head publishing its ConfigMap (just before
-# ray binds) and ray actually accepting connections.
 _HEAD_GCS_TCP_WAIT_TIMEOUT_S = 600
-_HEAD_GCS_TCP_WAIT_INTERVAL_S = 1
-
-# Bound on retries when a worker's ConfigMap merge races another worker
-# (409 Conflict from stale resourceVersion). On a many-node cluster
-# every worker contends for the one ConfigMap, so the loser of a race
-# can be bounced several times before it lands — keep this generous.
-_MERGE_RETRY_LIMIT = 8
-# Full-jitter exponential backoff between 409 retries. Without it, N
-# workers retrying in lockstep are a thundering herd that keeps losing
-# to each other; spreading them out lets a large cluster converge.
-_MERGE_RETRY_BASE_DELAY_S = 0.2
-_MERGE_RETRY_MAX_DELAY_S = 5
-
-# Per-request budget for K8s API calls. Without this, urlopen would
-# block forever on a hung API server and freeze the pod bootstrap.
-_K8S_API_TIMEOUT_S = 10
+_HEAD_GCS_TCP_WAIT_INTERVAL_S = 2
 
 
-# maxsize=1: both take no arguments, so a single slot caches the only
-# possible call. (Memoizing a constant read/parse, not a keyed cache.)
-@functools.lru_cache(maxsize=1)
-def _api_auth_token() -> str:
-    with open(_SA_TOKEN_PATH, encoding='utf-8') as f:
-        return f.read().strip()
+def env_var_for_port(name: str) -> str:
+    """The env var this port is passed in.
+
+    Public so the server exports the same names the pod reads; one mapping,
+    so a renamed var cannot be exported under the old name.
+    """
+    return _ENV_VAR_FOR_PORT[name]
 
 
-@functools.lru_cache(maxsize=1)
-def _api_ssl_context() -> ssl.SSLContext:
-    return ssl.create_default_context(cafile=_SA_CA_PATH)
-
-
-def _bind_ephemeral_port() -> Tuple[socket.socket, int]:
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(('0.0.0.0', 0))
-    return s, s.getsockname()[1]
-
-
-def _probe_ports(
-        names: List[str]) -> Tuple[List[socket.socket], Dict[str, int]]:
-    """Bind one ephemeral socket per name; caller must keep them alive
-    until just before ``ray start`` rebinds the ports."""
-    held: List[socket.socket] = []
+def _assigned_ports(names: List[str]) -> Dict[str, int]:
+    """Read the assigned ports out of the pod env."""
     ports: Dict[str, int] = {}
+    missing: List[str] = []
     for name in names:
-        sock, port = _bind_ephemeral_port()
-        held.append(sock)
-        ports[name] = port
-    return held, ports
-
-
-def _write_env_file(ports: Dict[str, int], path: str) -> None:
-    lines = [
-        f'export {_ENV_VAR_FOR_PORT[name]}={port}'
-        for name, port in ports.items()
-    ]
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(lines) + '\n')
-
-
-def _k8s_api_request(
-        method: str,
-        path: str,
-        body: Optional[Dict[str, Any]] = None) -> Tuple[int, bytes]:
-    api_host = os.environ['KUBERNETES_SERVICE_HOST']
-    api_port = os.environ['KUBERNETES_SERVICE_PORT']
-    headers = {
-        'Authorization': f'Bearer {_api_auth_token()}',
-        'Accept': 'application/json',
-    }
-    data: bytes = b''
-    if body is not None:
-        data = json.dumps(body).encode('utf-8')
-        headers['Content-Type'] = 'application/json'
-    url = f'https://{api_host}:{api_port}{path}'
-    req = urllib.request.Request(url,
-                                 data=data if data else None,
-                                 headers=headers,
-                                 method=method)
-    try:
-        with urllib.request.urlopen(
-                req, context=_api_ssl_context(),
-                timeout=_K8S_API_TIMEOUT_S) as resp:  # noqa: S310
-            return resp.status, resp.read()
-    except urllib.error.HTTPError as e:
-        return e.code, e.read()
-
-
-def _configmap_data_for_ports(podname: str, ports: Dict[str,
-                                                        int]) -> Dict[str, str]:
-    """Translate probe port names into ConfigMap data keys.
-
-    The 'sshd' port is rewritten to ``sshd_<podname>`` because every pod
-    (head + each worker) publishes its own sshd port into the same
-    ConfigMap. Other keys are head-owned Ray ports and stay flat so the
-    worker probe can look up the head's GCS by the bare key 'gcs'.
-    """
-    out: Dict[str, str] = {}
-    for name, port in ports.items():
-        key = f'{SSHD_KEY_PREFIX}{podname}' if name == 'sshd' else name
-        out[key] = str(port)
-    return out
-
-
-def _head_ports_from_configmap_data(data: Dict[str, str],
-                                    podname: str) -> Optional[Dict[str, int]]:
-    """Reconstruct the head's probed ports from a ConfigMap's data.
-
-    Inverse of _configmap_data_for_ports for the head's own keys. Returns
-    None if any expected head port is missing or non-integer, so the
-    caller falls back to a fresh probe rather than reusing a partial set.
-    """
-    ports: Dict[str, int] = {}
-    for name in _HEAD_PORT_NAMES:
-        key = f'{SSHD_KEY_PREFIX}{podname}' if name == 'sshd' else name
-        raw = data.get(key)
+        raw = os.environ.get(_ENV_VAR_FOR_PORT[name])
         if raw is None:
-            return None
-        try:
-            ports[name] = int(raw)
-        except ValueError:
-            return None
+            missing.append(_ENV_VAR_FOR_PORT[name])
+            continue
+        ports[name] = int(raw)
+    if missing:
+        raise RuntimeError(
+            'Host ports were not assigned to this pod: '
+            f'{", ".join(sorted(missing))} unset. The pod spec should carry '
+            'them; this pod was likely created by an older SkyPilot.')
     return ports
 
 
-def _build_configmap_body(name: str, namespace: str, ports: Dict[str, int],
-                          owner_pod_name: str,
-                          owner_pod_uid: str) -> Dict[str, Any]:
-    """Build the ConfigMap body, including the ownerReference that ties its
-    lifetime to the head pod so K8s garbage-collects it on `sky down`."""
-    return {
-        'apiVersion': 'v1',
-        'kind': 'ConfigMap',
-        'metadata': {
-            'name': name,
-            'namespace': namespace,
-            'labels': {
-                'parent': 'skypilot',
-                'skypilot-ray-ports': 'true',
-            },
-            # ownerReference ties the ConfigMap's lifetime to the head
-            # pod so it's GC'd on sky down without explicit teardown.
-            'ownerReferences': [{
-                'apiVersion': 'v1',
-                'kind': 'Pod',
-                'name': owner_pod_name,
-                'uid': owner_pod_uid,
-                'controller': False,
-                'blockOwnerDeletion': False,
-            }],
-        },
-        'data': _configmap_data_for_ports(owner_pod_name, ports),
-    }
+_EPHEMERAL_RANGE_PATH = '/proc/sys/net/ipv4/ip_local_port_range'
 
 
-def _format_api_error(action: str, name: str, namespace: str, status: int,
-                      resp: bytes) -> str:
-    body = resp.decode('utf-8', 'replace')
-    return (f'Failed to {action} ConfigMap {namespace}/{name}: '
-            f'status={status} body={body}')
+def _node_ephemeral_range() -> Optional[Tuple[int, int]]:
+    """The node's ephemeral port range, or None if it cannot be read.
 
+    Valid only from a hostNetwork pod: the sysctl is per network namespace,
+    so an ordinary pod reports its own namespace's default (32768-60999)
+    rather than the node's. Measured on one node both ways: 10240-65535
+    with hostNetwork, 32768-60999 without.
 
-def _get_configmap(name: str, namespace: str) -> Dict[str, Any]:
-    """GET a ConfigMap, returning its parsed body. Raises on non-200."""
-    base = f'/api/v1/namespaces/{namespace}/configmaps/{name}'
-    status, resp = _k8s_api_request('GET', base)
-    if status >= 300:
-        raise RuntimeError(
-            _format_api_error('GET', name, namespace, status, resp))
-    return json.loads(resp)
-
-
-def _try_get_configmap(name: str, namespace: str) -> Optional[Dict[str, Any]]:
-    """GET a ConfigMap, returning None if it doesn't exist (404)."""
-    base = f'/api/v1/namespaces/{namespace}/configmaps/{name}'
-    status, resp = _k8s_api_request('GET', base)
-    if status == 404:
+    No Kubernetes API call -- a file read, which a zero-permission pod can
+    still do.
+    """
+    try:
+        with open(_EPHEMERAL_RANGE_PATH, encoding='utf-8') as f:
+            lo, hi = (int(x) for x in f.read().split()[:2])
+        return lo, hi
+    except Exception:  # pylint: disable=broad-except
+        # Non-Linux, a masked /proc, or an unexpected format. The caller is
+        # already reporting a failure; losing the hint must not replace it.
         return None
-    if status >= 300:
-        raise RuntimeError(
-            _format_api_error('GET', name, namespace, status, resp))
-    return json.loads(resp)
 
 
-def _publish_configmap(name: str, namespace: str, ports: Dict[str,
-                                                              int]) -> None:
-    """Create or update a ConfigMap with the head's chosen ports.
+def _clash_hint(port: int) -> str:
+    """Why this clash happened, in the terms that decide what to do next.
 
-    Idempotent: on 409 we GET, lift the resourceVersion, and PUT — which
-    also re-points the ownerReference at the current head pod (so a
-    ConfigMap left by a prior, GC-lagging head gets re-adopted).
+    Three causes share one symptom, and they need different responses:
+    relaunch, reconfigure the range, or go inspect the node. Without this
+    the message lists all three and the reader has to guess.
     """
-    # SKYPILOT_POD_NAME / SKYPILOT_POD_UID come from the K8s downward
-    # API — $HOSTNAME is the host node's name under hostNetwork.
-    owner_pod_name = os.environ['SKYPILOT_POD_NAME']
-    owner_pod_uid = os.environ['SKYPILOT_POD_UID']
-    body = _build_configmap_body(name, namespace, ports, owner_pod_name,
-                                 owner_pod_uid)
-    base = f'/api/v1/namespaces/{namespace}/configmaps'
-    status, resp = _k8s_api_request('POST', base, body)
-    if status == 409:
-        existing = _get_configmap(name, namespace)
-        body['metadata']['resourceVersion'] = (
-            existing['metadata']['resourceVersion'])
-        status, resp = _k8s_api_request('PUT', f'{base}/{name}', body)
-    if status >= 300:
-        raise RuntimeError(
-            _format_api_error('publish', name, namespace, status, resp))
+    rng = _node_ephemeral_range()
+    if rng is None:
+        return ''
+    lo, hi = rng
+    if lo <= port <= hi:
+        return (f'\nThis node\'s ephemeral port range is {lo}-{hi}, which '
+                f'covers port {port}: the kernel hands ports from that range '
+                'to outbound connections, so clashes here are a matter of how '
+                'busy the node is rather than a fixed obstacle. Relaunching '
+                'still helps, but a range outside the ephemeral pool avoids '
+                'the contention entirely.')
+    return (f'\nThis node\'s ephemeral port range is {lo}-{hi}, which does '
+            f'NOT cover port {port}, so something on the node is holding it '
+            'rather than the kernel having handed it out.')
 
 
-def _merge_sshd_port(name: str, namespace: str, podname: str,
-                     port: int) -> None:
-    """Merge ``sshd_<podname>: <port>`` into an existing ConfigMap.
+def _verify_free(ports: Dict[str, int]) -> List[socket.socket]:
+    """Bind every assigned port, proving it is free.
 
-    Workers call this after the head has published the ConfigMap so the
-    SkyPilot client can read every pod's sshd port from one place.
-    Retries on 409 (resourceVersion went stale — typically another
-    worker won the merge race) up to a small bound.
+    Returns the held sockets; the caller keeps them alive until just before
+    ``ray start`` and sshd rebind the same ports.
     """
-    base = f'/api/v1/namespaces/{namespace}/configmaps/{name}'
-    key = f'{SSHD_KEY_PREFIX}{podname}'
-    last_err: Optional[str] = None
-    for attempt in range(_MERGE_RETRY_LIMIT):
-        existing = _get_configmap(name, namespace)
-        data = dict(existing.get('data') or {})
-        data[key] = str(port)
-        existing['data'] = data
-        status, resp = _k8s_api_request('PUT', base, existing)
-        if status < 300:
-            return
-        last_err = _format_api_error('PUT', name, namespace, status, resp)
-        if status != 409:
-            break
-        # Lost the resourceVersion race (typically to another worker).
-        # Back off with full jitter before re-reading so a many-node
-        # cluster's workers don't keep colliding in lockstep.
-        if attempt < _MERGE_RETRY_LIMIT - 1:
-            ceiling = min(_MERGE_RETRY_MAX_DELAY_S,
-                          _MERGE_RETRY_BASE_DELAY_S * 2**attempt)
-            time.sleep(random.uniform(0, ceiling))
-    raise RuntimeError(
-        f'Failed to merge {key} into ConfigMap {namespace}/{name} after '
-        f'{_MERGE_RETRY_LIMIT} attempts: {last_err}')
-
-
-def _read_configmap_with_retry(name: str, namespace: str) -> Dict[str, str]:
-    """Poll a ConfigMap until it exists, returning its ``data`` field.
-
-    Doubles as the "head is up" sync barrier for workers — the same
-    role ``nc -z`` plays for non-hostNetwork bootstraps.
-    """
-    base = f'/api/v1/namespaces/{namespace}/configmaps/{name}'
-    deadline = time.monotonic() + _CONFIGMAP_POLL_TIMEOUT_S
-    while time.monotonic() < deadline:
-        status, resp = _k8s_api_request('GET', base)
-        if status == 200:
-            body = json.loads(resp)
-            return body.get('data', {})
-        if status != 404:
+    held: List[socket.socket] = []
+    for name, port in sorted(ports.items(), key=lambda kv: kv[1]):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.bind(('0.0.0.0', port))
+        except OSError as e:
+            for held_sock in held:
+                held_sock.close()
+            sock.close()
             raise RuntimeError(
-                f'Unexpected status {status} reading ConfigMap '
-                f'{namespace}/{name}: {resp.decode("utf-8", "replace")}')
-        time.sleep(_CONFIGMAP_POLL_INTERVAL_S)
-    raise TimeoutError(
-        f'ConfigMap {namespace}/{name} did not appear within '
-        f'{_CONFIGMAP_POLL_TIMEOUT_S}s — is the head pod healthy?')
+                f'Assigned host port {port} ({name}) is already in use on '
+                f'this node: {e}.\n'
+                'Launching again assigns a different block and usually '
+                'succeeds -- blocks are chosen at random, so a clash is '
+                'rarely hit twice.\n'
+                'If it keeps failing, something on this node holds a port in '
+                'the range SkyPilot reserves for host-networked pods. The '
+                'Kubernetes scheduler only accounts for ports a pod '
+                '*declares*, so such a holder is invisible to it: a node '
+                'daemon, a SkyPilot pod created before host ports moved into '
+                'the pod spec, or an overlap with the cluster\'s NodePort '
+                'range.' + _clash_hint(port)) from e
+        held.append(sock)
+    return held
 
 
 def _wait_head_gcs_tcp(host: str, port: int) -> None:
@@ -359,78 +204,24 @@ def _wait_head_gcs_tcp(host: str, port: int) -> None:
         f'{_HEAD_GCS_TCP_WAIT_TIMEOUT_S}s (last error: {last_err}).')
 
 
-def _existing_head_ports_to_reuse(name: str,
-                                  namespace: str) -> Optional[Dict[str, int]]:
-    """Ports to reuse if this head pod's ConfigMap already exists.
-
-    A *container* restart (crash, OOM, ``ray stop``-then-up) keeps the
-    Pod object — and its UID — so the ownerReference'd ConfigMap is NOT
-    garbage-collected; only deleting the Pod object triggers GC. After a
-    container restart the head must reuse the already-published ports:
-    workers and the SkyPilot SSH client are still dialing the old
-    GCS/sshd ports, so re-probing would strand them on a port nothing
-    rebinds.
-
-    Reuse only when the ConfigMap is owned by *this* pod UID. A
-    different UID means a stale ConfigMap from a prior, now-deleted head
-    whose GC simply hasn't caught up yet; its ports may already be taken
-    on this fresh node, so probe afresh (the subsequent publish, via its
-    409 PUT, re-points the ownerReference at the live pod).
-    """
-    existing = _try_get_configmap(name, namespace)
-    if existing is None:
-        return None
-    owner_uid = os.environ['SKYPILOT_POD_UID']
-    owners = existing.get('metadata', {}).get('ownerReferences') or []
-    if not any(o.get('uid') == owner_uid for o in owners):
-        return None
-    podname = os.environ['SKYPILOT_POD_NAME']
-    return _head_ports_from_configmap_data(existing.get('data') or {}, podname)
+def _run_head() -> None:
+    held = _verify_free(_assigned_ports(HEAD_PORT_NAMES))
+    del held  # release just before ray start takes them
 
 
-def _run_head(env_file: str, configmap_name: str,
-              configmap_namespace: str) -> None:
-    reused = _existing_head_ports_to_reuse(configmap_name, configmap_namespace)
-    if reused is not None:
-        # This head pod's container restarted; keep the published ports
-        # so in-flight workers / SSH stay valid. Nothing to hold — ray
-        # rebinds the same ports the dead process vacated.
-        held: List[socket.socket] = []
-        ports = reused
-    else:
-        held, ports = _probe_ports(_HEAD_PORT_NAMES)
-    # Publish before writing the env file so a failed publish prevents
-    # ray start from binding ports the workers will never discover. The
-    # publish is idempotent (409 → PUT), so it harmlessly re-points the
-    # ownerReference at the current pod on the reuse path too.
-    _publish_configmap(configmap_name, configmap_namespace, ports)
-    _write_env_file(ports, env_file)
-    del held  # release the held sockets just before this process exits
-
-
-def _run_worker(env_file: str, configmap_name: str,
-                configmap_namespace: str) -> None:
-    head_data = _read_configmap_with_retry(configmap_name, configmap_namespace)
-    head_gcs = head_data.get('gcs')
-    if head_gcs is None:
-        raise RuntimeError(
-            f'ConfigMap {configmap_namespace}/{configmap_name} is missing '
-            f'the "gcs" key. Data: {head_data}')
-    held, ports = _probe_ports(_WORKER_PORT_NAMES)
-    # Publish before releasing the held sockets so a failed merge
-    # aborts the bootstrap before sshd binds a port nothing can find.
-    podname = os.environ['SKYPILOT_POD_NAME']
-    _merge_sshd_port(configmap_name, configmap_namespace, podname,
-                     ports['sshd'])
-    ports['gcs'] = int(head_gcs)
-    _write_env_file(ports, env_file)
+def _run_worker() -> None:
+    ports = _assigned_ports(WORKER_PORT_NAMES)
+    held = _verify_free(ports)
+    # The head's GCS port, assigned by the server: head and workers are
+    # created concurrently, so a worker cannot read it off the head pod.
+    head_gcs = int(os.environ[_ENV_VAR_FOR_PORT['gcs']])
     del held
     # The pod template points SKYPILOT_RAY_HEAD_IP at the head's headless
     # Service DNS. Same-cluster pods never share a K8s node (per-cluster
     # podAntiAffinity), so that resolves to the head's routable host IP.
     head_ip = os.environ.get('SKYPILOT_RAY_HEAD_IP')
     if head_ip:
-        _wait_head_gcs_tcp(head_ip, int(head_gcs))
+        _wait_head_gcs_tcp(head_ip, head_gcs)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -438,17 +229,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     # before the script is inlined into the pod bootstrap.
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', choices=['head', 'worker'], required=True)
-    parser.add_argument('--env-file',
-                        required=True,
-                        help='Path to write `export VAR=value` lines to.')
-    parser.add_argument('--configmap-name', required=True)
-    parser.add_argument('--configmap-namespace', required=True)
     args = parser.parse_args(argv)
     if args.mode == 'head':
-        _run_head(args.env_file, args.configmap_name, args.configmap_namespace)
+        _run_head()
     else:
-        _run_worker(args.env_file, args.configmap_name,
-                    args.configmap_namespace)
+        _run_worker()
     return 0
 
 
