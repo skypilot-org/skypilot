@@ -185,7 +185,8 @@ def launch(
             even from inside a job group, or a job id / unique running job
             name to attach explicitly.
         depends_on: Managed job IDs this job waits for. It starts once all of
-            them succeed, and is cancelled if any of them ends otherwise.
+            them succeed, and is cancelled if any of them ends otherwise. The
+            launch fails if one of them has already ended without succeeding.
             Requires an API server that runs managed jobs in consolidation
             mode.
         _need_confirmation: (Internal only) Whether to show a confirmation

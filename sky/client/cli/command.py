@@ -5874,7 +5874,8 @@ def _parse_depends_on(value: Optional[str]) -> Optional[List[int]]:
               required=False,
               help=('Comma-separated managed job IDs to wait for. The job '
                     'starts once all of them succeed, and is cancelled if any '
-                    'of them ends otherwise.'))
+                    'of them ends otherwise. The launch fails if one of them '
+                    'has already ended without succeeding.'))
 @click.option('--git-url', type=str, help='Git repository URL.')
 @click.option('--git-ref',
               type=str,

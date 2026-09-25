@@ -917,7 +917,8 @@ def launch(
           attachments are unsupported (non-consolidation mode): explicit
           errors, automatic launches top-level.
         depends_on: Managed jobs this job waits for. It starts once all of
-          them succeed, and is cancelled if any of them ends otherwise.
+          them succeed, and is cancelled if any of them ends otherwise. The
+          launch fails if one of them has already ended without succeeding.
 
     Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid

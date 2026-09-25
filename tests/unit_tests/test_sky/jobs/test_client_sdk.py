@@ -162,6 +162,27 @@ async def test_async_queue_passes_version_through():
         'request-id', jobs_sdk_async.sdk_async.DEFAULT_STREAM_CONFIG)
 
 
+@pytest.mark.asyncio
+async def test_async_launch_forwards_depends_on():
+
+    async def mock_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    with mock.patch('sky.jobs.client.sdk_async.asyncio.to_thread',
+                    side_effect=mock_to_thread), \
+         mock.patch.object(jobs_sdk, 'launch',
+                           return_value='request-id') as mock_launch, \
+         mock.patch.object(jobs_sdk_async.sdk_async,
+                           'get',
+                           new=mock.AsyncMock(return_value='launch-result')):
+        result = await jobs_sdk_async.launch('task',
+                                             stream_logs=None,
+                                             depends_on=[12, 13])
+
+    assert result == 'launch-result'
+    assert mock_launch.call_args.kwargs['depends_on'] == [12, 13]
+
+
 class TestResolveJobGroup:
     """`launch(job_group=...)` → _JobGroupAttachment."""
 
