@@ -3767,8 +3767,16 @@ class ControllerManager:
 
         logger.info(f'Starting job {job_id} with log_file={log_file}')
 
-        async with self._job_tasks_lock:
-            self.starting.add(job_id)
+        # Only a job that will launch a cluster holds a launch slot: the
+        # `starting` set is bounded by LAUNCHES_PER_WORKER to cap concurrent
+        # sky.launch calls, and a pool job never launches - it waits for a
+        # ready pool worker, potentially for hours. Counting pool jobs here
+        # let one large pool batch pin every controller's slots and starve
+        # every other managed job of a controller (they stayed PENDING while
+        # the cluster sat idle).
+        if pool is None:
+            async with self._job_tasks_lock:
+                self.starting.add(job_id)
         await create_background_task(self.run_job_loop(job_id, log_file, pool))
 
         logger.info(f'Job {job_id} started successfully')
