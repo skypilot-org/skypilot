@@ -3850,16 +3850,18 @@ def test_managed_jobs_depends_on(generic_cloud: str):
     up_id_file = f'/tmp/{name}-up-id'
     launch = (f'sky jobs launch -y --infra {generic_cloud} '
               f'{smoke_tests_utils.LOW_RESOURCE_ARG}')
+    # Debug logs from loading the config reach stdout before -o takes effect.
+    launch_for_id = f'SKYPILOT_DEBUG=0 {launch}'
     test = smoke_tests_utils.Test(
         'managed_jobs_depends_on',
         [
-            (f'up_id=$({launch} -n {name}-up -o id "sleep 120") && '
-             f'echo "$up_id" | grep -Eq "^[0-9]+$" && '
+            (f'up_id=$({launch_for_id} -n {name}-up -o id "sleep 120"); '
+             f'echo "up_id=[$up_id]"; [[ "$up_id" =~ ^[0-9]+$ ]] && '
              f'echo "$up_id" > {up_id_file} && '
              f'{launch} -n {name}-down -d --depends-on "$up_id" '
              f'"echo dependency succeeded"'),
-            (f'bad_id=$({launch} -n {name}-bad -o id "exit 1") && '
-             f'echo "$bad_id" | grep -Eq "^[0-9]+$" && '
+            (f'bad_id=$({launch_for_id} -n {name}-bad -o id "exit 1"); '
+             f'echo "bad_id=[$bad_id]"; [[ "$bad_id" =~ ^[0-9]+$ ]] && '
              f'{launch} -n {name}-skip -d --depends-on "$bad_id" '
              f'"echo should not run"'),
             smoke_tests_utils.
