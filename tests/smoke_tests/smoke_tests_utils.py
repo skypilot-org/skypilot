@@ -16,6 +16,7 @@ from types import MethodType
 from typing import (Any, BinaryIO, Callable, Dict, Generator, List, NamedTuple,
                     Optional, Sequence, Set, Tuple, Union)
 from unittest.mock import patch
+import urllib.parse
 import uuid
 
 import colorama
@@ -1444,6 +1445,33 @@ def get_api_server_url() -> str:
     return server_common.get_server_url()
 
 
+def endpoint_url_has_credentials() -> bool:
+    """Whether the API server endpoint URL embeds basic-auth credentials.
+
+    TEMPORARY. This exists to work around a known gap in OSS auth and every
+    caller must be removed once that gap is fixed.
+
+    A URL of the form ``https://user:pw@host`` is the documented login for the
+    helm chart's basic-auth ingress. A job launched with ``api_server_access``
+    gets that URL copied into its pod next to a service-account token. When
+    the pod's client sends a request, ``requests`` builds a Basic header from
+    the URL credentials and overwrites the ``Authorization: Bearer`` header
+    the token was set on (``PreparedRequest.prepare_auth``; reproduced on
+    requests 2.34.2). The ingress validates Basic and strips the header, so
+    the API server gets no credential and records the job under the pod's
+    self-generated user id instead of the launching user's.
+
+    A test that expects the launching user to see a job launched from a task
+    cannot pass under this condition. Callers relax to all-users queries when
+    this returns True and stay strict everywhere else. Returns False when the
+    endpoint URL cannot be parsed.
+    """
+    try:
+        return urllib.parse.urlsplit(get_api_server_url()).username is not None
+    except ValueError:
+        return False
+
+
 def get_metrics_server_url() -> str:
     """Get the metrics server URL in the test environment."""
     if is_remote_server_test():
@@ -1684,8 +1712,12 @@ def write_blob(file: BinaryIO, total_size: int):
 def wait_for_managed_job_status_sdk(job_name: Optional[str] = None,
                                     target_statuses: Optional[list] = None,
                                     timeout: int = 360,
-                                    job_id: Optional[int] = None) -> dict:
+                                    job_id: Optional[int] = None,
+                                    all_users: bool = False) -> dict:
     """Wait for a managed job to reach one of the target statuses.
+
+    ``all_users`` widens the query past the calling user. Only pass it when
+    the job under test is known to belong to someone else.
 
     Identify the job by ``job_id`` where possible: job names are not unique,
     so on a long-lived API server a name-based wait can match a terminal
@@ -1702,6 +1734,7 @@ def wait_for_managed_job_status_sdk(job_name: Optional[str] = None,
     while time.time() - start_time < timeout:
         jobs_list = sky.get(
             sky.jobs.queue_v2(refresh=False,
+                              all_users=all_users,
                               job_ids=None if job_id is None else [job_id],
                               fields=['job_id', 'job_name', 'status']))[0]
         if job_id is None:
