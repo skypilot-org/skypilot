@@ -302,6 +302,12 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
                             # that update_managed_jobs_statuses won't think they
                             # have failed.
                             state.reset_jobs_for_recovery()
+                            # Every WAITING transition is followed by a marker
+                            # touch (see the module docstring). Moot if the
+                            # stop above really killed every controller -- a
+                            # fresh controller queries before its first wait
+                            # -- but a survivor wakes on it instead of its poll.
+                            managed_job_utils.touch_waiting_jobs_marker()
                         except Exception as e:  # pylint: disable=broad-except
                             logger.error(f'Failed to stop the api server: {e}')
                             pass

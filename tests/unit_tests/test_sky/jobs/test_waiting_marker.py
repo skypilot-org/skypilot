@@ -311,3 +311,54 @@ class TestSharedFilesystemRobustness:
         monkeypatch.setattr(os, 'stat', guarded_stat)
         assert jobs_utils.get_waiting_jobs_marker_mtime() is not None
         assert calls == ['fstat']
+
+
+class TestReviewFindings:
+    """Regression tests for review findings on the marker wake-up."""
+
+    def test_mtime_read_survives_fstat_failure_and_closes_fd(
+            self, signal_dir, monkeypatch):
+        # On NFS, open() can succeed and fstat() then fail (e.g. ESTALE).
+        # That must read as "no signal" (None), not escape into monitor_loop
+        # and take the controller down; and the fd must not leak.
+        jobs_utils.touch_waiting_jobs_marker()
+        closed = []
+        real_close = os.close
+
+        def spy_close(fd):
+            closed.append(fd)
+            real_close(fd)
+
+        def failing_fstat(fd):
+            raise OSError(116, 'Stale file handle')
+
+        monkeypatch.setattr(os, 'fstat', failing_fstat)
+        monkeypatch.setattr(os, 'close', spy_close)
+        assert jobs_utils.get_waiting_jobs_marker_mtime() is None
+        assert len(closed) == 1
+
+    def test_wheel_update_requeue_touches_marker(self, signal_dir, monkeypatch,
+                                                 tmp_path):
+        # The wheel-update branch of maybe_start_controllers resets every
+        # live job to WAITING; the scheduler contract says every WAITING
+        # transition is followed by a marker touch.
+        cur = tmp_path / 'hash'
+        cur.write_text('new')
+        (tmp_path / 'hash.old').write_text('old')
+        monkeypatch.setattr(scheduler, 'CURRENT_HASH', str(cur))
+        monkeypatch.setattr(scheduler, 'JOB_CONTROLLER_PID_LOCK',
+                            str(tmp_path / 'pid.lock'))
+        monkeypatch.setattr(jobs_utils, 'is_consolidation_mode', lambda: False)
+        order = MagicMock()
+        monkeypatch.setattr(scheduler.sdk, 'api_stop', order.api_stop)
+        monkeypatch.setattr(managed_job_state, 'reset_jobs_for_recovery',
+                            order.reset)
+        monkeypatch.setattr(jobs_utils, 'touch_waiting_jobs_marker',
+                            order.touch)
+        # Stop before any controller is actually spawned.
+        monkeypatch.setattr(scheduler, 'get_alive_controllers', lambda: None)
+
+        scheduler.maybe_start_controllers(from_scheduler=True)
+
+        names = [c[0] for c in order.mock_calls]
+        assert names == ['api_stop', 'reset', 'touch'], names

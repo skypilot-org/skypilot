@@ -4390,6 +4390,12 @@ def touch_waiting_jobs_marker() -> None:
 
     Best effort. The controllers' periodic DB poll is the fallback, so a
     failure here must never fail the submission.
+
+    The fast path reaches controllers on another API server replica only
+    when the signals directory is shared between replicas (the same
+    requirement the cancel signal files in this directory already have).
+    Where it is per-pod, submissions from a non-leader replica are still
+    claimed by the leader's fallback poll, i.e. the pre-existing behavior.
     """
     path = _waiting_jobs_marker_path()
     try:
@@ -4441,6 +4447,11 @@ def get_waiting_jobs_marker_mtime() -> Optional[int]:
 
     Blocking (one or two round trips on NFS); call it via asyncio.to_thread
     from an event loop.
+
+    Any OSError, at open or at fstat (e.g. ESTALE from an NFS client whose
+    handle went stale between the two), reads as "no signal": the caller
+    keeps its periodic DB poll, so a flaky mount can only delay a wake-up,
+    never take the controller down.
     """
     try:
         fd = os.open(_waiting_jobs_marker_path(), os.O_RDONLY)
@@ -4448,8 +4459,13 @@ def get_waiting_jobs_marker_mtime() -> Optional[int]:
         return None
     try:
         return os.fstat(fd).st_mtime_ns
+    except OSError:
+        return None
     finally:
-        os.close(fd)
+        try:
+            os.close(fd)
+        except OSError:
+            pass
 
 
 def parse_job_cancel_file(content: str) -> Tuple[bool, Optional[int]]:
