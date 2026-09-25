@@ -28,7 +28,6 @@ import concurrent.futures
 import contextlib
 import datetime
 import fnmatch
-import functools
 import io
 import json
 import os
@@ -367,45 +366,42 @@ def _async_call_or_wait(request_id: server_common.RequestId[T],
             f'{colorama.Style.RESET_ALL}\n')
 
 
+_JOB_IDS_OUTPUT_KEY = 'job_ids_output'
+
+
 @contextlib.contextmanager
-def _stdout_to_stderr() -> Generator[None, None, None]:
-    """Send everything written to stdout to stderr while the block runs.
+def _stdout_to_stderr() -> Generator[typing.TextIO, None, None]:
+    """Send everything written to stdout to stderr until the block exits.
 
     The stdout file descriptor is redirected too, because logging handlers
-    hold the original sys.stdout object.
+    hold the original sys.stdout object. Yields a stream to the original
+    stdout.
     """
     streams = [s for s in (sys.stdout, sys.__stdout__) if s is not None]
     for stream in streams:
         stream.flush()
     saved_stdout_fd = os.dup(1)
+    original_stdout = os.fdopen(os.dup(saved_stdout_fd), 'w')
     try:
         os.dup2(2, 1)
         with contextlib.redirect_stdout(sys.stderr):
-            yield
+            yield original_stdout
     finally:
         for stream in streams:
             stream.flush()
+        original_stdout.close()
         os.dup2(saved_stdout_fd, 1)
         os.close(saved_stdout_fd)
 
 
-def _print_job_ids_for_output(func: Callable[..., Any]) -> Callable[..., Any]:
-    """With --output, run the command with stdout sent to stderr, then print
-    only the job IDs it returns."""
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        output_format = kwargs.get('output_format')
-        if output_format is None:
-            return func(*args, **kwargs)
-        with _stdout_to_stderr():
-            job_ids = func(*args, **kwargs)
-        if output_format.lower() == 'json':
-            click.echo(json.dumps({'job_ids': job_ids}))
-        else:
-            click.echo('\n'.join(str(job_id) for job_id in job_ids))
-
-    return wrapper
+def _route_stdout_for_output(ctx: click.Context, param: click.Parameter,
+                             value: Optional[str]) -> Optional[str]:
+    """Eager --output callback: send stdout to stderr before the other
+    options' callbacks run, keeping a stream to the original stdout."""
+    del param  # Unused.
+    if value is not None:
+        ctx.meta[_JOB_IDS_OUTPUT_KEY] = ctx.with_resource(_stdout_to_stderr())
+    return value
 
 
 def _merge_cli_and_file_vars(
@@ -5916,13 +5912,14 @@ def jobs():
               'output_format',
               type=click.Choice(['id', 'json'], case_sensitive=False),
               default=None,
+              is_eager=True,
+              callback=_route_stdout_for_output,
               help=('Print only the submitted job IDs, for scripts: `id` '
                     'prints one per line, `json` prints {"job_ids": [...]}. '
                     'Everything else goes to stderr. Implies --detach-run.'))
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
-@_print_job_ids_for_output
 def jobs_launch(
     entrypoint: Tuple[str, ...],
     name: Optional[str],
@@ -6097,7 +6094,12 @@ def jobs_launch(
     job_ids = [job_id_handle[0]] if isinstance(job_id_handle[0],
                                                int) else job_id_handle[0]
     if output_format is not None:
-        return job_ids
+        output = click.get_current_context().meta[_JOB_IDS_OUTPUT_KEY]
+        if output_format == 'json':
+            output.write(json.dumps({'job_ids': job_ids}) + '\n')
+        else:
+            output.write(''.join(f'{job_id}\n' for job_id in job_ids))
+        return
 
     if len(job_ids) == 1:
         job_id = job_ids[0]
