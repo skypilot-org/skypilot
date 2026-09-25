@@ -61,6 +61,18 @@ class RuntimeCursor:
 
 
 @dataclasses.dataclass(frozen=True)
+class RuntimeAllocation:
+    """How users identify a runtime allocation in its scheduler."""
+
+    # Scheduler kind, e.g. 'slurm'.
+    scheduler: str
+    # The scheduler instance that owns the allocation, e.g. a Slurm cluster.
+    location: str
+    # The allocation's id in that scheduler.
+    job_id: str
+
+
+@dataclasses.dataclass(frozen=True)
 class RuntimeObservation:
     """An authoritative observation of one runtime allocation.
 
@@ -81,6 +93,9 @@ class RuntimeObservation:
     recovery_reasons: Optional[Dict[int, str]] = None
     # Node names of the allocation, head first; None when not yet placed.
     nodes: Optional[List[str]] = None
+    # The allocation as its scheduler names it; the lifecycle layer keeps a
+    # history of these per task.
+    allocation: Optional[RuntimeAllocation] = None
 
     @property
     def phase(self) -> RuntimePhase:
