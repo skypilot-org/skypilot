@@ -25,6 +25,7 @@ each other.
 """
 import collections
 import concurrent.futures
+import contextlib
 import datetime
 import fnmatch
 import io
@@ -363,6 +364,44 @@ def _async_call_or_wait(request_id: server_common.RequestId[T],
             'the request, run: '
             f'{ux_utils.BOLD}sky api cancel {short_request_id}'
             f'{colorama.Style.RESET_ALL}\n')
+
+
+_JOB_IDS_OUTPUT_KEY = 'job_ids_output'
+
+
+@contextlib.contextmanager
+def _stdout_to_stderr() -> Generator[typing.TextIO, None, None]:
+    """Send everything written to stdout to stderr until the block exits.
+
+    The stdout file descriptor is redirected too, because logging handlers
+    hold the original sys.stdout object. Yields a stream to the original
+    stdout.
+    """
+    streams = [s for s in (sys.stdout, sys.__stdout__) if s is not None]
+    for stream in streams:
+        stream.flush()
+    saved_stdout_fd = os.dup(1)
+    original_stdout = os.fdopen(os.dup(saved_stdout_fd), 'w')
+    try:
+        os.dup2(2, 1)
+        with contextlib.redirect_stdout(sys.stderr):
+            yield original_stdout
+    finally:
+        for stream in streams:
+            stream.flush()
+        original_stdout.close()
+        os.dup2(saved_stdout_fd, 1)
+        os.close(saved_stdout_fd)
+
+
+def _route_stdout_for_output(ctx: click.Context, param: click.Parameter,
+                             value: Optional[str]) -> Optional[str]:
+    """Eager --output callback: send stdout to stderr before the other
+    options' callbacks run, keeping a stream to the original stdout."""
+    del param  # Unused.
+    if value is not None:
+        ctx.meta[_JOB_IDS_OUTPUT_KEY] = ctx.with_resource(_stdout_to_stderr())
+    return value
 
 
 def _merge_cli_and_file_vars(
@@ -5868,6 +5907,16 @@ def jobs():
               callback=flags.apply_workspace_option_callback,
               help=('Workspace to submit the managed job into. Shorthand for '
                     '`--config active_workspace=<name>`.'))
+@click.option('--output',
+              '-o',
+              'output_format',
+              type=click.Choice(['id', 'json'], case_sensitive=False),
+              default=None,
+              is_eager=True,
+              callback=_route_stdout_for_output,
+              help=('Print only the submitted job IDs, for scripts: `id` '
+                    'prints one per line, `json` prints {"job_ids": [...]}. '
+                    'Everything else goes to stderr. Implies --detach-run.'))
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
@@ -5908,6 +5957,7 @@ def jobs_launch(
     git_ref: Optional[str] = None,
     job_group: Optional[str] = None,
     no_job_group: bool = False,
+    output_format: Optional[str] = None,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -5922,10 +5972,17 @@ def jobs_launch(
       sky jobs launch task.yaml
 
       sky jobs launch 'echo hello!'
+
+      # Print only the job ID, e.g. to pass it to another command.
+      JOB_ID=$(sky jobs launch -y -o id task.yaml)
     """
     if num_jobs is not None and num_jobs < 1:
         raise click.UsageError(
             f'--num-jobs must be a positive integer. Got: {num_jobs}.')
+    if output_format is not None and async_call:
+        raise click.UsageError(
+            '--output cannot be used with --async, which returns before the '
+            'job IDs exist.')
 
     if cluster is not None:
         if name is not None and name != cluster:
@@ -6036,6 +6093,13 @@ def jobs_launch(
 
     job_ids = [job_id_handle[0]] if isinstance(job_id_handle[0],
                                                int) else job_id_handle[0]
+    if output_format is not None:
+        output = click.get_current_context().meta[_JOB_IDS_OUTPUT_KEY]
+        if output_format == 'json':
+            output.write(json.dumps({'job_ids': job_ids}) + '\n')
+        else:
+            output.write(''.join(f'{job_id}\n' for job_id in job_ids))
+        return
 
     if len(job_ids) == 1:
         job_id = job_ids[0]
