@@ -159,10 +159,42 @@ class _NebiusDeprecationFilter(logging.Filter):
         return f'{os.sep}nebius{os.sep}' not in record.pathname
 
 
+class _NebiusGrpcPollerFilter(logging.Filter):
+    """Downgrades grpc.aio poller errors logged to the 'asyncio' logger.
+
+    The nebius SDK's grpc.aio channels raise exceptions in event-loop
+    callbacks (PollerCompletionQueue._handle_events, e.g.
+    'BlockingIOError: [Errno 11] Resource temporarily unavailable') when
+    the SDK's pollers race with fd availability. asyncio's default
+    exception handler logs them at ERROR to the 'asyncio' logger, which
+    propagates to the root logger and pollutes user-facing CLI output.
+    The exceptions are internal to grpc's poller and are not actionable;
+    real API errors are still raised to callers through sync_call().
+
+    The loop-scoped handler installed by _get_event_loop() only covers
+    the dedicated loop used by sync_call(), but the SDK also runs
+    pollers on its own internal loops, whose records we can only
+    intercept here. The records are re-logged at debug level instead of
+    being dropped, so SKYPILOT_DEBUG=1 still shows them for diagnostics.
+
+    Only records mentioning the grpc poller are downgraded, so unrelated
+    asyncio errors (from any library) keep their original level.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if 'PollerCompletionQueue' not in record.getMessage():
+            return True
+        logger.debug('nebius SDK grpc.aio poller: %s',
+                     record.getMessage(),
+                     exc_info=record.exc_info)
+        return False
+
+
 def _set_nebius_loggers() -> None:
     # https://github.com/grpc/grpc/issues/37642 to avoid spam in console
     os.environ['GRPC_VERBOSITY'] = 'NONE'
     logging.getLogger('deprecation').addFilter(_NebiusDeprecationFilter())
+    logging.getLogger('asyncio').addFilter(_NebiusGrpcPollerFilter())
 
 
 nebius = common.LazyImport('nebius',

@@ -8,11 +8,13 @@ SkyPilot: Manage all your AI compute
   :align: center
   :alt: SkyPilot
   :class: no-scaled-link, only-dark, hero-logo
+  :target: https://skypilot.ai/
 .. image:: /_static/SkyPilot_wide_light.svg
   :width: 38%
   :align: center
   :alt: SkyPilot
   :class: no-scaled-link, only-light, hero-logo
+  :target: https://skypilot.ai/
 
 .. raw:: html
 

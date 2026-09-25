@@ -3708,6 +3708,47 @@ def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
 
 
 @metrics_lib.time_me
+def get_or_set_ssh_keys(user_hash: str, ssh_public_key: str,
+                        ssh_private_key: str) -> Tuple[str, str]:
+    """Insert a user's SSH key pair if absent, returning the live pair.
+
+    Returns the pair stored in the database after the call, which is the
+    pre-existing one whenever a row was already there -- callers must use the
+    return value rather than assume the pair they passed won. Unlike
+    `set_ssh_keys` this can never overwrite, so servers racing to bootstrap
+    the same user's key converge on a single pair.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
+            insert_func = sqlite.insert
+        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
+             ):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+        insert_stmnt = insert_func(ssh_key_table).values(
+            user_hash=user_hash,
+            ssh_public_key=ssh_public_key,
+            ssh_private_key=ssh_private_key)
+        session.execute(
+            insert_stmnt.on_conflict_do_nothing(
+                index_elements=[ssh_key_table.c.user_hash]))
+        session.commit()
+
+        # Read back rather than trusting the generated pair: on conflict the
+        # row keeps whatever the winner wrote, and that is the pair callers
+        # must use.
+        row = session.query(ssh_key_table).filter_by(
+            user_hash=user_hash).first()
+    if row is None:
+        raise RuntimeError(f'SSH keys for user {user_hash!r} are missing '
+                           'right after inserting them; they were '
+                           'concurrently deleted.')
+    return row.ssh_public_key, row.ssh_private_key
+
+
+@metrics_lib.time_me
 def add_service_account_token(token_id: str,
                               token_name: str,
                               token_hash: str,

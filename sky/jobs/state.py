@@ -26,6 +26,8 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.dag import DagExecution
+from sky.jobs import runtime as managed_job_runtime
+from sky.provision import observation as provision_observation
 from sky.skylet import constants
 from sky.utils import asyncio_utils
 from sky.utils import common_utils
@@ -88,6 +90,22 @@ _MEASURABLE = 'created_at IS NOT NULL AND eligible_at IS NOT NULL'
 PENDING_TIMELINE_PREDICATE = f't_time_to_running IS NULL AND {_MEASURABLE}'
 NEVER_RAN_PREDICATE = (f't_controller_queue IS NULL AND start_at IS NULL AND '
                        f'{_MEASURABLE}')
+
+# A task the scheduler has claimed that has neither started nor finished. Used
+# three ways -- the partial index below, its migration, and the WHERE of the
+# stall scan in sky/jobs/stall.py -- so the query cannot drift from the index
+# that serves it even by editing one of them. The two above are shared by two
+# places each; this one closes the remaining gap.
+#
+# It holds in-flight claimed work only: a row leaves the moment it starts or
+# ends, so the index tracks what is outstanding rather than job history.
+CLAIMED_IN_FLIGHT_PREDICATE = ('submitted_at IS NOT NULL AND '
+                               'start_at IS NULL AND end_at IS NULL')
+
+# Claimed and not finished, whether or not it has started: what a controller
+# process is holding. Deliberately one predicate wider than the one above --
+# a running job still occupies its slot -- so it cannot share that index.
+CLAIMED_LIVE_PREDICATE = 'submitted_at IS NOT NULL AND end_at IS NULL'
 
 spot_table = sqlalchemy.Table(
     'spot',
@@ -256,6 +274,20 @@ spot_table = sqlalchemy.Table(
                      'end_at',
                      postgresql_where=sqlalchemy.text(NEVER_RAN_PREDICATE),
                      sqlite_where=sqlalchemy.text(NEVER_RAN_PREDICATE)),
+    # submitted_at is the indexed column so the stall scan's `<= cutoff` is a
+    # range scan and its ORDER BY submitted_at needs no sort.
+    sqlalchemy.Index(
+        'ix_spot_unattended',
+        'submitted_at',
+        postgresql_where=sqlalchemy.text(CLAIMED_IN_FLIGHT_PREDICATE),
+        sqlite_where=sqlalchemy.text(CLAIMED_IN_FLIGHT_PREDICATE)),
+    # Occupancy: how many jobs the controllers are holding. Counted on every
+    # refresh, and the predicate is wider than the one above, so without this
+    # the count is a sequential scan of every task ever run.
+    sqlalchemy.Index('ix_spot_claimed_live',
+                     'spot_job_id',
+                     postgresql_where=sqlalchemy.text(CLAIMED_LIVE_PREDICATE),
+                     sqlite_where=sqlalchemy.text(CLAIMED_LIVE_PREDICATE)),
 )
 
 job_info_table = sqlalchemy.Table(
@@ -484,6 +516,16 @@ def create_table(engine: sqlalchemy.engine.Engine):
 _db_manager = db_utils.DatabaseManager('spot_jobs', create_table)
 
 
+def get_engine() -> sqlalchemy.engine.Engine:
+    """The managed-jobs database engine.
+
+    For readers in this package that run their own SQL -- sky/jobs/stall.py
+    asks a question no accessor here answers -- so that they do not reach into
+    this module's manager and couple themselves to its internals.
+    """
+    return _db_manager.get_engine()
+
+
 async def _retry_session(operation):
     """Run `operation(session)` in a fresh async session with retry on
     transient DB errors. Use when a function has non-DB side effects
@@ -606,73 +648,87 @@ async def _retry_schedule_state_update(
 def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
     # WARNING: If you update these you may also need to update GetJobTable in
     # the skylet ManagedJobsServiceImpl.
+    #
+    # Read the present columns out of a plain dict rather than off the
+    # RowMapping. This function probes every column unconditionally, but a
+    # query that was given `fields` selects only a subset, and a RowMapping
+    # miss is not a cheap lookup: it goes through _key_fallback, which
+    # *constructs* a NoSuchColumnError before the default is returned. That
+    # is one exception object per absent column per row -- on a jobs table
+    # with tens of thousands of rows and a typical `fields` list, millions of
+    # them, and the dominant cost of the whole queue. dict(r) materializes
+    # only the columns the query actually selected, so the absent ones become
+    # ordinary dict misses. The two ambiguous columns below stay on the
+    # RowMapping: their Column keys are the only thing that disambiguates
+    # them, and there are just two of them per row.
+    m = dict(r)
     return {
-        '_job_id': r.get('job_id'),  # from spot table
-        '_task_name': r.get('job_name'),  # deprecated, from spot table
-        'resources': r.get('resources'),
-        'submitted_at': r.get('submitted_at'),
-        'status': r.get('status'),
-        'run_timestamp': r.get('run_timestamp'),
-        'start_at': r.get('start_at'),
-        'end_at': r.get('end_at'),
-        'last_recovered_at': r.get('last_recovered_at'),
-        'recovery_count': r.get('recovery_count'),
-        'job_duration': r.get('job_duration'),
-        'failure_reason': r.get('failure_reason'),
+        '_job_id': m.get('job_id'),  # from spot table
+        '_task_name': m.get('job_name'),  # deprecated, from spot table
+        'resources': m.get('resources'),
+        'submitted_at': m.get('submitted_at'),
+        'status': m.get('status'),
+        'run_timestamp': m.get('run_timestamp'),
+        'start_at': m.get('start_at'),
+        'end_at': m.get('end_at'),
+        'last_recovered_at': m.get('last_recovered_at'),
+        'recovery_count': m.get('recovery_count'),
+        'job_duration': m.get('job_duration'),
+        'failure_reason': m.get('failure_reason'),
         'job_id': r.get(spot_table.c.spot_job_id
                        ),  # ambiguous, use table.column
-        'task_id': r.get('task_id'),
-        'task_name': r.get('task_name'),
-        'specs': r.get('specs'),
-        'local_log_file': r.get('local_log_file'),
-        'metadata': r.get('metadata'),
-        'links': r.get('links'),  # SQLAlchemy JSON type, already parsed
+        'task_id': m.get('task_id'),
+        'task_name': m.get('task_name'),
+        'specs': m.get('specs'),
+        'local_log_file': m.get('local_log_file'),
+        'metadata': m.get('metadata'),
+        'links': m.get('links'),  # SQLAlchemy JSON type, already parsed
         # columns from job_info table (some may be None for legacy jobs)
         '_job_info_job_id': r.get(job_info_table.c.spot_job_id
                                  ),  # ambiguous, use table.column
-        'job_name': r.get('name'),  # from job_info table
-        'schedule_state': r.get('schedule_state'),
-        'controller_pid': r.get('controller_pid'),
-        'controller_pid_started_at': r.get('controller_pid_started_at'),
+        'job_name': m.get('name'),  # from job_info table
+        'schedule_state': m.get('schedule_state'),
+        'controller_pid': m.get('controller_pid'),
+        'controller_pid_started_at': m.get('controller_pid_started_at'),
         # the _path columns are for backwards compatibility, use the _content
         # columns instead
-        'dag_yaml_path': r.get('dag_yaml_path'),
-        'env_file_path': r.get('env_file_path'),
-        'dag_yaml_content': r.get('dag_yaml_content'),
-        'env_file_content': r.get('env_file_content'),
-        'config_file_content': r.get('config_file_content'),
-        'user_hash': r.get('user_hash'),
-        'workspace': r.get('workspace'),
-        'priority': r.get('priority'),
-        'priority_class': r.get('priority_class'),
-        'entrypoint': r.get('entrypoint'),
-        'original_user_yaml_path': r.get('original_user_yaml_path'),
-        'original_user_yaml_content': r.get('original_user_yaml_content'),
-        'pool': r.get('pool'),
-        'current_cluster_name': r.get('current_cluster_name'),
-        'job_id_on_pool_cluster': r.get('job_id_on_pool_cluster'),
-        'pool_hash': r.get('pool_hash'),
+        'dag_yaml_path': m.get('dag_yaml_path'),
+        'env_file_path': m.get('env_file_path'),
+        'dag_yaml_content': m.get('dag_yaml_content'),
+        'env_file_content': m.get('env_file_content'),
+        'config_file_content': m.get('config_file_content'),
+        'user_hash': m.get('user_hash'),
+        'workspace': m.get('workspace'),
+        'priority': m.get('priority'),
+        'priority_class': m.get('priority_class'),
+        'entrypoint': m.get('entrypoint'),
+        'original_user_yaml_path': m.get('original_user_yaml_path'),
+        'original_user_yaml_content': m.get('original_user_yaml_content'),
+        'pool': m.get('pool'),
+        'current_cluster_name': m.get('current_cluster_name'),
+        'job_id_on_pool_cluster': m.get('job_id_on_pool_cluster'),
+        'pool_hash': m.get('pool_hash'),
         # Whether this task is primary (True) or auxiliary (False) in a job
         # group. NULL for non-job-group jobs.
-        'is_primary_in_job_group': r.get('is_primary_in_job_group'),
+        'is_primary_in_job_group': m.get('is_primary_in_job_group'),
         # Execution mode: 'parallel' (job group) or 'serial' (pipeline/single)
-        'execution': r.get('execution'),
+        'execution': m.get('execution'),
         # Infrastructure columns for filtering/sorting
-        'cloud': r.get('cloud'),
-        'region': r.get('region'),
-        'zone': r.get('zone'),
+        'cloud': m.get('cloud'),
+        'region': m.get('region'),
+        'zone': m.get('zone'),
         # Batch progress columns
-        'is_batch': r.get('is_batch'),
-        'batch_total_batches': r.get('batch_total_batches'),
-        'batch_completed_batches': r.get('batch_completed_batches'),
-        'node_names': common_utils.get_display_node_names(r.get('node_names')),
+        'is_batch': m.get('is_batch'),
+        'batch_total_batches': m.get('batch_total_batches'),
+        'batch_completed_batches': m.get('batch_completed_batches'),
+        'node_names': common_utils.get_display_node_names(m.get('node_names')),
         # The job/task that launched this job, when launched from inside
         # another managed job. NULL for top-level jobs.
-        'root_job_id': r.get('root_job_id'),
-        'parent_job_id': r.get('parent_job_id'),
-        'parent_task_id': r.get('parent_task_id'),
-        'dynamic_task_index': r.get('dynamic_task_index'),
-        'dynamic_task_count': r.get('dynamic_task_count'),
+        'root_job_id': m.get('root_job_id'),
+        'parent_job_id': m.get('parent_job_id'),
+        'parent_task_id': m.get('parent_task_id'),
+        'dynamic_task_index': m.get('dynamic_task_index'),
+        'dynamic_task_count': m.get('dynamic_task_count'),
     }
 
 
@@ -1935,9 +1991,15 @@ def get_active_file_mounts_blob_ids() -> Set[str]:
     return {row[0] for row in rows if row[0] is not None}
 
 
-def get_managed_jobs_highest_priority() -> int:
-    """Get the highest priority of the managed jobs."""
-    engine = _db_manager.get_engine()
+def get_managed_jobs_highest_priority(
+        conn: Optional[sqlalchemy.engine.Connection] = None) -> int:
+    """Get the highest priority of the managed jobs.
+
+    `conn` runs the query on a connection the caller already owns, which is how
+    a caller with a statement budget keeps this inside it -- see
+    sky/jobs/stall.py, where an unbounded query on the metrics thread is the
+    thing the budget exists to prevent.
+    """
     query = sqlalchemy.select(sqlalchemy.func.max(
         job_info_table.c.priority)).where(
             sqlalchemy.and_(
@@ -1949,7 +2011,8 @@ def get_managed_jobs_highest_priority() -> int:
                 ]),
                 job_info_table.c.priority.is_not(None),
             ))
-    with orm.Session(engine) as session:
+    with orm.Session(
+            conn if conn is not None else _db_manager.get_engine()) as session:
         priority = session.execute(query).fetchone()
         return priority[0] if priority and priority[
             0] is not None else constants.MIN_PRIORITY
@@ -3899,6 +3962,373 @@ async def set_recovering_async(
     await callback_func('RECOVERING')
 
 
+@dataclasses.dataclass
+class _RuntimeObservationPlan:
+    values: Dict[str, Any]
+    events: List[Tuple[ManagedJobStatus, str]]
+    callbacks: List[str]
+    # Nodes to merge into the job's infra lineage, when placement changed.
+    placement: Optional[List[str]] = None
+
+
+def _plan_runtime_observation(
+    row: Dict[str, Any],
+    observation: managed_job_runtime.RuntimeObservation,
+    *,
+    provisioning: bool,
+    now: float,
+) -> Optional[_RuntimeObservationPlan]:
+    """Plan the task update for one runtime observation, or None to skip.
+
+    Restarts newer than the persisted cursor are recovery facts: they increment
+    recovery_count and add RECOVERING events in every phase. Status transitions
+    are decided separately, and only while monitoring, because the controller
+    owns status during launch.
+    """
+    restart_count = observation.restart_count
+    if restart_count < 0:
+        raise ValueError('Runtime restart count must be nonnegative')
+    if (row['end_at'] is not None or row['status'] not in [
+            status.value for status in ManagedJobStatus.processing_statuses()
+    ]):
+        return None
+    runtime_id = observation.runtime_id
+    metadata = json.loads(row['metadata'] or '{}')
+    cursor = metadata.get('runtime_recovery', {})
+    same_runtime = cursor.get('runtime_id') == runtime_id
+    if not same_runtime:
+        cursor = {}
+    observed = cursor.get('restarts', 0)
+    previous_user_restarts = cursor.get('user_restarts', 0)
+    user_delta = max(0, observation.user_restart_count - previous_user_restarts)
+    if restart_count < observed:
+        return None
+    delta = restart_count - observed
+    job_status = observation.job_status
+    running = job_status is not None and job_status.value == 'RUNNING'
+    # The cursor keeps the nodes of the last running observation, which is the
+    # placement recorded in the job's infra lineage.
+    placed = observation.phase == managed_job_runtime.RuntimePhase.RUNNING
+    nodes = (observation.nodes
+             if placed and observation.nodes else cursor.get('nodes'))
+    nodes_changed = nodes != cursor.get('nodes')
+    reasons = observation.recovery_reasons or {}
+    default_reason = observation.reason or (
+        'Runtime restarted during provisioning'
+        if provisioning else 'Runtime restarted the job')
+    values: Dict[str, Any] = {}
+    events: List[Tuple[ManagedJobStatus, str]] = []
+    callbacks: List[str] = []
+    if delta:
+        values['recovery_count'] = (row['recovery_count'] or 0) + delta
+        for count in range(observed + 1, restart_count + 1):
+            events.append((ManagedJobStatus.RECOVERING, reasons.get(count) or
+                           default_reason))
+
+    if provisioning:
+        if delta == 0 and user_delta == 0:
+            return None
+        cursor = dict(cursor, runtime_id=runtime_id, restarts=restart_count)
+    else:
+        terminal = job_status is not None and job_status.is_terminal()
+        waiting = job_status is not None and not running and not terminal
+        pending = bool(cursor.get('pending', False))
+        queued = waiting and restart_count > 0 and not pending
+        resumed = pending and (running or terminal)
+        controller_resumed = (not pending and delta == 0 and
+                              (running or terminal) and row['status']
+                              == ManagedJobStatus.RECOVERING.value)
+        starting = ((running or terminal) and
+                    row['status'] == ManagedJobStatus.STARTING.value)
+        refresh_running = running and (cursor.get('last_running_at') is None or
+                                       now - cursor['last_running_at'] >= 60)
+        if (delta == 0 and user_delta == 0 and not resumed and
+                not controller_resumed and not starting and not queued and
+                not refresh_running and not nodes_changed and same_runtime):
+            return None
+        resume_time = min(now, observation.started_at or now)
+        if delta:
+            callbacks.append('RECOVERING')
+        if delta or queued:
+            if row['status'] in (ManagedJobStatus.RUNNING.value,
+                                 ManagedJobStatus.WINDING_DOWN.value):
+                last = row['last_recovered_at']
+                if last is not None and last >= 0:
+                    # A missed poll cannot establish when prior work ended.
+                    # Count only the interval confirmed by observation.
+                    stopped_at = cursor.get('last_running_at') or last
+                    if running or terminal:
+                        stopped_at = min(stopped_at, resume_time)
+                    values['job_duration'] = ((row['job_duration'] or 0) +
+                                              max(0, stopped_at - last))
+            pending = True
+        if starting:
+            values.update(status=ManagedJobStatus.RUNNING.value,
+                          start_at=row['start_at'] or resume_time,
+                          last_recovered_at=resume_time,
+                          recovering_from_failure=None)
+            if row['recovering_from_failure']:
+                values['recovery_count'] = (
+                    values.get('recovery_count', row['recovery_count'] or 0) +
+                    1)
+            events.append((ManagedJobStatus.RUNNING, 'Job has started'))
+            callbacks.append('STARTED')
+            pending = False
+        elif pending:
+            if running or terminal:
+                values.update(status=ManagedJobStatus.RUNNING.value,
+                              start_at=row['start_at'] or resume_time,
+                              last_recovered_at=resume_time,
+                              recovering_from_failure=None)
+                events.append(
+                    (ManagedJobStatus.RUNNING, 'Runtime recovery completed'))
+                callbacks.append('RECOVERED')
+                pending = False
+            else:
+                values.update(status=ManagedJobStatus.RECOVERING.value,
+                              recovering_from_failure=False)
+        elif controller_resumed:
+            # The runtime kept running while the controller was recovering.
+            # Restore its baseline to avoid counting that interval twice.
+            values.update(status=ManagedJobStatus.RUNNING.value,
+                          start_at=row['start_at'] or resume_time,
+                          job_duration=cursor.get('running_duration',
+                                                  row['job_duration']),
+                          last_recovered_at=cursor.get('running_since',
+                                                       resume_time),
+                          recovering_from_failure=None)
+            if row['recovering_from_failure']:
+                values['recovery_count'] = (row['recovery_count'] or 0) + 1
+            events.append(
+                (ManagedJobStatus.RUNNING, 'Runtime is still running'))
+            callbacks.append('RECOVERED')
+        cursor = dict(
+            runtime_id=runtime_id,
+            restarts=restart_count,
+            pending=pending,
+            running_duration=values.get('job_duration', row['job_duration']),
+            running_since=values.get('last_recovered_at',
+                                     row['last_recovered_at']),
+            last_running_at=(now if running else cursor.get('last_running_at')))
+    cursor['user_restarts'] = max(previous_user_restarts,
+                                  observation.user_restart_count)
+    if nodes is not None:
+        cursor['nodes'] = nodes
+    metadata['runtime_user_restarts'] = (
+        metadata.get('runtime_user_restarts', 0) + user_delta)
+    metadata['runtime_recovery'] = cursor
+    values['metadata'] = json.dumps(metadata)
+    placement = list(nodes) if nodes_changed and nodes is not None else None
+    return _RuntimeObservationPlan(values, events, callbacks, placement)
+
+
+def _runtime_task_filter(job_id: int, task_id: int):
+    return sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                           spot_table.c.task_id == task_id)
+
+
+def _runtime_observation_update(job_id: int, task_id: int, row: Dict[str, Any],
+                                plan: _RuntimeObservationPlan):
+    return sqlalchemy.update(spot_table).where(
+        _runtime_task_filter(job_id,
+                             task_id), spot_table.c.metadata == row['metadata'],
+        spot_table.c.status == row['status'],
+        spot_table.c.end_at.is_(None)).values(**plan.values)
+
+
+def _runtime_observation_events(job_id: int, task_id: int,
+                                plan: _RuntimeObservationPlan):
+    return [
+        job_events_table.insert().values(
+            spot_job_id=job_id,
+            task_id=task_id,
+            new_status=status.value,
+            reason=reason,
+            recovery_source=RecoverySource.FAILURE.value,
+            timestamp=datetime.datetime.now()) for status, reason in plan.events
+    ]
+
+
+@db_retries.retry
+def _observe_runtime_during_provisioning(
+        job_id: int, task_id: int,
+        observation: managed_job_runtime.RuntimeObservation) -> None:
+    """Record runtime restarts while the controller awaits provisioning.
+
+    The controller owns launch status transitions, so this records restart
+    counts, retry budget and events only. They persist even if provisioning
+    later fails, and monitoring resumes from the same cursor.
+    """
+    engine = _db_manager.get_engine()
+    for _ in range(20):
+        with orm.Session(engine) as session:
+            row = session.execute(
+                sqlalchemy.select(spot_table).where(
+                    _runtime_task_filter(job_id, task_id))).mappings().one()
+            plan = _plan_runtime_observation(dict(row),
+                                             observation,
+                                             provisioning=True,
+                                             now=time.time())
+            if plan is None:
+                return
+            result = session.execute(
+                _runtime_observation_update(job_id, task_id, dict(row), plan))
+            if result.rowcount != 1:
+                session.rollback()
+                continue
+            for statement in _runtime_observation_events(job_id, task_id, plan):
+                session.execute(statement)
+            session.commit()
+            return
+    raise RuntimeError('Concurrent runtime recovery updates did not settle')
+
+
+async def _record_placement_async(session: sql_async.AsyncSession, job_id: int,
+                                  nodes: List[str],
+                                  infra: Optional[Dict[str, Optional[str]]]):
+    result = await session.execute(
+        sqlalchemy.select(job_info_table.c.node_names).where(
+            job_info_table.c.spot_job_id == job_id).with_for_update())
+    values: Dict[str, Any] = {
+        key: value for key, value in (infra or {}).items() if value is not None
+    }
+    values['node_names'] = common_utils.merge_node_names_lineage(
+        result.scalar_one_or_none(), nodes)
+    await session.execute(
+        sqlalchemy.update(job_info_table).where(
+            job_info_table.c.spot_job_id == job_id).values(**values))
+
+
+@db_retries.retry_async
+async def observe_runtime_async(
+    job_id: int,
+    task_id: int,
+    observation: managed_job_runtime.RuntimeObservation,
+    *,
+    callback_func: AsyncCallbackType,
+    infra: Optional[Dict[str, Optional[str]]] = None,
+) -> None:
+    """Persist a monitoring observation, including its placement.
+
+    A running observation whose nodes differ from the cursor merges them into
+    the job's infra lineage in the same transaction; infra supplies the cloud,
+    region and zone recorded with them. callback_func receives RECOVERING,
+    STARTED or RECOVERED after commit for each transition this observation
+    caused.
+    """
+    engine = await _db_manager.get_async_engine()
+    for _ in range(20):
+        async with sql_async.AsyncSession(engine) as session:
+            result = await session.execute(
+                sqlalchemy.select(spot_table).where(
+                    _runtime_task_filter(job_id, task_id)))
+            row = dict(result.mappings().one())
+            plan = _plan_runtime_observation(row,
+                                             observation,
+                                             provisioning=False,
+                                             now=time.time())
+            if plan is None:
+                return
+            result = await session.execute(
+                _runtime_observation_update(job_id, task_id, row, plan))
+            if result.rowcount != 1:
+                await session.rollback()
+                continue
+            for statement in _runtime_observation_events(job_id, task_id, plan):
+                await session.execute(statement)
+            if plan.placement is not None:
+                await _record_placement_async(session, job_id, plan.placement,
+                                              infra)
+            await session.commit()
+        for callback in plan.callbacks:
+            await callback_func(callback)
+        return
+    raise RuntimeError('Concurrent runtime recovery updates did not settle')
+
+
+def _runtime_cursor_from_metadata(
+        metadata: Optional[str]) -> Optional[managed_job_runtime.RuntimeCursor]:
+    cursor = json.loads(metadata or '{}').get('runtime_recovery')
+    if not cursor or 'runtime_id' not in cursor:
+        return None
+    return managed_job_runtime.RuntimeCursor(
+        runtime_id=cursor['runtime_id'],
+        restart_count=cursor.get('restarts', 0),
+        user_restart_count=cursor.get('user_restarts', 0),
+        nodes=cursor.get('nodes'))
+
+
+@db_retries.retry
+def get_runtime_cursor(
+        job_id: int,
+        task_id: int) -> Optional[managed_job_runtime.RuntimeCursor]:
+    """Return the task's last persisted runtime observation, if any."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        metadata = session.execute(
+            sqlalchemy.select(spot_table.c.metadata).where(
+                _runtime_task_filter(job_id, task_id))).scalar_one_or_none()
+    return _runtime_cursor_from_metadata(metadata)
+
+
+@db_retries.retry_async
+async def get_runtime_cursor_async(
+        job_id: int,
+        task_id: int) -> Optional[managed_job_runtime.RuntimeCursor]:
+    """Return the task's last persisted runtime observation, if any."""
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.select(spot_table.c.metadata).where(
+                _runtime_task_filter(job_id, task_id)))
+        metadata = result.scalar_one_or_none()
+    return _runtime_cursor_from_metadata(metadata)
+
+
+_MANAGED_TASK_OBSERVATION = 'managed_task'
+
+
+def provisioning_observation_target(
+        job_id: int, task_id: int) -> provision_observation.Target:
+    """Name a managed task as the target of provisioning-time observations."""
+    return {
+        'kind': _MANAGED_TASK_OBSERVATION,
+        'job_id': job_id,
+        'task_id': task_id,
+    }
+
+
+class _ManagedTaskObservationSink:
+    """Persists provisioning-time observations of a managed task."""
+
+    def previous(
+        self, target: provision_observation.Target
+    ) -> Optional[managed_job_runtime.RuntimeCursor]:
+        return get_runtime_cursor(target['job_id'], target['task_id'])
+
+    def report(self, target: provision_observation.Target,
+               observation: managed_job_runtime.RuntimeObservation) -> None:
+        _observe_runtime_during_provisioning(target['job_id'],
+                                             target['task_id'], observation)
+
+
+provision_observation.register_sink(_MANAGED_TASK_OBSERVATION,
+                                    _ManagedTaskObservationSink())
+
+
+@db_retries.retry_async
+async def get_runtime_user_restarts_async(job_id: int, task_id: int) -> int:
+    """Return budget-consuming retries performed by task runtimes."""
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.select(spot_table.c.metadata).where(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id))
+        metadata = result.scalar_one_or_none()
+    return json.loads(metadata or '{}').get('runtime_user_restarts', 0)
+
+
 async def set_recovered_async(job_id: int,
                               task_id: int,
                               recovered_time: float,
@@ -3936,6 +4366,8 @@ async def set_recovered_async(job_id: int,
                 )).
             values({
                 spot_table.c.status: ManagedJobStatus.RUNNING.value,
+                spot_table.c.start_at: sqlalchemy.func.coalesce(
+                    spot_table.c.start_at, recovered_time),
                 spot_table.c.last_recovered_at: recovered_time,
                 spot_table.c.recovery_count: count_expr,
                 # Close the episode: this task has left RECOVERING, so a

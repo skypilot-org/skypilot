@@ -2,7 +2,9 @@
 import json
 import os
 import shlex
+import sqlite3
 import subprocess
+import sys
 from unittest import mock
 
 import pytest
@@ -41,8 +43,27 @@ def _snapshot_manifest(num_nodes=2, generation=_SNAPSHOT_GENERATION):
     }
 
 
+_SHARED_HOME = f'/home/test/.sky_clusters/{_CLUSTER}'
+
+
 def _command_text(command):
     return shlex.join(command) if isinstance(command, list) else command
+
+
+def _runner_commands(runner):
+    return [_command_text(call.args[0]) for call in runner.run.call_args_list]
+
+
+def _state_then_gone(job_state):
+    """Report `job_state` on the first poll and an empty queue afterwards."""
+    polls = []
+
+    def get_states(job_name):
+        del job_name
+        polls.append(None)
+        return [job_state] if len(polls) == 1 else []
+
+    return get_states
 
 
 @pytest.mark.parametrize('old_id', [None, 'a' * 32])
@@ -330,6 +351,10 @@ def mock_client(monkeypatch):
                         mock.MagicMock(return_value=login_runner))
     monkeypatch.setattr(instance, '_resolve_sky_base_dir',
                         mock.MagicMock(return_value='/home/test'))
+    monkeypatch.setattr(instance.slurm_utils, 'get_slurm_cluster_from_config',
+                        mock.MagicMock(return_value='test-slurm'))
+    monkeypatch.setattr(instance.skypilot_config, 'get_effective_region_config',
+                        mock.MagicMock(return_value=None))
     client.test_login_runner = login_runner
     # Make waits resolve quickly in tests that exercise timeouts.
     monkeypatch.setattr(instance, '_TERMINATION_GRACE_PERIOD_SECONDS', 0.05)
@@ -358,40 +383,98 @@ class TestTerminateInstances:
         mock_client.cancel_jobs_by_name.assert_not_called()
 
     def test_no_jobs_found_no_cancel(self, mock_client):
+        # A job already gone is the case the cleanup trap could not cover, so
+        # the login node reclaims the shared home itself.
         mock_client.get_jobs_state_by_name.return_value = []
-        instance.terminate_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+        instance.terminate_instances(_CLUSTER,
+                                     provider_config=_CONTAINER_PROVIDER_CONFIG)
         mock_client.cancel_jobs_by_name.assert_not_called()
-        remove_commands = [
-            _command_text(call.args[0])
-            for call in mock_client.test_login_runner.run.call_args_list
-        ]
-        assert any('.sky_snapshots/test-cluster' in command
-                   for command in remove_commands)
+        commands = _runner_commands(mock_client.test_login_runner)
+        assert instance._remove_shared_state_script(
+            _SHARED_HOME, preserve_logs=False) in commands
+        assert any(
+            '.sky_snapshots/test-cluster' in command for command in commands)
 
     def test_snapshot_cleanup_denied_after_cancellation(self, mock_client):
         mock_client.get_jobs_state_by_name.return_value = ['PENDING']
         mock_client.test_login_runner.run.return_value = (
             1, '', 'sudo: a password is required')
-        instance.terminate_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+        instance.terminate_instances(_CLUSTER,
+                                     provider_config=_CONTAINER_PROVIDER_CONFIG)
         mock_client.cancel_jobs_by_name.assert_called_once_with(_CLUSTER,
                                                                 signal=None)
-        mock_client.test_login_runner.run.assert_called_once_with(
-            ['rm', '-rf', '--', '/home/test/.sky_snapshots/test-cluster'],
-            require_outputs=True,
-            stream_logs=False)
+        assert _runner_commands(
+            mock_client.test_login_runner)[-1] == shlex.join(
+                ['rm', '-rf', '--', '/home/test/.sky_snapshots/test-cluster'])
 
     def test_local_snapshot_cleanup_failure(self, mock_client, monkeypatch):
         runner = mock.MagicMock()
+        runner.command_as_user.side_effect = shlex.join
         runner.run.return_value = (1, '', 'Permission denied')
         monkeypatch.setattr(instance.slurm_utils, 'is_inside_slurm_cluster',
                             lambda: True)
         monkeypatch.setattr(instance, '_make_client_and_login_runner',
                             lambda *args: (mock_client, runner))
         mock_client.get_jobs_state_by_name.return_value = ['PENDING']
-        instance.terminate_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+        instance.terminate_instances(_CLUSTER,
+                                     provider_config=_CONTAINER_PROVIDER_CONFIG)
         mock_client.cancel_jobs_by_name.assert_called_once_with(_CLUSTER,
                                                                 signal=None)
-        runner.run.assert_called_once()
+        assert any('.sky_snapshots/test-cluster' in command
+                   for command in _runner_commands(runner))
+
+    def test_non_container_teardown_removes_no_snapshot_path(self, mock_client):
+        mock_client.query_jobs.return_value = ['123']
+        mock_client.get_job_nodes.return_value = (['node-a'], ['10.0.0.1'])
+        mock_client.get_jobs_state_by_name.side_effect = _state_then_gone(
+            'RUNNING')
+
+        instance.terminate_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+
+        assert not any(
+            '.sky_snapshots' in command
+            for command in _runner_commands(mock_client.test_login_runner))
+
+    @pytest.mark.parametrize('job_state',
+                             ['COMPLETING', 'STAGING_OUT', 'SIGNALING'])
+    def test_shared_home_untouched_while_job_is_in_the_queue(
+            self, mock_client, job_state):
+        # A job that has not left the queue may still be running the batch
+        # script, and with it the cleanup trap that owns the shared home.
+        mock_client.get_jobs_state_by_name.return_value = [job_state]
+
+        instance.terminate_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+
+        assert _runner_commands(mock_client.test_login_runner) == []
+
+    def test_shared_home_cleanup_runs_after_cancellation(self, mock_client):
+        events = []
+
+        def cancel(job_name, signal=None, full=False):
+            del job_name
+            events.append(f'scancel:{signal}:{full}')
+
+        def run(command, **kwargs):
+            del kwargs
+            events.append(_command_text(command))
+            return 0, '', ''
+
+        mock_client.query_jobs.return_value = ['123']
+        mock_client.get_job_nodes.return_value = (['node-a'], ['10.0.0.1'])
+        mock_client.get_jobs_state_by_name.side_effect = _state_then_gone(
+            'RUNNING')
+        mock_client.cancel_jobs_by_name.side_effect = cancel
+        mock_client.test_login_runner.run.side_effect = run
+
+        instance.terminate_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+
+        node_cleanup = next(index for index, event in enumerate(events)
+                            if event.startswith('srun '))
+        batch_cancel = events.index('scancel:TERM:True')
+        cleanup = events.index(
+            instance._remove_shared_state_script(_SHARED_HOME,
+                                                 preserve_logs=False))
+        assert node_cleanup < batch_cancel < cleanup
 
     @pytest.mark.parametrize('job_state', ['PENDING', 'CONFIGURING'])
     def test_pending_cancels_without_signal(self, mock_client, job_state):
@@ -405,7 +488,9 @@ class TestTerminateInstances:
                                                     job_state):
         # Transient states get the graceful signal but no verify/escalate.
         mock_client.get_jobs_state_by_name.return_value = [job_state]
-        instance.terminate_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+        instance._cancel_slurm_job(mock_client,
+                                   _CLUSTER,
+                                   inside_slurm_cluster=False)
         mock_client.cancel_jobs_by_name.assert_called_once_with(_CLUSTER,
                                                                 signal='TERM',
                                                                 full=True)
@@ -429,7 +514,8 @@ class TestTerminateInstances:
     @pytest.mark.parametrize('job_state', ['RUNNING', 'SUSPENDED'])
     def test_graceful_termination_succeeds(self, mock_client, job_state):
         # The job exits (gone from squeue) within the grace period.
-        mock_client.get_jobs_state_by_name.side_effect = [[job_state], []]
+        mock_client.get_jobs_state_by_name.side_effect = _state_then_gone(
+            job_state)
         instance.terminate_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
         assert mock_client.cancel_jobs_by_name.call_args_list == [
             mock.call(_CLUSTER, signal='TERM'),
@@ -454,15 +540,17 @@ class TestTerminateInstances:
             client,
             _CLUSTER,
             inside_slurm_cluster=False,
-            pre_batch_cancel=lambda: events.append('cleanup'))
+            pre_batch_cancel=lambda: events.append('cleanup'),
+            pre_step_cancel=lambda: events.append('capture'))
 
-        assert events == [('TERM', False), 'cleanup', ('TERM', True)]
+        assert events == ['capture', ('TERM', False), 'cleanup', ('TERM', True)]
 
     def test_cleanup_failure_still_cancels_allocation(self, mock_client,
                                                       monkeypatch):
         mock_client.query_jobs.return_value = ['123']
         mock_client.get_job_nodes.return_value = (['node-a'], ['10.0.0.1'])
-        mock_client.get_jobs_state_by_name.side_effect = [['RUNNING'], []]
+        mock_client.get_jobs_state_by_name.side_effect = _state_then_gone(
+            'RUNNING')
         cleanup = mock.MagicMock(side_effect=RuntimeError('cleanup failed'))
         monkeypatch.setattr(instance, '_cleanup_slurm_allocation', cleanup)
         warning = mock.MagicMock()
@@ -480,11 +568,21 @@ class TestTerminateInstances:
 
     def test_graceful_wait_tolerates_transient_query_failure(self, mock_client):
         # One failed poll inside the wait must not fail the teardown.
-        mock_client.get_jobs_state_by_name.side_effect = [
+        replies = [
             ['RUNNING'],
             exceptions.CommandError(255, 'squeue', 'ssh dropped', None),
-            [],
         ]
+
+        def get_states(job_name):
+            del job_name
+            if not replies:
+                return []
+            reply = replies.pop(0)
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+
+        mock_client.get_jobs_state_by_name.side_effect = get_states
         instance.terminate_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
         assert mock_client.cancel_jobs_by_name.call_args_list == [
             mock.call(_CLUSTER, signal='TERM'),
@@ -856,9 +954,8 @@ class TestStopInstances:
                 '            if ! container_exists "$enroot_name"; then'
                 in node_cleanup)
         assert 'rm -rf -- /tmp/test-cluster' in node_cleanup
-        shared_cleanup = login_runner.run.call_args_list[1].args[0]
-        assert shared_cleanup == instance._remove_shared_state_script(
-            '/home/test/.sky_clusters/test-cluster', preserve_logs=False)
+        # The shared cluster home is left to the batch script's cleanup trap.
+        login_runner.run.assert_called_once()
 
     def test_remove_shared_state_script_preserves_logs(self):
         script = instance._remove_shared_state_script(
@@ -875,6 +972,34 @@ class TestStopInstances:
         assert script.count('sleep') == 1
         assert 'exit 0' in script
         assert 'exit 1' in script
+
+    def test_cleanup_never_removes_an_already_empty_home(self, tmp_path):
+        # The allocation's cleanup trap owns the removal, so a teardown under
+        # a sudoers policy that grants no rm must not reach one.
+        fake_bin = tmp_path / 'bin'
+        fake_bin.mkdir()
+        (fake_bin / 'rm').write_text('#!/bin/bash\n'
+                                     'echo "$@" >> "$CLEANUP_LOG"\n'
+                                     'exit 1\n')
+        os.chmod(fake_bin / 'rm', 0o755)
+        log_file = tmp_path / 'cleanup.log'
+        log_file.touch()
+        env = {
+            **os.environ, 'PATH': f'{fake_bin}:{os.environ["PATH"]}',
+            'CLEANUP_LOG': str(log_file)
+        }
+        script = instance._remove_shared_state_script(str(
+            tmp_path / '.sky_clusters' / _CLUSTER),
+                                                      preserve_logs=False)
+
+        result = subprocess.run(['/bin/bash', '-c', script],
+                                check=False,
+                                capture_output=True,
+                                text=True,
+                                env=env)
+
+        assert result.returncode == 0, result.stderr
+        assert log_file.read_text() == ''
 
     def test_cleanup_fails_after_exhausted_retries(self, monkeypatch, tmp_path):
         # A removal that keeps failing must not be reported as success.
@@ -940,31 +1065,20 @@ class TestStopInstances:
         assert not home.exists()
         assert len(log_file.read_text().splitlines()) == 2
 
-    def test_cleanup_allocation_preserves_logs(self, monkeypatch, tmp_path):
-        client = mock.MagicMock()
+    def test_leftover_cleanup_preserves_logs(self, tmp_path):
         login_runner = mock.MagicMock()
         login_runner.command_as_user.side_effect = shlex.join
 
         def run(command, **kwargs):
-            command = _command_text(command)
             del kwargs
-            if command.startswith('srun '):
-                return 0, '', ''
-            result = subprocess.run(['/bin/bash', '-c', command],
-                                    check=False,
-                                    capture_output=True,
-                                    text=True)
+            result = subprocess.run(
+                ['/bin/bash', '-c', _command_text(command)],
+                check=False,
+                capture_output=True,
+                text=True)
             return result.returncode, result.stdout, result.stderr
 
         login_runner.run.side_effect = run
-        monkeypatch.setattr(instance.skypilot_config,
-                            'get_effective_region_config',
-                            mock.MagicMock(return_value=None))
-        monkeypatch.setattr(instance, '_resolve_sky_base_dir',
-                            mock.MagicMock(return_value=str(tmp_path)))
-        monkeypatch.setattr(instance.slurm_utils,
-                            'get_slurm_cluster_from_config',
-                            mock.MagicMock(return_value='test-slurm'))
         cluster_home = tmp_path / '.sky_clusters' / _CLUSTER
         log_file = cluster_home / 'sky_logs' / '1-job' / 'run.log'
         log_file.parent.mkdir(parents=True)
@@ -975,38 +1089,34 @@ class TestStopInstances:
         workdir = cluster_home / 'sky_workdir'
         workdir.mkdir()
 
-        instance._cleanup_slurm_allocation(client,
-                                           login_runner,
-                                           _CLUSTER,
-                                           _PROVIDER_CONFIG,
-                                           '123', ['node-a'],
-                                           preserve_logs=True)
+        instance._remove_leftover_shared_state(mock.MagicMock(),
+                                               login_runner,
+                                               _CLUSTER,
+                                               str(cluster_home),
+                                               preserve_logs=True)
 
         assert log_file.read_text() == 'job output'
         assert not stale_state.parent.exists()
         assert not workdir.exists()
 
     def test_stop_cleanup_preserves_logs(self, monkeypatch):
-        _, _, _, _, cancel_slurm_job = self._setup(monkeypatch, ['node-a'])
-        cleanup_slurm_allocation = mock.MagicMock()
-        monkeypatch.setattr(instance, '_cleanup_slurm_allocation',
-                            cleanup_slurm_allocation)
+        self._setup(monkeypatch, ['node-a'])
+        remove_leftover = mock.MagicMock()
+        monkeypatch.setattr(instance, '_remove_leftover_shared_state',
+                            remove_leftover)
 
         instance.stop_instances(_CLUSTER,
                                 provider_config=_CONTAINER_PROVIDER_CONFIG)
-        cleanup = cancel_slurm_job.call_args.kwargs['pre_batch_cancel']
-        cleanup()
 
-        assert cleanup_slurm_allocation.call_args.kwargs == {
-            'preserve_logs': True,
-        }
+        assert remove_leftover.call_args.args[3] == _SHARED_HOME
+        assert remove_leftover.call_args.kwargs == {'preserve_logs': True}
 
     def test_stop_cleanup_failure_still_cancels_after_manifest(
             self, monkeypatch):
         cancel_slurm_job = instance._cancel_slurm_job
         client, _, _, write_manifest, _ = self._setup(monkeypatch, ['node-a'])
         monkeypatch.setattr(instance, '_cancel_slurm_job', cancel_slurm_job)
-        client.get_jobs_state_by_name.side_effect = [['RUNNING'], []]
+        client.get_jobs_state_by_name.side_effect = _state_then_gone('RUNNING')
         events = []
         write_manifest.side_effect = lambda *args: events.append('manifest')
 
@@ -1802,3 +1912,99 @@ class TestWaitForJobNodes:
         with mock.patch.object(instance.time, 'sleep'):
             instance._wait_for_job_nodes(client, '17269', 60, 'dev', on_pending)
         on_pending.assert_called_once_with('PENDING', 'Resources', 2)
+
+
+@pytest.mark.parametrize('rows,expected', [
+    ([], 0),
+    ([('FAILED', '7')], 7),
+    ([('FAILED', '0,7,0')], 7),
+    ([('FAILED', '-15')], 143),
+    ([('FAILED_SETUP', None)], 1),
+    ([('CANCELLED', None)], 1),
+    ([('RUNNING', None)], 1),
+    ([('SUCCEEDED', None)], 0),
+    ([('FAILED', '7'), ('SUCCEEDED', None)], 0),
+    ([('SUCCEEDED', None), ('FAILED', '9')], 9),
+])
+def test_allocation_exit_code_uses_latest_job(tmp_path, rows, expected):
+    state = tmp_path / '.sky'
+    state.mkdir()
+    with sqlite3.connect(state / 'jobs.db') as conn:
+        conn.execute('CREATE TABLE jobs (job_id INTEGER PRIMARY KEY, '
+                     'status TEXT, exit_codes TEXT)')
+        conn.executemany('INSERT INTO jobs(status, exit_codes) VALUES (?, ?)',
+                         rows)
+    script = instance._allocation_exit_code_script(str(tmp_path))
+    result = subprocess.run(['bash', '-c', script],
+                            capture_output=True,
+                            text=True,
+                            check=True)
+    assert int(result.stdout) == expected
+
+
+def test_allocation_exit_code_before_job_database_exists(tmp_path):
+    result = subprocess.run(
+        ['bash', '-c',
+         instance._allocation_exit_code_script(str(tmp_path))],
+        capture_output=True,
+        text=True,
+        check=True)
+    assert result.stdout.strip() == '0'
+
+
+@pytest.mark.parametrize('cached', [False, True])
+def test_cleanup_preserves_exit_code_before_removing_database(
+        tmp_path, monkeypatch, cached):
+    runtime = tmp_path / 'runtime'
+    state = runtime / '.sky'
+    state.mkdir(parents=True)
+    with sqlite3.connect(state / 'jobs.db') as conn:
+        conn.execute('CREATE TABLE jobs (job_id INTEGER PRIMARY KEY, '
+                     'status TEXT, exit_codes TEXT)')
+        conn.execute("INSERT INTO jobs VALUES (1, 'FAILED', '7')")
+    monkeypatch.setattr(instance, '_resolve_skypilot_runtime_dir',
+                        lambda *args: str(runtime))
+
+    def run_node_cleanup(runner, command, error_message):
+        del runner, error_message
+        # Execute the production node cleanup without an actual Slurm launcher.
+        subprocess.run(['bash', '-c', command[-1]], check=True)
+
+    monkeypatch.setattr(instance, '_run_on_login_node', run_node_cleanup)
+    if cached:
+        instance._cache_slurm_allocation_exit_code(mock.Mock(), mock.Mock(),
+                                                   _CLUSTER, _PROVIDER_CONFIG,
+                                                   '123', ['node-a'])
+        (state / 'jobs.db').unlink()
+    instance._cleanup_slurm_allocation(mock.Mock(), mock.Mock(), _CLUSTER,
+                                       _PROVIDER_CONFIG, '123', ['node-a'])
+    assert not runtime.exists()
+    assert (tmp_path / 'runtime.exitcode.123').read_text().strip() == '7'
+
+
+@pytest.mark.parametrize('has_database', [False, True])
+def test_allocation_exit_code_without_system_python(tmp_path, has_database):
+    state = tmp_path / '.sky'
+    state.mkdir()
+    if has_database:
+        with sqlite3.connect(state / 'jobs.db') as conn:
+            conn.execute('CREATE TABLE jobs (job_id INTEGER PRIMARY KEY, '
+                         'status TEXT, exit_codes TEXT)')
+            conn.execute("INSERT INTO jobs VALUES (1, 'SUCCEEDED', NULL)")
+        (state / 'python_path').write_text(sys.executable)
+    # Only cat is on PATH; Python must come from the recorded runtime path.
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    (bin_dir / 'cat').symlink_to('/bin/cat')
+    result = subprocess.run([
+        '/bin/bash', '-c',
+        instance._allocation_exit_code_script(str(tmp_path))
+    ],
+                            env={
+                                **os.environ, 'PATH': str(bin_dir)
+                            },
+                            capture_output=True,
+                            text=True,
+                            check=True)
+    assert result.stdout.strip() == '0'
+    assert result.stderr == ''
