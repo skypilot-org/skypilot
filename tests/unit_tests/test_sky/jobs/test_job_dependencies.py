@@ -4,6 +4,8 @@ import contextlib
 from typing import Optional
 from unittest import mock
 
+import click
+import fastapi
 import filelock
 import pytest
 from sqlalchemy import create_engine
@@ -11,11 +13,14 @@ from sqlalchemy import orm
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from sky import exceptions
+from sky.client.cli import command
 from sky.jobs import state
 from sky.jobs.controller import JobController
 from sky.jobs.server import core as jobs_core
+from sky.jobs.server import server as jobs_server
 from sky.jobs.state import ManagedJobScheduleState
 from sky.jobs.state import ManagedJobStatus
+from sky.server.requests import payloads
 
 
 @pytest.fixture
@@ -283,3 +288,47 @@ class TestControllerRun:
             set_reason.assert_called_once_with(
                 10, 'Dependency did not succeed: job 12 (FAILED), '
                 'job 13 (not found)')
+
+
+class TestLaunchRoute:
+
+    @staticmethod
+    def _launch(depends_on, consolidation):
+        body = payloads.JobsLaunchBody(task='name: t',
+                                       name=None,
+                                       depends_on=depends_on)
+        request = mock.MagicMock()
+        with mock.patch.object(jobs_server.managed_jobs_utils,
+                               'is_consolidation_mode',
+                               return_value=consolidation), \
+             mock.patch.object(jobs_server.executor, 'schedule_request_async',
+                               new=mock.AsyncMock()) as schedule:
+            asyncio.run(jobs_server.launch(request, body))
+        return schedule
+
+    def test_rejects_depends_on_without_consolidation_mode(self):
+        with pytest.raises(fastapi.HTTPException) as e:
+            self._launch([1], consolidation=False)
+        assert e.value.status_code == 400
+
+    @pytest.mark.parametrize(('depends_on', 'consolidation'), [
+        ([1], True),
+        (None, False),
+    ])
+    def test_schedules_otherwise(self, depends_on, consolidation):
+        self._launch(depends_on, consolidation).assert_called_once()
+
+
+@pytest.mark.parametrize(('value', 'expected'), [
+    (None, None),
+    ('12', [12]),
+    (' 12, 13 ,', [12, 13]),
+])
+def test_parse_depends_on(value, expected):
+    assert command._parse_depends_on(value) == expected
+
+
+@pytest.mark.parametrize('value', ['', ',', 'abc', '0', '-1', '1.5'])
+def test_parse_depends_on_rejects(value):
+    with pytest.raises(click.UsageError, match='--depends-on'):
+        command._parse_depends_on(value)

@@ -5803,6 +5803,18 @@ def jobs():
     pass
 
 
+def _parse_depends_on(value: Optional[str]) -> Optional[List[int]]:
+    """Parse ``--depends-on`` (comma-separated managed job IDs)."""
+    if value is None:
+        return None
+    ids = [part.strip() for part in value.split(',') if part.strip()]
+    if not ids or not all(part.isdigit() and int(part) > 0 for part in ids):
+        raise click.UsageError(
+            f'--depends-on must be comma-separated managed job IDs. Got: '
+            f'{value!r}.')
+    return [int(part) for part in ids]
+
+
 @jobs.command('launch', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=True)
 @click.argument('entrypoint',
@@ -5856,6 +5868,13 @@ def jobs():
               required=False,
               help=('Launch a top-level job even when running inside a job '
                     'group (do not attach to it).'))
+@click.option('--depends-on',
+              default=None,
+              type=str,
+              required=False,
+              help=('Comma-separated managed job IDs to wait for. The job '
+                    'starts once all of them succeed, and is cancelled if any '
+                    'of them ends otherwise.'))
 @click.option('--git-url', type=str, help='Git repository URL.')
 @click.option('--git-ref',
               type=str,
@@ -5908,6 +5927,7 @@ def jobs_launch(
     git_ref: Optional[str] = None,
     job_group: Optional[str] = None,
     no_job_group: bool = False,
+    depends_on: Optional[str] = None,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -5922,10 +5942,14 @@ def jobs_launch(
       sky jobs launch task.yaml
 
       sky jobs launch 'echo hello!'
+
+      # Start after managed jobs 12 and 13 succeed.
+      sky jobs launch --depends-on 12,13 task.yaml
     """
     if num_jobs is not None and num_jobs < 1:
         raise click.UsageError(
             f'--num-jobs must be a positive integer. Got: {num_jobs}.')
+    depends_on_ids = _parse_depends_on(depends_on)
 
     if cluster is not None:
         if name is not None and name != cluster:
@@ -6027,6 +6051,7 @@ def jobs_launch(
                                      pool,
                                      num_jobs,
                                      job_group=job_group_arg,
+                                     depends_on=depends_on_ids,
                                      _need_confirmation=not yes)
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
