@@ -109,6 +109,38 @@ class TestClaim:
         state.set_job_dependencies(5, [99])
         assert _claim() == 5
 
+    def test_waiting_job_does_not_raise_highest_priority(self, _db):
+        _add_job(_db, 1, ManagedJobScheduleState.ALIVE,
+                 ManagedJobStatus.RUNNING)
+        _add_job(_db,
+                 2,
+                 ManagedJobScheduleState.WAITING,
+                 ManagedJobStatus.PENDING,
+                 priority=1000)
+        state.set_job_dependencies(2, [1])
+        _add_job(_db,
+                 3,
+                 ManagedJobScheduleState.WAITING,
+                 ManagedJobStatus.PENDING,
+                 priority=200)
+        assert state.get_managed_jobs_highest_priority() == 200
+
+    def test_unfinished_dependencies(self, _db):
+        _add_job(_db, 1, ManagedJobScheduleState.ALIVE,
+                 ManagedJobStatus.RUNNING)
+        _add_job(_db, 2, ManagedJobScheduleState.DONE,
+                 ManagedJobStatus.SUCCEEDED)
+        _add_job(_db, 3, ManagedJobScheduleState.WAITING,
+                 ManagedJobStatus.PENDING)
+        _add_job(_db, 4, ManagedJobScheduleState.WAITING,
+                 ManagedJobStatus.PENDING)
+        _add_job(_db, 5, ManagedJobScheduleState.WAITING,
+                 ManagedJobStatus.PENDING)
+        state.set_job_dependencies(4, [1, 2, 3])
+        state.set_job_dependencies(5, [2])
+        assert state.get_unfinished_dependencies([4, 5]) == {4: [1, 3]}
+        assert state.get_unfinished_dependencies([]) == {}
+
     def test_dependencies_round_trip(self, _db):
         state.set_job_dependencies(5, [3, 1])
         state.set_job_dependencies(6, [])
@@ -151,6 +183,28 @@ class TestOutcome:
         _add_job(_db, 10, ManagedJobScheduleState.WAITING,
                  ManagedJobStatus.PENDING)
         assert asyncio.run(state.get_unsucceeded_dependencies_async(10)) == []
+        assert asyncio.run(state.get_dependencies_finished_at_async(10)) is None
+
+    def test_dependencies_finished_at(self, _db):
+        _add_job(_db, 1, ManagedJobScheduleState.DONE,
+                 ManagedJobStatus.SUCCEEDED, ManagedJobStatus.SUCCEEDED)
+        _add_job(_db, 2, ManagedJobScheduleState.DONE,
+                 ManagedJobStatus.SUCCEEDED)
+        _add_job(_db, 10, ManagedJobScheduleState.WAITING,
+                 ManagedJobStatus.PENDING)
+        state.set_job_dependencies(10, [1, 2])
+        with orm.Session(_db) as session:
+            for job_id, task_id, end_at in ((1, 0, 100.0), (1, 1, 300.0),
+                                            (2, 0, 200.0)):
+                session.execute(
+                    state.sqlalchemy.update(state.spot_table).where(
+                        state.sqlalchemy.and_(
+                            state.spot_table.c.spot_job_id == job_id,
+                            state.spot_table.c.task_id == task_id)).values(
+                                end_at=end_at))
+            session.commit()
+        assert asyncio.run(
+            state.get_dependencies_finished_at_async(10)) == 300.0
 
     def test_failure_reason_only_on_pending_tasks(self, _db):
         _add_job(_db, 10, ManagedJobScheduleState.ALIVE,
@@ -269,6 +323,10 @@ class TestControllerRun:
         controller = self._make_controller()
         with mock.patch.object(state, 'get_unsucceeded_dependencies_async',
                                new=mock.AsyncMock(return_value=unsucceeded)), \
+             mock.patch.object(state, 'get_dependencies_finished_at_async',
+                               new=mock.AsyncMock(return_value=300.0)), \
+             mock.patch.object(state, 'set_eligible_at_async',
+                               new=mock.AsyncMock()) as set_eligible_at, \
              mock.patch.object(state,
                                'set_pending_tasks_failure_reason_async',
                                new=mock.AsyncMock()) as set_reason, \
@@ -284,7 +342,10 @@ class TestControllerRun:
         set_cancelled.assert_called_once()
         if runs:
             set_reason.assert_not_called()
+            # The first task became eligible when the last dependency ended.
+            set_eligible_at.assert_called_once_with(10, 0, 300.0)
         else:
+            set_eligible_at.assert_not_called()
             set_reason.assert_called_once_with(
                 10, 'Dependency did not succeed: job 12 (FAILED), '
                 'job 13 (not found)')

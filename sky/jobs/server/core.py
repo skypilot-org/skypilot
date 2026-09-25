@@ -538,9 +538,12 @@ def _maybe_submit_job_locally(
             assert task.name is not None, 'task must have a name'
             # A job group's tasks all start waiting now; so does task 0 of
             # anything. A pipeline's later tasks are waiting on the task before
-            # them, not on us, so their origin is written at the handoff.
-            eligible_at = (time.time()
-                           if task_id == 0 or dag.is_job_group() else None)
+            # them, not on us, so their origin is written at the handoff. A job
+            # with dependencies waits on them; the controller writes its origin
+            # once they have succeeded.
+            eligible_at = (time.time() if
+                           (task_id == 0 or dag.is_job_group()) and
+                           not depends_on else None)
             managed_job_state.set_pending(consolidation_mode_job_id, task_id,
                                           task.name, resources_str,
                                           task.metadata_json,

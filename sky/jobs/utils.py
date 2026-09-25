@@ -3194,15 +3194,18 @@ def _get_launch_reasons_by_task(
     return reasons
 
 
-def _format_job_details(*,
-                        job: Dict[str, Any],
-                        highest_blocking_priority: int,
-                        recovery_reason: Optional[str] = None,
-                        pending_reason: Optional[str] = None,
-                        cancel_reason: Optional[str] = None,
-                        launch_reason: Optional[str] = None) -> None:
+def _format_job_details(
+        *,
+        job: Dict[str, Any],
+        highest_blocking_priority: int,
+        recovery_reason: Optional[str] = None,
+        pending_reason: Optional[str] = None,
+        cancel_reason: Optional[str] = None,
+        launch_reason: Optional[str] = None,
+        unfinished_dependencies: Optional[List[int]] = None) -> None:
     """Add details about schedule state / backoff / recovery / pending /
-    who requested a cancellation / what a launch is waiting on."""
+    who requested a cancellation / what a launch is waiting on / which jobs it
+    depends on are still running."""
     if cancel_reason:
         # Surface who asked for the cancellation, and under which API
         # request, e.g. 'Cancellation requested by user alice (request ID:
@@ -3219,6 +3222,11 @@ def _format_job_details(*,
     state_details = None
     if job['schedule_state'] == 'ALIVE_BACKOFF':
         state_details = 'In backoff, waiting for resources'
+    elif job['schedule_state'] == 'WAITING' and unfinished_dependencies:
+        noun = 'job' if len(unfinished_dependencies) == 1 else 'jobs'
+        state_details = (
+            f'Waiting for dependency {noun} '
+            f'{", ".join(str(d) for d in unfinished_dependencies)} to succeed')
     elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
         priority = job.get('priority')
         if (priority is not None and priority < highest_blocking_priority):
@@ -3574,6 +3582,7 @@ def get_managed_job_queue(
     pending_reasons: Dict[int, str] = {}
     cancel_reasons: Dict[int, str] = {}
     launch_reasons: Dict[Tuple[int, Optional[int]], str] = {}
+    unfinished_dependencies: Dict[int, List[int]] = {}
     if not fields or 'details' in fields:
         recovering_job_ids = [
             job['job_id'] for job in jobs if job['status'] ==
@@ -3610,6 +3619,13 @@ def get_managed_job_queue(
         # provisioned (e.g. 'Launching (pending: QOSGrpGRES)' on Slurm), so
         # `details` answers why the job has not started yet.
         launch_reasons = _get_launch_reasons_by_task(jobs)
+        unfinished_dependencies = (
+            managed_job_state.get_unfinished_dependencies(
+                list({
+                    job['job_id']
+                    for job in jobs
+                    if job['schedule_state'] == 'WAITING'
+                })))
 
     for job in jobs:
         if not fields or 'details' in fields:
@@ -3620,7 +3636,9 @@ def get_managed_job_queue(
                 pending_reason=pending_reasons.get(job['job_id']),
                 cancel_reason=cancel_reasons.get(job['job_id']),
                 launch_reason=launch_reasons.get(
-                    (job['job_id'], job.get('task_id'))))
+                    (job['job_id'], job.get('task_id'))),
+                unfinished_dependencies=unfinished_dependencies.get(
+                    job['job_id']))
 
         # Derive is_job_group from execution column
         job['is_job_group'] = (
