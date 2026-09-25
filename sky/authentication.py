@@ -36,7 +36,6 @@ from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import gcp
 from sky.adaptors import ibm
-from sky.adaptors import runpod
 from sky.adaptors import seeweb as seeweb_adaptor
 from sky.adaptors import shadeform as shadeform_adaptor
 from sky.adaptors import vast
@@ -47,6 +46,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.lambda_cloud import lambda_utils
 from sky.provision.mithril import utils as mithril_utils
 from sky.provision.primeintellect import utils as primeintellect_utils
+from sky.provision.runpod import utils as runpod_utils
 from sky.utils import auth_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -367,7 +367,7 @@ def setup_runpod_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Add a label to the public key so that it can be identified in the RunPod
     # dashboard.
     labeled_key = ' '.join(public_key.split()[:2] + [_runpod_key_label()])
-    runpod.runpod.cli.groups.ssh.functions.add_ssh_key(labeled_key)
+    runpod_utils.register_ssh_key(labeled_key)
 
     return configure_ssh_info(config)
 

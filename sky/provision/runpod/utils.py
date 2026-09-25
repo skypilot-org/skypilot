@@ -1,7 +1,11 @@
-"""RunPod library wrapper for SkyPilot."""
+"""RunPod library wrapper for SkyPilot.
+
+Pods, templates and registry credentials are managed through the RunPod REST
+API v2 (see ``sky.adaptors.runpod``). Spot pods have no v2 endpoint yet and
+still go through the GraphQL API (``sky.provision.runpod.api``).
+"""
 
 import base64
-import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
@@ -9,7 +13,6 @@ from sky.adaptors import runpod
 from sky.provision import docker_utils
 from sky.provision.runpod.api import commands as runpod_commands
 from sky.skylet import constants
-from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -84,161 +87,72 @@ def _construct_docker_login_template_name(cluster_name: str) -> str:
     return f'{cluster_name}-docker-login-template'
 
 
-def retry(func):
-    """Decorator to retry a function.
-
-    Only retries on transient errors. Does not retry on authorization errors
-    (Unauthorized, Forbidden) as these are not recoverable.
-    """
-
-    def wrapper(*args, **kwargs):
-        """Wrapper for retrying a function."""
-        cnt = 0
-        while True:
-            try:
-                return func(*args, **kwargs)
-            except runpod.runpod.error.QueryError as e:
-                error_msg = str(e).lower()
-                # Don't retry on authorization errors - these won't recover
-                auth_keywords = ['unauthorized', 'forbidden', '401', '403']
-                if any(keyword in error_msg for keyword in auth_keywords):
-                    logger.error(f'RunPod authorization error (not retrying): '
-                                 f'{common_utils.format_exception(e)}')
-                    raise
-                cnt += 1
-                if cnt >= 3:
-                    raise
-                logger.warning('Retrying for exception: '
-                               f'{common_utils.format_exception(e)}.')
-                time.sleep(1)
-
-    return wrapper
+def _construct_registry_auth_name(cluster_name: str) -> str:
+    return f'{cluster_name}-registry-auth'
 
 
-# Adapted from runpod.api.queries.pods.py::QUERY_POD.
-# Adding containerRegistryAuthId to the query.
-_QUERY_POD = """
-query myPods {
-    myself {
-        pods {
-            id
-            containerDiskInGb
-            containerRegistryAuthId
-            costPerHr
-            desiredStatus
-            dockerArgs
-            dockerId
-            env
-            gpuCount
-            imageName
-            lastStatusChange
-            machineId
-            memoryInGb
-            name
-            podType
-            port
-            ports
-            uptimeSeconds
-            vcpuCount
-            volumeInGb
-            volumeMountPath
-            runtime {
-                ports{
-                    ip
-                    isIpPublic
-                    privatePort
-                    publicPort
-                    type
-                }
-            }
-            machine {
-                gpuDisplayName
-            }
-        }
+def _list_pods() -> List[Dict[str, Any]]:
+    return runpod.rest_list('/pods', 'pods')
+
+
+def _list_templates() -> List[Dict[str, Any]]:
+    return runpod.rest_list('/templates', 'templates')
+
+
+def _parse_pod(pod: Dict[str, Any]) -> Dict[str, Any]:
+    """Converts a v2 pod object into the provisioner's instance info."""
+    info: Dict[str, Any] = {
+        'status': pod['status'],
+        'name': pod['name'],
+        'vcpu_count': None,
+        'port2endpoint': {},
     }
-}
-"""
+    compute = pod.get('gpu') or pod.get('cpu') or {}
+    info['vcpu_count'] = compute.get('vcpuCount')
 
-
-def _sky_get_pods() -> dict:
-    """List all pods with extra registry auth information.
-
-    Adapted from runpod.get_pods() to include containerRegistryAuthId.
-    """
-    raw_return = runpod.runpod.api.graphql.run_graphql_query(_QUERY_POD)
-    cleaned_return = raw_return['data']['myself']['pods']
-    return cleaned_return
-
-
-_QUERY_POD_TEMPLATE_WITH_REGISTRY_AUTH = """
-query myself {
-    myself {
-        podTemplates {
-            name
-            containerRegistryAuthId
+    if pod['status'] != 'RUNNING':
+        return info
+    # RunPod only publishes the port mappings once the pod is RUNNING, and
+    # even then the ports may take a while to be assigned.
+    runtime = pod.get('runtime') or {}
+    for port in runtime.get('ports') or []:
+        if (port.get('type') != 'tcp' or port.get('ip') is None or
+                port.get('public') is None):
+            continue
+        info['port2endpoint'][port['private']] = {
+            'host': port['ip'],
+            'port': port['public'],
         }
-    }
-}
-"""
-
-
-def _list_pod_templates_with_container_registry() -> dict:
-    """List all pod templates."""
-    raw_return = runpod.runpod.api.graphql.run_graphql_query(
-        _QUERY_POD_TEMPLATE_WITH_REGISTRY_AUTH)
-    return raw_return['data']['myself']['podTemplates']
+    ssh = (pod.get('ssh') or {}).get('direct')
+    if ssh is None and 22 in info['port2endpoint']:
+        ssh = info['port2endpoint'][22]
+    if ssh is not None:
+        info['external_ip'] = ssh['host']
+        info['ssh_port'] = ssh['port']
+    return info
 
 
 def list_instances() -> Dict[str, Dict[str, Any]]:
     """Lists instances associated with API key."""
-    instances = _sky_get_pods()
-
-    instance_dict: Dict[str, Dict[str, Any]] = {}
-    for instance in instances:
-        info = {}
-
-        info['status'] = instance['desiredStatus']
-        info['name'] = instance['name']
-        info['vcpu_count'] = instance.get('vcpuCount')
-        info['port2endpoint'] = {}
-
-        # Sometimes when the cluster is in the process of being created,
-        # the `port` field in the runtime is None and we need to check for it.
-        if (instance['desiredStatus'] == 'RUNNING' and
-                instance.get('runtime') and
-                instance.get('runtime').get('ports')):
-            for port in instance['runtime']['ports']:
-                if port['isIpPublic']:
-                    if port['privatePort'] == 22:
-                        info['external_ip'] = port['ip']
-                        info['ssh_port'] = port['publicPort']
-                    info['port2endpoint'][port['privatePort']] = {
-                        'host': port['ip'],
-                        'port': port['publicPort']
-                    }
-                else:
-                    info['internal_ip'] = port['ip']
-
-        instance_dict[instance['id']] = info
-
-    return instance_dict
+    return {pod['id']: _parse_pod(pod) for pod in _list_pods()}
 
 
-def delete_pod_template(template_name: str) -> None:
+def delete_pod_template(template_id: str) -> None:
     """Deletes a pod template."""
     try:
-        runpod.runpod.api.graphql.run_graphql_query(
-            f'mutation {{deleteTemplate(templateName: "{template_name}")}}')
-    except runpod.runpod.error.QueryError as e:
-        logger.warning(f'Failed to delete template {template_name}: {e} '
+        runpod.rest_request('DELETE',
+                            f'/templates/{runpod.path_segment(template_id)}')
+    except runpod.RunPodRestError as e:
+        logger.warning(f'Failed to delete template {template_id}: {e} '
                        'Please delete it manually.')
 
 
 def delete_register_auth(registry_auth_id: str) -> None:
     """Deletes a registry auth."""
     try:
-        runpod.runpod.delete_container_registry_auth(registry_auth_id)
-    except runpod.runpod.error.QueryError as e:
+        runpod.rest_request(
+            'DELETE', f'/registries/{runpod.path_segment(registry_auth_id)}')
+    except runpod.RunPodRestError as e:
         logger.warning(
             f'Failed to delete registry auth {registry_auth_id}: {e} '
             'Please delete it manually.')
@@ -258,29 +172,41 @@ def _create_template_for_docker_login(
     if docker_login_config is None:
         return image_name, None
     login_config = docker_utils.DockerLoginConfig(**docker_login_config)
-    container_registry_auth_name = f'{cluster_name}-registry-auth'
-    container_template_name = _construct_docker_login_template_name(
-        cluster_name)
-    # Compute the fully-qualified image name (e.g. ghcr.io/org/image:tag)
-    # before creating the template. Passing image_name=None caused Python to
-    # serialize None as the literal string "None" in the GraphQL mutation
-    # (imageName: "None"), which the RunPod API now rejects as invalid.
     # TODO(tian): Now we create a template and a registry auth for each cluster.
     # Consider create one for each server and reuse them. Challenges including
     # calculate the reference count and delete them when no longer needed.
     formatted_image = login_config.format_image(image_name)
-    create_auth_resp = runpod.runpod.create_container_registry_auth(
-        name=container_registry_auth_name,
-        username=login_config.username,
-        password=login_config.password,
-    )
+    create_auth_resp = runpod.rest_request(
+        'POST',
+        '/registries',
+        json={
+            'name': _construct_registry_auth_name(cluster_name),
+            'username': login_config.username,
+            'password': login_config.password,
+        })
     registry_auth_id = create_auth_resp['id']
-    create_template_resp = runpod.runpod.create_template(
-        name=container_template_name,
-        image_name=formatted_image,
-        registry_auth_id=registry_auth_id,
-    )
+    create_template_resp = runpod.rest_request(
+        'POST',
+        '/templates',
+        json={
+            'name': _construct_docker_login_template_name(cluster_name),
+            'image': formatted_image,
+            'registry': registry_auth_id,
+            'startJupyter': False,
+        })
     return formatted_image, create_template_resp['id']
+
+
+def _get_gpu_memory_gb(gpu_type: str) -> int:
+    gpu_specs = runpod.rest_request(
+        'GET', f'/catalog/gpus/{runpod.path_segment(gpu_type)}')
+    return gpu_specs['memory']
+
+
+def _parse_cpu_instance_type(instance_type: str) -> Dict[str, Any]:
+    """Splits a '<flavor>-<vcpus>-<memory>' CPU instance type."""
+    flavor, vcpu_count, _ = instance_type.rsplit('-', 2)
+    return {'id': flavor, 'vcpuCount': int(vcpu_count)}
 
 
 def launch(
@@ -307,6 +233,8 @@ def launch(
 
     For GPU instances, we convert the instance_type to the RunPod GPU name,
     and finds the specs for the GPU, before launching the instance.
+
+    ``zone`` is a comma-separated list of RunPod data center ids.
 
     Returns:
         instance_id: The instance ID.
@@ -346,82 +274,106 @@ def launch(
                    f'bash init.sh\'')
 
     # Port 8081 is occupied for nginx in the base image.
-    custom_ports_str = ''
+    port_list = ['22/tcp']
     if ports is not None:
-        custom_ports_str = ''.join([f'{p}/tcp,' for p in ports])
-    ports_str = (f'22/tcp,'
-                 f'{custom_ports_str}'
-                 f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
-                 f'{constants.SKY_REMOTE_RAY_PORT}/http')
+        port_list.extend(f'{p}/tcp' for p in ports)
+    port_list.extend([
+        f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http',
+        f'{constants.SKY_REMOTE_RAY_PORT}/http',
+    ])
 
     image_name_formatted, template_id = _create_template_for_docker_login(
         cluster_name, image_name, docker_login_config)
 
-    params = {
-        'name': name,
-        'image_name': image_name_formatted,
-        'container_disk_in_gb': disk_size,
-        'country_code': region,
-        'data_center_id': zone,
-        'ports': ports_str,
-        'support_public_ip': True,
-        'docker_args': docker_args,
-        'template_id': template_id,
-    }
-
-    # Optional network volume mount.
-    if volume_mount_path is not None:
-        params['volume_mount_path'] = volume_mount_path
-    if network_volume_id is not None:
-        params['network_volume_id'] = network_volume_id
-
     # GPU instance types start with f'{gpu_count}x',
     # CPU instance types start with 'cpu'.
     is_cpu_instance = instance_type.startswith('cpu')
-    if is_cpu_instance:
-        # RunPod CPU instances can be uniquely identified by the instance_id.
-        params.update({
-            'instance_id': instance_type,
-        })
-    else:
+    if not is_cpu_instance:
         gpu_type = GPU_NAME_MAP[instance_type.split('_')[1]]
         gpu_quantity = int(instance_type.split('_')[0].replace('x', ''))
         cloud_type = instance_type.split('_')[2]
-        gpu_specs = runpod.runpod.get_gpu(gpu_type)
-        params.update({
-            'gpu_type_id': gpu_type,
-            'cloud_type': cloud_type,
-            'min_vcpu_count': 4 * gpu_quantity,
-            'min_memory_in_gb': gpu_specs['memoryInGb'] * gpu_quantity,
-            'gpu_count': gpu_quantity,
-        })
+        gpu_memory_gb = _get_gpu_memory_gb(gpu_type)
 
-    if preemptible is None or not preemptible:
-        new_instance = runpod.runpod.create_pod(**params)
-    else:
+    if preemptible:
+        if is_cpu_instance:
+            raise ValueError('RunPod does not support spot CPU instances.')
         new_instance = runpod_commands.create_spot_pod(
+            name=name,
+            image_name=image_name_formatted,
+            gpu_type_id=gpu_type,
             bid_per_gpu=bid_per_gpu,
-            **params,  # type: ignore[arg-type]
+            cloud_type=cloud_type,
+            gpu_count=gpu_quantity,
+            min_vcpu_count=4 * gpu_quantity,
+            min_memory_in_gb=gpu_memory_gb * gpu_quantity,
+            container_disk_in_gb=disk_size,
+            country_code=region,
+            data_center_id=zone,
+            ports=','.join(port_list),
+            docker_args=docker_args,
+            template_id=template_id,
+            network_volume_id=network_volume_id,
+            volume_mount_path=(volume_mount_path if volume_mount_path
+                               is not None else '/runpod-volume'),
         )
+        return new_instance['id']
 
+    body: Dict[str, Any] = {
+        'name': name,
+        'image': image_name_formatted,
+        'disk': disk_size,
+        'ports': port_list,
+        'args': docker_args,
+        'startSsh': True,
+    }
+    if template_id is not None:
+        body['templateId'] = template_id
+    if zone:
+        body['dataCenterIds'] = zone.split(',')
+    if network_volume_id is not None:
+        if volume_mount_path is None:
+            raise ValueError('volume_mount_path is required when mounting a '
+                             'RunPod network volume.')
+        body['mounts'] = {
+            'network': [{
+                'volumeId': network_volume_id,
+                'path': volume_mount_path,
+            }]
+        }
+    if is_cpu_instance:
+        body['cpu'] = _parse_cpu_instance_type(instance_type)
+    else:
+        body['gpu'] = {
+            'id': gpu_type,
+            'count': gpu_quantity,
+            'minVcpuCountPerGpu': 4,
+            'minRamPerGpu': gpu_memory_gb,
+        }
+        # 'ALL' (any cloud) is expressed in v2 by omitting the field.
+        if cloud_type in ('SECURE', 'COMMUNITY'):
+            body['cloud'] = cloud_type
+    new_instance = runpod.rest_request('POST', '/pods', json=body)
     return new_instance['id']
 
 
 def get_registry_auth_resources(
         cluster_name: str) -> Tuple[Optional[str], Optional[str]]:
-    """Gets the registry auth resources."""
-    container_registry_auth_name = _construct_docker_login_template_name(
-        cluster_name)
-    for template in _list_pod_templates_with_container_registry():
-        if template['name'] == container_registry_auth_name:
-            return container_registry_auth_name, template[
-                'containerRegistryAuthId']
+    """Gets the docker login template and registry auth of a cluster.
+
+    Returns:
+        (template_id, registry_auth_id), both None if the cluster has no
+        docker login template.
+    """
+    template_name = _construct_docker_login_template_name(cluster_name)
+    for template in _list_templates():
+        if template['name'] == template_name:
+            return template['id'], template.get('registry')
     return None, None
 
 
 def remove(instance_id: str) -> None:
     """Terminates the given instance."""
-    runpod.runpod.terminate_pod(instance_id)
+    runpod.rest_request('DELETE', f'/pods/{runpod.path_segment(instance_id)}')
 
 
 def get_ssh_ports(cluster_name) -> List[int]:
@@ -440,3 +392,20 @@ def get_ssh_ports(cluster_name) -> List[int]:
         f'Could not find any instances for cluster {cluster_name}.')
 
     return ssh_ports
+
+
+def register_ssh_key(public_key: str) -> None:
+    """Adds a public key to the account's SSH keys, unless already present.
+
+    Keys are compared on type and material only, so a re-labeled copy of a
+    registered key is not added twice.
+    """
+    resp = runpod.rest_request('GET', '/account/ssh-keys')
+    current_keys: List[str] = list(resp.get('keys') or [])
+    new_material = public_key.split()[:2]
+    for key in current_keys:
+        if key.split()[:2] == new_material:
+            return
+    runpod.rest_request('PUT',
+                        '/account/ssh-keys',
+                        json={'keys': current_keys + [public_key]})
