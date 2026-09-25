@@ -1813,8 +1813,10 @@ export function ManagedJobsTable({
                 : memberIsMultiTask
                   ? `/jobs/${item.id}/${taskIndex}`
                   : `/jobs/${item.id}`;
-            // Same Dynamic pill as the job page's task list: hover names the
-            // launching task, or says the member was attached from outside.
+            // Same Dynamic pill as the job page's task list, on every member
+            // (also the rare pre-index rows, whose ID cell shows the job id):
+            // hover names the launching task, or says the member was attached
+            // from outside.
             const launchedFrom =
               item.parent_task_id != null
                 ? `task ${item.parent_task_id} of ${
@@ -1833,11 +1835,9 @@ export function ManagedJobsTable({
                     </span>
                   )}
                 </Link>
-                {item.dynamic_task_index != null && (
-                  <span className="ml-1.5">
-                    <DynamicBadge launchedFrom={launchedFrom} />
-                  </span>
-                )}
+                <span className="ml-1.5">
+                  <DynamicBadge launchedFrom={launchedFrom} />
+                </span>
               </TableCell>
             );
           }
