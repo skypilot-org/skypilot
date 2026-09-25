@@ -282,7 +282,7 @@ def handle_returncode(returncode: int,
 
 
 def kill_children_processes(parent_pids: Optional[Union[
-    int, List[Optional[int]]]] = None,
+    int, psutil.Process, List[Optional[Union[int, psutil.Process]]]]] = None,
                             force: bool = False) -> None:
     """Kill children processes recursively.
 
@@ -293,14 +293,15 @@ def kill_children_processes(parent_pids: Optional[Union[
        etc. while we are cleaning up the clusters.
 
     Args:
-        parent_pids: Optional PIDs of a series of processes. The processes and
+        parent_pids: Optional PIDs or identity-checked psutil.Process objects.
+          Passing a Process preserves PID-reuse protection. The processes and
           their children will be killed.  If a list of PID is specified, it is
           killed by the order in the list. This is for guaranteeing the order
           of cleaning up and suppress flaky errors.
         force: bool, send SIGKILL if force, otherwise, use SIGTERM for
           gracefully kill the process.
     """
-    if isinstance(parent_pids, int):
+    if isinstance(parent_pids, (int, psutil.Process)):
         parent_pids = [parent_pids]
 
     parent_processes = []
@@ -309,7 +310,8 @@ def kill_children_processes(parent_pids: Optional[Union[
     else:
         for pid in parent_pids:
             try:
-                process = psutil.Process(pid)
+                process = pid if isinstance(
+                    pid, psutil.Process) else psutil.Process(pid)
             except psutil.NoSuchProcess:
                 continue
             parent_processes.append(process)

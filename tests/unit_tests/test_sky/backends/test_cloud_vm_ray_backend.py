@@ -430,6 +430,7 @@ class TestCloudVmRayBackendGetGrpcChannel:
 
             with patch.object(handle, '_get_skylet_ssh_tunnel', side_effect=mock_get_tunnel_side_effect), \
                 patch.object(handle, '_open_and_update_skylet_tunnel', side_effect=mock_open_tunnel), \
+                patch.object(SSHTunnelInfo, 'get_process', return_value=MagicMock()), \
                 patch('grpc.insecure_channel', side_effect=lambda addr, options: addr), \
                 patch('socket.socket') as mock_socket:
 
