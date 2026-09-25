@@ -14,6 +14,8 @@ Machine learning examples:
 
 - [**`huggingface_glue_imdb_app.yaml`**](./huggingface_glue_imdb_app.yaml): Use [Huggingface Transformers](https://github.com/huggingface/transformers/) to finetune a pretrained BERT model.
 
+- [**`training/halo/`**](./training/halo/README.md): Fine-tune a Hugging Face model with faster kernels and lower peak memory on an H100 provisioned by SkyPilot.
+
 - [**`cosmos3-finetuning/`**](./cosmos3-finetuning/README.md): Fine-tune [NVIDIA Cosmos 3](https://github.com/NVIDIA/cosmos-framework) (`Cosmos3-Nano`, a 16B world foundation model for Physical AI) on robot-manipulation video as a managed job, using NVIDIA's `vision_sft_nano` SFT recipe with checkpoint-to-bucket auto-recovery.
 
 - [**`hf-storage-transcription/`**](./hf-storage-transcription/README.md): Batch audio transcription with [Hugging Face storage](https://huggingface.co/docs/hub/storage-buckets) as the only storage layer — audio bucket in, transcript bucket out, same YAML on any cloud.
