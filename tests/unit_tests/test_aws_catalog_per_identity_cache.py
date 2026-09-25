@@ -6,10 +6,11 @@ across requests. Before this, ``_user_df`` was one module global created "at
 most once per a process' lifetime", so the first identity in a process fixed
 that process's catalog for every identity after it.
 
-Every test below uses TWO identities. A single-identity test proves nothing
-here: the unkeyed cache returns the right answer for the first identity whether
-or not a key exists, and it is every later identity that is served the wrong
-catalog.
+The two tests that assert the fix use TWO identities, which is the only shape
+that shows it: the unkeyed cache returns the right answer for the FIRST
+identity whether or not a key exists, and it is every later identity that is
+served the wrong catalog. The remaining tests cover the failure and fallback
+paths, which are single-identity by nature.
 """
 import pytest
 
@@ -127,3 +128,17 @@ def test_an_unreadable_identity_still_resolves_to_a_concrete_key(
                         lambda name: str(tmp_path / name.replace('/', '_')))
 
     assert aws_catalog._resolve_aws_user_hash() == 'default'
+
+
+def test_the_cache_is_bounded(two_identities):
+    """Each entry is a full catalog and a process can serve unboundedly many
+    identities. Eviction costs one refetch, which the identity's on-disk
+    ``az_mappings-<hash>.csv`` already makes cheap."""
+    who, _ = two_identities
+
+    for n in range(aws_catalog._MAX_CACHED_USER_DFS + 3):
+        who['hash'] = f'{n:08x}'
+        assert aws_catalog._get_df() == f'catalog-for-{n:08x}', (
+            'the catalog returned must be the one built for the identity that '
+            'asked, even when the insert triggers an eviction')
+    assert len(aws_catalog._user_dfs) == aws_catalog._MAX_CACHED_USER_DFS

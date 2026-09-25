@@ -91,6 +91,10 @@ _PULL_FREQUENCY_HOURS = 7
 # `_apply_az_mapping_lock` protects reading/writing `_user_dfs`.
 _default_df = common.read_catalog('aws/vms.csv',
                                   pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+# Bounded: each entry is a full catalog, a process can serve an unbounded
+# number of identities over its lifetime, and an evicted identity costs one
+# refetch -- which its on-disk `az_mappings-<hash>.csv` already makes cheap.
+_MAX_CACHED_USER_DFS = 8
 _user_dfs: Dict[str, 'pd.DataFrame'] = {}
 _apply_az_mapping_lock = threading.Lock()
 
@@ -112,7 +116,8 @@ def _get_az_mappings(aws_user_hash: str) -> Optional['pd.DataFrame']:
             with rich_utils.safe_status(
                     ux_utils.spinner_message('AWS: Fetching availability '
                                              'zones mapping')):
-                az_mappings = fetch_aws.fetch_availability_zone_mappings()
+                az_mappings = fetch_aws.fetch_availability_zone_mappings(
+                    aws_user_hash)
         else:
             return None
         # get_catalog_path() is now a pure path getter; create the
@@ -222,6 +227,8 @@ def _get_df() -> 'pd.DataFrame':
             try:
                 _user_dfs[aws_user_hash] = _fetch_and_apply_az_mapping(
                     _default_df, aws_user_hash)
+                while len(_user_dfs) > _MAX_CACHED_USER_DFS:
+                    _user_dfs.pop(next(iter(_user_dfs)))
             except (RuntimeError, ImportError) as e:
                 if config.get_use_default_catalog_if_failed():
                     logger.warning('Failed to fetch availability zone mapping. '
@@ -233,7 +240,9 @@ def _get_df() -> 'pd.DataFrame':
                     return _default_df
                 else:
                     raise
-    return _user_dfs[aws_user_hash]
+        # Read inside the lock: eviction can remove another thread's entry
+        # between the insert above and a read outside it.
+        return _user_dfs[aws_user_hash]
 
 
 def get_quota_code(instance_type: str, use_spot: bool) -> Optional[str]:
