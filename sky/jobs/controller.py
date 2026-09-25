@@ -3865,10 +3865,16 @@ class ControllerManager:
                 await asyncio.sleep(60)
                 continue
 
-            # Check if there are any jobs that are waiting to launch
+            # Check if there are any jobs that are waiting to launch. Re-read
+            # the server config first so an edit to the per-user launch cap
+            # takes effect on the next round without restarting controllers.
             try:
+                await asyncio.to_thread(skypilot_config.safe_reload_config)
                 waiting_job = await managed_job_state.get_waiting_job_async(
-                    pid=self._pid, pid_started_at=self._pid_started_at)
+                    pid=self._pid,
+                    pid_started_at=self._pid_started_at,
+                    max_concurrent_launches_per_user=(
+                        get_max_concurrent_launches_per_user()))
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Failed to get waiting job: {e}')
                 await asyncio.sleep(5)
@@ -3901,6 +3907,12 @@ class ControllerManager:
                     continue
 
             await self.start_job(job_id, pool)
+
+
+def get_max_concurrent_launches_per_user() -> Optional[int]:
+    """``jobs.controller.max_concurrent_launches_per_user``; None = no cap."""
+    return skypilot_config.get_nested(
+        ('jobs', 'controller', 'max_concurrent_launches_per_user'), None)
 
 
 async def main(controller_uuid: str):

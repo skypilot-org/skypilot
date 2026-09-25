@@ -55,6 +55,7 @@ Below is the configuration syntax and some example values. See detailed explanat
         down: false  # use with caution!
       :ref:`controller_logs_gc_retention_hours <config-yaml-jobs-controller-controller-logs-gc-retention-hours>`: 24 * 7
       :ref:`task_logs_gc_retention_hours <config-yaml-jobs-controller-task-logs-gc-retention-hours>`: 24 * 7
+      :ref:`max_concurrent_launches_per_user <config-yaml-jobs-controller-max-concurrent-launches-per-user>`: 16
 
   :ref:`docker <config-yaml-docker>`:
     :ref:`run_options <config-yaml-docker-run-options>`:
@@ -638,6 +639,39 @@ Example:
     controller:
       # Disable task logs GC (keep all logs indefinitely)
       task_logs_gc_retention_hours: -1
+
+
+.. _config-yaml-jobs-controller-max-concurrent-launches-per-user:
+
+``jobs.controller.max_concurrent_launches_per_user``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Maximum number of managed jobs a single user may have launching at the same
+time (optional). Unset by default: no per-user limit.
+
+A managed job holds a controller launch slot, and in consolidation mode an
+API server worker, from the moment it is picked up until its cluster is up.
+If a launch waits a long time for capacity (for example, a Kubernetes pod
+pending behind a queue), the slot stays held for the whole wait. One user
+submitting a large batch of such jobs can hold every slot, and every other
+user's jobs then stay ``PENDING`` even when the resources they need are
+free.
+
+With this setting, the scheduler skips a user's remaining jobs while that
+user already has this many jobs launching, and moves on to other users'
+jobs. The skipped jobs stay ``PENDING`` and start as the user's earlier
+launches complete; nothing is rejected. Pool jobs are not counted and are
+not held back, since they run on the pool's own workers and do not launch a
+cluster.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      # No single user can hold more than 16 launch slots at once.
+      max_concurrent_launches_per_user: 16
 
 
 .. _config-yaml-allowed-clouds:
