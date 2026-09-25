@@ -133,9 +133,10 @@ export const USER_FILTER_SCHEMA = [
 // to on, so only the off state needs to travel.
 const USER_VIEW_SCHEMA = [{ key: 'deduplicate', default: 'true' }];
 
-const PROPERTY_OPTIONS = USER_FILTER_SCHEMA.map(({ key, label }) => ({
+const PROPERTY_OPTIONS = USER_FILTER_SCHEMA.map(({ key, label, multi }) => ({
   label,
   value: key,
+  multi: !!multi,
 }));
 
 const MULTI_VALUE_LABELS = new Set(

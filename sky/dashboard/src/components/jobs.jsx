@@ -533,9 +533,10 @@ export function ManagedJobs() {
   );
 
   // Default filter input and active-filter chips.
-  const filterPropertyList = filterSchema.map(({ key, label }) => ({
+  const filterPropertyList = filterSchema.map(({ key, label, multi }) => ({
     label,
     value: key,
+    multi: !!multi,
   }));
   const filterInput = (
     <FilterDropdown

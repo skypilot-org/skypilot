@@ -130,9 +130,10 @@ const CLUSTER_VIEW_SCHEMA = [
   },
 ];
 
-const PROPERTY_OPTIONS = CLUSTER_FILTER_SCHEMA.map(({ key, label }) => ({
+const PROPERTY_OPTIONS = CLUSTER_FILTER_SCHEMA.map(({ key, label, multi }) => ({
   label,
   value: key,
+  multi: !!multi,
 }));
 
 // Properties whose values are alternatives rather than extra conditions. Only

@@ -84,9 +84,10 @@ const VOLUME_FILTER_SCHEMA = [
   { key: 'user', label: 'User', kind: 'text' },
 ];
 
-const PROPERTY_OPTIONS = VOLUME_FILTER_SCHEMA.map(({ key, label }) => ({
+const PROPERTY_OPTIONS = VOLUME_FILTER_SCHEMA.map(({ key, label, multi }) => ({
   label,
   value: key,
+  multi: !!multi,
 }));
 
 // Properties whose values are alternatives rather than extra conditions: two
