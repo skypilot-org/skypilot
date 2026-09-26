@@ -215,13 +215,9 @@ def get_identities_only(ssh_config_dict: Dict[str, Any]) -> bool:
 def get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
     ssh_config = get_slurm_ssh_config()
     ssh_config_dict = ssh_config.lookup(cluster)
-    # `sinfo` and `scontrol show node` report the cluster's own inventory,
-    # which is the same whoever asks for it, so they run as the SSH account
-    # instead of impersonating the submitting user. Impersonating them would
-    # gain nothing and would require sinfo and scontrol in the sudo allowlist
-    # of every user, without which the inventory cannot be read at all. The
-    # result is shared across users for the same reason.
-    cache_key = f'slurm:nodes_info:{cluster}'
+    slurm_user = get_submit_user(cluster)
+    command_user = slurm_user or ssh_config_dict['user']
+    cache_key = f'slurm:nodes_info:{cluster}:{command_user}'
     cached = kv_cache.get_cache_entry(cache_key)
     if cached is not None:
         logger.debug(f'Slurm nodes info found in cache ({cache_key})')
@@ -235,6 +231,7 @@ def get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
         identities_only=get_identities_only(ssh_config_dict),
+        slurm_user=slurm_user,
     )
     nodes_info = client.info_nodes()
 
