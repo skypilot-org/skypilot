@@ -557,6 +557,23 @@ def get_engine() -> sqlalchemy.engine.Engine:
     return _db_manager.get_engine()
 
 
+def _retry_session_sync(operation):
+    """Run `operation(session)` in a fresh sync session with retry on
+    transient DB errors. Use when a function has non-DB side effects
+    (event logs, callbacks) that must run exactly once; wrap only the
+    session block with this helper. For pure-leaf DB functions, prefer
+    the `@db_retries.retry` decorator on the function itself.
+    """
+
+    def _do(attempt):  # pylint: disable=unused-argument
+        del attempt
+        engine = _db_manager.get_engine()
+        with orm.Session(engine) as session:
+            return operation(session)
+
+    return db_retries.with_db_retries(_do)
+
+
 async def _retry_session(operation):
     """Run `operation(session)` in a fresh async session with retry on
     transient DB errors. Use when a function has non-DB side effects
@@ -572,6 +589,27 @@ async def _retry_session(operation):
             return await operation(session)
 
     return await db_retries.with_db_retries_async(_do)
+
+
+def _describe_task_transition_failure_sync(session: orm.Session, job_id: int,
+                                           task_id: int) -> str:
+    """Return a human-readable description when a task transition fails."""
+    details = 'Couldn\'t fetch the task details.'
+    try:
+        debug_result = session.execute(
+            sqlalchemy.select(spot_table.c.status, spot_table.c.end_at).where(
+                sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                                spot_table.c.task_id == task_id)))
+        rows = debug_result.mappings().all()
+        details = (f'{len(rows)} rows matched job {job_id} and task '
+                   f'{task_id}.')
+        for row in rows:
+            status = row['status']
+            end_at = row['end_at']
+            details += f' Status: {status}, End time: {end_at}.'
+    except Exception as exc:  # pylint: disable=broad-except
+        details += f' Error fetching task details: {exc}'
+    return details
 
 
 async def _describe_task_transition_failure(session: sql_async.AsyncSession,
@@ -593,6 +631,43 @@ async def _describe_task_transition_failure(session: sql_async.AsyncSession,
     except Exception as exc:  # pylint: disable=broad-except
         details += f' Error fetching task details: {exc}'
     return details
+
+
+def _retry_task_status_update_sync(
+    job_id: int,
+    task_id: int,
+    target_status: 'ManagedJobStatus',
+    update: Callable[[orm.Session], int],
+    failure_prefix: str,
+) -> None:
+    """Run a one-row task status update with commit-lost-safe retry."""
+    prior_update_matched = False
+
+    def _op(attempt: int) -> None:
+        nonlocal prior_update_matched
+        engine = _db_manager.get_engine()
+        with orm.Session(engine) as session:
+            count = update(session)
+            if count == 1:
+                prior_update_matched = True
+            session.commit()
+            if count == 1:
+                return
+            if count == 0 and attempt > 0 and prior_update_matched:
+                current = session.execute(
+                    sqlalchemy.select(spot_table.c.status).where(
+                        sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                                        spot_table.c.task_id == task_id)))
+                row = current.fetchone()
+                if row is not None and row[0] == target_status.value:
+                    return
+            details = _describe_task_transition_failure_sync(
+                session, job_id, task_id)
+            message = f'{failure_prefix} ({count} rows updated. {details})'
+            logger.error(message)
+            raise exceptions.ManagedJobStatusError(message)
+
+    db_retries.with_db_retries(_op)
 
 
 async def _retry_task_status_update(
@@ -3738,6 +3813,58 @@ async def get_all_task_ids_statuses_async(
         return [(row[0], ManagedJobStatus(row[1])) for row in result.fetchall()]
 
 
+def _starting_update(
+        job_id: int, task_id: int, run_timestamp: str, submit_time: float,
+        resources_str: str, specs: Dict[str, Any],
+        full_resources_json: Optional[Dict[str, Any]]) -> sqlalchemy.sql.Update:
+    values = {
+        spot_table.c.resources: resources_str,
+        # Write-once: a parked launch sets the task back to PENDING
+        # (set_backoff_pending_async) with its submission already
+        # recorded, and a controller restart during that window re-runs
+        # this transition. Keeping the first value stops the restart
+        # moment from being reported as the submission time.
+        spot_table.c.submitted_at: sqlalchemy.func.coalesce(
+            spot_table.c.submitted_at, submit_time),
+        spot_table.c.status: ManagedJobStatus.STARTING.value,
+        spot_table.c.run_timestamp: run_timestamp,
+        spot_table.c.specs: json.dumps(specs),
+    }
+    if full_resources_json is not None:
+        values[spot_table.c.full_resources] = full_resources_json
+    return (sqlalchemy.update(spot_table).where(
+        sqlalchemy.and_(
+            spot_table.c.spot_job_id == job_id,
+            spot_table.c.task_id == task_id,
+            spot_table.c.status == ManagedJobStatus.PENDING.value,
+            spot_table.c.end_at.is_(None),
+        )).values(values))
+
+
+def set_starting(job_id: int,
+                 task_id: int,
+                 run_timestamp: str,
+                 submit_time: float,
+                 resources_str: str,
+                 specs: Dict[str, Any],
+                 callback_func: SyncCallbackType,
+                 full_resources_json: Optional[Dict[str, Any]] = None):
+    """Set the task to starting state."""
+    add_job_event(job_id, task_id, ManagedJobStatus.STARTING, 'Job is starting')
+    logger.info('Launching the spot cluster...')
+
+    def _op(session: orm.Session) -> int:
+        result = session.execute(
+            _starting_update(job_id, task_id, run_timestamp, submit_time,
+                             resources_str, specs, full_resources_json))
+        return result.rowcount
+
+    _retry_task_status_update_sync(job_id, task_id, ManagedJobStatus.STARTING,
+                                   _op, 'Failed to set the task to starting.')
+    callback_func('SUBMITTED')
+    callback_func('STARTING')
+
+
 async def set_starting_async(job_id: int,
                              task_id: int,
                              run_timestamp: str,
@@ -3753,35 +3880,64 @@ async def set_starting_async(job_id: int,
     logger.info('Launching the spot cluster...')
 
     async def _op(session: sql_async.AsyncSession) -> int:
-        values = {
-            spot_table.c.resources: resources_str,
-            # Write-once: a parked launch sets the task back to PENDING
-            # (set_backoff_pending_async) with its submission already
-            # recorded, and a controller restart during that window re-runs
-            # this transition. Keeping the first value stops the restart
-            # moment from being reported as the submission time.
-            spot_table.c.submitted_at: sqlalchemy.func.coalesce(
-                spot_table.c.submitted_at, submit_time),
-            spot_table.c.status: ManagedJobStatus.STARTING.value,
-            spot_table.c.run_timestamp: run_timestamp,
-            spot_table.c.specs: json.dumps(specs),
-        }
-        if full_resources_json is not None:
-            values[spot_table.c.full_resources] = full_resources_json
         result = await session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id,
-                    spot_table.c.status == ManagedJobStatus.PENDING.value,
-                    spot_table.c.end_at.is_(None),
-                )).values(values))
+            _starting_update(job_id, task_id, run_timestamp, submit_time,
+                             resources_str, specs, full_resources_json))
         return result.rowcount
 
     await _retry_task_status_update(job_id, task_id, ManagedJobStatus.STARTING,
                                     _op, 'Failed to set the task to starting.')
     await callback_func('SUBMITTED')
     await callback_func('STARTING')
+
+
+def _started_update(job_id: int, task_id: int,
+                    start_time: float) -> sqlalchemy.sql.Update:
+    # A failure-credited episode can still be open here: a recovery that
+    # parked (set_backoff_pending_async) is PENDING when the controller
+    # restarts, and the restart drives it back to RUNNING through this
+    # transition rather than through set_recovered_async. Close it the
+    # same way that function does, so the recovery is still counted.
+    # Only an explicit TRUE counts: a fresh start leaves the column NULL.
+    count_expr = spot_table.c.recovery_count + sqlalchemy.case(
+        (spot_table.c.recovering_from_failure.is_(True), 1), else_=0)
+    return (sqlalchemy.update(spot_table).where(
+        sqlalchemy.and_(
+            spot_table.c.spot_job_id == job_id,
+            spot_table.c.task_id == task_id,
+            spot_table.c.status.in_([
+                ManagedJobStatus.STARTING.value, ManagedJobStatus.PENDING.value
+            ]),
+            spot_table.c.end_at.is_(None),
+        )
+    ).values({
+        spot_table.c.status: ManagedJobStatus.RUNNING.value,
+        # Write-once, like submitted_at above: start_at is the
+        # first time the task ran, and set_recovered_async never
+        # moves it. A restart resuming a parked task must not
+        # reset it either.
+        spot_table.c.start_at: sqlalchemy.func.coalesce(spot_table.c.start_at,
+                                                        start_time),
+        spot_table.c.last_recovered_at: start_time,
+        spot_table.c.recovery_count: count_expr,
+        # Defensive: no recovery episode is open once RUNNING.
+        spot_table.c.recovering_from_failure: None,
+    }))
+
+
+def set_started(job_id: int, task_id: int, start_time: float,
+                callback_func: SyncCallbackType):
+    """Set the task to started state."""
+    add_job_event(job_id, task_id, ManagedJobStatus.RUNNING, 'Job has started')
+    logger.info('Job started.')
+
+    def _op(session: orm.Session) -> int:
+        result = session.execute(_started_update(job_id, task_id, start_time))
+        return result.rowcount
+
+    _retry_task_status_update_sync(job_id, task_id, ManagedJobStatus.RUNNING,
+                                   _op, 'Failed to set the task to started.')
+    callback_func('STARTED')
 
 
 async def set_started_async(job_id: int, task_id: int, start_time: float,
@@ -3792,38 +3948,8 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
     logger.info('Job started.')
 
     async def _op(session: sql_async.AsyncSession) -> int:
-        # A failure-credited episode can still be open here: a recovery that
-        # parked (set_backoff_pending_async) is PENDING when the controller
-        # restarts, and the restart drives it back to RUNNING through this
-        # transition rather than through set_recovered_async. Close it the
-        # same way that function does, so the recovery is still counted.
-        # Only an explicit TRUE counts: a fresh start leaves the column NULL.
-        count_expr = spot_table.c.recovery_count + sqlalchemy.case(
-            (spot_table.c.recovering_from_failure.is_(True), 1), else_=0)
         result = await session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id,
-                    spot_table.c.status.in_([
-                        ManagedJobStatus.STARTING.value,
-                        ManagedJobStatus.PENDING.value
-                    ]),
-                    spot_table.c.end_at.is_(None),
-                )).
-            values({
-                spot_table.c.status: ManagedJobStatus.RUNNING.value,
-                # Write-once, like submitted_at above: start_at is the
-                # first time the task ran, and set_recovered_async never
-                # moves it. A restart resuming a parked task must not
-                # reset it either.
-                spot_table.c.start_at: sqlalchemy.func.coalesce(
-                    spot_table.c.start_at, start_time),
-                spot_table.c.last_recovered_at: start_time,
-                spot_table.c.recovery_count: count_expr,
-                # Defensive: no recovery episode is open once RUNNING.
-                spot_table.c.recovering_from_failure: None,
-            }))
+            _started_update(job_id, task_id, start_time))
         return result.rowcount
 
     await _retry_task_status_update(job_id, task_id, ManagedJobStatus.RUNNING,
@@ -3902,6 +4028,111 @@ async def get_job_status_with_task_id_async(
         return ManagedJobStatus(status[0]) if status else None
 
 
+def _recovering_update(
+        job_id: int, task_id: int, force_transit_to_recovering: bool,
+        current_time: float,
+        recovery_source: RecoverySource) -> sqlalchemy.sql.Update:
+    if force_transit_to_recovering:
+        status_condition = spot_table.c.status.in_(
+            [s.value for s in ManagedJobStatus.processing_statuses()])
+    else:
+        status_condition = (
+            spot_table.c.status == ManagedJobStatus.RUNNING.value)
+
+    # RUNNING and WINDING_DOWN are the "still doing job work"
+    # states (set_succeeded_async treats them equivalently, and
+    # `set_winding_down` itself doesn't accumulate). Forced
+    # recovery may revisit PENDING/STARTING/RECOVERING rows on
+    # resume or commit-lost retry; do not re-accumulate there.
+    should_accumulate_duration = sqlalchemy.and_(
+        spot_table.c.status.in_([
+            ManagedJobStatus.RUNNING.value,
+            ManagedJobStatus.WINDING_DOWN.value,
+        ]),
+        spot_table.c.last_recovered_at >= 0,
+    )
+    return (sqlalchemy.update(spot_table).where(
+        sqlalchemy.and_(
+            spot_table.c.spot_job_id == job_id,
+            spot_table.c.task_id == task_id,
+            status_condition,
+            spot_table.c.end_at.is_(None),
+        )).values({
+            spot_table.c.status: ManagedJobStatus.RECOVERING.value,
+            spot_table.c.recovering_from_failure: recovery_source ==
+                                                  RecoverySource.FAILURE,
+            spot_table.c.job_duration: sqlalchemy.case(
+                (should_accumulate_duration, spot_table.c.job_duration +
+                 current_time - spot_table.c.last_recovered_at),
+                else_=spot_table.c.job_duration),
+            spot_table.c.last_recovered_at: sqlalchemy.case(
+                (spot_table.c.last_recovered_at < 0, current_time),
+                else_=spot_table.c.last_recovered_at),
+        }))
+
+
+def set_recovering(
+    job_id: int,
+    task_id: int,
+    force_transit_to_recovering: bool,
+    callback_func: SyncCallbackType,
+    external_failures: Optional[List[ExternalClusterFailure]] = None,
+    cluster_event_reason: Optional[str] = None,
+    user_job_failure_reason: Optional[str] = None,
+    recovery_source: RecoverySource = RecoverySource.FAILURE,
+):
+    """Set the task to recovering state, and update the job duration.
+
+    user_job_failure_reason is set when the recovery was triggered by the
+    user job exiting non-zero on a healthy cluster (max_restarts_on_errors /
+    recover_on_exit_codes), so the event tells the user their program
+    failed instead of claiming the cluster was preempted.
+
+    recovery_source records why the job is recovering (defaults to FAILURE,
+    i.e. preemption/failure). It is stored on the RECOVERING job event so
+    consumers can count only failure-driven recoveries, and on the spot row
+    for the duration of the episode so set_recovered_async can decide
+    whether the completed recovery counts toward recovery_count.
+    """
+    # Build code and reason from external failures for the event log.
+    # Prefer external_failures over cluster_event_reason to avoid
+    # duplicating the same message when a plugin writes the same reason
+    # to both cluster events and cluster failures.
+    code = None
+    if external_failures:
+        code = '; '.join(f.code for f in external_failures)
+        reason = '; '.join(f.reason for f in external_failures)
+    elif user_job_failure_reason:
+        code = USER_JOB_FAILURE_EVENT_CODE
+        reason = user_job_failure_reason
+    elif cluster_event_reason:
+        reason = cluster_event_reason
+    else:
+        assert code is None, 'Code should be None if there are no reasons.'
+        reason = 'Cluster preempted or failed, recovering'
+
+    add_job_event(job_id,
+                  task_id,
+                  ManagedJobStatus.RECOVERING,
+                  reason,
+                  code=code,
+                  recovery_source=recovery_source)
+    logger.info('=== Recovering... ===')
+    current_time = time.time()
+
+    def _op(session: orm.Session) -> int:
+        result = session.execute(
+            _recovering_update(job_id, task_id, force_transit_to_recovering,
+                               current_time, recovery_source))
+        return result.rowcount
+
+    _retry_task_status_update_sync(
+        job_id, task_id, ManagedJobStatus.RECOVERING, _op,
+        ('Failed to set the task to recovering with '
+         f'force_transit_to_recovering={force_transit_to_recovering}.'))
+    callback_func('RECOVERING')
+
+
 async def set_recovering_async(
     job_id: int,
     task_id: int,
@@ -3952,44 +4183,9 @@ async def set_recovering_async(
     current_time = time.time()
 
     async def _op(session: sql_async.AsyncSession) -> int:
-        if force_transit_to_recovering:
-            status_condition = spot_table.c.status.in_(
-                [s.value for s in ManagedJobStatus.processing_statuses()])
-        else:
-            status_condition = (
-                spot_table.c.status == ManagedJobStatus.RUNNING.value)
-
-        # RUNNING and WINDING_DOWN are the "still doing job work"
-        # states (set_succeeded_async treats them equivalently, and
-        # `set_winding_down` itself doesn't accumulate). Forced
-        # recovery may revisit PENDING/STARTING/RECOVERING rows on
-        # resume or commit-lost retry; do not re-accumulate there.
-        should_accumulate_duration = sqlalchemy.and_(
-            spot_table.c.status.in_([
-                ManagedJobStatus.RUNNING.value,
-                ManagedJobStatus.WINDING_DOWN.value,
-            ]),
-            spot_table.c.last_recovered_at >= 0,
-        )
         result = await session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id,
-                    status_condition,
-                    spot_table.c.end_at.is_(None),
-                )).values({
-                    spot_table.c.status: ManagedJobStatus.RECOVERING.value,
-                    spot_table.c.recovering_from_failure:
-                        recovery_source == RecoverySource.FAILURE,
-                    spot_table.c.job_duration: sqlalchemy.case(
-                        (should_accumulate_duration, spot_table.c.job_duration +
-                         current_time - spot_table.c.last_recovered_at),
-                        else_=spot_table.c.job_duration),
-                    spot_table.c.last_recovered_at: sqlalchemy.case(
-                        (spot_table.c.last_recovered_at < 0, current_time),
-                        else_=spot_table.c.last_recovered_at),
-                }))
+            _recovering_update(job_id, task_id, force_transit_to_recovering,
+                               current_time, recovery_source))
         return result.rowcount
 
     await _retry_task_status_update(
@@ -4260,6 +4456,21 @@ def _observe_runtime_during_provisioning(
     raise RuntimeError('Concurrent runtime recovery updates did not settle')
 
 
+def _record_placement(session: orm.Session, job_id: int, nodes: List[str],
+                      infra: Optional[Dict[str, Optional[str]]]):
+    result = session.execute(
+        sqlalchemy.select(job_info_table.c.node_names).where(
+            job_info_table.c.spot_job_id == job_id).with_for_update())
+    values: Dict[str, Any] = {
+        key: value for key, value in (infra or {}).items() if value is not None
+    }
+    values['node_names'] = common_utils.merge_node_names_lineage(
+        result.scalar_one_or_none(), nodes)
+    session.execute(
+        sqlalchemy.update(job_info_table).where(
+            job_info_table.c.spot_job_id == job_id).values(**values))
+
+
 async def _record_placement_async(session: sql_async.AsyncSession, job_id: int,
                                   nodes: List[str],
                                   infra: Optional[Dict[str, Optional[str]]]):
@@ -4274,6 +4485,52 @@ async def _record_placement_async(session: sql_async.AsyncSession, job_id: int,
     await session.execute(
         sqlalchemy.update(job_info_table).where(
             job_info_table.c.spot_job_id == job_id).values(**values))
+
+
+@db_retries.retry
+def observe_runtime(
+    job_id: int,
+    task_id: int,
+    observation: managed_job_runtime.RuntimeObservation,
+    *,
+    callback_func: SyncCallbackType,
+    infra: Optional[Dict[str, Optional[str]]] = None,
+) -> None:
+    """Persist a monitoring observation, including its placement.
+
+    A running observation whose nodes differ from the cursor merges them into
+    the job's infra lineage in the same transaction; infra supplies the cloud,
+    region and zone recorded with them. callback_func receives RECOVERING,
+    STARTED or RECOVERED after commit for each transition this observation
+    caused.
+    """
+    engine = _db_manager.get_engine()
+    for _ in range(20):
+        with orm.Session(engine) as session:
+            result = session.execute(
+                sqlalchemy.select(spot_table).where(
+                    _runtime_task_filter(job_id, task_id)))
+            row = dict(result.mappings().one())
+            plan = _plan_runtime_observation(row,
+                                             observation,
+                                             provisioning=False,
+                                             now=time.time())
+            if plan is None:
+                return
+            result = session.execute(
+                _runtime_observation_update(job_id, task_id, row, plan))
+            if result.rowcount != 1:
+                session.rollback()
+                continue
+            for statement in _runtime_observation_events(job_id, task_id, plan):
+                session.execute(statement)
+            if plan.placement is not None:
+                _record_placement(session, job_id, plan.placement, infra)
+            session.commit()
+        for callback in plan.callbacks:
+            callback_func(callback)
+        return
+    raise RuntimeError('Concurrent runtime recovery updates did not settle')
 
 
 @db_retries.retry_async
@@ -4406,6 +4663,64 @@ async def get_runtime_user_restarts_async(job_id: int, task_id: int) -> int:
     return json.loads(metadata or '{}').get('runtime_user_restarts', 0)
 
 
+def _recovered_update(job_id: int, task_id: int, recovered_time: float,
+                      count_recovery: bool) -> sqlalchemy.sql.Update:
+    if count_recovery:
+        count_expr = spot_table.c.recovery_count + sqlalchemy.case(
+            (sqlalchemy.or_(spot_table.c.recovering_from_failure.is_(None),
+                            spot_table.c.recovering_from_failure.is_(True)), 1),
+            else_=0)
+    else:
+        count_expr = spot_table.c.recovery_count
+
+    return (sqlalchemy.update(spot_table).where(
+        sqlalchemy.and_(
+            spot_table.c.spot_job_id == job_id,
+            spot_table.c.task_id == task_id,
+            spot_table.c.status == ManagedJobStatus.RECOVERING.value,
+            spot_table.c.end_at.is_(None),
+        )
+    ).values({
+        spot_table.c.status: ManagedJobStatus.RUNNING.value,
+        spot_table.c.start_at: sqlalchemy.func.coalesce(spot_table.c.start_at,
+                                                        recovered_time),
+        spot_table.c.last_recovered_at: recovered_time,
+        spot_table.c.recovery_count: count_expr,
+        # Close the episode: this task has left RECOVERING, so a
+        # future recovery must open a fresh episode.
+        spot_table.c.recovering_from_failure: None,
+    }))
+
+
+def set_recovered(job_id: int,
+                  task_id: int,
+                  recovered_time: float,
+                  callback_func: SyncCallbackType,
+                  count_recovery: bool = True):
+    """Set the task to recovered.
+
+    recovery_count only counts genuine failure recoveries: the increment is
+    gated on the episode's failure credit (spot.recovering_from_failure;
+    NULL is treated as credited). Purely system-driven episodes (EMERGENCY /
+    RESTART) complete without inflating the user-visible count. Callers pass
+    count_recovery=False when completing a RECOVERING status that never was
+    a recovery episode at all (e.g. a kept-STARTING resume whose relaunch
+    retry moved the row to RECOVERING).
+    """
+    add_job_event(job_id, task_id, ManagedJobStatus.RUNNING,
+                  'Job has recovered')
+
+    def _op(session: orm.Session) -> int:
+        result = session.execute(
+            _recovered_update(job_id, task_id, recovered_time, count_recovery))
+        return result.rowcount
+
+    _retry_task_status_update_sync(job_id, task_id, ManagedJobStatus.RUNNING,
+                                   _op, 'Failed to set the task to recovered.')
+    logger.info('==== Recovered. ====')
+    callback_func('RECOVERED')
+
+
 async def set_recovered_async(job_id: int,
                               task_id: int,
                               recovered_time: float,
@@ -4424,33 +4739,10 @@ async def set_recovered_async(job_id: int,
     """
     await add_job_event_async(job_id, task_id, ManagedJobStatus.RUNNING,
                               'Job has recovered')
-    if count_recovery:
-        count_expr = spot_table.c.recovery_count + sqlalchemy.case(
-            (sqlalchemy.or_(spot_table.c.recovering_from_failure.is_(None),
-                            spot_table.c.recovering_from_failure.is_(True)), 1),
-            else_=0)
-    else:
-        count_expr = spot_table.c.recovery_count
 
     async def _op(session: sql_async.AsyncSession) -> int:
         result = await session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id,
-                    spot_table.c.status == ManagedJobStatus.RECOVERING.value,
-                    spot_table.c.end_at.is_(None),
-                )).
-            values({
-                spot_table.c.status: ManagedJobStatus.RUNNING.value,
-                spot_table.c.start_at: sqlalchemy.func.coalesce(
-                    spot_table.c.start_at, recovered_time),
-                spot_table.c.last_recovered_at: recovered_time,
-                spot_table.c.recovery_count: count_expr,
-                # Close the episode: this task has left RECOVERING, so a
-                # future recovery must open a fresh episode.
-                spot_table.c.recovering_from_failure: None,
-            }))
+            _recovered_update(job_id, task_id, recovered_time, count_recovery))
         return result.rowcount
 
     await _retry_task_status_update(job_id, task_id, ManagedJobStatus.RUNNING,
@@ -4661,6 +4953,42 @@ def set_winding_down(job_id: int, task_id: int) -> None:
                            f'task_id={task_id}')
 
 
+def _succeeded_update(job_id: int, task_id: int,
+                      end_time: float) -> sqlalchemy.sql.Update:
+    return (sqlalchemy.update(spot_table).where(
+        sqlalchemy.and_(
+            spot_table.c.spot_job_id == job_id,
+            spot_table.c.task_id == task_id,
+            spot_table.c.status.in_([
+                ManagedJobStatus.RUNNING.value,
+                ManagedJobStatus.WINDING_DOWN.value,
+            ]),
+            spot_table.c.end_at.is_(None),
+        )).values({
+            spot_table.c.status: ManagedJobStatus.SUCCEEDED.value,
+            spot_table.c.end_at: end_time,
+            # Close any open recovery episode on reaching a terminal
+            # state.
+            spot_table.c.recovering_from_failure: None,
+        }))
+
+
+def set_succeeded(job_id: int, task_id: int, end_time: float,
+                  callback_func: SyncCallbackType):
+    """Set the task to succeeded, if it is in a non-terminal state."""
+    add_job_event(job_id, task_id, ManagedJobStatus.SUCCEEDED,
+                  'Job has succeeded')
+
+    def _op(session: orm.Session) -> int:
+        result = session.execute(_succeeded_update(job_id, task_id, end_time))
+        return result.rowcount
+
+    _retry_task_status_update_sync(job_id, task_id, ManagedJobStatus.SUCCEEDED,
+                                   _op, 'Failed to set the task to succeeded.')
+    callback_func('SUCCEEDED')
+    logger.info('Job succeeded.')
+
+
 async def set_succeeded_async(job_id: int, task_id: int, end_time: float,
                               callback_func: AsyncCallbackType):
     """Set the task to succeeded, if it is in a non-terminal state."""
@@ -4669,23 +4997,7 @@ async def set_succeeded_async(job_id: int, task_id: int, end_time: float,
 
     async def _op(session: sql_async.AsyncSession) -> int:
         result = await session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id,
-                    spot_table.c.status.in_([
-                        ManagedJobStatus.RUNNING.value,
-                        ManagedJobStatus.WINDING_DOWN.value,
-                    ]),
-                    spot_table.c.end_at.is_(None),
-                )).
-            values({
-                spot_table.c.status: ManagedJobStatus.SUCCEEDED.value,
-                spot_table.c.end_at: end_time,
-                # Close any open recovery episode on reaching a terminal
-                # state.
-                spot_table.c.recovering_from_failure: None,
-            }))
+            _succeeded_update(job_id, task_id, end_time))
         return result.rowcount
 
     await _retry_task_status_update(job_id, task_id, ManagedJobStatus.SUCCEEDED,
@@ -4843,18 +5155,41 @@ def update_links(job_id: int, task_id: Optional[int], links: Dict[str,
         session.commit()
 
 
+def _cancelling_update(job_id: int) -> sqlalchemy.sql.Update:
+    return (sqlalchemy.update(spot_table).where(
+        sqlalchemy.and_(
+            spot_table.c.spot_job_id == job_id,
+            spot_table.c.end_at.is_(None),
+        )).values({spot_table.c.status: ManagedJobStatus.CANCELLING.value}))
+
+
+def set_cancelling(job_id: int, callback_func: SyncCallbackType):
+    """Set tasks in the job as cancelling, if they are in non-terminal
+    states."""
+
+    def _op(session: orm.Session) -> bool:
+        result = session.execute(_cancelling_update(job_id))
+        count = result.rowcount
+        session.commit()
+        return count > 0
+
+    updated = _retry_session_sync(_op)
+    if updated:
+        # Record cancellation only when a task actually transitioned.
+        add_job_event(job_id, None, ManagedJobStatus.CANCELLING,
+                      'Job is cancelling')
+        logger.info('Cancelling the job...')
+        callback_func('CANCELLING')
+    else:
+        logger.info('Cancellation skipped, job is already terminal')
+
+
 async def set_cancelling_async(job_id: int, callback_func: AsyncCallbackType):
     """Set tasks in the job as cancelling, if they are in non-terminal
     states."""
 
-    async def _op(session):
-        result = await session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.end_at.is_(None),
-                )).values(
-                    {spot_table.c.status: ManagedJobStatus.CANCELLING.value}))
+    async def _op(session: sql_async.AsyncSession) -> bool:
+        result = await session.execute(_cancelling_update(job_id))
         count = result.rowcount
         await session.commit()
         return count > 0
@@ -4874,23 +5209,45 @@ async def set_cancelling_async(job_id: int, callback_func: AsyncCallbackType):
         logger.info('Cancellation skipped, job is already terminal')
 
 
+def _cancelled_update(job_id: int) -> sqlalchemy.sql.Update:
+    return (sqlalchemy.update(spot_table).where(
+        sqlalchemy.and_(
+            spot_table.c.spot_job_id == job_id,
+            spot_table.c.status == ManagedJobStatus.CANCELLING.value,
+        )).values({
+            spot_table.c.status: ManagedJobStatus.CANCELLED.value,
+            spot_table.c.end_at: time.time(),
+            # Close any open recovery episode on reaching a terminal
+            # state.
+            spot_table.c.recovering_from_failure: None,
+        }))
+
+
+def set_cancelled(job_id: int, callback_func: SyncCallbackType):
+    """Set tasks in the job as cancelled, if they are in CANCELLING state."""
+
+    def _op(session: orm.Session) -> bool:
+        result = session.execute(_cancelled_update(job_id))
+        count = result.rowcount
+        session.commit()
+        return count > 0
+
+    updated = _retry_session_sync(_op)
+    if updated:
+        # Record cancellation only when a task actually transitioned.
+        add_job_event(job_id, None, ManagedJobStatus.CANCELLED,
+                      'Job has been cancelled')
+        logger.info('Job cancelled.')
+        callback_func('CANCELLED')
+    else:
+        logger.info('Cancellation skipped, job is not CANCELLING')
+
+
 async def set_cancelled_async(job_id: int, callback_func: AsyncCallbackType):
     """Set tasks in the job as cancelled, if they are in CANCELLING state."""
 
-    async def _op(session):
-        result = await session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.status == ManagedJobStatus.CANCELLING.value,
-                )).
-            values({
-                spot_table.c.status: ManagedJobStatus.CANCELLED.value,
-                spot_table.c.end_at: time.time(),
-                # Close any open recovery episode on reaching a terminal
-                # state.
-                spot_table.c.recovering_from_failure: None,
-            }))
+    async def _op(session: sql_async.AsyncSession) -> bool:
+        result = await session.execute(_cancelled_update(job_id))
         count = result.rowcount
         await session.commit()
         return count > 0
@@ -5563,7 +5920,10 @@ def add_job_event(job_id: int,
                   task_id: Optional[int],
                   new_status: ManagedJobStatus,
                   reason: str,
-                  timestamp: Optional[datetime.datetime] = None) -> None:
+                  timestamp: Optional[datetime.datetime] = None,
+                  *,
+                  code: Optional[str] = None,
+                  recovery_source: Optional[RecoverySource] = None) -> None:
     """Add a job event record to the audit log.
 
     Args:
@@ -5573,6 +5933,8 @@ def add_job_event(job_id: int,
         new_status: The new status being transitioned to. Can be a
             ManagedJobStatus enum.
         reason: A description of why the event occurred.
+        code: Optional error category code for failures.
+        recovery_source: Why the task is recovering.
         timestamp: The timestamp of the event. If None, uses current time.
     """
     if timestamp is None:
@@ -5587,6 +5949,9 @@ def add_job_event(job_id: int,
             task_id=task_id,  # Can be None for job-level events
             new_status=status_value,
             reason=reason,
+            code=code,
+            recovery_source=(recovery_source.value
+                             if recovery_source is not None else None),
             timestamp=timestamp,
         ))
         session.commit()
