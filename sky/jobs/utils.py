@@ -2566,6 +2566,7 @@ def stream_logs_by_id(
         assert latest_task_id is not None, (job_id, latest_task_id)
         task_id = latest_task_id
 
+        streaming_started = False
         while should_keep_logging(managed_job_status):
             context_utils.raise_if_canceled()
             handle = None
@@ -2645,6 +2646,7 @@ def stream_logs_by_id(
                     managed_job_state.ManagedJobStatus.RUNNING)
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
             status_display.stop()
+            streaming_started = True
             returncode = None
             if managed_job_runtime.is_registered():
                 returncode = managed_job_runtime.tail_logs(
@@ -2813,6 +2815,13 @@ def stream_logs_by_id(
         wait_seconds += 1
         managed_job_status = managed_job_state.get_status(job_id)
         assert managed_job_status is not None, job_id
+
+    if not streaming_started and managed_job_status.is_terminal():
+        return stream_logs_by_id(job_id,
+                                 follow=False,
+                                 tail=tail,
+                                 tail_offset=tail_offset,
+                                 task=task)
 
     if not follow and not managed_job_status.is_terminal():
         # The job is not in terminal state and we are not following,
