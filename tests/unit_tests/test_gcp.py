@@ -80,6 +80,22 @@ def test_gcp_n4a_n4d_data_disk_uses_hyperdisk_balanced(instance_type):
         assert tier2name[tier] == 'hyperdisk-balanced', (instance_type, tier)
 
 
+@pytest.mark.parametrize('instance_type, arch, image_tag', [
+    ('t2a-standard-4', 'arm64', 'skypilot:custom-cpu-ubuntu-2204-arm64'),
+    ('n4a-highcpu-8', 'arm64', 'skypilot:custom-cpu-ubuntu-2204-arm64'),
+    ('c4a-highcpu-4', 'arm64', 'skypilot:custom-cpu-ubuntu-2204-arm64'),
+    ('c4-highcpu-4', 'x86_64', 'skypilot:custom-cpu-ubuntu-2204'),
+    ('n2-standard-8', 'x86_64', 'skypilot:custom-cpu-ubuntu-2204'),
+])
+def test_gcp_arm_series_default_cpu_image(instance_type, arch, image_tag):
+    # Arm series cannot boot the x86 default image ("Requested boot disk
+    # architecture (X86_64) is not compatible with machine type architecture
+    # (ARM64)").
+    assert GCP.get_arch_from_instance_type(instance_type) == arch
+    assert GCP._get_default_cpu_image_id(  # pylint: disable=protected-access
+        instance_type) == image_tag
+
+
 @pytest.mark.parametrize((
     'mock_return', 'expected'
 ), [([

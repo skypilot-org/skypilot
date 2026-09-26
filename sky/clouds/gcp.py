@@ -21,6 +21,7 @@ from sky.clouds.utils import gcp_utils
 from sky.clouds.utils import gpu_utils
 from sky.provision.gcp import constants
 from sky.provision.gcp import volume_utils
+from sky.skylet import constants as skylet_constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
@@ -118,6 +119,9 @@ _IMAGE_NOT_FOUND_UX_MESSAGE = (
 
 # Image ID tags
 _DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-2204'
+# Arm (aarch64) machine series; these cannot boot the x86 default image.
+_ARM64_SERIES = ('t2a', 'n4a', 'c4a')
+_DEFAULT_CPU_ARM64_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-2204-arm64'
 # For GPU-related package version, see sky/catalog/images/provisioners/cuda.sh
 # Default GPU image: NVIDIA 580 open kernel module + CUDA 13. Supports Turing
 # and later only.
@@ -551,7 +555,7 @@ class GCP(clouds.Cloud):
         # --no-standard-images
         # We use the debian image, as the ubuntu image has some connectivity
         # issue when first booted.
-        image_id = _DEFAULT_CPU_IMAGE_ID
+        image_id = self._get_default_cpu_image_id(resources.instance_type)
 
         r = resources
         # Find GPU spec, if any.
@@ -846,6 +850,23 @@ class GCP(clouds.Cloud):
         )
         return resources_utils.FeasibleResources([r], fuzzy_candidate_list,
                                                  None)
+
+    @classmethod
+    def get_arch_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Optional[str]:
+        if instance_type.split('-')[0] in _ARM64_SERIES:
+            return skylet_constants.ARM64_ARCH
+        return skylet_constants.X86_64_ARCH
+
+    @classmethod
+    def _get_default_cpu_image_id(cls, instance_type: Optional[str]) -> str:
+        if (instance_type is not None and
+                cls.get_arch_from_instance_type(instance_type)
+                == skylet_constants.ARM64_ARCH):
+            return _DEFAULT_CPU_ARM64_IMAGE_ID
+        return _DEFAULT_CPU_IMAGE_ID
 
     @classmethod
     def get_accelerators_from_instance_type(
