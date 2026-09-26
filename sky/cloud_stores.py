@@ -389,7 +389,11 @@ class R2CloudStorage(CloudStorage):
     # List of commands to install AWS CLI
     _GET_AWSCLI = [
         ('if aws --version >/dev/null 2>&1; then '
+         'if [ "$(type -t aws)" = function ]; then '
+         'awscli_path=aws; '
+         'else '
          'awscli_path=$(type -P aws); '
+         'fi; '
          'else '
          f'{constants.SKY_UV_PIP_CMD} install awscli && '
          f'awscli_path={constants.SKY_REMOTE_PYTHON_ENV}/bin/aws; '
