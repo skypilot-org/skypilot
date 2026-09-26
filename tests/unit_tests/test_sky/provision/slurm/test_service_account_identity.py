@@ -111,6 +111,17 @@ def test_schema(identity_config):
                                      schemas.get_config_schema(), '')
 
 
+@pytest.mark.parametrize('cluster_specific', [False, True])
+def test_schema_accepts_plus_in_unix_owner(identity_config, cluster_specific):
+    target = identity_config['slurm']
+    if cluster_specific:
+        target = target['cluster_configs']['a']
+    target['submit_as_user'] = False
+    target['username_map'] = {'alice@example.com': 'alice+lab'}
+    common_utils.validate_schema(identity_config, schemas.get_config_schema(),
+                                 '')
+
+
 def test_client_cannot_override_identity(identity_config):
     with skypilot_config.override_skypilot_config({
             'slurm': {
