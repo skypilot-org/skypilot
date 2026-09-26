@@ -641,7 +641,7 @@ class GCP(clouds.Cloud):
                 assert region_name in cloud_image_id, cloud_image_id
                 image_id = cloud_image_id[region_name]
         if image_id.startswith('skypilot:'):
-            image_id = catalog.get_image_id_from_tag(image_id, clouds='gcp')
+            image_id = self._resolve_image_tag(image_id, r.instance_type)
 
         assert image_id is not None, (image_id, r)
         resources_vars['image_id'] = image_id
@@ -867,6 +867,26 @@ class GCP(clouds.Cloud):
                 == skylet_constants.ARM64_ARCH):
             return _DEFAULT_CPU_ARM64_IMAGE_ID
         return _DEFAULT_CPU_IMAGE_ID
+
+    @classmethod
+    def _resolve_image_tag(cls, image_tag: str,
+                           instance_type: Optional[str]) -> str:
+        image_id = catalog.get_image_id_from_tag(image_tag, clouds='gcp')
+        if image_id is None:
+            hint = ''
+            if (instance_type is not None and
+                    cls.get_arch_from_instance_type(instance_type)
+                    == skylet_constants.ARM64_ARCH):
+                hint = (f' {instance_type} is an Arm (arm64) instance type; '
+                        'set `image_id` to an arm64 image, e.g. the latest '
+                        'image of the `ubuntu-2204-lts-arm64` family in the '
+                        '`ubuntu-os-cloud` project.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Image tag {image_tag!r} was not found in the GCP image '
+                    f'catalog. Upgrade SkyPilot or specify `image_id` '
+                    f'explicitly.{hint}')
+        return image_id
 
     @classmethod
     def get_accelerators_from_instance_type(

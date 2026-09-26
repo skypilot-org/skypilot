@@ -96,6 +96,21 @@ def test_gcp_arm_series_default_cpu_image(instance_type, arch, image_tag):
         instance_type) == image_tag
 
 
+@pytest.mark.parametrize('instance_type, mentions_arm', [
+    ('n4a-highcpu-8', True),
+    ('n2-standard-8', False),
+])
+def test_gcp_unresolved_image_tag_raises_clear_error(instance_type,
+                                                     mentions_arm):
+    # E.g. a catalog without the arm64 tag: fail with guidance, not an
+    # AssertionError on a None image id.
+    with patch.object(gcp_catalog, 'get_image_id_from_tag', return_value=None):
+        with pytest.raises(ValueError, match='not found in the GCP image') as e:
+            GCP._resolve_image_tag(  # pylint: disable=protected-access
+                'skypilot:custom-cpu-ubuntu-2204-arm64', instance_type)
+    assert ('arm64 image' in str(e.value)) == mentions_arm
+
+
 @pytest.mark.parametrize((
     'mock_return', 'expected'
 ), [([
