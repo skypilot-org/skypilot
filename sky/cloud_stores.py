@@ -388,11 +388,12 @@ class R2CloudStorage(CloudStorage):
 
     # List of commands to install AWS CLI
     _GET_AWSCLI = [
-        ('if ! aws --version >/dev/null 2>&1; then '
-         f'{constants.SKY_UV_PIP_CMD} install awscli; '
-         'fi; '
-         'awscli_path=$(which aws || echo '
-         f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws)'),
+        ('if aws --version >/dev/null 2>&1; then '
+         'awscli_path=$(command -v aws); '
+         'else '
+         f'{constants.SKY_UV_PIP_CMD} install awscli && '
+         f'awscli_path={constants.SKY_REMOTE_PYTHON_ENV}/bin/aws; '
+         'fi'),
     ]
 
     def is_directory(self, url: str) -> bool:
