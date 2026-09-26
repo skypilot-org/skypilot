@@ -2,13 +2,13 @@ from sky.data.storage import CloudStorage, StorageMode
 from sky.server import constants
 
 
-class R2CloudStorage(CloudStorage):
+class R2CloudStorage(CloudStorage):  # type: ignore
     """Cloudflare Cloud Storage."""
 
     # Consolidated installation and path resolution into a single robust bash command
     _GET_AWSCLI = [
-        f'if ! aws --version >/dev/null 2>&1; then {constants.SKY_UV_PIP_CMD} install awscli; fi; '
-        f'awscli_path=$(which aws || echo {constants.SKY_REMOTE_PYTHON_ENV}/bin/aws)'
+        f'if ! aws --version >/dev/null 2>&1; then {constants.SKY_UV_PIP_CMD} install awscli; fi; ',  # type: ignore
+        f'awscli_path=$(which aws || echo {constants.SKY_REMOTE_PYTHON_ENV}/bin/aws)',  # type: ignore
     ]
 
     def __init__(self, name: str, source: str, mode: StorageMode = StorageMode.MOUNT):
