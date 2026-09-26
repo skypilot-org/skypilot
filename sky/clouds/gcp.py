@@ -1242,10 +1242,10 @@ class GCP(clouds.Cloud):
             # These series don't support pd-standard, use pd-balanced for LOW.
             _propagate_disk_type(
                 lowest=tier2name[resources_utils.DiskTier.MEDIUM])
-        if instance_type.startswith('a3-ultragpu') or series in ('n4', 'a4',
-                                                                 'g4'):
-            # a3-ultragpu, n4, a4, and g4 instances only support
-            # hyperdisk-balanced.
+        if instance_type.startswith('a3-ultragpu') or series in (
+                'n4', 'n4a', 'n4d', 'a4', 'g4', 'c4', 'c4a', 'c4d'):
+            # a3-ultragpu, n4, n4a, n4d, a4, g4, c4, c4a, and c4d instances
+            # only support hyperdisk-balanced.
             _propagate_disk_type(all='hyperdisk-balanced')
 
         # Series specific handling
