@@ -96,11 +96,14 @@ class TestGetIdentityFile:
 
 
 class TestGetSlurmNodesInfo:
-    """Test cluster-wide Slurm node discovery."""
+    """Test user-scoped Slurm node discovery."""
 
-    @pytest.mark.parametrize('slurm_user', ['alice', 'bob', None])
-    def test_inventory_is_read_as_the_ssh_account(self, monkeypatch,
-                                                  slurm_user):
+    @pytest.mark.parametrize('slurm_user,expected_command_user',
+                             [('alice', 'alice'), ('bob', 'bob'),
+                              (None, 'transport-user')])
+    def test_cache_and_query_are_scoped_by_command_user(self, monkeypatch,
+                                                        slurm_user,
+                                                        expected_command_user):
         ssh_config = mock.Mock()
         ssh_config.lookup.return_value = {
             'hostname': 'login.example.com',
@@ -121,10 +124,9 @@ class TestGetSlurmNodesInfo:
 
         assert utils.get_slurm_nodes_info('cluster-a') == []
 
-        # The node inventory is the same whoever asks for it, so the
-        # submitting user changes neither the command nor the cache key.
-        get_cache_entry.assert_called_once_with('slurm:nodes_info:cluster-a')
-        assert 'slurm_user' not in slurm_client_cls.call_args.kwargs
+        get_cache_entry.assert_called_once_with(
+            f'slurm:nodes_info:cluster-a:{expected_command_user}')
+        assert slurm_client_cls.call_args.kwargs['slurm_user'] == slurm_user
 
 
 class TestClusterFeatureCache:
