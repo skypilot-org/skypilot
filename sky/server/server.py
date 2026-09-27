@@ -2289,10 +2289,17 @@ def _extract_members(zipf, members: List[zipfile.ZipInfo],
 
         # Handle files
         new_path.parent.mkdir(parents=True, exist_ok=True)
+        # A previous upload or overlapping mount may have made this read-only.
+        # Replace its checked target, preserving any in-root symlink to it.
+        resolved_path.unlink(missing_ok=True)
         with zipf.open(member) as member_file, new_path.open('wb') as f:
             # Use shutil.copyfileobj to copy files in chunks,
             # so it does not load the entire file into memory.
             shutil.copyfileobj(member_file, f)
+        # Keep Unix permissions without setuid/setgid/sticky bits.
+        mode = member.external_attr >> 16
+        if member.create_system == 3 and mode:
+            new_path.chmod(mode & 0o777)
 
 
 async def unzip_file(zip_file_path: pathlib.Path,

@@ -2,6 +2,8 @@ import asyncio
 import io
 import os
 import pathlib
+import stat
+import subprocess
 import tempfile
 import zipfile
 
@@ -11,6 +13,111 @@ import pytest
 from sky.data import storage_utils
 from sky.server import server
 from sky.skylet import constants
+
+
+@pytest.mark.parametrize('mode', [0o700, 0o755, 0o640, 0o7755])
+def test_uploaded_regular_file_permissions(tmp_path, mode):
+    source = tmp_path / 'executable'
+    source.write_text('#!/bin/sh\nexit 0\n')
+    source.chmod(mode)
+    archive = tmp_path / 'upload.zip'
+    storage_utils.zip_files_and_folders([str(source)], archive, io.StringIO())
+    destination = tmp_path / 'received'
+    destination.mkdir()
+
+    asyncio.run(server.unzip_file(archive, destination))
+
+    received = destination / str(source).lstrip('/')
+    assert stat.S_IMODE(received.stat().st_mode) == mode & 0o777
+    assert received.read_bytes() == source.read_bytes()
+    if mode & stat.S_IXUSR:
+        subprocess.run([str(received)], check=True, timeout=5)
+
+
+@pytest.mark.parametrize('mode', [0o444, 0o555])
+def test_overlapping_uploads_preserve_readonly_permissions(tmp_path, mode):
+    workdir = tmp_path / 'workdir'
+    workdir.mkdir()
+    source = workdir / 'readonly'
+    source.write_bytes(b'payload')
+    source.chmod(mode)
+    archive = tmp_path / 'upload.zip'
+    storage_utils.zip_files_and_folders(
+        [str(workdir), str(source)], archive, io.StringIO())
+    destination = tmp_path / 'received'
+    destination.mkdir()
+
+    asyncio.run(server.unzip_file(archive, destination))
+
+    received = destination / str(source).lstrip('/')
+    assert received.read_bytes() == b'payload'
+    assert stat.S_IMODE(received.stat().st_mode) == mode
+
+
+@pytest.mark.parametrize('mode', [0o444, 0o555])
+def test_repeated_upload_replaces_readonly_file(tmp_path, mode):
+    source = tmp_path / 'readonly'
+    source.touch()
+    destination = tmp_path / 'received'
+    destination.mkdir()
+    for payload in (b'first', b'second'):
+        source.chmod(0o600)
+        source.write_bytes(payload)
+        source.chmod(mode)
+        archive = tmp_path / 'upload.zip'
+        storage_utils.zip_files_and_folders([str(source)], archive,
+                                            io.StringIO())
+
+        asyncio.run(server.unzip_file(archive, destination))
+
+        received = destination / str(source).lstrip('/')
+        assert received.read_bytes() == payload
+        assert stat.S_IMODE(received.stat().st_mode) == mode
+
+
+def test_permissions_do_not_follow_replacement_symlink(tmp_path):
+    archive = tmp_path / 'upload.zip'
+    regular = zipfile.ZipInfo('replaced')
+    regular.external_attr = (stat.S_IFREG | 0o444) << 16
+    symlink = zipfile.ZipInfo('replaced')
+    symlink.external_attr = (stat.S_IFLNK | 0o777) << 16
+    target = zipfile.ZipInfo('target')
+    target.external_attr = (stat.S_IFREG | 0o600) << 16
+    with zipfile.ZipFile(archive, 'w') as bundle:
+        bundle.writestr(regular, b'old')
+        with pytest.warns(UserWarning, match='Duplicate name'):
+            bundle.writestr(symlink, b'target')
+        bundle.writestr(target, b'new')
+    destination = tmp_path / 'received'
+    destination.mkdir()
+
+    asyncio.run(server.unzip_file(archive, destination))
+
+    assert (destination / 'replaced').is_symlink()
+    assert (destination / 'replaced').read_bytes() == b'new'
+    assert stat.S_IMODE((destination / 'target').stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize(('creator', 'attributes'), [(0, 0x20), (3, 0x20),
+                                                     (0, 0o100755 << 16)])
+def test_upload_without_unix_permissions_keeps_default_mode(
+        tmp_path, creator, attributes):
+    archive = tmp_path / 'upload.zip'
+    member = zipfile.ZipInfo('data')
+    member.create_system = creator
+    member.external_attr = attributes
+    with zipfile.ZipFile(archive, 'w') as bundle:
+        bundle.writestr(member, b'payload')
+    destination = tmp_path / 'received'
+    destination.mkdir()
+    control = destination / 'control'
+    control.write_bytes(b'payload')
+
+    asyncio.run(server.unzip_file(archive, destination))
+
+    assert (destination / 'data').read_bytes() == control.read_bytes()
+    assert stat.S_IMODE((destination / 'data').stat().st_mode) == stat.S_IMODE(
+        control.stat().st_mode)
 
 
 def test_zip_files_and_folders(skyignore_dir):
