@@ -2,10 +2,13 @@
 
 When a job's cluster is stopped or terminated, its logs can no longer be read
 from the cluster. If the logs were forwarded to an external store, a registered
-``LogReader`` streams them back. Register one with ``register_log_reader()``.
+``LogReader`` streams them back. A store that makes records readable soon after
+they are written can also serve a running managed job's live logs, which keeps
+the log stream off the job's cluster. Register a reader with
+``register_log_reader()``.
 """
 import abc
-from typing import Optional
+from typing import Callable, Optional
 
 
 class LogReader(abc.ABC):
@@ -70,6 +73,44 @@ class LogReader(abc.ABC):
             the store should return 0.
         """
         del job_id, task_id, task_name, follow, tail  # Unsupported by default.
+        return None
+
+    def follow_managed_job_logs(self,
+                                job_id: int,
+                                task_id: Optional[int],
+                                *,
+                                task_name: Optional[str] = None,
+                                cluster_name_on_cloud: Optional[str] = None,
+                                tail: int,
+                                is_done: Callable[[], bool]) -> Optional[int]:
+        """Streams a running managed job task's logs from the store to stdout.
+
+        Starts with the last ``tail`` lines already in the store, then prints
+        new lines as they become readable. Stops once ``is_done()`` returns
+        True and the lines the task wrote before that point have been read.
+        ``is_done`` is cheap to call on every poll and raises
+        ``asyncio.CancelledError`` when the client went away.
+
+        Non-abstract: the default follows nothing. A reader must return None
+        without printing anything when it cannot follow this task, for example
+        because the task's logs go to a store whose ingestion delay is too long
+        to tail, or to no readable store at all. The caller then streams the
+        logs from the job's cluster instead.
+
+        Args:
+            job_id: The managed job id.
+            task_id: The task id within the job, or None for all tasks.
+            task_name: The task's name, when the caller knows it.
+            cluster_name_on_cloud: Provider-side name of the cluster running
+                the task, which identifies where its logs were routed.
+            tail: Number of existing lines to print first; 0 means all.
+            is_done: Returns True once the task is no longer running.
+
+        Returns:
+            None if this reader does not follow the task, else 0 once the
+            task's logs were followed to the end.
+        """
+        del job_id, task_id, task_name, cluster_name_on_cloud, tail, is_done
         return None
 
 
