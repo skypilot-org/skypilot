@@ -195,6 +195,15 @@ def test_parse_offer_query_none_and_defaults():
     assert filters == {'num_gpus': {'eq': '2'}}
 
 
+def test_parse_offer_query_directive_order_independent():
+    before, _, _ = vast.parse_offer_query('georegion=true geolocation=NA')
+    after, georegion, _ = vast.parse_offer_query(
+        'geolocation=NA georegion=true')
+    assert georegion
+    assert before == after
+    assert after['geolocation'] == {'in': ['CA', 'US']}
+
+
 def test_parse_offer_query_geolocation_without_georegion():
     filters, _, _ = vast.parse_offer_query('geolocation=NA')
     assert filters['geolocation'] == {'eq': 'NA'}
@@ -390,6 +399,40 @@ def test_create_instance_template_and_env_string(client, fake_requests):
     assert 'volume_info' not in fake_requests.calls[6]['json']
     with pytest.raises(ValueError, match='jupyter and args'):
         client.create_instance(9, jupyter=True, args=['x'])
+
+    client.create_instance(9, direct=True)
+    assert fake_requests.calls[8]['json']['runtype'] == 'ssh_direc ssh_proxy'
+
+    client.create_instance(9, image_login='-u me -p secret registry', vm=True)
+    body = fake_requests.calls[9]['json']
+    assert body['image_login'] == '-u me -p secret registry'
+    assert body['vm'] is True
+    assert 'vm' not in fake_requests.calls[8]['json']
+
+
+def test_create_instance_is_not_retried_after_transport_errors(
+        client, monkeypatch):
+    monkeypatch.setattr(vast.time, 'sleep', lambda _: None)
+    request = mock.Mock(side_effect=requests.Timeout('slow'))
+    monkeypatch.setattr(vast.requests, 'request', request)
+    with pytest.raises(requests.Timeout):
+        client.create_instance(9)
+    # Renting is not idempotent: a timeout after Vast accepted the rental
+    # must not create a second contract.
+    assert request.call_count == 1
+
+
+def test_create_instance_retries_only_rate_limits(client, fake_requests):
+    fake_requests.responses.extend(
+        [_FakeResponse(429),
+         _FakeResponse(200, {'new_contract': 1})])
+    assert client.create_instance(9)['new_contract'] == 1
+    assert len(fake_requests.calls) == 2
+
+    fake_requests.responses.extend([_FakeResponse(503), _FakeResponse(200)])
+    with pytest.raises(requests.HTTPError):
+        client.create_instance(9)
+    assert len(fake_requests.calls) == 3
 
 
 def test_instance_lifecycle_endpoints(client, fake_requests):

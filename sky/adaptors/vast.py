@@ -218,17 +218,23 @@ def parse_offer_query(
         clauses.append(
             (match.group('field'), match.group('op'), match.group('value')))
 
+    # Directives first, so ``geolocation=NA georegion=true`` behaves the
+    # same as ``georegion=true geolocation=NA``.
     for field, op, raw_value in clauses:
-        op_name = _OPERATORS[re.sub(r'\s+', ' ', op.strip())]
-        if field in _DIRECTIVES:
-            if op_name != 'eq':
-                raise ValueError(f'{field} only supports "=": {raw_value!r}')
-            enabled = raw_value.strip('"').lower() == 'true'
-            if field == 'georegion':
-                georegion = enabled
-            else:
-                chunked = enabled
+        if field not in _DIRECTIVES:
             continue
+        if _OPERATORS[re.sub(r'\s+', ' ', op.strip())] != 'eq':
+            raise ValueError(f'{field} only supports "=": {raw_value!r}')
+        enabled = raw_value.strip('"').lower() == 'true'
+        if field == 'georegion':
+            georegion = enabled
+        else:
+            chunked = enabled
+
+    for field, op, raw_value in clauses:
+        if field in _DIRECTIVES:
+            continue
+        op_name = _OPERATORS[re.sub(r'\s+', ' ', op.strip())]
         field = _FIELD_ALIASES.get(field, field)
         raw_value = raw_value.strip('[]')
         if not raw_value.strip('"'):
@@ -364,8 +370,10 @@ def _resolve_runtype(args: Optional[List[str]], ssh: bool, jupyter: bool,
     if jupyter:
         return ('jupyter_direc ssh_direc ssh_proxy'
                 if direct else 'jupyter_proxy ssh_proxy')
+    if direct:
+        return 'ssh_direc ssh_proxy'
     if ssh:
-        return 'ssh_direc ssh_proxy' if direct else 'ssh_proxy'
+        return 'ssh_proxy'
     return 'ssh'
 
 
@@ -412,8 +420,16 @@ class VastClient:
                  method: str,
                  path: str,
                  params: Optional[Dict[str, str]] = None,
-                 json_body: Optional[Any] = None) -> requests.Response:
+                 json_body: Optional[Any] = None,
+                 idempotent: bool = True) -> requests.Response:
         """Sends a request, retrying transient failures with backoff.
+
+        Args:
+            idempotent: Whether repeating the request is safe. Non-idempotent
+                calls (renting an offer) are never retried after a timeout
+                or connection error, since the server may already have
+                acted on them; only a 429 (request rejected before
+                processing) is retried.
 
         Raises:
             requests.HTTPError: For non-2xx responses (after retries).
@@ -438,12 +454,15 @@ class VastClient:
                                             json=json_body,
                                             timeout=self.timeout)
             except (requests.ConnectionError, requests.Timeout):
-                if last_attempt:
+                if last_attempt or not idempotent:
                     raise
                 time.sleep(backoff)
                 backoff *= 1.5
                 continue
-            if response.status_code in _RETRYABLE_STATUS and not last_attempt:
+            retryable = response.status_code in _RETRYABLE_STATUS
+            if not idempotent:
+                retryable = response.status_code == 429
+            if retryable and not last_attempt:
                 time.sleep(backoff)
                 backoff *= 1.5
                 continue
@@ -544,6 +563,7 @@ class VastClient:
         extra: Optional[str] = None,
         onstart_cmd: Optional[str] = None,
         login: Optional[str] = None,
+        image_login: Optional[str] = None,
         python_utf8: bool = False,
         lang_utf8: bool = False,
         jupyter_lab: bool = False,
@@ -559,6 +579,7 @@ class VastClient:
         jupyter: bool = False,
         direct: bool = False,
         volume_info: Optional[Dict[str, Any]] = None,
+        vm: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """Rents an offer (the ``vastai create instance`` command).
 
@@ -569,6 +590,8 @@ class VastClient:
             price = bid_price
         if template_hash is None:
             template_hash = template_hash_id
+        if login is None:
+            login = image_login
         env_dict = (_parse_env_string(env)
                     if isinstance(env, str) else dict(env or {}))
 
@@ -605,7 +628,12 @@ class VastClient:
             body['args'] = args
         if volume_info is not None:
             body['volume_info'] = volume_info
-        return self._request('PUT', f'/asks/{offer_id}/', json_body=body).json()
+        if vm is not None:
+            body['vm'] = vm
+        return self._request('PUT',
+                             f'/asks/{offer_id}/',
+                             json_body=body,
+                             idempotent=False).json()
 
     def start_instance(self, instance_id: Union[int, str]) -> Dict[str, Any]:
         """Starts a stopped instance."""
