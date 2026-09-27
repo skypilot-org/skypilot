@@ -21,7 +21,7 @@ raises :class:`HostlistError` (a ``ValueError``).
 """
 import itertools
 import re
-from typing import List
+from typing import Dict, List
 
 # Refuse to expand absurdly large expressions such as ``n[1-999999999]``
 # rather than exhausting memory.
@@ -125,8 +125,12 @@ def _expand_entry(entry: str) -> List[str]:
 
 
 def _expand_range_list(spec: str, entry: str) -> List[str]:
-    """Expands the inside of one bracket group, e.g. ``01-03,07``."""
-    values: List[str] = []
+    """Expands the inside of one bracket group, e.g. ``01-03,07``.
+
+    Values that repeat across the group's ranges (``1-5,3-8``) are returned
+    once, so the size guard counts distinct hosts.
+    """
+    values: Dict[str, None] = {}
     for item in spec.split(','):
         item = item.strip()
         match = _RANGE_RE.fullmatch(item)
@@ -135,7 +139,7 @@ def _expand_range_list(spec: str, entry: str) -> List[str]:
                 f'Bad range {item!r} in hostlist entry {entry!r}')
         low, high = match.group(1), match.group(2)
         if high is None:
-            values.append(low)
+            values[low] = None
             continue
         low_int, high_int = int(low), int(high)
         if low_int > high_int:
@@ -146,5 +150,6 @@ def _expand_range_list(spec: str, entry: str) -> List[str]:
                 f'Hostlist expands to more than {MAX_HOSTS} hosts: {entry!r}')
         # Slurm keeps the zero padding of the range start: [01-3] -> 01,02,03.
         width = len(low) if low.startswith('0') else 0
-        values.extend(str(i).zfill(width) for i in range(low_int, high_int + 1))
-    return values
+        for i in range(low_int, high_int + 1):
+            values[str(i).zfill(width)] = None
+    return list(values)

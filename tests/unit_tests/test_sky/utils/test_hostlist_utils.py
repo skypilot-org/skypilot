@@ -80,3 +80,5 @@ def test_expand_hostlist_size_guard():
     assert len(
         hostlist_utils.expand_hostlist(
             f'n[1-{hostlist_utils.MAX_HOSTS}]')) == hostlist_utils.MAX_HOSTS
+    # Overlapping ranges count distinct hosts, not range lengths.
+    assert len(hostlist_utils.expand_hostlist('n[1-60000,1-60001]')) == 60001
