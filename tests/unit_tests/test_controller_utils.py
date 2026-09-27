@@ -585,10 +585,10 @@ def test_get_cloud_dependencies_installation_commands_vast_only(
     commands = controller_utils._get_cloud_dependencies_installation_commands(
         controller)
 
-    # Should include Vast dependencies
+    # Vast talks to its REST API through sky.adaptors.vast, so no extra
+    # package is installed on the controller.
     combined_commands = ' '.join(commands)
-    assert 'Vast' in combined_commands
-    assert 'vastai_sdk' in combined_commands
+    assert 'vastai' not in combined_commands
 
 
 @pytest.mark.parametrize('controller_type', ['jobs', 'serve'])

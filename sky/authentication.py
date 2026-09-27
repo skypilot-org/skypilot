@@ -381,7 +381,7 @@ def setup_vast_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
         public_key = pub_key_file.read().strip()
         try:
-            current_key_list = vast.vast().show_ssh_keys()  # pylint: disable=assignment-from-no-return
+            current_key_list = vast.vast().show_ssh_keys()
             # Only add an ssh key if it hasn't already been added
             if not any(x['public_key'] == public_key for x in current_key_list):
                 vast.vast().create_ssh_key(ssh_key=public_key)

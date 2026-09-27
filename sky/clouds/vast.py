@@ -7,7 +7,6 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 from sky import catalog
 from sky import clouds
 from sky import skypilot_config
-from sky.adaptors import common
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -310,16 +309,10 @@ class Vast(clouds.Cloud):
         """Checks if the user has valid credentials for
         Vast's compute service."""
 
-        dependency_error_msg = ('Failed to import vast. '
-                                'To install, run: pip install skypilot[vast]')
-        if not common.can_import_modules(['vastai_sdk']):
-            return False, dependency_error_msg
-
         if not os.path.exists(os.path.expanduser(_CREDENTIAL_PATH)):
             return False, (
                 'error \n'  # First line is indented by 4 spaces
                 '    Credentials can be set up by running: \n'
-                '        $ pip install vastai\n'
                 '        $ mkdir -p ~/.config/vastai\n'
                 f'        $ echo [key] > {_CREDENTIAL_PATH}\n'
                 '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#vast'  # pylint: disable=line-too-long

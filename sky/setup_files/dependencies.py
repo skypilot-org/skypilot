@@ -255,7 +255,8 @@ cloud_dependencies: Dict[str, List[str]] = {
     'primeintellect': [],  # No dependencies needed for primeintellect
     # TODO:(jason810496): azure-core 1.38.0+ required for CVE-2026-21226
     'do': ['pydo>=0.3.0', 'azure-core>=1.24.0', 'azure-common'],
-    'vast': ['vastai-sdk>=0.1.12'],
+    # The Vast.ai REST client lives in sky.adaptors.vast (uses requests).
+    'vast': [],
     'vsphere': [
         'pyvmomi==8.0.1.0.2',
         # vsphere-automation-sdk is also required, but it does not have
@@ -298,9 +299,6 @@ if sys.version_info >= (3, 12):
     # The version of ray we use does not work with >= 3.12, so avoid clouds
     # that require ray.
     clouds_for_all -= set(clouds_with_ray)
-    # vast requires setuptools==51.1.1 which will not work with python >= 3.12
-    # TODO: Remove once https://github.com/vast-ai/vast-sdk/pull/6 is released
-    clouds_for_all.remove('vast')
 
 cloud_extras = {
     cloud: dependencies + server_dependencies
