@@ -377,6 +377,20 @@ def test_create_instance_template_and_env_string(client, fake_requests):
     client.create_instance(9, runtype='ssh_proxy')
     assert fake_requests.calls[3]['json']['runtype'] == 'ssh_proxy'
 
+    client.create_instance(9, ssh=True)
+    assert fake_requests.calls[4]['json']['runtype'] == 'ssh_proxy'
+    client.create_instance(9, ssh=True, direct=True)
+    assert fake_requests.calls[5]['json']['runtype'] == 'ssh_direc ssh_proxy'
+    client.create_instance(9, jupyter=True, direct=True)
+    assert (fake_requests.calls[6]['json']['runtype'] ==
+            'jupyter_direc ssh_direc ssh_proxy')
+    volume = {'mount_path': '/data', 'create_new': True, 'size': 15}
+    client.create_instance(9, volume_info=volume)
+    assert fake_requests.calls[7]['json']['volume_info'] == volume
+    assert 'volume_info' not in fake_requests.calls[6]['json']
+    with pytest.raises(ValueError, match='jupyter and args'):
+        client.create_instance(9, jupyter=True, args=['x'])
+
 
 def test_instance_lifecycle_endpoints(client, fake_requests):
     fake_requests.responses.extend([

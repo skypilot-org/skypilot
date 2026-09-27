@@ -349,6 +349,26 @@ def _parse_env_string(env: str) -> Dict[str, str]:
     return result
 
 
+def _resolve_runtype(args: Optional[List[str]], ssh: bool, jupyter: bool,
+                     direct: bool) -> str:
+    """Maps the CLI-style connection flags to a Vast.ai ``runtype``.
+
+    Same defaults as the Vast.ai CLI: SSH access unless the caller asks for
+    a raw ``args`` container or for Jupyter.
+    """
+    if args is not None:
+        if jupyter:
+            raise ValueError('jupyter and args cannot be combined; use '
+                             'onstart_cmd instead of args.')
+        return 'args'
+    if jupyter:
+        return ('jupyter_direc ssh_direc ssh_proxy'
+                if direct else 'jupyter_proxy ssh_proxy')
+    if ssh:
+        return 'ssh_direc ssh_proxy' if direct else 'ssh_proxy'
+    return 'ssh'
+
+
 def _strip_jupyter_portal_config(env: Dict[str, str],
                                  runtype: Optional[str]) -> Dict[str, str]:
     """Drops Jupyter entries from PORTAL_CONFIG on non-Jupyter runtypes."""
@@ -535,6 +555,10 @@ class VastClient:
         user: Optional[str] = None,
         runtype: Optional[str] = None,
         args: Optional[List[str]] = None,
+        ssh: bool = False,
+        jupyter: bool = False,
+        direct: bool = False,
+        volume_info: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Rents an offer (the ``vastai create instance`` command).
 
@@ -549,14 +573,11 @@ class VastClient:
                     if isinstance(env, str) else dict(env or {}))
 
         if template_hash is None and runtype is None:
-            # Same defaults as the Vast.ai CLI: SSH access unless the caller
-            # asks for a raw args container or Jupyter.
-            if args is not None:
-                runtype = 'args'
-            elif jupyter_lab or jupyter_dir:
-                runtype = 'jupyter_proxy ssh_proxy'
-            else:
-                runtype = 'ssh'
+            runtype = _resolve_runtype(args=args,
+                                       ssh=ssh,
+                                       jupyter=jupyter or
+                                       bool(jupyter_lab or jupyter_dir),
+                                       direct=direct)
         env_dict = _strip_jupyter_portal_config(env_dict, runtype)
 
         body: Dict[str, Any] = {
@@ -582,6 +603,8 @@ class VastClient:
             body['runtype'] = runtype
         if args is not None:
             body['args'] = args
+        if volume_info is not None:
+            body['volume_info'] = volume_info
         return self._request('PUT', f'/asks/{offer_id}/', json_body=body).json()
 
     def start_instance(self, instance_id: Union[int, str]) -> Dict[str, Any]:
