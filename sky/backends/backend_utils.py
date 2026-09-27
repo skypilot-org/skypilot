@@ -919,7 +919,8 @@ def write_cluster_config(
 
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
-    logging_agent = logs.get_logging_agent()
+    logging_agent = logs.get_logging_agent(cloud=str(cloud).lower(),
+                                           region=region.name)
     if logging_agent:
         for k, v in logging_agent.get_credential_file_mounts().items():
             assert k not in credentials, f'{k} already in credentials'

@@ -53,3 +53,56 @@ class TestLoggingAgentProvider(unittest.TestCase):
         logs.register_logging_agent_provider(None)
         with mock.patch('sky.skypilot_config.get_nested', return_value=None):
             self.assertIsNone(logs.get_logging_agent())
+
+    def test_placement_aware_provider_receives_cloud_and_region(self):
+        agent = _FakeAgent()
+        seen = []
+
+        def provider(*, cloud=None, region=None):
+            seen.append((cloud, region))
+            return agent
+
+        logs.register_logging_agent_provider(provider)
+        self.assertIs(
+            logs.get_logging_agent(cloud='kubernetes', region='ctx-a'), agent)
+        self.assertIs(logs.get_logging_agent(), agent)
+        self.assertEqual(seen, [('kubernetes', 'ctx-a'), (None, None)])
+
+    def test_provider_without_parameters_is_called_without_placement(self):
+        agent = _FakeAgent()
+        calls = []
+
+        def provider():
+            calls.append(True)
+            return agent
+
+        logs.register_logging_agent_provider(provider)
+        self.assertIs(
+            logs.get_logging_agent(cloud='kubernetes', region='ctx-a'), agent)
+        self.assertEqual(calls, [True])
+
+    def test_provider_accepting_kwargs_receives_placement(self):
+        seen = {}
+
+        def provider(**kwargs):
+            seen.update(kwargs)
+            return _FakeAgent()
+
+        logs.register_logging_agent_provider(provider)
+        logs.get_logging_agent(cloud='aws', region='us-east-1')
+        self.assertEqual(seen, {'cloud': 'aws', 'region': 'us-east-1'})
+
+    def test_is_configured_routes_by_placement(self):
+
+        def provider(*, cloud=None, region=None):
+            del cloud
+            return _FakeAgent() if region == 'ctx-a' else None
+
+        logs.register_logging_agent_provider(provider)
+        with mock.patch('sky.skypilot_config.get_nested', return_value=None):
+            self.assertTrue(
+                logs.is_logging_agent_configured(cloud='kubernetes',
+                                                 region='ctx-a'))
+            self.assertFalse(
+                logs.is_logging_agent_configured(cloud='kubernetes',
+                                                 region='ctx-b'))

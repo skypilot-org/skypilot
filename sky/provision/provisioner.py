@@ -902,7 +902,9 @@ def _post_provision_setup(
             logger.debug('Ray cluster is ready. Skip starting ray cluster on '
                          'worker nodes.')
 
-        logging_agent = logs.get_logging_agent()
+        agent_cloud = str(launched_resources.cloud).lower()
+        logging_agent = logs.get_logging_agent(cloud=agent_cloud,
+                                               region=launched_resources.region)
         if logging_agent:
             status.update(
                 ux_utils.spinner_message('Setting up logging agent',

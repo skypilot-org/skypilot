@@ -1,4 +1,5 @@
 """Sky logging agents."""
+import inspect
 from typing import Callable, Optional
 
 from sky import exceptions
@@ -29,23 +30,51 @@ __all__ = [
 # it is consulted before the ``logs.store`` config selection. Returning
 # ``None`` falls back to the config-based selection, so the override never has
 # to reimplement it.
-LoggingAgentProvider = Callable[[], Optional[LoggingAgent]]
+#
+# A provider may accept the keyword arguments ``cloud`` and ``region`` (for
+# Kubernetes and SSH the region is the context) to route a cluster's logs by
+# where it runs. A provider that takes no arguments is called without them and
+# resolves one agent for every cluster.
+LoggingAgentProvider = Callable[..., Optional[LoggingAgent]]
 _logging_agent_provider: Optional[LoggingAgentProvider] = None
+_provider_takes_placement = False
+
+
+def _accepts_placement(provider: LoggingAgentProvider) -> bool:
+    try:
+        inspect.signature(provider).bind(cloud=None, region=None)
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 def register_logging_agent_provider(
         provider: Optional[LoggingAgentProvider]) -> None:
     """Registers the process-global logging agent provider (None to clear)."""
-    global _logging_agent_provider
+    global _logging_agent_provider, _provider_takes_placement
+    _provider_takes_placement = (provider is not None and
+                                 _accepts_placement(provider))
     _logging_agent_provider = provider
 
 
-def get_logging_agent() -> Optional[LoggingAgent]:
-    # Capture into a local so a concurrent register_logging_agent_provider(None)
+def get_logging_agent(cloud: Optional[str] = None,
+                      region: Optional[str] = None) -> Optional[LoggingAgent]:
+    """Returns the logging agent for a cluster placed at (cloud, region).
+
+    Args:
+        cloud: Lower-case cloud name of the cluster, or None when the caller
+            has no cluster in scope.
+        region: The cluster's region; the context for Kubernetes and SSH.
+    """
+    # Capture into locals so a concurrent register_logging_agent_provider(None)
     # cannot clear the global between the check and the call.
     provider = _logging_agent_provider
+    takes_placement = _provider_takes_placement
     if provider is not None:
-        agent = provider()
+        if takes_placement:
+            agent = provider(cloud=cloud, region=region)
+        else:
+            agent = provider()
         if agent is not None:
             return agent
     store = skypilot_config.get_nested(('logs', 'store'), None)
@@ -65,11 +94,12 @@ def get_logging_agent() -> Optional[LoggingAgent]:
         f'Invalid logging store: {store}')
 
 
-def is_logging_agent_configured() -> bool:
-    """Returns whether a logging agent is configured.
+def is_logging_agent_configured(cloud: Optional[str] = None,
+                                region: Optional[str] = None) -> bool:
+    """Returns whether a logging agent is configured for (cloud, region).
 
     When True, job logs are forwarded to an external store, so callers can
     stream them on demand and fall back to the registered ``LogReader`` instead
     of persisting a local copy.
     """
-    return get_logging_agent() is not None
+    return get_logging_agent(cloud=cloud, region=region) is not None

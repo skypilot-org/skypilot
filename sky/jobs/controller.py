@@ -655,7 +655,15 @@ class JobController:
         were not delivered; we then keep the local copy instead of skipping
         it.
         """
-        if (logs.is_logging_agent_configured() and
+        agent_cloud: Optional[str] = None
+        agent_region: Optional[str] = None
+        if handle is not None and handle.launched_resources is not None:
+            launched = handle.launched_resources
+            if launched.cloud is not None:
+                agent_cloud = str(launched.cloud).lower()
+            agent_region = launched.region
+        if (logs.is_logging_agent_configured(cloud=agent_cloud,
+                                             region=agent_region) and
                 logs.get_log_reader() is not None):
             undelivered_reason = None
             if handle is not None:
