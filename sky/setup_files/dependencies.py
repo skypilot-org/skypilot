@@ -278,7 +278,8 @@ cloud_dependencies: Dict[str, List[str]] = {
     'seeweb': ['ecsapi==0.4.0'],
     'mithril': [],  # No dependencies needed for mithril
     'shadeform': [],  # No dependencies needed for shadeform
-    'slurm': ['python-hostlist'],
+    # Slurm hostlist expansion is implemented in sky.utils.hostlist_utils.
+    'slurm': [],
     'yotta': [],  # No dependencies needed for Yotta
     'verda': [],  # No dependencies needed for verda
 }

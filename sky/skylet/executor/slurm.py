@@ -14,10 +14,10 @@ import sys
 import time
 
 import colorama
-import hostlist
 
 from sky.skylet import constants
 from sky.skylet.log_lib import run_bash_command_with_log
+from sky.utils import hostlist_utils
 
 # Slurm populates step- and task-scoped SLURM_* variables for the executor's
 # own job step (e.g. SLURM_CPU_BIND, SLURM_CPUS_PER_TASK=1,
@@ -81,7 +81,7 @@ def _get_job_node_ips() -> str:
     # Expand compressed nodelist (e.g., "node[1-3,5]" -> "node1\nnode2...")
     # Alternative: `scontrol show hostnames $SLURM_JOB_NODELIST`, but `scontrol`
     # (and Slurm CLI binaries in general) may not exist inside containers.
-    hostnames = list(hostlist.expand_hostlist(nodelist))
+    hostnames = hostlist_utils.expand_hostlist(nodelist)
     ips = []
     for hostname in hostnames:
         try:
