@@ -299,6 +299,26 @@ describe('WorkspaceEditor with a plugin that changes the workspace', () => {
     expect(yamlBox().value).not.toContain('# note');
   });
 
+  test('a change landing after a save is caught at the next Apply', async () => {
+    // Someone else's write lands right after ours, before anything after the
+    // save could read the server.
+    mockUpdateWorkspace.mockImplementationOnce(async (name, config) => {
+      server = { [name]: config };
+      addBob();
+      return {};
+    });
+    await renderEditor();
+    await edit((y) => `${y}  gcp:\n    project_id: first\n`);
+    await apply();
+    expect(mockUpdateWorkspace).toHaveBeenCalledTimes(1);
+    await edit((y) => y.replace('first', 'second'));
+    await apply();
+    expect(
+      screen.getByText('Workspace changed since you started editing')
+    ).toBeInTheDocument();
+    expect(mockUpdateWorkspace).toHaveBeenCalledTimes(1);
+  });
+
   test('a change made elsewhere (another tab) is caught at Apply', async () => {
     await renderEditor();
     await edit((y) => `${y}  gcp:\n    project_id: mine\n`);

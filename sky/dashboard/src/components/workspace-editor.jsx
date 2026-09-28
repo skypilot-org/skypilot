@@ -660,13 +660,10 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         setSuccess('Workspace updated successfully!');
         setOriginalConfig(workspaceConfig);
         serverYamlRef.current = savedYaml;
-        // The server may normalize what it stores; compare the next Apply
-        // against what it actually holds.
-        try {
-          baseConfigRef.current = stableStringify(await readServerConfig());
-        } catch (err) {
-          baseConfigRef.current = stableStringify(workspaceConfig);
-        }
+        // The server stores the config as sent, so that is the new baseline.
+        // Not re-read: a change landing after this save must still show up
+        // as a conflict on the next Apply, not become the baseline.
+        baseConfigRef.current = stableStringify(workspaceConfig);
         // Refresh stats after successful save
         fetchWorkspaceStats();
       }
