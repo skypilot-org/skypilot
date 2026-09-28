@@ -208,6 +208,18 @@ describe('WorkspaceEditor onChanged', () => {
     expect(screen.getByLabelText('workspace yaml').value).toContain('bob');
   });
 
+  test.each([
+    ['a comment-only edit', (yaml) => `# who is here and why\n${yaml}`],
+    ['invalid YAML', (yaml) => `${yaml}  gcp: [unclosed\n`],
+  ])('keeps %s, which leaves the parsed config unchanged', async (_, edit) => {
+    await renderEditor();
+    const box = screen.getByLabelText('workspace yaml');
+    const draft = edit(box.value);
+    fireEvent.change(box, { target: { value: draft } });
+    await pluginRefresh();
+    expect(screen.getByLabelText('workspace yaml').value).toBe(draft);
+  });
+
   test('keeps unsaved YAML edits while refreshing the roster', async () => {
     await renderEditor();
     const draft =

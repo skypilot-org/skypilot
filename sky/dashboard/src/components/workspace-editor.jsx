@@ -377,8 +377,12 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
-  // Read inside fetchWorkspaceConfig without making it a dependency.
-  const hasChangesRef = useRef(false);
+  // The editor text as last loaded from the server, and as it is now. A draft
+  // is any difference, including comment-only or not-yet-valid edits that
+  // leave the parsed config unchanged. Refs so fetchWorkspaceConfig can read
+  // them without depending on them.
+  const serverYamlRef = useRef('');
+  const draftYamlRef = useRef('');
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [yamlError, setYamlError] = useState(null);
@@ -427,7 +431,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         setIsReadOnlyVisible(readOnly === true);
         setIsWritable(writableFlag !== false);
         setAllUsers(usersResponse || []);
-        if (keepDraft && hasChangesRef.current) {
+        if (keepDraft && draftYamlRef.current !== serverYamlRef.current) {
           return;
         }
         setWorkspaceConfig(config);
@@ -446,6 +450,8 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
             flowLevel: -1,
           });
         }
+        serverYamlRef.current = yamlOutput;
+        draftYamlRef.current = yamlOutput;
         setYamlValue(yamlOutput);
       } catch (err) {
         console.error('Error fetching workspace config:', err);
@@ -545,10 +551,10 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     const currentConfigStr = JSON.stringify(workspaceConfig);
     const originalConfigStr = JSON.stringify(originalConfig);
     setHasChanges(currentConfigStr !== originalConfigStr);
-    hasChangesRef.current = currentConfigStr !== originalConfigStr;
   }, [workspaceConfig, originalConfig]);
 
   const handleYamlChange = (value) => {
+    draftYamlRef.current = value;
     setYamlValue(value);
     setYamlError(null);
 
@@ -676,6 +682,8 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         flowLevel: -1,
       });
     }
+    serverYamlRef.current = yamlOutput;
+    draftYamlRef.current = yamlOutput;
     setYamlValue(yamlOutput);
 
     // Clear any errors
