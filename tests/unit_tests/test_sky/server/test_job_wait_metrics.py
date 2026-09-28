@@ -26,7 +26,16 @@ def seed(db,
          started=None,
          ended=None,
          events=(),
-         task_id=0):
+         task_id=0,
+         eligible=None):
+    pending = [
+        at for _, status, reason, at in events
+        if status == 'PENDING' and reason == 'Job submitted to queue'
+    ]
+    starting = [at for _, status, _, at in events if status == 'STARTING']
+    if eligible is None and pending:
+        eligible = min(pending)
+    accepted = min(starting) if starting else submitted
     with db.begin() as conn:
         if task_id == 0:
             conn.execute(state.job_info_table.insert().values(
@@ -39,7 +48,8 @@ def seed(db,
             spot_job_id=job_id,
             task_id=task_id,
             status=status,
-            submitted_at=submitted,
+            eligible_at=eligible,
+            submitted_at=accepted,
             start_at=started,
             end_at=ended,
             resources='1x[L40S:1]',
@@ -135,7 +145,7 @@ def test_cancellation_failure_and_active_waits_are_separate(db):
                   outcome='started') == []
 
 
-def test_missing_events_are_reported_not_reconstructed_from_mutable_fields(db):
+def test_tasks_without_eligibility_are_not_measured(db):
     seed(db, 1, submitted=NOW - 100, started=NOW - 50, ended=NOW - 10)
     seed(db,
          2,
@@ -145,9 +155,6 @@ def test_missing_events_are_reported_not_reconstructed_from_mutable_fields(db):
              (0, 'PENDING', 'Job submitted to queue', NOW - 100),
          ])
     data = samples()
-    assert values(data,
-                  'sky_managed_job_wait_missing_tasks',
-                  reason='submission') == [1]
     assert values(data, 'sky_managed_job_wait_missing_tasks',
                   reason='start') == [1]
     assert values(data, 'sky_managed_job_wait_7d_seconds_count') == []
@@ -296,5 +303,53 @@ def test_recovery_only_excludes_tasks_that_previously_started(db, started):
     else:
         assert values(data, 'sky_managed_job_waiting_tasks') == []
         assert values(data,
-                      'sky_managed_job_wait_missing_tasks',
-                      reason='start') == [1]
+                      'sky_managed_job_wait_7d_seconds_sum',
+                      phase='total',
+                      outcome='started') == [400]
+
+
+def test_pipeline_task_wait_starts_only_when_eligible(db):
+    seed(db,
+         1,
+         status='RUNNING',
+         started=NOW - 100,
+         events=[(0, 'PENDING', 'Job submitted to queue', NOW - 1000),
+                 (0, 'STARTING', 'Job is starting', NOW - 900)])
+    seed(db,
+         1,
+         task_id=1,
+         status='PENDING',
+         events=[(1, 'PENDING', 'Job submitted to queue', NOW - 1000)],
+         eligible=NOW - 30)
+    seed(db,
+         1,
+         task_id=2,
+         status='PENDING',
+         events=[(2, 'PENDING', 'Job submitted to queue', NOW - 1000)])
+    with db.begin() as conn:
+        conn.execute(state.spot_table.update().where(
+            state.spot_table.c.spot_job_id == 1,
+            state.spot_table.c.task_id == 2).values(eligible_at=None))
+    data = samples()
+    assert values(data, 'sky_managed_job_waiting_tasks') == [1]
+    assert values(data, 'sky_managed_job_oldest_wait_seconds') == [30]
+
+
+def test_naive_local_event_timestamps_do_not_affect_wait(db):
+    seed(db,
+         1,
+         status='RUNNING',
+         started=NOW - 10,
+         events=[(0, 'PENDING', 'Job submitted to queue', NOW - 100),
+                 (0, 'STARTING', 'Job is starting', NOW - 80)])
+    with db.begin() as conn:
+        conn.execute(state.job_events_table.update().values(
+            timestamp=datetime.datetime.fromtimestamp(NOW + 10800)))
+    data = samples()
+    assert values(data,
+                  'sky_managed_job_wait_7d_seconds_sum',
+                  phase='total',
+                  outcome='started') == [90]
+    assert values(data,
+                  'sky_managed_job_wait_missing_tasks',
+                  reason='invalid_timestamps') == []

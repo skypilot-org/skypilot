@@ -8,21 +8,20 @@ wrapper; updating the dashboard alone does not install the metrics.
 
 ## Semantics
 
-- The fixed rolling cohort is tasks first submitted in the last seven days,
-  independent of the Grafana time picker. The first task-level `PENDING` event
-  with reason `Job submitted to queue` defines submission; retry timestamps and
-  job-level cleanup events do not redefine it.
-- Startup is submission to the first task-level `RUNNING` event. `controller` is
-  submission to first `STARTING`; `launch` is first `STARTING` to first `RUNNING`,
-  including acquisition, provisioning, image pulls, setup and retries. This is
-  not a measurement of pure GPU scheduling delay. Phase percentiles do not add.
+- The fixed rolling cohort is tasks first eligible to run in the last seven days,
+  independent of the Grafana time picker. Pipeline and dependency-blocked tasks
+  join only when their `eligible_at` timestamp is set. Retries do not reset it.
+- Startup is eligibility (`eligible_at`) to first run (`start_at`). `controller`
+  is eligibility to first controller claim (`submitted_at`); `launch` is claim
+  to first run, including acquisition, provisioning, image pulls, setup and
+  retries. This is not pure GPU scheduling delay. Phase percentiles do not add.
 - Tasks cancelled or failed before first run are separate outcomes. Their total
   wait ends at the task's terminal timestamp. Cancellation after a run remains
   in the started cohort. Current waiting gauges include tasks older than seven
   days, and exclude recovery after a run.
-- Missing retained events and invalid chronology are reported by reason, not
-  reconstructed from mutable summary fields. Keep job events for at least seven
-  days; waiting tasks older than retention can have unknown duration.
+- Missing timing fields and invalid chronology are reported by reason.
+  Tasks without `eligible_at` are excluded until they become eligible; elapsed
+  time comes from epoch-second state columns, independent of event retention.
 - All metrics are gauges. For `sky_managed_job_wait_7d_seconds_bucket`, use
   `histogram_quantile` directly on aggregated cumulative buckets. Never apply
   `rate` or `increase`. Counts are tasks, not GPU counts or GPU hours.
@@ -39,5 +38,5 @@ older than three minutes and deduplicate API replicas before aggregation. A fres
 empty cohort can display zero; missing/stale collection cannot.
 
 After deploying both server code and chart, verify the snapshot age is below three
-minutes and compare sampled outliers with task events in the jobs dashboard.
+minutes and compare sampled outliers with the task eligibility, claim and start timestamps.
 Check a retried task, a cancelled-before-start task and a currently waiting task.

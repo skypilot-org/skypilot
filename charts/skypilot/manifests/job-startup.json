@@ -144,7 +144,7 @@
   "panels": [
     {
       "id": 1,
-      "title": "Submission \u2192 first run \u00b7 p50",
+      "title": "Eligibility \u2192 first run \u00b7 p50",
       "type": "stat",
       "gridPos": {
         "x": 0,
@@ -191,7 +191,7 @@
     },
     {
       "id": 2,
-      "title": "Submission \u2192 first run \u00b7 p95",
+      "title": "Eligibility \u2192 first run \u00b7 p95",
       "type": "stat",
       "gridPos": {
         "x": 6,
@@ -332,7 +332,7 @@
     },
     {
       "id": 5,
-      "title": "Started tasks \u00b7 7d submissions",
+      "title": "Started tasks \u00b7 7d eligible tasks",
       "type": "stat",
       "gridPos": {
         "x": 0,
@@ -592,7 +592,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Controller: submission to first STARTING. Launch: first STARTING to first RUNNING, including capacity acquisition, provisioning, image pulls, setup and retries. Phase percentiles are not additive.",
+      "description": "Controller: eligibility to first controller claim. Launch: first claim to first run, including capacity acquisition, provisioning, image pulls, setup and retries. Phase percentiles are not additive.",
       "targets": [
         {
           "refId": "A",
@@ -627,7 +627,7 @@
     },
     {
       "id": 11,
-      "title": "Submission outcomes by user \u00b7 7d",
+      "title": "Eligibility outcomes by user \u00b7 7d",
       "type": "bargauge",
       "gridPos": {
         "x": 0,
@@ -733,7 +733,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Global top 20 emitted per snapshot, then dashboard filters apply. Includes started/cancelled/failed tasks from the seven-day submission cohort and current waiting tasks of any age. Open the job to inspect logs.",
+      "description": "Global top 20 emitted per snapshot, then dashboard filters apply. Includes started/cancelled/failed tasks from the seven-day eligibility cohort and current waiting tasks of any age. Open the job to inspect logs.",
       "targets": [
         {
           "refId": "A",
@@ -809,7 +809,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Missing submission/start/end/acceptance events or invalid chronology. These observations are excluded from the affected duration calculation.",
+      "description": "Missing claim/start/end timestamps or invalid chronology. These observations are excluded from the affected duration calculation.",
       "targets": [
         {
           "refId": "A",
@@ -854,7 +854,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Fixed rolling seven-day submission cohort.** The time picker does not change it. Retries retain the first submission time. Counts are tasks, not GPUs. CPU tasks are included unless filtered out.\n\nStartup measures **time until user code first runs**, not pure GPU scheduling delay. Current waiting includes older tasks. Cancelled/failed-before-start tasks are reported separately from successful starts.\n\nBuckets are rolling gauges: use `histogram_quantile` directly, never `rate` or `increase`. Retain job events for at least seven days. Missing data is explicit. Historical project attribution cannot be reconstructed reliably. User is the SkyPilot user hash."
+        "content": "**Fixed rolling seven-day eligibility cohort.** The time picker does not change it. Pipeline and dependency-blocked tasks join when first eligible; retries retain that time. Counts are tasks, not GPUs. CPU tasks are included unless filtered out.\n\nStartup measures **time until user code first runs**, not pure GPU scheduling delay. Current waiting includes older tasks. Cancelled/failed-before-start tasks are reported separately from successful starts.\n\nBuckets are rolling gauges: use `histogram_quantile` directly, never `rate` or `increase`. Durations use epoch-second state timestamps, independent of event retention. Missing timing data is explicit. Historical project attribution cannot be reconstructed reliably. User is the SkyPilot user hash."
       }
     }
   ]

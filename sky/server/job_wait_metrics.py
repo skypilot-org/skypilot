@@ -1,7 +1,6 @@
-"""Seven-day task startup snapshots from retained managed-job events."""
+"""Seven-day task startup snapshots from managed-job launch timestamps."""
 
 import collections
-import datetime
 import re
 import time
 from typing import Any, Dict, Iterator, List, Mapping, Tuple
@@ -19,27 +18,14 @@ _PREFIX = 'sky_managed_job_'
 
 
 def _rows(now: float) -> List[Any]:
-    e = state.job_events_table.c
     t, j = state.spot_table.c, state.job_info_table.c
-    events = sa.select(
-        e.spot_job_id,
-        e.task_id,
-        sa.func.min(
-            sa.case((sa.and_(e.new_status == 'PENDING',
-                             e.reason == 'Job submitted to queue'),
-                     e.timestamp))).label('queued'),
-        sa.func.min(sa.case(
-            (e.new_status == 'STARTING', e.timestamp))).label('accepted'),
-        sa.func.min(sa.case(
-            (e.new_status == 'RUNNING', e.timestamp))).label('running'),
-        sa.func.max(e.timestamp).label('last_event'),
-    ).where(e.task_id.is_not(None)).group_by(e.spot_job_id,
-                                             e.task_id).subquery()
     cutoff = now - _WINDOW
     query = sa.select(
         t.spot_job_id,
         t.task_id,
         t.status,
+        t.eligible_at,
+        t.submitted_at,
         t.start_at,
         t.end_at,
         t.full_resources,
@@ -47,45 +33,32 @@ def _rows(now: float) -> List[Any]:
         j.workspace,
         j.user_hash,
         j.cloud,
-        events.c.queued,
-        events.c.accepted,
-        events.c.running,
     ).select_from(
         state.spot_table.outerjoin(
-            state.job_info_table, t.spot_job_id == j.spot_job_id).outerjoin(
-                events,
-                sa.and_(t.spot_job_id == events.c.spot_job_id,
-                        t.task_id == events.c.task_id))
-    ).where(
-        sa.or_(
-            t.submitted_at >= cutoff, t.end_at >= cutoff,
-            t.status.not_in(
-                [s.value for s in state.ManagedJobStatus.terminal_statuses()]),
-            events.c.last_event >= datetime.datetime.fromtimestamp(
-                cutoff, datetime.timezone.utc)))
+            state.job_info_table, t.spot_job_id == j.spot_job_id)).where(
+                t.eligible_at.is_not(None)).where(
+                    sa.or_(
+                        t.eligible_at >= cutoff,
+                        t.status.not_in([
+                            s.value
+                            for s in state.ManagedJobStatus.terminal_statuses()
+                        ])))
     # pylint: disable=protected-access
     with state._db_manager.get_engine().connect() as conn:
         return list(conn.execute(query).mappings())
 
 
-def _timestamp(value: datetime.datetime) -> float:
-    # SQLite returns naive UTC datetimes; the exporter host need not use UTC.
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=datetime.timezone.utc)
-    return value.timestamp()
-
-
 class JobWaitCollector:
     """Expose rolling gauges, not counters; never apply rate() to the buckets.
 
-    The cohort is tasks first submitted within seven days. Current waiting
-    gauges include older tasks. Missing retained events are reported separately.
+    The cohort is tasks first eligible within seven days. Current waiting
+    gauges include older tasks. Missing timing fields are reported separately.
     Register through the server's resilient collector wrapper to bound DB work.
     """
 
     def describe(self) -> Iterator[GaugeMetricFamily]:
         for name, help_text, extra in [
-            ('wait_7d_tasks', 'Tasks first submitted in the last seven days.',
+            ('wait_7d_tasks', 'Tasks first eligible in the last seven days.',
              ['outcome']),
             ('wait_7d_seconds_bucket',
              'Seven-day cumulative wait buckets; gauges, not counters.',
@@ -134,17 +107,13 @@ class JobWaitCollector:
                                     'unknown', row['cloud'] or 'unknown', gpu,
                                     labels.get('team', 'unknown'),
                                     labels.get('project', 'unknown'))
-            queued = _timestamp(row['queued']) if row['queued'] else None
-            running = _timestamp(row['running']) if row['running'] else None
+            queued = row['eligible_at']
+            running = row['start_at']
             terminal = state.ManagedJobStatus(row['status']).is_terminal()
             previously_started = (running is not None or
-                                  row['start_at'] is not None or
                                   row['status'] in ('RUNNING', 'SUCCEEDED'))
             if not terminal and not previously_started:
                 waiting[key] += 1
-            if queued is None:
-                missing[key + ('submission',)] += 1
-                continue
             recent = queued >= now - _WINDOW
             if not recent and (terminal or previously_started):
                 continue
@@ -179,8 +148,7 @@ class JobWaitCollector:
                 continue
             durations[key + (outcome, 'total')].append(elapsed)
             if running is not None:
-                accepted = _timestamp(
-                    row['accepted']) if row['accepted'] else None
+                accepted = row['submitted_at']
                 if accepted is not None and queued <= accepted <= running:
                     durations[key + (outcome, 'controller')].append(accepted -
                                                                     queued)
