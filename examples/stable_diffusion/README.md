@@ -30,11 +30,3 @@ If a model you want to install is gated on Hugging Face, pass a token with `sky 
 ## Running locally
 
 `docker-compose.yml` starts the same container on a local machine with an NVIDIA GPU: `docker compose up`.
-
-## Serving multiple replicas
-
-`examples/serve/stable_diffusion_service.yaml` runs the same container as a SkyServe service with two replicas behind a single endpoint:
-
-```
-sky serve up -n sd examples/serve/stable_diffusion_service.yaml
-```
