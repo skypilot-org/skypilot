@@ -251,15 +251,20 @@ def test_ha_backend_roots_are_honored(local_server, tmp_path):
 # ---------------------------------------------------------------------------
 def test_flag_stripped_from_client_env_vars(monkeypatch):
     # The executor overlays request env vars into os.environ before running
-    # process_mounts, so the server-set flag must be stripped from the client's
-    # env vars first, or a caller could set it to '0' and disable the check.
+    # process_mounts, so any SKYPILOT_SERVER_-prefixed key (including the
+    # containment flag) must be stripped from the client's env vars first, or a
+    # crafted request could set the flag to '0' and disable the check.
+    import os
+
     from sky.server.requests import executor
 
     monkeypatch.setenv(FLAG, '1')  # server says: enforce
+    fake_server_var = constants.SKYPILOT_SERVER_ENV_VAR_PREFIX + 'FAKE'
 
     request_body = types.SimpleNamespace(
         env_vars={
             FLAG: '0',  # attacker tries to disable enforcement
+            fake_server_var: 'x',  # any server-prefixed key is stripped too
             constants.USER_ID_ENV_VAR: USER,
             constants.USER_ENV_VAR: USER,
         },
@@ -289,6 +294,8 @@ def test_flag_stripped_from_client_env_vars(monkeypatch):
     with executor.override_request_env_and_config(request_body, 'req-1',
                                                   'sky.launch'):
         assert common.should_enforce_mount_containment() is True
+        # The client-supplied server-prefixed keys never reached os.environ.
+        assert os.environ.get(fake_server_var) is None
 
 
 def test_init_respects_explicit_flag(monkeypatch):
