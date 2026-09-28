@@ -763,3 +763,53 @@ async def test_restart_limit_counts_live_runtime_user_retries(
     assert result is False
     set_failed.assert_awaited_once()
     executor.recover.assert_not_called()
+
+
+def allocation(job_id, location='cluster-a'):
+    return runtime.RuntimeAllocation('slurm', location, job_id)
+
+
+def test_provisioning_records_allocation_before_any_restart(database):
+    """A queued allocation is recorded before it starts or restarts."""
+    provision(0, allocation=allocation('41'))
+    row = task_row(database)
+    metadata = json.loads(row['metadata'])
+    assert state.runtime_allocations(metadata) == [allocation('41')]
+    assert metadata['runtime_recovery']['runtime_id'] == 'allocation-a'
+    # Only the history and cursor changed.
+    assert row['status'] == 'RUNNING'
+    assert row['recovery_count'] == 0
+    assert metadata['other_owner'] == {'kept': True}
+
+
+@pytest.mark.asyncio
+async def test_allocation_history_keeps_every_allocation_once(database):
+    await observe(0, running=True, allocation=allocation('41'))
+    await observe(0, running=True, allocation=allocation('41'))
+    # A replacement resets the cursor but not the history.
+    await observe(0,
+                  running=True,
+                  runtime_id='allocation-b',
+                  allocation=allocation('42', 'cluster-b'))
+    metadata = json.loads(task_row(database)['metadata'])
+    assert state.runtime_allocations(metadata) == [
+        allocation('41'), allocation('42', 'cluster-b')
+    ]
+    assert metadata['runtime_recovery']['runtime_id'] == 'allocation-b'
+
+
+def test_allocation_history_is_bounded(database):
+    for index in range(state._MAX_RUNTIME_ALLOCATIONS + 5):
+        provision(0,
+                  runtime_id=f'allocation-{index}',
+                  allocation=allocation(str(index)))
+    history = state.runtime_allocations(
+        json.loads(task_row(database)['metadata']))
+    assert len(history) == state._MAX_RUNTIME_ALLOCATIONS
+    assert history[0] == allocation('5')
+    assert history[-1] == allocation(str(state._MAX_RUNTIME_ALLOCATIONS + 4))
+
+
+def test_runtime_allocations_of_a_task_without_history():
+    assert state.runtime_allocations(None) == []
+    assert state.runtime_allocations({'other_owner': {}}) == []
