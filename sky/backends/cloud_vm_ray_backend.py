@@ -538,9 +538,10 @@ class FailoverCloudErrorHandlerV2:
     @staticmethod
     def _azure_handler(blocked_resources: Set['resources_lib.Resources'],
                        launchable_resources: 'resources_lib.Resources',
-                       region: 'clouds.Region', zones: List['clouds.Zone'],
-                       err: Exception):
-        del region, zones  # Unused.
+                       region: 'clouds.Region',
+                       zones: Optional[List['clouds.Zone']], err: Exception):
+        del region  # Unused.
+        # Azure now retries individual native availability zones.
         if '(ReadOnlyDisabledSubscription)' in str(err):
             logger.info(
                 f'{colorama.Style.DIM}Azure subscription is read-only. '
@@ -555,8 +556,13 @@ class FailoverCloudErrorHandlerV2:
                 blocked_resources,
                 resources_lib.Resources(cloud=clouds.Azure()))
         else:
-            _add_to_blocked_resources(blocked_resources,
-                                      launchable_resources.copy(zone=None))
+            # a failed zone must not block other zones.
+            failed_zones: List[Optional[str]] = ([zone.name for zone in zones]
+                                                 if zones else [None])
+            for zone_name in failed_zones:
+                _add_to_blocked_resources(
+                    blocked_resources,
+                    launchable_resources.copy(zone=zone_name))
 
     @staticmethod
     def _gcp_handler(blocked_resources: Set['resources_lib.Resources'],
@@ -3763,7 +3769,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if zone is None:
                 get_zone_cmd = (
                     handle.launched_resources.cloud.get_zone_shell_cmd())
-                # zone is None for Azure
                 if get_zone_cmd is not None:
                     runners = handle.get_command_runners()
 

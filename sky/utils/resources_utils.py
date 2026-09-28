@@ -551,7 +551,7 @@ def make_launchables_for_valid_region_zones(
         optimize_by_zone = (override_optimize_by_zone or
                             launchable_resources.cloud.optimize_by_zone())
         # It is possible that we force the optimize_by_zone but some clouds
-        # do not support zone-level provisioning (i.e. Azure). So we check
+        # or offerings do not support zone-level provisioning. So we check
         # if there is zone-level information in the region first.
         if (region.zones is not None and
             (launchable_resources.use_spot or optimize_by_zone)):

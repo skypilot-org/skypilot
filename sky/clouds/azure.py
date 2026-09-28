@@ -25,7 +25,11 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
+    from sky.catalog import azure_catalog
     from sky.utils import volume as volume_lib
+else:
+    # The catalog imports Azure, so defer loading it until the cloud is ready.
+    azure_catalog = adaptors_common.LazyImport('sky.catalog.azure_catalog')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -311,12 +315,15 @@ class Azure(clouds.Cloud):
         resources: Optional['resources.Resources'] = None,
     ) -> List[clouds.Region]:
         del accelerators  # unused
-        assert zone is None, 'Azure does not support zones'
-        regions = catalog.get_region_zones_for_instance_type(
-            instance_type, use_spot, 'azure')
-
-        if region is not None:
-            regions = [r for r in regions if r.name == region]
+        # use the subscription's native zonal SKU offerings.
+        regions = azure_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot, region)
+        if zone is not None:
+            azure_catalog.validate_region_zone(region, zone)
+            for candidate in regions:
+                candidate.set_zones(
+                    [z for z in candidate.zones or [] if z.name == zone])
+            regions = [candidate for candidate in regions if candidate.zones]
         return regions
 
     @classmethod
@@ -328,16 +335,21 @@ class Azure(clouds.Cloud):
         instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[None]:
+    ) -> Iterator[Optional[List[clouds.Zone]]]:
+        # Azure provisions one native zone per attempt.
         del num_nodes  # unused
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
                                             use_spot,
                                             region=region,
                                             zone=None)
+        # let the standard provision loop retry each zone.
         for r in regions:
-            assert r.zones is None, r
-            yield r.zones
+            if r.zones:
+                for zone in r.zones:
+                    yield [zone]
+            else:
+                yield None
 
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
@@ -360,7 +372,10 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
-        return None
+        # read placement from Azure IMDS, including resumed VMs.
+        return ('curl -fsS -H Metadata:true '
+                '"http://169.254.169.254/metadata/instance/compute/zone'
+                '?api-version=2021-02-01&format=text"')
 
     def make_deploy_resources_variables(
         self,
@@ -372,7 +387,8 @@ class Azure(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
-        assert zones is None, ('Azure does not support zones', zones)
+        # Azure accepts one zone for each VM deployment.
+        assert zones is None or len(zones) == 1, zones
 
         region_name = region.name
 
@@ -388,8 +404,7 @@ class Azure(clouds.Cloud):
 
         cloud_image_id = resources.get_cloud_image_id()
         if cloud_image_id is None:
-            # pylint: disable=import-outside-toplevel
-            from sky.catalog import azure_catalog
+            # share the catalog for image and SKU metadata.
             gen_version = azure_catalog.get_gen_version_from_instance_type(
                 resources.instance_type)
             image_id = self._get_default_image_tag(gen_version,
@@ -484,6 +499,15 @@ class Azure(clouds.Cloud):
             assert False, 'Low disk tier should always be supported on Azure.'
 
         disk_tier = _failover_disk_tier()
+        # new VM families can require NVMe instead of SCSI.
+        capabilities = azure_catalog.get_instance_type_capabilities(
+            resources.instance_type, region_name)
+        controllers = {
+            value.strip().upper()
+            for value in capabilities.get('DiskControllerTypes', '').split(',')
+        }
+        disk_controller_type = ('NVMe' if 'NVME' in controllers and
+                                'SCSI' not in controllers else None)
 
         resources_vars: Dict[str, Any] = {
             'instance_type': resources.instance_type,
@@ -491,8 +515,9 @@ class Azure(clouds.Cloud):
             'num_gpus': acc_count,
             'use_spot': resources.use_spot,
             'region': region_name,
-            # Azure does not support specific zones.
-            'zones': None,
+            # the provisioner consumes the selected native zone.
+            'zones': zones[0].name if zones else None,
+            'disk_controller_type': disk_controller_type,
             **image_config,
             'disk_tier': Azure._get_disk_type(disk_tier),
             'cloud_init_setup_commands': cloud_init_setup_commands,
@@ -541,11 +566,10 @@ class Azure(clouds.Cloud):
                 resource_list.append(r)
             return resource_list
 
-        # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
         if accelerators is None:
-            # Return a default instance type with the given number of vCPUs.
-            default_instance_type = Azure.get_default_instance_type(
+            # native optimizer/retries need all CPU candidates.
+            instance_types = azure_catalog.get_instance_types_for_cpus_mem(
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
@@ -554,11 +578,8 @@ class Azure(clouds.Cloud):
                 zone=resources.zone,
                 use_spot=resources.use_spot,
                 max_hourly_cost=resources.max_hourly_cost)
-            if default_instance_type is None:
-                return resources_utils.FeasibleResources([], [], None)
-            else:
-                return resources_utils.FeasibleResources(
-                    _make([default_instance_type]), [], None)
+            return resources_utils.FeasibleResources(_make(instance_types), [],
+                                                     None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
