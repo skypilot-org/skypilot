@@ -258,6 +258,21 @@ const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
   );
 };
 
+// Key-order-independent JSON, so a config read from the server and one parsed
+// from YAML compare equal when they hold the same settings.
+function stableStringify(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`;
+  }
+  if (value && typeof value === 'object') {
+    const entries = Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`);
+    return `{${entries.join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
 // Detailed allowed users component for workspace editor.
 //
 // Plugin slots:
@@ -383,6 +398,12 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   // them without depending on them.
   const serverYamlRef = useRef('');
   const draftYamlRef = useRef('');
+  // The server config the editor text was based on. If the server holds
+  // something else by the time Apply is clicked, the workspace changed while
+  // the draft was open (another admin, another tab, a change made from this
+  // page), and Apply asks before overwriting it.
+  const baseConfigRef = useRef('');
+  const [conflict, setConflict] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [yamlError, setYamlError] = useState(null);
@@ -435,6 +456,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
           return;
         }
         setWorkspaceConfig(config);
+        baseConfigRef.current = stableStringify(config);
 
         // Format as YAML with workspace name as top-level key
         const fullConfig = { [workspaceName]: config };
@@ -587,7 +609,16 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     }
   };
 
-  const handleSave = async () => {
+  // The workspace's config as the server holds it now, without the
+  // server-computed flags.
+  const readServerConfig = async () => {
+    const allWorkspaces = await getWorkspaces();
+    const { writable, read_only, ...config } =
+      allWorkspaces[workspaceName] || {};
+    return config;
+  };
+
+  const handleSave = async ({ force = false } = {}) => {
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -618,10 +649,24 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
           router.push(`/workspaces/${workspaceName}`);
         }, 1500);
       } else {
+        if (!force) {
+          const latest = await readServerConfig();
+          if (stableStringify(latest) !== baseConfigRef.current) {
+            setConflict(true);
+            return;
+          }
+        }
         await updateWorkspace(workspaceName, workspaceConfig);
         setSuccess('Workspace updated successfully!');
         setOriginalConfig(workspaceConfig);
         serverYamlRef.current = savedYaml;
+        // The server may normalize what it stores; compare the next Apply
+        // against what it actually holds.
+        try {
+          baseConfigRef.current = stableStringify(await readServerConfig());
+        } catch (err) {
+          baseConfigRef.current = stableStringify(workspaceConfig);
+        }
         // Refresh stats after successful save
         fetchWorkspaceStats();
       }
@@ -671,6 +716,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const handleDiscard = () => {
     // Reset to original configuration
     setWorkspaceConfig(originalConfig);
+    baseConfigRef.current = stableStringify(originalConfig);
 
     // Reset YAML value to original
     const fullConfig = { [workspaceName]: originalConfig };
@@ -965,7 +1011,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                         {/* Action buttons */}
                         <div className="flex justify-end space-x-3 pt-3 border-gray-200">
                           <Button
-                            onClick={handleSave}
+                            onClick={() => handleSave()}
                             disabled={saving || yamlError || loading}
                             className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white"
                           >
@@ -983,6 +1029,50 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         )}
 
         {/* Delete Confirmation Dialog */}
+        <Dialog
+          open={conflict}
+          onOpenChange={(open) => {
+            if (!open) setConflict(false);
+          }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader className="">
+              <DialogTitle>
+                Workspace changed since you started editing
+              </DialogTitle>
+              <DialogDescription>
+                Workspace &quot;{workspaceName}&quot; was changed after you
+                started editing, for example by another admin or in another tab.
+                Applying replaces its whole configuration with your YAML and
+                would undo those changes.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="">
+              <Button variant="outline" onClick={() => setConflict(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setConflict(false);
+                  fetchWorkspaceConfig(false);
+                }}
+              >
+                Reload latest
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  setConflict(false);
+                  handleSave({ force: true });
+                }}
+              >
+                Apply anyway
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <Dialog open={deleteState.showDialog} onOpenChange={handleCancelDelete}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader className="">

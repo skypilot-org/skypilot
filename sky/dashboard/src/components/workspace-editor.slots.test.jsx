@@ -172,24 +172,42 @@ test('non-members see no roster and no plugin controls', () => {
   expect(container).toBeEmptyDOMElement();
 });
 
-describe('WorkspaceEditor onChanged', () => {
-  const before = { ws: { private: true, allowed_users: ['alice'] } };
-  const after = { ws: { private: true, allowed_users: ['alice', 'bob'] } };
+describe('WorkspaceEditor with a plugin that changes the workspace', () => {
+  // The server's copy of the workspace. The plugin adds bob to it and asks the
+  // page to refresh; Apply writes the editor's config into it.
+  let server;
+  const addBob = () => {
+    const ws = server.ws;
+    server = { ws: { ...ws, allowed_users: [...ws.allowed_users, 'bob'] } };
+  };
 
-  // A plugin that changes the workspace (here: adds bob) and asks the page to
-  // refresh.
   beforeEach(() => {
+    server = { ws: { private: true, allowed_users: ['alice'] } };
+    mockGetWorkspaces.mockReset();
+    mockGetWorkspaces.mockImplementation(async () => server);
+    mockUpdateWorkspace.mockReset();
+    mockUpdateWorkspace.mockImplementation(async (name, config) => {
+      server = { [name]: config };
+      return {};
+    });
     mockComponents['workspaces.detail.allowedUsers.actions'] = [
       {
         id: 'actions',
         component: ({ onChanged }) => (
-          <button onClick={() => onChanged()}>plugin change</button>
+          <button
+            onClick={() => {
+              addBob();
+              onChanged();
+            }}
+          >
+            plugin change
+          </button>
         ),
       },
     ];
-    mockGetWorkspaces.mockReset();
-    mockGetWorkspaces.mockResolvedValueOnce(before).mockResolvedValue(after);
   });
+
+  const yamlBox = () => screen.getByLabelText('workspace yaml');
 
   async function renderEditor() {
     render(<WorkspaceEditor workspaceName="ws" />);
@@ -203,47 +221,92 @@ describe('WorkspaceEditor onChanged', () => {
     await screen.findByText('Allowed Users (2)');
   }
 
+  async function edit(fn) {
+    const draft = fn(yamlBox().value);
+    fireEvent.change(yamlBox(), { target: { value: draft } });
+    return draft;
+  }
+
+  async function apply() {
+    await act(async () => {
+      fireEvent.click(screen.getByText('Apply'));
+    });
+  }
+
   test('refreshes the roster and YAML when there are no unsaved edits', async () => {
     await renderEditor();
     await pluginRefresh();
-    expect(screen.getByLabelText('workspace yaml').value).toContain('bob');
+    expect(yamlBox().value).toContain('bob');
   });
 
   test.each([
-    ['a comment-only edit', (yaml) => `# who is here and why\n${yaml}`],
-    ['invalid YAML', (yaml) => `${yaml}  gcp: [unclosed\n`],
-  ])('keeps %s, which leaves the parsed config unchanged', async (_, edit) => {
+    ['a comment-only edit', (y) => `# who is here and why\n${y}`],
+    ['invalid YAML', (y) => `${y}  gcp: [unclosed\n`],
+    ['a config edit', (y) => `${y}  gcp:\n    project_id: draft\n`],
+  ])('keeps %s while refreshing the roster', async (_, change) => {
     await renderEditor();
-    const box = screen.getByLabelText('workspace yaml');
-    const draft = edit(box.value);
-    fireEvent.change(box, { target: { value: draft } });
+    const draft = await edit(change);
     await pluginRefresh();
-    expect(screen.getByLabelText('workspace yaml').value).toBe(draft);
+    expect(yamlBox().value).toBe(draft);
+    expect(screen.getByText('bob')).toBeInTheDocument();
+  });
+
+  test('Apply with no concurrent change saves directly', async () => {
+    await renderEditor();
+    await edit((y) => `${y}  gcp:\n    project_id: saved\n`);
+    await apply();
+    expect(mockUpdateWorkspace).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByText('Workspace changed since you started editing')
+    ).not.toBeInTheDocument();
   });
 
   test('after Apply, a plugin refresh updates the YAML again', async () => {
     await renderEditor();
-    const box = screen.getByLabelText('workspace yaml');
-    fireEvent.change(box, {
-      target: { value: `${box.value}  gcp:\n    project_id: saved\n` },
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByText('Apply'));
-    });
-    expect(mockUpdateWorkspace).toHaveBeenCalled();
+    await edit((y) => `${y}  gcp:\n    project_id: saved\n`);
+    await apply();
+    expect(mockUpdateWorkspace).toHaveBeenCalledTimes(1);
     await pluginRefresh();
-    expect(screen.getByLabelText('workspace yaml').value).toContain('bob');
+    expect(yamlBox().value).toContain('bob');
   });
 
-  test('keeps unsaved YAML edits while refreshing the roster', async () => {
+  test('Apply after a change made on this page asks before overwriting', async () => {
     await renderEditor();
-    const draft =
-      'ws:\n  private: true\n  allowed_users:\n    - alice\n  gcp:\n    project_id: draft\n';
-    fireEvent.change(screen.getByLabelText('workspace yaml'), {
-      target: { value: draft },
-    });
+    await edit((y) => `# note\n${y}`);
     await pluginRefresh();
-    expect(screen.getByLabelText('workspace yaml').value).toBe(draft);
-    expect(screen.getByText('bob')).toBeInTheDocument();
+    await apply();
+    expect(
+      screen.getByText('Workspace changed since you started editing')
+    ).toBeInTheDocument();
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Apply anyway'));
+    });
+    expect(mockUpdateWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  test('Reload latest discards the draft and loads the server copy', async () => {
+    await renderEditor();
+    await edit((y) => `# note\n${y}`);
+    await pluginRefresh();
+    await apply();
+    await act(async () => {
+      fireEvent.click(screen.getByText('Reload latest'));
+    });
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+    expect(yamlBox().value).toContain('bob');
+    expect(yamlBox().value).not.toContain('# note');
+  });
+
+  test('a change made elsewhere (another tab) is caught at Apply', async () => {
+    await renderEditor();
+    await edit((y) => `${y}  gcp:\n    project_id: mine\n`);
+    addBob(); // not refreshed on this page
+    await apply();
+    expect(
+      screen.getByText('Workspace changed since you started editing')
+    ).toBeInTheDocument();
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
   });
 });
