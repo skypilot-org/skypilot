@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/router';
 import {
   getWorkspaces,
@@ -288,6 +288,11 @@ export const DetailedAllowedUsers = ({
   // Get all admin users
   const adminUsers = (allUsers || []).filter((user) => user.role === 'admin');
   const adminUsernames = adminUsers.map((user) => user.username);
+  // allowed_users entries may be usernames or user ids.
+  const adminIdentities = new Set([
+    ...adminUsernames,
+    ...adminUsers.map((user) => user.userId),
+  ]);
 
   // Combine allowed users and admin users, remove duplicates
   const allAllowedUsers = [
@@ -323,7 +328,7 @@ export const DetailedAllowedUsers = ({
       </h4>
       <div className="space-y-1 max-h-48 overflow-y-auto border border-gray-200 rounded">
         {allAllowedUsers.map((username) => {
-          const isAdmin = adminUsernames.includes(username);
+          const isAdmin = adminIdentities.has(username);
           return (
             <div
               key={username}
@@ -372,6 +377,8 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+  // Read inside fetchWorkspaceConfig without making it a dependency.
+  const hasChangesRef = useRef(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [yamlError, setYamlError] = useState(null);
@@ -393,8 +400,10 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   });
   const [statsLoading, setStatsLoading] = useState(false);
 
+  // `keepDraft`: refresh the server snapshot (roster, badges) but leave
+  // unsaved YAML edits in place. Used when a plugin changes the workspace.
   const fetchWorkspaceConfig = useCallback(
-    async (showLoading = true) => {
+    async (showLoading = true, { keepDraft = false } = {}) => {
       if (showLoading) {
         setLoading(true);
       }
@@ -414,11 +423,14 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
           read_only: readOnly,
           ...config
         } = allWorkspaces[workspaceName] || {};
-        setWorkspaceConfig(config);
         setOriginalConfig(config);
         setIsReadOnlyVisible(readOnly === true);
         setIsWritable(writableFlag !== false);
         setAllUsers(usersResponse || []);
+        if (keepDraft && hasChangesRef.current) {
+          return;
+        }
+        setWorkspaceConfig(config);
 
         // Format as YAML with workspace name as top-level key
         const fullConfig = { [workspaceName]: config };
@@ -533,6 +545,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     const currentConfigStr = JSON.stringify(workspaceConfig);
     const originalConfigStr = JSON.stringify(originalConfig);
     setHasChanges(currentConfigStr !== originalConfigStr);
+    hasChangesRef.current = currentConfigStr !== originalConfigStr;
   }, [workspaceConfig, originalConfig]);
 
   const handleYamlChange = (value) => {
@@ -862,7 +875,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                         workspaceConfig={originalConfig}
                         allUsers={allUsers}
                         writable={isWritable}
-                        onChanged={() => fetchWorkspaceConfig(false)}
+                        onChanged={() =>
+                          fetchWorkspaceConfig(false, { keepDraft: true })
+                        }
                       />
                     </div>
                   </Card>
