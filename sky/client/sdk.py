@@ -673,6 +673,7 @@ def validate(
     if response.status_code == 400:
         _raise_exception_object_on_client(
             exceptions.deserialize_exception(response.json().get('detail')))
+    server_common.handle_request_error(response)
 
 
 @usage_lib.entrypoint
