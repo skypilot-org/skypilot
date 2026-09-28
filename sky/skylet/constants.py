@@ -748,6 +748,16 @@ ENV_VAR_SERVER_AUTH_USER_HEADER = f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_USER_HEADER'
 # skypilot server.
 ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
 
+# Server-set flag (never from a client request) telling request workers whether
+# to contain task file-mount sources to the caller's staging roots. Set at
+# server startup and inherited by workers via os.environ. It uses the
+# SKYPILOT_SERVER_ prefix, so the client never forwards it and the server strips
+# every SKYPILOT_SERVER_-prefixed key from request env vars before overlaying
+# them -- a client cannot forge it. See
+# sky.server.common.should_enforce_mount_containment.
+ENV_VAR_ENFORCE_MOUNT_CONTAINMENT = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}ENFORCE_MOUNT_CONTAINMENT')
+
 # Optional: route the state DB through a transaction-mode connection pooler
 # (e.g. PgBouncer). When set, regular state-DB engines connect through the
 # pooler while session-scoped advisory locks keep a direct connection (see

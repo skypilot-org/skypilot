@@ -728,6 +728,16 @@ def override_request_env_and_config(
             # running in a Kubernetes pod.
             request_body.env_vars.pop(
                 kubernetes_adaptor.IN_CLUSTER_CONTEXT_NAME_ENV_VAR, None)
+            # SKYPILOT_SERVER_-prefixed vars are server-only (e.g. the
+            # file-mount containment flag). A client must not be able to overlay
+            # them via its request env vars, so strip them before the overlay.
+            # The client already omits them, but a crafted request could include
+            # them, so enforce it here too.
+            for env_var in [
+                    k for k in request_body.env_vars
+                    if k.startswith(constants.SKYPILOT_SERVER_ENV_VAR_PREFIX)
+            ]:
+                request_body.env_vars.pop(env_var, None)
             os.environ.update(request_body.env_vars)
             # Note: may be overridden by AuthProxyMiddleware.
             # TODO(zhwu): we need to make the entire request a context

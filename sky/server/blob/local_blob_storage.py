@@ -49,6 +49,12 @@ class LocalFilesystemBlobStorage(bs.BlobStorage):
         return (server_common.API_SERVER_CLIENT_DIR.expanduser().resolve() /
                 user_id / 'file_mounts' / 'blobs')
 
+    def user_roots(self, user_id: str) -> List[pathlib.Path]:
+        # Blobs live under clients/<user>/file_mounts/blobs, so the
+        # file_mounts dir already contains every path this backend resolves.
+        return [(server_common.API_SERVER_CLIENT_DIR.expanduser().resolve() /
+                 user_id / 'file_mounts')]
+
     async def blob_exists(self, user_id: str, blob_id: str) -> bool:
         target = self.get_target_dir(user_id, blob_id)
         if target.is_dir():
