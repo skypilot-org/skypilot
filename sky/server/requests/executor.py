@@ -728,6 +728,12 @@ def override_request_env_and_config(
             # running in a Kubernetes pod.
             request_body.env_vars.pop(
                 kubernetes_adaptor.IN_CLUSTER_CONTEXT_NAME_ENV_VAR, None)
+            # The file-mount containment flag is server-set at startup; a
+            # client must not be able to overlay it (and disable the check)
+            # via its request env vars. See
+            # server_common.should_enforce_mount_containment.
+            request_body.env_vars.pop(
+                constants.ENV_VAR_ENFORCE_MOUNT_CONTAINMENT, None)
             os.environ.update(request_body.env_vars)
             # Note: may be overridden by AuthProxyMiddleware.
             # TODO(zhwu): we need to make the entire request a context
