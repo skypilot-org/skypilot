@@ -1,12 +1,12 @@
 resources:
   cpus: 0.1+
   infra: kubernetes
-  image_id: docker:debian:12
+  image_id: docker:ubuntu:22.04
 
 num_nodes: 1
 
 volumes:
-  /mnt/data1: docker-build-vol0
+  /mnt/data0: {{mount_volume}}
 
 run: |
   set -ex
@@ -16,12 +16,13 @@ run: |
   RUN echo "test"
   CMD ["echo", "hello from DinD"]
   EOF
-  docker buildx ls
-  docker buildx build -t hello:test sky_workdir/dev
-  docker buildx du
+  docker build -t hello:test -f sky_workdir/dev/Dockerfile sky_workdir/dev
+  docker run --rm hello:test cat /etc/os-release
+  docker info
+  docker images
 
 config:
   kubernetes:
     enable_docker:
-      mode: BUILD
-      cache_volume: docker-build-vol1
+      mode: ALL
+      cache_volume: {{cache_volume}}

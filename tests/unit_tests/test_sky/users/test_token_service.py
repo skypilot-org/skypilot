@@ -2,10 +2,12 @@
 
 import datetime
 import secrets
+import threading
 import time
 from unittest import mock
 
 import pytest
+import sqlalchemy.exc
 
 from sky.users import token_service
 
@@ -18,7 +20,9 @@ class TestTokenService:
         with mock.patch('sky.users.token_service.global_user_state'
                        ) as mock_global_state:
             mock_global_state.get_system_config.return_value = None
-            mock_global_state.set_system_config = mock.Mock()
+            mock_global_state.get_or_set_system_config.side_effect = (
+                lambda _key, value: value)
+            mock_global_state.count_service_account_tokens.return_value = 0
 
             service = token_service.TokenService()
 
@@ -27,7 +31,9 @@ class TestTokenService:
             service._lazy_initialize()
             assert service.secret_key is not None
             assert len(service.secret_key) >= 32  # Ensure sufficient entropy
-            mock_global_state.set_system_config.assert_called_once()
+            mock_global_state.get_or_set_system_config.assert_called_once()
+            # Bootstrap must never take the overwriting path.
+            mock_global_state.set_system_config.assert_not_called()
 
     def test_token_service_existing_secret(self):
         """Test TokenService initialization with existing secret."""
@@ -394,3 +400,249 @@ class TestTokenService:
             assert captured_payload['u'] == 'sa123'  # service account user ID
             assert 'k' in captured_payload  # token ID
             assert captured_payload['y'] == 'sa'  # type
+
+
+class TestSecretBootstrap:
+    """The signing secret must survive a database failure.
+
+    A read that raised used to be indistinguishable from "no secret yet", so
+    the server minted a replacement and overwrote the live one, permanently
+    invalidating every token already issued.
+    """
+
+    @staticmethod
+    def _db_error() -> Exception:
+        # What pgbouncer pool starvation looks like from SQLAlchemy.
+        return sqlalchemy.exc.OperationalError(
+            'SELECT config_value FROM system_config', {},
+            Exception('server closed the connection unexpectedly'))
+
+    def test_read_error_never_generates(self):
+        """A failed read must not write anything, and must not be cached."""
+        with mock.patch('sky.users.token_service.global_user_state'
+                       ) as mock_global_state:
+            mock_global_state.get_system_config.side_effect = self._db_error()
+
+            service = token_service.TokenService()
+            with pytest.raises(token_service.JWTSecretUnavailableError):
+                service.ensure_secret_loaded()
+
+            mock_global_state.get_or_set_system_config.assert_not_called()
+            mock_global_state.set_system_config.assert_not_called()
+            # Nothing cached, so a later call retries instead of the process
+            # being stuck on a secret nobody else knows.
+            assert service.secret_key is None
+
+    def test_transient_read_error_recovers(self):
+        """One blip then success adopts the persisted secret, writing nothing."""
+        existing = secrets.token_urlsafe(32)
+        with mock.patch('sky.users.token_service.global_user_state'
+                       ) as mock_global_state:
+            mock_global_state.get_system_config.side_effect = [
+                self._db_error(), existing
+            ]
+
+            service = token_service.TokenService()
+            with mock.patch('sky.utils.db.retries.time.sleep'):
+                service.ensure_secret_loaded()
+
+            assert service.secret_key == existing
+            mock_global_state.get_or_set_system_config.assert_not_called()
+
+    def test_write_error_is_not_cached_in_memory(self):
+        """A failed write must raise, not leave an unpersisted secret behind.
+
+        Signing with a secret no other process (nor this one after a restart)
+        can read produces tokens that are permanently unverifiable.
+        """
+        with mock.patch('sky.users.token_service.global_user_state'
+                       ) as mock_global_state:
+            mock_global_state.get_system_config.return_value = None
+            mock_global_state.get_or_set_system_config.side_effect = (
+                self._db_error())
+
+            service = token_service.TokenService()
+            with pytest.raises(token_service.JWTSecretUnavailableError):
+                service.ensure_secret_loaded()
+            assert service.secret_key is None
+
+    def test_lost_race_adopts_the_stored_secret(self):
+        """Another replica won the insert; we must use its value, not ours."""
+        winner = secrets.token_urlsafe(32)
+        with mock.patch('sky.users.token_service.global_user_state'
+                       ) as mock_global_state:
+            mock_global_state.get_system_config.return_value = None
+            mock_global_state.get_or_set_system_config.return_value = winner
+
+            service = token_service.TokenService()
+            service.ensure_secret_loaded()
+
+            assert service.secret_key == winner
+            # The candidate we generated is discarded, not written anywhere.
+            mock_global_state.set_system_config.assert_not_called()
+
+    @staticmethod
+    def _bootstrap_with_existing_tokens(existing_token_count):
+        """Bootstrap a secret against a DB holding that many token rows."""
+        with mock.patch('sky.users.token_service.global_user_state'
+                       ) as mock_global_state:
+            mock_global_state.get_system_config.return_value = None
+            mock_global_state.get_or_set_system_config.side_effect = (
+                lambda _key, value: value)
+            mock_global_state.count_service_account_tokens.return_value = (
+                existing_token_count)
+            with mock.patch.object(token_service, 'logger') as mock_logger:
+                token_service.TokenService().ensure_secret_loaded()
+            return mock_logger
+
+    def test_generating_over_existing_tokens_logs_error(self):
+        """The alertable case: a new secret orphans tokens that already exist."""
+        mock_logger = self._bootstrap_with_existing_tokens(1)
+        mock_logger.error.assert_called_once()
+        assert ('NEW JWT signing secret while 1 service'
+                in mock_logger.error.call_args[0][0])
+
+    def test_first_time_bootstrap_does_not_log_error(self):
+        """A brand-new deployment generating the secret is routine."""
+        mock_logger = self._bootstrap_with_existing_tokens(0)
+        mock_logger.error.assert_not_called()
+
+    def test_waiting_on_a_stuck_load_gives_up(self):
+        """A load stuck on a degraded DB must release its waiters.
+
+        Waiters park on `init_lock` while holding an auth executor thread, so
+        an unbounded wait convoys authentication for every other request.
+
+        Driven from a worker thread and joined with a deadline: an unbounded
+        wait would otherwise hang the suite instead of failing it, and a hang
+        is not a usable failure signal.
+        """
+        service = token_service.TokenService()
+        outcome = {}
+
+        def waiter():
+            try:
+                service.ensure_secret_loaded()
+                outcome['returned'] = True
+            except BaseException as e:  # pylint: disable=broad-except
+                outcome['raised'] = e
+
+        service.init_lock.acquire()
+        try:
+            with mock.patch.object(token_service,
+                                   '_SECRET_LOAD_LOCK_TIMEOUT_SECONDS', 0.05):
+                thread = threading.Thread(target=waiter, daemon=True)
+                thread.start()
+                thread.join(timeout=5)
+
+            assert not thread.is_alive(), (
+                'A waiter blocked on init_lock for 5s while the lock was held. '
+                'Acquire it with a timeout so a stuck load cannot park auth '
+                'executor threads for its whole duration.')
+            assert isinstance(outcome.get('raised'),
+                              token_service.JWTSecretUnavailableError)
+        finally:
+            service.init_lock.release()
+
+    def test_waiter_uses_a_secret_that_landed_during_its_wait(self):
+        """Timing out on the lock must not fail a caller that can be served.
+
+        The holder can finish in the last instant of the wait; answering 503
+        then rejects a request the server is able to serve. A stub lock pins
+        that interleaving instead of racing two threads for it.
+        """
+        service = token_service.TokenService()
+
+        class _TimesOutAfterTheHolderFinished:
+            """acquire() fails, but the secret landed while we waited."""
+
+            def acquire(self, timeout=None):  # pylint: disable=unused-argument
+                service.secret_key = 'loaded-by-the-holder'
+                return False
+
+            def release(self):
+                raise AssertionError('released a lock that was never acquired')
+
+        service.init_lock = _TimesOutAfterTheHolderFinished()
+        service.ensure_secret_loaded()
+
+        assert service.secret_key == 'loaded-by-the-holder'
+
+    def test_a_refused_secret_is_never_announced_as_healthy(self):
+        """Validation must precede the log line, not follow it.
+
+        Announcing an adopted secret and then refusing it leaves an operator
+        debugging exactly this corruption reading a success line first.
+        """
+        with mock.patch('sky.users.token_service.global_user_state'
+                       ) as mock_global_state:
+            mock_global_state.get_system_config.return_value = None
+            mock_global_state.get_or_set_system_config.return_value = ''
+
+            service = token_service.TokenService()
+            with mock.patch.object(token_service, 'logger') as mock_logger:
+                with pytest.raises(token_service.JWTSecretUnavailableError):
+                    service.ensure_secret_loaded()
+
+            assert not any(
+                'Adopted' in str(c) for c in mock_logger.info.mock_calls)
+
+    def test_empty_secret_adopted_from_a_race_is_rejected_too(self):
+        """The guard must cover the adopt exit, not only the read exit.
+
+        The read says "no row", then the insert loses to a writer that stored
+        an empty value, so the read-back hands one back. Caching it would sign
+        and verify with a key PyJWT rejects on every request.
+        """
+        with mock.patch('sky.users.token_service.global_user_state'
+                       ) as mock_global_state:
+            mock_global_state.get_system_config.return_value = None
+            mock_global_state.get_or_set_system_config.return_value = ''
+
+            service = token_service.TokenService()
+            with pytest.raises(token_service.JWTSecretUnavailableError):
+                service.ensure_secret_loaded()
+            assert service.secret_key is None
+
+    def test_empty_stored_secret_is_corruption_not_absence(self):
+        """An empty row must not be treated as "no secret yet".
+
+        Generating would clobber whatever belongs there, and adopting it hands
+        PyJWT a key it rejects on every request, surfacing as a bogus 401.
+        """
+        with mock.patch('sky.users.token_service.global_user_state'
+                       ) as mock_global_state:
+            mock_global_state.get_system_config.return_value = ''
+
+            service = token_service.TokenService()
+            with pytest.raises(token_service.JWTSecretUnavailableError):
+                service.ensure_secret_loaded()
+
+            mock_global_state.get_or_set_system_config.assert_not_called()
+            assert service.secret_key is None
+
+    def test_secret_loaded_predicate_tracks_the_cache(self):
+        """The request path gates its executor dispatch on this."""
+        existing = secrets.token_urlsafe(32)
+        with mock.patch('sky.users.token_service.global_user_state'
+                       ) as mock_global_state:
+            mock_global_state.get_system_config.return_value = existing
+
+            service = token_service.TokenService()
+            assert not service.secret_loaded()
+            service.ensure_secret_loaded()
+            assert service.secret_loaded()
+
+    def test_loaded_secret_needs_no_further_db_calls(self):
+        """The steady state stays off the database."""
+        existing = secrets.token_urlsafe(32)
+        with mock.patch('sky.users.token_service.global_user_state'
+                       ) as mock_global_state:
+            mock_global_state.get_system_config.return_value = existing
+
+            service = token_service.TokenService()
+            service.ensure_secret_loaded()
+            mock_global_state.get_system_config.reset_mock()
+            service.ensure_secret_loaded()
+
+            mock_global_state.get_system_config.assert_not_called()

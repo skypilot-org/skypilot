@@ -5,7 +5,7 @@ import enum
 import logging
 import threading
 import typing
-from typing import Callable, Iterator, Optional, Tuple, Union
+from typing import Any, Callable, Iterator, Optional, Tuple, Union
 
 from sky import exceptions
 from sky.adaptors import common as adaptors_common
@@ -67,7 +67,13 @@ class Control(enum.Enum):
         return f'<{self.value}>{msg}</{self.value}>'
 
     @classmethod
-    def decode(cls, encoded_msg: str) -> Tuple[Optional['Control'], str]:
+    def decode(cls, encoded_msg: Any) -> Tuple[Optional['Control'], Any]:
+        # A payload can carry any JSON value -- `instance_setup` sends a dict
+        # -- and a task's own output can be payload-shaped, so this is not
+        # only reached with our own strings. Containers happen to survive the
+        # `in` below; scalars raise TypeError, which no caller catches.
+        if not isinstance(encoded_msg, str):
+            return None, encoded_msg
         # Find the control code
         control_str = None
         for control in cls:

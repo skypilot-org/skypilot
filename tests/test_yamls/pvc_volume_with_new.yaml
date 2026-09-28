@@ -1,14 +1,15 @@
 name: min
 resources:
   cpus: 0.1+
+# See pvc_volume.yaml: the names come from the VOL_PREFIX task env.
 volumes:
-  /mnt/data0: pvc0
-  /mnt/data1: existing0
+  /mnt/data0: ${VOL_PREFIX}-pvc0
+  /mnt/data1: ${VOL_PREFIX}-existing0
   /mnt/data2:
     size: 1Gi
     labels:
       key: value
-  /mnt/data3: pvc1
+  /mnt/data3: ${VOL_PREFIX}-pvc1
   /mnt/data4:
     size: 1Gi
 envs:

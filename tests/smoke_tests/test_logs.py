@@ -72,7 +72,7 @@ def test_log_collection_to_gcp(generic_cloud: str):
                  f'{validate_logs_cmd}'),
             ],
             f'sky down -y {name}',
-            timeout=20 * 60,
+            timeout=smoke_tests_utils.LOG_STORE_CMD_TIMEOUT,
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -122,7 +122,7 @@ def test_managed_job_logs_with_log_store(generic_cloud: str):
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=job_name,
                     job_status=[sky.ManagedJobStatus.RUNNING],
-                    timeout=360),
+                    timeout=smoke_tests_utils.LOG_STORE_JOB_START_TIMEOUT),
                 'sleep 10',
                 f's=$(sky jobs logs -n {job_name} --no-follow); echo "$s"; '
                 f'echo "$s" | grep "{marker}_1"',
@@ -138,6 +138,6 @@ def test_managed_job_logs_with_log_store(generic_cloud: str):
             ],
             f'sky jobs cancel -y -n {job_name}',
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
-            timeout=20 * 60,
+            timeout=smoke_tests_utils.LOG_STORE_CMD_TIMEOUT,
         )
         smoke_tests_utils.run_one_test(test)

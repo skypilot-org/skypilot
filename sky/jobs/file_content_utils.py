@@ -12,6 +12,7 @@ from typing import Optional
 from sky import sky_logging
 from sky import skypilot_config
 from sky.jobs import state as managed_job_state
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -110,9 +111,13 @@ def restore_job_config_file(job_id: int) -> None:
         # Config content is in database - restore it
         # Ensure the directory exists
         os.makedirs(os.path.dirname(config_path_expanded), exist_ok=True)
-        # Write the config file
-        with open(config_path_expanded, 'w', encoding='utf-8') as f:
-            f.write(config_content)
+        # Jobs submitted in one batch (`--num-jobs`) share a single config
+        # path, and every job's controller restores it concurrently. The
+        # write must be atomic: an O_TRUNC rewrite lets a concurrent reader
+        # load a zero-byte file as an empty config.
+        common_utils.atomic_write_text(config_path_expanded,
+                                       config_content,
+                                       mode=0o600)
         logger.info(f'Restored config file for job {job_id} to '
                     f'{config_path_expanded} ({len(config_content)} bytes)')
     elif os.path.exists(config_path_expanded):
