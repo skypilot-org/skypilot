@@ -157,6 +157,18 @@ def test_reject_source_under_shared_tmp(local_server, tmp_path):
         _run({'run': 'x', 'file_mounts': {'/dst': str(shared)}}, enforce=True)
 
 
+def test_containment_not_bypassable_via_user_hash_traversal(local_server):
+    # The containment roots are built from the caller's id; a traversal id like
+    # '../..' would resolve a root to '/', letting /etc/passwd pass. The id is
+    # validated (is_single_path_component) before roots are computed, so a
+    # traversal id is rejected outright. This PR depends on that guard.
+    common.set_mount_containment_enforced(True)
+    env = {constants.USER_ID_ENV_VAR: '../../../../../..'}
+    task = yaml.dump({'run': 'x', 'file_mounts': {'/dst': '/etc/passwd'}})
+    with pytest.raises(ValueError):
+        common.process_mounts_in_task_on_api_server(task, env, False, None)
+
+
 def test_allow_mapped_source_under_clients(local_server):
     # Legit remote upload: mapping resolves under clients/<user>/file_mounts.
     _run(
