@@ -23,6 +23,7 @@ from sky.provision import gcp
 from sky.provision import hyperbolic
 from sky.provision import kubernetes
 from sky.provision import lambda_cloud
+from sky.provision import lium
 from sky.provision import mithril
 from sky.provision import nebius
 from sky.provision import oci
