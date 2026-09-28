@@ -776,7 +776,9 @@ def launch(
     Args:
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch.
         cluster_name: name of the cluster to create/reuse.  If None,
-            auto-generate a name.
+            auto-generate a name. New clusters receive a distinct cloud name
+            if normalization or truncation conflicts with another live cluster
+            in this SkyPilot state database. Existing cloud names are preserved.
         retry_until_up: whether to retry launching the cluster until it is
             up.
         idle_minutes_to_autostop: automatically stop the cluster after this
@@ -812,6 +814,8 @@ def launch(
         exceptions.ClusterOwnerIdentityMismatchError: if the cluster is
             owned by another user.
         exceptions.InvalidClusterNameError: if the cluster name is invalid.
+        exceptions.ClusterNameCollisionError: if an existing cloud name is
+            ambiguous or no unused name can be allocated for a new cluster.
         exceptions.ResourcesMismatchError: if the requested resources
             do not match the existing cluster.
         exceptions.NotSupportedError: if required features are not supported
