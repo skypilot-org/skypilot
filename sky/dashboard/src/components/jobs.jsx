@@ -536,7 +536,7 @@ export function ManagedJobs() {
   const filterPropertyList = filterSchema.map(({ key, label, multi }) => ({
     label,
     value: key,
-    multi: !!multi,
+    multi: multi ?? false,
   }));
   const filterInput = (
     <FilterDropdown

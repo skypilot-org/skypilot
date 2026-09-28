@@ -133,7 +133,7 @@ const CLUSTER_VIEW_SCHEMA = [
 const PROPERTY_OPTIONS = CLUSTER_FILTER_SCHEMA.map(({ key, label, multi }) => ({
   label,
   value: key,
-  multi: !!multi,
+  multi: multi ?? false,
 }));
 
 // Properties whose values are alternatives rather than extra conditions. Only
@@ -552,6 +552,7 @@ export function Clusters() {
             context={{
               filters,
               setFilters,
+              addFilter,
               propertyList: PROPERTY_OPTIONS,
               valueList: optionValues,
               placeholder: 'Filter clusters',

@@ -87,7 +87,7 @@ const VOLUME_FILTER_SCHEMA = [
 const PROPERTY_OPTIONS = VOLUME_FILTER_SCHEMA.map(({ key, label, multi }) => ({
   label,
   value: key,
-  multi: !!multi,
+  multi: multi ?? false,
 }));
 
 // Properties whose values are alternatives rather than extra conditions: two
@@ -955,15 +955,14 @@ export function VolumesTable({
           />
         </div>
       </div>
-      {filters.length > 0 && (
-        <div className="mb-2">
-          <PluginSlot
-            name="volumes.filters.active"
-            context={{ filters, setFilters, defaultContent: filterChips }}
-            fallback={filterChips}
-          />
-        </div>
-      )}
+      <PluginSlot
+        name="volumes.filters.active"
+        context={{ filters, setFilters, defaultContent: filterChips }}
+        wrapperClassName="mb-2"
+        fallback={
+          filters.length > 0 ? <div className="mb-2">{filterChips}</div> : null
+        }
+      />
 
       <Card>
         <div className="overflow-x-auto rounded-lg">

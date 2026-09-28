@@ -136,7 +136,7 @@ const USER_VIEW_SCHEMA = [{ key: 'deduplicate', default: 'true' }];
 const PROPERTY_OPTIONS = USER_FILTER_SCHEMA.map(({ key, label, multi }) => ({
   label,
   value: key,
-  multi: !!multi,
+  multi: multi ?? false,
 }));
 
 const MULTI_VALUE_LABELS = new Set(
