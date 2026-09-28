@@ -1198,6 +1198,20 @@ def set_mount_containment_enforced(enforced: bool) -> None:
                                                                else '0')
 
 
+def init_mount_containment_enforced(deploy: bool, host: str) -> None:
+    """Set the enforce flag at startup unless it was set explicitly.
+
+    An operator can export ``ENV_VAR_ENFORCE_MOUNT_CONTAINMENT`` before starting
+    the server to force the decision (e.g. ``0`` to opt out on a deployed server
+    whose clients are all on the same trusted host); that explicit value wins.
+    Otherwise it is computed from the server's mode (see
+    ``mount_containment_enforced``).
+    """
+    if constants.ENV_VAR_ENFORCE_MOUNT_CONTAINMENT in os.environ:
+        return
+    set_mount_containment_enforced(mount_containment_enforced(deploy, host))
+
+
 def should_enforce_mount_containment() -> bool:
     """Whether the current worker must contain file-mount sources.
 

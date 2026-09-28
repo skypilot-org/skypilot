@@ -289,3 +289,24 @@ def test_flag_stripped_from_client_env_vars(monkeypatch):
     with executor.override_request_env_and_config(request_body, 'req-1',
                                                   'sky.launch'):
         assert common.should_enforce_mount_containment() is True
+
+
+def test_init_respects_explicit_flag(monkeypatch):
+    # An operator's explicit value wins over the computed default, so a deployed
+    # server can be told to skip enforcement (or forced to enforce).
+    monkeypatch.setenv(FLAG, '0')
+    common.init_mount_containment_enforced(deploy=True, host='0.0.0.0')
+    assert common.should_enforce_mount_containment() is False
+    monkeypatch.setenv(FLAG, '1')
+    common.init_mount_containment_enforced(deploy=False, host='127.0.0.1')
+    assert common.should_enforce_mount_containment() is True
+
+
+def test_init_computes_default_when_unset(monkeypatch):
+    # Unset -> compute from server mode: deployed enforces, loopback exempt.
+    monkeypatch.delenv(FLAG, raising=False)
+    common.init_mount_containment_enforced(deploy=True, host='127.0.0.1')
+    assert common.should_enforce_mount_containment() is True
+    monkeypatch.delenv(FLAG, raising=False)
+    common.init_mount_containment_enforced(deploy=False, host='127.0.0.1')
+    assert common.should_enforce_mount_containment() is False
