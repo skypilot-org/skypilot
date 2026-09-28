@@ -5,6 +5,7 @@ import pytest
 
 from sky import exceptions
 from sky import Task
+from sky.data.storage import AzureBlobStore
 from sky.data.storage import S3Store
 from sky.utils import controller_utils
 
@@ -13,6 +14,7 @@ from sky.utils import controller_utils
     ('a' * 24, 'bfc5e485'),
     ('a' * 25, 'bfc5e485'),
     ('a' * 26, 'bfc5e485'),
+    ('a' * 24 + '-b', 'bfc5e485'),
     ('a' * 63, 'bfc5e485'),
     ('a' * 63, 'b' * 36),
 ])
@@ -24,6 +26,7 @@ def test_generated_bucket_fits_s3(username, user_hash, tmp_path):
         for storage in task.storage_mounts.values():
             seen.append(storage.name)
             S3Store.validate_name(storage.name)
+            AzureBlobStore.validate_name(storage.name)
         raise RuntimeError('stop before cloud upload')
 
     with mock.patch.object(controller_utils.common_utils,
@@ -41,8 +44,9 @@ def test_generated_bucket_fits_s3(username, user_hash, tmp_path):
     if len(user_hash) > 16:
         user_hash = hashlib.sha256(user_hash.encode()).hexdigest()[:16]
     username_limit = 63 - len(f'skypilot-filemounts--{user_hash}-56j9fnwc')
+    bounded_username = username[:username_limit].rstrip('-')
     assert seen == [
-        f'skypilot-filemounts-{username[:username_limit]}-'
+        f'skypilot-filemounts-{bounded_username}-'
         f'{user_hash}-56j9fnwc'
     ]
 

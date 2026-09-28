@@ -1083,10 +1083,11 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         bucket_template = constants.FILE_MOUNTS_BUCKET_NAME
         username_limit = 63 - len(
             bucket_template.format(username='', user_hash=user_hash, id=run_id))
-        bucket_name = bucket_template.format(
-            username=common_utils.get_cleaned_username()[:username_limit],
-            user_hash=user_hash,
-            id=run_id)
+        staging_username = common_utils.get_cleaned_username()
+        staging_username = staging_username[:username_limit].rstrip('-')
+        bucket_name = bucket_template.format(username=staging_username,
+                                             user_hash=user_hash,
+                                             id=run_id)
     else:
         (store_type, bucket_name, sub_path, storage_account_name, region) = (
             storage_lib.StoreType.get_fields_from_store_url(bucket_wth_prefix))
