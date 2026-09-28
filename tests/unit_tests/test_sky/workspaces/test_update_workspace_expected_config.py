@@ -18,10 +18,13 @@ _STORED = {
     },
 }
 
+_NEW = {'private': True, 'allowed_users': ['alice'], 'gcp': {'project_id': 'q'}}
+
 
 @pytest.fixture(name='stored')
 def stored_fixture(monkeypatch):
-    """The workspaces as held under the config lock; updates write into it."""
+    """The stored workspaces; reads see them and the locked update writes them.
+    """
     workspaces = copy.deepcopy(_STORED)
     monkeypatch.setattr(core, '_validate_workspace_config',
                         lambda *a, **k: None)
@@ -29,6 +32,11 @@ def stored_fixture(monkeypatch):
                         lambda *a, **k: None)
     monkeypatch.setattr(core.workspaces_utils, 'get_workspace_users',
                         lambda config: [])
+    monkeypatch.setattr(core.skypilot_config, 'safe_reload_config',
+                        lambda: None)
+    monkeypatch.setattr(core.skypilot_config,
+                        'get_nested',
+                        lambda keys, default_value=None: workspaces)
 
     def run_under_lock(modifier):
         modifier(workspaces)
@@ -38,9 +46,6 @@ def stored_fixture(monkeypatch):
     with mock.patch.object(core.permission.permission_service,
                            'update_workspace_policy'):
         yield workspaces
-
-
-_NEW = {'private': True, 'allowed_users': ['alice'], 'gcp': {'project_id': 'q'}}
 
 
 def test_without_expected_config_the_update_is_unconditional(stored):
@@ -74,6 +79,46 @@ def test_outdated_expected_config_raises_and_writes_nothing(stored):
     assert stored['dev'] == _STORED['dev']
 
 
-def test_expected_empty_config_matches_a_workspace_without_one(stored):
-    core.update_workspace('fresh', {'private': False}, expected_config={})
-    assert stored['fresh'] == {'private': False}
+def test_expected_empty_config_matches_an_empty_workspace(stored):
+    stored['empty'] = {}
+    core.update_workspace('empty', {'private': False}, expected_config={})
+    assert stored['empty'] == {'private': False}
+
+
+def test_a_deleted_workspace_conflicts_even_if_it_was_empty(stored):
+    # The editor loaded an empty workspace, which was deleted meanwhile.
+    with pytest.raises(exceptions.WorkspaceConfigConflictError):
+        core.update_workspace('gone', {'private': False}, expected_config={})
+    assert 'gone' not in stored
+
+
+def test_conflict_is_reported_before_resource_validation(stored, monkeypatch):
+    # Against the newer config the draft looks like a change validation would
+    # reject; the outdated snapshot must be what gets reported.
+    del stored
+
+    def reject(*args, **kwargs):
+        del args, kwargs
+        raise ValueError('active resources')
+
+    monkeypatch.setattr(core, '_validate_workspace_config_changes_with_lock',
+                        reject)
+    outdated = {'private': True, 'allowed_users': ['alice']}
+    with pytest.raises(exceptions.WorkspaceConfigConflictError):
+        core.update_workspace('dev', _NEW, expected_config=outdated)
+
+
+def test_a_stale_process_config_is_refreshed_before_the_early_check(
+        stored, monkeypatch):
+    # This process still holds the config from before someone else's write;
+    # the draft is based on the newer one, so it must not conflict.
+    newer = copy.deepcopy(stored['dev'])
+    stale = {'dev': dict(newer, allowed_users=['alice'])}
+    view = {'workspaces': stale}
+    monkeypatch.setattr(core.skypilot_config,
+                        'get_nested',
+                        lambda keys, default_value=None: view['workspaces'])
+    monkeypatch.setattr(core.skypilot_config, 'safe_reload_config',
+                        lambda: view.update(workspaces=stored))
+    core.update_workspace('dev', _NEW, expected_config=newer)
+    assert stored['dev'] == _NEW

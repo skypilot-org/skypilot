@@ -497,6 +497,23 @@ def _validate_workspace_config_changes(
 
 
 @usage_lib.entrypoint
+def _check_expected_workspace_config(
+        workspaces: Dict[str, Any], workspace_name: str,
+        expected_config: Optional[Dict[str, Any]]) -> None:
+    """Raises WorkspaceConfigConflictError if the workspace moved on.
+
+    A no-op when ``expected_config`` is None. A workspace that no longer
+    exists is a conflict too, even if the expected config was empty.
+    """
+    if expected_config is None:
+        return
+    if (workspace_name not in workspaces or
+        (workspaces[workspace_name] or {}) != expected_config):
+        raise exceptions.WorkspaceConfigConflictError(
+            f'Workspace {workspace_name!r} was changed since this update '
+            'was prepared. Reload it and apply your changes again.')
+
+
 def update_workspace(
         workspace_name: str,
         config: Dict[str, Any],
@@ -533,21 +550,28 @@ def update_workspace(
     """
     _validate_workspace_config(workspace_name, config)
 
+    if expected_config is not None:
+        # This process's config may predate a write handled elsewhere (another
+        # worker or replica); refresh it so the early conflict check below
+        # doesn't report a conflict against a stale copy.
+        skypilot_config.safe_reload_config()
     # Get the current workspace configuration for comparison
     current_workspaces = skypilot_config.get_nested(('workspaces',),
                                                     default_value={})
     current_config = current_workspaces.get(workspace_name, {})
 
+    # Before the active-resource validation, so an outdated draft is reported
+    # as a conflict rather than as a validation error about changes it only
+    # appears to make. Checked again under the config lock below.
+    _check_expected_workspace_config(current_workspaces, workspace_name,
+                                     expected_config)
     _validate_workspace_config_changes_with_lock(workspace_name, current_config,
                                                  config)
 
     def update_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to update workspace inside the lock."""
-        if (expected_config is not None and
-            (workspaces.get(workspace_name) or {}) != expected_config):
-            raise exceptions.WorkspaceConfigConflictError(
-                f'Workspace {workspace_name!r} was changed since this update '
-                'was prepared. Reload it and apply your changes again.')
+        _check_expected_workspace_config(workspaces, workspace_name,
+                                         expected_config)
         workspaces[workspace_name] = config
         users = workspaces_utils.get_workspace_users(config)
         permission_service = permission.permission_service
