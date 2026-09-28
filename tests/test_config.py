@@ -2312,6 +2312,8 @@ def test_admin_policy_is_not_client_overridable(monkeypatch, tmp_path):
         {'admin_policy': 'attacker_pkg.NoOpPolicy'}):
         assert skypilot_config.get_nested(('admin_policy',),
                                           None) == 'server_pkg.ServerPolicy'
+
+
 def test_get_effective_queue_name_slurm(monkeypatch, tmp_path) -> None:
     """Slurm `quota.queue`: workspace > global; partition > cluster > cloud."""
     with open(tmp_path / 'slurm_quota.yaml', 'w', encoding='utf-8') as f:
