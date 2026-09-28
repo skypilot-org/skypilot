@@ -1416,6 +1416,14 @@ presents a certificate trusted by the SkyServe controller.
 This setting only affects readiness probes. It does not enable HTTPS for
 requests proxied from the SkyServe load balancer to replicas.
 
+.. note::
+
+  Explicitly setting ``scheme`` requires a SkyServe controller running a
+  version that supports this field. If a service created by an older client
+  already has a controller, tear down and recreate that controller with the
+  upgraded SkyPilot version before setting ``scheme``. The default behavior
+  omits this field and remains compatible with older controllers.
+
 .. code-block:: yaml
 
   service:

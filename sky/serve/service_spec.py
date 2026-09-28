@@ -466,6 +466,8 @@ class SkyServiceSpec:
             return config
 
         add_if_not_none('readiness_probe', 'path', self.readiness_path)
+        # An explicit override requires a controller that supports this field.
+        # Keep the default omitted so new clients can update older controllers.
         if self.readiness_scheme != constants.DEFAULT_READINESS_PROBE_SCHEME:
             add_if_not_none('readiness_probe', 'scheme', self.readiness_scheme)
         add_if_not_none('readiness_probe', 'initial_delay_seconds',
