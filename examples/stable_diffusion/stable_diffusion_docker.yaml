@@ -1,5 +1,5 @@
 # Runs the InvokeAI Stable Diffusion web UI (https://github.com/invoke-ai/InvokeAI)
-# on a single GPU using the official ghcr.io/invoke-ai/invokeai image.
+# on a single GPU using the official ghcr.io/invoke-ai/invokeai:v6.14.2-cuda image.
 #
 # Usage:
 #   sky launch -c stable-diffusion examples/stable_diffusion/stable_diffusion_docker.yaml
@@ -14,7 +14,7 @@ resources:
 
 setup: |
   set -e
-  docker pull ghcr.io/invoke-ai/invokeai
+  docker pull ghcr.io/invoke-ai/invokeai:v6.14.2-cuda
 
 run: |
   set -e
@@ -26,5 +26,5 @@ run: |
     -p 9090:9090 \
     -v ~/invokeai:/invokeai \
     -e HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-} \
-    ghcr.io/invoke-ai/invokeai
+    ghcr.io/invoke-ai/invokeai:v6.14.2-cuda
   docker logs -f invokeai

@@ -1,6 +1,6 @@
 # Stable Diffusion Web UI on SkyPilot
 
-Run the [InvokeAI](https://github.com/invoke-ai/InvokeAI) Stable Diffusion web UI on a cloud GPU with SkyPilot, using the official `ghcr.io/invoke-ai/invokeai` image.
+Run the [InvokeAI](https://github.com/invoke-ai/InvokeAI) Stable Diffusion web UI on a cloud GPU with SkyPilot, using the official `ghcr.io/invoke-ai/invokeai:v6.14.2-cuda` image (pinned; newer tags are listed in the [InvokeAI releases](https://github.com/invoke-ai/InvokeAI/releases)).
 
 ## Steps
 

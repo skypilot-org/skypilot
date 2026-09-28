@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   invokeai:
-    image: ghcr.io/invoke-ai/invokeai
+    image: ghcr.io/invoke-ai/invokeai:v6.14.2-cuda
     container_name: invokeai
     restart: on-failure
     ports:
