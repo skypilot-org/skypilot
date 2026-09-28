@@ -4390,9 +4390,9 @@ if __name__ == '__main__':
     # Decide whether to contain client file-mount sources and record it in the
     # process env before any worker is spawned, so workers inherit it. A
     # deployed / network-reachable server enforces; a loopback `sky api start`
-    # is exempt (its legitimate sources are arbitrary local paths).
-    common.set_mount_containment_enforced(
-        common.mount_containment_enforced(cmd_args.deploy, cmd_args.host))
+    # is exempt (its legitimate sources are arbitrary local paths). An operator
+    # may override this by exporting the env var explicitly before startup.
+    common.init_mount_containment_enforced(cmd_args.deploy, cmd_args.host)
 
     # Always load plugin in main process, an edge case is that the main process
     # will also run uvicorn server when num_worker=1 and then the plugins will
