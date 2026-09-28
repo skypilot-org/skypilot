@@ -60,3 +60,18 @@ def test_storage_error_is_not_masked(tmp_path):
         with pytest.raises(exceptions.StorageNameError, match='bad name'):
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
                 task, 'serve')
+
+
+@pytest.mark.parametrize('error', [
+    ValueError('No enabled cloud for storage'),
+    exceptions.NoCloudAccessError('missing cloud'),
+])
+def test_missing_cloud_error_keeps_guidance(error, tmp_path):
+    task = Task(workdir=str(tmp_path))
+    with mock.patch.object(controller_utils.skypilot_config, 'get_nested',
+                           return_value=None), \
+         mock.patch.object(task, 'sync_storage_mounts', side_effect=error):
+        with pytest.raises(exceptions.NotSupportedError,
+                           match='no cloud with object store support'):
+            controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+                task, 'serve')
