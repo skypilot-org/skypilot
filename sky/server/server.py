@@ -793,9 +793,12 @@ async def cleanup_upload_ids():
                     (client_file_mounts_dir /
                      upload_id).with_suffix('.zip').unlink(missing_ok=True)
                 except Exception as e:  # pylint: disable=broad-except
+                    # Keep the entry so a later sweep retries; a transient
+                    # error (e.g. a temporary permission failure) would
+                    # otherwise strand the chunks on disk.
                     logger.warning(f'Failed to clean up upload id '
-                                   f'{upload_id}: {e}')
-                finally:
+                                   f'{upload_id}, will retry: {e}')
+                else:
                     upload_ids_to_cleanup.pop((upload_id, user_hash))
 
 

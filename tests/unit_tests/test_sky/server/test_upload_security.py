@@ -212,9 +212,11 @@ async def test_cleanup_survives_bad_entry(clients, monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await server.cleanup_upload_ids()
 
-    # The bad entry did not stop the valid one, and both were dequeued.
-    assert not server.upload_ids_to_cleanup
+    # The bad entry did not stop the valid one: the valid entry is cleaned and
+    # dequeued, while the failing entry is kept for a later retry (not dropped).
     assert any(VALID_V1_ID in d for d in deleted)
+    assert (VALID_V1_ID, 'alice') not in server.upload_ids_to_cleanup
+    assert ('/', 'alice') in server.upload_ids_to_cleanup
 
 
 # --- /launch env user id (9th site) -----------------------------------------
@@ -256,3 +258,81 @@ def test_process_mounts_valid_env_id_works(clients):
                                                        workdir_only=False)
     assert (clients / 'alice' / 'file_mounts').is_dir()
     assert not _outside(clients)
+
+
+# --- auth id wins over user_hash at the handlers (not just in owner_user_id) --
+
+
+def _stream_request(body: bytes, auth=None):
+    """A minimal streaming POST Request the upload handlers can read."""
+    sent = False
+
+    async def receive():
+        nonlocal sent
+        if not sent:
+            sent = True
+            return {'type': 'http.request', 'body': body, 'more_body': False}
+        return {'type': 'http.disconnect'}
+
+    request = fastapi.Request(
+        {
+            'type': 'http',
+            'method': 'POST',
+            'path': '/upload',
+            'headers': [],
+            'query_string': b''
+        }, receive)
+    request.state.auth_user = auth
+    return request
+
+
+@pytest.mark.asyncio
+async def test_check_blob_exists_uses_auth_id_not_user_hash(clients):
+    """A blob in bob's tree must not be found when authenticated as alice and
+    querying user_hash=bob: the handler must look in alice's namespace."""
+    (clients / 'bob' / 'file_mounts' / 'blobs' /
+     VALID_V2_ID).mkdir(parents=True)
+    auth = models.User(id='alice', name='Alice')
+    res = await server.check_blob_exists(_request(auth),
+                                         user_hash='bob',
+                                         blob_id=VALID_V2_ID,
+                                         size_bytes=None)
+    assert res == {'exists': False}
+    # Sanity: anonymously querying bob does find it, so the fixture is right.
+    res2 = await server.check_blob_exists(_request(),
+                                          user_hash='bob',
+                                          blob_id=VALID_V2_ID,
+                                          size_bytes=None)
+    assert res2 == {'exists': True}
+
+
+@pytest.mark.asyncio
+async def test_upload_v2_auth_id_writes_under_auth_id(clients):
+    """Authenticated as alice with user_hash=bob, the v2 blob must land under
+    alice, never bob."""
+    auth = models.User(id='alice', name='Alice')
+    req = _stream_request(_zip_bytes(), auth)
+    await server.upload_blob(req,
+                             user_hash='bob',
+                             upload_id=VALID_V2_ID,
+                             chunk_index=0,
+                             total_chunks=1)
+    assert (clients / 'alice' / 'file_mounts' / 'blobs' / VALID_V2_ID).is_dir()
+    assert not (clients / 'bob').exists()
+
+
+@pytest.mark.asyncio
+async def test_upload_v1_auth_id_writes_under_auth_id(clients):
+    """Same for v1 /upload: bytes under alice, bob's dir untouched."""
+    auth = models.User(id='alice', name='Alice')
+    req = _stream_request(_zip_bytes(), auth)
+    await server.upload_zip_file(req,
+                                 user_hash='bob',
+                                 upload_id=VALID_V1_ID,
+                                 chunk_index=0,
+                                 total_chunks=1)
+    # v1 extracts into the user's file_mounts dir; must be alice's, not bob's.
+    assert (clients / 'alice' / 'file_mounts' / 'marker.txt').exists()
+    assert not (clients / 'bob').exists()
+    # And cleanup is queued under the auth id.
+    assert (VALID_V1_ID, 'alice') in server.upload_ids_to_cleanup
