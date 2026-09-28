@@ -788,8 +788,14 @@ async def cleanup_upload_ids():
                     client_file_mounts_dir = (
                         common.API_SERVER_CLIENT_DIR.expanduser().resolve() /
                         user_hash / 'file_mounts')
-                    shutil.rmtree(client_file_mounts_dir / upload_id,
-                                  ignore_errors=True)
+                    # A missing dir is normal (single-chunk upload, or an
+                    # earlier partial cleanup); any other rmtree error must
+                    # reach the handler so the entry is kept and retried, not
+                    # swallowed by ignore_errors.
+                    try:
+                        shutil.rmtree(client_file_mounts_dir / upload_id)
+                    except FileNotFoundError:
+                        pass
                     (client_file_mounts_dir /
                      upload_id).with_suffix('.zip').unlink(missing_ok=True)
                 except Exception as e:  # pylint: disable=broad-except

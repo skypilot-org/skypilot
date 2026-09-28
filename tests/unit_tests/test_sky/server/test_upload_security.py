@@ -336,3 +336,50 @@ async def test_upload_v1_auth_id_writes_under_auth_id(clients):
     assert not (clients / 'bob').exists()
     # And cleanup is queued under the auth id.
     assert (VALID_V1_ID, 'alice') in server.upload_ids_to_cleanup
+
+
+async def _run_one_cleanup_tick(monkeypatch):
+    calls = {'n': 0}
+
+    async def fake_sleep(_):
+        calls['n'] += 1
+        if calls['n'] > 1:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(server.asyncio, 'sleep', fake_sleep)
+    with pytest.raises(asyncio.CancelledError):
+        await server.cleanup_upload_ids()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_keeps_entry_on_rmtree_error(clients, monkeypatch):
+    """A real rmtree error (not a missing dir) must keep the entry for retry,
+    so it must not be hidden by ignore_errors."""
+    past = datetime.datetime.now() - datetime.timedelta(days=1)
+    server.upload_ids_to_cleanup[(VALID_V1_ID, 'alice')] = past
+
+    def rmtree(path, ignore_errors=False):  # honors the kwarg like shutil does
+        if ignore_errors:
+            return
+        raise PermissionError('boom')
+
+    monkeypatch.setattr(server.shutil, 'rmtree', rmtree)
+    monkeypatch.setattr(pathlib.Path, 'unlink', lambda *a, **k: None)
+    await _run_one_cleanup_tick(monkeypatch)
+    assert (VALID_V1_ID, 'alice') in server.upload_ids_to_cleanup
+
+
+@pytest.mark.asyncio
+async def test_cleanup_treats_missing_dir_as_success(clients, monkeypatch):
+    """A missing chunk dir (normal for a single-chunk upload) is not a failure:
+    the entry is cleaned and dequeued."""
+    past = datetime.datetime.now() - datetime.timedelta(days=1)
+    server.upload_ids_to_cleanup[(VALID_V1_ID, 'alice')] = past
+
+    def rmtree(path, ignore_errors=False):
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(server.shutil, 'rmtree', rmtree)
+    monkeypatch.setattr(pathlib.Path, 'unlink', lambda *a, **k: None)
+    await _run_one_cleanup_tick(monkeypatch)
+    assert (VALID_V1_ID, 'alice') not in server.upload_ids_to_cleanup
