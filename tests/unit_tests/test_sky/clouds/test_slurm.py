@@ -10,6 +10,7 @@ from unittest.mock import call
 from unittest.mock import patch
 import unittest.mock as mock
 
+import jsonschema
 import pytest
 
 from sky import clouds
@@ -23,6 +24,7 @@ from sky.clouds import slurm as slurm_cloud
 from sky.provision.slurm import instance as slurm_instance
 from sky.provision.slurm import utils as slurm_utils
 from sky.skylet import constants
+from sky.utils import schemas
 from sky.utils import yaml_utils
 
 
@@ -63,6 +65,34 @@ class TestStopFeatureSupport:
 
 class TestGetSubmitUser:
 
+    @pytest.mark.parametrize('cluster_scoped', [False, True])
+    def test_mapped_user_with_plus(self, cluster_scoped):
+        mapping = {'alice@example.com': 'alice+lab'}
+        cluster_config = {'username_map': mapping} if cluster_scoped else {}
+        global_mapping = {} if cluster_scoped else mapping
+        config = {
+            'slurm': {
+                'submit_as_user': True,
+                'username_map': global_mapping,
+                'cluster_configs': {
+                    'my-cluster': cluster_config
+                },
+            }
+        }
+        jsonschema.validate(config, schemas.get_config_schema())
+        nested = {
+            ('slurm', 'username_map'): global_mapping,
+            ('slurm', 'cluster_configs', 'my-cluster'): cluster_config,
+        }
+        with patch.object(skypilot_config, 'get_nested',
+                          side_effect=lambda keys, **_: nested[keys]), \
+             patch.object(skypilot_config, 'get_effective_region_config',
+                          return_value=True), \
+             patch('sky.provision.slurm.utils.common_utils.get_current_user',
+                   return_value=models.User(id='human',
+                                            name='alice@example.com')):
+            assert slurm_utils.get_submit_user('my-cluster') == 'alice+lab'
+
     def test_config_is_server_managed(self):
         key = ('slurm', 'submit_as_user')
         assert key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS
@@ -71,6 +101,7 @@ class TestGetSubmitUser:
         ('alice@example.com', 'alice'),
         ('alice', 'alice'),
         ('alice.ml@example.com', 'alice.ml'),
+        ('alice+ml@example.com', 'alice+ml'),
     ])
     @patch('sky.provision.slurm.utils.common_utils.get_current_user')
     @patch('sky.provision.slurm.utils.skypilot_config.'
@@ -97,7 +128,7 @@ class TestGetSubmitUser:
     @pytest.mark.parametrize('user_name', [
         '@example.com',
         'Alice@example.com',
-        'alice+ml@example.com',
+        'alice;ml@example.com',
         '-alice@example.com',
     ])
     @patch('sky.provision.slurm.utils.common_utils.get_current_user')
