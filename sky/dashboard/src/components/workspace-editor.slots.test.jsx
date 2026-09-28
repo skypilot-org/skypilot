@@ -174,8 +174,30 @@ test('non-members see no roster and no plugin controls', () => {
 
 describe('WorkspaceEditor with a plugin that changes the workspace', () => {
   // The server's copy of the workspace. The plugin adds bob to it and asks the
-  // page to refresh; Apply writes the editor's config into it.
+  // page to refresh; Apply writes the editor's config into it, refusing (as
+  // the real server does under its config lock) when `expected` is stale.
   let server;
+  const sorted = (v) =>
+    Array.isArray(v)
+      ? v.map(sorted)
+      : v && typeof v === 'object'
+        ? Object.fromEntries(
+            Object.keys(v)
+              .sort()
+              .map((k) => [k, sorted(v[k])])
+          )
+        : v;
+  const same = (a, b) =>
+    JSON.stringify(sorted(a || {})) === JSON.stringify(sorted(b || {}));
+  const serverUpdate = async (name, config, expected) => {
+    if (expected !== undefined && !same(server[name], expected)) {
+      const err = new Error('updateWorkspace failed: changed');
+      err.type = 'WorkspaceConfigConflictError';
+      throw err;
+    }
+    server = { ...server, [name]: config };
+    return {};
+  };
   const addBob = () => {
     const ws = server.ws;
     server = { ws: { ...ws, allowed_users: [...ws.allowed_users, 'bob'] } };
@@ -186,10 +208,7 @@ describe('WorkspaceEditor with a plugin that changes the workspace', () => {
     mockGetWorkspaces.mockReset();
     mockGetWorkspaces.mockImplementation(async () => server);
     mockUpdateWorkspace.mockReset();
-    mockUpdateWorkspace.mockImplementation(async (name, config) => {
-      server = { [name]: config };
-      return {};
-    });
+    mockUpdateWorkspace.mockImplementation(serverUpdate);
     mockComponents['workspaces.detail.allowedUsers.actions'] = [
       {
         id: 'actions',
@@ -278,12 +297,19 @@ describe('WorkspaceEditor with a plugin that changes the workspace', () => {
     expect(
       screen.getByText('Workspace changed since you started editing')
     ).toBeInTheDocument();
-    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+    // The server refused the write; nothing was overwritten.
+    expect(server.ws.allowed_users).toContain('bob');
 
     await act(async () => {
       fireEvent.click(screen.getByText('Apply anyway'));
     });
-    expect(mockUpdateWorkspace).toHaveBeenCalledTimes(1);
+    // Apply anyway sends no expected config, so it goes through.
+    expect(mockUpdateWorkspace).toHaveBeenLastCalledWith(
+      'ws',
+      expect.anything(),
+      undefined
+    );
+    expect(server.ws.allowed_users).toEqual(['alice']);
   });
 
   test('Reload latest discards the draft and loads the server copy', async () => {
@@ -294,7 +320,7 @@ describe('WorkspaceEditor with a plugin that changes the workspace', () => {
     await act(async () => {
       fireEvent.click(screen.getByText('Reload latest'));
     });
-    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+    expect(server.ws.allowed_users).toEqual(['alice', 'bob']);
     expect(yamlBox().value).toContain('bob');
     expect(yamlBox().value).not.toContain('# note');
   });
@@ -302,8 +328,8 @@ describe('WorkspaceEditor with a plugin that changes the workspace', () => {
   test('a change landing after a save is caught at the next Apply', async () => {
     // Someone else's write lands right after ours, before anything after the
     // save could read the server.
-    mockUpdateWorkspace.mockImplementationOnce(async (name, config) => {
-      server = { [name]: config };
+    mockUpdateWorkspace.mockImplementationOnce(async (...args) => {
+      await serverUpdate(...args);
       addBob();
       return {};
     });
@@ -316,17 +342,31 @@ describe('WorkspaceEditor with a plugin that changes the workspace', () => {
     expect(
       screen.getByText('Workspace changed since you started editing')
     ).toBeInTheDocument();
-    expect(mockUpdateWorkspace).toHaveBeenCalledTimes(1);
+    // The second write was refused: bob's change and our first save survive.
+    expect(server.ws.allowed_users).toEqual(['alice', 'bob']);
+    expect(server.ws.gcp.project_id).toBe('first');
   });
 
-  test('a change made elsewhere (another tab) is caught at Apply', async () => {
+  test('a change made elsewhere (another tab) is refused at Apply', async () => {
     await renderEditor();
     await edit((y) => `${y}  gcp:\n    project_id: mine\n`);
-    addBob(); // not refreshed on this page
+    addBob(); // not refreshed on this page, e.g. up to the moment of Apply
     await apply();
     expect(
       screen.getByText('Workspace changed since you started editing')
     ).toBeInTheDocument();
-    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+    expect(server.ws.allowed_users).toEqual(['alice', 'bob']);
+    expect(server.ws.gcp).toBeUndefined();
+  });
+
+  test('Apply sends the config the draft started from', async () => {
+    await renderEditor();
+    await edit((y) => `${y}  gcp:\n    project_id: mine\n`);
+    await apply();
+    expect(mockUpdateWorkspace).toHaveBeenCalledWith(
+      'ws',
+      { private: true, allowed_users: ['alice'], gcp: { project_id: 'mine' } },
+      { private: true, allowed_users: ['alice'] }
+    );
   });
 });

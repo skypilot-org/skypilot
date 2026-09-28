@@ -258,21 +258,6 @@ const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
   );
 };
 
-// Key-order-independent JSON, so a config read from the server and one parsed
-// from YAML compare equal when they hold the same settings.
-function stableStringify(value) {
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(',')}]`;
-  }
-  if (value && typeof value === 'object') {
-    const entries = Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`);
-    return `{${entries.join(',')}}`;
-  }
-  return JSON.stringify(value);
-}
-
 // Detailed allowed users component for workspace editor.
 //
 // Plugin slots:
@@ -398,11 +383,11 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   // them without depending on them.
   const serverYamlRef = useRef('');
   const draftYamlRef = useRef('');
-  // The server config the editor text was based on. If the server holds
-  // something else by the time Apply is clicked, the workspace changed while
-  // the draft was open (another admin, another tab, a change made from this
-  // page), and Apply asks before overwriting it.
-  const baseConfigRef = useRef('');
+  // The server config the editor text was based on, sent with Apply as
+  // `expected_config`. If the workspace changed while the draft was open
+  // (another admin, another tab, a change made from this page), the server
+  // refuses the write and Apply asks before overwriting it.
+  const baseConfigRef = useRef({});
   const [conflict, setConflict] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
@@ -456,7 +441,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
           return;
         }
         setWorkspaceConfig(config);
-        baseConfigRef.current = stableStringify(config);
+        baseConfigRef.current = config;
 
         // Format as YAML with workspace name as top-level key
         const fullConfig = { [workspaceName]: config };
@@ -609,15 +594,6 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     }
   };
 
-  // The workspace's config as the server holds it now, without the
-  // server-computed flags.
-  const readServerConfig = async () => {
-    const allWorkspaces = await getWorkspaces();
-    const { writable, read_only, ...config } =
-      allWorkspaces[workspaceName] || {};
-    return config;
-  };
-
   const handleSave = async ({ force = false } = {}) => {
     setSaving(true);
     setError(null);
@@ -649,27 +625,28 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
           router.push(`/workspaces/${workspaceName}`);
         }, 1500);
       } else {
-        if (!force) {
-          const latest = await readServerConfig();
-          if (stableStringify(latest) !== baseConfigRef.current) {
-            setConflict(true);
-            return;
-          }
-        }
-        await updateWorkspace(workspaceName, workspaceConfig);
+        await updateWorkspace(
+          workspaceName,
+          workspaceConfig,
+          force ? undefined : baseConfigRef.current
+        );
         setSuccess('Workspace updated successfully!');
         setOriginalConfig(workspaceConfig);
         serverYamlRef.current = savedYaml;
         // The server stores the config as sent, so that is the new baseline.
         // Not re-read: a change landing after this save must still show up
         // as a conflict on the next Apply, not become the baseline.
-        baseConfigRef.current = stableStringify(workspaceConfig);
+        baseConfigRef.current = workspaceConfig;
         // Refresh stats after successful save
         fetchWorkspaceStats();
       }
     } catch (err) {
-      console.error('Error saving workspace:', err);
-      setError(err);
+      if (err?.type === 'WorkspaceConfigConflictError') {
+        setConflict(true);
+      } else {
+        console.error('Error saving workspace:', err);
+        setError(err);
+      }
     } finally {
       setSaving(false);
     }
@@ -713,7 +690,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const handleDiscard = () => {
     // Reset to original configuration
     setWorkspaceConfig(originalConfig);
-    baseConfigRef.current = stableStringify(originalConfig);
+    baseConfigRef.current = originalConfig;
 
     // Reset YAML value to original
     const fullConfig = { [workspaceName]: originalConfig };

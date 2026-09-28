@@ -497,13 +497,19 @@ def _validate_workspace_config_changes(
 
 
 @usage_lib.entrypoint
-def update_workspace(workspace_name: str, config: Dict[str,
-                                                       Any]) -> Dict[str, Any]:
+def update_workspace(
+        workspace_name: str,
+        config: Dict[str, Any],
+        expected_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Updates a specific workspace configuration.
 
     Args:
         workspace_name: The name of the workspace to update.
         config: The new configuration for the workspace.
+        expected_config: The configuration this update was based on. If set
+            and the workspace no longer holds it when the config lock is
+            taken, nothing is written and WorkspaceConfigConflictError is
+            raised, so a concurrent change is never silently overwritten.
 
     Returns:
         The updated workspaces configuration.
@@ -522,6 +528,8 @@ def update_workspace(workspace_name: str, config: Dict[str,
             - Other changes: Workspace must have no active resources
         FileNotFoundError: If the config file cannot be found.
         PermissionError: If the config file cannot be written.
+        WorkspaceConfigConflictError: If ``expected_config`` is set and the
+            workspace was changed since.
     """
     _validate_workspace_config(workspace_name, config)
 
@@ -535,6 +543,11 @@ def update_workspace(workspace_name: str, config: Dict[str,
 
     def update_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to update workspace inside the lock."""
+        if (expected_config is not None and
+            (workspaces.get(workspace_name) or {}) != expected_config):
+            raise exceptions.WorkspaceConfigConflictError(
+                f'Workspace {workspace_name!r} was changed since this update '
+                'was prepared. Reload it and apply your changes again.')
         workspaces[workspace_name] = config
         users = workspaces_utils.get_workspace_users(config)
         permission_service = permission.permission_service
