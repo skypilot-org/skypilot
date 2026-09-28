@@ -208,6 +208,51 @@ def test_allow_cloud_store_source(local_server):
     _run({'run': 'x', 'file_mounts': {'/dst': 's3://bucket/key'}}, enforce=True)
 
 
+def test_reject_dict_source_absolute(local_server):
+    # file_mounts value can be a storage dict {source: ...}; the source is
+    # contained too.
+    with pytest.raises(ValueError, match='outside the allowed'):
+        _run({
+            'run': 'x',
+            'file_mounts': {
+                '/dst': {
+                    'source': '/etc/passwd'
+                }
+            }
+        },
+             enforce=True)
+
+
+def test_reject_list_source_absolute(local_server):
+    # A storage dict source can be a list; every element is contained.
+    with pytest.raises(ValueError, match='outside the allowed'):
+        _run({
+            'run': 'x',
+            'file_mounts': {
+                '/dst': {
+                    'source': ['/etc/passwd']
+                }
+            }
+        },
+             enforce=True)
+
+
+def test_reject_service_tls_absolute(local_server):
+    # service.tls keyfile/certfile are translated sources and are contained.
+    with pytest.raises(ValueError, match='outside the allowed'):
+        _run(
+            {
+                'run': 'x',
+                'service': {
+                    'tls': {
+                        'keyfile': '/etc/passwd',
+                        'certfile': '/etc/passwd'
+                    }
+                }
+            },
+            enforce=True)
+
+
 def test_exempt_server_allows_absolute_local_source(local_server):
     # Baseline arm: a loopback local server legitimately mounts local paths.
     _run({'run': 'x', 'file_mounts': {'/dst': '/etc/hosts'}}, enforce=False)
