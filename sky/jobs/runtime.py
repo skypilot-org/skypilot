@@ -1,9 +1,9 @@
 """ManagedJobRuntime: runtime adapter for managed jobs.
 
 Extension point for runtime-specific behavior in the managed-jobs
-lifecycle. Each method takes a cluster handle and returns ``None``
-to defer to the default behavior at the call site, or a non-None
-result to handle the operation.
+lifecycle. Methods identify jobs by a cluster handle or managed job ID
+and return ``None`` to defer to the default behavior at the call site,
+or a non-None result to handle the operation.
 
 Register a runtime with ``register(MyRuntime())``. Multiple runtimes
 can be registered and form a dispatch chain: the chain iterates in
@@ -268,6 +268,23 @@ class ManagedJobRuntime(Protocol):
         to the call site's default (``backend.tail_logs``)."""
         ...
 
+    def tail_managed_job_logs(
+        self,
+        *,
+        job_id: int,
+        task_id: Optional[int],
+        follow: bool,
+        tail: Optional[int],
+        tail_offset: Optional[int] = None,
+    ) -> Optional[int]:
+        """Stream logs by managed job ID, independently of a cluster handle.
+
+        Called after validating the job and resolving the task selector,
+        before branching on job status. ``task_id=None`` requests all tasks.
+        Return an exit code when handled, or None to use the standard reader.
+        """
+        ...
+
     def job_group_envs(
         self,
         tasks: List['task_lib.Task'],
@@ -506,6 +523,29 @@ def tail_logs(
             tail=tail,
             tail_offset=tail_offset,
         )
+        if result is not None:
+            return result
+    return None
+
+
+def tail_managed_job_logs(
+    *,
+    job_id: int,
+    task_id: Optional[int],
+    follow: bool,
+    tail: Optional[int],
+    tail_offset: Optional[int] = None,
+) -> Optional[int]:
+    """Dispatch job-ID log readers in registration order."""
+    for runtime in _runtimes:
+        hook = getattr(runtime, 'tail_managed_job_logs', None)
+        if hook is None:
+            continue
+        result = hook(job_id=job_id,
+                      task_id=task_id,
+                      follow=follow,
+                      tail=tail,
+                      tail_offset=tail_offset)
         if result is not None:
             return result
     return None
