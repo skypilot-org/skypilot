@@ -13,6 +13,7 @@ import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { NonCapitalizedTooltip } from '@/components/utils';
 import { Layout } from '@/components/elements/layout';
+import { PluginSlot } from '@/plugins/PluginSlot';
 import Link from 'next/link';
 import Head from 'next/head';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -257,11 +258,23 @@ const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
   );
 };
 
-// Detailed allowed users component for workspace editor
-const DetailedAllowedUsers = ({
+// Detailed allowed users component for workspace editor.
+//
+// Plugin slots:
+// - `workspaces.detail.allowedUser.role` replaces the role badge on each row.
+//   Context: { workspaceName, entry, isAdmin, onChanged }, where `entry` is the
+//   allowed_users entry (a username or user id) and `isAdmin` is true for
+//   users with the global admin role.
+// - `workspaces.detail.allowedUsers.actions` renders below the list.
+//   Context: { workspaceName, allowedUsers, onChanged }.
+// Plugins call `onChanged()` after changing the workspace so the page reloads
+// its config.
+export const DetailedAllowedUsers = ({
+  workspaceName,
   workspaceConfig,
   allUsers,
   writable = true,
+  onChanged = () => {},
 }) => {
   if (!workspaceConfig.private) return null;
   // Non-member (read-only-visible) view: the server strips allowed_users from
@@ -281,6 +294,14 @@ const DetailedAllowedUsers = ({
     ...new Set([...allowedUsersFromConfig, ...adminUsernames]),
   ];
 
+  const actionsSlot = (
+    <PluginSlot
+      name="workspaces.detail.allowedUsers.actions"
+      context={{ workspaceName, allowedUsers: allAllowedUsers, onChanged }}
+      wrapperClassName="mt-2"
+    />
+  );
+
   if (allAllowedUsers.length === 0) {
     return (
       <div className="mt-4">
@@ -290,6 +311,7 @@ const DetailedAllowedUsers = ({
         <div className="text-amber-600 text-xs italic p-2 bg-amber-50 rounded border border-amber-200">
           No users configured (workspace may be inaccessible)
         </div>
+        {actionsSlot}
       </div>
     );
   }
@@ -308,21 +330,29 @@ const DetailedAllowedUsers = ({
               className="flex items-center justify-between text-xs p-2 bg-gray-50 hover:bg-gray-100 border-b border-gray-100 last:border-b-0"
             >
               <span className="font-medium text-gray-700">{username}</span>
-              {isAdmin ? (
-                <span className="inline-flex items-center text-blue-600">
-                  <StarIcon className="w-3 h-3 mr-1" />
-                  Admin
-                </span>
-              ) : (
-                <span className="inline-flex items-center text-gray-600">
-                  <User className="w-3 h-3 mr-1" />
-                  User
-                </span>
-              )}
+              <PluginSlot
+                name="workspaces.detail.allowedUser.role"
+                context={{ workspaceName, entry: username, isAdmin, onChanged }}
+                wrapperClassName="contents"
+                fallback={
+                  isAdmin ? (
+                    <span className="inline-flex items-center text-blue-600">
+                      <StarIcon className="w-3 h-3 mr-1" />
+                      Admin
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center text-gray-600">
+                      <User className="w-3 h-3 mr-1" />
+                      User
+                    </span>
+                  )
+                }
+              />
             </div>
           );
         })}
       </div>
+      {actionsSlot}
     </div>
   );
 };
@@ -828,9 +858,11 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
 
                       {/* Detailed allowed users for private workspaces */}
                       <DetailedAllowedUsers
+                        workspaceName={workspaceName}
                         workspaceConfig={originalConfig}
                         allUsers={allUsers}
                         writable={isWritable}
+                        onChanged={() => fetchWorkspaceConfig(false)}
                       />
                     </div>
                   </Card>
