@@ -755,7 +755,7 @@ class TestGetAllJobsGres:
     """Test SlurmClient.get_all_jobs_gres()."""
 
     def test_get_all_jobs_gres_expansion(self):
-        """Test parsing and expanding multi-node jobs using py-hostlist."""
+        """Test parsing and expanding multi-node jobs via hostlist_utils."""
         client = slurm.SlurmClient(
             ssh_host='localhost',
             ssh_port=22,

@@ -9,8 +9,8 @@ import shlex
 import subprocess
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
-from sky.adaptors import common
 from sky.utils import command_runner
+from sky.utils import hostlist_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 
@@ -57,10 +57,10 @@ _MAXTIME_REGEX = re.compile(r'MaxTime=((?:\d+-)?\d{1,2}:\d{2}:\d{2}|UNLIMITED)')
 _DEFAULT_TIME_REGEX = re.compile(
     r'DefaultTime=((?:\d+-)?\d{1,2}:\d{2}:\d{2}|UNLIMITED|NONE)')
 
-_IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Slurm. '
-                         'Try running: pip install "skypilot[slurm]"')
-hostlist = common.LazyImport('hostlist',
-                             import_error_message=_IMPORT_ERROR_MESSAGE)
+# Kept as a module attribute for external callers that used
+# ``slurm.hostlist.expand_hostlist``; Slurm hostlist expansion now lives in
+# ``sky.utils.hostlist_utils``.
+hostlist = hostlist_utils
 
 _UNRESOLVED_HOSTNAME_MARKER = 'UNRESOLVED'
 
@@ -242,7 +242,7 @@ def _parse_all_jobs_info_output(stdout: str) -> Dict[str, List[JobGresInfo]]:
                                job_name=job_name,
                                user=user,
                                gres_str=gres_str)
-        for node in hostlist.expand_hostlist(nodelist_str):
+        for node in hostlist_utils.expand_hostlist(nodelist_str):
             nodes_to_jobs.setdefault(node, []).append(job_info)
     return nodes_to_jobs
 
@@ -852,7 +852,7 @@ class SlurmClient:
             if not gres_str or gres_str == 'N/A':
                 continue
 
-            for node in hostlist.expand_hostlist(nodelist_str):
+            for node in hostlist_utils.expand_hostlist(nodelist_str):
                 nodes_to_gres.setdefault(node, []).append(gres_str)
 
         return nodes_to_gres
