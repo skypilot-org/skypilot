@@ -779,15 +779,24 @@ async def cleanup_upload_ids():
         upload_ids_to_cleanup_list = list(upload_ids_to_cleanup.items())
         for (upload_id, user_hash), expire_time in upload_ids_to_cleanup_list:
             if current_time > expire_time:
-                logger.info(f'Cleaning up upload id: {upload_id}')
-                client_file_mounts_dir = (
-                    common.API_SERVER_CLIENT_DIR.expanduser().resolve() /
-                    user_hash / 'file_mounts')
-                shutil.rmtree(client_file_mounts_dir / upload_id,
-                              ignore_errors=True)
-                (client_file_mounts_dir /
-                 upload_id).with_suffix('.zip').unlink(missing_ok=True)
-                upload_ids_to_cleanup.pop((upload_id, user_hash))
+                # Guard each entry so one bad entry (e.g. a filesystem error)
+                # cannot kill the loop for the rest of the worker's life. The
+                # upload handler is the only writer and validates before
+                # queueing, so this is robustness, not a second check.
+                try:
+                    logger.info(f'Cleaning up upload id: {upload_id}')
+                    client_file_mounts_dir = (
+                        common.API_SERVER_CLIENT_DIR.expanduser().resolve() /
+                        user_hash / 'file_mounts')
+                    shutil.rmtree(client_file_mounts_dir / upload_id,
+                                  ignore_errors=True)
+                    (client_file_mounts_dir /
+                     upload_id).with_suffix('.zip').unlink(missing_ok=True)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.warning(f'Failed to clean up upload id '
+                                   f'{upload_id}: {e}')
+                finally:
+                    upload_ids_to_cleanup.pop((upload_id, user_hash))
 
 
 async def cleanup_unreferenced_file_mounts():
@@ -1795,14 +1804,8 @@ async def optimize(optimize_body: payloads.OptimizeBody,
     )
 
 
-async def _prepare_client_mount_dir(user_hash: str,
-                                    request: fastapi.Request) -> pathlib.Path:
-    # For anonymous access, use the user hash from client
-    user_id = user_hash
-    if request.state.auth_user is not None:
-        # Otherwise, the authenticated identity should be used.
-        user_id = request.state.auth_user.id
-
+async def _prepare_client_mount_dir(user_id: str) -> pathlib.Path:
+    # `user_id` is a validated single path component (see owner_user_id).
     client_file_mounts_dir = (
         common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
         'file_mounts')
@@ -2123,19 +2126,24 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         chunk_index: The chunk index, starting from 0.
         total_chunks: The total number of chunks.
     """
-    # Add the upload id to the cleanup list.
-    upload_ids_to_cleanup[(upload_id,
-                           user_hash)] = (datetime.datetime.now() +
-                                          _DEFAULT_UPLOAD_EXPIRATION_TIME)
-    # Check upload_id to be a valid SkyPilot run_timestamp appended with 8 hex
-    # characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
-    if not re.match(
+    # Validate upload_id BEFORE any side effect: it is the last component of
+    # the path this request writes to and the path a later cleanup deletes.
+    # A valid SkyPilot run_timestamp appended with 8 hex characters, e.g.
+    # 'sky-2025-01-17-09-10-13-933602-35d31c22'.
+    if not re.fullmatch(
             r'sky-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}-'
-            r'[0-9]{2}-[0-9]{6}-[0-9a-f]{8}$', upload_id):
-        raise ValueError(
-            f'Invalid upload_id: {upload_id}. Please use a valid uuid.')
+            r'[0-9]{2}-[0-9]{6}-[0-9a-f]{8}', upload_id):
+        raise fastapi.HTTPException(status_code=400,
+                                    detail=f'Invalid upload_id: {upload_id}')
 
-    base_dir = await _prepare_client_mount_dir(user_hash, request)
+    user_id = download_utils.owner_user_id(request, user_hash)
+    # Register cleanup under the validated owner id, i.e. the dir actually
+    # written, so cleanup deletes exactly that dir and nothing else.
+    upload_ids_to_cleanup[(upload_id,
+                           user_id)] = (datetime.datetime.now() +
+                                        _DEFAULT_UPLOAD_EXPIRATION_TIME)
+
+    base_dir = await _prepare_client_mount_dir(user_id)
     missing_chunks = await _receive_and_assemble_chunks(
         base_dir=base_dir,
         zip_name=upload_id,
@@ -2160,12 +2168,10 @@ async def check_blob_exists(
         description='Client-reported compressed ZIP size in bytes.'),
 ) -> Dict[str, bool]:
     """Check if a file mount blob already exists."""
-    if not re.match(r'^[0-9a-f]{64}$', blob_id):
+    if not re.fullmatch(r'[0-9a-f]{64}', blob_id):
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Invalid blob_id: {blob_id}')
-    user_id = user_hash
-    if request.state.auth_user is not None:
-        user_id = request.state.auth_user.id
+    user_id = download_utils.owner_user_id(request, user_hash)
     exists = await bs.get_blob_storage().blob_exists(user_id, blob_id)
     if metrics_utils.METRICS_ENABLED and size_bytes is not None:
         metrics_utils.SKY_APISERVER_BLOB_CHECK_SIZE_BYTES.labels(
@@ -2183,13 +2189,11 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
     into a staging directory, then atomically renames to a shared extraction
     directory (blobs/{upload_id}/) so all requests can reuse it.
     """
-    if not re.match(r'^[0-9a-f]{64}$', upload_id):
+    if not re.fullmatch(r'[0-9a-f]{64}', upload_id):
         raise fastapi.HTTPException(
             status_code=400, detail=f'Invalid upload_id for v2: {upload_id}')
 
-    user_id = user_hash
-    if request.state.auth_user is not None:
-        user_id = request.state.auth_user.id
+    user_id = download_utils.owner_user_id(request, user_hash)
 
     storage = bs.get_blob_storage()
 
@@ -2586,7 +2590,8 @@ async def download_logs(
         request: fastapi.Request,
         cluster_jobs_body: payloads.ClusterJobsDownloadLogsBody) -> None:
     """Downloads the logs of a job."""
-    user_hash = download_utils.download_user_id(request, cluster_jobs_body)
+    user_hash = download_utils.owner_user_id(request,
+                                             cluster_jobs_body.user_hash)
     logs_dir_on_api_server = pathlib.Path(
         bs.get_blob_storage().download_tmp_dir(user_hash))
     logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
@@ -2608,7 +2613,7 @@ async def download_logs(
 async def download(download_body: payloads.DownloadBody,
                    request: fastapi.Request) -> None:
     """Downloads a folder from the cluster to the local machine."""
-    user_hash = download_utils.download_user_id(request, download_body)
+    user_hash = download_utils.owner_user_id(request, download_body.user_hash)
     logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
     download_tmp = bs.get_blob_storage().download_tmp_dir(user_hash)
     allowed_roots = [
