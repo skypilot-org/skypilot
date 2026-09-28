@@ -5916,6 +5916,7 @@ def set_controller_logs_cleaned(job_ids: List[int], logs_cleaned_at: float):
         session.commit()
 
 
+@db_retries.retry
 def add_job_event(job_id: int,
                   task_id: Optional[int],
                   new_status: ManagedJobStatus,
