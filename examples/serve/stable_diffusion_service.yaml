@@ -1,36 +1,32 @@
-# SkyServe YAML to run stable diffusion web tool.
+# SkyServe YAML to run the InvokeAI Stable Diffusion web UI with multiple replicas.
 #
 # Usage:
 #   sky serve up -n sd examples/serve/stable_diffusion_service.yaml
-# Then visit the endpoint printed in the console. You could also
-# check the endpoint by running:
-#   sky serve status --endpoint sd
+# Then open the endpoint printed by `sky serve status sd` in your browser.
 
 service:
   readiness_probe: /
   replicas: 2
 
-resources:
-  ports: 7860
-  accelerators: V100:1
+envs:
+  HUGGING_FACE_HUB_TOKEN: ""  # optional, for gated Hugging Face models
 
-file_mounts:
-  /stable_diffusion: examples/stable_diffusion
+resources:
+  ports: 9090
+  accelerators: L4:1
 
 setup: |
-  sudo curl "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-  sudo chmod +x /usr/local/bin/docker-compose
-  cd stable-diffusion-webui-docker  
-  sudo rm -r stable-diffusion-webui-docker
-  git clone https://github.com/AbdBarho/stable-diffusion-webui-docker.git
-  cd stable-diffusion-webui-docker
-  git reset --hard 0d8b7d4ac8f9ba99e041ca332547eab9d65e6360
-  wget https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt -P models
-  mv models/sd-v1-4.ckpt models/model.ckpt
-  docker pull berkeleyskypilot/stable-diffusion
-  rm docker-compose.yml
-  cp /stable_diffusion/docker-compose.yml .
+  set -e
+  docker pull ghcr.io/invoke-ai/invokeai
 
 run: |
-  cd stable-diffusion-webui-docker
-  docker-compose up
+  set -e
+  mkdir -p ~/invokeai
+  docker rm -f invokeai 2>/dev/null || true
+  docker run -d --name invokeai --restart on-failure \
+    --gpus all \
+    -p 9090:9090 \
+    -v ~/invokeai:/invokeai \
+    -e HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-} \
+    ghcr.io/invoke-ai/invokeai
+  docker logs -f invokeai
