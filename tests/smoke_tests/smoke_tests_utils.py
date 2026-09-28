@@ -25,6 +25,7 @@ from smoke_tests.docker import docker_utils
 
 import sky
 from sky import clouds
+from sky import jobs
 from sky import serve
 from sky import skypilot_config
 from sky.client import sdk
@@ -612,6 +613,35 @@ def get_replica_cluster_name_on_gcp(name: str, replica_id: int) -> str:
     cluster_name = serve.generate_replica_cluster_name(name, replica_id)
     return common_utils.make_cluster_name_on_cloud(
         cluster_name, sky.GCP.max_cluster_name_length())
+
+
+def get_managed_job_cluster_name_prefix_on_gcp(job_name: str) -> str:
+    """Prefix of a managed job's GCP cluster name that is safe to filter on.
+
+    The jobs controller names a job's cluster
+    ``<job_name[:JOBS_CLUSTER_NAME_PREFIX_LENGTH]>-<job_id>`` and the GCP
+    provisioner then applies ``make_cluster_name_on_cloud`` with GCP's 35-char
+    limit, which truncates the display name and appends
+    ``-<2-char hash>-<8-char user hash>``. The 24- to 25-char names that
+    ``get_cluster_name`` produces no longer fit, so the job id and the tail of
+    the name are cut off and a ``labels.ray-cluster-name:<full name>`` filter
+    never matches. Only the leading ``35 - 2 - 1 - 9 = 23`` characters are
+    guaranteed to survive, so return those. gcloud's ``:`` operator is a
+    word-prefix match, so the prefix also matches when nothing was truncated.
+    Matching on ~23 chars keeps the first two chars of ``test_id``, the same
+    entropy the filter had before ``test_id`` grew to four chars.
+    """
+    display_name_prefix = common_utils.make_cluster_name_on_cloud(
+        job_name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+    # '-<user hash>' is appended after the cluster name hash.
+    user_hash_length = common_utils.USER_HASH_LENGTH + 1
+    max_length = sky.GCP.max_cluster_name_length()
+    assert max_length is not None
+    keep = (max_length - common_utils.CLUSTER_NAME_HASH_LENGTH - 1 -
+            user_hash_length)
+    # A cut can land on a separator; a trailing '-' would make the gcloud
+    # ':' pattern end in an empty word.
+    return display_name_prefix[:keep].rstrip('-')
 
 
 def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:

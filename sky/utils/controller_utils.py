@@ -1552,6 +1552,22 @@ def _effective_jobs_consolidation_with_warnings(
     return effective, arg
 
 
+def effective_jobs_consolidation_mode() -> bool:
+    """Whether jobs run consolidated, without emitting operator guidance.
+
+    Same answer as `is_jobs_consolidation_mode`, minus the warning path: that
+    one queries the cluster table, scans the managed-jobs tables when
+    consolidation is off, and resolves through a `scope='request'` cache --
+    which is process-global, so a background thread that asks before the API
+    server has written the signal file pins the wrong answer for the whole
+    process. Readers on a polling path want the fact, not the guidance.
+    """
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        # Inside the controller process, which is consolidated by definition.
+        return True
+    return _read_jobs_consolidation_signal()
+
+
 def is_jobs_consolidation_mode(
         extra_validator: Optional[Callable[[bool], None]] = None) -> bool:
     """Return effective jobs-controller consolidation state.

@@ -6,7 +6,7 @@ import os
 import pathlib
 import shutil
 import time
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import anyio
 import filelock
@@ -30,6 +30,14 @@ class LocalFilesystemBlobStorage(bs.BlobStorage):
     def download_tmp_base_dir(self):
         # Downloads share the persistent log directory; no separate cleanup.
         return None
+
+    def local_disk_roots(self) -> Dict[str, str]:
+        # Everything this backend writes lives under the clients dir:
+        # extracted file-mount blobs plus per-user download staging.
+        return {
+            'api_server_clients': str(
+                server_common.API_SERVER_CLIENT_DIR.expanduser())
+        }
 
     def blobs_dir(self, user_id: str) -> pathlib.Path:
 

@@ -274,6 +274,7 @@ _REQUEST_BODY_ALLOWLIST: Dict[str, Tuple[str, ...]] = {
     'sky.pool-status-refresh': (),
     'sky.server-heartbeat': (),
     'sky.expired-token-cleanup': (),
+    'sky.launch-metrics': (),
     # Category 2: redact task/dag YAML fields before including
     'sky.launch': ('task',),
     'sky.exec': ('task',),
@@ -611,7 +612,7 @@ def _managed_job_cluster_names_from_records(
     current_cluster_name. Non-pool jobs use a deterministic per-task
     cluster name (a multi-task pipeline launches one cluster per task,
     so a job can have several). Mirrors the resolution in
-    jobs.utils.queue_v2 and jobs.server.core._get_job_cluster_names.
+    jobs.utils.queue_v2 and jobs.server.core._get_job_clusters.
 
     job_records are queue_v2 records: one record per task, so a
     multi-task job contributes one name per task.

@@ -489,6 +489,8 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 skip_finished=request.skip_finished,
                 accessible_workspaces=accessible_workspaces,
                 job_ids=job_ids,
+                include_tree=(request.include_tree
+                              if request.HasField('include_tree') else False),
                 workspace_match=request.workspace_match
                 if request.HasField('workspace_match') else None,
                 name_match=request.name_match
@@ -576,7 +578,12 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     # Batch progress fields
                     is_batch=job.get('is_batch'),
                     batch_total_batches=job.get('batch_total_batches'),
-                    batch_completed_batches=job.get('batch_completed_batches'))
+                    batch_completed_batches=job.get('batch_completed_batches'),
+                    # Parent links (None for top-level jobs)
+                    root_job_id=job.get('root_job_id'),
+                    parent_job_id=job.get('parent_job_id'),
+                    parent_task_id=job.get('parent_task_id'),
+                    dynamic_task_index=job.get('dynamic_task_index'))
                 jobs_info.append(job_info)
 
             return managed_jobsv1_pb2.GetJobTableResponse(
@@ -588,7 +595,10 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 # predates the field leaves it false, which is how the caller
                 # tells an empty result apart from an unfiltered one.
                 infra_match_applied=True,
-                infra_options=infra_options)
+                infra_options=infra_options,
+                # Same for include_tree: the caller cannot otherwise tell a
+                # tree answer from a root-only one.
+                include_tree_applied=True)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(e, exc_info=True)
             context.abort(grpc.StatusCode.INTERNAL, str(e))

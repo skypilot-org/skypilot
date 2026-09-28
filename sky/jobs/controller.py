@@ -1,6 +1,7 @@
 """Controller: handles scheduling and the life cycle of a managed job.
 """
 import asyncio
+import enum
 import io
 import json
 import os
@@ -36,7 +37,6 @@ from sky.jobs import job_group_networking
 from sky.jobs import log_gc
 from sky.jobs import recovery_strategy
 from sky.jobs import runtime as managed_job_runtime
-from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.metrics import utils as metrics_lib
@@ -55,6 +55,7 @@ from sky.utils import dag_utils
 from sky.utils import log_links
 from sky.utils import status_lib
 from sky.utils import ux_utils
+from sky.utils.db import retries as db_retries
 from sky.utils.plugin_extensions import ExternalClusterFailure
 from sky.utils.plugin_extensions import ExternalFailureSource
 from sky.utils.plugin_extensions import LogDeliverySource
@@ -190,6 +191,64 @@ def _build_task_specs(
 _EMERGENCY_BOOKKEEPING_ROUNDS = 5
 
 
+def _runtime_infra(
+    handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle']
+) -> Dict[str, Optional[str]]:
+    """Cloud, region and zone recorded with a runtime's placement."""
+    resources = getattr(handle, 'launched_resources', None)
+    cloud = getattr(resources, 'cloud', None)
+    return {
+        'cloud': str(cloud) if cloud is not None else None,
+        'region': getattr(resources, 'region', None),
+        'zone': getattr(resources, 'zone', None),
+    }
+
+
+class _TaskRunAction(enum.Enum):
+    """What the controller should do with a task when (re)entering run()."""
+    # The task already finished in a previous controller incarnation.
+    SKIP = 'skip'
+    # The task was mid-flight when the previous controller died.
+    RESUME = 'resume'
+    # The task has not started yet.
+    FRESH = 'fresh'
+
+
+def _task_run_action(
+    task_status: Optional['managed_job_state.ManagedJobStatus']
+) -> _TaskRunAction:
+    """Classify a task for JobController.run()'s sequential task loop.
+
+    Keyed on the task's OWN status, not on the job's aggregate "latest
+    non-terminal task" status: for a pipeline whose earlier task already
+    SUCCEEDED while a later task is still PENDING, the aggregate status is
+    PENDING, which would otherwise make the controller treat the finished
+    earlier task as a fresh start and re-issue STARTING for it. STARTING can
+    only be set on a task that is still PENDING with a NULL end_at, so that
+    update matches no rows and raises; run()'s cleanup then cancels the
+    still-PENDING later task, tearing down an otherwise healthy pipeline.
+
+    A task that fell back to PENDING for a launch retry backoff is correctly
+    classified as FRESH: it is still PENDING with a NULL end_at, so
+    re-issuing STARTING for it is exactly right.
+
+    Args:
+        task_status: The task's own persisted status, or None if the task
+            has no row yet (e.g. a pipeline task that hasn't been reached).
+
+    Returns:
+        The action the controller should take for this task.
+    """
+    if task_status is None or (task_status
+                               == managed_job_state.ManagedJobStatus.PENDING):
+        return _TaskRunAction.FRESH
+    if task_status.is_terminal():
+        return _TaskRunAction.SKIP
+    # STARTING/RUNNING/RECOVERING/CANCELLING/... : the task was mid-flight
+    # when the previous controller incarnation died.
+    return _TaskRunAction.RESUME
+
+
 class JobController:
     """Controls the lifecycle of a single managed job.
 
@@ -223,6 +282,17 @@ class JobController:
     - ``_strategy_executor``: Recovery/launch strategy executor (created per
       task).
     """
+
+    # Whether this job is the top-level job of its tree (not itself launched
+    # from another job). Only the root sweeps the jobs launched under it when
+    # it finishes; a dynamic member finishing leaves its own children to the
+    # root's lifecycle. Set in _load_dag; the class default keeps controllers
+    # built without __init__ (tests) from sweeping anything.
+    _is_tree_root: bool = False
+    # Set once the jobs launched from this job (dynamic job group members)
+    # have been swept, so the job-group sweep and run()'s completion backstop
+    # don't signal them twice. Class default for the same reason.
+    _dynamic_members_swept: bool = False
 
     def __init__(
         self,
@@ -308,12 +378,34 @@ class JobController:
                 is_managed_job=True)
             job_id_env_vars.append(job_id_env_var)
 
+        # SKYPILOT_ROOT_JOB_ID marks a task as part of a job tree and names
+        # the tree's top-level job: a job group's tasks get the group's own
+        # id, a dynamic member's tasks get the member's root. A plain
+        # top-level job gets none, so its nested launches stay top-level as
+        # they always have. The SDK attaches a launch to the tree exactly
+        # when the variable is present, so this is the one place that
+        # decides which jobs' children join a group.
+        own_row = managed_job_state.get_job_info_row(self._job_id)
+        # The row exists: _get_dag above read the DAG out of it.
+        assert own_row is not None, self._job_id
+        in_job_tree = (self._dag.is_job_group() or
+                       own_row.root_job_id is not None)
+        root_job_id = own_row.tree_root_job_id if in_job_tree else None
+        self._is_tree_root = own_row.root_job_id is None
+
         for i, task in enumerate(self._dag.tasks):
             task_envs = task.envs or {}
             task_envs[constants.TASK_ID_ENV_VAR] = job_id_env_vars[i]
             task_envs[constants.TASK_ID_LIST_ENV_VAR] = '\n'.join(
                 job_id_env_vars)
             task_envs[constants.MANAGED_JOB_ID_ENV_VAR] = str(self._job_id)
+            if root_job_id is not None:
+                task_envs[constants.ROOT_JOB_ID_ENV_VAR] = str(root_job_id)
+            else:
+                # The controller owns this marker both ways: a value the
+                # user put in the task YAML must not make a plain job's
+                # nested launches attach to some other job.
+                task_envs.pop(constants.ROOT_JOB_ID_ENV_VAR, None)
             # Add SKYPILOT_JOB_RANK if it's set in the context or os.environ
             # (os.environ may be hijacked to use ContextualEnviron which includes context overrides)
             if self._rank is not None:
@@ -610,22 +702,25 @@ class JobController:
         logger.info(
             f'Starting task {task_id} ({task.name}) for job {self._job_id}')
 
-        latest_task_id, last_task_prev_status = (
-            await
-            managed_job_state.get_latest_task_id_status_async(self._job_id))
-
-        is_resume = False
-        if (latest_task_id is not None and last_task_prev_status !=
-                managed_job_state.ManagedJobStatus.PENDING):
-            assert latest_task_id >= task_id, (latest_task_id, task_id)
-            if latest_task_id > task_id:
-                logger.info(f'Task {task_id} ({task.name}) has already '
-                            'been executed. Skipping...')
-                return True
-            if latest_task_id == task_id:
-                # Start recovery.
-                is_resume = True
-                logger.info(f'Resuming task {task_id} from previous execution')
+        # Classify this task from its OWN persisted status, not the job's
+        # aggregate "latest non-terminal task" status: in a pipeline where an
+        # earlier task already SUCCEEDED while this task is still PENDING,
+        # the aggregate status would be PENDING, which would otherwise make
+        # us treat this already-finished task as a fresh start.
+        task_status = await managed_job_state.get_job_status_with_task_id_async(
+            job_id=self._job_id, task_id=task_id)
+        action = _task_run_action(task_status)
+        if action == _TaskRunAction.SKIP:
+            assert task_status is not None
+            logger.info(f'Task {task_id} ({task.name}) has already been '
+                        f'executed ({task_status.value}). Skipping...')
+            # Propagate whether the task actually succeeded (rather than
+            # unconditionally returning True), so that a pipeline stops if an
+            # earlier task ended in a terminal-but-not-successful state.
+            return task_status == managed_job_state.ManagedJobStatus.SUCCEEDED
+        is_resume = action == _TaskRunAction.RESUME
+        if is_resume:
+            logger.info(f'Resuming task {task_id} from previous execution')
 
         callback_func = managed_job_utils.event_callback_func(
             job_id=self._job_id, task_id=task_id, task=task)
@@ -845,9 +940,13 @@ class JobController:
         """
         if is_resume:
             # Check if the previous run already reached a terminal status.
-            _, prev_status = (await
-                              managed_job_state.get_latest_task_id_status_async(
-                                  self._job_id))
+            # Look up this task's own status rather than the job's aggregate
+            # "latest non-terminal task" status, so a batch task in a
+            # pipeline is classified from its own state, not a sibling
+            # task's.
+            prev_status = await (
+                managed_job_state.get_job_status_with_task_id_async(
+                    job_id=self._job_id, task_id=task_id))
             if (prev_status is not None and prev_status.is_terminal()):
                 logger.info(f'Batch task {task_id} already in terminal status '
                             f'{prev_status.value}, skipping.')
@@ -1049,12 +1148,46 @@ class JobController:
                         'seconds.')
                     continue
 
+            # A runtime observation can preserve a viable allocation even when
+            # recovery is forced. Without one, forced recovery skips the job
+            # status check and leaves job_status=None for recovery below.
+            runtime_recovery = None
+            runtime_cursor = None
+            runtime_handle = None
+            runtime_error = None
+            if managed_job_runtime.is_registered():
+                runtime_handle = await asyncio.to_thread(
+                    global_user_state.get_handle_from_cluster_name,
+                    cluster_name)
+                try:
+                    runtime_cursor = (
+                        await managed_job_state.get_runtime_cursor_async(
+                            self._job_id, task_id))
+                    runtime_recovery = await asyncio.to_thread(
+                        managed_job_runtime.get_recovery_status,
+                        runtime_handle,
+                        cluster_name,
+                        job_id=self._job_id,
+                        task_id=task_id,
+                        task=task,
+                        previous=runtime_cursor)
+                except Exception as exc:  # pylint: disable=broad-except
+                    runtime_error = common_utils.format_exception(exc)
+                    transient_job_check_error_reason = runtime_error
+            if runtime_recovery is not None:
+                job_status = runtime_recovery.job_status
+                status_logger.log('No job found.' if job_status is None else
+                                  f'Job status: {job_status}')
+                transient_job_check_error_reason = (
+                    runtime_recovery.reason or 'Runtime job status unavailable'
+                    if job_status is None and
+                    not runtime_recovery.should_relaunch else None)
+            elif not force_transit_to_recovering and runtime_error is None:
                 # NOTE: we do not check cluster status first because race
                 # condition can occur, i.e. cluster can be down during the job
                 # status check.
-                # NOTE: If fetching the job status fails or we force to transit
-                # to recovering, we will set the job status to None, which will
-                # force enter the recovering logic.
+                # A failed status fetch leaves job_status=None; the checks
+                # below distinguish transient errors from recovery conditions.
                 try:
                     job_status, transient_job_check_error_reason = (
                         await managed_job_utils.get_job_status(
@@ -1062,6 +1195,7 @@ class JobController:
                             cluster_name,
                             job_id=job_id_on_pool_cluster,
                             status_logger=status_logger,
+                            handle=runtime_handle,
                         ))
                 except exceptions.FetchClusterInfoError as fetch_e:
                     status_logger.reset()
@@ -1071,6 +1205,7 @@ class JobController:
                         f'Traceback: {traceback.format_exc()}')
                     # Fall through to recovery logic below
 
+            if not force_transit_to_recovering:
                 # While the job is running, surface external links harvested
                 # from its logs (best-effort; the terminal-state scan is the
                 # guarantee). Throttled and capped so a job that never prints a
@@ -1102,6 +1237,44 @@ class JobController:
                 status_check_window.record_failure()
             else:
                 status_check_window.reset()
+
+            if runtime_error is not None:
+                if status_check_window.exhausted:
+                    raise RuntimeError(
+                        'Failed to observe runtime after '
+                        f'{status_check_window.summary()}: {runtime_error}')
+                await asyncio.sleep(status_check_window.next_backoff())
+                continue
+
+            if runtime_recovery is not None:
+                job_status = runtime_recovery.job_status
+                phase = runtime_recovery.phase
+                await managed_job_state.observe_runtime_async(
+                    self._job_id,
+                    task_id,
+                    runtime_recovery,
+                    callback_func=callback_func,
+                    infra=_runtime_infra(runtime_handle))
+                if phase == managed_job_runtime.RuntimePhase.NEEDS_REPLACEMENT:
+                    job_status = None
+                elif job_status == job_lib.JobStatus.CANCELLED:
+                    logger.info(f'Task {task_id} was cancelled by its runtime. '
+                                'Cleaning up the managed job.')
+                    raise asyncio.CancelledError()
+                elif phase != managed_job_runtime.RuntimePhase.TERMINATED:
+                    if phase == managed_job_runtime.RuntimePhase.UNAVAILABLE:
+                        if status_check_window.exhausted:
+                            raise RuntimeError(
+                                'Failed to fetch runtime job status after '
+                                f'{status_check_window.summary()}: '
+                                f'{transient_job_check_error_reason}')
+                        backoff_time = status_check_window.next_backoff()
+                        logger.info(
+                            'Runtime job status unavailable. Retrying in '
+                            f'{backoff_time:.1f} seconds...')
+                        await asyncio.sleep(backoff_time)
+                    force_transit_to_recovering = False
+                    continue
 
             # Handle success
             if job_status == job_lib.JobStatus.SUCCEEDED:
@@ -1180,12 +1353,21 @@ class JobController:
             # iteration rather than escalating to run()'s unexpected-error
             # handling (emergency recovery), which would tear down and
             # relaunch a healthy cluster.
+            # Refresh may remove a terminated cluster from local state. Keep
+            # its identity available to the recovery log-capture hook.
+            recovery_handle = runtime_handle
             try:
-                (cluster_status, handle) = await asyncio.to_thread(
-                    cloud_api_retries.with_cloud_api_retries,
-                    lambda: backend_utils.refresh_cluster_status_handle(
-                        cluster_name,
-                        force_refresh_statuses=set(status_lib.ClusterStatus)))
+                if runtime_recovery is not None:
+                    handle = runtime_handle
+                    cluster_status = (None if runtime_recovery.should_relaunch
+                                      else status_lib.ClusterStatus.UP)
+                else:
+                    (cluster_status, handle) = await asyncio.to_thread(
+                        cloud_api_retries.with_cloud_api_retries,
+                        lambda: backend_utils.refresh_cluster_status_handle(
+                            cluster_name,
+                            force_refresh_statuses=set(status_lib.ClusterStatus
+                                                      )))
             except exceptions.ClusterStatusFetchingError as e:
                 # The refresh kept failing after retries. Treat it as a
                 # transient condition and back off, reusing the transient
@@ -1217,7 +1399,8 @@ class JobController:
                 continue
 
             external_failures: Optional[List[ExternalClusterFailure]] = None
-            cluster_event_reason = None
+            cluster_event_reason = (runtime_recovery.reason
+                                    if runtime_recovery is not None else None)
             # Set when recovery is triggered by the user job exiting non-zero
             # (cluster still UP), so the RECOVERING job event can say what
             # actually happened instead of the generic preemption copy.
@@ -1259,7 +1442,8 @@ class JobController:
                                 f'  {timestamp}: {event["reason"]}')
                         events_str = '\n'.join(event_strs)
                         logger.info(f'Recent cluster events:\n{events_str}')
-                        cluster_event_reason = str(events[-1]['reason'])
+                        if cluster_event_reason is None:
+                            cluster_event_reason = str(events[-1]['reason'])
                 except Exception as e:  # pylint: disable=broad-except
                     logger.debug('Failed to fetch cluster events: '
                                  f'{common_utils.format_exception(e)}')
@@ -1351,7 +1535,15 @@ class JobController:
                             exit_code_desc = ('Job exited with exit codes '
                                               f'{exit_codes}')
 
+                    if managed_job_runtime.is_registered():
+                        # Runtime retries since launch count toward the
+                        # max_restarts_on_errors budget.
+                        executor.runtime_restart_cnt_on_failure = await (
+                            managed_job_state.get_runtime_user_restarts_async(
+                                self._job_id, task_id))
                     should_restart_on_failure = (
+                        not (runtime_recovery is not None and
+                             runtime_recovery.handles_user_retries) and
                         executor.should_restart_on_failure(
                             exit_codes=exit_codes))
                     if should_restart_on_failure:
@@ -1474,7 +1666,8 @@ class JobController:
             if managed_job_runtime.is_registered():
                 try:
                     await asyncio.to_thread(
-                        managed_job_runtime.on_before_recovery, handle,
+                        managed_job_runtime.on_before_recovery,
+                        handle if handle is not None else recovery_handle,
                         self._backend, self._job_id, task_id, exit_codes,
                         job_id_on_pool_cluster)
                 except Exception as e:  # pylint: disable=broad-except
@@ -1495,7 +1688,9 @@ class JobController:
                 # Challenge: race condition when the worker cluster thought it
                 # does not have a running job yet but later the job is launched.
                 if (resources.need_cleanup_after_preemption_or_failure() or
-                        force_transit_to_recovering):
+                        force_transit_to_recovering or
+                    (runtime_recovery is not None and
+                     runtime_recovery.should_relaunch)):
                     # Some spot resource (e.g., Spot TPU VM) may need to be
                     # cleaned up after preemption, as running launch again on
                     # those clusters again may fail.
@@ -1547,7 +1742,7 @@ class JobController:
                 await managed_job_state.set_recovering_async(
                     job_id=self._job_id,
                     task_id=task_id,
-                    force_transit_to_recovering=False,
+                    force_transit_to_recovering=(runtime_recovery is not None),
                     callback_func=callback_func,
                     external_failures=external_failures,
                     cluster_event_reason=cluster_event_reason,
@@ -2242,7 +2437,55 @@ class JobController:
             at: tid for tid, at in monitor_async_tasks.items()
         }
 
+        def primary_task_succeeded(tid: int) -> bool:
+            # For terminal tasks, check their status; for others, the result.
+            if is_terminal(tid):
+                return (task_resume_info[tid][0] ==
+                        managed_job_state.ManagedJobStatus.SUCCEEDED)
+            return task_results.get(tid, True) is True
+
+        async def on_all_primaries_done() -> None:
+            """Everything that happens once the last primary task is done.
+
+            The declared auxiliaries are terminated first (after their
+            termination_delay if every primary succeeded). Only then are the
+            jobs launched from this group swept: by that point no member of
+            the group is alive to launch another, so one pass catches
+            everything, including what a watcher launched during its delay,
+            and those launches got the same grace period the watcher did.
+            Sweeping before the auxiliaries are gone would race with exactly
+            those launches.
+            """
+            all_primary_succeeded = all(
+                primary_task_succeeded(tid) for tid in primary_task_ids)
+            if monitor_async_tasks:
+                await self._terminate_auxiliary_jobs(tasks, monitor_async_tasks,
+                                                     cluster_names,
+                                                     all_primary_succeeded)
+            await self._cancel_dynamic_members(
+                f'with job group {self._job_id}: all primary tasks '
+                f'{"finished" if all_primary_succeeded else "ended (a primary task failed)"}'  # pylint: disable=line-too-long
+            )
+
         try:
+            if (primary_task_ids and not remaining_primary and
+                    monitor_async_tasks):
+                # Every primary task had already finished before this
+                # controller (re)started, e.g. a restart after the trainer
+                # succeeded while the watcher was still running. The loop
+                # below only reaches the primaries-done path when a live
+                # primary completes, which can never happen here, so it would
+                # wait on the auxiliaries forever. Do the primaries-done work
+                # now instead. (An auxiliary's termination_delay restarts from
+                # zero here; when the primaries finished is not recorded.)
+                logger.info('All primary jobs had already completed before '
+                            'this controller started; terminating auxiliary '
+                            'jobs')
+                await on_all_primaries_done()
+                # The terminated auxiliaries' monitors are already done, so
+                # there is nothing left to wait on; the loop below is skipped.
+                monitor_async_tasks.clear()
+
             # Monitor with primary/auxiliary termination logic
             while monitor_async_tasks:
                 # Wait for any task to complete
@@ -2286,30 +2529,12 @@ class JobController:
                         remaining_primary.discard(completed_task_id)
 
                         if not remaining_primary:
-                            # All primary jobs are done
+                            # That was the last primary. Sweep and terminate
+                            # the auxiliaries; their cancelled monitors come
+                            # back through asyncio.wait on the next iteration
+                            # and are recorded as terminated there.
                             logger.info('All primary jobs completed')
-
-                            # Check if all primary jobs succeeded. For terminal
-                            # tasks, check their status; for others, check
-                            # result.
-                            def primary_task_succeeded(tid: int) -> bool:
-                                if is_terminal(tid):
-                                    return (task_resume_info[tid][0] ==
-                                            managed_job_state.ManagedJobStatus.
-                                            SUCCEEDED)
-                                return task_results.get(tid, True) is True
-
-                            all_primary_succeeded = all(
-                                primary_task_succeeded(tid)
-                                for tid in primary_task_ids)
-
-                            # Terminate remaining auxiliary jobs
-                            if monitor_async_tasks:
-                                await self._terminate_auxiliary_jobs(
-                                    tasks, monitor_async_tasks, cluster_names,
-                                    all_primary_succeeded)
-                                # All auxiliary jobs terminated, exit loop
-                                break
+                            await on_all_primaries_done()
 
         except Exception as e:
             logger.error(f'Monitoring failed: {e}')
@@ -2456,6 +2681,37 @@ class JobController:
                             f'{self._job_id}')
                         await asyncio.sleep(backoff)
 
+                    # The scheduler claims a job only once every job it
+                    # depends on is DONE. If any of them did not succeed, the
+                    # job does not run: its tasks are cancelled in the finally
+                    # below, with this reason.
+                    unsucceeded = await (
+                        managed_job_state.get_unsucceeded_dependencies_async(
+                            self._job_id))
+                    if unsucceeded:
+                        failure_reason = 'Dependency did not succeed: ' + (
+                            ', '.join(
+                                f'job {dependency} '
+                                f'({status.value if status else "not found"})'
+                                for dependency, status in unsucceeded))
+                        logger.info(failure_reason)
+                        await (managed_job_state.
+                               set_pending_tasks_failure_reason_async(
+                                   self._job_id, failure_reason))
+                        return
+                    # The moment the last dependency ended is when the tasks
+                    # that start first could first have started.
+                    dependencies_finished_at = await (
+                        managed_job_state.get_dependencies_finished_at_async(
+                            self._job_id))
+                    if dependencies_finished_at is not None:
+                        first_task_ids = (range(len(self._dag.tasks))
+                                          if self._dag.is_job_group() else [0])
+                        for first_task_id in first_task_ids:
+                            await managed_job_state.set_eligible_at_async(
+                                self._job_id, first_task_id,
+                                dependencies_finished_at)
+
                     succeeded = True
 
                     # Check if this is a JobGroup (parallel execution)
@@ -2471,6 +2727,16 @@ class JobController:
                                         f'{len(self._dag.tasks)-1}: '
                                         f'{task.name}')
                             task_start = time.time()
+                            if task_id > 0:
+                                # The task before this one has just finished,
+                                # so this is the moment this task could first
+                                # have started -- the origin its startup
+                                # breakdown is measured from. Written once: a
+                                # controller that restarts mid-pipeline
+                                # re-enters here, and the first value is the
+                                # true one.
+                                await (managed_job_state.set_eligible_at_async(
+                                    self._job_id, task_id, task_start))
                             succeeded = await self._run_one_task(task_id, task)
                             task_time = time.time() - task_start
                             logger.info(
@@ -2575,15 +2841,77 @@ class JobController:
                 job_id=self._job_id,
                 task_id=task_id,
                 task=self._dag.tasks[task_id])
+            # 1. This job's tasks that have not ended go CANCELLING: on a
+            #    natural finish that is the tasks that never ran; on a user
+            #    cancel it includes the running one. From this write on, the
+            #    insert guard (state._check_parent_accepts_attachment)
+            #    refuses to attach a new job under this one.
             await managed_job_state.set_cancelling_async(
                 job_id=self._job_id, callback_func=callback_func)
+            # 2. Then the jobs launched under this one. After the write, so
+            #    that a child which committed before it is found here and a
+            #    child arriving after it is refused there; nothing lands in
+            #    between. A natural finish sweeps only from a tree root (the
+            #    group's lifecycle owns its dynamic tasks; a dynamic task
+            #    finishing leaves its children to the root); a user cancel
+            #    takes the subtree of whatever node was cancelled.
+            if cancelled:
+                note = f'with job {self._job_id}: it was cancelled'
+            else:
+                note = f'with job {self._job_id}: it finished'
+            await self._cancel_dynamic_members(note, on_cancel=cancelled)
+            # 3. On a natural finish the not-yet-run tasks can go CANCELLED
+            #    right away (nothing to clean up). On a user cancel the
+            #    running task's resources are torn down first, and
+            #    run_job_loop writes CANCELLED after that.
             if not cancelled:
-                # the others haven't been run yet so we can set them to
-                # cancelled immediately (no resources to clean up).
-                # if we are running and get cancelled, we need to clean up
-                # the resources first so this will be done later.
                 await managed_job_state.set_cancelled_async(
                     job_id=self._job_id, callback_func=callback_func)
+
+    async def _cancel_dynamic_members(self,
+                                      note: str,
+                                      *,
+                                      on_cancel: bool = False) -> None:
+        """Cancel the jobs launched under this job.
+
+        On its own completion only a tree root sweeps. Lifetime is owned by
+        the root: when the top-level job finishes (its primaries for a job
+        group, the job itself otherwise) everything launched under it, at
+        any depth, is swept. A dynamic member finishing sweeps nothing; its
+        children stay under the root.
+
+        On a user cancel (``on_cancel``) any node takes its own subtree,
+        root or not: that is what cancelling a job means, and this is the
+        pass that catches a child whose row landed after the request-time
+        expansion (see run()).
+
+        Idempotent per controller: the job-group primaries-done sweep and
+        run()'s completion backstop may both reach here. Best-effort: a
+        failure to sweep must never change this job's own final state.
+        """
+        if not on_cancel and not self._is_tree_root:
+            return
+        if self._dynamic_members_swept:
+            return
+        try:
+            msg = await asyncio.to_thread(
+                managed_job_utils.cancel_descendant_jobs, self._job_id, note)
+        except Exception as e:  # pylint: disable=broad-except
+            # Not marked swept: run()'s backstop (or the cancel pass) gets
+            # one more try. A repeat is harmless, a miss is not.
+            logger.warning(
+                'Failed to cancel jobs launched from job '
+                f'{self._job_id}: {common_utils.format_exception(e)}')
+            return
+        # Marked only once a sweep has fully run. A sweep interrupted by a
+        # cancel (CancelledError from the await) leaves the flag clear, so
+        # the cancel-time pass that follows the CANCELLING write still
+        # expands the tree; a child that landed during the interrupted
+        # sweep is caught there.
+        self._dynamic_members_swept = True
+        if msg != 'No job to cancel.':
+            logger.info(f'Cancelling jobs launched from job {self._job_id}: '
+                        f'{msg}')
 
     async def _handle_unexpected_error(
             self, error: Union[Exception, SystemExit]) -> Optional[str]:
@@ -3353,11 +3681,25 @@ class ControllerManager:
                          f'{common_utils.format_exception(e)}')
             raise
         finally:
+            deadline = (time.monotonic() +
+                        jobs_constants.JOB_FINALIZE_DB_RETRY_BUDGET_SECONDS)
+
+            async def finalize_step(coro_fn):
+                return await db_retries.with_db_retries_async(
+                    coro_fn,
+                    max_retries=None,
+                    initial_backoff=jobs_constants.
+                    JOB_FINALIZE_DB_RETRY_BACKOFF_BASE_SECONDS,
+                    max_backoff=jobs_constants.
+                    JOB_FINALIZE_DB_RETRY_BACKOFF_CAP_SECONDS,
+                    deadline=deadline)
+
             try:
-                await self._cleanup(job_id,
-                                    pool=pool,
-                                    graceful=graceful,
-                                    graceful_timeout=graceful_timeout)
+                await finalize_step(
+                    lambda _: self._cleanup(job_id,
+                                            pool=pool,
+                                            graceful=graceful,
+                                            graceful_timeout=graceful_timeout))
                 logger.info(f'Cluster of managed job {job_id} has been cleaned '
                             'up.')
             except Exception as e:  # pylint: disable=broad-except
@@ -3365,42 +3707,30 @@ class ControllerManager:
                     'Failed to clean up, resources may have leaked: '
                     f'{common_utils.format_exception(e)}. Please check '
                     'whether the job\'s cluster and storage still exist.')
-                await managed_job_state.set_failed_async(
-                    job_id,
-                    task_id=None,
-                    failure_type=managed_job_state.ManagedJobStatus.
-                    FAILED_CONTROLLER,
-                    failure_reason=failure_reason,
-                    override_terminal=True)
+                await finalize_step(
+                    lambda _: managed_job_state.set_failed_async(
+                        job_id,
+                        task_id=None,
+                        failure_type=managed_job_state.ManagedJobStatus.
+                        FAILED_CONTROLLER,
+                        failure_reason=failure_reason,
+                        override_terminal=True))
 
+            callback_func = None
             if cancelling:
                 # Since it's set with cancelling
                 assert task_id is not None, job_id
-                await managed_job_state.set_cancelled_async(
-                    job_id=job_id,
-                    callback_func=managed_job_utils.event_callback_func(
-                        job_id=job_id, task_id=task_id,
-                        task=dag.tasks[task_id]))
-
-            # We should check job status after 'set_cancelled', otherwise
-            # the job status is not terminal.
-            job_status = await managed_job_state.get_status_async(job_id)
-            assert job_status is not None
-            # The job can be non-terminal if the controller exited
-            # abnormally, e.g. failed to launch cluster after reaching
-            # the MAX_RETRY.
-            if not job_status.is_terminal():
-                logger.info(f'Previous job status: {job_status.value}')
-                await managed_job_state.set_failed_async(
-                    job_id,
-                    task_id=None,
-                    failure_type=managed_job_state.ManagedJobStatus.
-                    FAILED_CONTROLLER,
-                    failure_reason=(
-                        'Unexpected error occurred. For details, '
-                        f'run: sky jobs logs --controller {job_id}'))
-
-            await scheduler.job_done_async(job_id)
+                callback_func = managed_job_utils.event_callback_func(
+                    job_id=job_id, task_id=task_id, task=dag.tasks[task_id])
+            # Write the final task status (CANCELLED if cancelling;
+            # FAILED_CONTROLLER if the controller exited abnormally with the
+            # job still non-terminal) and schedule_state=DONE in a single
+            # transaction. If they were separate writes, dying between them
+            # would strand the job terminal-but-not-DONE, and the recovery
+            # machinery would relaunch a controller for it on every pass.
+            await finalize_step(
+                lambda _: managed_job_state.finalize_job_done_async(
+                    job_id, cancelling=cancelling, callback_func=callback_func))
 
             async with self._job_tasks_lock:
                 try:

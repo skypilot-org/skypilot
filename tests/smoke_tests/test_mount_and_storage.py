@@ -687,6 +687,13 @@ def test_slurm_storage_mounts_cached(image_id: Optional[str]):
 
 
 @pytest.mark.kubernetes
+# The fd check lists and execs into the fusermount-server pod in the
+# skypilot-system namespace. On a remote server that kubectl runs from the
+# cloud-cmd helper, a regular (non-controller) cluster whose
+# skypilot-service-account only has access to its own namespace (#10845), so
+# the lookup is Forbidden. Against a local API server it runs with the local
+# kubeconfig, which still covers the leak check.
+@pytest.mark.no_remote_server
 def test_kubernetes_ensure_no_fd_leak_fusermount_server():
     """Verify fusermount-server closes /dev/fuse fds after MOUNT_CACHED mounts.
 
