@@ -35,10 +35,11 @@ jest.mock('@/components/ui/yaml-editor', () => ({
 }));
 jest.mock('./jobs', () => ({ __esModule: true, statusGroups: { active: [] } }));
 const mockGetWorkspaces = jest.fn();
+const mockUpdateWorkspace = jest.fn(async () => ({}));
 jest.mock('@/data/connectors/workspaces', () => ({
   __esModule: true,
   getWorkspaces: (...args) => mockGetWorkspaces(...args),
-  updateWorkspace: jest.fn(),
+  updateWorkspace: (...args) => mockUpdateWorkspace(...args),
   createWorkspace: jest.fn(),
   deleteWorkspace: jest.fn(),
   getEnabledClouds: jest.fn(async () => []),
@@ -218,6 +219,20 @@ describe('WorkspaceEditor onChanged', () => {
     fireEvent.change(box, { target: { value: draft } });
     await pluginRefresh();
     expect(screen.getByLabelText('workspace yaml').value).toBe(draft);
+  });
+
+  test('after Apply, a plugin refresh updates the YAML again', async () => {
+    await renderEditor();
+    const box = screen.getByLabelText('workspace yaml');
+    fireEvent.change(box, {
+      target: { value: `${box.value}  gcp:\n    project_id: saved\n` },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Apply'));
+    });
+    expect(mockUpdateWorkspace).toHaveBeenCalled();
+    await pluginRefresh();
+    expect(screen.getByLabelText('workspace yaml').value).toContain('bob');
   });
 
   test('keeps unsaved YAML edits while refreshing the roster', async () => {

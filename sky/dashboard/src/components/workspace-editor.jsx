@@ -591,6 +591,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     setSaving(true);
     setError(null);
     setSuccess(null);
+    // The text being saved. Typing that happens during the request stays a
+    // draft, so only this snapshot becomes the new server baseline.
+    const savedYaml = yamlValue;
 
     try {
       // Validate YAML
@@ -618,6 +621,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         await updateWorkspace(workspaceName, workspaceConfig);
         setSuccess('Workspace updated successfully!');
         setOriginalConfig(workspaceConfig);
+        serverYamlRef.current = savedYaml;
         // Refresh stats after successful save
         fetchWorkspaceStats();
       }
