@@ -2398,6 +2398,21 @@ def get_config_schema():
                 }
             },
         },
+        'runpod': {
+            'type': 'object',
+            'additionalProperties': False,
+            'properties': {
+                'allowed_cuda_versions': {
+                    'type': 'array',
+                    'minItems': 1,
+                    'uniqueItems': True,
+                    'items': {
+                        'type': 'string',
+                        'pattern': r'^[0-9]+\.[0-9]+$(?!\n)',
+                    },
+                },
+            },
+        },
         'vast': {
             'type': 'object',
             'required': [],

@@ -1,12 +1,14 @@
 """ RunPod Cloud. """
 
 from importlib import util as import_lib_util
+import math
 import os
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky import skypilot_config
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -194,7 +196,7 @@ class RunPod(clouds.Cloud):
         num_nodes: int,
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
-    ) -> Dict[str, Optional[Union[str, bool]]]:
+    ) -> Dict[str, Any]:
         del dryrun, cluster_name  # unused
         assert zones is not None, (region, zones)
 
@@ -229,7 +231,28 @@ class RunPod(clouds.Cloud):
                                       if resources.docker_username_for_runpod
                                       is not None else 'root')
 
+        gpu_requirements = {}
+        if acc_dict:
+            cpus, memory_gib = self.get_vcpus_mem_from_instance_type(
+                instance_type)
+            if any(value is None or not math.isfinite(value) or value <= 0
+                   for value in (cpus, memory_gib)):
+                raise ValueError(f'RunPod GPU instance {instance_type} must '
+                                 'have known positive CPU and host RAM sizes.')
+            assert cpus is not None and memory_gib is not None
+            # Preserve the advertised host shape, not the GPU's VRAM. RunPod's
+            # GraphQL minimum is total GB; ceil GiB to decimal GB conservatively.
+            gpu_requirements = {
+                'min_vcpu_count': math.ceil(cpus),
+                'min_memory_in_gb': math.ceil(memory_gib * 2**30 / 10**9),
+                'allowed_cuda_versions': skypilot_config.get_nested(
+                    ('runpod', 'allowed_cuda_versions'),
+                    default_value=None,
+                    override_configs=resources.cluster_config_overrides),
+            }
+
         return {
+            **gpu_requirements,
             'instance_type': instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
