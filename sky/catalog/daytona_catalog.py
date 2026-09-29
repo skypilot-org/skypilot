@@ -69,6 +69,12 @@ def get_default_instance_type(
     max_hourly_cost: Optional[float] = None,
 ) -> Optional[str]:
     del disk_tier, local_disk  # Unused
+    if use_spot:
+        # Daytona only offers spot for GPU sandboxes. CPU shapes have no
+        # spot price, and without a max_hourly_cost the shared impl would
+        # select them by on-demand price for spot requests, producing a
+        # cluster that cannot launch.
+        return None
     return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory, region,
                                                       zone, use_spot,
                                                       max_hourly_cost)

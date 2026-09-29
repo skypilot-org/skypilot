@@ -312,3 +312,10 @@ class TestDaytonaCloudFeatures:
     def test_repr(self):
         assert repr(daytona.Daytona()) == 'Daytona'
 
+
+class TestDaytonaSpotDefaults:
+    """Spot requests must not select CPU shapes."""
+
+    def test_no_default_instance_type_for_spot(self):
+        from sky.catalog import daytona_catalog
+        assert daytona_catalog.get_default_instance_type(use_spot=True) is None
