@@ -317,9 +317,8 @@ def launch(
     """
     is_cpu_instance = instance_type.startswith('cpu')
     if not is_cpu_instance:
-        if any(
-                type(value) is not int or value <= 0
-                for value in (min_vcpu_count, min_memory_in_gb)):
+        if any(not isinstance(value, int) or isinstance(value, bool) or
+               value <= 0 for value in (min_vcpu_count, min_memory_in_gb)):
             raise ValueError('RunPod GPU launch requires positive integer '
                              'host CPU and RAM minima. Re-render the launch '
                              'configuration if these fields are missing.')

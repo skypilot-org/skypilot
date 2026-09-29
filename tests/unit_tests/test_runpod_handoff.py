@@ -1,4 +1,6 @@
-"""Offline proof of the RunPod resource contract through the provider boundary."""
+"""Offline RunPod resource contract through the provider boundary."""
+# The test exercises the provider's internal selection entry point.
+# pylint: disable=protected-access
 import importlib
 from unittest import mock
 
@@ -22,10 +24,10 @@ from sky.utils import resources_utils
 from sky.utils import schemas
 
 
-@pytest.fixture(autouse=True)
-def offline(monkeypatch):
+@pytest.fixture(autouse=True, name='offline')
+def offline_catalog(monkeypatch):
 
-    def no_network(*args, **kwargs):
+    def no_network(*_args, **_kwargs):
         pytest.fail('RunPod contract test attempted network I/O')
 
     monkeypatch.setattr(requests.sessions.Session, 'request', no_network)
@@ -256,7 +258,7 @@ def test_actual_sdk_and_spot_graphql_preserve_total_requirements(
     graphql = importlib.import_module('runpod.api.graphql')
     calls = []
 
-    def query(body, **kwargs):
+    def query(body, **_kwargs):
         calls.append(body)
         return {
             'data': {

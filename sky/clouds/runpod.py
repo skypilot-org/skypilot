@@ -241,7 +241,7 @@ class RunPod(clouds.Cloud):
                                  'have known positive CPU and host RAM sizes.')
             assert cpus is not None and memory_gib is not None
             # Preserve the advertised host shape, not the GPU's VRAM. RunPod's
-            # GraphQL minimum is total GB; ceil GiB to decimal GB conservatively.
+            # GraphQL uses total GB; round GiB up to decimal GB conservatively.
             gpu_requirements = {
                 'min_vcpu_count': math.ceil(cpus),
                 'min_memory_in_gb': math.ceil(memory_gib * 2**30 / 10**9),
