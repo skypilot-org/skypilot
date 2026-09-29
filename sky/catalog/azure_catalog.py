@@ -190,8 +190,7 @@ def get_instance_types_for_cpus_mem(
             lambda name: zone in (get_instance_type_zones(name, region) or []))]
     df = df.loc[df['InstanceType'].apply(
         lambda name: Azure.check_disk_tier(name, disk_tier)[0])]
-    price = ('SpotPrice'
-             if use_spot and max_hourly_cost is not None else 'Price')
+    price = 'SpotPrice' if use_spot else 'Price'
     df = df.dropna(subset=[price])
     if max_hourly_cost is not None:
         df = df[df[price] <= max_hourly_cost]

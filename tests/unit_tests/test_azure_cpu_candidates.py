@@ -112,6 +112,23 @@ def test_all_cpu_candidates_obey_native_constraints(azure_cpu, constraints,
         **options) == (expected[0] if expected else None)
 
 
+def test_spot_candidates_without_price_limit_use_available_spot_prices(
+        azure_cpu):
+    frame = azure_cpu.catalog._df
+    frame.loc[frame.InstanceType == 'Standard_D2s_v5',
+              'SpotPrice'] = float('nan')
+    options = dict(cpus='2',
+                   memory='4+',
+                   region='southcentralus',
+                   disk_tier=DiskTier.MEDIUM,
+                   use_spot=True)
+    assert azure_cpu.catalog.get_instance_types_for_cpus_mem(**options) == [
+        'Standard_D2s_v7', 'Standard_F2s_v2', 'Standard_D2s_v6'
+    ]
+    assert azure_cpu.catalog.get_default_instance_type(
+        **options) == 'Standard_D2s_v7'
+
+
 def test_native_blocklist_retries_other_cpu_types_with_settings_preserved(
         azure_cpu, monkeypatch):
 
