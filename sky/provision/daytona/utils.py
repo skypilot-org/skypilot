@@ -311,9 +311,10 @@ def launch_sandbox(
             # the create API reject over-cap values with its own clear
             # quota error; when the size is SkyPilot's default (i.e. the
             # user did not ask for it), use the platform default instead.
-            # pylint: disable=import-outside-toplevel
-            from sky.resources import DEFAULT_DISK_SIZE_GB
-            if disk_size != DEFAULT_DISK_SIZE_GB:
+            # Imported lazily to avoid a circular import
+            # (sky.resources -> sky.clouds -> sky.provision.daytona).
+            from sky import resources  # pylint: disable=import-outside-toplevel
+            if disk_size != resources.DEFAULT_DISK_SIZE_GB:
                 body['disk'] = disk_size
             else:
                 logger.debug(
