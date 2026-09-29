@@ -302,6 +302,8 @@ auth:
     redis-secret: null
     # Container image for the bundled session store. Valkey (BSD-3-Clause) is a
     # drop-in replacement for Redis; any Redis-protocol-compatible image works.
+    # A release upgraded with --reuse-values keeps the image it already
+    # renders; set this key explicitly to switch an existing release.
     # @schema type: [string, null]
     redis-image: "valkey/valkey:8.1-alpine"
     # Cookie timing settings (in seconds)
@@ -475,6 +477,8 @@ ingress:
     redis-url: null
     # Container image for the bundled session store. Valkey (BSD-3-Clause) is a
     # drop-in replacement for Redis; any Redis-protocol-compatible image works.
+    # A release upgraded with --reuse-values keeps the image it already
+    # renders; set this key explicitly to switch an existing release.
     # @schema type: [string, null]
     redis-image: "valkey/valkey:8.1-alpine"
     # Cookie timing settings (in seconds)
