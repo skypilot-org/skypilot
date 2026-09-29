@@ -2251,6 +2251,7 @@ def _is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
 def _extract_members(zipf, members: List[zipfile.ZipInfo],
                      client_file_mounts_dir: pathlib.Path) -> None:
     """Writes the zip's members under *client_file_mounts_dir*."""
+    resolved_client_file_mounts_dir = client_file_mounts_dir.resolve()
     for member in members:
         # Determine the new path
         original_path = os.path.normpath(member.filename)
@@ -2260,7 +2261,7 @@ def _extract_members(zipf, members: List[zipfile.ZipInfo],
         # directory to prevent Zip Slip attacks (path traversal via
         # malicious "../" sequences in archive member names).
         resolved_path = new_path.resolve()
-        if not _is_relative_to(resolved_path, client_file_mounts_dir):
+        if not _is_relative_to(resolved_path, resolved_client_file_mounts_dir):
             raise ValueError(f'Zip member {member.filename!r} would extract '
                              'outside target directory. Aborted.')
 
@@ -2272,7 +2273,8 @@ def _extract_members(zipf, members: List[zipfile.ZipInfo],
             # Since target is a relative path, we need to check that
             # it is under `client_file_mounts_dir` for security.
             full_target_path = (new_path.parent / target).resolve()
-            if not _is_relative_to(full_target_path, client_file_mounts_dir):
+            if not _is_relative_to(full_target_path,
+                                   resolved_client_file_mounts_dir):
                 raise ValueError(f'Symlink target {target} leads to a '
                                  'file not in userspace. Aborted.')
 
