@@ -313,6 +313,42 @@ class TestDaytonaCloudFeatures:
         assert repr(daytona.Daytona()) == 'Daytona'
 
 
+class TestDaytonaLaunchBody:
+    """Disk handling in the sandbox create request."""
+
+    def _launch_body(self, instance_type, disk_size):
+        captured = {}
+
+        def fake_request(method, path, params=None, body=None, timeout=None):
+            del method, path, params, timeout
+            captured.update(body)
+            return {'id': 'sbx-1'}
+
+        with mock.patch.object(daytona_utils, '_request', fake_request), \
+                mock.patch.object(daytona_utils, 'check_gpu_capacity'):
+            daytona_utils.launch_sandbox(
+                cluster_name_on_cloud='c-1',
+                instance_type=instance_type,
+                region='us',
+                use_spot=False,
+                disk_size=disk_size,
+            )
+        return captured
+
+    def test_gpu_disk_passthrough(self):
+        body = self._launch_body('1x-H100', 256)
+        assert body['disk'] == 256
+
+    def test_cpu_explicit_disk_applied(self):
+        body = self._launch_body('cpu-2x-8gb', 8)
+        assert body['disk'] == 8
+
+    def test_cpu_default_disk_omitted(self):
+        from sky.resources import DEFAULT_DISK_SIZE_GB
+        body = self._launch_body('cpu-2x-8gb', DEFAULT_DISK_SIZE_GB)
+        assert 'disk' not in body
+
+
 class TestDaytonaSpotDefaults:
     """Spot requests must not select CPU shapes."""
 

@@ -305,22 +305,20 @@ def launch_sandbox(
             # GPU sandboxes support up to 512 GiB disk per GPU.
             body['disk'] = disk_size
         else:
-            # CPU sandboxes have a much smaller tier-dependent per-sandbox
-            # disk cap (e.g. 10 GiB), below SkyPilot's default disk_size,
-            # so the platform default is used for them instead. Only warn
-            # when the size differs from SkyPilot's default, i.e. the user
-            # explicitly requested it.
+            # CPU sandboxes accept any disk size up to a tier-dependent
+            # per-sandbox cap (e.g. 10 GiB), which is below SkyPilot's
+            # default disk_size. Apply explicitly requested sizes and let
+            # the create API reject over-cap values with its own clear
+            # quota error; when the size is SkyPilot's default (i.e. the
+            # user did not ask for it), use the platform default instead.
             # pylint: disable=import-outside-toplevel
             from sky.resources import DEFAULT_DISK_SIZE_GB
             if disk_size != DEFAULT_DISK_SIZE_GB:
-                logger.warning(
-                    f'Daytona CPU sandboxes do not support the requested '
-                    f'disk size ({disk_size} GiB); using the platform '
-                    'default disk size instead.')
+                body['disk'] = disk_size
             else:
                 logger.debug(
-                    'Skipping disk size for Daytona CPU sandbox; using '
-                    'the platform default.')
+                    'Skipping default disk size for Daytona CPU sandbox; '
+                    'using the platform default.')
     body['buildInfo'] = {
         'dockerfileContent': f'FROM {image_id or DEFAULT_IMAGE}'
     }
