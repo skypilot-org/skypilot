@@ -92,6 +92,22 @@ def test_a_deleted_workspace_conflicts_even_if_it_was_empty(stored):
     assert 'gone' not in stored
 
 
+def test_an_implicit_default_workspace_is_not_a_conflict(stored):
+    # `default` isn't in the stored config; the dashboard shows it as {}.
+    assert 'default' not in stored
+    core.update_workspace('default', {'gcp': {
+        'project_id': 'd'
+    }},
+                          expected_config={})
+    assert stored['default'] == {'gcp': {'project_id': 'd'}}
+
+
+def test_update_workspace_is_a_usage_entrypoint():
+    # The helper above it must not have taken the decorator.
+    assert hasattr(core.update_workspace, '__wrapped__')
+    assert not hasattr(core._check_expected_workspace_config, '__wrapped__')  # pylint: disable=protected-access
+
+
 def test_conflict_is_reported_before_resource_validation(stored, monkeypatch):
     # Against the newer config the draft looks like a change validation would
     # reject; the outdated snapshot must be what gets reported.

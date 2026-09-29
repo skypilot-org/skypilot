@@ -496,24 +496,31 @@ def _validate_workspace_config_changes(
         ])
 
 
-@usage_lib.entrypoint
 def _check_expected_workspace_config(
         workspaces: Dict[str, Any], workspace_name: str,
         expected_config: Optional[Dict[str, Any]]) -> None:
     """Raises WorkspaceConfigConflictError if the workspace moved on.
 
     A no-op when ``expected_config`` is None. A workspace that no longer
-    exists is a conflict too, even if the expected config was empty.
+    exists is a conflict too, even if the expected config was empty, except
+    the default workspace, which exists implicitly as ``{}`` when it isn't in
+    the stored config (see `_load_workspaces`).
     """
     if expected_config is None:
         return
-    if (workspace_name not in workspaces or
-        (workspaces[workspace_name] or {}) != expected_config):
+    if workspace_name in workspaces:
+        current = workspaces[workspace_name] or {}
+    elif workspace_name == constants.SKYPILOT_DEFAULT_WORKSPACE:
+        current = {}
+    else:
+        current = None
+    if current is None or current != expected_config:
         raise exceptions.WorkspaceConfigConflictError(
             f'Workspace {workspace_name!r} was changed since this update '
             'was prepared. Reload it and apply your changes again.')
 
 
+@usage_lib.entrypoint
 def update_workspace(
         workspace_name: str,
         config: Dict[str, Any],

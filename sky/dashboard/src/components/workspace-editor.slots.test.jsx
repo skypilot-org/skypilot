@@ -127,7 +127,9 @@ test('a role plugin replaces the badge and gets the row context', () => {
   );
   expect(screen.queryByText('User')).not.toBeInTheDocument();
   expect(screen.getByText('role:alice')).toBeInTheDocument();
-  expect(screen.getByText('actions:alice,bob,root')).toBeInTheDocument();
+  // The workspace's own allowed_users, without the global admins the list
+  // also displays.
+  expect(screen.getByText('actions:alice,bob')).toBeInTheDocument();
   const root = seen.find((p) => p.entry === 'root');
   expect(root).toMatchObject({ workspaceName: 'ws', isAdmin: true });
   root.onChanged();

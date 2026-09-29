@@ -266,7 +266,9 @@ const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
 //   allowed_users entry (a username or user id) and `isAdmin` is true for
 //   users with the global admin role.
 // - `workspaces.detail.allowedUsers.actions` renders below the list.
-//   Context: { workspaceName, allowedUsers, onChanged }.
+//   Context: { workspaceName, allowedUsers, onChanged }, where
+//   `allowedUsers` is the workspace's own `allowed_users` (usernames or user
+//   ids), not the displayed list, which also shows every global admin.
 // Plugins call `onChanged()` after changing the workspace so the page reloads
 // its config.
 export const DetailedAllowedUsers = ({
@@ -302,7 +304,11 @@ export const DetailedAllowedUsers = ({
   const actionsSlot = (
     <PluginSlot
       name="workspaces.detail.allowedUsers.actions"
-      context={{ workspaceName, allowedUsers: allAllowedUsers, onChanged }}
+      context={{
+        workspaceName,
+        allowedUsers: allowedUsersFromConfig,
+        onChanged,
+      }}
       wrapperClassName="mt-2"
     />
   );
