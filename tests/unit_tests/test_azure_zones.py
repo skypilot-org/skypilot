@@ -119,6 +119,31 @@ def test_catalog_keeps_regional_offerings_and_filters_restricted_locations(
                                    zone='2') == 0.3
 
 
+def test_exhausted_zonal_offering_does_not_become_regional(
+        catalog, monkeypatch):
+    _serve(catalog, monkeypatch, [
+        _sku(restrictions=[_restrict('Zone', ['eastus'], ['1', '2'])],
+             capabilities=[('CpuArchitectureType', 'x64')]),
+        _sku('Standard_Regional',
+             zones=(),
+             capabilities=[('CpuArchitectureType', 'x64')]),
+    ])
+    assert catalog.get_instance_type_zones('Standard_Test', 'eastus') is None
+    assert catalog.get_region_zones_for_instance_type('Standard_Test',
+                                                      False) == []
+    assert catalog.get_cpu_instance_types('eastus') == {'Standard_Regional'}
+    assert list(
+        Azure.zones_provision_loop(region='eastus',
+                                   num_nodes=1,
+                                   instance_type='Standard_Test')) == []
+    assert list(
+        Azure.zones_provision_loop(region='eastus',
+                                   num_nodes=1,
+                                   instance_type='Standard_Regional')) == [
+                                       None
+                                   ]
+
+
 def test_sku_api_errors_are_not_cached_or_silently_treated_as_no_zones(
         catalog, monkeypatch):
     listing = _serve(catalog, monkeypatch, [])

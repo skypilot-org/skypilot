@@ -67,6 +67,7 @@ def _sku_zones(sku: Any, region: str) -> Optional[List[str]]:
     for info in sku.location_info or []:
         if info.location.lower() == region:
             zones.update(info.zones or [])
+    has_zones = bool(zones)
     for restriction in sku.restrictions or []:
         info = restriction.restriction_info
         locations = (getattr(info, 'locations', None) or
@@ -78,6 +79,9 @@ def _sku_zones(sku: Any, region: str) -> Optional[List[str]]:
             return None
         if restriction.type == 'Zone':
             zones.difference_update(getattr(info, 'zones', None) or [])
+    if has_zones and not zones:
+        # Exhausted zonal offerings must not become regional-only offerings.
+        return None
     return sorted(zones)
 
 
