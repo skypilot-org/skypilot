@@ -177,10 +177,11 @@ class TestDaytonaCapacityCheck:
     @mock.patch.object(daytona_utils,
                        '_get_organization_id',
                        return_value='org-1')
-    def test_absent_type_raises(self, mock_org, mock_request):
+    def test_absent_type_fails_open(self, mock_org, mock_request):
+        # A missing capacity row is advisory-only: creation proceeds and
+        # the create API decides.
         mock_request.return_value = self._CAPACITY
-        with pytest.raises(daytona_utils.DaytonaError, match='no capacity'):
-            daytona_utils.check_gpu_capacity('B300', 1, use_spot=False)
+        daytona_utils.check_gpu_capacity('B300', 1, use_spot=False)
 
     @mock.patch.object(daytona_utils,
                        '_get_organization_id',
@@ -310,3 +311,4 @@ class TestDaytonaCloudFeatures:
 
     def test_repr(self):
         assert repr(daytona.Daytona()) == 'Daytona'
+

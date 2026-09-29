@@ -198,8 +198,11 @@ def check_gpu_capacity(daytona_gpu: str, count: int, use_spot: bool) -> None:
             f'Insufficient Daytona capacity for {count}x {daytona_gpu} '
             f'({("spot" if use_spot else "on-demand")}): {available} '
             'GPU(s) currently available.')
-    raise DaytonaError(
-        f'GPU type {daytona_gpu} has no capacity in the Daytona fleet.')
+    # The GPU type has no row in the capacity response. Fail open: the
+    # check is advisory, and the create API is the authority on whether
+    # the type is launchable.
+    logger.debug(f'GPU type {daytona_gpu} not present in the capacity '
+                 'response; proceeding to sandbox creation.')
 
 
 def list_cluster_sandboxes(cluster_name_on_cloud: str) -> List[Dict[str, Any]]:
