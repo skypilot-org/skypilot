@@ -32,9 +32,12 @@ CREDENTIALS_PATH = '~/.daytona/api_key'
 
 SSH_GATEWAY_HOST = 'ssh.app.daytona.io'
 SSH_GATEWAY_PORT = 22
-# SSH access tokens double as the SSH username. Issue long-lived tokens so
-# that an existing cluster stays reachable between provisioner refreshes.
-SSH_TOKEN_EXPIRES_MINUTES = 30 * 24 * 60  # 30 days.
+# SSH access tokens double as the SSH username. A fresh token is issued on
+# every get_cluster_info call (any provision/recovery path), but the backend
+# caches the token in the cluster handle between those calls, so issue
+# long-lived tokens to keep existing clusters reachable. Clusters older
+# than the expiry need a relaunch (`sky launch -c <cluster>`) to refresh.
+SSH_TOKEN_EXPIRES_MINUTES = 365 * 24 * 60  # 1 year.
 
 # Label used to associate sandboxes with a SkyPilot cluster.
 CLUSTER_LABEL = 'skypilot-cluster'
