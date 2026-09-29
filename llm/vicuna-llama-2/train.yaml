@@ -1,4 +1,5 @@
 envs:
+  USE_XFORMERS: 1
   HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
   ARTIFACT_BUCKET_NAME: # TODO: Fill with your unique bucket name, or use --env to pass.
   WANDB_API_KEY: null # Pass with `--secret WANDB_API_KEY` in CLI
@@ -34,6 +35,9 @@ setup: |
   # Use an older version of fastchat to install transformers==4.28.1, as the transformers>=4.31
   # has issues with checkpoint saving -- saving additional large files in the checkpoint folder
   pip install git+https://github.com/lm-sys/FastChat.git@cfc73bf3e13c22ded81e89675e0d7b228cf4b342
+  if [ $USE_XFORMERS -eq 1 ]; then
+    pip install -U xformers
+  fi
   python hardcoded_questions.py
   python -m fastchat.data.merge --in $HOME/data/sharegpt.json hardcoded.json --out $HOME/data/mydata.json
 
@@ -42,7 +46,11 @@ setup: |
 run: |
   cd scripts
   conda activate chatbot
-  TRAIN_SCRIPT=train.py
+  if [ $USE_XFORMERS -eq 1 ]; then
+    TRAIN_SCRIPT=train_xformers.py
+  else
+    TRAIN_SCRIPT=train.py
+  fi
 
   PER_DEVICE_BATCH_SIZE=4
   SEQ_LEN=2048
