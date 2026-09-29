@@ -305,6 +305,15 @@ class Azure(clouds.Cloud):
         return _DEFAULT_GPU_IMAGE_ID
 
     @classmethod
+    @annotations.lru_cache(scope='request')
+    def _community_image_supports_nvme(cls, image_id: str, region: str) -> bool:
+        image = azure_utils.get_community_image(
+            azure.get_client('compute', cls.get_project_id()), image_id, region)
+        return any(feature.name == 'DiskControllerTypes' and 'NVME' in {
+            value.strip().upper() for value in (feature.value or '').split(',')
+        } for feature in image.features or [])
+
+    @classmethod
     def regions_with_offering(
         cls,
         instance_type: str,
@@ -402,6 +411,16 @@ class Azure(clouds.Cloud):
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
+        # new VM families can require NVMe instead of SCSI.
+        capabilities = azure_catalog.get_instance_type_capabilities(
+            resources.instance_type, region_name)
+        controllers = {
+            value.strip().upper()
+            for value in capabilities.get('DiskControllerTypes', '').split(',')
+        }
+        disk_controller_type = ('NVMe' if 'NVME' in controllers and
+                                'SCSI' not in controllers else None)
+
         cloud_image_id = resources.get_cloud_image_id()
         if cloud_image_id is None:
             # share the catalog for image and SKU metadata.
@@ -418,19 +437,36 @@ class Azure(clouds.Cloud):
 
         # Checked basic image syntax in resources.py
         if image_id.startswith('skypilot:'):
-            image_id = catalog.get_image_id_from_tag(image_id, clouds='azure')
+            image_tag = image_id
+            image_id = catalog.get_image_id_from_tag(image_tag, clouds='azure')
             # Fallback if image does not exist in the specified region.
             # Putting fallback here instead of at image validation
             # when creating the resource because community images are
             # regional so we need the correct region when we check whether
             # the image exists.
-            if image_id.startswith(
-                    _COMMUNITY_IMAGE_PREFIX
-            ) and region_name not in azure_catalog.COMMUNITY_IMAGE_AVAILABLE_REGIONS:
-                logger.info(f'Azure image {image_id} does not exist in region '
-                            f'{region_name} so use the fallback image instead.')
-                image_id = catalog.get_image_id_from_tag(_FALLBACK_IMAGE_ID,
-                                                         clouds='azure')
+            if image_id.startswith(_COMMUNITY_IMAGE_PREFIX):
+                image_available = (
+                    region_name
+                    in azure_catalog.COMMUNITY_IMAGE_AVAILABLE_REGIONS)
+                if (cloud_image_id is None and acc_dict is None and
+                        disk_controller_type == 'NVMe' and
+                    (not image_available or
+                     not self._community_image_supports_nvme(
+                         image_id, region_name))):
+                    base_image = azure_catalog.get_image_id_from_tag(
+                        image_tag, None, use_base_image=True)
+                    if base_image is None:
+                        raise exceptions.ResourcesUnavailableError(
+                            f'No base image found for NVMe CPU image {image_tag}.'
+                        )
+                    image_id = (f'{base_image}:latest'
+                                if base_image.count(':') == 2 else base_image)
+                elif not image_available:
+                    logger.info(
+                        f'Azure image {image_id} does not exist in region '
+                        f'{region_name} so use the fallback image instead.')
+                    image_id = catalog.get_image_id_from_tag(_FALLBACK_IMAGE_ID,
+                                                             clouds='azure')
 
         if image_id.startswith(_COMMUNITY_IMAGE_PREFIX):
             image_config = {'community_gallery_image_id': image_id}
@@ -499,15 +535,6 @@ class Azure(clouds.Cloud):
             assert False, 'Low disk tier should always be supported on Azure.'
 
         disk_tier = _failover_disk_tier()
-        # new VM families can require NVMe instead of SCSI.
-        capabilities = azure_catalog.get_instance_type_capabilities(
-            resources.instance_type, region_name)
-        controllers = {
-            value.strip().upper()
-            for value in capabilities.get('DiskControllerTypes', '').split(',')
-        }
-        disk_controller_type = ('NVMe' if 'NVME' in controllers and
-                                'SCSI' not in controllers else None)
 
         resources_vars: Dict[str, Any] = {
             'instance_type': resources.instance_type,

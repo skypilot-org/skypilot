@@ -253,6 +253,75 @@ def test_deployment_renders_native_zone_and_required_controller(
     assert arm.get('diskControllerType') == expected
 
 
+@pytest.mark.parametrize('settings,expected,metadata_calls', [
+    ({}, 'Canonical:offer:gen2:latest', 1),
+    ({
+        'features': 'SCSI, NVMe'
+    }, 'community', 1),
+    ({
+        'base': 'Canonical:offer:gen2:1.2.3'
+    }, 'Canonical:offer:gen2:1.2.3', 1),
+    ({
+        'available': False
+    }, 'Canonical:offer:gen2:latest', 0),
+    ({
+        'controllers': 'SCSI,NVMe'
+    }, 'community', 0),
+    ({
+        'explicit': 'Custom:offer:gen2:9'
+    }, 'Custom:offer:gen2:9', 0),
+    ({
+        'gpu': True
+    }, 'community', 0),
+])
+def test_default_cpu_image_matches_required_controller(cloud, catalog,
+                                                       monkeypatch, settings,
+                                                       expected,
+                                                       metadata_calls):
+    _serve(catalog, monkeypatch, [
+        _sku(capabilities=[('DiskControllerTypes',
+                            settings.get('controllers', 'NVMe'))])
+    ])
+    community = '/CommunityGalleries/test/Images/default'
+    monkeypatch.setattr(
+        catalog, '_image_df',
+        pd.DataFrame([{
+            'Tag': tag,
+            'Region': None,
+            'ImageId': community,
+            'BaseImageId': settings.get('base', 'Canonical:offer:gen2')
+        } for tag in ('skypilot:custom-cpu-ubuntu-v2',
+                      'skypilot:custom-gpu-ubuntu-v2')]))
+    monkeypatch.setattr(catalog, 'get_gen_version_from_instance_type',
+                        lambda *_: 'V2')
+    monkeypatch.setattr(cloud, 'get_accelerators_from_instance_type',
+                        lambda *_: {'T4': 1} if settings.get('gpu') else None)
+    monkeypatch.setattr(cloud, 'get_project_id', lambda *_: 'subscription-a')
+    if not settings.get('available', True):
+        monkeypatch.setattr(catalog, 'COMMUNITY_IMAGE_AVAILABLE_REGIONS', set())
+    features = settings.get('features')
+    metadata = Mock(return_value=NS(
+        features=[NS(name='DiskControllerTypes', value=features
+                    )] if features else None))
+    monkeypatch.setattr('sky.clouds.azure.azure_utils.get_community_image',
+                        metadata)
+    resource = sky.Resources(infra='azure/eastus/2',
+                             instance_type='Standard_Test',
+                             image_id=settings.get('explicit'),
+                             disk_tier='medium')
+    for _ in range(2):
+        values = cloud().make_deploy_resources_variables(
+            resource, NS(name_on_cloud='test'), sky.clouds.Region('eastus'),
+            [sky.clouds.Zone('2')], 1)
+        if expected == 'community':
+            assert values['community_gallery_image_id'] == community
+        else:
+            assert ':'.join(values[f'image_{key}']
+                            for key in ('publisher', 'offer', 'sku',
+                                        'version')) == expected
+    assert metadata.call_count == metadata_calls
+
+
 def test_provisioner_uses_native_zone_and_reports_actual_resume_zone(
         monkeypatch):
     module = azure_instance

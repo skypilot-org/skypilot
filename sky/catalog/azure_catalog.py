@@ -300,17 +300,22 @@ def list_accelerators(
                                          case_sensitive, all_regions)
 
 
-def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
+def get_image_id_from_tag(tag: str,
+                          region: Optional[str],
+                          use_base_image: bool = False) -> Optional[str]:
     """Returns the image id from the tag."""
     global _image_df
-    image_id = common.get_image_id_from_tag_impl(_image_df, tag, region)
+    column = 'BaseImageId' if use_base_image else 'ImageId'
+    image_id = common.get_image_id_from_tag_impl(
+        _image_df.assign(ImageId=_image_df[column]), tag, region)
     if image_id is None:
         # Refresh the image catalog and try again, if the image tag is not
         # found.
         logger.debug('Refreshing the image catalog and trying again.')
         _image_df = common.read_catalog('azure/images.csv',
                                         pull_frequency_hours=0)
-        image_id = common.get_image_id_from_tag_impl(_image_df, tag, region)
+        image_id = common.get_image_id_from_tag_impl(
+            _image_df.assign(ImageId=_image_df[column]), tag, region)
     return image_id
 
 
