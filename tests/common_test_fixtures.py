@@ -5,6 +5,7 @@ import os
 import pickle
 import tempfile
 import time
+from types import SimpleNamespace
 import unittest
 import uuid
 
@@ -21,6 +22,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
+from sky.catalog import azure_catalog
 from sky.catalog import vsphere_catalog
 from sky.provision import common as provision_common
 from sky.provision.aws import config as aws_config
@@ -159,6 +161,42 @@ def get_az_mappings(*_, **__):
     return pd.read_csv('tests/default_aws_az_mappings.csv')
 
 
+def get_azure_subscription_id_mock():
+    return '00000000-0000-0000-0000-000000000000'
+
+
+@annotations.lru_cache(scope='request', maxsize=64)
+def get_azure_resource_skus_mock(_subscription_id, region):
+    # Dry runs enable clouds without credentials. Model regional SKU offerings
+    # from the price catalog; dedicated Azure tests cover native restrictions.
+    # pylint: disable=protected-access
+    offerings = azure_catalog._df
+    # Give the mock subscription fixed x64 CPU families for reproducible
+    # all-cloud optimizer expectations; native Azure tests cover other SKUs.
+    cpu_offerings = offerings['InstanceType'].str.match(
+        r'Standard_(D\d+s_v5|E\d+s_v5|F\d+s_v2)$')
+    offerings = offerings[cpu_offerings | (offerings['AcceleratorCount'] > 0)]
+    if region is not None:
+        offerings = offerings[offerings['Region'] == region]
+    skus = []
+    for row in offerings.drop_duplicates(['InstanceType',
+                                          'Region']).itertuples():
+        gpu_count = row.AcceleratorCount
+        skus.append(
+            SimpleNamespace(
+                name=row.InstanceType,
+                locations=[row.Region],
+                location_info=[],
+                restrictions=[],
+                capabilities=[
+                    SimpleNamespace(name='CpuArchitectureType', value='x64'),
+                    SimpleNamespace(
+                        name='GPUs',
+                        value=str(gpu_count) if pd.notna(gpu_count) else '0'),
+                ]))
+    return tuple(skus)
+
+
 def list_empty_reservations(*_, **__):
     return []
 
@@ -211,6 +249,10 @@ def enable_all_clouds(monkeypatch, request, mock_client_requests):
     monkeypatch.setattr('sky.check.check_capability', dummy_function)
     monkeypatch.setattr('sky.catalog.aws_catalog._get_az_mappings',
                         get_az_mappings)
+    monkeypatch.setattr('sky.adaptors.azure.get_subscription_id',
+                        get_azure_subscription_id_mock)
+    monkeypatch.setattr(azure_catalog, '_get_resource_skus',
+                        get_azure_resource_skus_mock)
     monkeypatch.setattr('sky.backends.backend_utils.check_owner_identity',
                         dummy_function)
     monkeypatch.setattr(
