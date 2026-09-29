@@ -115,8 +115,10 @@ def _run(config, monkeypatch):
 
 
 @pytest.mark.parametrize('spot', [False, True])
-@pytest.mark.parametrize('cpus,memory', [('16+', '550+'), ('48', '752'),
-                                         ('16+', '12x'), (None, None)])
+@pytest.mark.parametrize('cpus,memory',
+                         [('16+', '550+'),
+                          ('48', str(752_000_000_000 / 1_073_741_824)),
+                          ('16+', '12x'), (None, None)])
 def test_render_to_provider_preserves_selected_shape(tmp_path, monkeypatch,
                                                      spot, cpus, memory):
     config = _render(tmp_path, cpus=cpus, memory=memory, spot=spot)
@@ -130,7 +132,7 @@ def test_render_to_provider_preserves_selected_shape(tmp_path, monkeypatch,
     assert args['gpu_type_id'] == 'NVIDIA H200'
     assert args['gpu_count'] == 4
     assert args['min_vcpu_count'] == 48
-    assert args['min_memory_in_gb'] == 808
+    assert args['min_memory_in_gb'] == 752
     assert args['allowed_cuda_versions'] == ['13.0']
     assert args['image_name'] == 'example/pinned:cuda13'
     assert args['data_center_id'] == 'US-TEST-1'
@@ -185,7 +187,7 @@ def test_no_eligible_cuda_keeps_filters_and_propagates_failure(
         _run(config, monkeypatch)
     provider.assert_called_once()
     assert provider.call_args.kwargs['allowed_cuda_versions'] == ['13.0']
-    assert provider.call_args.kwargs['min_memory_in_gb'] == 808
+    assert provider.call_args.kwargs['min_memory_in_gb'] == 752
 
 
 def test_unset_cuda_adds_no_filter(tmp_path, monkeypatch):
@@ -251,15 +253,33 @@ def test_cpu_instance_path_unchanged(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize('spot', [False, True])
+@pytest.mark.parametrize('native_memory', [591, 752])
 def test_actual_sdk_and_spot_graphql_preserve_total_requirements(
-        tmp_path, monkeypatch, spot):
+        tmp_path, monkeypatch, offline, spot, native_memory):
     sdk = pytest.importorskip('runpod')
+    fetcher = importlib.import_module('sky.catalog.data_fetchers.fetch_runpod')
+    # Start with the real catalog fetcher's unconverted provider data, not a
+    # hand-written fixture asserting that nominal GB was already GiB.
+    shape = fetcher.get_gpu_info('H200-SXM', {
+        'displayName': 'H200 SXM',
+        'manufacturer': 'NVIDIA',
+        'memoryInGb': 141,
+    }, 4)
+    assert shape['vCPUs'] == 48
+    assert shape['MemoryGiB'] == 752
+    offline['vCPUs'] = shape['vCPUs']
+    offline['MemoryGiB'] = native_memory
     ctl = importlib.import_module('runpod.api.ctl_commands')
     graphql = importlib.import_module('runpod.api.graphql')
     calls = []
 
     def query(body, **_kwargs):
         calls.append(body)
+        # A native-sized host must remain eligible. Inflating the native 752
+        # to 808 reproduces the old no-eligible-host failure at this boundary.
+        memory = int(body.split('minMemoryInGb: ')[1].split(',')[0])
+        if memory > native_memory:
+            raise RuntimeError('No eligible host meets inflated memory floor')
         return {
             'data': {
                 'podFindAndDeployOnDemand': {
@@ -279,6 +299,43 @@ def test_actual_sdk_and_spot_graphql_preserve_total_requirements(
     _run(_render(tmp_path, spot=spot), monkeypatch)
     assert len(calls) == 1
     assert 'minVcpuCount: 48' in calls[0]
-    assert 'minMemoryInGb: 808' in calls[0]
+    assert f'minMemoryInGb: {native_memory}' in calls[0]
     assert 'gpuCount: 4' in calls[0]
     assert 'allowedCudaVersions: ["13.0"]' in calls[0]
+
+
+@pytest.mark.parametrize('spot', [False, True])
+@pytest.mark.parametrize('native_memory,eligible', [(590, False), (591, True)])
+def test_sky_gib_floor_uses_conservative_provider_gb(offline, spot,
+                                                     native_memory, eligible):
+    offline['MemoryGiB'] = native_memory
+    resources = Resources(cloud=clouds.RunPod(),
+                          accelerators='H200-SXM:4',
+                          cpus='16+',
+                          memory='550+',
+                          use_spot=spot)
+    result = clouds.RunPod()._get_feasible_launchable_resources(resources)
+    assert bool(result.resources_list) is eligible
+    assert not result.fuzzy_candidate_list
+
+
+def test_normalized_view_keeps_native_shape_and_cpu_rows(offline, monkeypatch):
+    catalog = importlib.import_module('sky.catalog.runpod_catalog')
+    cpu = offline.iloc[0].to_dict()
+    cpu.update(InstanceType='cpu3c-2-4',
+               AcceleratorName=None,
+               AcceleratorCount=0,
+               vCPUs=2,
+               MemoryGiB=4)
+    frame = pd.concat([offline, pd.DataFrame([cpu])], ignore_index=True)
+    monkeypatch.setattr(catalog, '_df', frame)
+    before = frame.copy(deep=True)
+    for _ in range(2):
+        assert catalog.get_vcpus_mem_from_instance_type(
+            '4x_H200-SXM_SECURE') == (48, 752_000_000_000 / 1_073_741_824)
+        assert catalog.get_native_gpu_host_resources('4x_H200-SXM_SECURE') == (
+            48, 752)
+        assert catalog.get_vcpus_mem_from_instance_type('cpu3c-2-4') == (2, 4)
+        assert catalog.get_default_instance_type(cpus='2',
+                                                 memory='4') == ('cpu3c-2-4')
+    pd.testing.assert_frame_equal(frame, before)

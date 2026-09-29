@@ -2895,9 +2895,13 @@ launches. A task's ``config`` block can override the global setting. Omit the
 setting to use the provider default; CPU-only instances ignore it. A Docker
 image tag alone does not constrain the host driver.
 
-SkyPilot also passes the selected GPU instance's catalog CPU and host-memory
-sizes as provisioning minima. Catalog memory is in GiB and is conservatively
-rounded up to decimal GB for RunPod's GraphQL request. Unknown or invalid
+SkyPilot also passes the selected GPU instance's CPU and provider-native
+host-memory sizes as provisioning minima. The legacy RunPod GPU catalog stores
+nominal GB under the ``MemoryGiB`` column. For matching Sky's GiB requirements,
+SkyPilot conservatively treats each nominal GB as 10\ :sup:`9` bytes, without
+claiming RunPod's undocumented byte basis. Provisioning retains the original
+nominal GB floor: a catalog value of 752 sends 752, while a 550 GiB requirement
+needs at least 591 nominal GB. CPU-only sizing is unchanged. Unknown or invalid
 host sizes fail before provisioning. These constraints can reduce availability;
 SkyPilot does not remove them when a provider rejects the request.
 Previously rendered GPU configurations without these host minima must be

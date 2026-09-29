@@ -42,7 +42,10 @@ def offline_catalog(monkeypatch):
 @pytest.mark.parametrize('memory,expected', [
     (None, ['small', 'unknown', 'large']),
     ('550+', ['large']),
-    ('752', ['large']),
+    (str(752_000_000_000 / 1_073_741_824), ['large']),
+    ('752', []),
+    ('701+', []),
+    ('700+', ['large']),
     ('550', []),
     ('753+', []),
     ('12x', ['large']),

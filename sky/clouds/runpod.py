@@ -233,18 +233,21 @@ class RunPod(clouds.Cloud):
 
         gpu_requirements = {}
         if acc_dict:
-            cpus, memory_gib = self.get_vcpus_mem_from_instance_type(
+            # Keep catalog initialization lazy, as in other cloud adapters.
+            # pylint: disable=import-outside-toplevel
+            from sky.catalog import runpod_catalog
+            cpus, memory_gb = runpod_catalog.get_native_gpu_host_resources(
                 instance_type)
             if any(value is None or not math.isfinite(value) or value <= 0
-                   for value in (cpus, memory_gib)):
+                   for value in (cpus, memory_gb)):
                 raise ValueError(f'RunPod GPU instance {instance_type} must '
                                  'have known positive CPU and host RAM sizes.')
-            assert cpus is not None and memory_gib is not None
-            # Preserve the advertised host shape, not the GPU's VRAM. RunPod's
-            # GraphQL uses total GB; round GiB up to decimal GB conservatively.
+            assert cpus is not None and memory_gb is not None
+            # Preserve the provider-native floor. The catalog separately uses
+            # a conservative GiB view when matching Sky memory requirements.
             gpu_requirements = {
                 'min_vcpu_count': math.ceil(cpus),
-                'min_memory_in_gb': math.ceil(memory_gib * 2**30 / 10**9),
+                'min_memory_in_gb': math.ceil(memory_gb),
                 'allowed_cuda_versions': skypilot_config.get_nested(
                     ('runpod', 'allowed_cuda_versions'),
                     default_value=None,
