@@ -300,12 +300,18 @@ def launch_sandbox(
     # STOP feature is declared unsupported), so this only affects how the
     # platform would treat a stop, not SkyPilot's lifecycle.
     body['autoDeleteInterval'] = 0 if is_gpu else -1
-    if disk_size is not None and is_gpu:
-        # GPU sandboxes support up to 512 GiB disk per GPU. CPU sandboxes
-        # have a much smaller tier-dependent per-sandbox disk cap (e.g.
-        # 10 GiB), below SkyPilot's default disk_size, so the platform
-        # default is used for them instead.
-        body['disk'] = disk_size
+    if disk_size is not None:
+        if is_gpu:
+            # GPU sandboxes support up to 512 GiB disk per GPU.
+            body['disk'] = disk_size
+        else:
+            # CPU sandboxes have a much smaller tier-dependent per-sandbox
+            # disk cap (e.g. 10 GiB), below SkyPilot's default disk_size,
+            # so the platform default is used for them instead.
+            logger.warning(
+                f'Daytona CPU sandboxes do not support the requested disk '
+                f'size ({disk_size} GiB); using the platform default disk '
+                'size instead.')
     body['buildInfo'] = {
         'dockerfileContent': f'FROM {image_id or DEFAULT_IMAGE}'
     }
