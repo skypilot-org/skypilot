@@ -75,7 +75,7 @@ def test_gpu_memory_constraints(memory, expected, use_spot):
         'accelerators': 'H200-SXM:2'
     },
     {
-        'accelerators': 'H200:4'
+        'accelerators': 'B200:4'
     },
     {
         'max_hourly_cost': 10
