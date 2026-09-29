@@ -971,6 +971,10 @@ class UpdateWorkspaceBody(RequestBody):
     """The request body for updating a specific workspace configuration."""
     workspace_name: str = ''  # Will be set from path parameter
     config: Dict[str, Any]
+    # The workspace config the update was based on. When set, the update is
+    # rejected with WorkspaceConfigConflictError if the workspace no longer
+    # holds it (compared under the config lock).
+    expected_config: Optional[Dict[str, Any]] = None
 
 
 class CreateWorkspaceBody(RequestBody):
