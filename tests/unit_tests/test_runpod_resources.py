@@ -1,4 +1,6 @@
 """RunPod selection must enforce the requested host resources."""
+# The test exercises the provider's internal selection entry point.
+# pylint: disable=protected-access
 import importlib
 
 import pandas as pd
@@ -27,7 +29,7 @@ def offline_catalog(monkeypatch):
                          ])
     frame['SpotPrice'] = frame['Price'] / 2
 
-    def no_network(*args, **kwargs):
+    def no_network(*_args, **_kwargs):
         pytest.fail('Offline RunPod resource test attempted a network request')
 
     monkeypatch.setattr(requests.sessions.Session, 'request', no_network)
