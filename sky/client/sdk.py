@@ -494,6 +494,7 @@ def optimize(
     """
     _check_slurm_host_path_volume_api_version(dag)
     _check_task_namespace_api_version(dag)
+    versions.check_modal_deadline_api(dag, versions.get_remote_api_version())
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
     body = payloads.OptimizeBody(dag=dag_str,
@@ -628,6 +629,7 @@ def validate(
     """
     _check_slurm_host_path_volume_api_version(dag)
     _check_task_namespace_api_version(dag)
+    versions.check_modal_deadline_api(dag, versions.get_remote_api_version())
     remote_api_version = versions.get_remote_api_version()
 
     def _omit(version: int) -> bool:

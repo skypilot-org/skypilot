@@ -8,7 +8,9 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 from sky import catalog
 from sky import clouds
 from sky import exceptions
+from sky import skypilot_config
 from sky.adaptors import modal as modal_adaptor
+from sky.provision.modal import deadline as modal_deadline
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
@@ -51,8 +53,6 @@ class Modal(clouds.Cloud):
             'Host controllers are not supported on Modal yet.',
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             'High availability controllers are not supported on Modal.',
-        clouds.CloudImplementationFeatures.AUTO_TERMINATE:
-            'Auto-termination is not supported on Modal yet.',
         clouds.CloudImplementationFeatures.AUTOSTOP:
             'Autostop without down is not supported on Modal.',
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
@@ -263,6 +263,11 @@ class Modal(clouds.Cloud):
             'modal_cpu': modal_cpu,
             'modal_memory': modal_memory,
             'modal_timeout': 24 * 60 * 60,
+            'modal_deadline': modal_deadline.validate(
+                skypilot_config.get_nested(
+                    ('modal', 'deadline'),
+                    None,
+                    override_configs=resources.cluster_config_overrides)),
             'modal_idle_timeout': None,
             'modal_docker_image': resources.extract_docker_image(),
             'modal_volume_mounts': modal_volume_mounts,

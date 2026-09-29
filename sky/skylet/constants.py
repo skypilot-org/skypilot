@@ -645,6 +645,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('vast', 'datacenter_only'),
     ('vast', 'create_instance_kwargs'),
     ('runpod', 'allowed_cuda_versions'),
+    ('modal', 'deadline'),
     ('slurm', 'sbatch_options'),
     ('slurm', 'quota'),
     ('slurm', 'cpu_partition'),

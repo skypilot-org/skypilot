@@ -1767,6 +1767,8 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
 
     try:
         dag = dag_utils.load_dag_from_yaml_str(validate_body.dag)
+        versions.check_modal_deadline_api(dag,
+                                          versions.get_remote_api_version())
         # Apply admin policy and validate DAG is blocking, run it in a separate
         # thread executor to avoid blocking the uvicorn event loop.
         await asyncio.to_thread(validate_dag, dag)

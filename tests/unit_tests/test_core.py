@@ -1,3 +1,4 @@
+import contextlib
 import inspect
 from unittest import mock
 
@@ -13,6 +14,7 @@ from sky import global_user_state
 from sky import models
 from sky import skypilot_config
 from sky.backends import backend_utils
+from sky.backends import cloud_vm_ray_backend
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
 from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
 from sky.client import sdk
@@ -24,6 +26,104 @@ from sky.utils import config_utils
 from sky.utils import dag_utils
 from sky.utils import status_lib
 from sky.workspaces import constants as workspace_constants
+
+
+@pytest.mark.parametrize('retry_until_up', [False, True])
+@pytest.mark.parametrize('cutoff', [1, 2000000000.75])
+def test_expired_modal_retry_finishes_before_provisioning(
+        cutoff, retry_until_up, monkeypatch):
+    resource = sky.Resources(
+        infra='modal',
+        _cluster_config_overrides={'modal': {
+            'deadline': cutoff
+        }})
+    backend = CloudVmRayBackend()
+    monkeypatch.setattr(backend, '_check_existing_cluster',
+                        mock.Mock(return_value=mock.Mock(resources=resource)))
+    monkeypatch.setattr(cloud_vm_ray_backend.lock_events,
+                        'DistributedLockEvent',
+                        lambda *a: contextlib.nullcontext())
+    monkeypatch.setattr(cloud_vm_ray_backend.rich_utils, 'force_update_status',
+                        lambda *a: None)
+    monkeypatch.setattr(backend, '_maybe_clear_external_cluster_failures',
+                        lambda *a: None)
+    monkeypatch.setattr(cloud_vm_ray_backend.usage_lib.messages.usage,
+                        'update_cluster_resources', lambda *a: None)
+    monkeypatch.setattr(cloud_vm_ray_backend.usage_lib.messages.usage,
+                        'update_cluster_status', lambda *a: None)
+    wheel = mock.Mock(side_effect=RuntimeError('normal provisioning path'))
+    monkeypatch.setattr(cloud_vm_ray_backend.wheel_utils, 'build_sky_wheel',
+                        wheel)
+    error = TimeoutError if cutoff == 1 else RuntimeError
+    with pytest.raises(error,
+                       match='deadline has passed|normal provisioning path'):
+        backend._locked_provision('unused',
+                                  sky.Task(),
+                                  resource,
+                                  False,
+                                  False,
+                                  'existing',
+                                  retry_until_up=retry_until_up)
+    assert wheel.call_count == (0 if cutoff == 1 else 1)
+
+
+@pytest.mark.parametrize('requested,actual', [
+    (None, None),
+    (None, 2000000000.75),
+    (2000000000.75, 2000000000.75),
+    (2000000000.75, None),
+    (2000000000.75, 2000000001.75),
+    (2000000000.75, 1999999999.75),
+])
+@pytest.mark.parametrize('terminated', [False, True])
+@pytest.mark.parametrize('planned', [False, True])
+def test_modal_reuse_preserves_rendered_deadline(requested, actual, terminated,
+                                                 planned, monkeypatch):
+    # Original deadline came from global config, so it is absent from Resources.
+    original = sky.Resources(infra='modal/auto', instance_type='4CPU--16GB')
+    handle = mock.Mock(spec=CloudVmRayResourceHandle,
+                       cluster_name='existing',
+                       cluster_yaml='/generated/existing.yml',
+                       launched_resources=original,
+                       launched_nodes=1)
+    task = sky.Task().set_resources(
+        sky.Resources(infra='modal',
+                      _cluster_config_overrides={} if requested is None else
+                      {'modal': {
+                          'deadline': requested
+                      }}))
+    record = {
+        'handle': handle,
+        'status': status_lib.ClusterStatus.UP,
+        'cluster_ever_up': True,
+        'config_hash': None
+    }
+    monkeypatch.setattr(global_user_state, 'get_cluster_from_name',
+                        lambda *a, **kw: record)
+    monkeypatch.setattr(backend_utils, 'refresh_cluster_record',
+                        lambda *a, **kw: None if terminated else record)
+    monkeypatch.setattr(global_user_state, 'get_status_from_cluster_name',
+                        lambda *a: None)
+    monkeypatch.setattr(
+        global_user_state, 'get_cluster_yaml_str', lambda *a:
+        'available_node_types:\n  ray_head_default:\n    node_config:\n'
+        f'      Deadline: {actual if actual is not None else "null"}\n')
+    backend = CloudVmRayBackend()
+    with skypilot_config.replace_skypilot_config_in_process(
+            config_utils.Config({})):
+        if requested is not None and requested != actual:
+            with pytest.raises(exceptions.ResourcesMismatchError,
+                               match='Existing Modal deadline'):
+                backend._check_existing_cluster(task,
+                                                original if planned else None,
+                                                'existing')
+        else:
+            result = backend._check_existing_cluster(
+                task, original if planned else None, 'existing')
+            assert result.prev_handle is (None if terminated else handle)
+            assert result.resources.cluster_config_overrides.get(
+                'modal', {}).get('deadline') == actual
+    assert not original.cluster_config_overrides
 
 
 @pytest.mark.parametrize('requested,actual', [

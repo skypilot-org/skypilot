@@ -271,7 +271,6 @@ def test_modal_unsupported_features():
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
         clouds.CloudImplementationFeatures.HOST_CONTROLLERS,
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS,
-        clouds.CloudImplementationFeatures.AUTO_TERMINATE,
         clouds.CloudImplementationFeatures.AUTOSTOP,
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK,
         clouds.CloudImplementationFeatures.LOCAL_DISK,
@@ -644,8 +643,9 @@ def test_modal_run_instances_creates_sandbox(monkeypatch):
         modal_instance.modal_utils,
         'get_image',
         lambda docker_image=None: image_calls.append(docker_image) or 'image')
-    monkeypatch.setattr(modal_instance.modal_utils, 'get_ssh_tunnel',
-                        lambda sandbox: ('host', 12345))
+    monkeypatch.setattr(modal_instance.modal_utils,
+                        'get_ssh_tunnel',
+                        lambda sandbox, timeout=None: ('host', 12345))
     monkeypatch.setattr(modal_utils, '_get_s3_secret',
                         lambda region: f's3-secret:{region}')
     monkeypatch.setattr(

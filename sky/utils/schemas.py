@@ -2398,6 +2398,16 @@ def get_config_schema():
                 }
             },
         },
+        'modal': {
+            'type': 'object',
+            'additionalProperties': False,
+            'properties': {
+                'deadline': {
+                    'type': 'number',
+                    'exclusiveMinimum': 0,
+                },
+            },
+        },
         'runpod': {
             'type': 'object',
             'additionalProperties': False,

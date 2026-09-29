@@ -1235,6 +1235,18 @@ SkyPilot storage mounts in ``MOUNT`` mode are translated to Modal
 ``CloudBucketMount`` at Sandbox creation time for S3, Cloudflare R2, and GCS
 buckets. ``MOUNT_CACHED`` is not supported on Modal.
 
+For a shorter lifetime, set ``config.modal.deadline`` to an absolute Unix
+timestamp in seconds in the task YAML (or pass
+``--config modal.deadline=TIMESTAMP``). SkyPilot preserves that cutoff through
+setup and delayed container startup; it does not renew the lifetime on reuse.
+A different cutoff requires a new cluster. The provider timeout remains capped
+at 24 hours.
+
+This is a runtime backstop, not a scheduled-creation cancellation API. If launch
+is canceled or times out while Modal is still provisioning, reconcile the
+original Sky request and named Sandbox, terminate it with ``sky down``, and
+verify it is gone. A lost response is not proof that no Sandbox was created.
+
 Current limitations:
 
 - Modal support is single-node only.

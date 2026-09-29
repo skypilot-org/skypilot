@@ -173,8 +173,9 @@ def get_head_sandbox(cluster_name_on_cloud: str,
     return next(iter(sandboxes.values()))
 
 
-def get_ssh_tunnel(sandbox) -> Tuple[str, int]:
-    tunnels = sandbox.tunnels(timeout=_TUNNEL_TIMEOUT_SECONDS)
+def get_ssh_tunnel(sandbox, timeout: Optional[int] = None) -> Tuple[str, int]:
+    tunnels = sandbox.tunnels(timeout=min(_TUNNEL_TIMEOUT_SECONDS, timeout) if
+                              timeout is not None else _TUNNEL_TIMEOUT_SECONDS)
     tunnel = tunnels[SSH_PORT]
     return tunnel.tcp_socket
 

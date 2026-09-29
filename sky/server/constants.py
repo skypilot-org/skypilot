@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 65  # explicit task Kubernetes namespace binding
+API_VERSION = 66  # absolute Modal Sandbox deadlines
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -227,3 +227,6 @@ EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS = 3600  # 1 hour
 # enough that a launch shows up on the dashboard while someone is still
 # watching it, long enough that the sweep is negligible next to provisioning.
 LAUNCH_METRICS_DAEMON_INTERVAL_SECONDS = 60
+
+# Minimum client/server API version preserving an absolute Modal deadline.
+MIN_MODAL_SANDBOX_DEADLINE_API_VERSION = 66

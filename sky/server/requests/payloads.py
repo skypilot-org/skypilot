@@ -34,6 +34,7 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.server import common
+from sky.server import versions
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
@@ -265,6 +266,7 @@ class DagRequestBody(RequestBody):
         kwargs = super().to_kwargs()
 
         dag = dag_utils.load_dag_from_yaml_str(self.dag)
+        versions.check_modal_deadline_api(dag, self.client_api_version)
         # We should not validate the dag here, as the file mounts are not
         # processed yet, but we need to validate the resources during the
         # optimization to make sure the resources are available.
@@ -341,7 +343,8 @@ class LaunchBody(RequestBody):
             self.task,
             self.env_vars,
             workdir_only=False,
-            file_mounts_blob_id=self.file_mounts_blob_id)
+            file_mounts_blob_id=self.file_mounts_blob_id,
+            client_api_version=self.client_api_version)
 
         backend_cls = registry.BACKEND_REGISTRY.from_str(self.backend)
         backend = backend_cls() if backend_cls is not None else None
@@ -374,7 +377,8 @@ class ExecBody(RequestBody):
             self.task,
             self.env_vars,
             workdir_only=True,
-            file_mounts_blob_id=self.file_mounts_blob_id)
+            file_mounts_blob_id=self.file_mounts_blob_id,
+            client_api_version=self.client_api_version)
         backend_cls = registry.BACKEND_REGISTRY.from_str(self.backend)
         backend = backend_cls() if backend_cls is not None else None
         kwargs['task'] = dag
@@ -641,7 +645,8 @@ class JobsLaunchBody(RequestBody):
             self.task,
             self.env_vars,
             workdir_only=False,
-            file_mounts_blob_id=self.file_mounts_blob_id)
+            file_mounts_blob_id=self.file_mounts_blob_id,
+            client_api_version=self.client_api_version)
         # Pass the blob id through so that consolidation-mode submissions can
         # record it on the job and keep the blob alive until the job is
         # terminal.
@@ -760,7 +765,8 @@ class ServeUpBody(RequestBody):
             self.task,
             self.env_vars,
             workdir_only=False,
-            file_mounts_blob_id=self.file_mounts_blob_id)
+            file_mounts_blob_id=self.file_mounts_blob_id,
+            client_api_version=self.client_api_version)
         assert len(
             dag.tasks) == 1, ('Must only specify one task in the DAG for '
                               'a service.', dag)
@@ -780,7 +786,8 @@ class ServeUpdateBody(RequestBody):
             self.task,
             self.env_vars,
             workdir_only=False,
-            file_mounts_blob_id=self.file_mounts_blob_id)
+            file_mounts_blob_id=self.file_mounts_blob_id,
+            client_api_version=self.client_api_version)
         assert len(
             dag.tasks) == 1, ('Must only specify one task in the DAG for '
                               'a service.', dag)
@@ -920,7 +927,8 @@ class JobsPoolApplyBody(RequestBody):
                 self.task,
                 self.env_vars,
                 workdir_only=False,
-                file_mounts_blob_id=self.file_mounts_blob_id)
+                file_mounts_blob_id=self.file_mounts_blob_id,
+                client_api_version=self.client_api_version)
             assert len(
                 dag.tasks) == 1, ('Must only specify one task in the DAG for '
                                   'a pool.', dag)

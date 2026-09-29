@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sky import sky_logging
 from sky.adaptors import modal as modal_adaptor
 from sky.provision import common
+from sky.provision.modal import deadline as modal_deadline
 from sky.provision.modal import modal_utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
@@ -52,6 +53,9 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     if config.count != 1:
         raise RuntimeError('Modal only supports single-node clusters.')
 
+    deadline = modal_deadline.validate(config.node_config.get('Deadline'))
+    if deadline is not None:
+        modal_deadline.remaining(deadline)
     environment_name = config.provider_config.get('environment_name')
     active_instances = _filter_instances(cluster_name_on_cloud,
                                          [status_lib.ClusterStatus.UP],
@@ -62,6 +66,12 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     if active_instances:
         head_instance_id = _get_head_instance_id(active_instances)
         assert head_instance_id is not None
+        if deadline is not None:
+            existing = active_instances[head_instance_id].get_tags().get(
+                modal_deadline.TAG)
+            if existing != str(deadline):
+                raise RuntimeError('Cannot change an existing Modal Sandbox '
+                                   'deadline; use a new cluster.')
         logger.info(f'Cluster {cluster_name_on_cloud} already has an active '
                     'Modal Sandbox.')
         return common.ProvisionRecord(provider_name=PROVIDER_NAME,
@@ -95,16 +105,19 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         sandbox_secrets.append(modal_env_secret)
     user_ports = sorted(
         set(config.ports_to_open_on_launch or []) - {modal_utils.SSH_PORT})
+    image = modal_utils.get_image(modal_docker_image)
+    tags = {'skypilot-cluster': cluster_name_on_cloud}
+    if deadline is not None:
+        modal_timeout = min(modal_timeout or 24 * 60 * 60,
+                            modal_deadline.remaining(deadline))
+        tags[modal_deadline.TAG] = str(deadline)
     sandbox = modal_adaptor.modal.Sandbox.create(
-        'bash',
-        '-lc',
-        modal_utils.get_ssh_start_command(public_key),
+        *modal_deadline.command(modal_utils.get_ssh_start_command(public_key),
+                                deadline),
         app=app,
         name=cluster_name_on_cloud,
-        tags={
-            'skypilot-cluster': cluster_name_on_cloud,
-        },
-        image=modal_utils.get_image(modal_docker_image),
+        tags=tags,
+        image=image,
         secrets=sandbox_secrets,
         encrypted_ports=user_ports,
         unencrypted_ports=[modal_utils.SSH_PORT],
@@ -117,9 +130,13 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                  modal_memory) if modal_memory is not None else None),
         volumes=sandbox_volumes,
     )
+    # Record accepted identity before readiness can fail or be interrupted.
+    logger.info(f'Created Modal Sandbox {sandbox.object_id} '
+                f'for {cluster_name_on_cloud}.')
     # Ensure the SSH tunnel exists before SkyPilot starts probing SSH.
-    modal_utils.get_ssh_tunnel(sandbox)
-    logger.info(f'Launched Modal Sandbox {sandbox.object_id}.')
+    modal_utils.get_ssh_tunnel(sandbox,
+                               timeout=None if deadline is None else
+                               modal_deadline.remaining(deadline))
     return common.ProvisionRecord(provider_name=PROVIDER_NAME,
                                   cluster_name=cluster_name_on_cloud,
                                   region=region,

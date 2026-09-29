@@ -28,6 +28,7 @@ available_node_types:
       Cpu: {{modal_cpu}}
       Memory: {{modal_memory}}
       Timeout: {{modal_timeout}}
+      Deadline: {% if modal_deadline is none %}null{% else %}{{modal_deadline}}{% endif %}
       IdleTimeout: {% if modal_idle_timeout is none %}null{% else %}{{modal_idle_timeout}}{% endif %}
       DockerImage: {% if modal_docker_image is none %}null{% else %}"{{modal_docker_image}}"{% endif %}
       ModalVolumes:
