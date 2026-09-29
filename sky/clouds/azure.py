@@ -307,8 +307,15 @@ class Azure(clouds.Cloud):
     @classmethod
     @annotations.lru_cache(scope='request')
     def _community_image_supports_nvme(cls, image_id: str, region: str) -> bool:
-        image = azure_utils.get_community_image(
-            azure.get_client('compute', cls.get_project_id()), image_id, region)
+        try:
+            image = azure_utils.get_community_image(
+                azure.get_client('compute', cls.get_project_id()), image_id,
+                region)
+        except exceptions.ResourcesUnavailableError as error:
+            if isinstance(error.__cause__,
+                          azure.exceptions().ResourceNotFoundError):
+                return False
+            raise
         return any(feature.name == 'DiskControllerTypes' and 'NVME' in {
             value.strip().upper() for value in (feature.value or '').split(',')
         } for feature in image.features or [])

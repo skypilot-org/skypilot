@@ -307,7 +307,7 @@ def get_image_id_from_tag(tag: str,
     global _image_df
     column = 'BaseImageId' if use_base_image else 'ImageId'
     image_id = common.get_image_id_from_tag_impl(
-        _image_df.assign(ImageId=_image_df[column]), tag, region)
+        _image_df.assign(ImageId=_image_df.get(column)), tag, region)
     if image_id is None:
         # Refresh the image catalog and try again, if the image tag is not
         # found.
@@ -315,7 +315,7 @@ def get_image_id_from_tag(tag: str,
         _image_df = common.read_catalog('azure/images.csv',
                                         pull_frequency_hours=0)
         image_id = common.get_image_id_from_tag_impl(
-            _image_df.assign(ImageId=_image_df[column]), tag, region)
+            _image_df.assign(ImageId=_image_df.get(column)), tag, region)
     return image_id
 
 

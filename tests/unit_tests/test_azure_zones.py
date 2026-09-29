@@ -253,8 +253,49 @@ def test_deployment_renders_native_zone_and_required_controller(
     assert arm.get('diskControllerType') == expected
 
 
+def test_legacy_image_catalog_without_base_column_remains_usable(
+        catalog, monkeypatch):
+    frame = pd.DataFrame([{
+        'Tag': 'skypilot:legacy',
+        'Region': None,
+        'ImageId': 'Canonical:offer:gen2:latest'
+    }])
+    monkeypatch.setattr(catalog, '_image_df', frame)
+    refresh = Mock(return_value=frame)
+    monkeypatch.setattr(catalog.common, 'read_catalog', refresh)
+    assert catalog.get_image_id_from_tag('skypilot:legacy',
+                                         None) == 'Canonical:offer:gen2:latest'
+    refresh.assert_not_called()
+    assert catalog.get_image_id_from_tag(
+        'skypilot:legacy', None, use_base_image=True) is None
+    refresh.assert_called_once()
+
+
+@pytest.mark.parametrize('error_class',
+                         ['HttpResponseError', 'ServiceRequestError'])
+def test_community_metadata_errors_do_not_trigger_image_fallback(
+        cloud, catalog, monkeypatch, error_class):
+    _serve(catalog, monkeypatch, [])
+    monkeypatch.setattr(cloud, 'get_project_id', lambda *_: 'subscription-a')
+    error = sky.exceptions.ResourcesUnavailableError('metadata unavailable')
+    error.__cause__ = getattr(catalog.azure.exceptions(),
+                              error_class)('metadata unavailable')
+    metadata = Mock(side_effect=error)
+    monkeypatch.setattr('sky.clouds.azure.azure_utils.get_community_image',
+                        metadata)
+    for _ in range(2):
+        with pytest.raises(sky.exceptions.ResourcesUnavailableError,
+                           match='metadata unavailable'):
+            cloud._community_image_supports_nvme(
+                '/CommunityGalleries/test/Images/default', 'eastus')
+    assert metadata.call_count == 2
+
+
 @pytest.mark.parametrize('settings,expected,metadata_calls', [
     ({}, 'Canonical:offer:gen2:latest', 1),
+    ({
+        'not_found': True
+    }, 'Canonical:offer:gen2:latest', 1),
     ({
         'features': 'SCSI, NVMe'
     }, 'community', 1),
@@ -303,6 +344,11 @@ def test_default_cpu_image_matches_required_controller(cloud, catalog,
     metadata = Mock(return_value=NS(
         features=[NS(name='DiskControllerTypes', value=features
                     )] if features else None))
+    if settings.get('not_found'):
+        error = sky.exceptions.ResourcesUnavailableError('image absent')
+        error.__cause__ = catalog.azure.exceptions().ResourceNotFoundError(
+            'image absent')
+        metadata.side_effect = error
     monkeypatch.setattr('sky.clouds.azure.azure_utils.get_community_image',
                         metadata)
     resource = sky.Resources(infra='azure/eastus/2',
