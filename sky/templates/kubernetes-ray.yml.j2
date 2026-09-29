@@ -1387,13 +1387,21 @@ available_node_types:
                 # dropping set -e for the load-bearing commands below.
                 $(prefix_cmd) sed "s@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd || true;
                 cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A;
-                $(prefix_cmd) mkdir -p ~/.ssh;
-                $(prefix_cmd) chown -R $(whoami) ~/.ssh;
-                $(prefix_cmd) chmod 700 ~/.ssh;
-                $(prefix_cmd) cat > ~/.ssh/authorized_keys <<'SKYPILOT_SSH_KEY_EOF'
+                # sshd uses the account's home, which may differ from image HOME
+                # when pod securityContext overrides the image's user. Bash's
+                # tilde fallback reads passwd without requiring getent/Python.
+                skypilot_ssh_home=$(unset HOME && builtin printf '%s\n' ~)
+                case "$skypilot_ssh_home" in
+                  /*) ;;
+                  *) echo "Cannot determine absolute SSH account home" >&2; exit 1 ;;
+                esac
+                $(prefix_cmd) mkdir -p "$skypilot_ssh_home/.ssh";
+                $(prefix_cmd) chown -R $(whoami) "$skypilot_ssh_home/.ssh";
+                $(prefix_cmd) chmod 700 "$skypilot_ssh_home/.ssh";
+                $(prefix_cmd) cat > "$skypilot_ssh_home/.ssh/authorized_keys" <<'SKYPILOT_SSH_KEY_EOF'
               skypilot:ssh_public_key_content
               SKYPILOT_SSH_KEY_EOF
-                $(prefix_cmd) chmod 644 ~/.ssh/authorized_keys;
+                $(prefix_cmd) chmod 644 "$skypilot_ssh_home/.ssh/authorized_keys";
                 # Start sshd portably: the service is `ssh` on Debian/Ubuntu but
                 # `sshd` on RHEL/UBI/SUSE, and minimal containers often have no
                 # service manager at all — fall back to launching the daemon
