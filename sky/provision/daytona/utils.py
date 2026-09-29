@@ -307,11 +307,20 @@ def launch_sandbox(
         else:
             # CPU sandboxes have a much smaller tier-dependent per-sandbox
             # disk cap (e.g. 10 GiB), below SkyPilot's default disk_size,
-            # so the platform default is used for them instead.
-            logger.warning(
-                f'Daytona CPU sandboxes do not support the requested disk '
-                f'size ({disk_size} GiB); using the platform default disk '
-                'size instead.')
+            # so the platform default is used for them instead. Only warn
+            # when the size differs from SkyPilot's default, i.e. the user
+            # explicitly requested it.
+            # pylint: disable=import-outside-toplevel
+            from sky.resources import DEFAULT_DISK_SIZE_GB
+            if disk_size != DEFAULT_DISK_SIZE_GB:
+                logger.warning(
+                    f'Daytona CPU sandboxes do not support the requested '
+                    f'disk size ({disk_size} GiB); using the platform '
+                    'default disk size instead.')
+            else:
+                logger.debug(
+                    'Skipping disk size for Daytona CPU sandbox; using '
+                    'the platform default.')
     body['buildInfo'] = {
         'dockerfileContent': f'FROM {image_id or DEFAULT_IMAGE}'
     }
