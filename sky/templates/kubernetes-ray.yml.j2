@@ -1828,7 +1828,7 @@ available_node_types:
           resources:
             requests:
               cpu: {{cpus}}
-              memory: {{memory}}G
+              memory: {{memory}}Gi
               {% if k8s_ephemeral_storage is defined %}
               ephemeral-storage: {{k8s_ephemeral_storage}}G
               {% endif %}
@@ -1857,7 +1857,7 @@ available_node_types:
               {% if k8s_cpu_limit is defined %}
               # CPU/Memory limits set via set_pod_resource_limits config
               cpu: {{k8s_cpu_limit}}
-              memory: {{k8s_memory_limit}}G
+              memory: {{k8s_memory_limit}}Gi
               {% endif %}
               {% if k8s_ephemeral_storage_limit is defined %}
               ephemeral-storage: {{k8s_ephemeral_storage_limit}}G

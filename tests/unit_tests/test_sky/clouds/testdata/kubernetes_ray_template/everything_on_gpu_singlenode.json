@@ -157,14 +157,14 @@
                 "limits": {
                   "cpu": 8.0,
                   "ephemeral-storage": "512.0G",
-                  "memory": "64.0G",
+                  "memory": "64.0Gi",
                   "nvidia.com/gpu": 8,
                   "nvidia.com/rdma_ib": 8
                 },
                 "requests": {
                   "cpu": 4,
                   "ephemeral-storage": "512G",
-                  "memory": "16G",
+                  "memory": "16Gi",
                   "nvidia.com/gpu": 8,
                   "nvidia.com/rdma_ib": 8
                 }

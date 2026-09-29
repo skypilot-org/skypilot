@@ -82,6 +82,7 @@ from typing import Any, Dict
 import pytest
 import yaml
 
+from sky.adaptors import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 
@@ -562,6 +563,28 @@ def test_kubernetes_ray_template_snapshot(case_name: str) -> None:
     variables = _build_variables(case_name)
     rendered = _render(variables)
     _assert_matches_snapshot(case_name, _normalize(rendered))
+
+
+@pytest.mark.parametrize('memory', [0.5, 64.0])
+@pytest.mark.parametrize('with_limit', [False, True])
+def test_memory_request_and_limit_preserve_gib(memory: float,
+                                               with_limit: bool) -> None:
+    variables = _build_variables('base_cpu')
+    variables['memory'] = str(memory)
+    if with_limit:
+        variables['k8s_cpu_limit'] = 4
+        variables['k8s_memory_limit'] = memory * 2
+    config = yaml.safe_load(_render(variables))
+    pod = config['available_node_types']['ray_head_default']['node_config']
+    resources = pod['spec']['containers'][0]['resources']
+    # Compare actual Kubernetes byte quantities, independently of Sky's parser.
+    assert kubernetes.parse_quantity(
+        resources['requests']['memory']) == memory * 2**30
+    if with_limit:
+        assert kubernetes.parse_quantity(
+            resources['limits']['memory']) == memory * 2 * 2**30
+    else:
+        assert 'memory' not in resources.get('limits', {})
 
 
 def test_sriov_pod_is_coherent() -> None:
