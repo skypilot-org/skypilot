@@ -1759,6 +1759,45 @@ For per-workspace overrides — e.g. sharing a single cluster context across
 teams, with each team scoped to its own namespace — see
 :ref:`Workspaces <workspaces>`.
 
+With API server version 65 or newer, an explicit task namespace binds that
+task's Kubernetes destination. It may override a plain global namespace default,
+but must match the effective workspace or per-context namespace when one is set:
+
+.. code-block:: yaml
+
+  resources:
+    infra: k8s/my-context
+  config:
+    kubernetes:
+      namespace: my-namespace
+
+This binding requires an explicit Kubernetes cloud and concrete context
+(``infra: k8s/<context>``, or ``cloud: kubernetes`` with ``region: <context>``).
+Cloudless, contextless, wildcard, SSH, and other-cloud selections are rejected
+before submission. Specify the context so namespace policy is evaluated against
+the final destination, including when reusing a cluster. Tasks without a namespace
+binding keep their existing placement behavior.
+
+When an admin policy is configured, any effective namespace in its returned
+config is authoritative, including an unchanged global namespace. A conflicting
+task namespace is rejected. A policy can allow task selection by returning no
+namespace constraint. Requests without a task namespace keep the existing
+workspace/context precedence.
+This admission check applies to cluster operations, managed jobs, and services
+before their task and returned config are passed to controllers.
+
+The launch flag ``--config kubernetes.namespace=my-namespace`` has the same
+effect. This changes the flag from an ambient default to a binding request.
+New clients reject it on servers older than API 65, even when the older ambient
+flag previously worked; upgrade both client and server to use the binding.
+``pod_config.metadata.namespace`` does not bind placement: pod creation uses
+the resolved provider namespace. Reusing an existing cluster rejects a task
+binding that differs from its recorded provider namespace, or whose existing
+namespace cannot be verified. Registered PVC volumes and auto-mounts must match
+the bound namespace; new ephemeral volumes inherit it. This does not move an
+existing cluster or PVC. Kubernetes task namespace binding is unsupported on
+SSH node pools and is rejected there.
+
 .. _config-yaml-kubernetes-allowed-nodes:
 
 ``kubernetes.allowed_nodes``

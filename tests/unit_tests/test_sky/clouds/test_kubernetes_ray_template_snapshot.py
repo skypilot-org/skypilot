@@ -78,13 +78,24 @@ import os
 from pathlib import Path
 import tempfile
 from typing import Any, Dict
+from unittest import mock
 
 import pytest
 import yaml
 
+from sky import clouds
+from sky import skypilot_config
+from sky import task as task_lib
 from sky.adaptors import kubernetes
+from sky.client.cli import command
+from sky.provision import common as provision_common
+from sky.provision.kubernetes import instance
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.server import plugins
+from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import config_utils
+from sky.utils import resources_utils
 
 TEMPLATE_NAME = 'kubernetes-ray.yml.j2'
 TESTDATA_DIR = (Path(__file__).parent / 'testdata' / 'kubernetes_ray_template')
@@ -490,6 +501,120 @@ def _render(variables: Dict[str, Any]) -> str:
         common_utils.fill_template(TEMPLATE_NAME, variables, output_path)
         with open(output_path, 'r', encoding='utf-8') as f:
             return f.read()
+
+
+@pytest.mark.parametrize('source', ['task', 'cli', 'config_file', 'absent'])
+def test_task_namespace_reaches_pod_creation(source, monkeypatch, tmp_path):
+    """Keep the binding through parsing, copying and strict server loading."""
+    override = {'kubernetes': {'namespace': 'models'}}
+    task_yaml = {
+        'resources': {
+            'infra': 'k8s/test-context',
+            'instance_type': '2CPU--4GB',
+            'image_id': 'docker:test-image',
+        },
+    }
+    if source == 'task':
+        task_yaml['config'] = override
+    task = task_lib.Task.from_yaml_config(task_yaml)
+    if source in ('cli', 'config_file'):
+        if source == 'config_file':
+            path = tmp_path / 'config.yaml'
+            path.write_text(yaml.safe_dump(override))
+            cli_config = [str(path)]
+        else:
+            cli_config = ['kubernetes.namespace=models']
+        task.set_resources_override(
+            command._parse_override_params(config_override=skypilot_config.
+                                           _compose_cli_config(cli_config)))
+    else:
+        task.set_resources_override({})
+
+    # Client parsing is permissive. Check the strict server deserialization
+    # too, after the task config has moved into Resources' serialized form.
+    monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, 'true')
+    monkeypatch.setattr(plugins, 'plugins_loaded', lambda: True)
+    task = task_lib.Task.from_yaml_config(task.to_yaml_config())
+    resources = next(iter(task.resources))
+    assert resources.cluster_config_overrides == ({} if source == 'absent' else
+                                                  override)
+    expected_namespace = 'workspace-context' if source == 'absent' else 'models'
+    ambient = config_utils.Config({
+        'active_workspace': 'team',
+        'kubernetes': {
+            'namespace': 'global',
+            'context_configs': {
+                'test-context': {
+                    'namespace': 'context'
+                }
+            },
+        },
+        'workspaces': {
+            'team': {
+                'kubernetes': {
+                    'namespace': 'workspace',
+                    'context_configs': {
+                        'test-context': {
+                            'namespace': expected_namespace
+                        }
+                    },
+                }
+            }
+        },
+    })
+    monkeypatch.setattr(skypilot_config, '_get_loaded_config', lambda: ambient)
+    monkeypatch.setattr(skypilot_config, 'get_active_workspace', lambda: 'team')
+    monkeypatch.setattr(kubernetes_utils, 'get_accelerator_label_keys',
+                        lambda *a: [])
+    monkeypatch.setattr(kubernetes_utils, 'is_kubeconfig_exec_auth', lambda *a:
+                        (False, None))
+    monkeypatch.setattr(
+        clouds.Kubernetes, '_detect_network_type', lambda *a:
+        (kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, None))
+    variables = base_variables()
+    variables.update(clouds.Kubernetes().make_deploy_resources_variables(
+        resources,
+        resources_utils.ClusterName('test', 'test'),
+        clouds.Region('test-context'),
+        None,
+        1,
+        dryrun=True))
+    cluster = yaml.safe_load(_render(variables))
+    assert cluster['provider']['namespace'] == expected_namespace
+    pod = cluster['available_node_types']['ray_head_default']['node_config']
+    pod['metadata']['namespace'] = 'misleading-pod-namespace'
+    config = provision_common.ProvisionConfig(
+        provider_config=cluster['provider'],
+        authentication_config={},
+        docker_config={},
+        node_config=pod,
+        count=1,
+        tags={},
+        resume_stopped_nodes=False,
+        ports_to_open_on_launch=None)
+
+    # Stop at the Kubernetes create boundary, leaving provider namespace
+    # selection and the final Pod metadata assignment real.
+    monkeypatch.setattr(instance.global_user_state,
+                        'record_launch_milestone_for_cluster', lambda *a: None)
+    monkeypatch.setattr(kubernetes_utils, 'get_kube_config_context_namespace',
+                        lambda *a: 'kubeconfig-default')
+    monkeypatch.setattr(kubernetes_utils, 'filter_pods', lambda *a: {})
+    monkeypatch.setattr(kubernetes_utils, 'check_nvidia_runtime_class',
+                        lambda **kwargs: False)
+    monkeypatch.setattr(kubernetes_utils, 'get_gpu_resource_key',
+                        lambda *a: 'nvidia.com/gpu')
+    monkeypatch.setattr(instance.volume, 'check_pvc_usage_for_pod',
+                        lambda *a: None)
+    monkeypatch.setattr(instance.subprocess_utils, 'run_in_parallel',
+                        lambda fn, items, *a: [fn(i) for i in items])
+    create = mock.Mock(side_effect=RuntimeError('create boundary'))
+    monkeypatch.setattr(instance, '_create_namespaced_pod_with_retries', create)
+    with pytest.raises(RuntimeError, match='create boundary'):
+        instance._create_pods('kubernetes', 'test', 'test', config)
+    namespace, submitted_pod, context = create.call_args.args
+    assert (namespace, context) == (expected_namespace, 'test-context')
+    assert submitted_pod['metadata']['namespace'] == expected_namespace
 
 
 # Fields whose values are large generated shell blobs, not structural or

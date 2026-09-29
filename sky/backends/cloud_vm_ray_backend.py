@@ -3298,6 +3298,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         mismatch_str = (f'To fix: specify a new cluster name, or down the '
                         f'existing cluster first: sky down {cluster_name}')
+        namespace_bound = isinstance(
+            launched_resources.cloud, clouds.Kubernetes) and any(
+                resource.cluster_config_overrides.get('kubernetes', {}).get(
+                    'namespace') is not None for resource in task.resources)
+        actual_namespace = None
+        if namespace_bound:
+            cluster_yaml = (global_user_state.get_cluster_yaml_str(
+                handle.cluster_yaml)
+                            if handle.cluster_yaml is not None else None)
+            if cluster_yaml is not None:
+                actual_namespace = yaml_utils.safe_load(cluster_yaml).get(
+                    'provider', {}).get('namespace')
+            mismatch_str += (f' Existing Kubernetes namespace: '
+                             f'{actual_namespace!r}.')
         valid_resource = None
         requested_resource_list = []
         # For the validation comparison, optionally treat the node count as
@@ -3306,6 +3320,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         fit_num_nodes = (handle.launched_nodes
                          if skip_num_nodes_check else task.num_nodes)
         for resource in task.resources:
+            namespace = resource.cluster_config_overrides.get(
+                'kubernetes', {}).get('namespace')
+            if namespace is not None:
+                skypilot_config.get_effective_namespace(
+                    repr(resource.cloud).lower(),
+                    region=resource.region,
+                    override_configs=resource.cluster_config_overrides)
+                skypilot_config.get_effective_namespace(
+                    repr(launched_resources.cloud).lower(),
+                    region=launched_resources.region,
+                    override_configs=resource.cluster_config_overrides)
+                if namespace != actual_namespace:
+                    requested_resource_list.append(
+                        f'{task.num_nodes}x {resource} namespace={namespace!r}')
+                    continue
             if (fit_num_nodes <= handle.launched_nodes and
                     resource.less_demanding_than(
                         launched_resources,
@@ -6389,9 +6418,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # non-node hardware (instance type, accelerators, region,
                 # zone, ports, etc.) matches the existing cluster to prevent
                 # ending up with a mixed-resource cluster.
-                self.check_resources_fit_cluster(handle,
-                                                 task,
-                                                 skip_num_nodes_check=True)
+                matched_resource = self.check_resources_fit_cluster(
+                    handle, task, skip_num_nodes_check=True)
                 # Then run resize-specific pre-provision logic (e.g. verify
                 # no running jobs and terminate workers for scale-down).
                 self._handle_resize_pre_provision(
@@ -6400,7 +6428,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     cluster_name,
                     cluster_status=prev_cluster_status)
             else:
-                self.check_resources_fit_cluster(handle, task)
+                matched_resource = self.check_resources_fit_cluster(
+                    handle, task)
 
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
@@ -6419,6 +6448,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                            requested_ports_set)
             to_provision = handle.launched_resources
             assert to_provision is not None
+            namespace = matched_resource.cluster_config_overrides.get(
+                'kubernetes', {}).get('namespace')
+            if namespace is not None:
+                to_provision = to_provision.copy(_cluster_config_overrides={
+                    'kubernetes': {
+                        'namespace': namespace
+                    }
+                })
             to_provision = to_provision.assert_launchable()
             if (to_provision.cloud.OPEN_PORTS_VERSION <=
                     clouds.OpenPortsVersion.LAUNCH_ONLY):
@@ -6655,7 +6692,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     handle_before_refresh.launched_resources is not None):
                 to_provision = handle_before_refresh.launched_resources
                 # Ensure the requested task fits the previous placement.
-                self.check_resources_fit_cluster(handle_before_refresh, task)
+                matched_resource = self.check_resources_fit_cluster(
+                    handle_before_refresh, task)
+                namespace = matched_resource.cluster_config_overrides.get(
+                    'kubernetes', {}).get('namespace')
+                if namespace is not None:
+                    to_provision = to_provision.copy(_cluster_config_overrides={
+                        'kubernetes': {
+                            'namespace': namespace
+                        }
+                    })
                 # Mirror the original message for reuse path.
                 status_before_refresh_str = None
                 if status_before_refresh is not None:

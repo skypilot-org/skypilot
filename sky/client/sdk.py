@@ -446,6 +446,24 @@ def _check_slurm_host_path_volume_api_version(dag: 'sky.Dag') -> None:
                 f'{server_constants.MIN_SLURM_HOST_PATH_VOLUME_API_VERSION}.')
 
 
+def _check_task_namespace_api_version(dag: 'sky.Dag') -> None:
+    if not any(
+            resource.cluster_config_overrides.get('kubernetes', {}).get(
+                'namespace') is not None
+            for task in dag.tasks
+            for resource in task.resources):
+        return
+    remote_api_version = versions.get_remote_api_version()
+    if (remote_api_version is None or remote_api_version <
+            server_constants.MIN_TASK_KUBERNETES_NAMESPACE_API_VERSION):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                'Task kubernetes.namespace requires an API server that '
+                'supports namespace binding (API_VERSION >= '
+                f'{server_constants.MIN_TASK_KUBERNETES_NAMESPACE_API_VERSION}'
+                '). Please upgrade the API server.')
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
@@ -475,6 +493,7 @@ def optimize(
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
     _check_slurm_host_path_volume_api_version(dag)
+    _check_task_namespace_api_version(dag)
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
     body = payloads.OptimizeBody(dag=dag_str,
@@ -608,6 +627,7 @@ def validate(
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
     """
     _check_slurm_host_path_volume_api_version(dag)
+    _check_task_namespace_api_version(dag)
     remote_api_version = versions.get_remote_api_version()
 
     def _omit(version: int) -> bool:

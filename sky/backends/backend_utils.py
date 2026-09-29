@@ -85,6 +85,7 @@ if typing.TYPE_CHECKING:
     import rich.progress as rich_progress
     import yaml
 
+    from sky import models
     from sky import resources as resources_lib
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
@@ -814,6 +815,17 @@ def _reject_not_ready_volume(volume_name: str, record: Dict[str, Any],
         f'or {remove_hint}.')
 
 
+def _check_bound_volume_namespace(namespace: Optional[str],
+                                  volume_config: 'models.VolumeConfig') -> None:
+    if (namespace is not None and
+            volume_config.type == volume_utils.VolumeType.PVC.value and
+            volume_config.config.get('namespace') != namespace):
+        raise exceptions.VolumeTopologyConflictError(
+            f'Volume {volume_config.name!r} belongs to Kubernetes namespace '
+            f'{volume_config.config.get("namespace")!r}, but the task binds '
+            f'namespace {namespace!r}.')
+
+
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
@@ -1117,9 +1129,16 @@ def write_cluster_config(
     volume_mount_vars = []
     ephemeral_volume_mount_vars = []
     conflict_checker = volume_utils.VolumeMountConflictChecker()
+    bound_namespace = (to_provision.cluster_config_overrides.get(
+        'kubernetes', {}).get('namespace')
+                       if repr(cloud).lower() == 'kubernetes' else None)
 
     if volume_mounts is not None:
         for vol in volume_mounts:
+            if vol.is_ephemeral and bound_namespace is not None:
+                vol.volume_config.config.setdefault('namespace',
+                                                    bound_namespace)
+            _check_bound_volume_namespace(bound_namespace, vol.volume_config)
             if vol.is_ephemeral:
                 volume_name = _get_volume_name(vol.path, cluster_name_on_cloud)
                 vol.volume_name = volume_name
@@ -1191,6 +1210,7 @@ def write_cluster_config(
             for auto_mount in auto_mounts.mounted:
                 volume_name = auto_mount.volume_name
                 volume_config = auto_mount.volume_config
+                _check_bound_volume_namespace(bound_namespace, volume_config)
                 # Reject before a pod is created. Mounting a volume whose
                 # backing storage is not usable does not fail loudly -- the pod
                 # just sits unschedulable or stuck in ContainerCreating -- so
