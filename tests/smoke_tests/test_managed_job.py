@@ -3841,6 +3841,69 @@ def test_managed_jobs_consolidation_mode_file_mount_cleanup(generic_cloud: str):
 
 
 @pytest.mark.managed_jobs
+def test_managed_jobs_depends_on(generic_cloud: str):
+    """Test that --depends-on waits for success and cancels on failure."""
+    if not smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('--depends-on requires consolidation mode.')
+
+    name = smoke_tests_utils.get_cluster_name()
+    up_id_file = f'/tmp/{name}-up-id'
+    launch = (f'sky jobs launch -y --infra {generic_cloud} '
+              f'{smoke_tests_utils.LOW_RESOURCE_ARG}')
+    # Debug logs from loading the config reach stdout before -o takes effect.
+    launch_for_id = f'SKYPILOT_DEBUG=0 {launch}'
+    test = smoke_tests_utils.Test(
+        'managed_jobs_depends_on',
+        [
+            (f'up_id=$({launch_for_id} -n {name}-up -o id "sleep 120"); '
+             f'echo "up_id=[$up_id]"; [[ "$up_id" =~ ^[0-9]+$ ]] && '
+             f'echo "$up_id" > {up_id_file} && '
+             f'{launch} -n {name}-down -d --depends-on "$up_id" '
+             f'"echo dependency succeeded"'),
+            (f'bad_id=$({launch_for_id} -n {name}-bad -o id "exit 1"); '
+             f'echo "bad_id=[$bad_id]"; [[ "$bad_id" =~ ^[0-9]+$ ]] && '
+             f'{launch} -n {name}-skip -d --depends-on "$bad_id" '
+             f'"echo should not run"'),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-up',
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=300),
+            # The dependent job stays PENDING while its dependency runs.
+            (f'up_id=$(cat {up_id_file}); s=$(sky jobs queue -v); echo "$s"; '
+             f'echo "$s" | grep {name}-down | grep PENDING | '
+             f'grep "Dependency: $up_id"'),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-down',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=600),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-up',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=60),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-bad',
+                job_status=[sky.ManagedJobStatus.FAILED],
+                timeout=300),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-skip',
+                job_status=[sky.ManagedJobStatus.CANCELLED],
+                timeout=300),
+        ],
+        (f'sky jobs cancel -y -n {name}-up; sky jobs cancel -y -n {name}-down; '
+         f'sky jobs cancel -y -n {name}-bad; '
+         f'sky jobs cancel -y -n {name}-skip; rm -f {up_id_file}'),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
 def test_managed_jobs_wait_timeout(generic_cloud: str):

@@ -29,7 +29,7 @@ logger = sky_logging.init_logger(__name__)
 DEFAULT_SLURM_PATH = '~/.slurm/config'
 
 _VAR_PATTERN = re.compile(r'\$(\w+|\{[^}]*\})')
-_SLURM_USER_PATTERN = re.compile(r'^[a-z_][a-z0-9_.-]*$')
+_SLURM_USER_PATTERN = re.compile(r'^[a-z_][a-z0-9_.+-]*$')
 
 SLURM_MARKER_FILE = '.sky_slurm_cluster'
 
@@ -190,7 +190,8 @@ def get_submit_user(cluster_name: str) -> Optional[str]:
             'Cannot derive a valid Unix user from SkyPilot user '
             f'{user_name!r}. Slurm submit users must start with a lowercase '
             'letter or "_" '
-            'and contain only lowercase letters, digits, "_", ".", or "-".')
+            'and contain only lowercase letters, digits, "_", ".", "+", or "-".'
+        )
     return submit_user
 
 
