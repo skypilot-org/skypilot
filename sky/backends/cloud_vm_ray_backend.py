@@ -1035,8 +1035,6 @@ class RetryingVmProvisioner(object):
         - 'handle': The provisioned cluster handle.
         - 'provision_record': (Only if using the new skypilot provisioner) The
           record returned by provisioner.bulk_provision().
-        - 'resources_vars': (Only if using the new skypilot provisioner) The
-          resources variables given by make_deploy_resources_variables().
         """
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
@@ -1164,6 +1162,11 @@ class RetryingVmProvisioner(object):
                         extra_template_variables=extra_vars,
                     )
                 except exceptions.ResourcesUnavailableError as e:
+                    if cluster_exists:
+                        # No provisioning or teardown occurred; an INIT
+                        # cluster may still have live resources to preserve.
+                        raise exceptions.ResourcesUnavailableError(
+                            str(e), no_failover=True) from e
                     # Failed due to catalog issue, e.g. image not found, or
                     # GPUs are requested in a Kubernetes cluster but the cluster
                     # does not have nodes labeled with GPU types.
@@ -1326,14 +1329,7 @@ class RetryingVmProvisioner(object):
                         # NOTE: We will handle the logic of '_ensure_cluster_ray_started'
                         # in 'provision_utils.post_provision_runtime_setup()' in the
                         # caller.
-                        resources_vars = (
-                            to_provision.cloud.make_deploy_resources_variables(
-                                to_provision,
-                                resources_utils.ClusterName(
-                                    cluster_name, handle.cluster_name_on_cloud),
-                                region, zones, num_nodes))
                         config_dict['provision_record'] = provision_record
-                        config_dict['resources_vars'] = resources_vars
                         config_dict['handle'] = handle
                         return config_dict
                     except provision_common.StopFailoverError:
@@ -3672,7 +3668,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if config_dict['provisioning_skipped']:
                 # Skip further provisioning.
                 # In this case, we won't have certain fields in the config_dict
-                # ('handle', 'provision_record', 'resources_vars')
+                # ('handle', 'provision_record')
                 # We need to return the handle - but it should be the existing
                 # handle for the cluster.
                 handle = global_user_state.get_handle_from_cluster_name(

@@ -1987,6 +1987,22 @@ class Resources:
         return self.cloud.get_reservations_available_resources(
             self.instance_type, self.region, self.zone, specific_reservations)
 
+    def _same_instance_type(self, other: 'Resources') -> bool:
+        if self.instance_type == other.instance_type:
+            return True
+        if (self.instance_type is None or other.instance_type is None or
+                not isinstance(self.cloud or other.cloud, clouds.RunPod) or
+            (other.cloud is not None and
+             not isinstance(other.cloud, clouds.RunPod))):
+            return False
+        # Reuse the catalog's private grammar only for RunPod comparisons.
+        # A saved price estimate is metadata, not host shape or capacity.
+        # pylint: disable=import-outside-toplevel,protected-access
+        from sky.catalog import runpod_catalog
+        return (runpod_catalog._sized(
+            self.instance_type)[:3] == runpod_catalog._sized(
+                other.instance_type)[:3])
+
     def less_demanding_than(
         self,
         other: Union[List['Resources'], 'Resources'],
@@ -2042,7 +2058,7 @@ class Resources:
                     return False
 
         if (self._instance_type is not None and
-                self._instance_type != other.instance_type):
+                not self._same_instance_type(other)):
             return False
         # self._instance_type <= other.instance_type
 
@@ -2123,7 +2139,7 @@ class Resources:
                 not self.cloud.is_same_cloud(blocked.cloud)):
             is_matched = False
         if (blocked.instance_type is not None and
-                self.instance_type != blocked.instance_type):
+                not self._same_instance_type(blocked)):
             is_matched = False
         if blocked.region is not None and self._region != blocked.region:
             is_matched = False
