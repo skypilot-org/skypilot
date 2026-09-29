@@ -268,6 +268,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
     :ref:`security_group_name <config-yaml-nebius-security-group-name>`: my-sg
 
+  :ref:`runpod <config-yaml-runpod>`:
+    allowed_cuda_versions: ["13.0"]
+
   :ref:`vast <config-yaml-vast>`:
     :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
     :ref:`create_instance_kwargs <config-yaml-vast-create-instance-kwargs>`:
@@ -2879,6 +2882,36 @@ Example:
           us-ashburn-1:
             vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
             vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
+
+.. _config-yaml-runpod:
+
+``runpod``
+----------
+
+``runpod.allowed_cuda_versions`` accepts a nonempty list of CUDA
+``major.minor`` strings, such as ``["13.0"]``. For GPU Pods, SkyPilot passes
+the list to RunPod's host compatibility filter for both on-demand and spot
+launches. A task's ``config`` block can override the global setting. Omit the
+setting to use the provider default; CPU-only instances ignore it. A Docker
+image tag alone does not constrain the host driver.
+
+SkyPilot also passes the selected GPU instance's CPU and provider-native
+host-memory sizes as provisioning minima. The legacy RunPod GPU catalog stores
+nominal GB under the ``MemoryGiB`` column. For matching Sky's GiB requirements,
+SkyPilot conservatively treats each nominal GB as 10\ :sup:`9` bytes, without
+claiming RunPod's undocumented byte basis. Provisioning retains the original
+nominal GB floor: a catalog value of 752 sends 752, while a 550 GiB requirement
+needs at least 591 nominal GB. CPU-only sizing is unchanged. Unknown or invalid
+host sizes fail before provisioning. These constraints can reduce availability;
+SkyPilot does not remove them when a provider rejects the request.
+Previously rendered GPU configurations without these host minima must be
+re-rendered before provisioning another Pod.
+
+.. code-block:: yaml
+
+  config:
+    runpod:
+      allowed_cuda_versions: ["13.0"]
 
 .. _config-yaml-nebius:
 
