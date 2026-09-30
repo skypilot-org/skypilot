@@ -11,6 +11,9 @@ import jwt as pyjwt
 import pytest
 
 from sky.server import config
+from sky.skylet import constants as skylet_constants
+from sky.utils import annotations
+from sky.utils import controller_utils
 
 
 @mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=8)
@@ -88,7 +91,6 @@ def test_compute_server_config_low_resources(cpu_count, mem_size_gb):
 @mock.patch('sky.utils.env_options.Options.RUNNING_IN_BUILDKITE.get',
             return_value=False)
 def test_compute_server_config_pool(cpu_count, mem_size_gb, buildkite_mock):
-    from sky.utils import controller_utils
     reserved_memory_mb = float(
         controller_utils.MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB)
 
@@ -142,8 +144,6 @@ def test_memory_aware_sizing_reserves_server_workers(cpu_count, mem_size_gb):
 @mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
 def test_memory_aware_sizing_consolidation_mode(cpu_count, mem_size_gb):
     """In consolidation mode the in-process controllers are reserved for."""
-    from sky.utils import controller_utils
-
     with _memory_aware_sizing(), \
          mock.patch.object(controller_utils, 'is_jobs_consolidation_mode',
                            return_value=True), \
@@ -170,8 +170,6 @@ def test_memory_aware_sizing_consolidation_mode(cpu_count, mem_size_gb):
 @mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
 def test_memory_aware_sizing_off_by_default(cpu_count, mem_size_gb):
     """Without the env var, consolidation mode reserves nothing."""
-    from sky.utils import controller_utils
-
     with mock.patch.object(controller_utils, 'is_jobs_consolidation_mode',
                            return_value=True), \
          mock.patch.object(controller_utils, '_is_consolidation_mode',
@@ -190,9 +188,6 @@ def test_controller_process_reserves_flat_headroom(cpu_count, mem_size_gb,
     _get_parallelism() sizes that machine assuming only the headroom was
     withheld, so the gate must not switch it to the scaling reservation.
     """
-    from sky.skylet import constants as skylet_constants
-    from sky.utils import controller_utils
-
     env = {skylet_constants.OVERRIDE_CONSOLIDATION_MODE: 'true'}
     if gate_on:
         from sky.utils import env_options
@@ -210,8 +205,6 @@ def test_controller_process_reserves_flat_headroom(cpu_count, mem_size_gb,
 def test_no_controller_reservation_outside_consolidation(
         cpu_count, mem_size_gb):
     """Outside consolidation mode the controllers cost the API server nothing."""
-    from sky.utils import controller_utils
-
     with _memory_aware_sizing(), \
          mock.patch.object(controller_utils, 'is_jobs_consolidation_mode',
                            return_value=False), \
@@ -240,7 +233,6 @@ def test_permanent_processes_fit_in_memory(cpu_count, mem_size_gb):
 
 def _explicit_counts(**counts):
     """Set the explicit worker/controller count env vars."""
-    from sky.skylet import constants as skylet_constants
     names = {
         'long': skylet_constants.ENV_VAR_SERVER_LONG_WORKERS,
         'short': skylet_constants.ENV_VAR_SERVER_SHORT_WORKERS,
@@ -328,8 +320,6 @@ def test_explicit_short_workers_below_daemon_floor_rejected():
 @mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=48)
 @mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
 def test_explicit_jobs_controllers_override(cpu_count, mem_size_gb):
-    from sky.utils import controller_utils
-
     with _explicit_counts(controllers=5):
         assert controller_utils.get_number_of_jobs_controllers() == 5
     for bad in ('0', str(controller_utils.MAX_CONTROLLERS + 1), 'many'):
@@ -345,9 +335,6 @@ def test_explicit_jobs_controllers_override(cpu_count, mem_size_gb):
 def test_explicit_worker_counts_flow_into_controller_budget(
         cpu_count, mem_size_gb):
     """Smaller pinned pools leave the derived controller count more memory."""
-    from sky.utils import annotations
-    from sky.utils import controller_utils
-
     with _memory_aware_sizing(), \
          mock.patch.object(controller_utils, 'is_jobs_consolidation_mode',
                            return_value=True), \
