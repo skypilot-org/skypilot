@@ -336,11 +336,17 @@ def create_catalog(output_path: str) -> None:
 
                 # Write row(s) for each available region
                 for region, availability_tuple in available_regions.items():
-                    on_demand_available, spot_available = availability_tuple
+                    _, spot_available = availability_tuple
 
-                    effective_price = price if on_demand_available else ''
-                    effective_spot_price = (spot_price
-                                            if spot_available else '')
+                    # The availability API only reports current capacity. A
+                    # type that is momentarily sold out in one mode is still
+                    # offered in this region, so keep its listed prices and
+                    # leave capacity to the provisioner's failover. Without
+                    # an explicit spot price, only write one where spot
+                    # capacity was reported.
+                    effective_price = price
+                    effective_spot_price = (spot_price if spot_available or
+                                            spot_price_raw else '')
 
                     writer.writerow([
                         instance_type_id,
