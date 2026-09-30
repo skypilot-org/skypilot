@@ -4,6 +4,7 @@ from datetime import datetime
 from datetime import timezone
 import enum
 import fnmatch
+import functools
 import hashlib
 import math
 import os
@@ -12,6 +13,7 @@ import pprint
 import queue as queue_lib
 import re
 import shlex
+import socket
 import subprocess
 import sys
 import tempfile
@@ -4642,9 +4644,19 @@ def workspace_lock_id(workspace_name: str) -> str:
     return f'{workspace_name}_workspace'
 
 
+@functools.lru_cache(maxsize=1)
+def skylet_tunnel_owner_id() -> str:
+    """Identifies this host among API servers that share one database.
+
+    A skylet tunnel is a process on the host that opened it, so tunnel
+    bookkeeping and locking are keyed by this id.
+    """
+    return socket.gethostname()
+
+
 def cluster_tunnel_lock_id(cluster_name: str) -> str:
-    """Get the lock ID for cluster tunnel operations."""
-    return f'{cluster_name}_ssh_tunnel'
+    """Get the lock ID for this host's tunnel operations on the cluster."""
+    return f'{cluster_name}_{skylet_tunnel_owner_id()}_ssh_tunnel'
 
 
 def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
