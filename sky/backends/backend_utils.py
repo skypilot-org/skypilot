@@ -1026,11 +1026,13 @@ def write_cluster_config(
     is_custom_docker = ('true' if to_provision.extract_docker_image()
                         is not None else 'false')
 
-    # Create the default user Python environment on VMs when conda is not
-    # installed. Kubernetes images bake it in, Slurm nodes share $HOME across
-    # nodes, and custom docker images manage their own Python.
+    # Create the default user Python environment on VMs and bare Slurm nodes
+    # when conda is not installed. Kubernetes images bake it in, and custom
+    # docker images manage their own Python. On Slurm, $HOME is the
+    # cluster-specific directory, so each cluster gets its own env (created the
+    # same way as the SkyPilot runtime env under the same $HOME).
     create_user_env = (not install_conda and is_custom_docker == 'false' and
-                       not isinstance(cloud, (clouds.Kubernetes, clouds.Slurm)))
+                       not isinstance(cloud, clouds.Kubernetes))
 
     # Check if the cluster name is a controller name.
     is_remote_controller = False

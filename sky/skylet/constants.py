@@ -353,18 +353,25 @@ UV_INSTALLATION_COMMANDS = (
 # not ship one. Since conda is no longer installed by default, bare images
 # (e.g. plain Ubuntu 24.04) otherwise leave user tasks with no `python`/`pip`
 # and an externally managed (PEP 668), non-writable system Python. Must run
-# after uv is installed. Best effort and idempotent: skipped if the env already
-# exists, if conda is present on the image, or if there is no python3.
+# after uv is installed. Best effort and idempotent: skipped if a usable env
+# (with both `python` and `pip`) already exists, or if there is no python3. An
+# incomplete env (e.g. a failed `--seed`) is removed and rebuilt, and removed
+# again if the rebuild fails, so ACTIVATE_SKY_USER_ENV never activates an env
+# without pip. It is created even when conda is installed: ACTIVATE_SKY_USER_ENV
+# only activates it when no conda env is active in the task shell.
 # --system-site-packages keeps packages preinstalled in the image's system
 # Python importable, while new installs go into the writable venv.
 SKY_USER_ENV_CREATION_COMMANDS = (
-    f'[ -d {SKY_USER_ENV_PATH} ] || '
-    'command -v conda > /dev/null 2>&1 || '
-    'grep -qs "# >>> conda initialize >>>" ~/.bashrc || '
+    f'{{ [ -x {SKY_USER_ENV_PATH}/bin/python ] && '
+    f'[ -x {SKY_USER_ENV_PATH}/bin/pip ]; }} || '
     '! command -v python3 > /dev/null 2>&1 || '
+    f'{{ rm -rf {SKY_USER_ENV_PATH} && '
     f'{SKY_UV_CMD} venv --seed --system-site-packages '
-    f'--python "$(command -v python3)" {SKY_USER_ENV_PATH} || '
-    'echo "Failed to create the default user Python environment; skipping.";')
+    f'--python "$(command -v python3)" {SKY_USER_ENV_PATH} && '
+    f'[ -x {SKY_USER_ENV_PATH}/bin/pip ]; }} || '
+    f'{{ rm -rf {SKY_USER_ENV_PATH}; '
+    'echo "Failed to create the default user Python environment; skipping."; '
+    '};')
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
