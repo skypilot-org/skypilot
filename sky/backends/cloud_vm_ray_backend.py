@@ -6133,12 +6133,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 code = autostop_lib.AutostopCodeGen.set_autostop(
                     idle_minutes_to_autostop, self.NAME, wait_for, down, hook,
                     hook_timeout, hooks)
-                returncode, _, stderr = self.run_on_head(
+                returncode, stdout, stderr = self.run_on_head(
                     handle, code, require_outputs=True, stream_logs=stream_logs)
                 subprocess_utils.handle_returncode(returncode,
                                                    code,
                                                    'Failed to set autostop',
-                                                   stderr=stderr,
+                                                   stderr=stdout + stderr,
                                                    stream_logs=stream_logs)
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop, down)
