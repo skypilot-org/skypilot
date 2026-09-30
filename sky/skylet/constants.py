@@ -130,7 +130,8 @@ SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
 SKY_REMOTE_PYTHON_ENV: str = f'{SKY_RUNTIME_DIR}/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # Default user-facing Python environment, baked into the container image (see
-# Dockerfile_k8s{,_gpu}). It replaces the role conda's base env used to play:
+# Dockerfile_k8s{,_gpu}) and created on VMs by SKY_USER_ENV_CREATION_COMMANDS.
+# It replaces the role conda's base env used to play:
 # user setup/run commands activate it so `pip`/`uv` install into a writable
 # location instead of a non-writable system site-packages. Kept separate from
 # the SkyPilot runtime env above. Only activated when conda is not active (an
@@ -347,6 +348,23 @@ UV_INSTALLATION_COMMANDS = (
     f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV} --python 3.10;'
     f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'  # pylint: disable=line-too-long
 )
+
+# Create the default user environment (SKY_USER_ENV_PATH) on VM images that do
+# not ship one. Since conda is no longer installed by default, bare images
+# (e.g. plain Ubuntu 24.04) otherwise leave user tasks with no `python`/`pip`
+# and an externally managed (PEP 668), non-writable system Python. Must run
+# after uv is installed. Best effort and idempotent: skipped if the env already
+# exists, if conda is present on the image, or if there is no python3.
+# --system-site-packages keeps packages preinstalled in the image's system
+# Python importable, while new installs go into the writable venv.
+SKY_USER_ENV_CREATION_COMMANDS = (
+    f'[ -d {SKY_USER_ENV_PATH} ] || '
+    'command -v conda > /dev/null 2>&1 || '
+    'grep -qs "# >>> conda initialize >>>" ~/.bashrc || '
+    '! command -v python3 > /dev/null 2>&1 || '
+    f'{SKY_UV_CMD} venv --seed --system-site-packages '
+    f'--python "$(command -v python3)" {SKY_USER_ENV_PATH} || '
+    'echo "Failed to create the default user Python environment; skipping.";')
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'

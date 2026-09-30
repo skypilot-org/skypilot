@@ -12,6 +12,7 @@ from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.exceptions import ClusterNotUpError
 from sky.resources import Resources
+from sky.skylet import constants
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import status_lib
@@ -177,6 +178,9 @@ def test_write_cluster_config_w_post_provision_runcmd_aws(
         0] == cluster_config_template, "config template incorrect"
     assert mock_fill_template.call_args[0][1][
         'runcmd'] == expected_runcmd, "runcmd not passed correctly"
+    # VM clouds create the default user Python environment.
+    assert (constants.SKY_USER_ENV_CREATION_COMMANDS
+            in mock_fill_template.call_args[0][1]['uv_installation_commands'])
 
 
 @mock.patch.object(skypilot_config, '_global_config_context',
@@ -212,6 +216,10 @@ def test_write_cluster_config_w_post_provision_runcmd_kubernetes(
         0] == cluster_config_template, "config template incorrect"
     assert mock_fill_template.call_args[0][1][
         'runcmd'] == expected_runcmd, "runcmd not passed correctly"
+    # Kubernetes images already ship the default user Python environment.
+    assert (
+        constants.SKY_USER_ENV_CREATION_COMMANDS
+        not in mock_fill_template.call_args[0][1]['uv_installation_commands'])
 
 
 @mock.patch.object(skypilot_config, '_global_config_context',

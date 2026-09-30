@@ -1026,6 +1026,12 @@ def write_cluster_config(
     is_custom_docker = ('true' if to_provision.extract_docker_image()
                         is not None else 'false')
 
+    # Create the default user Python environment on VMs when conda is not
+    # installed. Kubernetes images bake it in, Slurm nodes share $HOME across
+    # nodes, and custom docker images manage their own Python.
+    create_user_env = (not install_conda and is_custom_docker == 'false' and
+                       not isinstance(cloud, (clouds.Kubernetes, clouds.Slurm)))
+
     # Check if the cluster name is a controller name.
     is_remote_controller = False
     controller = controller_utils.Controllers.from_name(
@@ -1249,7 +1255,10 @@ def write_cluster_config(
                         '{is_custom_docker}', is_custom_docker)
                 if install_conda else '',
             # UV setup
-            'uv_installation_commands': constants.UV_INSTALLATION_COMMANDS,
+            'uv_installation_commands':
+                constants.UV_INSTALLATION_COMMANDS +
+                (constants.SKY_USER_ENV_CREATION_COMMANDS
+                 if create_user_env else ''),
             # Currently only used by Slurm. For other clouds, it is
             # already part of ray_skypilot_installation_commands
             'setup_sky_dirs_commands': constants.SETUP_SKY_DIRS_COMMANDS,
