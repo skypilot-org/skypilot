@@ -2,6 +2,7 @@
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from sky import exceptions
 from sky import sky_logging
 from sky.provision import common
 from sky.provision.nebius import constants as nebius_constants
@@ -508,11 +509,16 @@ def cleanup_ports(
                                       status_filters=None,
                                       project_id=project_id)
     except Exception as e:  # pylint: disable=broad-except
-        logger.warning(
-            f'Failed to list instances of {cluster_name_on_cloud!r}; skipping '
-            f'security group cleanup: '
-            f'{common_utils.format_exception(e, use_bracket=False)}')
-        return
+        # Raise rather than skip: returning normally would let
+        # `post_teardown_cleanup` drop the cluster record and config, leaving
+        # no later pass to reap the SG. Raising keeps both, so the next
+        # status refresh retries (a status refresh shows the cluster as
+        # UNKNOWN meanwhile), and `sky down --purge` still proceeds since it
+        # skips cleanup_ports failures.
+        raise exceptions.ClusterStatusFetchingError(
+            f'Failed to list instances of {cluster_name_on_cloud!r} to clean '
+            'up its security group: '
+            f'{common_utils.format_exception(e, use_bracket=False)}') from e
     if instances:
         logger.debug(f'{len(instances)} instance(s) of '
                      f'{cluster_name_on_cloud} still present; leaving the '

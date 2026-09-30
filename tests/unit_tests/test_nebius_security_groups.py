@@ -11,6 +11,7 @@ from unittest import mock
 
 import pytest
 
+from sky import exceptions
 from sky.adaptors import nebius as nebius_adaptor
 from sky.provision import common
 from sky.provision.nebius import config as nebius_config
@@ -250,6 +251,29 @@ def test_cleanup_ports_keeps_sg_while_instances_remain():
     mock_del.assert_not_called()
 
 
+def test_cleanup_ports_raises_when_instance_listing_fails():
+    """A failed instance listing must not look like a completed cleanup:
+    post_teardown_cleanup would then drop the cluster record and the SG
+    would never be retried. Raise ClusterStatusFetchingError so the record
+    is kept and a status refresh reports the cluster as UNKNOWN."""
+    with mock.patch.object(nebius_instance,
+                           '_filter_instances',
+                           side_effect=RuntimeError('list timed out')), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name') as mock_lookup, \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del, \
+         pytest.raises(exceptions.ClusterStatusFetchingError,
+                       match='list timed out'):
+        nebius_instance.cleanup_ports(
+            'mycluster',
+            ['8080'],
+            provider_config={'region': 'eu-north1'},
+        )
+    mock_lookup.assert_not_called()
+    mock_del.assert_not_called()
+
+
 def test_cleanup_ports_noop_when_sg_already_deleted():
     """After a normal `sky down`, terminate_instances already removed the
     SG; cleanup_ports finds nothing and must not error."""
@@ -288,22 +312,6 @@ def test_cleanup_ports_skips_byo_sg():
             },
         )
     mock_lookup.assert_not_called()
-    mock_del.assert_not_called()
-
-
-def test_cleanup_ports_list_error_does_not_raise():
-    """A failed instance listing must not fail the post-teardown cleanup."""
-    with mock.patch.object(nebius_instance,
-                           '_filter_instances',
-                           side_effect=RuntimeError('boom')), \
-         mock.patch.object(nebius_utils, 'get_project_by_region',
-                           return_value='proj-abc'), \
-         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del:
-        nebius_instance.cleanup_ports(
-            'mycluster',
-            [],
-            provider_config={'region': 'eu-north1'},
-        )
     mock_del.assert_not_called()
 
 
