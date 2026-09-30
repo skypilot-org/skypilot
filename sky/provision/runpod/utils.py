@@ -349,9 +349,12 @@ def launch(
             'minVcpuCountPerGpu': 4,
             'minRamPerGpu': gpu_memory_gb,
         }
-        # 'ALL' (any cloud) is expressed in v2 by omitting the field.
-        if cloud_type in ('SECURE', 'COMMUNITY'):
-            body['cloud'] = cloud_type
+        # Omitting the field defaults to SECURE, so an unknown tier must not
+        # be dropped silently.
+        if cloud_type not in ('SECURE', 'COMMUNITY'):
+            raise ValueError(f'Unsupported RunPod cloud type {cloud_type!r}; '
+                             'expected SECURE or COMMUNITY.')
+        body['cloud'] = cloud_type
     new_instance = runpod.rest_request('POST', '/pods', json=body)
     return new_instance['id']
 
