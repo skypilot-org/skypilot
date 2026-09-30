@@ -630,6 +630,10 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     elif accelerator == 'H200':
         # H200s on GCP use this label format
         return 'nvidia-h200-141gb'
+    elif accelerator in ('RTX-PRO-6000', 'RTXPRO6000'):
+        # RTX PRO 6000 (G4) is labeled nvidia-rtx-pro-6000 in GKE, and is
+        # named RTXPRO6000 in the GCP catalog.
+        return 'nvidia-rtx-pro-6000'
     elif accelerator.startswith('tpu-'):
         return accelerator
     elif accelerator.startswith('amd-'):

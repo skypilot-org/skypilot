@@ -628,6 +628,17 @@ def test_detect_gpu_label_formatter_invalid_label_skip():
         utils.detect_gpu_label_formatter.cache_clear()
 
 
+@pytest.mark.parametrize('accelerator', ['RTX-PRO-6000', 'RTXPRO6000'])
+def test_gke_label_formatter_rtx_pro_6000(accelerator):
+    """RTX PRO 6000 is labeled nvidia-rtx-pro-6000 in GKE, not
+    nvidia-tesla-rtx-pro-6000."""
+    assert utils.GKELabelFormatter.get_label_values(accelerator) == [
+        'nvidia-rtx-pro-6000'
+    ]
+    assert utils.GKELabelFormatter.get_accelerator_from_label_value(
+        'nvidia-rtx-pro-6000') == 'RTX-PRO-6000'
+
+
 def test_detect_gpu_label_formatter_suppresses_warning_for_coreweave_format():
     """Tests that warnings are not logged when GKE label keys have
     CoreWeave-formatted values (e.g., cloud.google.com/gke-accelerator=H100_NVLINK_80GB).
