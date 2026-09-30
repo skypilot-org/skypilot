@@ -345,6 +345,7 @@ def test_explicit_jobs_controllers_override(cpu_count, mem_size_gb):
 def test_explicit_worker_counts_flow_into_controller_budget(
         cpu_count, mem_size_gb):
     """Smaller pinned pools leave the derived controller count more memory."""
+    from sky.utils import annotations
     from sky.utils import controller_utils
 
     with _memory_aware_sizing(), \
@@ -353,10 +354,16 @@ def test_explicit_worker_counts_flow_into_controller_budget(
          mock.patch.object(controller_utils, '_is_consolidation_mode',
                            return_value=True), \
          mock.patch('sky.jobs.utils.is_consolidation_mode', return_value=True):
+        # _get_parallelism is request-cached; each count needs a fresh read.
+        annotations.clear_request_level_cache()
         derived = controller_utils.get_number_of_jobs_controllers()
         with _explicit_counts(long=8, short=20):
+            annotations.clear_request_level_cache()
             pinned = controller_utils.get_number_of_jobs_controllers()
-    assert pinned > derived
+    annotations.clear_request_level_cache()
+    # 48 GB: derived pools (24 long, 53 short) leave room for 17 controllers;
+    # pinned pools (8 long, 20 short) leave room for 37.
+    assert (derived, pinned) == (17, 37)
 
 
 def test_parallel_size_long():
