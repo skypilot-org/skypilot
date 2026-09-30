@@ -485,11 +485,40 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
-    # Intentional no-op. The cluster-specific security group is owned by
-    # the VM lifecycle, not the port lifecycle: it's created in
-    # `bootstrap_instances` and deleted in `terminate_instances` (when
-    # `worker_only=False`). Deleting it here would (a) tear down ingress
-    # for SSH and intra-cluster Ray traffic on a still-running cluster if
-    # this were ever called outside teardown, and (b) generate noisy
-    # FAILED_PRECONDITION retries while VMs still hold the NIC.
-    del cluster_name_on_cloud, ports, provider_config
+    # The cluster-specific security group is owned by the VM lifecycle, not
+    # the port lifecycle: it's created in `bootstrap_instances` and normally
+    # deleted in `terminate_instances` (when `worker_only=False`). That
+    # delete never runs on autodown, though: skylet calls
+    # `terminate_instances` on the head node itself, and the head VM is gone
+    # before the SG cleanup gets its turn. `post_teardown_cleanup` calls us
+    # from the API server once the cluster is known to be terminated, so
+    # this is the backstop that reaps the SG in that case.
+    #
+    # Only delete once the cluster has no instances left: deleting the SG
+    # under a live VM would tear down its SSH and intra-cluster ingress, and
+    # Nebius rejects the delete anyway while a NIC still holds the SG.
+    del ports
+    assert provider_config is not None
+    try:
+        project_id = provider_config.get('project_id')
+        if project_id is None:
+            project_id = utils.get_project_by_region(provider_config['region'])
+        instances = _filter_instances(provider_config['region'],
+                                      cluster_name_on_cloud,
+                                      status_filters=None,
+                                      project_id=project_id)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(
+            f'Failed to list instances of {cluster_name_on_cloud!r}; skipping '
+            f'security group cleanup: '
+            f'{common_utils.format_exception(e, use_bracket=False)}')
+        return
+    if instances:
+        logger.debug(f'{len(instances)} instance(s) of '
+                     f'{cluster_name_on_cloud} still present; leaving the '
+                     'security group in place.')
+        return
+    _cleanup_security_group(cluster_name_on_cloud,
+                            provider_config,
+                            project_id,
+                            wait_for_instances=False)

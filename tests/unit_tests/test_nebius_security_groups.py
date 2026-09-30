@@ -204,19 +204,107 @@ def test_open_ports_skips_for_byo_sg():
     assert any('user-managed (BYO) security group' in m for m in info_calls)
 
 
-def test_cleanup_ports_is_noop():
-    """SG deletion is the VM-lifecycle concern; cleanup_ports must not
-    touch the SG (which is still attached to live VMs at this point in
-    most invocation paths)."""
-    with mock.patch.object(nebius_utils, 'delete_security_group') as mock_del, \
-         mock.patch.object(nebius_utils, 'get_security_group_by_name') as mock_lookup:
+def test_cleanup_ports_deletes_sg_when_cluster_is_gone():
+    """Autodown runs terminate_instances on the head node, which dies before
+    the SG cleanup runs. The API server's post-teardown cleanup_ports call
+    must reap the SG once no instances are left."""
+    with mock.patch.object(nebius_instance, '_filter_instances',
+                           return_value={}), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           return_value='sg-2') as mock_lookup, \
+         mock.patch.object(nebius_instance,
+                           '_wait_for_instances_terminated') as mock_wait, \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del:
         nebius_instance.cleanup_ports(
             'mycluster',
             ['8080'],
             provider_config={'region': 'eu-north1'},
         )
-    mock_del.assert_not_called()
+    mock_lookup.assert_called_once_with('proj-abc', 'sky-sg-mycluster')
+    mock_wait.assert_not_called()
+    mock_del.assert_called_once_with('sg-2')
+
+
+def test_cleanup_ports_keeps_sg_while_instances_remain():
+    """The SG must not be deleted from under a VM that still exists."""
+    with mock.patch.object(nebius_instance,
+                           '_filter_instances',
+                           return_value={
+                               'i-1': {
+                                   'name': 'mycluster-aaaa-head',
+                                   'status': 'RUNNING'
+                               }
+                           }), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name') as mock_lookup, \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del:
+        nebius_instance.cleanup_ports(
+            'mycluster',
+            ['8080'],
+            provider_config={'region': 'eu-north1'},
+        )
     mock_lookup.assert_not_called()
+    mock_del.assert_not_called()
+
+
+def test_cleanup_ports_noop_when_sg_already_deleted():
+    """After a normal `sky down`, terminate_instances already removed the
+    SG; cleanup_ports finds nothing and must not error."""
+    with mock.patch.object(nebius_instance, '_filter_instances',
+                           return_value={}), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           return_value=None), \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del:
+        nebius_instance.cleanup_ports(
+            'mycluster',
+            [],
+            provider_config={'region': 'eu-north1'},
+        )
+    mock_del.assert_not_called()
+
+
+def test_cleanup_ports_skips_byo_sg():
+    """A user-managed SG is never deleted, even after termination."""
+    with mock.patch.object(nebius_instance, '_filter_instances',
+                           return_value={}), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name') as mock_lookup, \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del:
+        nebius_instance.cleanup_ports(
+            'mycluster',
+            [],
+            provider_config={
+                'region': 'eu-north1',
+                'security_group': {
+                    'GroupName': 'my-byo',
+                    'ManagedBySkyPilot': False,
+                },
+            },
+        )
+    mock_lookup.assert_not_called()
+    mock_del.assert_not_called()
+
+
+def test_cleanup_ports_list_error_does_not_raise():
+    """A failed instance listing must not fail the post-teardown cleanup."""
+    with mock.patch.object(nebius_instance,
+                           '_filter_instances',
+                           side_effect=RuntimeError('boom')), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del:
+        nebius_instance.cleanup_ports(
+            'mycluster',
+            [],
+            provider_config={'region': 'eu-north1'},
+        )
+    mock_del.assert_not_called()
 
 
 def test_terminate_instances_deletes_sg_on_full_teardown():
