@@ -1416,6 +1416,31 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
         yaml_utils.dump_yaml(yaml_file.name, yaml_config)
         yaml_path = yaml_file.name
         with tempfile.NamedTemporaryFile(mode='w', suffix='.log') as log_file:
+
+            def check_retry_logs():
+                output = pathlib.Path(log_file.name).read_text(encoding='utf-8')
+                assert 'Task 1 starting' in output, output
+                assert 'Task 2 starting' not in output, output
+
+                records = sky.get(
+                    jobs_sdk.queue_v2(refresh=False,
+                                      fields=[
+                                          'job_name', 'task_id', 'status',
+                                          'recovery_count', 'start_at'
+                                      ]))[0]
+                tasks = {
+                    row['task_id']: row
+                    for row in records
+                    if row['job_name'] == name
+                }
+                assert set(tasks) == {0, 1}, tasks
+                assert tasks[0]['status'] == sky.ManagedJobStatus.FAILED, tasks
+                assert tasks[0]['recovery_count'] == 1, tasks
+                assert tasks[1][
+                    'status'] == sky.ManagedJobStatus.CANCELLED, tasks
+                assert tasks[1]['start_at'] is None, tasks
+                yield 'Failed task retried once; downstream task never started.'
+
             test = smoke_tests_utils.Test(
                 'managed_jobs_retry_logs',
                 [
@@ -1425,14 +1450,9 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
                     # TODO(zhwu): Check why the logs does not return immediately
                     # after job status FAILED.
                     f'sky jobs logs -n {name} | tee {log_file.name} ',
-                    # First attempt
-                    f'cat {log_file.name} | grep "Job started. Streaming logs..."',
-                    f'cat {log_file.name} | grep "Job 1 failed"',
-                    # Second attempt
-                    f'cat {log_file.name} | grep "Job started. Streaming logs..." | wc -l | grep 2',
-                    f'cat {log_file.name} | grep "Job 1 failed" | wc -l | grep 2',
-                    # Task 2 is not reached
-                    f'! cat {log_file.name} | grep "Job 2"',
+                    # Some runtimes stream only the latest attempt. Verify the
+                    # retry through job state rather than runtime-specific logs.
+                    check_retry_logs,
                 ],
                 f'sky jobs cancel -y -n {name}',
                 env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
