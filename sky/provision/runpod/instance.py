@@ -13,6 +13,8 @@ from sky.utils import ux_utils
 
 POLL_INTERVAL = 5
 QUERY_PORTS_TIMEOUT_SECONDS = 30
+# A pod in one of these states never becomes RUNNING again.
+_FAILED_STATUSES = ('EXITED', 'ERROR', 'TERMINATED')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -127,10 +129,20 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     # Wait for instances to be ready.
     while True:
-        instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
+        instances = _filter_instances(cluster_name_on_cloud, None)
+        failed_instances = {
+            instance_id: instance['status']
+            for instance_id, instance in instances.items()
+            if instance['status'] in _FAILED_STATUSES
+        }
+        if failed_instances:
+            raise RuntimeError(
+                f'Failed to start instances for cluster '
+                f'{cluster_name_on_cloud}, with statuses: {failed_instances}')
         ready_instance_cnt = 0
         for instance_id, instance in instances.items():
-            if instance.get('ssh_port') is not None:
+            if (instance['status'] == 'RUNNING' and
+                    instance.get('ssh_port') is not None):
                 ready_instance_cnt += 1
         logger.info('Waiting for instances to be ready: '
                     f'({ready_instance_cnt}/{config.count}).')
