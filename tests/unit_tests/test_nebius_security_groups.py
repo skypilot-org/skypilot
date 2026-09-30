@@ -255,6 +255,92 @@ def test_terminate_instances_skips_sg_delete_for_worker_only():
     mock_del.assert_not_called()
 
 
+def test_terminate_instances_worker_only_waits_for_workers():
+    """Scale-down must return only after the deleted workers are gone.
+
+    `run_instances` runs right after a resize scale-down and counts RUNNING
+    instances; a worker whose delete is still in flight would be counted
+    against the requested node count. The head must be neither removed nor
+    waited on.
+    """
+    head = {'name': 'mycluster-aaaa-head', 'status': 'RUNNING'}
+    worker = {'name': 'mycluster-aaaa-worker', 'status': 'RUNNING'}
+    # Terminate-loop listing, then the wait polls: the worker is still
+    # listed (delete in flight), then only the head remains.
+    filter_results = iter([
+        {
+            'i-head': head,
+            'i-worker': worker
+        },
+        {
+            'i-head': head,
+            'i-worker': dict(worker, status='DELETING')
+        },
+        {
+            'i-head': head
+        },
+    ])
+    with mock.patch.object(nebius_instance,
+                           '_filter_instances',
+                           side_effect=lambda *a, **k: next(filter_results)), \
+         mock.patch.object(nebius_utils, 'remove') as mock_remove, \
+         mock.patch.object(nebius_utils, 'delete_cluster') as mock_del_cluster, \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del_sg, \
+         mock.patch('time.sleep') as mock_sleep:
+        nebius_instance.terminate_instances(
+            'mycluster',
+            provider_config={'region': 'eu-north1'},
+            worker_only=True,
+        )
+    mock_remove.assert_called_once_with('i-worker')
+    # One poll saw the deleting worker, the next saw only the head.
+    assert mock_sleep.call_count == 1
+    # All three listings were consumed: we did not return early.
+    assert next(filter_results, None) is None
+    mock_del_cluster.assert_not_called()
+    mock_del_sg.assert_not_called()
+
+
+def test_terminate_instances_worker_only_wait_times_out():
+    """If workers never drain, the bounded wait gives up with a warning
+    instead of hanging, and the head is never removed."""
+    filter_calls = {'n': 0}
+
+    def fake_filter(*_args, **_kwargs):
+        filter_calls['n'] += 1
+        return {
+            'i-head': {
+                'name': 'mycluster-aaaa-head',
+                'status': 'RUNNING'
+            },
+            'i-worker': {
+                'name': 'mycluster-aaaa-worker',
+                'status': 'DELETING'
+            },
+        }
+
+    with mock.patch.object(nebius_instance, '_filter_instances',
+                           side_effect=fake_filter), \
+         mock.patch.object(nebius_utils, 'remove') as mock_remove, \
+         mock.patch.object(nebius_utils, 'delete_cluster'), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch('time.sleep'), \
+         mock.patch.object(nebius_instance, 'logger') as mock_logger:
+        nebius_instance.terminate_instances(
+            'mycluster',
+            provider_config={'region': 'eu-north1'},
+            worker_only=True,
+        )
+    mock_remove.assert_called_once_with('i-worker')
+    # pylint: disable-next=protected-access
+    assert filter_calls['n'] == 1 + nebius_instance._TERMINATION_POLL_ATTEMPTS
+    warn_calls = [c.args[0] for c in mock_logger.warning.call_args_list]
+    assert any('still present' in m for m in warn_calls)
+
+
 def test_terminate_instances_noop_for_legacy_cluster_sg():
     """If no SG exists for the cluster (pre-PR launch), terminate cleanly
     skips the SG-delete branch."""
