@@ -354,22 +354,37 @@ UV_INSTALLATION_COMMANDS = (
 # (e.g. plain Ubuntu 24.04) otherwise leave user tasks with no `python`/`pip`
 # and an externally managed (PEP 668), non-writable system Python. Must run
 # after uv is installed. Best effort and idempotent: skipped if a usable env
-# (with both `python` and `pip`) already exists, or if there is no python3. An
-# incomplete env (e.g. a failed `--seed`) is removed and rebuilt, and removed
-# again if the rebuild fails, so ACTIVATE_SKY_USER_ENV never activates an env
-# without pip. It is created even when conda is installed: ACTIVATE_SKY_USER_ENV
-# only activates it when no conda env is active in the task shell.
+# (with both `python` and `pip`) already exists, or if there is no python3. It
+# is created even when conda is installed: ACTIVATE_SKY_USER_ENV only activates
+# it when no conda env is active in the task shell.
 # --system-site-packages keeps packages preinstalled in the image's system
 # Python importable, while new installs go into the writable venv.
+# Safe to run concurrently against a shared $HOME (e.g. all nodes of a Slurm
+# cluster): each run builds a --relocatable env in its own temporary
+# directory and only installs it with an atomic rename, so the env path only
+# ever holds a complete env and no run deletes a directory another run is
+# building. An incomplete env left at the path (e.g. by a failed `--seed` of
+# an older version) is renamed aside before the install instead of being
+# deleted in place.
+_SKY_USER_ENV_USABLE = (f'{{ [ -x {SKY_USER_ENV_PATH}/bin/python ] && '
+                        f'[ -x {SKY_USER_ENV_PATH}/bin/pip ]; }}')
 SKY_USER_ENV_CREATION_COMMANDS = (
-    f'{{ [ -x {SKY_USER_ENV_PATH}/bin/python ] && '
-    f'[ -x {SKY_USER_ENV_PATH}/bin/pip ]; }} || '
+    f'{_SKY_USER_ENV_USABLE} || '
     '! command -v python3 > /dev/null 2>&1 || '
-    f'{{ rm -rf {SKY_USER_ENV_PATH} && '
-    f'{SKY_UV_CMD} venv --seed --system-site-packages '
-    f'--python "$(command -v python3)" {SKY_USER_ENV_PATH} && '
-    f'[ -x {SKY_USER_ENV_PATH}/bin/pip ]; }} || '
-    f'{{ rm -rf {SKY_USER_ENV_PATH}; '
+    '{ '
+    '_sky_env_sfx="$(hostname 2>/dev/null).$$.$RANDOM"; '
+    f'_sky_env_tmp={SKY_USER_ENV_PATH}.tmp.$_sky_env_sfx; '
+    f'if {SKY_UV_CMD} venv --seed --relocatable --system-site-packages '
+    '--python "$(command -v python3)" "$_sky_env_tmp" > /dev/null 2>&1 && '
+    '[ -x "$_sky_env_tmp/bin/pip" ]; then '
+    f'if ! {_SKY_USER_ENV_USABLE} && [ -e {SKY_USER_ENV_PATH} ]; then '
+    f'mv -T {SKY_USER_ENV_PATH} {SKY_USER_ENV_PATH}.stale.$_sky_env_sfx '
+    f'2> /dev/null; rm -rf {SKY_USER_ENV_PATH}.stale.$_sky_env_sfx; '
+    'fi; '
+    f'mv -T "$_sky_env_tmp" {SKY_USER_ENV_PATH} 2> /dev/null; '
+    'fi; '
+    'rm -rf "$_sky_env_tmp"; '
+    f'{_SKY_USER_ENV_USABLE} || '
     'echo "Failed to create the default user Python environment; skipping."; '
     '};')
 
