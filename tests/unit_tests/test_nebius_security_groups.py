@@ -255,14 +255,16 @@ def test_cleanup_ports_raises_when_instance_listing_fails():
     """A failed instance listing must not look like a completed cleanup:
     post_teardown_cleanup would then drop the cluster record and the SG
     would never be retried. Raise ClusterStatusFetchingError so the record
-    is kept and a status refresh reports the cluster as UNKNOWN."""
+    is kept and a status refresh reports the cluster as UNKNOWN. The listing
+    is retried a bounded number of times first."""
     with mock.patch.object(nebius_instance,
                            '_filter_instances',
-                           side_effect=RuntimeError('list timed out')), \
+                           side_effect=RuntimeError('list timed out')) as mock_filter, \
          mock.patch.object(nebius_utils, 'get_project_by_region',
                            return_value='proj-abc'), \
          mock.patch.object(nebius_utils, 'get_security_group_by_name') as mock_lookup, \
          mock.patch.object(nebius_utils, 'delete_security_group') as mock_del, \
+         mock.patch('time.sleep'), \
          pytest.raises(exceptions.ClusterStatusFetchingError,
                        match='list timed out'):
         nebius_instance.cleanup_ports(
@@ -270,8 +272,31 @@ def test_cleanup_ports_raises_when_instance_listing_fails():
             ['8080'],
             provider_config={'region': 'eu-north1'},
         )
+    # pylint: disable-next=protected-access
+    assert mock_filter.call_count == nebius_instance._CLEANUP_LIST_ATTEMPTS
     mock_lookup.assert_not_called()
     mock_del.assert_not_called()
+
+
+def test_cleanup_ports_retries_transient_listing_error():
+    """A transient listing error must not fail the teardown (or abort a
+    provisioning failover): the retry succeeds and the SG is reaped."""
+    with mock.patch.object(nebius_instance,
+                           '_filter_instances',
+                           side_effect=[RuntimeError('blip'),
+                                        RuntimeError('blip'), {}]), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           return_value='sg-2'), \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del, \
+         mock.patch('time.sleep'):
+        nebius_instance.cleanup_ports(
+            'mycluster',
+            ['8080'],
+            provider_config={'region': 'eu-north1'},
+        )
+    mock_del.assert_called_once_with('sg-2')
 
 
 def test_cleanup_ports_noop_when_sg_already_deleted():

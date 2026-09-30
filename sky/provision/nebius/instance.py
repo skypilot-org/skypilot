@@ -22,6 +22,8 @@ MAX_RETRIES_TO_LAUNCH = 120  # Maximum number of retries
 # before deleting the cluster's security group. 60 * 5s = 5 minutes, which
 # covers typical Nebius instance reap times.
 _TERMINATION_POLL_ATTEMPTS = 60
+# Attempts to list instances in cleanup_ports before giving up.
+_CLEANUP_LIST_ATTEMPTS = 3
 
 logger = sky_logging.init_logger(__name__)
 
@@ -506,25 +508,40 @@ def cleanup_ports(
     sg_block = provider_config.get('security_group') or {}
     if not bool(sg_block.get('ManagedBySkyPilot', True)):
         return
-    try:
-        project_id = provider_config.get('project_id')
-        if project_id is None:
-            project_id = utils.get_project_by_region(provider_config['region'])
-        instances = _filter_instances(provider_config['region'],
-                                      cluster_name_on_cloud,
-                                      status_filters=None,
-                                      project_id=project_id)
-    except Exception as e:  # pylint: disable=broad-except
-        # Raise rather than skip: returning normally would let
-        # `post_teardown_cleanup` drop the cluster record and config, leaving
-        # no later pass to reap the SG. Raising keeps both, so the next
-        # status refresh retries (a status refresh shows the cluster as
-        # UNKNOWN meanwhile), and `sky down --purge` still proceeds since it
-        # skips cleanup_ports failures.
-        raise exceptions.ClusterStatusFetchingError(
-            f'Failed to list instances of {cluster_name_on_cloud!r} to clean '
-            'up its security group: '
-            f'{common_utils.format_exception(e, use_bracket=False)}') from e
+    # Retry the listing a few times so a transient API error does not fail
+    # the teardown (or a provisioning failover, which also calls us).
+    for attempt in range(_CLEANUP_LIST_ATTEMPTS):
+        try:
+            project_id = provider_config.get('project_id')
+            if project_id is None:
+                project_id = utils.get_project_by_region(
+                    provider_config['region'])
+            instances = _filter_instances(provider_config['region'],
+                                          cluster_name_on_cloud,
+                                          status_filters=None,
+                                          project_id=project_id)
+            break
+        except Exception as e:  # pylint: disable=broad-except
+            if attempt + 1 < _CLEANUP_LIST_ATTEMPTS:
+                logger.debug(f'Failed to list instances of '
+                             f'{cluster_name_on_cloud} (attempt '
+                             f'{attempt + 1}/{_CLEANUP_LIST_ATTEMPTS}): {e}')
+                time.sleep(utils.POLL_INTERVAL)
+                continue
+            # Raise rather than skip: returning normally would let
+            # `post_teardown_cleanup` drop the cluster record and config,
+            # leaving no later pass to reap the SG. Raising keeps both, so the
+            # next status refresh retries (a status refresh shows the cluster
+            # as UNKNOWN meanwhile), and `sky down --purge` still proceeds
+            # since it skips cleanup_ports failures. A provisioning failover
+            # stops here as it already does when the same listing fails in
+            # its non-terminated-node check, rather than moving on while this
+            # cluster's instances and SG are in an unknown state.
+            raise exceptions.ClusterStatusFetchingError(
+                f'Failed to list instances of {cluster_name_on_cloud!r} to '
+                'clean up its security group: '
+                f'{common_utils.format_exception(e, use_bracket=False)}') from e
+    assert project_id is not None
     if instances:
         logger.debug(f'{len(instances)} instance(s) of '
                      f'{cluster_name_on_cloud} still present; leaving the '
