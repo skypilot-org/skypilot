@@ -2297,6 +2297,21 @@ def set_cluster_skylet_ssh_tunnel(cluster_name: str, owner_id: str,
 
 
 @metrics_lib.time_me
+def get_skylet_ssh_tunnel_pids(owner_id: str) -> Set[int]:
+    """Returns the pids of owner_id's skylet tunnels across all clusters."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.query(cluster_table.c.skylet_ssh_tunnels).filter(
+            cluster_table.c.skylet_ssh_tunnels.isnot(None)).all()
+    pids = set()
+    for row in rows:
+        entry = row.skylet_ssh_tunnels.get(owner_id)
+        if entry is not None:
+            pids.add(entry[1])
+    return pids
+
+
+@metrics_lib.time_me
 def _get_cluster_usage_intervals(
         cluster_hash: Optional[str]
 ) -> Optional[List[Tuple[int, Optional[int]]]]:

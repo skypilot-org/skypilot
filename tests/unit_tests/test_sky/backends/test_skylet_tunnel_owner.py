@@ -1,15 +1,19 @@
-"""Tests for per-host skylet tunnel bookkeeping."""
+"""Tests for per-host skylet tunnel bookkeeping and its GC sweep."""
 import json
 import pickle
+import subprocess
+import sys
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
+import psutil
 import pytest
 import sqlalchemy
 from sqlalchemy import orm
 
 from sky import global_user_state
 from sky.backends import backend_utils
+from sky.backends import skylet_tunnel_gc
 from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
 from sky.backends.cloud_vm_ray_backend import SSHTunnelInfo
 from sky.skylet import constants
@@ -96,6 +100,7 @@ def test_owners_keep_independent_entries(fresh_db):
                                                                          222)
     assert global_user_state.get_cluster_skylet_ssh_tunnel(_CLUSTER,
                                                            'host-c') is None
+    assert global_user_state.get_skylet_ssh_tunnel_pids('host-a') == {111}
 
 
 def test_setting_none_removes_only_that_owner(fresh_db):
@@ -127,6 +132,7 @@ def test_released_version_tunnel_is_ignored_and_left_untouched(fresh_db):
     for owner in ('host-a', 'host-b'):
         assert global_user_state.get_cluster_skylet_ssh_tunnel(_CLUSTER,
                                                                owner) is None
+    assert global_user_state.get_skylet_ssh_tunnel_pids('host-a') == set()
 
     global_user_state.set_cluster_skylet_ssh_tunnel(_CLUSTER, 'host-b',
                                                     (20000, 222))
@@ -201,3 +207,104 @@ def test_cluster_tunnel_lock_id_is_per_owner(monkeypatch):
     lock_b = backend_utils.cluster_tunnel_lock_id(_CLUSTER)
     assert lock_a == f'{_CLUSTER}_host-a_ssh_tunnel'
     assert lock_a != lock_b
+
+
+def _spawn(args, shell=False) -> subprocess.Popen:
+    return subprocess.Popen(args, shell=shell)
+
+
+def _sleeper(*extra_args: str) -> list:
+    return [sys.executable, '-c', 'import time; time.sleep(120)', *extra_args]
+
+
+@pytest.fixture
+def gc_env(fresh_db, monkeypatch):
+    """Runs the sweep as host-a against only the processes a test spawns."""
+    _as_owner(monkeypatch, 'host-a')
+    monkeypatch.setattr(skylet_tunnel_gc, '_MIN_TUNNEL_AGE_SECONDS', 0)
+    spawned = []
+    real_process_iter = psutil.process_iter
+
+    def process_iter(*args, **kwargs):
+        pids = set()
+        for popen in spawned:
+            pids.add(popen.pid)
+            try:
+                pids.update(child.pid
+                            for child in psutil.Process(popen.pid).children(
+                                recursive=True))
+            except psutil.NoSuchProcess:
+                pass
+        for proc in real_process_iter(*args, **kwargs):
+            if proc.pid in pids:
+                yield proc
+
+    monkeypatch.setattr(skylet_tunnel_gc.psutil, 'process_iter', process_iter)
+    try:
+        yield spawned
+    finally:
+        for popen in spawned:
+            try:
+                parent = psutil.Process(popen.pid)
+                procs = [*parent.children(recursive=True), parent]
+            except psutil.NoSuchProcess:
+                procs = []
+            for proc in procs:
+                try:
+                    proc.kill()
+                except psutil.NoSuchProcess:
+                    pass
+            popen.wait(timeout=10)
+
+
+def _alive(proc: subprocess.Popen) -> bool:
+    return proc.poll() is None
+
+
+def test_sweep_keeps_recorded_and_kills_unrecorded_kubectl_tunnel(gc_env):
+    tunnel = _spawn(_sleeper('port-forward', 'pod/x', f'12345:{_GRPC_PORT}'))
+    gc_env.append(tunnel)
+    global_user_state.set_cluster_skylet_ssh_tunnel(_CLUSTER, 'host-a',
+                                                    (12345, tunnel.pid))
+
+    assert skylet_tunnel_gc.sweep() == 0
+    assert _alive(tunnel)
+
+    global_user_state.set_cluster_skylet_ssh_tunnel(_CLUSTER, 'host-a', None)
+    assert skylet_tunnel_gc.sweep() == 1
+    tunnel.wait(timeout=15)
+
+
+def test_sweep_kills_tunnel_recorded_under_another_owner(gc_env):
+    tunnel = _spawn(_sleeper('port-forward', 'pod/x', f'12345:{_GRPC_PORT}'))
+    gc_env.append(tunnel)
+    global_user_state.set_cluster_skylet_ssh_tunnel(_CLUSTER, 'host-b',
+                                                    (12345, tunnel.pid))
+
+    assert skylet_tunnel_gc.sweep() == 1
+    tunnel.wait(timeout=15)
+
+
+def test_sweep_keeps_child_of_recorded_shell_wrapper(gc_env):
+    # `; true` keeps sh from exec-ing, so the tunnel is sh's child.
+    wrapper = _spawn(
+        f'{sys.executable} -c "import time; time.sleep(120)" '
+        f'-L 12345:localhost:{_GRPC_PORT}; true',
+        shell=True)
+    gc_env.append(wrapper)
+    global_user_state.set_cluster_skylet_ssh_tunnel(_CLUSTER, 'host-a',
+                                                    (12345, wrapper.pid))
+
+    assert skylet_tunnel_gc.sweep() == 0
+    assert _alive(wrapper)
+    assert psutil.Process(wrapper.pid).children()
+
+
+def test_sweep_ignores_non_tunnel_processes(gc_env):
+    other_port = _spawn(_sleeper('port-forward', 'pod/x', '12345:8080'))
+    no_forward = _spawn(_sleeper(f'12345:{_GRPC_PORT}'))
+    gc_env.extend([other_port, no_forward])
+
+    assert skylet_tunnel_gc.sweep() == 0
+    assert _alive(other_port)
+    assert _alive(no_forward)
