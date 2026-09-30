@@ -3164,7 +3164,11 @@ def test_cli_output(generic_cloud: str):
                 f's=$(yes no | sky launch -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} || true) && '
                 'echo "$s" && echo "===Validating launch plan===" && '
                 'echo "$s" | grep "CHOSEN" && '
-                'border=$(echo "$s" | grep -A 1 "Considered resources" | tail -n +2) && '
+                # Match the border by pattern instead of taking the line right
+                # after "Considered resources": debug log lines (e.g. from
+                # catalog lookups on Nebius) can be interleaved in between.
+                'border=$(echo "$s" | grep -A 30 "Considered resources" | grep -m1 -oE -- "-{20,}") && '
+                '[ -n "$border" ] && '
                 'echo $border && echo "===Table should have 3 borders===" && '
                 # Strawman idea: validate the table has 3 borders to ensure it is completed.
                 'echo "$s" | grep -- "$border" | wc -l | grep 3'),
