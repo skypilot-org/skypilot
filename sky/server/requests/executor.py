@@ -1048,6 +1048,8 @@ def _request_execution_wrapper(request_id: str,
         try:
             # Capture the peak RSS before GC.
             peak_rss = max(proc.memory_info().rss, metrics_lib.peak_rss_bytes)
+            # Release the persisted result before GC and allocator trim.
+            return_value = None
             # Clear request level cache to release all memory used by the
             # request.
             annotations.clear_request_level_cache()
