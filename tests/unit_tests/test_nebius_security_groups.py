@@ -304,8 +304,9 @@ def test_terminate_instances_worker_only_waits_for_workers():
 
 
 def test_terminate_instances_worker_only_wait_times_out():
-    """If workers never drain, the bounded wait gives up with a warning
-    instead of hanging, and the head is never removed."""
+    """If workers never drain, the bounded wait gives up instead of hanging
+    and raises, so a resize does not re-provision while the deleted worker
+    may still be counted as RUNNING. The head is never removed."""
     filter_calls = {'n': 0}
 
     def fake_filter(*_args, **_kwargs):
@@ -328,7 +329,8 @@ def test_terminate_instances_worker_only_wait_times_out():
          mock.patch.object(nebius_utils, 'get_project_by_region',
                            return_value='proj-abc'), \
          mock.patch('time.sleep'), \
-         mock.patch.object(nebius_instance, 'logger') as mock_logger:
+         mock.patch.object(nebius_instance, 'logger') as mock_logger, \
+         pytest.raises(RuntimeError, match='Timed out waiting for the worker'):
         nebius_instance.terminate_instances(
             'mycluster',
             provider_config={'region': 'eu-north1'},

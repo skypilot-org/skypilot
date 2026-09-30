@@ -362,11 +362,16 @@ def terminate_instances(
             # deleted workers are still listed as RUNNING, `run_instances`
             # counts them against the requested node count and fails, and
             # the failure cleanup then tries to stop VMs that are already
-            # being deleted.
-            _wait_for_instances_terminated(provider_config['region'],
-                                           cluster_name_on_cloud,
-                                           project_id,
-                                           worker_only=True)
+            # being deleted. Raise on timeout so the caller does not proceed
+            # while termination is unconfirmed.
+            if not _wait_for_instances_terminated(provider_config['region'],
+                                                  cluster_name_on_cloud,
+                                                  project_id,
+                                                  worker_only=True):
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'Timed out waiting for the worker instances of '
+                        f'{cluster_name_on_cloud} to terminate.')
         else:
             utils.delete_cluster(cluster_name_on_cloud,
                                  provider_config['region'],
