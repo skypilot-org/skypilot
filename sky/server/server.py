@@ -51,6 +51,7 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.backends import skylet_tunnel_gc
 from sky.data import storage_utils
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
@@ -4482,6 +4483,10 @@ if __name__ == '__main__':
             background.create_task(cleanup_unreferenced_file_mounts()))
         global_tasks.append(background.create_task(cleanup_clients_tmp()))
         global_tasks.append(background.create_task(cleanup_sky_logs()))
+        # Skylet tunnels are processes on this host, so every API server
+        # process sweeps its own.
+        global_tasks.append(background.create_task(
+            skylet_tunnel_gc.gc_daemon()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         # managed-job-status-refresh runs as a thread inside this
