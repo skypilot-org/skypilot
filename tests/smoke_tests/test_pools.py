@@ -1621,7 +1621,10 @@ def test_pools_double_launch(generic_cloud: str):
                                                       pool_yaml=pool_yaml.name),
                 wait_until_pool_ready(pool_name, timeout=timeout),
                 _TEARDOWN_POOL.format(pool_name=pool_name),
-                'sleep 60',  # Wait a little bit to ensure the pool is fully shut down.
+                # Wait until the pool is fully shut down; re-applying while it
+                # is still shutting down is rejected. A fixed sleep is too
+                # short on clouds with slow teardown (e.g. Nebius).
+                check_pool_not_in_status(pool_name),
                 _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
                                                       pool_yaml=pool_yaml.name),
                 wait_until_pool_ready(pool_name, timeout=timeout),
@@ -1633,13 +1636,14 @@ def test_pools_double_launch(generic_cloud: str):
 
 
 def check_pool_not_in_status(pool_name: str,
-                             timeout: int = 30,
+                             timeout: int = 300,
                              time_between_checks: int = 5):
     """Check that a pool does not appear in `sky jobs pool status`.
 
     Args:
         pool_name: The name of the pool to check for.
         timeout: Maximum time in seconds to wait for the pool to be removed.
+            Pool teardown can take minutes on some clouds (e.g. Nebius).
         time_between_checks: Time in seconds to wait between checks.
     """
     return (
@@ -1800,7 +1804,7 @@ def test_pool_down_single_pool(generic_cloud: str):
                     'sleep 10',
                     wait_until_job_status(
                         job_name, ['CANCELLED'], bad_statuses=[], timeout=30),
-                    check_pool_not_in_status(pool_name, timeout=30),
+                    check_pool_not_in_status(pool_name),
                 ],
                 timeout=timeout,
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
