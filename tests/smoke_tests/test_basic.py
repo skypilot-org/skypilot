@@ -19,17 +19,25 @@
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_basic.py --generic-cloud aws
 
+import fcntl
 import json
 import os
 import pathlib
+import re
 import shlex
+import socket
+import stat
+import struct
 import subprocess
+import sys
 import tempfile
+import termios
 import textwrap
 import threading
 import time
 from typing import Dict, Generator, Optional
 
+import psutil
 import pytest
 from smoke_tests import smoke_tests_utils
 
@@ -3599,6 +3607,102 @@ def test_no_ssh_tunnel_process_leak_after_teardown(generic_cloud: str):
         ],
         f'sky down -y {cluster_name}',
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+def _find_skylet_tunnel_process(cluster_name: str) -> psutil.Process:
+    """Returns the local kubectl port-forward process to the cluster's skylet."""
+    remote_port_suffix = f':{constants.SKYLET_GRPC_PORT}'
+    candidates = []
+    for proc in psutil.process_iter(['name', 'cmdline', 'create_time']):
+        cmdline = proc.info['cmdline'] or []
+        if (proc.info['name'] == 'kubectl' and 'port-forward' in cmdline and
+                any(cluster_name in arg for arg in cmdline) and
+                any(arg.endswith(remote_port_suffix) for arg in cmdline)):
+            candidates.append(proc)
+    assert candidates, (
+        f'No kubectl port-forward to port {constants.SKYLET_GRPC_PORT} found '
+        f'for cluster {cluster_name}')
+    return max(candidates, key=lambda p: p.info['create_time'])
+
+
+def _queued_stdout_bytes(pid: int) -> int:
+    """Returns the bytes waiting to be read in a process's stdout pipe.
+
+    Opening /proc/<pid>/fd/1 yields another reader on the same pipe, and
+    FIONREAD reports its queued bytes without consuming them. Linux only.
+    """
+    fd = os.open(f'/proc/{pid}/fd/1', os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        mode = os.fstat(fd).st_mode
+        assert stat.S_ISFIFO(mode), f'stdout of process {pid} is not a pipe'
+        buf = fcntl.ioctl(fd, termios.FIONREAD, struct.pack('i', 0))
+        return struct.unpack('i', buf)[0]
+    finally:
+        os.close(fd)
+
+
+# Only inspects processes on the local machine, so skip remote server test.
+@pytest.mark.kubernetes
+@pytest.mark.no_remote_server
+def test_kubernetes_skylet_tunnel_survives_many_connections():
+    """The skylet gRPC tunnel keeps forwarding after many local connections.
+
+    kubectl port-forward prints a line to stdout for every accepted local
+    connection before forwarding it. The API server must keep reading that
+    output, or kubectl blocks once the pipe is full: local TCP connects still
+    succeed, but no bytes reach the skylet and every gRPC call times out.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    # Each connection prints ~30 bytes, so this writes well past a 64 KiB
+    # pipe buffer.
+    num_connections = 3000
+    max_queued_bytes = 4096
+
+    def hammer_tunnel() -> Generator[str, None, None]:
+        proc = _find_skylet_tunnel_process(name)
+        local_port = None
+        for arg in proc.info['cmdline']:
+            match = re.fullmatch(rf'(\d+):{constants.SKYLET_GRPC_PORT}', arg)
+            if match:
+                local_port = int(match.group(1))
+        assert local_port is not None, proc.info['cmdline']
+        yield f'Tunnel process {proc.pid} listens on port {local_port}'
+
+        measure = sys.platform.startswith('linux')
+        if measure:
+            yield (f'Queued stdout bytes before: '
+                   f'{_queued_stdout_bytes(proc.pid)}')
+        for _ in range(num_connections):
+            with socket.create_connection(('127.0.0.1', local_port), timeout=5):
+                pass
+        yield f'Opened and closed {num_connections} connections'
+        # Let kubectl finish handling the accepted connections.
+        time.sleep(5)
+        assert proc.is_running(), 'tunnel process exited'
+        if measure:
+            queued = _queued_stdout_bytes(proc.pid)
+            yield f'Queued stdout bytes after: {queued}'
+            assert queued < max_queued_bytes, (
+                f'{queued} bytes are queued in the tunnel stdout pipe')
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_skylet_tunnel_survives_many_connections',
+        [
+            f'sky launch -y -c {name} --infra kubernetes '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',
+            f'sky logs {name} 1 --status',
+            hammer_tunnel,
+            # Skylet calls through a wedged tunnel hang until their gRPC
+            # deadline, so bound how long these calls may take.
+            f'timeout 60 sky queue {name}',
+            f'timeout 60 sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}',
+        # TODO(kevin): remove SKYPILOT_ENABLE_GRPC=1 after it becomes the default.
+        env={'SKYPILOT_ENABLE_GRPC': '1'},
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
     )
     smoke_tests_utils.run_one_test(test)
 
