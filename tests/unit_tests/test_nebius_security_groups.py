@@ -458,6 +458,50 @@ def test_terminate_instances_sg_cleanup_runs_when_termination_fails():
     assert mock_filter.call_count == 1
 
 
+def test_terminate_instances_stuck_worker_does_not_block_head():
+    """A worker whose delete keeps failing, listed before the head, must not
+    keep the head from being deleted; the failure is still reported.
+
+    This is the autodown fallback path: the worker-only call already failed
+    on this worker and the full termination retries it.
+    """
+
+    def fake_remove(inst_id):
+        if inst_id == 'i-worker':
+            raise RuntimeError('worker delete rejected')
+
+    with mock.patch.object(
+            nebius_instance, '_filter_instances',
+            return_value={
+                'i-worker': {
+                    'name': 'mycluster-aaaa-worker',
+                    'status': 'RUNNING'
+                },
+                'i-head': {
+                    'name': 'mycluster-aaaa-head',
+                    'status': 'RUNNING'
+                },
+            }), \
+         mock.patch.object(nebius_utils, 'remove',
+                           side_effect=fake_remove) as mock_remove, \
+         mock.patch.object(nebius_utils, 'delete_cluster'), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           return_value='sg-2'), \
+         mock.patch.object(nebius_utils, 'delete_security_group'), \
+         mock.patch('time.sleep'):
+        with pytest.raises(RuntimeError,
+                           match='i-worker: .*worker delete rejected'):
+            nebius_instance.terminate_instances(
+                'mycluster',
+                provider_config={'region': 'eu-north1'},
+                worker_only=False,
+            )
+    assert [c.args[0] for c in mock_remove.call_args_list
+           ] == ['i-worker', 'i-head']
+
+
 def test_terminate_instances_sg_cleanup_error_does_not_mask_failure():
     """An SG-cleanup error inside the `finally` must never mask the
     original instance-termination error."""
