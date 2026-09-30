@@ -1640,6 +1640,12 @@ def check_pool_not_in_status(pool_name: str,
                              time_between_checks: int = 5):
     """Check that a pool does not appear in `sky jobs pool status`.
 
+    Only a successful status query that shows the pool is gone counts: either
+    "No existing pools." or a pool table without the pool. Anything else (e.g.
+    a controller-unavailable message, which also lacks the pool name) keeps
+    polling, so a transient controller error cannot pass as a completed
+    teardown.
+
     Args:
         pool_name: The name of the pool to check for.
         timeout: Maximum time in seconds to wait for the pool to be removed.
@@ -1651,19 +1657,22 @@ def check_pool_not_in_status(pool_name: str,
         'while true; do '
         f'if (( $SECONDS - $start_time > {timeout} )); then '
         f'  echo "Timeout after {timeout} seconds waiting for pool {pool_name} to be removed"; '
-        f'  s=$(sky jobs pool status); '
-        f'  echo "$s"; '
-        f'  if echo "$s" | grep "{pool_name}"; then '
-        f'    echo "ERROR: Pool {pool_name} still exists in pool status"; '
-        f'    exit 1; '
-        f'  fi; '
-        f'  exit 0; '
+        '  echo "Last pool status output:"; '
+        '  echo "$s"; '
+        f'  echo "ERROR: Could not confirm pool {pool_name} was removed"; '
+        '  exit 1; '
         'fi; '
-        f's=$(sky jobs pool status); '
-        'echo "$s"; '
-        f'if ! echo "$s" | grep "{pool_name}"; then '
-        f'  echo "Pool {pool_name} correctly removed from pool status"; '
-        '  break; '
+        'if s=$(sky jobs pool status); then '
+        '  echo "$s"; '
+        '  if echo "$s" | grep -q "No existing pools." || '
+        '     { echo "$s" | grep -qE "^NAME +VERSION" && '
+        f'       ! echo "$s" | grep -qF "{pool_name}"; }}; then '
+        f'    echo "Pool {pool_name} correctly removed from pool status"; '
+        '    break; '
+        '  fi; '
+        'else '
+        '  echo "$s"; '
+        '  echo "sky jobs pool status failed; retrying"; '
         'fi; '
         f'echo "Waiting for pool {pool_name} to be removed..."; '
         f'sleep {time_between_checks}; '
