@@ -185,30 +185,88 @@ def test_delayed_entrypoint_does_not_start_ssh_or_setup(tmp_path):
 @pytest.mark.parametrize('cancel', [False, True])
 def test_entrypoint_expiry_and_cancel_end_child_group(tmp_path, cancel):
     marker = tmp_path / 'started'
+    ready = tmp_path / 'ready'
+    owned_ack = tmp_path / 'owned'
     script = (f'echo $$ > {shlex.quote(str(marker))}; sleep 30 & '
               f'echo $! >> {shlex.quote(str(marker))}; wait')
+    # Gate the second wall-clock sample inside the supervisor's try/finally.
+    # Keep real wait/killpg behavior without spending its budget on startup.
+    # Expiry still waits 0.7s; cancellation gets 30s to avoid racing expiry.
+    clock = f"""\
+import pathlib, subprocess, time
+samples = iter((False, True))
+def wall_time():
+    if not next(samples):
+        return 0.0
+    marker = pathlib.Path({str(marker)!r})
+    until = time.monotonic() + 2
+    while time.monotonic() < until:
+        if marker.exists() and len(marker.read_text().splitlines()) == 2:
+            pathlib.Path({str(ready)!r}).touch()
+            while time.monotonic() < until:
+                if pathlib.Path({str(owned_ack)!r}).exists():
+                    return {0.0 if cancel else 29.3}
+                time.sleep(0.01)
+            raise TimeoutError('child ownership was not acknowledged')
+        time.sleep(0.01)
+    raise TimeoutError('child group did not become ready')
+time.time = wall_time
+"""
+    command = deadline.command(script, 30)
+    command[2] = clock + command[2]
     start = time.monotonic()
-    process = subprocess.Popen(deadline.command(script, time.time() + 0.7))
+    process = subprocess.Popen(command,
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE,
+                               text=True)
+    group_ready = False
+    owned = []
     try:
         while time.monotonic() - start < 2:
-            if marker.exists() and len(marker.read_text().splitlines()) == 2:
+            if ready.exists() or process.poll() is not None:
                 break
             time.sleep(0.01)
-        children = [int(pid) for pid in marker.read_text().splitlines()]
-        assert len(children) == 2
-        if cancel:
-            process.send_signal(signal.SIGTERM)
-        assert process.wait(timeout=3) == (143 if cancel else 124)
-        assert time.monotonic() - start < 3
-        for pid in children:
+        group_ready = ready.exists()
+        if group_ready:
+            children = [int(pid) for pid in marker.read_text().splitlines()]
+            assert len(children) == 2
+            owned = psutil.Process(process.pid).children(recursive=True)
+            assert set(children).issubset(child.pid for child in owned)
+            start = time.monotonic()
+            owned_ack.touch()
+            if cancel:
+                process.send_signal(signal.SIGTERM)
+            assert process.wait(timeout=3) == (143 if cancel else 124)
+            assert time.monotonic() - start < 3
+            for pid in children:
+                try:
+                    assert psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
+                except psutil.NoSuchProcess:
+                    pass
+    finally:
+        # Keep ownership even if the supervisor exited without killing children.
+        if process.poll() is None:
             try:
-                assert psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
+                if not owned:
+                    owned = psutil.Process(process.pid).children(recursive=True)
             except psutil.NoSuchProcess:
                 pass
-    finally:
-        if process.poll() is None:
-            process.kill()
-            process.wait(timeout=3)
+            process.terminate()
+        # Surviving children may hold stdout/stderr open after supervisor exit.
+        for child in owned:
+            try:
+                child.kill()
+            except psutil.NoSuchProcess:
+                pass
+        try:
+            stdout, stderr = process.communicate(timeout=3)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=3)
+    assert group_ready, (f'child group not ready: rc={process.returncode}, '
+                         f'stdout={stdout[-2000:]!r}, '
+                         f'stderr={stderr[-2000:]!r}')
 
 
 def test_entrypoint_preserves_early_exit():
