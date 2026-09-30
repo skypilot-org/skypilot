@@ -21,7 +21,8 @@ requests = common.LazyImport('requests')
 
 _REST_BASE = 'https://api.runpod.io/v2'
 _MAX_RETRIES = 3
-_TIMEOUT = 10
+# Pod creation can take well over 10s and a POST is not retried on timeout.
+_TIMEOUT = 30
 _RETRY_SLEEP_SECONDS = 1
 _MAX_RETRY_AFTER_SECONDS = 30
 # Repeating one of these after a lost response cannot leave a duplicate
