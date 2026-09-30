@@ -293,9 +293,12 @@ def test_cleanup_ports_noop_when_sg_already_deleted():
 
 
 def test_cleanup_ports_skips_byo_sg():
-    """A user-managed SG is never deleted, even after termination."""
-    with mock.patch.object(nebius_instance, '_filter_instances',
-                           return_value={}), \
+    """A user-managed SG is never deleted, even after termination, and no
+    instance listing happens: a listing failure must not block a teardown
+    that has nothing to clean up."""
+    with mock.patch.object(nebius_instance,
+                           '_filter_instances',
+                           side_effect=RuntimeError('list timed out')) as mock_filter, \
          mock.patch.object(nebius_utils, 'get_project_by_region',
                            return_value='proj-abc'), \
          mock.patch.object(nebius_utils, 'get_security_group_by_name') as mock_lookup, \
@@ -311,6 +314,7 @@ def test_cleanup_ports_skips_byo_sg():
                 },
             },
         )
+    mock_filter.assert_not_called()
     mock_lookup.assert_not_called()
     mock_del.assert_not_called()
 

@@ -500,6 +500,12 @@ def cleanup_ports(
     # Nebius rejects the delete anyway while a NIC still holds the SG.
     del ports
     assert provider_config is not None
+    # A user-managed (BYO) SG is never deleted by SkyPilot, so there is
+    # nothing to do and no reason to list instances (a listing failure would
+    # otherwise block an already completed teardown).
+    sg_block = provider_config.get('security_group') or {}
+    if not bool(sg_block.get('ManagedBySkyPilot', True)):
+        return
     try:
         project_id = provider_config.get('project_id')
         if project_id is None:

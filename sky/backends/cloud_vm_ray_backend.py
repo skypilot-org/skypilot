@@ -5821,6 +5821,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 except exceptions.PortDoesNotExistError:
                     logger.debug('Ports do not exist. Skipping cleanup.')
                     ports_cleaned_up = True
+                except exceptions.ClusterStatusFetchingError as e:
+                    # The provider could not confirm the cluster is gone, so
+                    # it did not clean up. During provisioning failover this
+                    # must not abort the remaining attempts; the cluster
+                    # config is kept (ports_cleaned_up stays False) so a later
+                    # teardown can retry. Otherwise handle it like any other
+                    # failure below.
+                    msg = common_utils.format_exception(e, use_bracket=True)
+                    if failover or purge:
+                        logger.warning(f'Failed to cleanup ports. Skipping. '
+                                       f'Details: {msg}')
+                    else:
+                        raise
                 except Exception as e:  # pylint: disable=broad-except
                     if purge:
                         msg = common_utils.format_exception(e, use_bracket=True)
