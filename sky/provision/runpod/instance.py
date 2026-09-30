@@ -59,6 +59,15 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             break
         logger.info(f'Waiting for {len(instances)} instances to be ready.')
         time.sleep(POLL_INTERVAL)
+    # RunPod cannot resume a pod for us (STOP is unsupported), and an exited
+    # or errored pod keeps billing its disk under the cluster name. Delete
+    # such pods before counting, so `sky start` replaces them.
+    stale_instances = _filter_instances(cluster_name_on_cloud,
+                                        ['EXITED', 'ERROR'])
+    for instance_id, instance in stale_instances.items():
+        logger.info(f'Deleting stale instance {instance_id} in status '
+                    f'{instance["status"]}.')
+        utils.remove(instance_id)
     exist_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
     head_instance_id = _get_head_instance_id(exist_instances)
 
