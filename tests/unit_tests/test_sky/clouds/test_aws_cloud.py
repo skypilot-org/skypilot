@@ -116,12 +116,15 @@ class TestVpcFailoverOverrides:
         ec2 = mock_aws.resource.return_value
         ec2.vpcs.filter.return_value = [mock.Mock()]
 
-        list(aws_mod.AWS.yield_cloud_specific_failover_overrides(
-            region='us-east-1'))
-        list(aws_mod.AWS.yield_cloud_specific_failover_overrides(
-            region='us-east-1'))
+        list(
+            aws_mod.AWS.yield_cloud_specific_failover_overrides(
+                region='us-east-1'))
+        list(
+            aws_mod.AWS.yield_cloud_specific_failover_overrides(
+                region='us-east-1'))
 
-        mock_aws.resource.assert_called_once_with('ec2', region_name='us-east-1')
+        mock_aws.resource.assert_called_once_with('ec2',
+                                                  region_name='us-east-1')
 
 
 class TestGetImageRootDeviceName:
