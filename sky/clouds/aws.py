@@ -165,6 +165,27 @@ def _is_efa_instance_type(instance_type: str) -> bool:
         for prefix in _EFA_INSTANCE_TYPE_PREFIXES)
 
 
+@aws_profile_aware_lru_cache(scope='request', maxsize=128)
+def _filter_vpc_names_by_region(vpc_names: Tuple[str, ...],
+                                region: str) -> Tuple[str, ...]:
+    try:
+        ec2 = aws.resource('ec2', region_name=region)
+        vpc_names_in_region = []
+        for vpc_name in vpc_names:
+            vpcs = list(
+                ec2.vpcs.filter(Filters=[{
+                    'Name': 'tag:Name',
+                    'Values': [vpc_name],
+                }]))
+            if vpcs:
+                vpc_names_in_region.append(vpc_name)
+    except (aws.botocore_exceptions().BotoCoreError,
+            aws.botocore_exceptions().ClientError) as e:
+        logger.debug('Failed to validate AWS VPC names in %s: %s', region, e)
+        return vpc_names
+    return tuple(vpc_names_in_region) or vpc_names[:1]
+
+
 @annotations.lru_cache(scope='global', maxsize=128)
 def _get_efa_image_id(region_name: str) -> Optional[str]:
     """Get the EFA image id for the given region."""
@@ -1738,26 +1759,11 @@ class AWS(clouds.Cloud):
             if isinstance(vpc_names, str):
                 vpc_names = [vpc_names]
             if len(vpc_names) > 1 and region is not None:
-                try:
-                    ec2 = aws.resource('ec2', region_name=region)
-                    vpc_names_in_region = []
-                    for vpc_name in vpc_names:
-                        vpcs = list(
-                            ec2.vpcs.filter(Filters=[{
-                                'Name': 'tag:Name',
-                                'Values': [vpc_name],
-                            }]))
-                        if vpcs:
-                            vpc_names_in_region.append(vpc_name)
-                except (aws.botocore_exceptions().BotoCoreError,
-                        aws.botocore_exceptions().ClientError) as e:
-                    logger.debug('Failed to validate AWS VPC names in %s: %s',
-                                 region, e)
-                else:
-                    # Keep a configured VPC when none exist in this region so
-                    # provisioning reports its configuration error instead of
-                    # falling back to the account default VPC.
-                    vpc_names = vpc_names_in_region or vpc_names[:1]
+                # Keep a configured VPC when none exist in this region so
+                # provisioning reports its configuration error instead of
+                # falling back to the account default VPC.
+                vpc_names = _filter_vpc_names_by_region(tuple(vpc_names),
+                                                        region)
             for vpc_name in vpc_names:
                 yield {'vpc_name': vpc_name}
         else:
