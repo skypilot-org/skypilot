@@ -1,5 +1,6 @@
 """Util constants/functions for the backends."""
 import asyncio
+import collections
 from datetime import datetime
 from datetime import timezone
 import enum
@@ -18,8 +19,8 @@ import tempfile
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, Iterator, List, Optional, Sequence,
-                    Set, Tuple, TypeVar, Union)
+from typing import (Any, Callable, Deque, Dict, IO, Iterator, List, Optional,
+                    Sequence, Set, Tuple, TypeVar, Union)
 import uuid
 
 import aiohttp
@@ -263,6 +264,8 @@ _FILE_MOUNT_BASENAMES_SKIP_HASH = frozenset({
 
 _ACK_MESSAGE = 'ack'
 _FORWARDING_FROM_MESSAGE = 'Forwarding from'
+# Trailing lines of tunnel process output kept for error messages.
+_TUNNEL_OUTPUT_TAIL_LINES = 100
 
 
 def _caller_is_viewer() -> bool:
@@ -4658,6 +4661,22 @@ def cluster_tunnel_lock_id(cluster_name: str) -> str:
     return f'{cluster_name}_ssh_tunnel'
 
 
+def _drain_tunnel_pipe(pipe: IO[str],
+                       tail: Deque[str],
+                       first_line: Optional[queue_lib.Queue] = None) -> None:
+    """Reads a tunnel process pipe until EOF, keeping its last lines in tail.
+
+    If first_line is given, the first line read is also put on it.
+    """
+    # Iteration ends at EOF, which arrives when the tunnel process exits and
+    # its end of the pipe closes, so the thread lives as long as the process.
+    for line in pipe:
+        if first_line is not None:
+            first_line.put(line)
+            first_line = None
+        tail.append(line)
+
+
 def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
                                        command_runner.KubernetesCommandRunner],
                     port_forward: Tuple[int, int]) -> subprocess.Popen:
@@ -4689,14 +4708,38 @@ def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
                                        stderr=subprocess.PIPE,
                                        start_new_session=True,
                                        text=True)
+    # The tunnel process writes to stdout and stderr for its whole lifetime
+    # (kubectl port-forward prints a line for every accepted connection before
+    # forwarding it), so both pipes are read until EOF to keep the process
+    # from blocking on a full pipe.
+    queue: queue_lib.Queue = queue_lib.Queue()
+    stdout_tail: Deque[str] = collections.deque(
+        maxlen=_TUNNEL_OUTPUT_TAIL_LINES)
+    stderr_tail: Deque[str] = collections.deque(
+        maxlen=_TUNNEL_OUTPUT_TAIL_LINES)
+
+    assert ssh_tunnel_proc.stdout is not None
+    assert ssh_tunnel_proc.stderr is not None
+
+    def _drain_stderr(pipe: IO[str]) -> None:
+        _drain_tunnel_pipe(pipe, stderr_tail)
+        if stderr_tail:
+            last_lines = ''.join(stderr_tail)
+            logger.debug(f'Port forward process {ssh_tunnel_proc.pid} closed '
+                         f'stderr. Last lines:\n{last_lines}')
+
+    drain_threads = [
+        threading.Thread(target=_drain_tunnel_pipe,
+                         args=(ssh_tunnel_proc.stdout, stdout_tail, queue),
+                         daemon=True),
+        threading.Thread(target=_drain_stderr,
+                         args=(ssh_tunnel_proc.stderr,),
+                         daemon=True),
+    ]
+    for thread in drain_threads:
+        thread.start()
     # Wait until we receive an ack from the remote cluster or
     # the SSH connection times out.
-    queue: queue_lib.Queue = queue_lib.Queue()
-    stdout_thread = threading.Thread(
-        target=lambda queue, stdout: queue.put(stdout.readline()),
-        args=(queue, ssh_tunnel_proc.stdout),
-        daemon=True)
-    stdout_thread.start()
     while ssh_tunnel_proc.poll() is None:
         try:
             ack = queue.get_nowait()
@@ -4754,7 +4797,10 @@ def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
             break
 
     if ssh_tunnel_proc.poll() is not None:
-        stdout, stderr = ssh_tunnel_proc.communicate()
+        for thread in drain_threads:
+            thread.join(timeout=5)
+        stdout = ''.join(stdout_tail)
+        stderr = ''.join(stderr_tail)
         error_msg = 'Port forward failed'
         if stdout:
             error_msg += f'\n-- stdout --\n{stdout}\n'
