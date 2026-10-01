@@ -13,7 +13,7 @@ Install the latest SkyPilot and check your setup of the cloud credentials:
 pip install git+https://github.com/skypilot-org/skypilot.git
 sky check
 ```
-See the Falcon SkyPilot YAML for [training](train.yaml). Serving is currently a work in progress and a YAML will be provided for that soon! We are also working on adding an evaluation step to evaluate the model you finetuned compared to the base model.
+See the Falcon SkyPilot YAML for [training](falcon.yaml). Serving is currently a work in progress and a YAML will be provided for that soon! We are also working on adding an evaluation step to evaluate the model you finetuned compared to the base model.
 
 ## Running Falcon on SkyPilot
 Finetuning `Falcon-7B` and `Falcon-40B` require GPUs with 80GB memory,
@@ -29,7 +29,7 @@ We can start the finetuning of Falcon model on Open Assistant's [Guanaco](https:
 
 Steps for training on your cloud(s):
 
-1. In [train.yaml](train.yaml), set the following variables in `envs`:
+1. In [falcon.yaml](falcon.yaml), set the following variables in `envs`:
 
     - Replace the `OUTPUT_BUCKET_NAME` with a unique name. SkyPilot will create this bucket for you to store the model weights.
     - Replace the `WANDB_API_KEY` to your own key.

@@ -12,7 +12,7 @@ We offer example YAMLs for running NCCL tests to verify high-performance GPU net
 | Configuration | Target Platform | GPU Networking Technology | VM Types |
 |---------------|----------------|---------------------------|----------|
 | [`nccl_tcpx_gcpvm_h100.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/nccl_tcpx_gcpvm_h100.yaml) | GCP VM | GPUDirect-TCPX | a3-highgpu-8g, a3-edgegpu-8g |
-| [`nccl_tcpx_gke_h100.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/nccl_tcpx_gke.yaml) | GKE | GPUDirect-TCPX | a3-highgpu-8g, a3-edgegpu-8g |
+| [`nccl_tcpx_gke_h100.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/nccl_tcpx_gke_h100.yaml) | GKE | GPUDirect-TCPX | a3-highgpu-8g, a3-edgegpu-8g |
 | [`nccl_rdma_gke_h200.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/nccl_rdma_gke_h200.yaml) | GKE | GPUDirect-RDMA | a3-ultragpu-8g |
 
 
@@ -31,7 +31,7 @@ To make sure your cluster is set up correctly, refer to the [GKE documentation](
 In addition to creating a node pool with fixed node size to request the desired GPU instances, you can also use Dynamic Workload Scheduler (DWS) on GKE to provision the nodes, refer to [using DWS on GKE](https://docs.skypilot.co/en/latest/reservations/reservations.html#using-dws-on-gke) for more details.
 
 After setting up the GKE cluster, you can run the appropriate NCCL tests for your GPUs:
-* H100: [`sky launch -c nccl nccl_tcpx_gke_h100.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/nccl_tcpx_gke.yaml)
+* H100: [`sky launch -c nccl nccl_tcpx_gke_h100.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/nccl_tcpx_gke_h100.yaml)
 * H200: [`sky launch -c nccl nccl_rdma_gke_h200.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/nccl_rdma_gke_h200.yaml)
 
 ### GPUDirect-RDMA on A3-ultragpu-8g (H200)
