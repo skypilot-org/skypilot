@@ -1737,6 +1737,27 @@ class AWS(clouds.Cloud):
         if vpc_names:
             if isinstance(vpc_names, str):
                 vpc_names = [vpc_names]
+            if len(vpc_names) > 1 and region is not None:
+                try:
+                    ec2 = aws.resource('ec2', region_name=region)
+                    vpc_names_in_region = []
+                    for vpc_name in vpc_names:
+                        vpcs = list(
+                            ec2.vpcs.filter(Filters=[{
+                                'Name': 'tag:Name',
+                                'Values': [vpc_name],
+                            }]))
+                        if vpcs:
+                            vpc_names_in_region.append(vpc_name)
+                except (aws.botocore_exceptions().BotoCoreError,
+                        aws.botocore_exceptions().ClientError) as e:
+                    logger.debug('Failed to validate AWS VPC names in %s: %s',
+                                 region, e)
+                else:
+                    # Keep a configured VPC when none exist in this region so
+                    # provisioning reports its configuration error instead of
+                    # falling back to the account default VPC.
+                    vpc_names = vpc_names_in_region or vpc_names[:1]
             for vpc_name in vpc_names:
                 yield {'vpc_name': vpc_name}
         else:
