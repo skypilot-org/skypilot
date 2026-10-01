@@ -2,6 +2,7 @@
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from sky import exceptions
 from sky import sky_logging
 from sky.provision import common
 from sky.provision.nebius import constants as nebius_constants
@@ -21,6 +22,8 @@ MAX_RETRIES_TO_LAUNCH = 120  # Maximum number of retries
 # before deleting the cluster's security group. 60 * 5s = 5 minutes, which
 # covers typical Nebius instance reap times.
 _TERMINATION_POLL_ATTEMPTS = 60
+# Attempts to list instances in cleanup_ports before giving up.
+_CLEANUP_LIST_ATTEMPTS = 3
 
 logger = sky_logging.init_logger(__name__)
 
@@ -485,11 +488,66 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
-    # Intentional no-op. The cluster-specific security group is owned by
-    # the VM lifecycle, not the port lifecycle: it's created in
-    # `bootstrap_instances` and deleted in `terminate_instances` (when
-    # `worker_only=False`). Deleting it here would (a) tear down ingress
-    # for SSH and intra-cluster Ray traffic on a still-running cluster if
-    # this were ever called outside teardown, and (b) generate noisy
-    # FAILED_PRECONDITION retries while VMs still hold the NIC.
-    del cluster_name_on_cloud, ports, provider_config
+    # The cluster-specific security group is owned by the VM lifecycle, not
+    # the port lifecycle: it's created in `bootstrap_instances` and normally
+    # deleted in `terminate_instances` (when `worker_only=False`). That
+    # delete never runs on autodown, though: skylet calls
+    # `terminate_instances` on the head node itself, and the head VM is gone
+    # before the SG cleanup gets its turn. `post_teardown_cleanup` calls us
+    # from the API server once the cluster is known to be terminated, so
+    # this is the backstop that reaps the SG in that case.
+    #
+    # Only delete once the cluster has no instances left: deleting the SG
+    # under a live VM would tear down its SSH and intra-cluster ingress, and
+    # Nebius rejects the delete anyway while a NIC still holds the SG.
+    del ports
+    assert provider_config is not None
+    # A user-managed (BYO) SG is never deleted by SkyPilot, so there is
+    # nothing to do and no reason to list instances (a listing failure would
+    # otherwise block an already completed teardown).
+    sg_block = provider_config.get('security_group') or {}
+    if not bool(sg_block.get('ManagedBySkyPilot', True)):
+        return
+    # Retry the listing a few times so a transient API error does not fail
+    # the teardown (or a provisioning failover, which also calls us).
+    for attempt in range(_CLEANUP_LIST_ATTEMPTS):
+        try:
+            project_id = provider_config.get('project_id')
+            if project_id is None:
+                project_id = utils.get_project_by_region(
+                    provider_config['region'])
+            instances = _filter_instances(provider_config['region'],
+                                          cluster_name_on_cloud,
+                                          status_filters=None,
+                                          project_id=project_id)
+            break
+        except Exception as e:  # pylint: disable=broad-except
+            if attempt + 1 < _CLEANUP_LIST_ATTEMPTS:
+                logger.debug(f'Failed to list instances of '
+                             f'{cluster_name_on_cloud} (attempt '
+                             f'{attempt + 1}/{_CLEANUP_LIST_ATTEMPTS}): {e}')
+                time.sleep(utils.POLL_INTERVAL)
+                continue
+            # Raise rather than skip: returning normally would let
+            # `post_teardown_cleanup` drop the cluster record and config,
+            # leaving no later pass to reap the SG. Raising keeps both, so the
+            # next status refresh retries (a status refresh shows the cluster
+            # as UNKNOWN meanwhile), and `sky down --purge` still proceeds
+            # since it skips cleanup_ports failures. A provisioning failover
+            # stops here as it already does when the same listing fails in
+            # its non-terminated-node check, rather than moving on while this
+            # cluster's instances and SG are in an unknown state.
+            raise exceptions.ClusterStatusFetchingError(
+                f'Failed to list instances of {cluster_name_on_cloud!r} to '
+                'clean up its security group: '
+                f'{common_utils.format_exception(e, use_bracket=False)}') from e
+    assert project_id is not None
+    if instances:
+        logger.debug(f'{len(instances)} instance(s) of '
+                     f'{cluster_name_on_cloud} still present; leaving the '
+                     'security group in place.')
+        return
+    _cleanup_security_group(cluster_name_on_cloud,
+                            provider_config,
+                            project_id,
+                            wait_for_instances=False)
