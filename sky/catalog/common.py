@@ -170,7 +170,16 @@ class LazyDataFrame:
     def _load_df(self) -> 'pd.DataFrame':
         if self._update_if_stale_func() or self._df is None:
             try:
-                self._df = pd.read_csv(self._filename)
+                read_csv = pd.read_csv
+                if not callable(read_csv) and isinstance(
+                        read_csv, adaptors_common.LazyImport):
+                    # A transient import/attribute error can leave a cached
+                    # submodule proxy. Resolve the callable through pandas
+                    # itself only on this recovery path.
+                    # pylint: disable=import-outside-toplevel
+                    from pandas import read_csv as native_read_csv
+                    read_csv = native_read_csv
+                self._df = read_csv(self._filename)
             except Exception as e:  # pylint: disable=broad-except
                 # As users can manually modify the catalog, read_csv can fail.
                 logger.error(f'Failed to read {self._filename}. '
