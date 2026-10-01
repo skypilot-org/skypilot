@@ -9,6 +9,10 @@ from sky.clouds import aws as aws_mod
 
 class TestVpcFailoverOverrides:
 
+    @pytest.fixture(autouse=True)
+    def clear_vpc_region_cache(self):
+        aws_mod._filter_vpc_names_by_region.cache_clear()
+
     @pytest.mark.parametrize(
         ('region', 'expected_vpc'),
         [
@@ -103,6 +107,21 @@ class TestVpcFailoverOverrides:
                     'vpc_name': 'ai-dev-us-east-2-vpc'
                 }]
         mock_resource.assert_called_once_with('ec2', region_name='us-east-1')
+
+    @mock.patch.object(aws_mod.skypilot_config,
+                       'get_effective_region_config',
+                       return_value=['ai-dev-vpc', 'ai-dev-us-east-2-vpc'])
+    @mock.patch.object(aws_mod, 'aws')
+    def test_caches_vpc_discovery_within_request(self, mock_aws, _):
+        ec2 = mock_aws.resource.return_value
+        ec2.vpcs.filter.return_value = [mock.Mock()]
+
+        list(aws_mod.AWS.yield_cloud_specific_failover_overrides(
+            region='us-east-1'))
+        list(aws_mod.AWS.yield_cloud_specific_failover_overrides(
+            region='us-east-1'))
+
+        mock_aws.resource.assert_called_once_with('ec2', region_name='us-east-1')
 
 
 class TestGetImageRootDeviceName:
