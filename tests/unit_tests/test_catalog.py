@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from sky import catalog
+from sky.adaptors import common as adaptors_common
 from sky.catalog import common as catalog_common
 from sky.utils import annotations
 
@@ -806,3 +807,24 @@ def test_efa_count_duplicate_index_safe():
     df.index = [0] * len(df)
     assert catalog_common.get_efa_count_for_accelerator_impl(df, 'H100',
                                                              8) == 32
+
+
+@pytest.mark.parametrize('fault', ['import', 'missing-attribute'])
+def test_catalog_retries_transient_lazy_reader_failure(monkeypatch, tmp_path,
+                                                       fault):
+    proxy = adaptors_common.LazyImport('pandas')
+    monkeypatch.setattr(catalog_common, 'pd', proxy)
+    path = tmp_path / 'catalog.csv'
+    path.write_text('Price\n0.25\n')
+    frame = catalog_common.LazyDataFrame(str(path), lambda: False)
+    with monkeypatch.context() as failure:
+        if fault == 'import':
+            failure.setattr(
+                adaptors_common.importlib, 'import_module',
+                mock.Mock(side_effect=AttributeError('import failed')))
+        else:
+            failure.delattr(pd, 'read_csv')
+        with pytest.raises(AttributeError):
+            frame._load_df()
+    assert 'read_csv' not in proxy.__dict__
+    pd.testing.assert_frame_equal(frame._load_df(), pd.read_csv(path))
