@@ -6,6 +6,7 @@ resources:
 # Task 1: Always fails
 run: |
   echo "Task 1 starting"
+  sleep 30
   exit 1
 ---
 # Task 2: Never reached due to Task 1 failure
