@@ -3059,32 +3059,18 @@ def test_nebius_security_group_attached_and_enforced():
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.nebius
-def test_nebius_sg_reaped_after_down():
-    """`sky down` must delete the cluster's SkyPilot-managed SG.
+def _nebius_sg_reap_checks(name: str, region: str, teardown: str):
+    """Returns (record, verify) callables for the Nebius SG leak tests.
 
-    Nebius instance deletion is async: DeleteInstance is accepted before
-    the VM (and its NIC's SG attachment) is actually gone, and Nebius
-    refuses to delete an SG that a NIC still references. Without the
-    wait-for-termination in `terminate_instances`, teardowns orphan their
-    `sky-sg-<cluster>` SG; leaks accumulate until the per-network SG
-    quota is exhausted (`vpc.network.max-security-groups-count`) and all
-    launches in the region fail.
-
-    Launches a real 2-node cluster (multi-node covers the N-instance
-    drain and widens the reap window), records the managed SG while the
-    cluster is up, runs `sky down`, then asserts the SG is gone.
-
-    Cheap: 2 small CPU instances, ~5 min including teardown. Skipped by
-    default; runs only with `pytest --nebius`.
+    `record` finds the cluster's SkyPilot-managed SG while the cluster is
+    up; `verify` asserts it is gone after `teardown` (used in the failure
+    message) has removed the cluster.
     """
     # pylint: disable=import-outside-toplevel
     from sky.provision.nebius import utils as nebius_utils
 
-    name = smoke_tests_utils.get_cluster_name()
-    region = 'eu-north1'
     # Populated by `_record_sg` while the cluster is up; consumed by
-    # `_verify_sg_reaped` after `sky down`.
+    # `_verify_sg_reaped` after the teardown.
     state: Dict[str, str] = {}
 
     def _record_sg():
@@ -3111,7 +3097,7 @@ def test_nebius_sg_reaped_after_down():
         sg_id = nebius_utils.get_security_group_by_name(project_id, sg_name)
         assert sg_id is not None, (
             f'managed SG {sg_name!r} not found while the cluster is up; '
-            f'cannot verify its post-down reaping. Head VM: '
+            f'cannot verify its post-teardown reaping. Head VM: '
             f'{heads[0]["name"]!r}, attached SGs: '
             f'{heads[0].get("security_group_ids")}')
         attached = heads[0].get('security_group_ids') or []
@@ -3124,7 +3110,7 @@ def test_nebius_sg_reaped_after_down():
 
     def _verify_sg_reaped():
         assert state, '_record_sg did not run; nothing to verify.'
-        # The SG delete is issued before `sky down` returns, but Nebius
+        # The SG delete is issued before the teardown completes, but Nebius
         # deletes are async; give the control plane a short window to
         # stop reporting the SG before declaring a leak.
         sg_id = None
@@ -3136,25 +3122,88 @@ def test_nebius_sg_reaped_after_down():
             time.sleep(5)
         raise AssertionError(
             f'security group {state["sg_name"]!r} ({sg_id}) still exists '
-            f'after `sky down` returned: terminate_instances leaked the '
-            f'SG. Each leak consumes one slot of the per-network SG quota '
-            f'until launches fail with '
+            f'after {teardown}: the SG leaked. Each leak consumes one slot '
+            f'of the per-network SG quota until launches fail with '
             f'vpc.network.max-security-groups-count.')
 
+    return _record_sg, _verify_sg_reaped
+
+
+@pytest.mark.nebius
+def test_nebius_sg_reaped_after_down():
+    """`sky down` must delete the cluster's SkyPilot-managed SG.
+
+    Nebius instance deletion is async: DeleteInstance is accepted before
+    the VM (and its NIC's SG attachment) is actually gone, and Nebius
+    refuses to delete an SG that a NIC still references. Without the
+    wait-for-termination in `terminate_instances`, teardowns orphan their
+    `sky-sg-<cluster>` SG; leaks accumulate until the per-network SG
+    quota is exhausted (`vpc.network.max-security-groups-count`) and all
+    launches in the region fail.
+
+    Launches a real 2-node cluster (multi-node covers the N-instance
+    drain and widens the reap window), records the managed SG while the
+    cluster is up, runs `sky down`, then asserts the SG is gone.
+
+    Cheap: 2 small CPU instances, ~5 min including teardown. Skipped by
+    default; runs only with `pytest --nebius`.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    record_sg, verify_sg_reaped = _nebius_sg_reap_checks(
+        name, 'eu-north1', '`sky down` returned')
     test = smoke_tests_utils.Test(
         'nebius_sg_reaped_after_down',
         [
             f'sky launch -y -c {name} --infra nebius --num-nodes 2 '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
             f'tests/test_yamls/minimal.yaml',
-            _record_sg,
+            record_sg,
             f'sky down -y {name}',
-            _verify_sg_reaped,
+            verify_sg_reaped,
         ],
         # Safety net for failures above; `sky down` on an already-downed
         # cluster is a no-op that exits 0.
         f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout('nebius'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.nebius
+def test_nebius_sg_reaped_after_autodown():
+    """Autodown must not leak the cluster's SkyPilot-managed SG.
+
+    On autodown the skylet runs `terminate_instances` on the head node
+    itself, so the head VM is gone before its SG cleanup can run. The SG
+    is instead reaped by `cleanup_ports` when the API server's status
+    refresh finds the autodowned cluster gone (`post_teardown_cleanup`).
+
+    Launches a 2-node cluster with `-i 1 --down`, records the managed SG,
+    waits (with `sky status -r`) until the refresh removes the cluster,
+    then asserts the SG is gone.
+
+    Cheap: 2 small CPU instances, ~10 min including the idle wait.
+    Skipped by default; runs only with `pytest --nebius`.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    record_sg, verify_sg_reaped = _nebius_sg_reap_checks(
+        name, 'eu-north1', 'autodown and the status refresh')
+    timeout = smoke_tests_utils.get_timeout('nebius')
+    test = smoke_tests_utils.Test(
+        'nebius_sg_reaped_after_autodown',
+        [
+            f'sky launch -y -c {name} --infra nebius --num-nodes 2 '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -i 1 --down '
+            f'tests/test_yamls/minimal.yaml',
+            record_sg,
+            # The cluster downs itself once idle; the refresh in this wait
+            # runs post_teardown_cleanup, which reaps the SG.
+            smoke_tests_utils.get_cmd_wait_until_cluster_is_not_found(
+                cluster_name=name, timeout=timeout),
+            verify_sg_reaped,
+        ],
+        f'sky down -y {name}',
+        timeout=timeout,
     )
     smoke_tests_utils.run_one_test(test)
 
