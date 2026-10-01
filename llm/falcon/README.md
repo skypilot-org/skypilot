@@ -34,7 +34,7 @@ Steps for training on your cloud(s):
     - Replace the `OUTPUT_BUCKET_NAME` with a unique name. SkyPilot will create this bucket for you to store the model weights.
     - Replace the `MODEL_NAME` with your desired base model.
 
-    `WANDB_API_KEY` is a secret in the YAML, so pass your key at launch with `--secret WANDB_API_KEY` (shown below).
+    `WANDB_API_KEY` is a secret in the YAML. Set it in your shell first with `export WANDB_API_KEY=<your-key>`, and the `--secret WANDB_API_KEY` flag below passes it to the job.
 
 2.  **Training the Falcon model using spot instances**:
 
