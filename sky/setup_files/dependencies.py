@@ -181,6 +181,13 @@ kubernetes_dependencies = [
 # break our Azure storage code (storage-account create and key listing).
 AZURE_CLI = 'azure-cli>=2.65.0,<2.87.0'
 
+# The Vast provisioner needs the 1.x SDK (`VastAI().client`, v1 instance
+# listing). With a 0.x floor, installing next to azure-cli (whose msal caps
+# cryptography<49) resolves to vastai-sdk 0.2.5: 1.0-1.3 pin
+# cryptography==46.0.5 and 1.4+ pin 49.0.0, so the resolver keeps a newer
+# cryptography and falls back to 0.x.
+VAST_SDK = 'vastai-sdk>=1.0.0,<2'
+
 cloud_dependencies: Dict[str, List[str]] = {
     'aws': aws_dependencies,
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
@@ -255,7 +262,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     'primeintellect': [],  # No dependencies needed for primeintellect
     # TODO:(jason810496): azure-core 1.38.0+ required for CVE-2026-21226
     'do': ['pydo>=0.3.0', 'azure-core>=1.24.0', 'azure-common'],
-    'vast': ['vastai-sdk>=0.1.12'],
+    'vast': [VAST_SDK],
     'vsphere': [
         'pyvmomi==8.0.1.0.2',
         # vsphere-automation-sdk is also required, but it does not have

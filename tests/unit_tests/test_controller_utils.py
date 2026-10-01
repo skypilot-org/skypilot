@@ -589,6 +589,9 @@ def test_get_cloud_dependencies_installation_commands_vast_only(
     combined_commands = ' '.join(commands)
     assert 'Vast' in combined_commands
     assert 'vastai_sdk' in combined_commands
+    # The provisioner needs the 1.x SDK; 0.x has no `VastAI().client`.
+    assert 'vastai-sdk>=1.0.0' in combined_commands
+    assert 'vastai_sdk>=0.1.12' not in combined_commands
 
 
 @pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
