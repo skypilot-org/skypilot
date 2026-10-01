@@ -111,6 +111,36 @@ class TestVpcFailoverOverrides:
     @mock.patch.object(aws_mod.skypilot_config,
                        'get_effective_region_config',
                        return_value=['ai-dev-vpc', 'ai-dev-us-east-2-vpc'])
+    @mock.patch.object(aws_mod.aws, 'resource')
+    def test_vpc_lookup_error_is_not_cached(self, mock_resource, _):
+        error = aws_mod.aws.botocore_exceptions().ClientError(
+            {'Error': {
+                'Code': 'UnauthorizedOperation',
+                'Message': 'denied'
+            }}, 'DescribeVpcs')
+        mock_resource.return_value.vpcs.filter.side_effect = [
+            error,
+            [mock.Mock()],
+            [],
+        ]
+
+        assert list(
+            aws_mod.AWS.yield_cloud_specific_failover_overrides(
+                region='us-east-1')) == [{
+                    'vpc_name': 'ai-dev-vpc'
+                }, {
+                    'vpc_name': 'ai-dev-us-east-2-vpc'
+                }]
+        assert list(
+            aws_mod.AWS.yield_cloud_specific_failover_overrides(
+                region='us-east-1')) == [{
+                    'vpc_name': 'ai-dev-vpc'
+                }]
+        assert mock_resource.call_count == 2
+
+    @mock.patch.object(aws_mod.skypilot_config,
+                       'get_effective_region_config',
+                       return_value=['ai-dev-vpc', 'ai-dev-us-east-2-vpc'])
     @mock.patch.object(aws_mod, 'aws')
     def test_caches_vpc_discovery_within_request(self, mock_aws, _):
         ec2 = mock_aws.resource.return_value
