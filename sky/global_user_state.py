@@ -139,8 +139,15 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('provision_log_path',
                       sqlalchemy.Text,
                       server_default=None),
+    # Released versions keep their (port, pid) skylet tunnel tuple here and
+    # share the database with this version during a rolling update.
     sqlalchemy.Column('skylet_ssh_tunnel_metadata',
                       sqlalchemy.LargeBinary,
+                      server_default=None),
+    # JSON {owner_id: [port, pid]} of the skylet tunnels opened by each API
+    # server host.
+    sqlalchemy.Column('skylet_ssh_tunnels',
+                      sqlalchemy.JSON(none_as_null=True),
                       server_default=None),
     # Infrastructure columns for efficient filtering
     sqlalchemy.Column('cloud', sqlalchemy.Text, server_default=None),
@@ -2252,34 +2259,41 @@ def set_cluster_storage_mounts_metadata(
 
 
 @metrics_lib.time_me
-def get_cluster_skylet_ssh_tunnel_metadata(
-        cluster_name: str) -> Optional[Tuple[int, int]]:
+def get_cluster_skylet_ssh_tunnel(cluster_name: str,
+                                  owner_id: str) -> Optional[Tuple[int, int]]:
+    """Returns owner_id's (port, pid) skylet tunnel entry for the cluster."""
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        row = session.query(
-            cluster_table.c.skylet_ssh_tunnel_metadata).filter_by(
-                name=cluster_name).first()
-    if row is None or row.skylet_ssh_tunnel_metadata is None:
+        row = session.query(cluster_table.c.skylet_ssh_tunnels).filter_by(
+            name=cluster_name).first()
+    if row is None:
         return None
-    return pickle.loads(row.skylet_ssh_tunnel_metadata)
+    entry = (row.skylet_ssh_tunnels or {}).get(owner_id)
+    if entry is None:
+        return None
+    return tuple(entry)
 
 
 @metrics_lib.time_me
-def set_cluster_skylet_ssh_tunnel_metadata(
-        cluster_name: str,
-        skylet_ssh_tunnel_metadata: Optional[Tuple[int, int]]) -> None:
+def set_cluster_skylet_ssh_tunnel(cluster_name: str, owner_id: str,
+                                  tunnel: Optional[Tuple[int, int]]) -> None:
+    """Sets owner_id's (port, pid) skylet tunnel entry for the cluster, or
+    removes it when tunnel is None. Other owners' entries are kept.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        value = pickle.dumps(
-            skylet_ssh_tunnel_metadata
-        ) if skylet_ssh_tunnel_metadata is not None else None
-        count = session.query(cluster_table).filter_by(
-            name=cluster_name).update(
-                {cluster_table.c.skylet_ssh_tunnel_metadata: value})
+        row = session.query(cluster_table.c.skylet_ssh_tunnels).filter_by(
+            name=cluster_name).with_for_update().first()
+        if row is None:
+            raise ValueError(f'Cluster {cluster_name} not found.')
+        tunnels = dict(row.skylet_ssh_tunnels or {})
+        if tunnel is None:
+            tunnels.pop(owner_id, None)
+        else:
+            tunnels[owner_id] = tunnel
+        session.query(cluster_table).filter_by(name=cluster_name).update(
+            {cluster_table.c.skylet_ssh_tunnels: tunnels or None})
         session.commit()
-    assert count <= 1, count
-    if count == 0:
-        raise ValueError(f'Cluster {cluster_name} not found.')
 
 
 @metrics_lib.time_me
