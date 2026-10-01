@@ -249,31 +249,37 @@ def stop_instances(
         utils.stop(instance_id)
 
 
-def _wait_for_instances_terminated(region: str, cluster_name_on_cloud: str,
-                                   project_id: str) -> bool:
+def _wait_for_instances_terminated(region: str,
+                                   cluster_name_on_cloud: str,
+                                   project_id: str,
+                                   worker_only: bool = False) -> bool:
     """Waits until the cluster has no instances left at the provider.
 
     Nebius instance deletion is async: `utils.remove` returns once the
     DeleteInstance request is accepted, not when the instance (and its
     NIC's security group attachment) is actually gone. Returns True once
-    the cluster's instance list is empty; False on timeout (the caller may
-    still attempt SG deletion, which retries internally).
+    the cluster's instance list is empty (ignoring the head node when
+    `worker_only`); False on timeout.
     """
     for attempt in range(_TERMINATION_POLL_ATTEMPTS):
         instances = _filter_instances(region,
                                       cluster_name_on_cloud,
                                       status_filters=None,
                                       project_id=project_id)
+        if worker_only:
+            instances = {
+                inst_id: inst
+                for inst_id, inst in instances.items()
+                if not inst['name'].endswith('-head')
+            }
         if not instances:
             return True
         logger.debug(f'Waiting for {len(instances)} instance(s) of '
                      f'{cluster_name_on_cloud} to finish terminating '
                      f'(attempt {attempt + 1}/{_TERMINATION_POLL_ATTEMPTS}).')
         time.sleep(utils.POLL_INTERVAL)
-    logger.warning(
-        f'Instances of {cluster_name_on_cloud} still present after '
-        f'{_TERMINATION_POLL_ATTEMPTS * utils.POLL_INTERVAL}s; attempting '
-        f'security group deletion anyway.')
+    logger.warning(f'Instances of {cluster_name_on_cloud} still present after '
+                   f'{_TERMINATION_POLL_ATTEMPTS * utils.POLL_INTERVAL}s.')
     return False
 
 
@@ -312,7 +318,8 @@ def _cleanup_security_group(cluster_name_on_cloud: str,
             # `sky.provision.aws.instance.cleanup_ports` (Case 4). Without
             # this, the SG delete's bounded retry often expires while VMs
             # still hold the SG, leaking one SG per cluster until the
-            # per-network SG quota is exhausted.
+            # per-network SG quota is exhausted. On timeout, still attempt
+            # the SG delete: its internal retry may catch a late detach.
             _wait_for_instances_terminated(provider_config['region'],
                                            cluster_name_on_cloud, project_id)
         utils.delete_security_group(sg_id)
@@ -340,6 +347,10 @@ def terminate_instances(
                                   project_id=project_id)
     terminated_ok = False
     try:
+        # Send a delete request to every instance before reporting failures,
+        # so one instance that fails to delete (e.g. a stuck worker) cannot
+        # keep the others, in particular the head, from being deleted.
+        failures: List[str] = []
         for inst_id, inst in instances.items():
             logger.debug(f'Terminating instance {inst_id}: {inst}')
             if worker_only and inst['name'].endswith('-head'):
@@ -347,12 +358,30 @@ def terminate_instances(
             try:
                 utils.remove(inst_id)
             except Exception as e:  # pylint: disable=broad-except
+                failures.append(
+                    f'{inst_id}: '
+                    f'{common_utils.format_exception(e, use_bracket=False)}')
+        if failures:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Failed to terminate instance(s) '
+                                   f'{"; ".join(failures)}')
+        if worker_only:
+            # Wait for the workers to be gone before returning. A resize
+            # scale-down re-provisions right after this call; while the
+            # deleted workers are still listed as RUNNING, `run_instances`
+            # counts them against the requested node count and fails, and
+            # the failure cleanup then tries to stop VMs that are already
+            # being deleted. Raise on timeout so the caller does not proceed
+            # while termination is unconfirmed.
+            if not _wait_for_instances_terminated(provider_config['region'],
+                                                  cluster_name_on_cloud,
+                                                  project_id,
+                                                  worker_only=True):
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
-                        f'Failed to terminate instance {inst_id}: '
-                        f'{common_utils.format_exception(e, use_bracket=False)}'
-                    ) from e
-        if not worker_only:
+                        f'Timed out waiting for the worker instances of '
+                        f'{cluster_name_on_cloud} to terminate.')
+        else:
             utils.delete_cluster(cluster_name_on_cloud,
                                  provider_config['region'],
                                  project_id=project_id)
