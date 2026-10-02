@@ -725,14 +725,22 @@ except ValueError:
 
 _CONTAINER_MEMORY_USAGE_HELP = (
     'Memory charged to the API server container\'s cgroup (memory.current), '
-    'including page cache the kernel can reclaim. Subtract '
-    'sky_apiserver_container_memory_stat_bytes{stat="file"} for the memory '
-    'the container cannot give back without swap.')
+    'including page cache the kernel can reclaim. See '
+    'sky_apiserver_container_memory_unreclaimable_bytes for the part it '
+    'cannot.')
+
+_CONTAINER_MEMORY_UNRECLAIMABLE_HELP = (
+    'Memory the kernel cannot reclaim from the API server container without '
+    'swap: memory.current minus page cache (memory.stat file), plus shmem. '
+    'Compare it with the container\'s memory limit, or with its node\'s '
+    'allocatable memory when there is no limit, to see how close the '
+    'container is to an OOM kill.')
 
 _CONTAINER_MEMORY_STAT_HELP = (
     'One field of the API server container\'s cgroup memory.stat: anon is '
     'process memory not backed by files, file is page cache (including '
-    'shmem), kernel is kernel memory charged to the container.')
+    'shmem), kernel is kernel memory charged to the container, shmem is '
+    'tmpfs and shared memory.')
 
 _CONTAINER_MEMORY_LIMIT_HELP = (
     'The API server container\'s cgroup memory limit (memory.max). No series '
@@ -783,6 +791,12 @@ class ContainerMemoryCollector:
             'sky_apiserver_container_memory_usage_bytes',
             _CONTAINER_MEMORY_USAGE_HELP,
             value=snapshot.usage_bytes)
+        unreclaimable = prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_memory_unreclaimable_bytes',
+            _CONTAINER_MEMORY_UNRECLAIMABLE_HELP)
+        if snapshot.unreclaimable_bytes is not None:
+            unreclaimable.add_metric([], snapshot.unreclaimable_bytes)
+        yield unreclaimable
         stat = prom_core.GaugeMetricFamily(
             'sky_apiserver_container_memory_stat_bytes',
             _CONTAINER_MEMORY_STAT_HELP,

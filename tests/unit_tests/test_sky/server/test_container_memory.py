@@ -91,7 +91,9 @@ def test_scan_counts_processes_by_type(container):
         'anon': 3699441664,
         'file': 109613056,
         'kernel': 62111744,
+        'shmem': 4096,
     }
+    assert snapshot.unreclaimable_bytes == 3871899648 - 109613056 + 4096
     assert snapshot.limit_bytes is None
     kib = 1024
     assert snapshot.types == {
@@ -115,6 +117,24 @@ def test_scan_reads_memory_limit(container):
 def test_scan_without_cgroup_v2_files(tmp_path):
     assert container_memory.scan(cgroup_dir=str(tmp_path),
                                  proc_dir=str(tmp_path)) is None
+
+
+def test_read_unreclaimable_bytes(container):
+    cgroup_dir, _ = container
+    assert container_memory.read_unreclaimable_bytes(cgroup_dir) == (
+        3871899648 - 109613056 + 4096)
+
+
+def test_read_unreclaimable_bytes_without_cgroup_v2_files(tmp_path):
+    assert container_memory.read_unreclaimable_bytes(str(tmp_path)) is None
+
+
+def test_unreclaimable_bytes_ignores_page_cache_but_not_shmem():
+    gib = 1024**3
+    # A 7 GiB file read into page cache, 3 GiB of it on tmpfs.
+    stat = {'anon': 2 * gib, 'file': 7 * gib, 'shmem': 3 * gib}
+    assert container_memory.unreclaimable_bytes(9 * gib, stat) == 5 * gib
+    assert container_memory.unreclaimable_bytes(9 * gib, {'anon': 1}) is None
 
 
 def test_scan_of_a_zombie_counts_the_process_without_memory(container):
@@ -147,6 +167,7 @@ def test_collector_exports_snapshot(monkeypatch):
             'anon': 700,
             'file': 200
         },
+        unreclaimable_bytes=800,
         limit_bytes=4000,
         types={
             'controller': container_memory.TypeUsage(64, 9600, 640, 20),
@@ -160,6 +181,7 @@ def test_collector_exports_snapshot(monkeypatch):
     other = (('type', 'other'),)
     assert samples == {
         (f'{p}memory_usage_bytes', ()): 1000,
+        (f'{p}memory_unreclaimable_bytes', ()): 800,
         (f'{p}memory_stat_bytes', (('stat', 'anon'),)): 700,
         (f'{p}memory_stat_bytes', (('stat', 'file'),)): 200,
         (f'{p}memory_limit_bytes', ()): 4000,
@@ -178,6 +200,7 @@ def test_collector_exports_snapshot(monkeypatch):
 def test_collector_without_limit_emits_no_limit_sample(monkeypatch):
     snapshot = container_memory.Snapshot(usage_bytes=1,
                                          stat_bytes={},
+                                         unreclaimable_bytes=None,
                                          limit_bytes=None,
                                          types={},
                                          duration_seconds=0.0)
@@ -187,6 +210,7 @@ def test_collector_without_limit_emits_no_limit_sample(monkeypatch):
         for name, _ in _samples(metrics.ContainerMemoryCollector().collect())
     }
     assert 'sky_apiserver_container_memory_limit_bytes' not in names
+    assert 'sky_apiserver_container_memory_unreclaimable_bytes' not in names
     assert 'sky_apiserver_container_memory_usage_bytes' in names
 
 

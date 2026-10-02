@@ -18,13 +18,13 @@ Measurement only.
 import dataclasses
 import os
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 CGROUP_DIR = '/sys/fs/cgroup'
 PROC_DIR = '/proc'
 
 # memory.stat keys exported as they are. `kernel` exists from Linux 5.18 on.
-MEMORY_STAT_KEYS = ('anon', 'file', 'kernel')
+MEMORY_STAT_KEYS = ('anon', 'file', 'kernel', 'shmem')
 
 # Process types. 'server' and 'worker:<group>' match the `type` label of
 # sky_apiserver_process_peak_rss.
@@ -55,6 +55,8 @@ class Snapshot:
     usage_bytes: int
     # memory.stat values for the MEMORY_STAT_KEYS the kernel reports.
     stat_bytes: Dict[str, int]
+    # See unreclaimable_bytes().
+    unreclaimable_bytes: Optional[int]
     # memory.max, or None when the container has no memory limit.
     limit_bytes: Optional[int]
     types: Dict[str, TypeUsage]
@@ -77,6 +79,37 @@ def _read_memory_stat(cgroup_dir: str) -> Dict[str, int]:
         if len(parts) == 2 and parts[0] in MEMORY_STAT_KEYS:
             stats[parts[0]] = int(parts[1])
     return stats
+
+
+def _read_memory(cgroup_dir: str) -> Optional[Tuple[int, Dict[str, int]]]:
+    """memory.current and memory.stat, read back to back."""
+    usage = (_read(os.path.join(cgroup_dir, 'memory.current')) or '').strip()
+    if not usage.isdigit():
+        return None
+    return int(usage), _read_memory_stat(cgroup_dir)
+
+
+def unreclaimable_bytes(usage_bytes: int,
+                        stat_bytes: Dict[str, int]) -> Optional[int]:
+    """Memory the kernel cannot reclaim from the container without swap.
+
+    memory.current minus page cache (memory.stat `file`), with shmem added
+    back: memory.stat counts tmpfs and shared memory inside `file`, but those
+    pages cannot be dropped.
+    """
+    if 'file' not in stat_bytes:
+        return None
+    return usage_bytes - stat_bytes['file'] + stat_bytes.get('shmem', 0)
+
+
+def read_unreclaimable_bytes(cgroup_dir: str = CGROUP_DIR) -> Optional[int]:
+    """unreclaimable_bytes() of the container now, without the process census.
+
+    Returns None when the container's cgroup v2 memory files are not
+    readable.
+    """
+    memory = _read_memory(cgroup_dir)
+    return None if memory is None else unreclaimable_bytes(*memory)
 
 
 def _read_limit(cgroup_dir: str) -> Optional[int]:
@@ -144,11 +177,10 @@ def scan(main_pid: Optional[int] = None,
     readable.
     """
     start = time.monotonic()
-    usage = (_read(os.path.join(cgroup_dir, 'memory.current')) or '').strip()
-    if not usage.isdigit():
+    memory = _read_memory(cgroup_dir)
+    if memory is None:
         return None
-    # Read right after memory.current: alerts subtract `file` from it.
-    stat_bytes = _read_memory_stat(cgroup_dir)
+    usage_bytes, stat_bytes = memory
     if main_pid is None:
         main_pid = os.getpid()
     types: Dict[str, TypeUsage] = {}
@@ -166,8 +198,10 @@ def scan(main_pid: Optional[int] = None,
         usage_of_type.rss_anon_bytes += rss_anon
         usage_of_type.max_rss_anon_bytes = max(usage_of_type.max_rss_anon_bytes,
                                                rss_anon)
-    return Snapshot(usage_bytes=int(usage),
+    return Snapshot(usage_bytes=usage_bytes,
                     stat_bytes=stat_bytes,
+                    unreclaimable_bytes=unreclaimable_bytes(
+                        usage_bytes, stat_bytes),
                     limit_bytes=_read_limit(cgroup_dir),
                     types=types,
                     duration_seconds=time.monotonic() - start)
