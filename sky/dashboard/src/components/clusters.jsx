@@ -107,6 +107,7 @@ export const CLUSTER_FILTER_SCHEMA = [
 ];
 
 const HISTORY_DAY_OPTIONS = [1, 5, 10, 30];
+const HISTORY_ALL_TIME = 'all';
 
 // Non-filter state that also belongs in a shared link. Anything left at its
 // default stays out of the URL.
@@ -156,12 +157,20 @@ const addFilter = (prevFilters, property, value) => {
 };
 
 // `history` carries the window directly: absent means the history view is off,
-// otherwise `1d` / `5d` / `10d` / `30d`. Replaces the old `history=true` plus
-// `historyDays=N` pair.
+// `all` means no time limit, otherwise `1d` / `5d` / `10d` / `30d`. Replaces
+// the old `history=true` plus `historyDays=N` pair. Returns the normalized
+// window, or null when the history view is off.
 const parseHistory = (value) => {
+  if (value === HISTORY_ALL_TIME) {
+    return HISTORY_ALL_TIME;
+  }
   const days = parseInt(String(value ?? '').replace(/d$/, ''), 10);
-  return HISTORY_DAY_OPTIONS.includes(days) ? days : null;
+  return HISTORY_DAY_OPTIONS.includes(days) ? `${days}d` : null;
 };
+
+// Days to look back for a window; null means all time.
+const historyWindowDays = (historyWindow) =>
+  historyWindow === HISTORY_ALL_TIME ? null : parseInt(historyWindow, 10);
 
 // Helper function to format username for display (reuse from users.jsx)
 const formatUserDisplay = (username, userId) => {
@@ -248,27 +257,23 @@ const readStoredOwnerScope = () => {
 // like a manual choice.
 const HISTORY_DAYS_STORAGE_KEY = 'skypilot-dashboard-clusters-history-days';
 
-const readStoredHistoryDays = () => {
+const readStoredHistoryWindow = () => {
   if (typeof window === 'undefined') {
     return null;
   }
   try {
-    const stored = parseInt(
-      window.localStorage.getItem(HISTORY_DAYS_STORAGE_KEY),
-      10
-    );
-    return HISTORY_DAY_OPTIONS.includes(stored) ? stored : null;
+    return parseHistory(window.localStorage.getItem(HISTORY_DAYS_STORAGE_KEY));
   } catch (e) {
     return null;
   }
 };
 
-const writeStoredHistoryDays = (days) => {
+const writeStoredHistoryWindow = (historyWindow) => {
   if (typeof window === 'undefined') {
     return;
   }
   try {
-    window.localStorage.setItem(HISTORY_DAYS_STORAGE_KEY, String(days));
+    window.localStorage.setItem(HISTORY_DAYS_STORAGE_KEY, historyWindow);
   } catch (e) {
     // Ignore: the window still applies for this session via state/URL.
   }
@@ -297,8 +302,9 @@ export function Clusters() {
   const { filters, setFilters, view, setView, initialQuery } =
     useUrlFilterState(CLUSTER_FILTER_SCHEMA, CLUSTER_VIEW_SCHEMA);
 
-  const historyDays = parseHistory(view.history) ?? 1;
-  const showHistory = parseHistory(view.history) !== null;
+  const historyWindow = parseHistory(view.history);
+  const showHistory = historyWindow !== null;
+  const historyDays = historyWindowDays(historyWindow ?? '1d');
   const userScope = isOwnerScope(view.owner) ? view.owner : OWNER_SCOPE_MINE;
   const setUserScope = useCallback(
     (scope) => setView('owner', scope),
@@ -456,26 +462,18 @@ export function Clusters() {
   // Remember the chosen window across an Active/All round trip: `history=off`
   // carries no day count, so without this the toggle would silently reset a
   // 30-day view to 1 day.
-  const lastHistoryDays = useRef(
-    parseHistory(view.history) ?? readStoredHistoryDays() ?? 1
+  const lastHistoryWindow = useRef(
+    historyWindow ?? readStoredHistoryWindow() ?? '1d'
   );
   useEffect(() => {
-    const days = parseHistory(view.history);
-    if (days !== null) {
-      lastHistoryDays.current = days;
-      writeStoredHistoryDays(days);
+    if (historyWindow !== null) {
+      lastHistoryWindow.current = historyWindow;
+      writeStoredHistoryWindow(historyWindow);
     }
-  }, [view.history]);
+  }, [historyWindow]);
 
   const selectHistoryTab = (showHistoryValue) => {
-    setView(
-      'history',
-      showHistoryValue ? `${lastHistoryDays.current}d` : 'off'
-    );
-  };
-
-  const selectHistoryDays = (days) => {
-    setView('history', `${days}d`);
+    setView('history', showHistoryValue ? lastHistoryWindow.current : 'off');
   };
 
   const explicitUserFilter = useMemo(
@@ -627,17 +625,21 @@ export function Clusters() {
         <div className="flex items-center gap-2 shrink-0 ml-2">
           {showHistory && (
             <Select
-              value={historyDays.toString()}
-              onValueChange={(value) => selectHistoryDays(parseInt(value))}
+              value={historyWindow}
+              onValueChange={(value) => setView('history', value)}
             >
               <SelectTrigger className="w-24 h-8 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="1">1 day</SelectItem>
-                <SelectItem value="5">5 days</SelectItem>
-                <SelectItem value="10">10 days</SelectItem>
-                <SelectItem value="30">30 days</SelectItem>
+                {/* Only reachable through the URL, e.g. a shared link. */}
+                {historyWindow === HISTORY_ALL_TIME && (
+                  <SelectItem value={HISTORY_ALL_TIME}>All time</SelectItem>
+                )}
+                <SelectItem value="1d">1 day</SelectItem>
+                <SelectItem value="5d">5 days</SelectItem>
+                <SelectItem value="10d">10 days</SelectItem>
+                <SelectItem value="30d">30 days</SelectItem>
               </SelectContent>
             </Select>
           )}

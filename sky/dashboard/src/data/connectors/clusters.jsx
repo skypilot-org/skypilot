@@ -581,7 +581,8 @@ export function useClusterDetails({ cluster, job = null }) {
  *
  * @param {Object} options - Hook options
  * @param {boolean} options.showHistory - Whether to include historical clusters
- * @param {number} options.historyDays - Number of days of history to fetch
+ * @param {?number} options.historyDays - Number of days of history to fetch,
+ *   or null for all time
  * @param {number} options.refreshInterval - Auto-refresh interval in ms
  * @param {Object} options.sortConfig - {key, direction} sort configuration
  * @param {Array} options.filters - Active filter definitions

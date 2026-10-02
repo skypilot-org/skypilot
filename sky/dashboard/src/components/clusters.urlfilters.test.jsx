@@ -155,4 +155,9 @@ describe('clusters filters in the URL', () => {
     await openAt('?owner=all&history=10d');
     await waitFor(() => expect(search()).toContain('history=10d'));
   });
+
+  it('reads an all-time history window from the URL', async () => {
+    await openAt('?owner=all&history=all');
+    await waitFor(() => expect(search()).toContain('history=all'));
+  });
 });
