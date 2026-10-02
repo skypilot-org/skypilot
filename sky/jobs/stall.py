@@ -72,7 +72,9 @@ DEFAULT_EXAMINATION_LIMIT = 200
 # `set_backoff_pending_async` going into backoff, `set_restarting_async` coming
 # out. A wedged one writes none. The loop's backoff caps at five times its 60s
 # base, so this window clears a sleeping round several times over while still
-# being shorter than the unattended threshold itself.
+# being shorter than the unattended threshold itself. A request on the task's
+# cluster that ended inside the same window is the same evidence; see
+# `_clusters_with_recent_requests`.
 _RETRY_ACTIVITY_SECONDS = 900
 
 # Budget for ALL the managed-jobs statements one scan runs, not a per-statement
@@ -346,32 +348,59 @@ def _cluster_name(task: StalledTask) -> Optional[str]:
         task.task_name, task.spot_job_id)
 
 
-def _clusters_with_live_requests(cluster_names: List[str]) -> Set[str]:
-    """Which of these clusters have a request queued, parked or executing.
+def _clusters_with_recent_requests(cluster_names: List[str],
+                                   now: float) -> Set[str]:
+    """Which of these clusters have a request live, or one that just ended.
 
-    One batched query rather than one per candidate: a fleet-wide stall is
-    exactly when this scan has the most rows and the API server the least to
-    spare. A parked launch -- queue admission, a cluster lock, pod-group
-    resolution -- is a request in WAITING, which is what makes this the primary
-    suppressor: it covers every park without knowing which kind it is.
+    Batched rather than one query per candidate: a fleet-wide stall is exactly
+    when this scan has the most rows and the API server the least to spare. A
+    parked launch -- queue admission, a cluster lock, pod-group resolution --
+    is a request in WAITING, which is what makes this the primary suppressor:
+    it covers every park without knowing which kind it is.
+
+    A request that ended inside `_RETRY_ACTIVITY_SECONDS` counts too. When a
+    launch round fails, the controller tears the cluster down before it writes
+    the backoff job_events row, and the teardown runs `core.down` in-process,
+    with retries of its own, under no request. Without this, a round that ran
+    longer than the activity window is reported in that gap while its retry is
+    on the way.
     """
     if not cluster_names:
         return set()
-    tasks = api_requests.get_request_tasks(
+    names = list(cluster_names)
+    live = api_requests.get_request_tasks(
         api_requests.RequestTaskFilter(
             status=[
                 api_requests.RequestStatus.PENDING,
                 api_requests.RequestStatus.WAITING,
                 api_requests.RequestStatus.RUNNING,
             ],
-            cluster_names=list(cluster_names),
+            cluster_names=names,
             # One column, deliberately. Without this every matching request is
             # fully decoded, which unpickles its request body -- and that
             # decode re-raises on a body this server cannot unpickle, so one
             # request left by another version would take the whole phase to
             # "not measured" during exactly the rollout worth watching.
             fields=[api_requests.COL_CLUSTER_NAME]))
-    return {task.cluster_name for task in tasks if task.cluster_name}
+    cutoff = now - _RETRY_ACTIVITY_SECONDS
+    ended = api_requests.get_request_tasks(
+        api_requests.RequestTaskFilter(
+            cluster_names=names,
+            finished_after=cutoff,
+            # No `status` either: decoding a status this server does not know
+            # raises the same way.
+            fields=[
+                api_requests.COL_CLUSTER_NAME, api_requests.COL_FINISHED_AT
+            ]))
+    busy = {task.cluster_name for task in live if task.cluster_name}
+    # `finished_after` also matches every row with no finished_at, and not all
+    # of those are live: some writers close a request without stamping it, and
+    # such a row would hold its cluster quiet for good.
+    for task in ended:
+        if (task.cluster_name and task.finished_at is not None and
+                task.finished_at >= cutoff):
+            busy.add(task.cluster_name)
+    return busy
 
 
 def _attempt_is_working(attempt: Any, now: float, age_seconds: float) -> bool:
@@ -646,11 +675,12 @@ def scan_unattended(
     candidates = [_task(row) for row in rows]
     examined = candidates[:examination_limit]
     # Both resolved for the whole batch before the per-task pass, for the
-    # reason in _clusters_with_live_requests.
-    busy_clusters = _clusters_with_live_requests([
+    # reason in _clusters_with_recent_requests.
+    cluster_names = [
         name for name in (_cluster_name(task) for task in examined)
         if name is not None
-    ])
+    ]
+    busy_clusters = _clusters_with_recent_requests(cluster_names, now)
     active = _tasks_active_recently(engine,
                                     [task.spot_job_id for task in examined],
                                     deadline)

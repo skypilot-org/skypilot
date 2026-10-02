@@ -27,7 +27,7 @@ _REAL_CONSOLIDATION_READER = (
 # attribute inside a test gets the stub and asserts nothing, which is the
 # failure mode that left these two functions untested to begin with.
 _REAL_TASKS_ACTIVE_RECENTLY = stall._tasks_active_recently
-_REAL_CLUSTERS_WITH_LIVE_REQUESTS = stall._clusters_with_live_requests
+_REAL_CLUSTERS_WITH_RECENT_REQUESTS = stall._clusters_with_recent_requests
 
 # Comfortably past both thresholds (10 and 15 minutes).
 _OLD = 3600
@@ -67,8 +67,8 @@ def no_cross_store_fixture(monkeypatch):
     # Capacity is resolved once per process and memoized, so it has to be
     # dropped between tests or the first one to run fixes it for the rest.
     monkeypatch.setattr(stall, '_POOL_CAPACITY', None)
-    monkeypatch.setattr(stall, '_clusters_with_live_requests',
-                        lambda names: set())
+    monkeypatch.setattr(stall, '_clusters_with_recent_requests',
+                        lambda names, now: set())
     monkeypatch.setattr(stall, '_tasks_active_recently',
                         lambda engine, job_ids, deadline: set())
     monkeypatch.setattr(stall.global_user_state,
@@ -298,8 +298,8 @@ def test_a_live_request_for_the_cluster_suppresses(engine, monkeypatch):
     _claimed(engine, 1, age=_OLD)
     _claimed(engine, 2, age=_OLD)
     busy = stall._cluster_name(stall.scan_unattended().tasks[0])
-    monkeypatch.setattr(stall, '_clusters_with_live_requests',
-                        lambda names: {busy})
+    monkeypatch.setattr(stall, '_clusters_with_recent_requests',
+                        lambda names, now: {busy})
 
     reported = _ids(stall.scan_unattended())
     assert reported == {2}, 'only the cluster with no live request is reported'
@@ -398,32 +398,116 @@ def test_an_unusable_threshold_raises_rather_than_falling_back(
 # --------------------------------------------------------------- truncation
 
 
-def test_the_request_lookup_asks_for_only_the_column_it_reads(engine):
+def test_the_request_lookup_asks_for_only_the_columns_it_reads(engine):
     """Asking for whole requests would decode them, and a decode can raise.
 
     Request.decode unpickles the request body and re-raises what it cannot
-    read, so one request left behind by another server version would take the
-    whole phase to "not measured" -- during a rollout, which is when it matters
-    most. Narrowing the projection is what prevents that, so it is pinned.
+    read, and a status it does not know raises too, so one request left behind
+    by another server version would take the whole phase to "not measured" --
+    during a rollout, which is when it matters most. Narrowing the projection
+    is what prevents that, so it is pinned.
     """
     # pylint: disable=import-outside-toplevel
     from sky.server.requests import requests as api_requests
 
-    seen = {}
+    seen = []
 
     def _capture(req_filter):
-        seen['filter'] = req_filter
+        seen.append(req_filter)
         return []
 
     _claimed(engine, 1, age=_OLD)
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(stall, '_clusters_with_live_requests',
-                      _REAL_CLUSTERS_WITH_LIVE_REQUESTS)
+        patch.setattr(stall, '_clusters_with_recent_requests',
+                      _REAL_CLUSTERS_WITH_RECENT_REQUESTS)
         patch.setattr(api_requests, 'get_request_tasks', _capture)
         stall.scan_unattended()
 
-    assert seen['filter'].fields == [api_requests.COL_CLUSTER_NAME]
+    assert [req_filter.fields for req_filter in seen] == [
+        [api_requests.COL_CLUSTER_NAME],
+        [api_requests.COL_CLUSTER_NAME, api_requests.COL_FINISHED_AT],
+    ]
+
+
+def _entrypoint():
+    return None
+
+
+@pytest.fixture(name='requests_db')
+def requests_db_fixture(tmp_path, monkeypatch):
+    """A requests database of this test's own."""
+    # pylint: disable=import-outside-toplevel
+    from sky.server import constants as server_constants
+    from sky.server.requests import requests as api_requests
+
+    log_dir = tmp_path / 'request_logs'
+    log_dir.mkdir()
+    monkeypatch.setattr(server_constants, 'API_SERVER_REQUEST_DB_PATH',
+                        str(tmp_path / 'requests.db'))
+    monkeypatch.setattr(server_constants, 'REQUEST_LOG_PATH_PREFIX',
+                        str(log_dir))
+    monkeypatch.setattr(api_requests, '_DB', None)
+
+
+async def _add_request(job_id: int, request_id: str, *, status: str,
+                       finished_at: Optional[float]):
+    """A request on the cluster of job `job_id`'s first task."""
+    # pylint: disable=import-outside-toplevel
+    from sky.server.requests import payloads
+    from sky.server.requests import requests as api_requests
+
+    cluster_name = stall.managed_job_utils.generate_managed_job_cluster_name(
+        f'task-{job_id}-0', job_id)
+    await api_requests.create_if_not_exists_async(
+        api_requests.Request(request_id=request_id,
+                             name='sky.launch',
+                             entrypoint=_entrypoint,
+                             request_body=payloads.RequestBody(),
+                             status=api_requests.RequestStatus(status),
+                             created_at=time.time() - _OLD,
+                             user_id='user',
+                             cluster_name=cluster_name,
+                             finished_at=finished_at))
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures('requests_db')
+async def test_a_request_that_just_ended_suppresses_until_the_window_passes(
+        engine, monkeypatch):
+    """The gap between a failed launch round and its backoff event.
+
+    The round ran longer than the activity window, so the task's last
+    job_events row is older than the window; its launch attempt closed failed;
+    the request has ended and the controller is tearing the cluster down,
+    which issues no request. Only the request's own end says somebody is still
+    driving the task. Run against a real requests database because the filter
+    it relies on also matches rows with no finished_at, which this must not
+    read as recent.
+    """
+    window = stall._RETRY_ACTIVITY_SECONDS
+    for job_id in (1, 2, 3, 4):
+        _claimed(engine, job_id, age=_OLD)
+    _attempts(monkeypatch, [_Attempt(outcome='failed')])
+    monkeypatch.setattr(stall, '_clusters_with_recent_requests',
+                        _REAL_CLUSTERS_WITH_RECENT_REQUESTS)
+
+    await _add_request(1,
+                       'ended-just-now',
+                       status='FAILED',
+                       finished_at=time.time() - 3)
+    await _add_request(2,
+                       'ended-before-the-window',
+                       status='FAILED',
+                       finished_at=time.time() - window - 60)
+    await _add_request(3,
+                       'closed-without-a-stamp',
+                       status='CANCELLED',
+                       finished_at=None)
+    await _add_request(4, 'still-running', status='RUNNING', finished_at=None)
+
+    reported = _ids(stall.scan_unattended())
+    assert reported == {2, 3}, 'an old or unstamped end does not suppress'
 
 
 def test_the_activity_lookup_runs_against_a_real_database(engine):
