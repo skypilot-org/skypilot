@@ -56,6 +56,7 @@ import pathlib
 import re
 import tempfile
 import threading
+import time
 import typing
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
@@ -122,6 +123,11 @@ _GLOBAL_CONFIG_PATH = '~/.sky/config.yaml'
 _PROJECT_CONFIG_PATH = '.sky.yaml'
 
 API_SERVER_CONFIG_KEY = 'api_server_config'
+
+
+class _ConfigFileParseError(ValueError):
+    """A config read that may have observed an incomplete internal write."""
+
 
 Base = declarative.declarative_base()
 
@@ -742,10 +748,17 @@ def reload_config() -> None:
         _reload_config_as_client()
 
 
-def parse_and_validate_config_file(config_path: str) -> config_utils.Config:
+def parse_and_validate_config_file(config_path: str,
+                                   strict: bool = False) -> config_utils.Config:
+    """Parse a config, rejecting empty or malformed YAML in internal reads."""
     config = config_utils.Config()
     try:
         config_dict = yaml_utils.read_yaml(config_path)
+        # An explicitly serialized {} is valid; an empty/null document is not
+        # evidence that an internal job config was successfully written.
+        if strict and config_dict is None:
+            raise _ConfigFileParseError(
+                'Internal config YAML is empty or null.')
         config = config_utils.Config.from_dict(config_dict)
         # pop the db url from the config, and set it to the env var.
         # this is to avoid db url (considered a sensitive value)
@@ -757,7 +770,14 @@ def parse_and_validate_config_file(config_path: str) -> config_utils.Config:
             logger.debug(f'Config loaded from {config_path}:\n'
                          f'{config_utils.dump_redacted_yaml(config)}')
     except yaml.YAMLError as e:
-        logger.error(f'Error in loading config file ({config_path}):', e)
+        # YAML errors can include source lines containing secrets. Report only
+        # the error type, and do not chain the original exception for jobs.
+        if strict:
+            raise _ConfigFileParseError(
+                f'Internal config YAML is malformed ({type(e).__name__}).'
+            ) from None
+        logger.error(f'Error in loading config file ({config_path}): '
+                     f'{type(e).__name__}')
     if config:
         _validate_config(config, config_path)
 
@@ -803,7 +823,21 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
                 'exist. Please double check the path or unset the env var: '
                 f'unset {ENV_VAR_SKYPILOT_CONFIG}')
     logger.debug(f'Using config path: {config_path}')
-    _set_loaded_config(parse_and_validate_config_file(config_path))
+    # Retry only incomplete YAML reads. Schema and file-access errors should
+    # surface immediately, without replacing the previously-loaded config.
+    attempts = 3
+    for attempt in range(attempts):
+        try:
+            config = parse_and_validate_config_file(config_path, strict=True)
+            break
+        except _ConfigFileParseError as e:
+            if attempt == attempts - 1:
+                raise ValueError(
+                    f'Failed to load internal config ({config_path!r}) after '
+                    f'{attempts} attempts: {e} Refusing to use an empty config.'
+                ) from None
+            time.sleep(0.1)
+    _set_loaded_config(config)
     _set_loaded_config_path(config_path)
 
 
