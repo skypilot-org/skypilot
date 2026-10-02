@@ -52,8 +52,14 @@ class SkyServeController:
             replica_managers.SkyPilotReplicaManager(service_name=service_name,
                                                     spec=service_spec,
                                                     version=version))
+        # Pass the running version so the autoscaler starts aligned with the
+        # replica manager. On a fresh service this is INITIAL_VERSION; on a
+        # controller restart or after an update it is the current version, and
+        # skipping it makes the autoscaler churn the live replicas (#8562).
         self._autoscaler: autoscalers.Autoscaler = (
-            autoscalers.Autoscaler.from_spec(service_name, service_spec))
+            autoscalers.Autoscaler.from_spec(service_name,
+                                             service_spec,
+                                             version=version))
         self._host = host
         self._port = port
         self._app = fastapi.FastAPI(lifespan=self.lifespan)
