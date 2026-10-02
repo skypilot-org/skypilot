@@ -1301,10 +1301,7 @@ def _get_free_memory_returner() -> Optional[Callable[[], int]]:
     if not sys.platform.startswith('linux'):
         return None
     process = ctypes.CDLL(None)
-    try:
-        mallctl = process.mallctl
-    except AttributeError:
-        mallctl = None
+    mallctl = getattr(process, 'mallctl', None)
     if mallctl is not None:
         mallctl.argtypes = [
             ctypes.c_char_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
@@ -1312,9 +1309,8 @@ def _get_free_memory_returner() -> Optional[Callable[[], int]]:
         ]
         mallctl.restype = ctypes.c_int
         return lambda: mallctl(_JEMALLOC_PURGE_ALL_ARENAS, None, None, None, 0)
-    try:
-        malloc_trim = process.malloc_trim
-    except AttributeError:
+    malloc_trim = getattr(process, 'malloc_trim', None)
+    if malloc_trim is None:
         # Not glibc, e.g. musl (alpine).
         return None
     return lambda: malloc_trim(0)
