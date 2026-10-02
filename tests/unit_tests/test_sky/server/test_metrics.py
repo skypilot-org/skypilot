@@ -280,6 +280,79 @@ def test_reap_stale_multiproc_files_removes_only_dead_pids(tmp_path):
     ]
 
 
+class _FakeProcess:
+    """psutil.Process stand-in with a fixed status and create time."""
+
+    def __init__(self, status, create_time):
+        self._status = status
+        self._create_time = create_time
+
+    def status(self):
+        return self._status
+
+    def create_time(self):
+        return self._create_time
+
+
+def _reap_with(tmp_path, processes):
+    """Run one reaper tick where pid -> _FakeProcess describes the pid table."""
+    reaped_pids = []
+
+    def fake_mark_dead(pid):
+        reaped_pids.append(pid)
+        for path in tmp_path.glob(f'gauge_live*_{pid}.db'):
+            path.unlink()
+
+    def fake_process(pid):
+        if pid not in processes:
+            raise metrics.psutil.NoSuchProcess(pid)
+        return processes[pid]
+
+    with patch.dict(os.environ,
+                    {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
+         patch('sky.server.metrics.psutil.pid_exists',
+               side_effect=lambda pid: pid in processes), \
+         patch('sky.server.metrics.psutil.Process', side_effect=fake_process), \
+         patch('sky.server.metrics.multiprocess.mark_process_dead',
+               side_effect=fake_mark_dead):
+        metrics._reap_stale_multiproc_files()
+    return reaped_pids
+
+
+def test_reap_stale_multiproc_files_reaps_zombie_writer(tmp_path, monkeypatch):
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _touch_live_gauge_files(str(tmp_path), 991)
+    zombie = _FakeProcess(metrics.psutil.STATUS_ZOMBIE, 100.0)
+    assert _reap_with(tmp_path, {991: zombie}) == [991]
+
+
+def test_reap_stale_multiproc_files_reaps_reused_pid(tmp_path, monkeypatch):
+    """A pid now held by a process other than the writer is reaped."""
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _touch_live_gauge_files(str(tmp_path), 991)
+    writer = _FakeProcess(metrics.psutil.STATUS_SLEEPING, 100.0)
+    assert _reap_with(tmp_path, {991: writer}) == []
+    assert _reap_with(tmp_path, {991: writer}) == []
+    # The writer died and the kernel handed 991 to an unrelated process.
+    reuser = _FakeProcess(metrics.psutil.STATUS_SLEEPING, 500.0)
+    assert _reap_with(tmp_path, {991: reuser}) == [991]
+    assert metrics._live_gauge_writers == {}
+
+
+def test_reap_stale_multiproc_files_forgets_pids_without_files(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _touch_live_gauge_files(str(tmp_path), 991)
+    writer = _FakeProcess(metrics.psutil.STATUS_SLEEPING, 100.0)
+    _reap_with(tmp_path, {991: writer})
+    assert metrics._live_gauge_writers == {991: 100.0}
+    # The writer removed its own files at exit.
+    for path in tmp_path.glob('gauge_live*_991.db'):
+        path.unlink()
+    _reap_with(tmp_path, {})
+    assert metrics._live_gauge_writers == {}
+
+
 def test_reap_stale_multiproc_files_swallows_per_pid_errors(tmp_path):
     """A failure on one pid does not stop the rest of the sweep."""
     pid_a, pid_b = 991, 992

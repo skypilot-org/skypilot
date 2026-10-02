@@ -28,6 +28,7 @@ from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.jobs import stall
 from sky.metrics import utils as metrics_utils
 from sky.server import constants as server_constants
+from sky.server import container_memory
 from sky.server import local_disk
 from sky.server import loop_stall
 from sky.server import middleware_utils
@@ -73,8 +74,8 @@ def register_multiproc_cleanup_atexit() -> None:
 
 
 # Default reap interval. Tuned to give prompt cleanup of stale per-pid
-# files without measurable overhead: one directory glob + one pid_exists()
-# check per unique pid per tick.
+# files without measurable overhead: one directory glob + a few /proc reads
+# per unique pid per tick.
 _REAPER_INTERVAL_SECONDS = 60
 # Matches the per-pid live-gauge file names written by
 # ``prometheus_client.multiprocess``: ``gauge_live{all,sum,max,min}_<pid>.db``.
@@ -101,8 +102,34 @@ def _scan_multiproc_pids(multiproc_dir: str) -> Set[int]:
     return pids
 
 
+# pid -> create time of the process that held the pid when the reaper first
+# saw the pid's live-gauge files. Only the reaper daemon touches it.
+_live_gauge_writers: Dict[int, float] = {}
+
+
+def _writer_exited(pid: int) -> bool:
+    """Whether the process that writes ``pid``'s live-gauge files is gone.
+
+    An existing pid is not enough: the writer may be a zombie its parent
+    has not waited for, or the kernel may have given the pid to another
+    process.
+    """
+    if not psutil.pid_exists(pid):
+        return True
+    try:
+        proc = psutil.Process(pid)
+        if proc.status() == psutil.STATUS_ZOMBIE:
+            return True
+        created = proc.create_time()
+    except psutil.NoSuchProcess:
+        return True
+    except psutil.Error:
+        return False
+    return _live_gauge_writers.setdefault(pid, created) != created
+
+
 def _reap_stale_multiproc_files() -> int:
-    """Remove prometheus multiproc files for pids that no longer exist.
+    """Remove prometheus multiproc files of writers that have exited.
 
     Returns the number of pids reaped.
     """
@@ -110,12 +137,15 @@ def _reap_stale_multiproc_files() -> int:
     if not multiproc_dir:
         return 0
     file_pids = _scan_multiproc_pids(multiproc_dir)
+    for pid in set(_live_gauge_writers) - file_pids:
+        del _live_gauge_writers[pid]
     if not file_pids:
         return 0
     reaped = 0
     for pid in file_pids:
-        if psutil.pid_exists(pid):
+        if not _writer_exited(pid):
             continue
+        _live_gauge_writers.pop(pid, None)
         try:
             multiprocess.mark_process_dead(pid)
             reaped += 1
@@ -141,23 +171,18 @@ async def multiproc_reaper_daemon(
     live-gauge value can be served by ``/metrics`` indefinitely (until
     the API server pod itself restarts and wipes the metrics dir). This
     daemon scans the multiproc dir from the main API server process and
-    invokes ``mark_process_dead`` on behalf of any writer whose pid no
-    longer exists.
+    invokes ``mark_process_dead`` on behalf of any writer that has
+    exited.
 
-    Reaps any pid whose live-gauge file is present but for which
-    ``psutil.pid_exists`` returns False (i.e. the pid no longer maps to
-    any running process). The descendant relationship is intentionally
-    not used as the membership signal: writers may not always be direct
-    descendants of the main API server process (e.g. workers reparented
-    to init after an intermediate exits), and a strict descendant filter
-    would leak files from those legitimate writers.
-
-    Known false-negative: if a dead worker's pid is later reused by an
-    unrelated process inside the same pod, its files keep being scraped
-    until either that unrelated process exits, the worker's pid wraps to
-    another value, or a same-pid SkyPilot writer overwrites the file.
-    PID reuse within a pod's lifetime is rare in practice (Linux pid_max
-    is large and pids are allocated sequentially), so this is accepted.
+    Reaps a pid whose live-gauge files are present when no process holds
+    the pid, when the process holding it is a zombie, or when it is not
+    the process (by create time) that held the pid when the reaper first
+    saw those files, i.e. the pid was reused. The descendant
+    relationship is intentionally not used as the membership signal:
+    writers may not always be direct descendants of the main API server
+    process (e.g. workers reparented to init after an intermediate
+    exits), and a strict descendant filter would leak files from those
+    legitimate writers.
 
     No-op when ``PROMETHEUS_MULTIPROC_DIR`` is unset.
     """
@@ -695,6 +720,118 @@ _LOCAL_DISK_USAGE_COLLECTOR = _wrap_collector(LocalDiskUsageCollector())
 
 try:
     prom.REGISTRY.register(_LOCAL_DISK_USAGE_COLLECTOR)  # non-multiprocess
+except ValueError:
+    pass
+
+_CONTAINER_MEMORY_USAGE_HELP = (
+    'Memory charged to the API server container\'s cgroup (memory.current), '
+    'including page cache the kernel can reclaim. Subtract '
+    'sky_apiserver_container_memory_stat_bytes{stat="file"} for the memory '
+    'the container cannot give back without swap.')
+
+_CONTAINER_MEMORY_STAT_HELP = (
+    'One field of the API server container\'s cgroup memory.stat: anon is '
+    'process memory not backed by files, file is page cache (including '
+    'shmem), kernel is kernel memory charged to the container.')
+
+_CONTAINER_MEMORY_LIMIT_HELP = (
+    'The API server container\'s cgroup memory limit (memory.max). No series '
+    'is emitted when the container has no limit, in which case its node\'s '
+    'allocatable memory is the bound.')
+
+_CONTAINER_PROCESSES_HELP = (
+    'Processes in the API server container, by type: main (the server '
+    'process), server (uvicorn workers), worker:<group> (executor workers), '
+    'controller (managed-job controllers), other (everything else, mostly '
+    'short-lived children such as kubectl, ssh and subprocess_daemon).')
+
+_CONTAINER_THREADS_HELP = (
+    'Threads in the API server container\'s processes, by process type.')
+
+_CONTAINER_RSS_ANON_HELP = (
+    'Sum of RssAnon over the API server container\'s processes, by process '
+    'type. Unlike per-process RSS it leaves out file pages, so summed over '
+    'types it is comparable to memory.stat anon.')
+
+_CONTAINER_MAX_RSS_ANON_HELP = (
+    'RssAnon of the largest process of each type in the API server '
+    'container.')
+
+_CONTAINER_SCAN_DURATION_HELP = (
+    'Wall-clock seconds the last read of the container\'s cgroup and '
+    'processes took. Runs off the scrape path.')
+
+
+class ContainerMemoryCollector:
+    """Collector for the API server container's memory and processes.
+
+    See sky/server/container_memory.py. Emits nothing outside a cgroup v2
+    container. The census reads two /proc files per process, so
+    ResilientCollector keeps it off the scrape path.
+    """
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_memory_usage_bytes',
+            _CONTAINER_MEMORY_USAGE_HELP)
+
+    def collect(self):
+        snapshot = container_memory.scan()
+        if snapshot is None:
+            return
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_memory_usage_bytes',
+            _CONTAINER_MEMORY_USAGE_HELP,
+            value=snapshot.usage_bytes)
+        stat = prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_memory_stat_bytes',
+            _CONTAINER_MEMORY_STAT_HELP,
+            labels=['stat'])
+        for key, value in snapshot.stat_bytes.items():
+            stat.add_metric([key], value)
+        yield stat
+        limit = prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_memory_limit_bytes',
+            _CONTAINER_MEMORY_LIMIT_HELP)
+        if snapshot.limit_bytes is not None:
+            limit.add_metric([], snapshot.limit_bytes)
+        yield limit
+
+        processes = prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_processes',
+            _CONTAINER_PROCESSES_HELP,
+            labels=['type'])
+        threads = prom_core.GaugeMetricFamily('sky_apiserver_container_threads',
+                                              _CONTAINER_THREADS_HELP,
+                                              labels=['type'])
+        rss_anon = prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_rss_anon_bytes',
+            _CONTAINER_RSS_ANON_HELP,
+            labels=['type'])
+        max_rss_anon = prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_max_rss_anon_bytes',
+            _CONTAINER_MAX_RSS_ANON_HELP,
+            labels=['type'])
+        for process_type, usage in sorted(snapshot.types.items()):
+            processes.add_metric([process_type], usage.processes)
+            threads.add_metric([process_type], usage.threads)
+            rss_anon.add_metric([process_type], usage.rss_anon_bytes)
+            max_rss_anon.add_metric([process_type], usage.max_rss_anon_bytes)
+        yield processes
+        yield threads
+        yield rss_anon
+        yield max_rss_anon
+
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_scan_duration_seconds',
+            _CONTAINER_SCAN_DURATION_HELP,
+            value=snapshot.duration_seconds)
+
+
+_CONTAINER_MEMORY_COLLECTOR = _wrap_collector(ContainerMemoryCollector())
+
+try:
+    prom.REGISTRY.register(_CONTAINER_MEMORY_COLLECTOR)  # non-multiprocess
 except ValueError:
     pass
 
@@ -1409,6 +1546,7 @@ def metrics() -> fastapi.Response:
         registry.register(_SQLITE_DB_SIZE_COLLECTOR)
         registry.register(_WORKSPACE_USAGE_COLLECTOR)
         registry.register(_LOCAL_DISK_USAGE_COLLECTOR)
+        registry.register(_CONTAINER_MEMORY_COLLECTOR)
         registry.register(_COLLECTOR_HEALTH_COLLECTOR)
         registry.register(_SERVER_START_TIME_COLLECTOR)
         if _MANAGED_JOBS_COLLECTOR is not None:
