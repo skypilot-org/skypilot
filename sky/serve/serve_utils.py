@@ -1362,10 +1362,14 @@ def _terminate_failed_services(
     under FAILED_CLEANUP, so a repeated purge resumes the teardown.
 
     Raises:
-        RuntimeError: A controller did not exit in time, or replica clusters
-            remain after teardown.
+        RuntimeError: A controller did not exit in time, replica clusters
+            remain after teardown, or storage cleanup failed.
     """
+    # `sky.core` imports `sky.task`, which imports this module, and
+    # `sky.serve.service` imports this module, so neither can be imported at
+    # the top level.
     from sky import core  # pylint: disable=import-outside-toplevel
+    from sky.serve import service  # pylint: disable=import-outside-toplevel
 
     serve_state.remove_ha_recovery_script(service_name)
     _signal_terminate(service_name)
@@ -1410,6 +1414,21 @@ def _terminate_failed_services(
             'replica clusters remain: '
             f'{", ".join(remaining_replica_clusters)}. Rerun the purge after '
             'resolving the errors.')
+
+    # Clean storage only after the replicas that mount it are gone, and keep
+    # the version records that describe it until cleanup succeeds.
+    failed_versions: List[int] = []
+    for version in serve_state.get_service_versions(service_name):
+        yaml_content = serve_state.get_yaml_content(service_name, version)
+        if (yaml_content is not None and
+                not service.cleanup_storage(yaml_content)):
+            failed_versions.append(version)
+    if failed_versions:
+        serve_state.set_service_status_and_active_versions(
+            service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
+        raise RuntimeError(
+            f'Failed to clean up storage of {service_name!r} for versions '
+            f'{failed_versions}. Rerun the purge after resolving the errors.')
 
     service_dir = os.path.expanduser(
         generate_remote_service_dir_name(service_name))
@@ -1456,7 +1475,7 @@ def terminate_services(service_names: Optional[List[str]], purge: bool,
                 # teardown instead of leaking its clusters.
                 _terminate_failed_services(
                     service_name, serve_state.ServiceStatus.SHUTTING_DOWN)
-                terminated_service_names.append(service_name)
+                terminated_service_names.append(f'{service_name!r}')
             # Without --purge, treat as already scheduled to terminate.
             continue
         if pool:
@@ -1513,7 +1532,9 @@ def terminate_services(service_names: Optional[List[str]], purge: bool,
         if len(terminated_service_names) > 1:
             terminated_service_names_str = ', '.join(terminated_service_names)
             identity_str = f'{capnoun}s {terminated_service_names_str} are'
-        messages.append(f'{identity_str} scheduled to be terminated.')
+        # Purge returns only after the teardown completes.
+        outcome = 'terminated' if purge else 'scheduled to be terminated'
+        messages.append(f'{identity_str} {outcome}.')
     return '\n'.join(messages)
 
 

@@ -1023,6 +1023,8 @@ class _PurgeEnv:
         self.downs = []
         # Each probe answers one `_start_in_flight` call; none means exited.
         self.controller_probes = []
+        self.storage_cleanups = []
+        self.storage_ok = True
 
     def down(self, cluster_name):
         # pylint: disable=import-outside-toplevel
@@ -1033,6 +1035,10 @@ class _PurgeEnv:
         if cluster_name in self.blocked:
             raise RuntimeError('AuthorizationFailed: delete is not permitted')
         self.clusters.remove(cluster_name)
+
+    def cleanup_storage(self, yaml_content):
+        self.storage_cleanups.append(yaml_content)
+        return self.storage_ok
 
     def start_in_flight(self, service_name):
         if not self.controller_probes:
@@ -1089,6 +1095,7 @@ def purge_env(tmp_path, monkeypatch):
 
     from sky import core
     from sky.serve import serve_state
+    from sky.serve import service
     engine = sqlalchemy.create_engine(f'sqlite:///{tmp_path / "serve.db"}')
     monkeypatch.setattr(serve_state._db_manager, '_engine', engine)  # pylint: disable=protected-access
     serve_state.Base.metadata.create_all(engine)
@@ -1100,6 +1107,7 @@ def purge_env(tmp_path, monkeypatch):
         clock[0] += seconds
 
     monkeypatch.setattr(core, 'down', env.down)
+    monkeypatch.setattr(service, 'cleanup_storage', env.cleanup_storage)
     monkeypatch.setattr(serve_utils, '_start_in_flight', env.start_in_flight)
     monkeypatch.setattr(serve_utils, 'time',
                         mock.Mock(time=lambda: clock[0], sleep=_sleep))
@@ -1134,11 +1142,16 @@ class TestPurgeTeardown:
         if provider_present:
             env.clusters.update({'bulk-1', 'bulk-2'})
 
-        serve_utils.terminate_services(['bulk'], purge=True, pool=True)
+        message = serve_utils.terminate_services(['bulk'],
+                                                 purge=True,
+                                                 pool=True)
 
+        assert message == 'Pool \'bulk\' is terminated.'
         assert env.records('bulk') == (None, [], None)
         assert env.clusters == {'bulk-2-1'}
         assert sorted(env.downs) == ['bulk-1', 'bulk-2']
+        assert len(env.storage_cleanups) == 1
+        assert 'name: bulk\n' in env.storage_cleanups[0]
         assert not env.signal_file('bulk').exists()
         other, other_replicas, other_script = env.records('bulk-2')
         assert other is not None
@@ -1170,6 +1183,27 @@ class TestPurgeTeardown:
         serve_utils.terminate_services(['bulk'], purge=True, pool=True)
         assert env.records('bulk') == (None, [], None)
         assert not env.clusters
+
+    def test_failed_storage_cleanup_is_resumable(self, purge_env):
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+        env = purge_env
+        env.add_pool('bulk', 'NO_REPLICA', [1])
+        env.clusters.add('bulk-1')
+        env.storage_ok = False
+
+        with pytest.raises(RuntimeError, match='storage of \'bulk\''):
+            serve_utils.terminate_services(['bulk'], purge=True, pool=True)
+        service, replicas, _ = env.records('bulk')
+        assert service['status'] == serve_state.ServiceStatus.FAILED_CLEANUP
+        assert replicas == []
+        assert serve_state.get_service_versions('bulk') == [1]
+        assert not env.clusters
+
+        env.storage_ok = True
+        serve_utils.terminate_services(['bulk'], purge=True, pool=True)
+        assert env.records('bulk') == (None, [], None)
+        assert len(env.storage_cleanups) == 2
 
     def test_waits_for_live_controller_cleanup(self, purge_env):
         # pylint: disable=import-outside-toplevel

@@ -7,6 +7,7 @@ from sky import backends
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.serve import serve_utils
+from sky.skylet import constants as skylet_constants
 
 if typing.TYPE_CHECKING:
     from sky.schemas.generated import servev1_pb2
@@ -135,9 +136,14 @@ class RpcRunner:
         assert handle.is_grpc_enabled_with_flag
         request = TerminateServicesRequestConverter.to_proto(
             service_names, purge, pool)
+        # Purge returns only after the teardown completes, which can take
+        # longer than the default deadline.
+        timeout: Optional[float] = skylet_constants.SKYLET_GRPC_TIMEOUT_SECONDS
+        if purge:
+            timeout = None
         response = backend_utils.invoke_skylet_with_retries(
-            lambda: backends.SkyletClient(handle.get_grpc_channel()
-                                         ).terminate_services(request))
+            lambda: backends.SkyletClient(handle.get_grpc_channel(
+            )).terminate_services(request, timeout=timeout))
         return response.message
 
     @classmethod

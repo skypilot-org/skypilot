@@ -1,4 +1,9 @@
+from unittest import mock
+
+import pytest
+
 from sky.serve import serve_rpc_utils as utils
+from sky.skylet import constants as skylet_constants
 
 # pylint: disable=line-too-long
 
@@ -75,3 +80,19 @@ def test_terminate_service_request_converter():
     assert service_names is None
     assert purge
     assert pool
+
+
+@pytest.mark.parametrize('purge,timeout',
+                         [(False, skylet_constants.SKYLET_GRPC_TIMEOUT_SECONDS),
+                          (True, None)])
+def test_terminate_services_purge_waits_without_deadline(purge, timeout):
+    """Purge blocks until teardown completes, so it has no gRPC deadline."""
+    handle = mock.Mock(is_grpc_enabled_with_flag=True)
+    with mock.patch(
+            'sky.serve.serve_rpc_utils.backends.SkyletClient') as mock_client:
+        mock_client.return_value.terminate_services.return_value = mock.Mock(
+            message='done')
+        assert utils.RpcRunner.terminate_services(handle, ['svc'], purge,
+                                                  True) == 'done'
+    call = mock_client.return_value.terminate_services.call_args
+    assert call.kwargs['timeout'] == timeout
