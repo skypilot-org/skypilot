@@ -507,6 +507,13 @@ def _follow_job_logs(file,
 # to fit the tail of typical log files in a single read while keeping
 # memory bounded for very long lines.
 _TAIL_BLOCK_SIZE = 64 * 1024
+# Most bytes the tail reader reads back from EOF.
+_TAIL_MAX_BYTES = 64 * 1024 * 1024
+
+
+def _count_line_breaks(chunk: bytes) -> int:
+    """Counts the ``\\n``, ``\\r`` and ``\\r\\n`` breaks in ``chunk``."""
+    return chunk.count(b'\n') + chunk.count(b'\r') - chunk.count(b'\r\n')
 
 
 def tail_lines_from_end(path: str,
@@ -517,6 +524,11 @@ def tail_lines_from_end(path: str,
     Reads backwards in fixed-size blocks from EOF so cost is O(tail *
     line-length) rather than O(file-size). For multi-GB log files this
     is the difference between ~10 s and ~1 ms per call.
+
+    Lines end at ``\\n``, ``\\r`` or ``\\r\\n``, as in ``str.splitlines``,
+    so progress bars that only write ``\\r`` count as lines. At most
+    ``_TAIL_MAX_BYTES`` are read; when that is not enough to reach
+    ``tail + offset`` lines, the lines found in that window are returned.
 
     Args:
         path: File path to read.
@@ -541,13 +553,18 @@ def tail_lines_from_end(path: str,
         f.seek(0, os.SEEK_END)
         end_pos = f.tell()
         pos = end_pos
-        while pos > 0 and line_count <= needed:
+        while (pos > 0 and line_count <= needed and
+               end_pos - pos < _TAIL_MAX_BYTES):
             read_size = min(_TAIL_BLOCK_SIZE, pos)
             pos -= read_size
             f.seek(pos)
             chunk = f.read(read_size)
+            line_count += _count_line_breaks(chunk)
+            if (chunks and chunk.endswith(b'\r') and
+                    chunks[-1].startswith(b'\n')):
+                # A '\r\n' split across two blocks is one break.
+                line_count -= 1
             chunks.append(chunk)
-            line_count += chunk.count(b'\n')
     data = b''.join(reversed(chunks))
     text = data.decode('utf-8', errors='replace')
     lines = text.splitlines(keepends=True)

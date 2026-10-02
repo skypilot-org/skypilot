@@ -111,3 +111,84 @@ def test_empty_file(log_path):
     lines, end_pos = log_lib.tail_lines_from_end(log_path, 10)
     assert lines == []
     assert end_pos == 0
+
+
+def _write_bytes(path: str, data: bytes) -> None:
+    with open(path, 'wb') as f:
+        f.write(data)
+
+
+@pytest.mark.parametrize('tail', [1, 7, 5000])
+@pytest.mark.parametrize('offset', [0, 3, 4000])
+def test_mixed_line_breaks_match_splitlines(log_path, tail, offset):
+    """``\\n``, ``\\r`` and ``\\r\\n`` each end one line."""
+    rng = random.Random(7)
+    parts = []
+    for i in range(20_000):
+        parts.append(f'{i:05d}' + 'p' * rng.randint(0, 40))
+        parts.append(rng.choice(['\n', '\r', '\r\n']))
+    data = ''.join(parts).encode()
+    _write_bytes(log_path, data)
+    expected = data.decode().splitlines(keepends=True)
+    if offset > 0:
+        expected = expected[:-offset]
+    actual, _ = log_lib.tail_lines_from_end(log_path, tail, offset)
+    assert actual == expected[-tail:]
+
+
+def test_crlf_split_across_blocks_is_one_break(log_path):
+    block = log_lib._TAIL_BLOCK_SIZE  # pylint: disable=protected-access
+    # The last two blocks are b'w...wx\r' and b'\ny...y\n'.
+    split_line = b'w' * (block - 2) + b'x\r\n'
+    last_line = b'y' * (block - 2) + b'\n'
+    _write_bytes(log_path, b'head\n' * 100 + split_line + last_line)
+    lines, _ = log_lib.tail_lines_from_end(log_path, 2)
+    assert lines == [split_line.decode(), last_line.decode()]
+
+
+class _CountingFile:
+    """Binary file wrapper that records how many bytes were read."""
+
+    def __init__(self, f, reads: list):
+        self._f = f
+        self._reads = reads
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self._f.close()
+
+    def seek(self, *args):
+        return self._f.seek(*args)
+
+    def tell(self):
+        return self._f.tell()
+
+    def read(self, size=-1):
+        out = self._f.read(size)
+        self._reads.append(len(out))
+        return out
+
+
+def test_carriage_return_progress_reads_one_block(log_path, monkeypatch):
+    _write_bytes(log_path, b'start\n' + b'step\r' * 100_000)
+    reads: list = []
+    monkeypatch.setattr(
+        log_lib,
+        'open',
+        lambda *args, **kwargs: _CountingFile(open(*args, **kwargs), reads),
+        raising=False)
+    lines, _ = log_lib.tail_lines_from_end(log_path, 10)
+    assert lines == ['step\r'] * 10
+    assert sum(reads) == log_lib._TAIL_BLOCK_SIZE  # pylint: disable=protected-access
+
+
+def test_read_stops_at_max_bytes(log_path, monkeypatch):
+    block = log_lib._TAIL_BLOCK_SIZE  # pylint: disable=protected-access
+    monkeypatch.setattr(log_lib, '_TAIL_MAX_BYTES', 4 * block)
+    data = b'old\n' * 10 + b'z' * (20 * block) + b'\nlast line\n'
+    _write_bytes(log_path, data)
+    lines, end_pos = log_lib.tail_lines_from_end(log_path, 5)
+    assert lines == ['last line\n']
+    assert end_pos == len(data)
