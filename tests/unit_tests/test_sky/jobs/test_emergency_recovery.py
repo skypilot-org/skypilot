@@ -1230,12 +1230,25 @@ class TestDbOutageResume:
 
         assert h.jc._run_one_task.call_count == 2
         h.probe.assert_awaited_once()
+        # The resumed attempt starts from a freshly loaded DAG.
+        h.jc._load_dag.assert_called_once()
         assert not h.sleeps
         h.record_attempt.assert_not_awaited()
         h.set_emergency.assert_not_awaited()
         h.jc._cleanup_cluster.assert_not_awaited()
         h.jc._update_failed_task_state.assert_not_called()
         h.set_cancelled.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_dag_reload_failure_falls_back_to_emergency(
+            self, monkeypatch):
+        h = self._harness(monkeypatch, [_db_error(), True])
+        h.jc._load_dag.side_effect = [RuntimeError('bad dag'), None]
+
+        await h.jc.run()
+
+        h.record_attempt.assert_awaited_once()
+        assert h.jc._run_one_task.call_count == 2
 
     @pytest.mark.asyncio
     async def test_error_caused_by_db_error_resumes(self, monkeypatch):

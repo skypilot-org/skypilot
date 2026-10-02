@@ -2930,11 +2930,12 @@ class JobController:
                                   task_id: int) -> bool:
         """Wait for the DB to answer again after a transient DB error.
 
-        Returns True once a DB read succeeds, so that run() resumes the job in
-        place. Returns False, leaving the error to _handle_unexpected_error,
-        when the error is not a transient DB error, when the DB does not
-        answer within JOB_DB_OUTAGE_WAIT_BUDGET_SECONDS, or when the job was
-        already resumed JOB_DB_OUTAGE_MAX_RESUMES times within that budget.
+        Returns True once a DB read succeeds and the DAG is reloaded, so that
+        run() resumes the job in place. Returns False, leaving the error to
+        _handle_unexpected_error, when the error is not a transient DB error,
+        when the DB does not answer within JOB_DB_OUTAGE_WAIT_BUDGET_SECONDS,
+        when the DAG cannot be reloaded, or when the job was already resumed
+        JOB_DB_OUTAGE_MAX_RESUMES times within that budget.
 
         Raises only asyncio.CancelledError.
         """
@@ -2967,11 +2968,14 @@ class JobController:
                 max_backoff=jobs_constants.
                 JOB_DB_OUTAGE_WAIT_BACKOFF_CAP_SECONDS,
                 deadline=now + budget)
+            # The failed attempt may have left the in-memory task objects
+            # mutated (see _load_dag).
+            await self.load_dag()
         except asyncio.CancelledError:  # pylint: disable=try-except-raise
             raise
         except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'DB still unavailable for job {self._job_id}: '
-                           f'{db_retries.summarize(e)}')
+            logger.warning(f'Cannot resume job {self._job_id} after the DB '
+                           f'error: {db_retries.summarize(e)}')
             return False
         self._db_outage_resumes.append(time.monotonic())
         logger.info(f'DB available again; resuming job {self._job_id}.')
