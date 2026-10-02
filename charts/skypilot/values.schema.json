@@ -354,6 +354,12 @@
                                 "null"
                             ]
                         },
+                        "scope": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
                         "session-store-type": {
                             "type": "string"
                         },
@@ -571,6 +577,12 @@
                             ]
                         },
                         "redis-url": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "scope": {
                             "type": [
                                 "string",
                                 "null"
