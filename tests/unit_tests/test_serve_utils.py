@@ -1012,3 +1012,234 @@ class TestHaRecoveryDefensiveOnAliveCheckException:
             # recovery script lookup or run must NOT happen — we skipped early
             mock_script.assert_not_called()
             mock_runner_cls.return_value.run.assert_not_called()
+
+
+class _PurgeEnv:
+    """An isolated serve DB, fake replica clusters and controller probes."""
+
+    def __init__(self):
+        self.clusters = set()
+        self.blocked = set()
+        self.downs = []
+        # Each probe answers one `_start_in_flight` call; none means exited.
+        self.controller_probes = []
+        self.storage_cleanups = []
+        self.storage_ok = True
+
+    def down(self, cluster_name):
+        # pylint: disable=import-outside-toplevel
+        from sky import exceptions
+        self.downs.append(cluster_name)
+        if cluster_name not in self.clusters:
+            raise exceptions.ClusterDoesNotExist(cluster_name)
+        if cluster_name in self.blocked:
+            raise RuntimeError('AuthorizationFailed: delete is not permitted')
+        self.clusters.remove(cluster_name)
+
+    def cleanup_storage(self, yaml_content):
+        self.storage_cleanups.append(yaml_content)
+        return self.storage_ok
+
+    def start_in_flight(self, service_name):
+        if not self.controller_probes:
+            return False
+        return self.controller_probes.pop(0)(service_name)
+
+    @staticmethod
+    def add_pool(name, status, replica_ids):
+        # pylint: disable=import-outside-toplevel
+        from sky import task as task_lib
+        from sky.serve import replica_managers
+        from sky.serve import serve_state
+        from sky.utils import yaml_utils
+        task = task_lib.Task.from_yaml_str(
+            f'name: {name}\nrun: echo\npool:\n  workers: 2\n')
+        yaml_content = yaml_utils.dump_yaml_str(task.to_yaml_config())
+        serve_state.add_service(name,
+                                controller_job_id=1,
+                                policy='',
+                                requested_resources_str='',
+                                load_balancing_policy=None,
+                                status=serve_state.ServiceStatus[status],
+                                tls_encrypted=False,
+                                pool=True,
+                                controller_pid=None,
+                                entrypoint='')
+        serve_state.add_or_update_version(name, 1, task.service, yaml_content)
+        serve_state.set_ha_recovery_script(name, 'true')
+        for replica_id in replica_ids:
+            info = replica_managers.ReplicaInfo(replica_id,
+                                                f'{name}-{replica_id}', '-',
+                                                False, None, 1, None)
+            serve_state.add_or_update_replica(name, replica_id, info)
+
+    @staticmethod
+    def records(name):
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+        replicas = sorted(
+            info.cluster_name for info in serve_state.get_replica_infos(name))
+        return (serve_state.get_service_from_name(name), replicas,
+                serve_state.get_ha_recovery_script(name))
+
+    @staticmethod
+    def signal_file(name):
+        return pathlib.Path(
+            serve_utils.constants.SIGNAL_FILE_PATH.format(name)).expanduser()
+
+
+@pytest.fixture
+def purge_env(tmp_path, monkeypatch):
+    # pylint: disable=import-outside-toplevel
+    import sqlalchemy
+
+    from sky import core
+    from sky.serve import serve_state
+    from sky.serve import service
+    engine = sqlalchemy.create_engine(f'sqlite:///{tmp_path / "serve.db"}')
+    monkeypatch.setattr(serve_state._db_manager, '_engine', engine)  # pylint: disable=protected-access
+    serve_state.Base.metadata.create_all(engine)
+    monkeypatch.setenv('HOME', str(tmp_path))
+    env = _PurgeEnv()
+    clock = [0.0]
+
+    def _sleep(seconds):
+        clock[0] += seconds
+
+    monkeypatch.setattr(core, 'down', env.down)
+    monkeypatch.setattr(service, 'cleanup_storage', env.cleanup_storage)
+    monkeypatch.setattr(serve_utils, '_start_in_flight', env.start_in_flight)
+    monkeypatch.setattr(serve_utils, 'time',
+                        mock.Mock(time=lambda: clock[0], sleep=_sleep))
+    monkeypatch.setattr(
+        serve_utils, '_get_to_controller_with_retry',
+        mock.Mock(side_effect=requests_exceptions.ConnectionError()))
+    monkeypatch.setattr(serve_utils.managed_job_state,
+                        'get_nonterminal_job_ids_by_pool',
+                        mock.Mock(return_value=[]))
+    yield env
+    engine.dispose()
+
+
+class TestPurgeTeardown:
+    """`down --purge` succeeds only after the exact service and its replica
+    clusters are gone, from any status, and is safe to repeat."""
+
+    # pylint: disable=redefined-outer-name
+
+    @pytest.mark.parametrize('status', [
+        'READY', 'NO_REPLICA', 'SHUTTING_DOWN', 'CONTROLLER_FAILED',
+        'FAILED_CLEANUP'
+    ])
+    @pytest.mark.parametrize('provider_present', [False, True])
+    def test_purge_removes_records_and_clusters(self, purge_env, status,
+                                                provider_present):
+        env = purge_env
+        env.add_pool('bulk', status, [1, 2])
+        # `bulk-2-1` belongs to pool `bulk-2`, not to replica 2 of `bulk`.
+        env.add_pool('bulk-2', 'READY', [1])
+        env.clusters.add('bulk-2-1')
+        if provider_present:
+            env.clusters.update({'bulk-1', 'bulk-2'})
+
+        message = serve_utils.terminate_services(['bulk'],
+                                                 purge=True,
+                                                 pool=True)
+
+        assert message == 'Pool \'bulk\' is terminated.'
+        assert env.records('bulk') == (None, [], None)
+        assert env.clusters == {'bulk-2-1'}
+        assert sorted(env.downs) == ['bulk-1', 'bulk-2']
+        assert len(env.storage_cleanups) == 1
+        assert 'name: bulk\n' in env.storage_cleanups[0]
+        assert not env.signal_file('bulk').exists()
+        other, other_replicas, other_script = env.records('bulk-2')
+        assert other is not None
+        assert (other_replicas, other_script) == (['bulk-2-1'], 'true')
+
+        message = serve_utils.terminate_services(['bulk'],
+                                                 purge=True,
+                                                 pool=True)
+        assert 'No pool to terminate.' in message
+        assert sorted(env.downs) == ['bulk-1', 'bulk-2']
+
+    def test_failed_cluster_teardown_is_resumable(self, purge_env):
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+        env = purge_env
+        env.add_pool('bulk', 'READY', [1, 2])
+        env.clusters.update({'bulk-1', 'bulk-2'})
+        env.blocked.add('bulk-2')
+
+        with pytest.raises(RuntimeError,
+                           match='\'bulk-2\' .*AuthorizationFailed'):
+            serve_utils.terminate_services(['bulk'], purge=True, pool=True)
+        service, replicas, script = env.records('bulk')
+        assert service['status'] == serve_state.ServiceStatus.FAILED_CLEANUP
+        assert (replicas, script, env.clusters) == (['bulk-2'], None,
+                                                    {'bulk-2'})
+
+        env.blocked.clear()
+        serve_utils.terminate_services(['bulk'], purge=True, pool=True)
+        assert env.records('bulk') == (None, [], None)
+        assert not env.clusters
+
+    def test_failed_storage_cleanup_is_resumable(self, purge_env):
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+        env = purge_env
+        env.add_pool('bulk', 'NO_REPLICA', [1])
+        env.clusters.add('bulk-1')
+        env.storage_ok = False
+
+        with pytest.raises(RuntimeError, match='storage of \'bulk\''):
+            serve_utils.terminate_services(['bulk'], purge=True, pool=True)
+        service, replicas, _ = env.records('bulk')
+        assert service['status'] == serve_state.ServiceStatus.FAILED_CLEANUP
+        assert replicas == []
+        assert serve_state.get_service_versions('bulk') == [1]
+        assert not env.clusters
+
+        env.storage_ok = True
+        serve_utils.terminate_services(['bulk'], purge=True, pool=True)
+        assert env.records('bulk') == (None, [], None)
+        assert len(env.storage_cleanups) == 2
+
+    def test_waits_for_live_controller_cleanup(self, purge_env):
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+        env = purge_env
+        env.add_pool('bulk', 'READY', [1])
+        env.clusters.add('bulk-1')
+
+        def _consume_signal(name):
+            assert env.signal_file(name).read_text() == 'terminate'
+            env.signal_file(name).unlink()
+            return True
+
+        def _finish_cleanup(name):
+            env.clusters.discard('bulk-1')
+            serve_state.remove_replica(name, 1)
+            serve_state.remove_service_completely(name)
+            return False
+
+        env.controller_probes.extend(
+            [_consume_signal, lambda _: True, _finish_cleanup])
+        serve_utils.terminate_services(['bulk'], purge=True, pool=True)
+
+        assert not env.controller_probes
+        assert not env.downs
+        assert env.records('bulk') == (None, [], None)
+
+    def test_controller_that_does_not_exit_fails_purge(self, purge_env):
+        env = purge_env
+        env.add_pool('bulk', 'SHUTTING_DOWN', [1])
+        env.clusters.add('bulk-1')
+        env.controller_probes.extend([lambda _: True] * 10_000)
+
+        with pytest.raises(RuntimeError, match='still running .*Rerun'):
+            serve_utils.terminate_services(['bulk'], purge=True, pool=True)
+        assert env.records('bulk')[1:] == (['bulk-1'], None)
+        assert env.clusters == {'bulk-1'}
+        assert not env.downs
+        assert env.signal_file('bulk').read_text() == 'terminate'
