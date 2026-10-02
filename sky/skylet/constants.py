@@ -130,7 +130,8 @@ SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
 SKY_REMOTE_PYTHON_ENV: str = f'{SKY_RUNTIME_DIR}/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # Default user-facing Python environment, baked into the container image (see
-# Dockerfile_k8s{,_gpu}). It replaces the role conda's base env used to play:
+# Dockerfile_k8s{,_gpu}) and created on VMs by SKY_USER_ENV_CREATION_COMMANDS.
+# It replaces the role conda's base env used to play:
 # user setup/run commands activate it so `pip`/`uv` install into a writable
 # location instead of a non-writable system site-packages. Kept separate from
 # the SkyPilot runtime env above. Only activated when conda is not active (an
@@ -347,6 +348,45 @@ UV_INSTALLATION_COMMANDS = (
     f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV} --python 3.10;'
     f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'  # pylint: disable=line-too-long
 )
+
+# Create the default user environment (SKY_USER_ENV_PATH) on VM images that do
+# not ship one. Since conda is no longer installed by default, bare images
+# (e.g. plain Ubuntu 24.04) otherwise leave user tasks with no `python`/`pip`
+# and an externally managed (PEP 668), non-writable system Python. Must run
+# after uv is installed. Best effort and idempotent: skipped if a usable env
+# (with both `python` and `pip`) already exists, or if there is no python3. It
+# is created even when conda is installed: ACTIVATE_SKY_USER_ENV only activates
+# it when no conda env is active in the task shell.
+# --system-site-packages keeps packages preinstalled in the image's system
+# Python importable, while new installs go into the writable venv.
+# Safe to run concurrently against a shared $HOME (e.g. all nodes of a Slurm
+# cluster): each run builds a --relocatable env in its own temporary
+# directory and only installs it with an atomic rename, so the env path only
+# ever holds a complete env and no run deletes a directory another run is
+# building. An incomplete env left at the path (e.g. by a failed `--seed` of
+# an older version) is renamed aside before the install instead of being
+# deleted in place.
+_SKY_USER_ENV_USABLE = (f'{{ [ -x {SKY_USER_ENV_PATH}/bin/python ] && '
+                        f'[ -x {SKY_USER_ENV_PATH}/bin/pip ]; }}')
+SKY_USER_ENV_CREATION_COMMANDS = (
+    f'{_SKY_USER_ENV_USABLE} || '
+    '! command -v python3 > /dev/null 2>&1 || '
+    '{ '
+    '_sky_env_sfx="$(hostname 2>/dev/null).$$.$RANDOM"; '
+    f'_sky_env_tmp={SKY_USER_ENV_PATH}.tmp.$_sky_env_sfx; '
+    f'if {SKY_UV_CMD} venv --seed --relocatable --system-site-packages '
+    '--python "$(command -v python3)" "$_sky_env_tmp" > /dev/null 2>&1 && '
+    '[ -x "$_sky_env_tmp/bin/pip" ]; then '
+    f'if ! {_SKY_USER_ENV_USABLE} && [ -e {SKY_USER_ENV_PATH} ]; then '
+    f'mv -T {SKY_USER_ENV_PATH} {SKY_USER_ENV_PATH}.stale.$_sky_env_sfx '
+    f'2> /dev/null; rm -rf {SKY_USER_ENV_PATH}.stale.$_sky_env_sfx; '
+    'fi; '
+    f'mv -T "$_sky_env_tmp" {SKY_USER_ENV_PATH} 2> /dev/null; '
+    'fi; '
+    'rm -rf "$_sky_env_tmp"; '
+    f'{_SKY_USER_ENV_USABLE} || '
+    'echo "Failed to create the default user Python environment; skipping."; '
+    '};')
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'

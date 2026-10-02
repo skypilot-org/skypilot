@@ -489,6 +489,16 @@ class InvalidWorkspaceNameError(Exception):
     pass
 
 
+class WorkspaceConfigConflictError(Exception):
+    """Raised when a workspace update was based on an outdated config.
+
+    The caller sent the config it started from (``expected_config``) and the
+    workspace no longer holds it, i.e. someone else changed the workspace in
+    the meantime.
+    """
+    pass
+
+
 class WorkspaceAmbiguousError(SkyPilotExcludeArgsBaseException):
     """Raised when a user belongs to multiple workspaces and none is chosen.
 
