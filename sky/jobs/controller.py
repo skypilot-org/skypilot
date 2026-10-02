@@ -327,6 +327,9 @@ class JobController:
         # retry attempt in run() (inside its `try`, so that a task.cancel()
         # during the sleep is handled by the normal cancellation path).
         self._emergency_backoff_seconds: Optional[float] = None
+        # time.monotonic() of each resume after a DB outage; see
+        # _wait_out_db_outage.
+        self._db_outage_resumes: List[float] = []
 
         logger.info('Initializing JobsController for job_id=%s', job_id)
 
@@ -2811,6 +2814,16 @@ class JobController:
                     cancelled = True
                     raise
                 except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+                    try:
+                        resume = await self._wait_out_db_outage(e, task_id)
+                    except asyncio.CancelledError:
+                        cancelled = True
+                        raise
+                    if resume:
+                        # A DB outage leaves the job's clusters untouched, so
+                        # resume the job the way a restarted controller does:
+                        # a RUNNING task is re-attached, not relaunched.
+                        continue
                     logger.error(f'Unexpected error in JobsController run for '
                                  f'task {task_id}')
                     with ux_utils.enable_traceback():
@@ -2912,6 +2925,57 @@ class JobController:
         if msg != 'No job to cancel.':
             logger.info(f'Cancelling jobs launched from job {self._job_id}: '
                         f'{msg}')
+
+    async def _wait_out_db_outage(self, error: Union[Exception, SystemExit],
+                                  task_id: int) -> bool:
+        """Wait for the DB to answer again after a transient DB error.
+
+        Returns True once a DB read succeeds, so that run() resumes the job in
+        place. Returns False, leaving the error to _handle_unexpected_error,
+        when the error is not a transient DB error, when the DB does not
+        answer within JOB_DB_OUTAGE_WAIT_BUDGET_SECONDS, or when the job was
+        already resumed JOB_DB_OUTAGE_MAX_RESUMES times within that budget.
+
+        Raises only asyncio.CancelledError.
+        """
+        if not isinstance(error,
+                          Exception) or not db_retries.is_transient(error):
+            return False
+        budget = jobs_constants.JOB_DB_OUTAGE_WAIT_BUDGET_SECONDS
+        now = time.monotonic()
+        self._db_outage_resumes = [
+            t for t in self._db_outage_resumes if now - t < budget
+        ]
+        if (len(self._db_outage_resumes) >=
+                jobs_constants.JOB_DB_OUTAGE_MAX_RESUMES):
+            logger.warning(
+                f'Job {self._job_id} was resumed '
+                f'{len(self._db_outage_resumes)} times after DB errors in '
+                f'the last {budget}s; handling {db_retries.summarize(error)} '
+                'as an unexpected error.')
+            return False
+        logger.warning(f'DB unavailable for job {self._job_id} (task '
+                       f'{task_id}): {db_retries.summarize(error)}. Waiting '
+                       f'up to {budget}s for the DB before resuming the job.')
+        try:
+            await db_retries.with_db_retries_async(
+                lambda _: managed_job_state.get_job_status_with_task_id_async(
+                    job_id=self._job_id, task_id=task_id),
+                max_retries=None,
+                initial_backoff=(
+                    jobs_constants.JOB_DB_OUTAGE_WAIT_BACKOFF_BASE_SECONDS),
+                max_backoff=jobs_constants.
+                JOB_DB_OUTAGE_WAIT_BACKOFF_CAP_SECONDS,
+                deadline=now + budget)
+        except asyncio.CancelledError:  # pylint: disable=try-except-raise
+            raise
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'DB still unavailable for job {self._job_id}: '
+                           f'{db_retries.summarize(e)}')
+            return False
+        self._db_outage_resumes.append(time.monotonic())
+        logger.info(f'DB available again; resuming job {self._job_id}.')
+        return True
 
     async def _handle_unexpected_error(
             self, error: Union[Exception, SystemExit]) -> Optional[str]:

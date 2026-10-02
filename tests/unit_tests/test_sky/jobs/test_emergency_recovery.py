@@ -25,6 +25,7 @@ from sky.jobs import constants as jobs_constants
 from sky.jobs import controller
 from sky.jobs import scheduler
 from sky.jobs import state
+from sky.utils import common_utils
 from sky.utils import controller_utils
 
 _PID = 1234
@@ -564,6 +565,7 @@ class _RetryLoopHarness:
         jc._dag = dag
         jc._pool = None
         jc._emergency_backoff_seconds = None
+        jc._db_outage_resumes = []
         jc._run_one_task = AsyncMock(side_effect=body_effects)
         jc._run_job_group = AsyncMock(side_effect=body_effects)
         jc._update_failed_task_state = AsyncMock()
@@ -1187,3 +1189,129 @@ class TestJobGroupEmergencyRecovery:
         h.jc._cleanup_cluster.assert_awaited_once()
         # The group-only bulk status probe is never used on this path.
         h.get_task_statuses.assert_not_awaited()
+
+
+def _db_error() -> sqlalchemy.exc.OperationalError:
+    return sqlalchemy.exc.OperationalError(
+        'SELECT 1', {},
+        Exception('connection to server failed: Connection '
+                  'refused'))
+
+
+class TestDbOutageResume:
+    """A transient DB error escaping the job body resumes the job in place.
+
+    asyncio.sleep is patched to record each backoff and advance the fake
+    clock that the wait budget reads.
+    """
+
+    @staticmethod
+    def _harness(monkeypatch, body_effects):
+        h = _RetryLoopHarness(monkeypatch, body_effects)
+        now = [1_000_000.0]
+
+        async def _fake_sleep(seconds):
+            h.sleeps.append(seconds)
+            now[0] += seconds
+
+        monkeypatch.setattr('asyncio.sleep', _fake_sleep)
+        monkeypatch.setattr(time, 'monotonic', lambda: now[0])
+        h.probe = AsyncMock(return_value=state.ManagedJobStatus.RUNNING)
+        monkeypatch.setattr(
+            'sky.jobs.controller.managed_job_state.'
+            'get_job_status_with_task_id_async', h.probe)
+        return h
+
+    @pytest.mark.asyncio
+    async def test_db_error_resumes_without_emergency(self, monkeypatch):
+        h = self._harness(monkeypatch, [_db_error(), True])
+
+        await h.jc.run()
+
+        assert h.jc._run_one_task.call_count == 2
+        h.probe.assert_awaited_once()
+        assert not h.sleeps
+        h.record_attempt.assert_not_awaited()
+        h.set_emergency.assert_not_awaited()
+        h.jc._cleanup_cluster.assert_not_awaited()
+        h.jc._update_failed_task_state.assert_not_called()
+        h.set_cancelled.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_error_caused_by_db_error_resumes(self, monkeypatch):
+        wrapped = RuntimeError('status check failed')
+        wrapped.__cause__ = _db_error()
+        h = self._harness(monkeypatch, [wrapped, True])
+
+        await h.jc.run()
+
+        assert h.jc._run_one_task.call_count == 2
+        h.record_attempt.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_waits_until_db_answers(self, monkeypatch):
+        h = self._harness(monkeypatch, [_db_error(), True])
+        h.probe.side_effect = [
+            _db_error(),
+            _db_error(), state.ManagedJobStatus.RUNNING
+        ]
+
+        await h.jc.run()
+
+        assert h.jc._run_one_task.call_count == 2
+        assert h.probe.await_count == 3
+        assert len(h.sleeps) == 2
+        assert max(h.sleeps) <= (
+            jobs_constants.JOB_DB_OUTAGE_WAIT_BACKOFF_CAP_SECONDS *
+            (1 + common_utils.Backoff.JITTER))
+        h.record_attempt.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_db_down_past_budget_falls_back_to_emergency(
+            self, monkeypatch):
+        h = self._harness(monkeypatch, [_db_error(), True])
+        h.probe.side_effect = _db_error()
+
+        await h.jc.run()
+
+        assert h.probe.await_count > 2
+        # The waits add up to the budget; the last sleep is the emergency
+        # backoff.
+        assert sum(h.sleeps[:-1]) == pytest.approx(
+            jobs_constants.JOB_DB_OUTAGE_WAIT_BUDGET_SECONDS)
+        h.record_attempt.assert_awaited_once()
+        assert h.jc._run_one_task.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_recurring_db_error_escalates_after_max_resumes(
+            self, monkeypatch):
+        max_resumes = jobs_constants.JOB_DB_OUTAGE_MAX_RESUMES
+        h = self._harness(monkeypatch,
+                          [_db_error()] * (max_resumes + 1) + [True])
+
+        await h.jc.run()
+
+        assert h.probe.await_count == max_resumes
+        h.record_attempt.assert_awaited_once()
+        assert h.jc._run_one_task.call_count == max_resumes + 2
+
+    @pytest.mark.asyncio
+    async def test_non_db_error_does_not_wait(self, monkeypatch):
+        h = self._harness(monkeypatch, [RuntimeError('boom'), True])
+
+        await h.jc.run()
+
+        h.probe.assert_not_awaited()
+        h.record_attempt.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_cancel_during_db_wait(self, monkeypatch):
+        h = self._harness(monkeypatch, [_db_error()])
+        h.probe.side_effect = asyncio.CancelledError()
+
+        with pytest.raises(asyncio.CancelledError):
+            await h.jc.run()
+
+        h.record_attempt.assert_not_awaited()
+        h.set_cancelling.assert_awaited_once()
+        h.set_cancelled.assert_not_awaited()
