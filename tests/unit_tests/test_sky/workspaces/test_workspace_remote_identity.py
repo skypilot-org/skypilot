@@ -259,9 +259,9 @@ class TestWorkspaceRemoteIdentityCallSite:
                                                        'nonexistent.yaml')
             skypilot_config._global_config_context = (
                 skypilot_config.ConfigContext())
-            with mock.patch.dict(os.environ, {
-                    skypilot_config.ENV_VAR_SKYPILOT_CONFIG: str(config_path)
-            }):
+            with mock.patch.dict(
+                    os.environ,
+                {skypilot_config.ENV_VAR_SKYPILOT_CONFIG: str(config_path)}):
                 skypilot_config.reload_config()
 
             region = mock.MagicMock()

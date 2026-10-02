@@ -1309,7 +1309,7 @@ def test_tail_hook_logs_minimal_api_version_required(monkeypatch):
     # check so reaching the version gate does not require a running server.
     monkeypatch.setattr(versions, 'get_remote_api_version', lambda: 51)
     monkeypatch.setattr('sky.server.common.check_server_healthy_or_start_fn',
-                       lambda *args, **kwargs: None)
+                        lambda *args, **kwargs: None)
     try:
         with pytest.raises(exceptions.APINotSupportedError) as excinfo:
             sdk.tail_hook_logs(cluster_name='ignored')
