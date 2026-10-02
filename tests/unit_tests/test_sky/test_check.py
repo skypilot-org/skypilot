@@ -619,3 +619,37 @@ class TestCheckWorkspacePermission:
     def test_skips_check_when_workspace_is_none(self, mock_check, _):
         sky_check.check(workspace=None)
         mock_check.assert_not_called()
+
+
+class TestCheckCapabilitiesInaccessibleWorkspace:
+    """A workspace miss is an access-filter result, not a config lookup."""
+
+    @staticmethod
+    def _message_for(monkeypatch, accessible):
+        # Signature-agnostic on purpose: this helper only cares about the
+        # returned set, not about how the caller narrows it.
+        monkeypatch.setattr(
+            'sky.workspaces.core.get_accessible_workspace_names',
+            lambda *args, **kwargs: set(accessible))
+        monkeypatch.setattr('sky.check.common_utils.get_current_user',
+                            lambda: models.User(id='u-1', name='alice'))
+        with pytest.raises(ValueError) as exc_info:
+            sky_check.check_capabilities(quiet=True, workspace='team-ws')
+        return str(exc_info.value)
+
+    def test_names_the_identity_and_the_accessible_set(self, monkeypatch):
+        message = self._message_for(monkeypatch, ['default'])
+        assert "Workspace 'team-ws' is not accessible to user 'alice'" in (
+            message)
+        assert 'Accessible workspaces: default.' in message
+        # The old wording blamed the server configuration unconditionally,
+        # which sent debugging at the config file instead of at the grants.
+        assert 'not found in SkyPilot configuration' not in message
+
+    def test_empty_filtered_set_is_not_an_empty_configuration(
+            self, monkeypatch):
+        message = self._message_for(monkeypatch, [])
+        assert 'No workspaces are accessible to this identity.' in message
+        # `Available workspaces: ` with nothing after it read as "this server
+        # has no workspaces configured at all".
+        assert 'Available workspaces:' not in message
