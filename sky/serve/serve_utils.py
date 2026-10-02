@@ -43,6 +43,7 @@ from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
 
@@ -87,6 +88,9 @@ _CONTROLLER_HTTP_TIMEOUT_SECONDS = (1.0, 10.0)
 # 100-pool deployment doesn't open 100 simultaneous DB connections or
 # trigger memory pressure on big pools.
 _STATUS_FANOUT_MAX_WORKERS = 8
+
+# Bound on how long a purge waits for a controller to finish its own teardown.
+_PURGE_CONTROLLER_EXIT_TIMEOUT_SECONDS = 30 * 60
 
 
 def _get_controller_url(service_name: str, controller_port: int) -> str:
@@ -1333,29 +1337,79 @@ def get_next_cluster_name(
         return replica_info.cluster_name
 
 
+def _signal_terminate(service_name: str) -> None:
+    """Sends the terminate signal to the controller of a service."""
+    signal_file = pathlib.Path(
+        constants.SIGNAL_FILE_PATH.format(service_name)).expanduser()
+    # Make sure parent directory exists.
+    signal_file.parent.mkdir(parents=True, exist_ok=True)
+    # Filelock is needed to prevent race condition between signal
+    # check/removal and signal writing.
+    with filelock.FileLock(str(signal_file) + '.lock'):
+        with signal_file.open(mode='w', encoding='utf-8') as f:
+            f.write(UserSignal.TERMINATE.value)
+            f.flush()
+
+
 def _terminate_failed_services(
         service_name: str,
-        service_status: Optional[serve_state.ServiceStatus]) -> Optional[str]:
-    """Terminate service in failed status.
+        service_status: Optional[serve_state.ServiceStatus]) -> None:
+    """Forcefully terminate a service and its replica clusters.
 
-    Services included in ServiceStatus.failed_statuses() do not have an
-    active controller process, so we can't send a file terminate signal
-    to the controller. Instead, we manually cleanup database record for
-    the service and alert the user about a potential resource leak.
+    Stops HA recovery, signals and waits for any local controller of this
+    service to exit, tears down its replica clusters, and removes records only
+    after their clusters are gone. Remaining clusters keep their replica rows
+    under FAILED_CLEANUP, so a repeated purge resumes the teardown.
 
-    Returns:
-        A message indicating potential resource leak (if any). If no
-        resource leak is detected, return None.
+    Raises:
+        RuntimeError: A controller did not exit in time, or replica clusters
+            remain after teardown.
     """
+    from sky import core  # pylint: disable=import-outside-toplevel
+
+    serve_state.remove_ha_recovery_script(service_name)
+    _signal_terminate(service_name)
+    deadline = time.time() + _PURGE_CONTROLLER_EXIT_TIMEOUT_SECONDS
+    while True:
+        record = serve_state.get_service_from_name(service_name)
+        controller_pid = None if record is None else record['controller_pid']
+        if not ((controller_pid is not None and
+                 _controller_process_alive(controller_pid, service_name)) or
+                _start_in_flight(service_name)):
+            break
+        if time.time() > deadline:
+            raise RuntimeError(
+                f'The controller of {service_name!r} is still running after '
+                f'{_PURGE_CONTROLLER_EXIT_TIMEOUT_SECONDS} seconds. Rerun the '
+                'purge to resume teardown.')
+        time.sleep(1)
+
+    def _down(cluster_name: str) -> Optional[str]:
+        try:
+            core.down(cluster_name)
+        except exceptions.ClusterDoesNotExist:
+            pass
+        except Exception as e:  # pylint: disable=broad-except
+            return f'{cluster_name!r} ({common_utils.format_exception(e)})'
+        return None
+
+    replica_infos = serve_state.get_replica_infos(service_name)
+    errors = subprocess_utils.run_in_parallel(
+        _down, [info.cluster_name for info in replica_infos])
     remaining_replica_clusters: List[str] = []
-    # The controller should have already attempted to terminate those
-    # replicas, so we don't need to try again here.
-    for replica_info in serve_state.get_replica_infos(service_name):
-        # TODO(tian): Refresh latest status of the cluster.
-        if global_user_state.cluster_with_name_exists(
-                replica_info.cluster_name):
-            remaining_replica_clusters.append(f'{replica_info.cluster_name!r}')
-        serve_state.remove_replica(service_name, replica_info.replica_id)
+    for replica_info, error in zip(replica_infos, errors):
+        if error is None:
+            serve_state.remove_replica(service_name, replica_info.replica_id)
+        else:
+            remaining_replica_clusters.append(error)
+    if remaining_replica_clusters:
+        serve_state.set_service_status_and_active_versions(
+            service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
+        raise RuntimeError(
+            f'Failed to terminate {service_name!r} ({service_status}). These '
+            'replica clusters remain: '
+            f'{", ".join(remaining_replica_clusters)}. Rerun the purge after '
+            'resolving the errors.')
 
     service_dir = os.path.expanduser(
         generate_remote_service_dir_name(service_name))
@@ -1369,15 +1423,10 @@ def _terminate_failed_services(
         # The service_dir may already be gone (e.g. the controller's own
         # success path raced with a purge).
         pass
-
-    if not remaining_replica_clusters:
-        return None
-    # TODO(tian): Try to terminate those replica clusters.
-    remaining_identity = ', '.join(remaining_replica_clusters)
-    return (f'{colorama.Fore.YELLOW}terminate service {service_name!r} with '
-            f'failed status ({service_status}). This may indicate a resource '
-            'leak. Please check the following SkyPilot clusters on the '
-            f'controller: {remaining_identity}{colorama.Style.RESET_ALL}')
+    # An unconsumed signal must not terminate a recreated service.
+    pathlib.Path(
+        constants.SIGNAL_FILE_PATH.format(service_name)).expanduser().unlink(
+            missing_ok=True)
 
 
 def terminate_services(service_names: Optional[List[str]], purge: bool,
@@ -1403,13 +1452,10 @@ def terminate_services(service_names: Optional[List[str]], purge: bool,
                 # can't relaunch (ha_recovery_script was deleted in
                 # cleanup's first step before the move to success-path),
                 # plain `down` skips it ("already scheduled"), and `apply`
-                # tries to update a dead controller. With --purge the user
-                # explicitly accepts a possible cluster-resource leak in
-                # exchange for clearing the row.
-                message = _terminate_failed_services(
+                # tries to update a dead controller. Purge completes the
+                # teardown instead of leaking its clusters.
+                _terminate_failed_services(
                     service_name, serve_state.ServiceStatus.SHUTTING_DOWN)
-                if message is not None:
-                    messages.append(message)
                 terminated_service_names.append(service_name)
             # Without --purge, treat as already scheduled to terminate.
             continue
@@ -1441,10 +1487,8 @@ def terminate_services(service_names: Optional[List[str]], purge: bool,
                 in serve_state.ServiceStatus.failed_statuses()):
             failed_status = service_status['status']
             if purge:
-                message = _terminate_failed_services(service_name,
-                                                     failed_status)
-                if message is not None:
-                    messages.append(message)
+                # Raises while replica clusters remain.
+                _terminate_failed_services(service_name, failed_status)
             else:
                 messages.append(
                     f'{colorama.Fore.YELLOW}{capnoun} {service_name!r} is in '
@@ -1455,18 +1499,12 @@ def terminate_services(service_names: Optional[List[str]], purge: bool,
                 # Don't add to terminated_service_names since it's not
                 # actually terminated.
                 continue
+        elif purge:
+            # A live controller tears down after the signal; purge then
+            # finishes whatever no controller consumed.
+            _terminate_failed_services(service_name, service_status['status'])
         else:
-            # Send the terminate signal to controller.
-            signal_file = pathlib.Path(
-                constants.SIGNAL_FILE_PATH.format(service_name)).expanduser()
-            # Make sure parent directory exists.
-            signal_file.parent.mkdir(parents=True, exist_ok=True)
-            # Filelock is needed to prevent race condition between signal
-            # check/removal and signal writing.
-            with filelock.FileLock(str(signal_file) + '.lock'):
-                with signal_file.open(mode='w', encoding='utf-8') as f:
-                    f.write(UserSignal.TERMINATE.value)
-                    f.flush()
+            _signal_terminate(service_name)
         terminated_service_names.append(f'{service_name!r}')
     if not terminated_service_names:
         messages.append(f'No {noun} to terminate.')
