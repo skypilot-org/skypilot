@@ -228,7 +228,9 @@ def encode_cost_report(
     for cluster_report in cost_report:
         if cluster_report['status'] is not None:
             cluster_report['status'] = cluster_report['status'].value
-        if 'resources' in cluster_report:
+        # core.cost_report encodes resources as it builds the report.
+        if 'resources' in cluster_report and not isinstance(
+                cluster_report['resources'], str):
             cluster_report['resources'] = encode_resources(
                 cluster_report['resources'])
     return cost_report
