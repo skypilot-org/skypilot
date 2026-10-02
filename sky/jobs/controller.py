@@ -81,6 +81,28 @@ _background_tasks_lock: asyncio.Lock = asyncio.Lock()
 _LIVE_LINK_POLL_EVERY = 4  # ~1 attempt per 4 status polls (~60s)
 _LIVE_LINK_MAX_ATTEMPTS = 30  # give up live updates after ~30 attempts
 
+# Random spread of each status-check gap in the monitor loop, as a fraction of
+# JOB_STATUS_CHECK_GAP_SECONDS. Without it, monitor loops that start together
+# (e.g. every job resumed after a controller restart) check their jobs at the
+# same moment in every cycle. The checks then compete for the same CPU and
+# database connections and finish together, so the loops never drift apart.
+_STATUS_CHECK_GAP_JITTER = 0.2
+
+
+def _status_check_gap_seconds(first_check: bool) -> float:
+    """Returns how long the monitor loop waits before a job status check.
+
+    The first check of a loop waits a random part of one full gap, so loops
+    that start together are spread out within one cycle. Later checks wait
+    JOB_STATUS_CHECK_GAP_SECONDS on average, +/- _STATUS_CHECK_GAP_JITTER, so
+    they stay spread out.
+    """
+    gap = managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS
+    if first_check:
+        return random.uniform(0, gap)
+    return gap * random.uniform(1 - _STATUS_CHECK_GAP_JITTER,
+                                1 + _STATUS_CHECK_GAP_JITTER)
+
 
 async def create_background_task(coro: typing.Coroutine) -> None:
     """Create a background task and add it to the set of background tasks.
@@ -1122,6 +1144,7 @@ class JobController:
         live_link_done = False
         live_link_attempts = 0
         live_link_poll_counter = 0
+        first_status_check = True
 
         while True:
             # Get job status (skip on first iteration if forcing recovery)
@@ -1135,7 +1158,8 @@ class JobController:
 
             if not force_transit_to_recovering:
                 await asyncio.sleep(
-                    managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
+                    _status_check_gap_seconds(first_check=first_status_check))
+                first_status_check = False
 
                 # Check the network connection to avoid false alarm for job
                 # failure. Network glitch was observed even in the VM.
@@ -1143,7 +1167,7 @@ class JobController:
                     await backend_utils.async_check_network_connection()
                 except exceptions.NetworkError:
                     logger.info(
-                        'Network is not available. Retrying again in '
+                        'Network is not available. Retrying again in about '
                         f'{managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS} '
                         'seconds.')
                     continue
