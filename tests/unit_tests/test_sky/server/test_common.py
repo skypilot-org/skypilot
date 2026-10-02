@@ -813,6 +813,26 @@ def test_redact_url_password_non_url_is_unchanged():
     assert common.redact_url_password('') == ''
 
 
+def test_redact_url_password_masks_dashboard_urls():
+    """Dashboard URLs inherit the endpoint's credentials, so display sites
+    that print them must redact.
+
+    get_dashboard_url() itself keeps the password on purpose -- `sky dashboard`
+    hands the real URL to the browser so basic auth still completes. Only the
+    printed form is masked, and the /dashboard path must survive.
+    """
+    dashboard_url = common.get_dashboard_url(
+        server_url='https://user:s3cr3t@example.com:8080',
+        starting_page='clusters/my-cluster')
+    # The constructor keeps credentials (the browser needs them)...
+    assert 's3cr3t' in dashboard_url
+    # ...and the printed form does not.
+    redacted = common.redact_url_password(dashboard_url)
+    assert 's3cr3t' not in redacted
+    assert redacted == ('https://user:<redacted>@example.com:8080'
+                        '/dashboard/clusters/my-cluster')
+
+
 def test_redact_url_password_bad_port_is_returned_unchanged():
     """A malformed port must not raise, even with a password present.
 
