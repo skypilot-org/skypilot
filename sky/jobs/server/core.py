@@ -104,6 +104,14 @@ _MANAGED_JOB_FIELDS_FOR_QUEUE_KUBERNETES = [
     'user_hash',
 ]
 
+_MANAGED_JOB_FIELDS_FOR_WAIT = [
+    'job_id',
+    'job_name',
+    'task_id',
+    'task_name',
+    'status',
+]
+
 
 def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
     """Warn if local file mounts or workdir may be lost during rolling update.
@@ -2143,7 +2151,9 @@ def wait(name: Optional[str],
 
     # Resolve name to job_id on the first call.
     if name is not None:
-        records, _, _, _, _ = queue_v2_api(refresh=False, name_match=name)
+        records, _, _, _, _ = queue_v2_api(refresh=False,
+                                           name_match=name,
+                                           fields=_MANAGED_JOB_FIELDS_FOR_WAIT)
         matching = [r for r in records if r.job_name == name]
         if not matching:
             with ux_utils.print_exception_no_traceback():
@@ -2156,7 +2166,9 @@ def wait(name: Optional[str],
     start_time = time.time()
 
     while True:
-        records, _, _, _, _ = queue_v2_api(refresh=False, job_ids=[job_id])
+        records, _, _, _, _ = queue_v2_api(refresh=False,
+                                           job_ids=[job_id],
+                                           fields=_MANAGED_JOB_FIELDS_FOR_WAIT)
         if not records:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Managed job {job_id} not found.')
