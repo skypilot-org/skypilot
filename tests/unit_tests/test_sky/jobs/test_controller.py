@@ -2831,6 +2831,137 @@ class TestRunJobLoopTransientDbErrors:
         return manager
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize('step', ['restore', 'reload'])
+    async def test_config_error_prevents_launch_and_finalizes(
+            self, manager, sleeps, step):
+        controller_module.file_content_utils.get_job_env_content.return_value = (
+            'SKYPILOT_CONFIG=/tmp/job.config_yaml\n')
+        error = ValueError('Internal job config is not readable')
+        with patch.object(controller_module.file_content_utils,
+                          'restore_job_config_file') as restore, patch.object(
+                              controller_module.skypilot_config,
+                              'reload_config') as reload:
+            target = restore if step == 'restore' else reload
+            target.side_effect = error
+            with pytest.raises(ValueError) as raised:
+                await manager.run_job_loop(1, 'job.log')
+
+        assert raised.value is error
+        restore.assert_called_once_with(1)
+        if step == 'restore':
+            reload.assert_not_called()
+        else:
+            reload.assert_called_once_with()
+        controller_module.JobController.assert_not_called()
+        controller_module.JobController.return_value.load_dag.assert_not_awaited(
+        )
+        controller_module.JobController.return_value.run.assert_not_awaited()
+        manager._cleanup.assert_awaited_once_with(1,
+                                                  pool=None,
+                                                  graceful=False,
+                                                  graceful_timeout=None)
+        manager._download_logs_for_cancelled_job.assert_not_awaited()
+        managed_job_state.finalize_job_done_async.assert_awaited_once_with(
+            1, cancelling=False, callback_func=None)
+        assert 1 not in manager.starting
+        assert not manager.job_tasks
+        assert not sleeps
+
+    @pytest.mark.asyncio
+    async def test_valid_config_is_loaded_before_launch(self, manager, sleeps):
+        controller_module.file_content_utils.get_job_env_content.return_value = (
+            'SKYPILOT_CONFIG=/tmp/job.config_yaml\n')
+        stages = []
+        job_controller = controller_module.JobController.return_value
+
+        def construct_controller(*args):
+            del args
+            stages.append('construct')
+            return job_controller
+
+        controller_module.JobController.side_effect = construct_controller
+        with patch.object(
+                controller_module.file_content_utils,
+                'restore_job_config_file',
+                side_effect=lambda _job_id: stages.append(
+                    'restore')) as restore, patch.object(
+                        controller_module.skypilot_config,
+                        'reload_config',
+                        side_effect=lambda: stages.append('reload')) as reload:
+            await manager.run_job_loop(1, 'job.log')
+
+        assert stages == ['restore', 'reload', 'construct']
+        restore.assert_called_once_with(1)
+        reload.assert_called_once_with()
+        job_controller.load_dag.assert_awaited_once_with()
+        job_controller.run.assert_awaited_once_with()
+        manager._cleanup.assert_awaited_once()
+        managed_job_state.finalize_job_done_async.assert_awaited_once_with(
+            1, cancelling=False, callback_func=None)
+        assert 1 not in manager.starting
+        assert not manager.job_tasks
+        assert not sleeps
+
+    @pytest.mark.asyncio
+    async def test_dotenv_parse_error_remains_best_effort(
+            self, manager, sleeps):
+        controller_module.file_content_utils.get_job_env_content.return_value = (
+            'SKYPILOT_CONFIG=/tmp/job.config_yaml\n')
+        with patch.object(controller_module.dotenv,
+                          'dotenv_values',
+                          side_effect=ValueError('Invalid environment file')):
+            with patch.object(
+                    controller_module.file_content_utils,
+                    'restore_job_config_file') as restore, patch.object(
+                        controller_module.skypilot_config,
+                        'reload_config') as reload:
+                await manager.run_job_loop(1, 'job.log')
+
+        restore.assert_not_called()
+        reload.assert_not_called()
+        controller_module.JobController.assert_called_once()
+        controller_module.JobController.return_value.load_dag.assert_awaited_once(
+        )
+        controller_module.JobController.return_value.run.assert_awaited_once()
+        manager._cleanup.assert_awaited_once()
+        managed_job_state.finalize_job_done_async.assert_awaited_once_with(
+            1, cancelling=False, callback_func=None)
+        assert 1 not in manager.starting
+        assert not manager.job_tasks
+        assert not sleeps
+
+    @pytest.mark.asyncio
+    async def test_cancel_during_config_reload_finalizes_before_launch(
+            self, manager, sleeps):
+        controller_module.file_content_utils.get_job_env_content.return_value = (
+            'SKYPILOT_CONFIG=/tmp/job.config_yaml\n')
+        with patch.object(controller_module.file_content_utils,
+                          'restore_job_config_file') as restore, patch.object(
+                              controller_module.skypilot_config,
+                              'reload_config',
+                              side_effect=asyncio.CancelledError()) as reload:
+            with pytest.raises(asyncio.CancelledError):
+                await manager.run_job_loop(1, 'job.log')
+
+        restore.assert_called_once_with(1)
+        reload.assert_called_once_with()
+        controller_module.JobController.assert_not_called()
+        controller_module.JobController.return_value.load_dag.assert_not_awaited(
+        )
+        controller_module.JobController.return_value.run.assert_not_awaited()
+        manager._download_logs_for_cancelled_job.assert_not_awaited()
+        managed_job_state.set_cancelling_async.assert_awaited_once()
+        manager._cleanup.assert_awaited_once_with(1,
+                                                  pool=None,
+                                                  graceful=False,
+                                                  graceful_timeout=None)
+        managed_job_state.finalize_job_done_async.assert_awaited_once_with(
+            1, cancelling=True, callback_func=None)
+        assert 1 not in manager.starting
+        assert not manager.job_tasks
+        assert not sleeps
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize('step', ['cleanup', 'finalize'])
     async def test_transient_db_error_is_retried(self, manager, sleeps, step):
         target = (manager._cleanup if step == 'cleanup' else

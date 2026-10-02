@@ -3536,6 +3536,7 @@ class ControllerManager:
         logger.info(f'  pid={self._pid}')
 
         job_rank = None
+        reload_job_config = False
         env_content = await asyncio.to_thread(
             file_content_utils.get_job_env_content, job_id)
         if env_content:
@@ -3550,11 +3551,7 @@ class ControllerManager:
                             logger.debug('Set environment variable: %s=%s', key,
                                          value)
 
-                    # Restore config file if needed
-                    await asyncio.to_thread(
-                        file_content_utils.restore_job_config_file, job_id)
-
-                    await asyncio.to_thread(skypilot_config.reload_config)
+                    reload_job_config = True
 
                     # Set SKYPILOT_JOB_RANK from job_id_to_rank mapping if
                     # available
@@ -3599,6 +3596,13 @@ class ControllerManager:
         graceful, graceful_timeout = False, None
         controller: Optional[JobController] = None
         try:
+            # A job must not launch with inherited settings if its own config
+            # cannot be restored or loaded. Keep these failures inside the job
+            # lifecycle so cleanup and terminal-state finalization still run.
+            if reload_job_config:
+                await asyncio.to_thread(
+                    file_content_utils.restore_job_config_file, job_id)
+                await asyncio.to_thread(skypilot_config.reload_config)
             controller = JobController(job_id, self.starting,
                                        self._job_tasks_lock,
                                        self._starting_signal, pool, job_rank)
@@ -3662,11 +3666,8 @@ class ControllerManager:
             # Download logs before cleanup so they remain accessible after
             # cancellation. This is best-effort - if the cluster is already
             # down, we skip gracefully.
-            if active_task_ids:
+            if active_task_ids and controller is not None:
                 try:
-                    # A cancel can only land at an await point, all of which
-                    # are after the controller is constructed.
-                    assert controller is not None
                     await self._download_logs_for_cancelled_job(
                         controller, job_id, active_task_ids, dag, pool)
                 except Exception as e:  # pylint: disable=broad-except
