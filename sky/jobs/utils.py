@@ -18,6 +18,7 @@ import re
 import select
 import shlex
 import signal
+import subprocess
 import sys
 import textwrap
 import threading
@@ -106,6 +107,9 @@ _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 _PROVISION_LOG_POLL_GAP_SECONDS = 1
 
 _JOB_STATUS_FETCH_TIMEOUT_SECONDS = 30
+# Below the fetch timeout so the remote command is killed before
+# asyncio.wait_for gives up on its thread.
+_JOB_STATUS_COMMAND_TIMEOUT_SECONDS = _JOB_STATUS_FETCH_TIMEOUT_SECONDS - 5
 
 # Defaults for the transient status-check window; see
 # TransientStatusCheckWindow for why both a time and a retry budget are
@@ -692,14 +696,15 @@ async def get_job_status(
             asyncio.to_thread(backend.get_job_status,
                               handle,
                               job_ids=job_ids,
-                              stream_logs=False),
+                              stream_logs=False,
+                              timeout=_JOB_STATUS_COMMAND_TIMEOUT_SECONDS),
             timeout=_JOB_STATUS_FETCH_TIMEOUT_SECONDS)
         status = list(statuses.values())[0]
         _log_job_status(status)
         return status, None
     except (exceptions.CommandError, exceptions.CommandFailureException,
             grpc.RpcError, grpc.FutureTimeoutError, ValueError, TypeError,
-            asyncio.TimeoutError) as e:
+            asyncio.TimeoutError, subprocess.TimeoutExpired) as e:
         # Note: Each of these exceptions has some additional conditions to
         # limit how we handle it and whether or not we catch it.
         potential_transient_error_reason = None
@@ -720,6 +725,9 @@ async def get_job_status(
             potential_transient_error_reason = (
                 'Job status check timed out after '
                 f'{_JOB_STATUS_FETCH_TIMEOUT_SECONDS}s')
+        elif isinstance(e, subprocess.TimeoutExpired):
+            potential_transient_error_reason = (
+                f'Job status check timed out after {e.timeout}s')
         # TODO(cooperc): Gracefully handle these exceptions in the backend.
         elif isinstance(e, ValueError):
             # If the cluster yaml is deleted in the middle of getting the

@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import pathlib
+import subprocess
 import tempfile
 import time
 from unittest import mock
@@ -109,6 +110,36 @@ async def test_get_job_status_timeout(mock_get_handle, mock_logger):
     # No status logline is emitted when the fetch fails - the caller logs the
     # transient error reason instead.
     assert mock_logger.info.call_count == 0
+
+
+@pytest.mark.asyncio
+@mock.patch('sky.jobs.utils.logger')
+@mock.patch('sky.global_user_state.get_handle_from_cluster_name')
+async def test_get_job_status_bounds_remote_command(mock_get_handle,
+                                                    mock_logger):
+    """The remote command gets a timeout below the fetch timeout, and its
+    expiry is a transient error."""
+    del mock_logger
+    mock_get_handle.return_value = mock.MagicMock(
+        spec=cloud_vm_ray_backend.CloudVmRayResourceHandle)
+    mock_backend = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayBackend)
+    seen_kwargs = {}
+
+    def timed_out_get_job_status(*args, **kwargs):
+        del args
+        seen_kwargs.update(kwargs)
+        raise subprocess.TimeoutExpired(cmd='kubectl exec', timeout=25)
+
+    mock_backend.get_job_status = timed_out_get_job_status
+
+    job_status, error_reason = await utils.get_job_status(
+        backend=mock_backend, cluster_name='test-cluster', job_id=1)
+
+    assert seen_kwargs['timeout'] == utils._JOB_STATUS_COMMAND_TIMEOUT_SECONDS
+    assert (utils._JOB_STATUS_COMMAND_TIMEOUT_SECONDS <
+            utils._JOB_STATUS_FETCH_TIMEOUT_SECONDS)
+    assert job_status is None
+    assert error_reason == 'Job status check timed out after 25s'
 
 
 @pytest.mark.asyncio
