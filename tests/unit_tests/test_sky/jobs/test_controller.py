@@ -969,6 +969,33 @@ class TestDownloadLogsForCancelledJob:
         return manager
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize('pool', [None, 'my-pool'])
+    async def test_forced_download_reaches_controller(self, pool):
+        manager = self._make_manager()
+        controller = MagicMock()
+        dag = MagicMock()
+        dag.tasks = [MagicMock(name='task')]
+        dag.tasks[0].name = 'test-job'
+        handle = MagicMock()
+
+        with patch('sky.jobs.controller.managed_job_state'
+                   '.get_pool_submit_info_async',
+                   return_value=('pool-cluster', 42)), \
+             patch('sky.jobs.controller.managed_job_utils'
+                   '.generate_managed_job_cluster_name',
+                   return_value='job-cluster'), \
+             patch('sky.jobs.controller.backend_utils.get_clusters',
+                   return_value=[{'handle': handle}]):
+            await manager._download_logs_for_cancelled_job(controller,
+                                                           1, [0],
+                                                           dag,
+                                                           pool,
+                                                           force_download=True)
+
+        controller.download_log_and_stream.assert_called_once_with(
+            0, handle, 42 if pool is not None else None, force_download=True)
+
+    @pytest.mark.asyncio
     async def test_non_pool_job_cluster_found(self):
         """Happy path: non-pool job finds cluster and downloads logs."""
         manager = self._make_manager()
@@ -1004,7 +1031,7 @@ class TestDownloadLogsForCancelledJob:
                 all_users=True,
                 _include_is_managed=True)
             controller.download_log_and_stream.assert_called_once_with(
-                task_id, mock_handle, None)
+                task_id, mock_handle, None, force_download=False)
 
     @pytest.mark.asyncio
     async def test_pool_job_cluster_found(self):
@@ -1033,7 +1060,7 @@ class TestDownloadLogsForCancelledJob:
 
             mock_pool_info.assert_called_once_with(job_id)
             controller.download_log_and_stream.assert_called_once_with(
-                task_id, mock_handle, 42)
+                task_id, mock_handle, 42, force_download=False)
 
     @pytest.mark.asyncio
     async def test_cluster_not_found_skips_download(self):
@@ -1130,7 +1157,7 @@ class TestDownloadLogsForCancelledJob:
                 pool=None)
 
             controller.download_log_and_stream.assert_called_once_with(
-                task_id, mock_handle, None)
+                task_id, mock_handle, None, force_download=False)
 
     @pytest.mark.asyncio
     async def test_job_group_downloads_for_multiple_tasks(self):
@@ -1178,9 +1205,9 @@ class TestDownloadLogsForCancelledJob:
 
             assert controller.download_log_and_stream.call_count == 2
             controller.download_log_and_stream.assert_any_call(
-                0, mock_handle_0, None)
+                0, mock_handle_0, None, force_download=False)
             controller.download_log_and_stream.assert_any_call(
-                2, mock_handle_2, None)
+                2, mock_handle_2, None, force_download=False)
 
     @pytest.mark.asyncio
     async def test_per_task_exception_continues_to_next(self):
@@ -1211,7 +1238,11 @@ class TestDownloadLogsForCancelledJob:
         # Task 0 fails, task 1 succeeds
         call_count = [0]
 
-        def download_side_effect(task_id, handle, job_id_on_pool):
+        def download_side_effect(task_id,
+                                 handle,
+                                 job_id_on_pool,
+                                 force_download=False):
+            assert not force_download
             call_count[0] += 1
             if task_id == 0:
                 raise RuntimeError('download failed for task 0')
@@ -1237,9 +1268,9 @@ class TestDownloadLogsForCancelledJob:
             # Both tasks should have been attempted
             assert controller.download_log_and_stream.call_count == 2
             controller.download_log_and_stream.assert_any_call(
-                0, mock_handle_0, None)
+                0, mock_handle_0, None, force_download=False)
             controller.download_log_and_stream.assert_any_call(
-                1, mock_handle_1, None)
+                1, mock_handle_1, None, force_download=False)
 
 
 class TestDownloadLogAndStreamLoggingAgentGate:
@@ -1286,6 +1317,54 @@ class TestDownloadLogAndStreamLoggingAgentGate:
         mock_state.set_local_log_file.assert_not_called()
         mock_runtime.download_logs.assert_not_called()
         mock_cutils.download_and_stream_job_log.assert_not_called()
+
+    @pytest.mark.parametrize('force_download', [False, True])
+    @pytest.mark.parametrize('runtime_registered', [False, True])
+    def test_forced_local_copy_preserves_log_metadata(self, force_download,
+                                                      runtime_registered):
+        controller = self._make_controller()
+        handle = MagicMock()
+        log_file = '/tmp/recovered-job.log'
+
+        def download_and_stream(*args, **kwargs):
+            del args
+            kwargs['on_downloaded'](log_file)
+            return log_file
+
+        with patch('sky.jobs.controller.logs.is_logging_agent_configured',
+                   return_value=True), \
+             patch('sky.jobs.controller.logs.get_log_reader',
+                   return_value=MagicMock()), \
+             patch('sky.jobs.controller.LogDeliverySource.undelivered_reason',
+                   return_value=None), \
+             patch('sky.jobs.controller.managed_job_state') as mock_state, \
+             patch('sky.jobs.controller.managed_job_runtime') as mock_runtime, \
+             patch('sky.jobs.controller.controller_utils') as mock_cutils:
+            mock_runtime.is_registered.return_value = runtime_registered
+            mock_runtime.download_logs.return_value = log_file
+            mock_cutils.download_and_stream_job_log.side_effect = (
+                download_and_stream)
+            controller.download_log_and_stream(0,
+                                               handle,
+                                               None,
+                                               force_download=force_download)
+
+        if force_download:
+            mock_state.set_local_log_file.assert_called_once_with(
+                1, 0, log_file)
+            controller._extract_and_store_log_links.assert_called_once_with(
+                0, log_file)
+            if runtime_registered:
+                mock_runtime.download_logs.assert_called_once_with(handle, 1, 0)
+                mock_cutils.download_and_stream_job_log.assert_not_called()
+            else:
+                mock_runtime.download_logs.assert_not_called()
+                mock_cutils.download_and_stream_job_log.assert_called_once()
+        else:
+            mock_state.set_local_log_file.assert_not_called()
+            controller._extract_and_store_log_links.assert_not_called()
+            mock_runtime.download_logs.assert_not_called()
+            mock_cutils.download_and_stream_job_log.assert_not_called()
 
     def test_downloads_when_agent_but_no_reader(self):
         # Forwarded to a write-only store (no reader) -> keep the local copy so
@@ -2832,6 +2911,174 @@ class TestRunJobLoopTransientDbErrors:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('step', ['restore', 'reload'])
+    @pytest.mark.parametrize('pool', [None, 'test-pool'])
+    async def test_config_failure_preserves_recovered_running_logs(
+            self, manager, sleeps, step, pool):
+        controller_module.file_content_utils.get_job_env_content.return_value = (
+            'SKYPILOT_CONFIG=/tmp/job.config_yaml\n')
+        error = ValueError('Internal job config is not readable')
+        stages = []
+        manager._download_logs_for_cancelled_job.side_effect = (
+            lambda *args, **kwargs: stages.append('download'))
+        manager._cleanup.side_effect = (
+            lambda *args, **kwargs: stages.append('cleanup'))
+
+        with patch.object(controller_module.file_content_utils,
+                          'restore_job_config_file') as restore, patch.object(
+                              controller_module.skypilot_config,
+                              'reload_config') as reload:
+            target = restore if step == 'restore' else reload
+            target.side_effect = error
+            with pytest.raises(ValueError) as raised:
+                await manager.run_job_loop(1, 'job.log', pool=pool)
+
+        assert raised.value is error
+        assert stages == ['download', 'cleanup']
+        controller_module.JobController.assert_called_once()
+        controller = controller_module.JobController.return_value
+        controller.load_dag.assert_not_awaited()
+        controller.run.assert_not_awaited()
+        manager._download_logs_for_cancelled_job.assert_awaited_once_with(
+            controller,
+            1, [0],
+            controller_module._get_dag.return_value,
+            pool,
+            force_download=True)
+        manager._cleanup.assert_awaited_once_with(1,
+                                                  pool=pool,
+                                                  graceful=False,
+                                                  graceful_timeout=None)
+        managed_job_state.finalize_job_done_async.assert_awaited_once_with(
+            1, cancelling=False, callback_func=None)
+        assert 1 not in manager.starting
+        assert not manager.job_tasks
+        assert not sleeps
+
+    @pytest.mark.asyncio
+    async def test_config_failure_log_error_does_not_mask_original(
+            self, manager, sleeps):
+        controller_module.file_content_utils.get_job_env_content.return_value = (
+            'SKYPILOT_CONFIG=/tmp/job.config_yaml\n')
+        error = ValueError('Internal job config is not readable')
+        manager._download_logs_for_cancelled_job.side_effect = RuntimeError(
+            'Log storage unavailable')
+        with patch.object(controller_module.file_content_utils,
+                          'restore_job_config_file'), patch.object(
+                              controller_module.skypilot_config,
+                              'reload_config',
+                              side_effect=error):
+            with pytest.raises(ValueError) as raised:
+                await manager.run_job_loop(1, 'job.log')
+
+        assert raised.value is error
+        manager._download_logs_for_cancelled_job.assert_awaited_once()
+        manager._cleanup.assert_awaited_once()
+        managed_job_state.finalize_job_done_async.assert_awaited_once_with(
+            1, cancelling=False, callback_func=None)
+        controller_module.JobController.return_value.load_dag.assert_not_awaited(
+        )
+        controller_module.JobController.return_value.run.assert_not_awaited()
+        assert 1 not in manager.starting
+        assert not manager.job_tasks
+        assert not sleeps
+
+    @pytest.mark.asyncio
+    async def test_config_failure_pending_job_has_no_logs_to_download(
+            self, manager, sleeps):
+        controller_module.file_content_utils.get_job_env_content.return_value = (
+            'SKYPILOT_CONFIG=/tmp/job.config_yaml\n')
+        managed_job_state.get_all_task_ids_statuses_async.return_value = [
+            (0, managed_job_state.ManagedJobStatus.PENDING)
+        ]
+        with patch.object(controller_module.file_content_utils,
+                          'restore_job_config_file'), patch.object(
+                              controller_module.skypilot_config,
+                              'reload_config',
+                              side_effect=ValueError('Config unreadable')):
+            with pytest.raises(ValueError, match='Config unreadable'):
+                await manager.run_job_loop(1, 'job.log')
+
+        manager._download_logs_for_cancelled_job.assert_not_awaited()
+        controller_module.JobController.return_value.load_dag.assert_not_awaited(
+        )
+        controller_module.JobController.return_value.run.assert_not_awaited()
+        manager._cleanup.assert_awaited_once()
+        managed_job_state.finalize_job_done_async.assert_awaited_once_with(
+            1, cancelling=False, callback_func=None)
+        assert 1 not in manager.starting
+        assert not manager.job_tasks
+        assert not sleeps
+
+    @pytest.mark.asyncio
+    async def test_config_failure_downloads_only_active_group_tasks(
+            self, manager, sleeps):
+        controller_module.file_content_utils.get_job_env_content.return_value = (
+            'SKYPILOT_CONFIG=/tmp/job.config_yaml\n')
+        status = managed_job_state.ManagedJobStatus
+        managed_job_state.get_all_task_ids_statuses_async.return_value = [
+            (0, status.PENDING), (1, status.RUNNING), (2, status.SUCCEEDED),
+            (3, status.RECOVERING), (4, status.FAILED), (5, status.STARTING)
+        ]
+        dag = controller_module._get_dag.return_value
+        dag.tasks = [MagicMock() for _ in range(6)]
+        with patch.object(controller_module.file_content_utils,
+                          'restore_job_config_file'), patch.object(
+                              controller_module.skypilot_config,
+                              'reload_config',
+                              side_effect=ValueError('Config unreadable')):
+            with pytest.raises(ValueError, match='Config unreadable'):
+                await manager.run_job_loop(1, 'job.log')
+
+        manager._download_logs_for_cancelled_job.assert_awaited_once_with(
+            controller_module.JobController.return_value,
+            1, [1, 3, 5],
+            dag,
+            None,
+            force_download=True)
+        manager._cleanup.assert_awaited_once()
+        managed_job_state.finalize_job_done_async.assert_awaited_once_with(
+            1, cancelling=False, callback_func=None)
+        assert 1 not in manager.starting
+        assert not manager.job_tasks
+        assert not sleeps
+
+    @pytest.mark.asyncio
+    async def test_cancel_before_config_loaded_preserves_recovered_logs(
+            self, manager, sleeps):
+        controller_module.file_content_utils.get_job_env_content.return_value = (
+            'SKYPILOT_CONFIG=/tmp/job.config_yaml\n')
+        stages = []
+        manager._download_logs_for_cancelled_job.side_effect = (
+            lambda *args, **kwargs: stages.append('download'))
+        manager._cleanup.side_effect = (
+            lambda *args, **kwargs: stages.append('cleanup'))
+        with patch.object(controller_module.file_content_utils,
+                          'restore_job_config_file'), patch.object(
+                              controller_module.skypilot_config,
+                              'reload_config',
+                              side_effect=asyncio.CancelledError()):
+            with pytest.raises(asyncio.CancelledError):
+                await manager.run_job_loop(1, 'job.log')
+
+        assert stages == ['download', 'cleanup']
+        controller = controller_module.JobController.return_value
+        manager._download_logs_for_cancelled_job.assert_awaited_once_with(
+            controller,
+            1, [0],
+            controller_module._get_dag.return_value,
+            None,
+            force_download=True)
+        controller.load_dag.assert_not_awaited()
+        controller.run.assert_not_awaited()
+        managed_job_state.set_cancelling_async.assert_awaited_once()
+        managed_job_state.finalize_job_done_async.assert_awaited_once_with(
+            1, cancelling=True, callback_func=None)
+        assert 1 not in manager.starting
+        assert not manager.job_tasks
+        assert not sleeps
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('step', ['restore', 'reload'])
     async def test_config_error_prevents_launch_and_finalizes(
             self, manager, sleeps, step):
         controller_module.file_content_utils.get_job_env_content.return_value = (
@@ -2852,7 +3099,7 @@ class TestRunJobLoopTransientDbErrors:
             reload.assert_not_called()
         else:
             reload.assert_called_once_with()
-        controller_module.JobController.assert_not_called()
+        controller_module.JobController.assert_called_once()
         controller_module.JobController.return_value.load_dag.assert_not_awaited(
         )
         controller_module.JobController.return_value.run.assert_not_awaited()
@@ -2860,7 +3107,12 @@ class TestRunJobLoopTransientDbErrors:
                                                   pool=None,
                                                   graceful=False,
                                                   graceful_timeout=None)
-        manager._download_logs_for_cancelled_job.assert_not_awaited()
+        manager._download_logs_for_cancelled_job.assert_awaited_once_with(
+            controller_module.JobController.return_value,
+            1, [0],
+            controller_module._get_dag.return_value,
+            None,
+            force_download=True)
         managed_job_state.finalize_job_done_async.assert_awaited_once_with(
             1, cancelling=False, callback_func=None)
         assert 1 not in manager.starting
@@ -2880,6 +3132,8 @@ class TestRunJobLoopTransientDbErrors:
             return job_controller
 
         controller_module.JobController.side_effect = construct_controller
+        job_controller.load_dag.side_effect = lambda: stages.append('load_dag')
+        job_controller.run.side_effect = lambda: stages.append('run')
         with patch.object(
                 controller_module.file_content_utils,
                 'restore_job_config_file',
@@ -2890,7 +3144,7 @@ class TestRunJobLoopTransientDbErrors:
                         side_effect=lambda: stages.append('reload')) as reload:
             await manager.run_job_loop(1, 'job.log')
 
-        assert stages == ['restore', 'reload', 'construct']
+        assert stages == ['construct', 'restore', 'reload', 'load_dag', 'run']
         restore.assert_called_once_with(1)
         reload.assert_called_once_with()
         job_controller.load_dag.assert_awaited_once_with()
@@ -2945,11 +3199,16 @@ class TestRunJobLoopTransientDbErrors:
 
         restore.assert_called_once_with(1)
         reload.assert_called_once_with()
-        controller_module.JobController.assert_not_called()
+        controller_module.JobController.assert_called_once()
         controller_module.JobController.return_value.load_dag.assert_not_awaited(
         )
         controller_module.JobController.return_value.run.assert_not_awaited()
-        manager._download_logs_for_cancelled_job.assert_not_awaited()
+        manager._download_logs_for_cancelled_job.assert_awaited_once_with(
+            controller_module.JobController.return_value,
+            1, [0],
+            controller_module._get_dag.return_value,
+            None,
+            force_download=True)
         managed_job_state.set_cancelling_async.assert_awaited_once()
         manager._cleanup.assert_awaited_once_with(1,
                                                   pool=None,
@@ -3040,6 +3299,12 @@ class TestRunJobLoopTransientDbErrors:
             await manager.run_job_loop(1, 'job.log')
 
         assert manager._cleanup.await_count == 2
+        manager._download_logs_for_cancelled_job.assert_awaited_once_with(
+            controller_module.JobController.return_value,
+            1, [0],
+            controller_module._get_dag.return_value,
+            None,
+            force_download=False)
         managed_job_state.set_cancelling_async.assert_awaited_once()
         managed_job_state.set_failed_async.assert_not_awaited()
         managed_job_state.finalize_job_done_async.assert_awaited_once_with(
