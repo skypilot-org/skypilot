@@ -33,6 +33,19 @@ def test_get_backend(env_value, expected, monkeypatch):
     assert leader_election.get_backend() == expected
 
 
+def test_get_backend_reads_the_named_variable(monkeypatch):
+    role_var = 'SKYPILOT_TEST_ROLE_LEADER_ELECTION_BACKEND'
+    monkeypatch.setenv(leader_election.ENV_VAR_BACKEND,
+                       leader_election.BACKEND_LEASE)
+    monkeypatch.delenv(role_var, raising=False)
+    assert (leader_election.get_backend(role_var) ==
+            leader_election.BACKEND_ADVISORY)
+    monkeypatch.setenv(role_var, 'lease')
+    monkeypatch.delenv(leader_election.ENV_VAR_BACKEND)
+    assert (
+        leader_election.get_backend(role_var) == leader_election.BACKEND_LEASE)
+
+
 def test_holder_id_is_shaped_hostname_pid_random_suffix():
     # Shaped ``<host>-<pid>-<8 hex>``. Both pid and the random suffix matter:
     # the suffix guards pid reuse against a not-yet-expired lease row, so assert

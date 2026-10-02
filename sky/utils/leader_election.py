@@ -12,8 +12,10 @@ caller verify leadership atomically inside its own write transaction.
 
 The backend is chosen by the ``SKYPILOT_LEADER_ELECTION_BACKEND`` environment
 variable (``advisory`` -- the default -- or ``lease``) so the lease path is
-opt-in and instantly revertible. On SQLite (single-node) there is no fleet to
-coordinate, and both backends fall back to the local advisory/file lock path.
+opt-in and instantly revertible. A role that is rolled out on its own passes
+``backend=get_backend(<its own variable>)`` instead. On SQLite (single-node)
+there is no fleet to coordinate, and both backends fall back to the local
+advisory/file lock path.
 """
 import abc
 import logging
@@ -522,9 +524,9 @@ class LeadershipRenewer(threading.Thread):
                 self._lost.set()
 
 
-def get_backend() -> str:
-    """Resolve the configured leader-election backend name."""
-    value = os.environ.get(ENV_VAR_BACKEND, BACKEND_ADVISORY).strip().lower()
+def get_backend(env_var: str = ENV_VAR_BACKEND) -> str:
+    """Resolve the leader-election backend selected by ``env_var``."""
+    value = os.environ.get(env_var, BACKEND_ADVISORY).strip().lower()
     return BACKEND_LEASE if value == BACKEND_LEASE else BACKEND_ADVISORY
 
 

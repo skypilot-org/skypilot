@@ -23,6 +23,12 @@ logger = sky_logging.init_logger(__name__)
 _ROLE_RENEW_INTERVAL_SECONDS = 5
 _ACQUIRE_RETRY_INTERVAL_SECONDS = 5
 
+# Selects this role's leader-election backend (`advisory`, the default, or
+# `lease`). It is separate from the fleet-wide
+# `SKYPILOT_LEADER_ELECTION_BACKEND`, so the job-controller leader moves to the
+# lease only when this variable is set.
+_LEADER_ELECTION_BACKEND_ENV_VAR = 'SKYPILOT_JOBS_LEADER_ELECTION_BACKEND'
+
 # Lease timing for the consolidation role, deliberately looser than the
 # `leader_election` defaults (ttl 60 / interval 10 / deadline 30). Both loose
 # knobs buy the same thing -- more waiting, fewer chances of two leaders --
@@ -97,17 +103,18 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         self._renewer: Optional[leader_election.LeadershipRenewer] = None
 
     def run(self) -> None:
-        # Elect through `sky.utils.leader_election` so this role honours the
-        # same `SKYPILOT_LEADER_ELECTION_BACKEND` switch as every other
-        # fleet-wide singleton: `advisory` (the default) is the historical
-        # Postgres session-scoped advisory lock on the same lock id, so old and
-        # new pods still contend together across a rolling upgrade; `lease` is
-        # a renewable `leader_leases` row, which pins no connection for the
-        # leadership term and carries an expiry the holder must keep extending.
-        # The timing is this role's own (see `_LEASE_TTL_SECONDS`) rather than
-        # the module defaults.
+        # Elect through `sky.utils.leader_election`, with the backend chosen by
+        # this role's own `_LEADER_ELECTION_BACKEND_ENV_VAR`: `advisory` (the
+        # default) is the historical Postgres session-scoped advisory lock on
+        # the same lock id, so old and new pods still contend together across a
+        # rolling upgrade; `lease` is a renewable `leader_leases` row, which
+        # pins no connection for the leadership term and carries an expiry the
+        # holder must keep extending. The timing is this role's own (see
+        # `_LEASE_TTL_SECONDS`) rather than the module defaults.
         self._elector = leader_election.get_elector(
             managed_job_constants.CONSOLIDATION_MODE_LOCK_ID,
+            backend=leader_election.get_backend(
+                _LEADER_ELECTION_BACKEND_ENV_VAR),
             ttl_seconds=_LEASE_TTL_SECONDS,
             renew_interval_seconds=_ROLE_RENEW_INTERVAL_SECONDS,
             renew_deadline_seconds=_RENEW_DEADLINE_SECONDS)

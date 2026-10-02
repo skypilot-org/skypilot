@@ -3,8 +3,9 @@
 These tests cover the state machine of the leader-elected refresh thread,
 not the full daemon loop:
 
-* the role is elected through ``sky.utils.leader_election`` (so the deployment's
-  backend switch applies to it) with timing looser than that module's defaults.
+* the role is elected through ``sky.utils.leader_election`` on the backend
+  chosen by its own ``SKYPILOT_JOBS_LEADER_ELECTION_BACKEND`` (not the
+  fleet-wide switch), with timing looser than that module's defaults.
 * the bid loop keeps re-bidding instead of dying on a transient failure, and a
   won bid starts a renewer that keeps the role alive across the long blocking
   steps that follow.
@@ -60,9 +61,36 @@ class TestElectorConfiguration:
             thread.run()
         get_elector.assert_called_once_with(
             managed_job_constants.CONSOLIDATION_MODE_LOCK_ID,
+            backend=mock.ANY,
             ttl_seconds=mjrt._LEASE_TTL_SECONDS,
             renew_interval_seconds=mjrt._ROLE_RENEW_INTERVAL_SECONDS,
             renew_deadline_seconds=mjrt._RENEW_DEADLINE_SECONDS)
+
+    @pytest.mark.parametrize('fleet_backend,role_backend,expected', [
+        (None, None, leader_election.BACKEND_ADVISORY),
+        ('lease', None, leader_election.BACKEND_ADVISORY),
+        ('lease', 'advisory', leader_election.BACKEND_ADVISORY),
+        (None, 'lease', leader_election.BACKEND_LEASE),
+        ('advisory', 'lease', leader_election.BACKEND_LEASE),
+    ])
+    def test_backend_is_gated_by_the_role_variable(self, monkeypatch,
+                                                   fleet_backend, role_backend,
+                                                   expected):
+        """The fleet-wide switch alone must not move this role to the lease."""
+        for var, value in ((leader_election.ENV_VAR_BACKEND, fleet_backend),
+                           (mjrt._LEADER_ELECTION_BACKEND_ENV_VAR,
+                            role_backend)):
+            if value is None:
+                monkeypatch.delenv(var, raising=False)
+            else:
+                monkeypatch.setenv(var, value)
+        thread = mjrt.ManagedJobRefreshDaemonThread()
+        with mock.patch.object(mjrt.leader_election,
+                               'get_elector') as get_elector, \
+                mock.patch.object(mjrt.ManagedJobRefreshDaemonThread,
+                                  '_become_leader_and_run'):
+            thread.run()
+        assert get_elector.call_args.kwargs['backend'] == expected
 
     def test_timing_is_looser_than_the_module_defaults(self):
         """Pin the intent, not the numbers.
