@@ -1035,8 +1035,22 @@ def _request_execution_wrapper(request_id: str,
                      f'{common_utils.format_exception(e)}')
         return
     else:
-        api_requests.set_request_succeeded(
-            request_id, return_value if not ignore_return_value else None)
+        try:
+            api_requests.set_request_succeeded(
+                request_id, return_value if not ignore_return_value else None)
+        except Exception as e:  # pylint: disable=broad-except
+            # A database error can hold the whole result as a statement
+            # parameter, so only the driver's message is recorded.
+            reason = str(getattr(e, 'orig', None) or e)[:1000]
+            api_requests.set_request_failed(
+                request_id,
+                RuntimeError(
+                    f'Failed to store the result of request {request_id}: '
+                    f'{reason}'))
+            _restore_output()
+            logger.error(f'Request {request_id} failed to store its result: '
+                         f'{reason}')
+            return
         # Manually reset the original stdout and stderr file descriptors early
         # so that the "Request xxxx failed due to ..." log message will be
         # written to the original stdout and stderr file descriptors.
