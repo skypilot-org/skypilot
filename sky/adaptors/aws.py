@@ -73,6 +73,27 @@ def _assert_kwargs_builtin_type(kwargs):
         f'kwargs should not contain none built-in types: {kwargs}')
 
 
+def _user_agent_extra() -> str:
+    """Return SkyPilot's user-agent suffix for boto3 clients."""
+    from sky import __version__
+    return f'skypilot/{__version__}'
+
+
+def _add_user_agent(kwargs: Dict[str, Any]) -> None:
+    """Append SkyPilot's user agent to the botocore config in kwargs.
+
+    The suffix is added to (not replacing) the default boto3 user agent so
+    that any S3-compatible endpoint can identify the client. Existing config
+    options are preserved, and the endpoint_url kwarg is left untouched.
+    """
+    ua_config = botocore_config().Config(user_agent_extra=_user_agent_extra())
+    existing = kwargs.get('config')
+    if existing is not None:
+        kwargs['config'] = existing.merge(ua_config)
+    else:
+        kwargs['config'] = ua_config
+
+
 def _create_aws_object(creation_fn_or_cls: Callable[[], T],
                        object_name: str) -> T:
     """Create an AWS object.
@@ -185,6 +206,8 @@ def resource(service_name: str, **kwargs):
     check_credentials = kwargs.pop('check_credentials', True)
     profile = get_workspace_profile()
 
+    _add_user_agent(kwargs)
+
     # Need to use the client retrieved from the per-thread session to avoid
     # thread-safety issues (Directly creating the client with boto3.resource()
     # is not thread-safe). Reference: https://stackoverflow.com/a/59635814
@@ -240,6 +263,8 @@ def client(service_name: str, **kwargs):
         kwargs['config'] = botocore_config().Config(**config_kwargs)
 
     profile = get_workspace_profile()
+
+    _add_user_agent(kwargs)
 
     # Need to use the client retrieved from the per-thread session to avoid
     # thread-safety issues (Directly creating the client with boto3.client() is
