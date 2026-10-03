@@ -2,6 +2,62 @@
 
 from sky.ssh_node_pools.deploy import deploy
 
+_AGENT_EXEC_ENV = (
+    'INSTALL_K3S_EXEC=\'agent --node-label skypilot-ip=worker-1\'')
+
+
+def test_sudo_k3s_install_cmd_passes_env_after_sudo():
+    """Regression: sudo-rs does not preserve k3s env with sudo -E."""
+    cmd = deploy._sudo_k3s_install_cmd([
+        ('K3S_NODE_NAME', 'worker-1'),
+        ('INSTALL_K3S_EXEC', 'agent --node-label skypilot-ip=worker-1'),
+        ('K3S_URL', 'https://10.0.0.1:6443'),
+        ('K3S_TOKEN', 'token'),
+    ])
+
+    assert cmd.startswith('sudo -A ')
+    assert cmd.endswith(' sh -')
+    assert 'sudo -E' not in cmd
+    assert cmd.index('sudo -A ') < cmd.index('K3S_NODE_NAME=worker-1')
+    assert _AGENT_EXEC_ENV in cmd
+    assert 'K3S_URL=https://10.0.0.1:6443' in cmd
+    assert 'K3S_TOKEN=token' in cmd
+
+
+def test_start_agent_node_installs_k3s_with_sudo_env(monkeypatch):
+    """Verify the worker join command does not rely on sudo env preservation."""
+    captured = {}
+
+    def fake_run_remote(node, cmd, user, ssh_key, use_ssh_config=False):
+        del user, ssh_key
+        captured['node'] = node
+        captured['cmd'] = cmd
+        captured['use_ssh_config'] = use_ssh_config
+        return 'ok'
+
+    monkeypatch.setattr(deploy.deploy_utils, 'run_remote', fake_run_remote)
+    monkeypatch.setattr(deploy.deploy_utils, 'check_gpu',
+                        lambda *args, **kwargs: False)
+
+    result = deploy.start_agent_node('worker-1',
+                                     master_addr='10.0.0.1',
+                                     k3s_token='token',
+                                     user='ubuntu',
+                                     ssh_key='~/.ssh/id_rsa',
+                                     askpass_block='export SUDO_ASKPASS=x',
+                                     use_ssh_config=True)
+
+    assert result == ('worker-1', True, False)
+    assert captured['node'] == 'worker-1'
+    assert captured['use_ssh_config'] is True
+    cmd = captured['cmd']
+    assert 'curl -sfL https://get.k3s.io | sudo -A ' in cmd
+    assert 'sudo -E' not in cmd
+    assert 'K3S_NODE_NAME=worker-1' in cmd
+    assert _AGENT_EXEC_ENV in cmd
+    assert 'K3S_URL=https://10.0.0.1:6443' in cmd
+    assert 'K3S_TOKEN=token' in cmd
+
 
 def test_prometheus_install_cmd_contains_required_fields():
     askpass_block = 'echo "askpass"'
