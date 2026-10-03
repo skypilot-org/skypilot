@@ -112,6 +112,8 @@ def _process_identity(pid: int) -> Optional[str]:
                 stat = f.read()
         except (FileNotFoundError, ProcessLookupError):
             return None
+        except PermissionError as e:
+            raise psutil.AccessDenied(pid) from e
         fields = stat[stat.rindex(b')') + 2:].split()
         return None if fields[0] == b'Z' else fields[19].decode()
     try:

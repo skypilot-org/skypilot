@@ -403,6 +403,33 @@ def test_reap_stale_multiproc_files_swallows_per_pid_errors(tmp_path):
     assert successes == [pid_b]
 
 
+def test_reap_stale_multiproc_files_keeps_unreadable_holder(
+        tmp_path, monkeypatch):
+    """A holder whose /proc entry cannot be read keeps its files, and the
+    sweep goes on to the other pids."""
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _touch_live_gauge_files(str(tmp_path), 991)
+    _touch_live_gauge_files(str(tmp_path), 992)
+    proc_errors = {
+        '/proc/991/stat': PermissionError(13, 'Permission denied'),
+        '/proc/992/stat': FileNotFoundError(2, 'No such file or directory'),
+    }
+
+    def fake_open(path, *args, **kwargs):
+        if path in proc_errors:
+            raise proc_errors[path]
+        return open(path, *args, **kwargs)
+
+    with patch.dict(os.environ,
+                    {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
+         patch.object(metrics, '_HAS_PROCFS', True), \
+         patch.object(metrics, 'open', fake_open, create=True), \
+         patch('sky.server.metrics.psutil.pid_exists', return_value=True):
+        assert metrics._reap_stale_multiproc_files() == 1
+    assert len(_live_files(tmp_path, 991)) == 4
+    assert not _live_files(tmp_path, 992)
+
+
 def test_process_identity_of_this_process_and_a_free_pid():
     identity = metrics._process_identity(os.getpid())
     assert identity
