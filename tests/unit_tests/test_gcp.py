@@ -56,6 +56,61 @@ def test_gcp_g4_uses_hyperdisk_balanced(instance_type):
             f'got {tier2name[tier]}')
 
 
+@pytest.mark.parametrize('instance_type', [
+    'c4-standard-2', 'c4-highcpu-4', 'c4-standard-96', 'c4a-highcpu-4',
+    'c4a-highcpu-72', 'c4d-highcpu-2', 'n4a-highcpu-4', 'n4d-highcpu-2'
+])
+def test_gcp_hyperdisk_only_series_boot_disk(instance_type):
+    # These series reject pd-* boot disks ("pd-balanced disk type cannot be
+    # used by <instance_type> machine type"); hyperdisk-balanced is the only
+    # bootable Hyperdisk type, so every tier maps to it.
+    for tier in resources_utils.DiskTier:
+        if tier == resources_utils.DiskTier.BEST:
+            continue
+        assert GCP._get_disk_type(  # pylint: disable=protected-access
+            instance_type, tier) == 'hyperdisk-balanced', (instance_type, tier)
+
+
+@pytest.mark.parametrize('instance_type', ['n4a-highcpu-4', 'n4d-highcpu-2'])
+def test_gcp_n4a_n4d_data_disk_uses_hyperdisk_balanced(instance_type):
+    tier2name = gcp_volume_utils.get_data_disk_tier_mapping(instance_type)
+    for tier in resources_utils.DiskTier:
+        if tier == resources_utils.DiskTier.BEST:
+            continue
+        assert tier2name[tier] == 'hyperdisk-balanced', (instance_type, tier)
+
+
+@pytest.mark.parametrize('instance_type, arch, image_tag', [
+    ('t2a-standard-4', 'arm64', 'skypilot:custom-cpu-ubuntu-2204-arm64'),
+    ('n4a-highcpu-8', 'arm64', 'skypilot:custom-cpu-ubuntu-2204-arm64'),
+    ('c4a-highcpu-4', 'arm64', 'skypilot:custom-cpu-ubuntu-2204-arm64'),
+    ('c4-highcpu-4', 'x86_64', 'skypilot:custom-cpu-ubuntu-2204'),
+    ('n2-standard-8', 'x86_64', 'skypilot:custom-cpu-ubuntu-2204'),
+])
+def test_gcp_arm_series_default_cpu_image(instance_type, arch, image_tag):
+    # Arm series cannot boot the x86 default image ("Requested boot disk
+    # architecture (X86_64) is not compatible with machine type architecture
+    # (ARM64)").
+    assert GCP.get_arch_from_instance_type(instance_type) == arch
+    assert GCP._get_default_cpu_image_id(  # pylint: disable=protected-access
+        instance_type) == image_tag
+
+
+@pytest.mark.parametrize('instance_type, mentions_arm', [
+    ('n4a-highcpu-8', True),
+    ('n2-standard-8', False),
+])
+def test_gcp_unresolved_image_tag_raises_clear_error(instance_type,
+                                                     mentions_arm):
+    # E.g. a catalog without the arm64 tag: fail with guidance, not an
+    # AssertionError on a None image id.
+    with patch.object(gcp_catalog, 'get_image_id_from_tag', return_value=None):
+        with pytest.raises(ValueError, match='not found in the GCP image') as e:
+            GCP._resolve_image_tag(  # pylint: disable=protected-access
+                'skypilot:custom-cpu-ubuntu-2204-arm64', instance_type)
+    assert ('arm64 image' in str(e.value)) == mentions_arm
+
+
 @pytest.mark.parametrize((
     'mock_return', 'expected'
 ), [([
