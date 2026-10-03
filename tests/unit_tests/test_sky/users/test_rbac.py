@@ -224,3 +224,31 @@ class TestDefaultRoleConfig:
         with mock.patch('sky.skypilot_config.get_nested',
                         return_value='viewer'):
             assert rbac.get_default_role() == 'viewer'
+
+
+class TestRestrictAllUsersMutations:
+    """`--all-users` on mutating commands is admin-only only when opted in."""
+
+    @staticmethod
+    def _with_config(value):
+
+        def fake_get_nested(keys, default_value=None, *args, **kwargs):
+            if keys == ('rbac', 'restrict_all_users_mutations'):
+                return default_value if value is None else value
+            return default_value
+
+        return mock.patch('sky.skypilot_config.get_nested',
+                          side_effect=fake_get_nested)
+
+    def test_defaults_to_false(self):
+        # Unset: an upgrade must not start rejecting `-u`.
+        with self._with_config(None):
+            assert rbac.restrict_all_users_mutations() is False
+
+    def test_enabled(self):
+        with self._with_config(True):
+            assert rbac.restrict_all_users_mutations() is True
+
+    def test_disabled_explicitly(self):
+        with self._with_config(False):
+            assert rbac.restrict_all_users_mutations() is False

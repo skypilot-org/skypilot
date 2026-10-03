@@ -94,6 +94,12 @@ class APIHealthResponse(ResponseBaseModel):
     # includes admin-only secrets). Lets the dashboard hide the config UI for
     # non-admins when enabled.
     restrict_config_to_admins: bool = True
+    # Whether this caller may NOT use `--all-users`/`-u` on mutating commands
+    # (rbac.restrict_all_users_mutations). Already resolved for the caller --
+    # admins and no-auth servers always get False. The CLI reads it to reject
+    # `sky down/stop/autostop -u` up front, since those expand `--all-users`
+    # into per-cluster requests client-side and never send the flag.
+    restrict_all_users_mutations: bool = False
 
 
 class StatusResponse(ResponseBaseModel):
