@@ -2162,6 +2162,13 @@ def get_tree_root_ids(job_ids: List[int]) -> List[int]:
         return [row[0] for row in session.execute(query).fetchall()]
 
 
+# The job's file contents, read by the controller through
+# get_job_file_contents. No queue response carries them, so a queue query
+# without explicit fields leaves them out.
+_QUEUE_UNSELECTED_JOB_INFO_COLUMNS = frozenset(
+    {'dag_yaml_content', 'env_file_content', 'config_file_content'})
+
+
 def build_managed_jobs_with_filters_no_status_query(
     fields: Optional[List[str]] = None,
     job_ids: Optional[List[int]] = None,
@@ -2231,7 +2238,8 @@ def build_managed_jobs_with_filters_no_status_query(
     else:
         query = sqlalchemy.select(
             spot_table,
-            job_info_table,
+            *(column for column in job_info_table.c
+              if column.name not in _QUEUE_UNSELECTED_JOB_INFO_COLUMNS),
             _batch_progress_subquery.c.batch_total_batches,
             _batch_progress_subquery.c.batch_completed_batches,
         )
