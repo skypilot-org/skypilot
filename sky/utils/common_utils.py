@@ -262,7 +262,8 @@ def check_workspace_name_is_valid(workspace_name: Optional[str]) -> None:
 
 def make_cluster_name_on_cloud(display_name: str,
                                max_length: Optional[int] = 15,
-                               add_user_hash: bool = True) -> str:
+                               add_user_hash: bool = True,
+                               user_hash: Optional[str] = None) -> str:
     """Generate valid cluster name on cloud that is unique to the user.
 
     This is to map the cluster name to a valid length and character set for
@@ -281,22 +282,52 @@ def make_cluster_name_on_cloud(display_name: str,
         max_length: The maximum length of the cluster name. If None, no
             truncation is performed.
         add_user_hash: Whether to append user hash to the cluster name.
+        user_hash: The user hash to append. Defaults to the current user's
+            hash. Only used when add_user_hash is True. Pass this to
+            reconstruct the name of a cluster that belongs to another user,
+            which the current process' user hash would not reproduce.
+
+    Raises:
+        ValueError: an explicit user_hash was given that is empty, or that is
+            too long to leave room for a name within max_length.
     """
+    if add_user_hash and user_hash is not None:
+        # Validate a caller-supplied hash before it is spent on the length
+        # budget below: an oversized one would make the truncation length
+        # negative and silently yield a name that no cloud accepts.
+        if not user_hash:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'user_hash must be a non-empty string when add_user_hash '
+                    'is set.')
+        if max_length is not None:
+            # -1 for the dash before the user hash, -1 for the dash before the
+            # display name hash, and at least one character of display name.
+            max_user_hash_length = (max_length - CLUSTER_NAME_HASH_LENGTH - 3)
+            if len(user_hash) > max_user_hash_length:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'user_hash {user_hash!r} is {len(user_hash)} '
+                        'characters, which does not fit a cluster name on '
+                        f'cloud limited to {max_length} characters: at most '
+                        f'{max_user_hash_length} characters are available for '
+                        'it.')
 
     cluster_name_on_cloud = re.sub(r'[._]', '-', display_name).lower()
     if display_name != cluster_name_on_cloud:
         logger.debug(
             f'The user specified cluster name {display_name} might be invalid '
             f'on the cloud, we convert it to {cluster_name_on_cloud}.')
-    user_hash = ''
+    user_hash_suffix = ''
     if add_user_hash:
-        user_hash = get_user_hash()
-        user_hash = f'-{user_hash}'
-    user_hash_length = len(user_hash)
+        if user_hash is None:
+            user_hash = get_user_hash()
+        user_hash_suffix = f'-{user_hash}'
+    user_hash_length = len(user_hash_suffix)
 
     if (max_length is None or
             len(cluster_name_on_cloud) <= max_length - user_hash_length):
-        return f'{cluster_name_on_cloud}{user_hash}'
+        return f'{cluster_name_on_cloud}{user_hash_suffix}'
     # -1 is for the dash between cluster name and cluster name hash.
     truncate_cluster_name_length = (max_length - CLUSTER_NAME_HASH_LENGTH - 1 -
                                     user_hash_length)
@@ -310,7 +341,8 @@ def make_cluster_name_on_cloud(display_name: str,
     # Use base36 to reduce the length of the hash.
     display_name_hash = base36_encode(display_name_hash)
     return (f'{truncate_cluster_name}'
-            f'-{display_name_hash[:CLUSTER_NAME_HASH_LENGTH]}{user_hash}')
+            f'-{display_name_hash[:CLUSTER_NAME_HASH_LENGTH]}'
+            f'{user_hash_suffix}')
 
 
 def cluster_name_in_hint(cluster_name: str, cluster_name_on_cloud: str) -> str:
