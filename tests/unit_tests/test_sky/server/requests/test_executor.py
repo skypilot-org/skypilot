@@ -9,6 +9,7 @@ import threading
 import time
 from typing import List
 from unittest import mock
+import weakref
 
 import pytest
 
@@ -1650,6 +1651,52 @@ async def test_wrapper_clears_in_request_execution_after_success(
 
 def _gate_clears_after_success_entrypoint():
     return 'ok'
+
+
+class _WeakResult(dict):
+    """A normal serializable response whose lifetime can be observed."""
+
+
+def _result_cleanup_entrypoint():
+    return _WeakResult(payload='value')
+
+
+@pytest.mark.asyncio
+async def test_wrapper_releases_persisted_result_before_trim(
+        isolated_database, reset_sigterm_gate, mock_global_user_state,
+        monkeypatch):
+    req = requests_lib.Request(request_id='release-result',
+                               name='test',
+                               entrypoint=_result_cleanup_entrypoint,
+                               request_body=payloads.RequestBody(
+                                   env_vars={
+                                       constants.USER_ID_ENV_VAR: 'test-user',
+                                       constants.USER_ENV_VAR: 'test-user',
+                                   }),
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+    refs = []
+    released = []
+    persist = requests_lib.set_request_succeeded
+    release_memory = executor.common_utils.release_memory
+
+    def observe_persist(request_id, result):
+        refs.append(weakref.ref(result))
+        persist(request_id, result)
+
+    def observe_trim():
+        released.append(bool(refs) and refs[0]() is None)
+        release_memory()
+
+    monkeypatch.setattr(requests_lib, 'set_request_succeeded', observe_persist)
+    monkeypatch.setattr(executor.common_utils, 'release_memory', observe_trim)
+    executor._request_execution_wrapper('release-result', False)
+    assert released == [True]
+    completed = await requests_lib.get_request_async('release-result')
+    assert completed.status == requests_lib.RequestStatus.SUCCEEDED
+    assert completed.get_return_value() == {'payload': 'value'}
 
 
 def _install_gated_handler_in_worker():

@@ -455,6 +455,17 @@ class Request:
             raise
 
 
+def get_request_fields_for_display(
+        fields: Optional[List[str]] = None) -> List[str]:
+    """Select metadata without loading results discarded by display encoders."""
+    # Keep the projection nonempty: an empty fields list selects every column.
+    # pid is cheap to read and both display encoders always return it as None.
+    return [
+        field for field in (fields or REQUEST_COLUMNS)
+        if field not in ('return_value', 'error')
+    ] or ['pid']
+
+
 def get_new_request_id() -> str:
     """Get a new request ID."""
     return str(uuid.uuid4())

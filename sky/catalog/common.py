@@ -307,13 +307,14 @@ def _get_instance_type(
     region: Optional[str],
     zone: Optional[str] = None,
 ) -> 'pd.DataFrame':
-    idx = df['InstanceType'] == instance_type
+    # Normalize only the selected instance's regions, not the whole catalog.
+    df = df[df['InstanceType'] == instance_type]
     if region is not None:
-        idx &= df['Region'].str.lower() == region.lower()
+        df = df[df['Region'].str.lower() == region.lower()]
     if zone is not None:
         # NOTE: For Azure instances, zone must be None.
-        idx &= df['AvailabilityZone'] == zone
-    return df[idx]
+        df = df[df['AvailabilityZone'] == zone]
+    return df
 
 
 def instance_type_exists_impl(df: 'pd.DataFrame', instance_type: str) -> bool:

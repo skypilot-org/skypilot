@@ -13,6 +13,43 @@ from sky.catalog import common as catalog_common
 from sky.utils import annotations
 
 
+@pytest.mark.parametrize('region,zone,indices', [
+    (None, None, [0, 1, 2, 3]),
+    ('west', None, [0, 1]),
+    ('WEST', 'b', [1]),
+    ('east', None, [2]),
+    (None, 'a', [0]),
+    ('missing', None, []),
+    ('west', 'missing', []),
+])
+def test_instance_lookup_normalizes_only_selected_regions(
+        monkeypatch, region, zone, indices):
+    frame = pd.DataFrame(
+        {
+            'InstanceType': ['selected'] * 4 + ['unrelated'] * 1000,
+            'Region': ['West', 'WEST', 'East', None] + ['West'] * 1000,
+            'AvailabilityZone': ['a', 'b', 'c', None] + ['a'] * 1000,
+            'Price': [1.0] * 1004,
+        },
+        index=[7, 7, 8, 9] + list(range(1000)))
+    original = frame.copy(deep=True)
+    accessor_type = type(frame['Region'].str)
+    lower = accessor_type.lower
+    sizes = []
+
+    def counted_lower(accessor):
+        sizes.append(len(accessor._orig))
+        return lower(accessor)
+
+    monkeypatch.setattr(accessor_type, 'lower', counted_lower)
+    actual = catalog_common._get_instance_type(frame, 'selected', region, zone)
+    pd.testing.assert_frame_equal(actual, frame.iloc[indices])
+    missing = catalog_common._get_instance_type(frame, 'missing', region, zone)
+    pd.testing.assert_frame_equal(missing, frame.iloc[:0])
+    pd.testing.assert_frame_equal(frame, original)
+    assert sizes == ([] if region is None else [4, 0])
+
+
 def test_rtxpro6000_in_common_gpus():
     # RTXPRO6000 (NVIDIA RTX PRO 6000 Blackwell) must appear in the common GPU
     # list so that `sky show-gpus` surfaces it across clouds. Naming matches
