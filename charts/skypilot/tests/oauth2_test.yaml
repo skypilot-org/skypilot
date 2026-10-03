@@ -438,7 +438,7 @@ tests:
         documentIndex: 0
       - equal:
           path: spec.template.spec.containers[0].image
-          value: "redis:7-alpine"
+          value: "valkey/valkey:8.1-alpine"
         documentIndex: 0
 
   - it: should configure oauth2-proxy with redis-secret
