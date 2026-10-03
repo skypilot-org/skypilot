@@ -1,5 +1,7 @@
+import concurrent.futures
 import os
 import tempfile
+import threading
 import time
 from unittest import mock
 
@@ -18,6 +20,85 @@ def test_rtxpro6000_in_common_gpus():
     # list so that `sky show-gpus` surfaces it across clouds. Naming matches
     # the AWS and RunPod catalogs (no hyphens), not GCP's `nvidia-rtx-pro-6000`.
     assert 'RTXPRO6000' in catalog.get_common_gpus()
+
+
+@pytest.mark.parametrize('refresh', [False, True])
+def test_concurrent_catalog_loads_once(refresh):
+    """Cold and stale catalogs share a read and request-level freshness check."""
+    ready = threading.Barrier(8)
+    entered = threading.Event()
+    duplicate = threading.Event()
+    release = threading.Event()
+    expected = pd.DataFrame({'cost': [2]})
+    update = mock.Mock(return_value=False)
+    frame = catalog_common.LazyDataFrame('catalog.csv', update)
+    if refresh:
+        with mock.patch.object(catalog_common.pd,
+                               'read_csv',
+                               return_value=pd.DataFrame({'cost': [1]})):
+            frame._load_df()
+        annotations.clear_request_level_cache()
+        update.reset_mock()
+        update.return_value = True
+
+    calls = 0
+    guard = threading.Lock()
+
+    def read_csv(filename):
+        nonlocal calls
+        assert filename == 'catalog.csv'
+        with guard:
+            calls += 1
+            if calls > 1:
+                duplicate.set()
+        entered.set()
+        assert release.wait(timeout=5)
+        return expected
+
+    def read():
+        ready.wait(timeout=5)
+        return frame._load_df()
+
+    with mock.patch.object(catalog_common.pd, 'read_csv', side_effect=read_csv):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(read) for _ in range(8)]
+            try:
+                assert entered.wait(timeout=5)
+                assert not duplicate.wait(timeout=0.2)
+            finally:
+                release.set()
+            assert all(
+                future.result(timeout=5) is expected for future in futures)
+    assert calls == 1
+    assert update.call_count == 1
+
+
+def test_catalog_read_failure_can_retry():
+    expected = pd.DataFrame({'cost': [1]})
+    frame = catalog_common.LazyDataFrame('catalog.csv', lambda: False)
+    with mock.patch.object(catalog_common.pd,
+                           'read_csv',
+                           side_effect=[ValueError('bad csv'), expected]):
+        with pytest.raises(ValueError, match='bad csv'):
+            frame._load_df()
+        assert frame._load_df() is expected
+
+
+def test_independent_catalogs_load_concurrently():
+    ready = threading.Barrier(2)
+
+    def read_csv(filename):
+        ready.wait(timeout=5)
+        return pd.DataFrame({'source': [filename]})
+
+    frames = [
+        catalog_common.LazyDataFrame(name, lambda: False) for name in ('a', 'b')
+    ]
+    with mock.patch.object(catalog_common.pd, 'read_csv', side_effect=read_csv):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(frame._load_df) for frame in frames]
+            assert [future.result(timeout=5).iloc[0, 0] for future in futures
+                   ] == ['a', 'b']
 
 
 @mock.patch('sky.catalog.common.requests.get')
