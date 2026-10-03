@@ -1703,6 +1703,114 @@ class TestCreateDebugDump:
         # No new handlers should remain on the logger
         assert dbg_logger.handlers == handlers_before
 
+    @mock.patch('sky.utils.debug_utils._dump_managed_job_info')
+    @mock.patch('sky.utils.debug_utils._dump_cluster_info')
+    @mock.patch('sky.utils.debug_utils._dump_request_id_info')
+    @mock.patch('sky.utils.debug_utils._dump_server_info')
+    @mock.patch('sky.utils.debug_utils._get_clusters_from_managed_jobs')
+    @mock.patch('sky.utils.debug_utils._get_clusters_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
+    @mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
+    def test_zip_uses_deliberate_deflate_level(
+            self, mock_req_from_clusters, mock_req_from_jobs,
+            mock_jobs_from_req, mock_clusters_from_req, mock_clusters_from_jobs,
+            mock_dump_server, mock_dump_requests, mock_dump_clusters,
+            mock_dump_jobs, tmp_path):
+        """The zip must DEFLATE at the benchmarked level, not the zlib default.
+
+        The level is a measured internal choice (see _ZIP_DEFLATE_LEVEL), so
+        dropping the compresslevel kwarg silently reverts to the slow default.
+        """
+        with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
+                        str(tmp_path / 'debug_dumps')), \
+             mock.patch('sky.utils.debug_utils.zipfile.ZipFile',
+                        wraps=zipfile.ZipFile) as mock_zipfile:
+            result = debug_utils.create_debug_dump(request_ids=['req-1'])
+
+        # Complementary to the byte-exact test below: compresslevel is not
+        # recorded in zip metadata, so a refactor away from zipfile.ZipFile
+        # would bypass this kwargs check while a level change is caught there.
+        assert (mock_zipfile.call_args.kwargs['compresslevel'] ==
+                debug_utils._ZIP_DEFLATE_LEVEL)
+
+        # The produced entries are actually DEFLATE-compressed.
+        with zipfile.ZipFile(result, 'r') as zf:
+            assert zf.namelist()
+            for info in zf.infolist():
+                assert info.compress_type == zipfile.ZIP_DEFLATED
+
+    @mock.patch('sky.utils.debug_utils._dump_managed_job_info')
+    @mock.patch('sky.utils.debug_utils._dump_cluster_info')
+    @mock.patch('sky.utils.debug_utils._dump_request_id_info')
+    @mock.patch('sky.utils.debug_utils._dump_server_info')
+    @mock.patch('sky.utils.debug_utils._get_clusters_from_managed_jobs')
+    @mock.patch('sky.utils.debug_utils._get_clusters_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
+    @mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
+    def test_zip_entries_compressed_at_chosen_level(
+            self, mock_req_from_clusters, mock_req_from_jobs,
+            mock_jobs_from_req, mock_clusters_from_req, mock_clusters_from_jobs,
+            mock_dump_server, mock_dump_requests, mock_dump_clusters,
+            mock_dump_jobs, tmp_path):
+        """Zip entries must be compressed exactly at _ZIP_DEFLATE_LEVEL.
+
+        zlib is deterministic for a given input and level, so the entry's
+        compressed size must match a reference zip built at that level (and
+        differ from one built at the zlib default of 6).
+        """
+
+        def _seed_compressible_file(request_ids, dump_dir, *args, **kwargs):
+            del args, kwargs
+            # Seed a compressible log for every request (the set also contains
+            # the system daemon request IDs that are always included).
+            for request_id in request_ids:
+                req_dir = os.path.join(dump_dir, 'requests', request_id)
+                os.makedirs(req_dir, exist_ok=True)
+                # Repetitive text, like the logs/JSON that dominate real dumps.
+                with open(os.path.join(req_dir, 'request.log'), 'w') as f:
+                    f.write('sky-log-line with repeated content\n' * 40000)
+
+        mock_dump_requests.side_effect = _seed_compressible_file
+
+        with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
+                        str(tmp_path / 'debug_dumps')):
+            result = debug_utils.create_debug_dump(request_ids=['req-1'])
+
+        seeded = tmp_path / 'seeded.log'
+        seeded.write_text('sky-log-line with repeated content\n' * 40000)
+
+        def _reference_compressed_size(level):
+            ref = tmp_path / 'reference.zip'
+            with zipfile.ZipFile(ref,
+                                 'w',
+                                 zipfile.ZIP_DEFLATED,
+                                 compresslevel=level) as zf:
+                zf.write(seeded, 'seeded.log')
+            with zipfile.ZipFile(ref, 'r') as zf:
+                size = zf.getinfo('seeded.log').compress_size
+            ref.unlink()
+            return size
+
+        level = debug_utils._ZIP_DEFLATE_LEVEL
+        with zipfile.ZipFile(result, 'r') as zf:
+            # Locate the seeded entry by suffix (timestamped dir prefix).
+            names = [
+                n for n in zf.namelist()
+                if n.endswith('requests/req-1/request.log')
+            ]
+            assert len(names) == 1
+            entry = zf.getinfo(names[0])
+            # The produced zip is valid and self-describing: the seeded
+            # content reads back byte-for-byte.
+            assert zf.read(names[0]) == seeded.read_bytes()
+        assert entry.compress_size == _reference_compressed_size(level)
+        # Guard against the level silently matching the default (which would
+        # make the equality above vacuous).
+        if level != 6:
+            assert entry.compress_size != _reference_compressed_size(6)
+
 
 # ---------------------------------------------------------------------------
 # Tests for request ID prefix resolution in create_debug_dump
