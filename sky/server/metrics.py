@@ -750,8 +750,11 @@ _CONTAINER_MEMORY_LIMIT_HELP = (
 _CONTAINER_PROCESSES_HELP = (
     'Processes in the API server container, by type: main (the server '
     'process), server (uvicorn workers), worker:<group> (executor workers), '
-    'controller (managed-job controllers), other (everything else, mostly '
-    'short-lived children such as kubectl, ssh and subprocess_daemon).')
+    'controller (managed-job controllers), kubectl_exec, '
+    'kubectl_port_forward, kubectl_other, subprocess_daemon, aws (AWS CLI), '
+    'shell (sh/bash), ssh_mux (ssh ControlMaster), ssh_other, '
+    'resource_tracker (multiprocessing), zombie (exited, not yet waited '
+    'for), python_other and other. Every type is always reported.')
 
 _CONTAINER_THREADS_HELP = (
     'Threads in the API server container\'s processes, by process type.')
@@ -760,6 +763,11 @@ _CONTAINER_RSS_ANON_HELP = (
     'Sum of RssAnon over the API server container\'s processes, by process '
     'type. Unlike per-process RSS it leaves out file pages, so summed over '
     'types it is comparable to memory.stat anon.')
+
+_CONTAINER_RSS_HELP = (
+    'Sum of VmRSS (anon, file and shmem pages) over the API server '
+    'container\'s processes, by process type. A page mapped by several '
+    'processes is counted once per process.')
 
 _CONTAINER_MAX_RSS_ANON_HELP = (
     'RssAnon of the largest process of each type in the API server '
@@ -826,15 +834,20 @@ class ContainerMemoryCollector:
             'sky_apiserver_container_max_rss_anon_bytes',
             _CONTAINER_MAX_RSS_ANON_HELP,
             labels=['type'])
+        rss = prom_core.GaugeMetricFamily('sky_apiserver_container_rss_bytes',
+                                          _CONTAINER_RSS_HELP,
+                                          labels=['type'])
         for process_type, usage in sorted(snapshot.types.items()):
             processes.add_metric([process_type], usage.processes)
             threads.add_metric([process_type], usage.threads)
             rss_anon.add_metric([process_type], usage.rss_anon_bytes)
             max_rss_anon.add_metric([process_type], usage.max_rss_anon_bytes)
+            rss.add_metric([process_type], usage.rss_bytes)
         yield processes
         yield threads
         yield rss_anon
         yield max_rss_anon
+        yield rss
 
         yield prom_core.GaugeMetricFamily(
             'sky_apiserver_container_scan_duration_seconds',
