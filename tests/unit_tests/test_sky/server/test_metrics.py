@@ -110,20 +110,22 @@ def test_register_multiproc_cleanup_atexit_noop_without_env_var():
         mock_register.assert_not_called()
 
 
-def test_register_multiproc_cleanup_atexit_registers_when_enabled():
-    """When PROMETHEUS_MULTIPROC_DIR is set, register mark_process_dead(pid)."""
-    with patch.dict(os.environ, {'PROMETHEUS_MULTIPROC_DIR': '/tmp/prom'}), \
+def test_register_multiproc_cleanup_atexit_registers_when_enabled(tmp_path):
+    """Registers the exit cleanup and records this process's identity."""
+    with patch.dict(os.environ, {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
          patch.object(metrics, '_multiproc_cleanup_registered', False), \
          patch('sky.server.metrics.atexit.register') as mock_register, \
-         patch('sky.server.metrics.os.getpid', return_value=4242):
+         patch('sky.server.metrics.os.getpid', return_value=4242), \
+         patch('sky.server.metrics._process_identity', return_value='777'):
         metrics.register_multiproc_cleanup_atexit()
-        mock_register.assert_called_once_with(
-            metrics.multiprocess.mark_process_dead, 4242)
+        mock_register.assert_called_once_with(metrics._forget_writer,
+                                              str(tmp_path), 4242)
+    assert (tmp_path / 'liveowner_4242').read_text() == '777'
 
 
-def test_register_multiproc_cleanup_atexit_is_idempotent():
+def test_register_multiproc_cleanup_atexit_is_idempotent(tmp_path):
     """Repeated calls in the same process only register once."""
-    with patch.dict(os.environ, {'PROMETHEUS_MULTIPROC_DIR': '/tmp/prom'}), \
+    with patch.dict(os.environ, {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
          patch.object(metrics, '_multiproc_cleanup_registered', False), \
          patch('sky.server.metrics.atexit.register') as mock_register:
         metrics.register_multiproc_cleanup_atexit()
@@ -253,12 +255,11 @@ def test_reap_stale_multiproc_files_removes_only_dead_pids(tmp_path):
 
     reaped_pids = []
 
-    def fake_mark_dead(pid):
+    def fake_mark_dead(pid, path=None):
+        del path
         reaped_pids.append(pid)
-        for path in (
-                tmp_path /
-                f'gauge_liveall_{pid}.db').parent.glob(f'gauge_live*_{pid}.db'):
-            path.unlink()
+        for p in tmp_path.glob(f'gauge_live*_{pid}.db'):
+            p.unlink()
 
     with patch.dict(os.environ,
                     {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
@@ -280,6 +281,103 @@ def test_reap_stale_multiproc_files_removes_only_dead_pids(tmp_path):
     ]
 
 
+def _reap_with(tmp_path, holders):
+    """One reaper tick; holders maps pid -> identity of the process holding
+    it (None for a zombie). Pids not in holders are free."""
+    with patch.dict(os.environ,
+                    {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
+         patch('sky.server.metrics.psutil.pid_exists',
+               side_effect=lambda pid: pid in holders), \
+         patch('sky.server.metrics._process_identity',
+               side_effect=holders.get):
+        return metrics._reap_stale_multiproc_files()
+
+
+def _live_files(tmp_path, pid):
+    return sorted(p.name for p in tmp_path.glob(f'gauge_live*_{pid}.db'))
+
+
+def _register_as(tmp_path, pid, identity):
+    """register_multiproc_cleanup_atexit() in a process with this pid."""
+    with patch.dict(os.environ, {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
+         patch.object(metrics, '_multiproc_cleanup_registered', False), \
+         patch('sky.server.metrics.atexit.register'), \
+         patch('sky.server.metrics.os.getpid', return_value=pid), \
+         patch('sky.server.metrics._process_identity', return_value=identity):
+        metrics.register_multiproc_cleanup_atexit()
+
+
+def test_reap_stale_multiproc_files_reaps_zombie_writer(tmp_path, monkeypatch):
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _touch_live_gauge_files(str(tmp_path), 991)
+    assert _reap_with(tmp_path, {991: None}) == 1
+    assert not _live_files(tmp_path, 991)
+
+
+def test_reap_stale_multiproc_files_reaps_reused_pid(tmp_path, monkeypatch):
+    """A writer that did not register: the holder seen first is the writer."""
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _touch_live_gauge_files(str(tmp_path), 991)
+    assert _reap_with(tmp_path, {991: '100'}) == 0
+    assert _reap_with(tmp_path, {991: '100'}) == 0
+    # The writer died and the kernel handed 991 to an unrelated process.
+    assert _reap_with(tmp_path, {991: '500'}) == 1
+    assert not _live_files(tmp_path, 991)
+    assert metrics._live_gauge_writers == {}
+
+
+def test_reap_stale_multiproc_files_keeps_writer_that_reused_pid(
+        tmp_path, monkeypatch):
+    """A new writer that got a dead writer's pid keeps its own files."""
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _register_as(tmp_path, 991, '100')
+    _touch_live_gauge_files(str(tmp_path), 991)
+    assert _reap_with(tmp_path, {991: '100'}) == 0
+    # Writer 100 is SIGKILLed; writer 500 starts with the same pid before
+    # the next sweep. It drops the old files and writes its own.
+    _register_as(tmp_path, 991, '500')
+    assert not _live_files(tmp_path, 991)
+    _touch_live_gauge_files(str(tmp_path), 991)
+    assert _reap_with(tmp_path, {991: '500'}) == 0
+    assert _reap_with(tmp_path, {991: '500'}) == 0
+    assert len(_live_files(tmp_path, 991)) == 4
+
+
+def test_reap_stale_multiproc_files_reaps_pid_reused_before_first_sweep(
+        tmp_path, monkeypatch):
+    """A writer that died before the reaper ever saw it is still reaped
+    when an unrelated process holds its pid."""
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _register_as(tmp_path, 991, '100')
+    _touch_live_gauge_files(str(tmp_path), 991)
+    assert _reap_with(tmp_path, {991: '500'}) == 1
+    assert not _live_files(tmp_path, 991)
+    assert not (tmp_path / 'liveowner_991').exists()
+
+
+def test_reap_stale_multiproc_files_removes_identity_of_writer_without_files(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _register_as(tmp_path, 991, '100')
+    _register_as(tmp_path, 992, '200')
+    _reap_with(tmp_path, {992: '200'})
+    assert not (tmp_path / 'liveowner_991').exists()
+    assert (tmp_path / 'liveowner_992').read_text() == '200'
+
+
+def test_reap_stale_multiproc_files_forgets_pids_without_files(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _touch_live_gauge_files(str(tmp_path), 991)
+    _reap_with(tmp_path, {991: '100'})
+    assert metrics._live_gauge_writers == {991: '100'}
+    # The writer removed its own files at exit.
+    for path in tmp_path.glob('gauge_live*_991.db'):
+        path.unlink()
+    _reap_with(tmp_path, {})
+    assert metrics._live_gauge_writers == {}
+
+
 def test_reap_stale_multiproc_files_swallows_per_pid_errors(tmp_path):
     """A failure on one pid does not stop the rest of the sweep."""
     pid_a, pid_b = 991, 992
@@ -288,7 +386,8 @@ def test_reap_stale_multiproc_files_swallows_per_pid_errors(tmp_path):
 
     successes = []
 
-    def flaky_mark_dead(pid):
+    def flaky_mark_dead(pid, path=None):
+        del path
         if pid == pid_a:
             raise OSError('boom')
         successes.append(pid)
@@ -302,6 +401,42 @@ def test_reap_stale_multiproc_files_swallows_per_pid_errors(tmp_path):
 
     assert reaped == 1
     assert successes == [pid_b]
+
+
+def test_reap_stale_multiproc_files_keeps_unreadable_holder(
+        tmp_path, monkeypatch):
+    """A holder whose /proc entry cannot be read keeps its files, and the
+    sweep goes on to the other pids."""
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _touch_live_gauge_files(str(tmp_path), 991)
+    _touch_live_gauge_files(str(tmp_path), 992)
+    proc_errors = {
+        '/proc/991/stat': PermissionError(13, 'Permission denied'),
+        '/proc/992/stat': FileNotFoundError(2, 'No such file or directory'),
+    }
+
+    def fake_open(path, *args, **kwargs):
+        if path in proc_errors:
+            raise proc_errors[path]
+        return open(path, *args, **kwargs)
+
+    with patch.dict(os.environ,
+                    {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
+         patch.object(metrics, '_HAS_PROCFS', True), \
+         patch.object(metrics, 'open', fake_open, create=True), \
+         patch('sky.server.metrics.psutil.pid_exists', return_value=True):
+        assert metrics._reap_stale_multiproc_files() == 1
+    assert len(_live_files(tmp_path, 991)) == 4
+    assert not _live_files(tmp_path, 992)
+
+
+def test_process_identity_of_this_process_and_a_free_pid():
+    identity = metrics._process_identity(os.getpid())
+    assert identity
+    assert metrics._process_identity(os.getpid()) == identity
+    with patch('sky.server.metrics.psutil.Process',
+               side_effect=metrics.psutil.NoSuchProcess(2**22 + 1)):
+        assert metrics._process_identity(2**22 + 1) is None
 
 
 @pytest.mark.asyncio
