@@ -132,7 +132,8 @@ def container(tmp_path):
     _write(
         os.path.join(cgroup_dir, 'memory.stat'),
         'anon 3699441664\nfile 109613056\nkernel 62111744\n'
-        'kernel_stack 9000000\nshmem 4096\n')
+        'kernel_stack 9000000\nshmem 4096\nslab_reclaimable 20000000\n'
+        'slab_unreclaimable 5000000\n')
     _write(os.path.join(cgroup_dir, 'memory.max'), 'max\n')
     # 999 is listed but has already exited. Zombies are not listed.
     _write(os.path.join(cgroup_dir, 'cgroup.procs'),
@@ -191,8 +192,10 @@ def test_scan_counts_processes_by_type(container):
         'file': 109613056,
         'kernel': 62111744,
         'shmem': 4096,
+        'slab_reclaimable': 20000000,
     }
-    assert snapshot.unreclaimable_bytes == 3871899648 - 109613056 + 4096
+    assert snapshot.unreclaimable_bytes == (3871899648 - 109613056 + 4096 -
+                                            20000000)
     assert snapshot.limit_bytes is None
     expected = {t: container_memory.TypeUsage() for t in container_memory.TYPES}
     expected.update({
@@ -267,7 +270,7 @@ def test_scan_without_cgroup_v2_files(tmp_path):
 def test_read_unreclaimable_bytes(container):
     cgroup_dir, _ = container
     assert container_memory.read_unreclaimable_bytes(cgroup_dir) == (
-        3871899648 - 109613056 + 4096)
+        3871899648 - 109613056 + 4096 - 20000000)
 
 
 def test_read_unreclaimable_bytes_without_cgroup_v2_files(tmp_path):
@@ -280,6 +283,19 @@ def test_unreclaimable_bytes_ignores_page_cache_but_not_shmem():
     stat = {'anon': 2 * gib, 'file': 7 * gib, 'shmem': 3 * gib}
     assert container_memory.unreclaimable_bytes(9 * gib, stat) == 5 * gib
     assert container_memory.unreclaimable_bytes(9 * gib, {'anon': 1}) is None
+
+
+def test_unreclaimable_bytes_ignores_reclaimable_slab():
+    mib = 1024**2
+    # 300,000 empty files in a 1 GiB container: 650 MiB of dentry and inode
+    # cache, which the kernel frees once anonymous memory needs the room.
+    stat = {
+        'anon': 6 * mib,
+        'file': 80 * mib,
+        'shmem': 0,
+        'slab_reclaimable': 650 * mib,
+    }
+    assert container_memory.unreclaimable_bytes(737 * mib, stat) == 7 * mib
 
 
 def _samples(families):

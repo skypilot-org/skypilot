@@ -33,7 +33,7 @@ CGROUP_DIR = '/sys/fs/cgroup'
 PROC_DIR = '/proc'
 
 # memory.stat keys exported as they are. `kernel` exists from Linux 5.18 on.
-MEMORY_STAT_KEYS = ('anon', 'file', 'kernel', 'shmem')
+MEMORY_STAT_KEYS = ('anon', 'file', 'kernel', 'shmem', 'slab_reclaimable')
 
 # Process types: a fixed set, so `type` label values stay bounded. 'server'
 # and 'worker:<group>' match the `type` label of sky_apiserver_process_peak_rss.
@@ -128,13 +128,15 @@ def unreclaimable_bytes(usage_bytes: int,
                         stat_bytes: Dict[str, int]) -> Optional[int]:
     """Memory the kernel cannot reclaim from the container without swap.
 
-    memory.current minus page cache (memory.stat `file`), with shmem added
-    back: memory.stat counts tmpfs and shared memory inside `file`, but those
-    pages cannot be dropped.
+    memory.current minus page cache (memory.stat `file`) and reclaimable
+    slab (dentry and inode caches), with shmem added back: memory.stat
+    counts tmpfs and shared memory inside `file`, but those pages cannot be
+    dropped.
     """
     if 'file' not in stat_bytes:
         return None
-    return usage_bytes - stat_bytes['file'] + stat_bytes.get('shmem', 0)
+    return (usage_bytes - stat_bytes['file'] + stat_bytes.get('shmem', 0) -
+            stat_bytes.get('slab_reclaimable', 0))
 
 
 def read_unreclaimable_bytes(cgroup_dir: str = CGROUP_DIR) -> Optional[int]:
