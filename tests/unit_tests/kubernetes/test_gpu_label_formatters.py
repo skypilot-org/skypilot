@@ -2,7 +2,7 @@
 
 Tests verify correct GPU detection from Kubernetes labels.
 """
-from sky.provision.kubernetes.utils import _accelerator_name_matches
+from sky.provision.kubernetes.utils import accelerator_name_matches
 from sky.provision.kubernetes.utils import GFDLabelFormatter
 from sky.provision.kubernetes.utils import is_neuron_accelerator
 from sky.provision.kubernetes.utils import KarpenterLabelFormatter
@@ -306,10 +306,10 @@ class TestAcceleratorNameMatches:
 
     def test_exact_match(self):
         """Test exact accelerator name matching."""
-        assert _accelerator_name_matches('H200', ['h200'])
-        assert _accelerator_name_matches('H100', ['h100'])
-        assert _accelerator_name_matches('A100-80GB', ['a100-80gb'])
-        assert not _accelerator_name_matches('H200', ['h100'])
+        assert accelerator_name_matches('H200', ['h200'])
+        assert accelerator_name_matches('H100', ['h100'])
+        assert accelerator_name_matches('A100-80GB', ['a100-80gb'])
+        assert not accelerator_name_matches('H200', ['h100'])
 
     def test_backward_compat_canonical_to_fallback(self):
         """Test matching canonical name against fallback name.
@@ -319,11 +319,11 @@ class TestAcceleratorNameMatches:
         launched_resources has 'H200-SXM-80GB', viable list has ['h200'].
         """
         # Old acc_type (H200-SXM-80GB) should match new canonical (h200)
-        assert _accelerator_name_matches('H200-SXM-80GB', ['h200'])
-        assert _accelerator_name_matches('H200-SXM-80GB',
-                                         ['nvidia-h200-sxm-80gb', 'h200'])
-        assert _accelerator_name_matches('H100-PCIE-80GB', ['h100'])
-        assert _accelerator_name_matches('L40S-48GB', ['l40s'])
+        assert accelerator_name_matches('H200-SXM-80GB', ['h200'])
+        assert accelerator_name_matches('H200-SXM-80GB',
+                                        ['nvidia-h200-sxm-80gb', 'h200'])
+        assert accelerator_name_matches('H100-PCIE-80GB', ['h100'])
+        assert accelerator_name_matches('L40S-48GB', ['l40s'])
 
     def test_forward_compat_fallback_to_canonical(self):
         """Test matching fallback name against canonical name.
@@ -332,36 +332,36 @@ class TestAcceleratorNameMatches:
         fallback 'H200-SXM-80GB' from get_accelerator_from_label_value.
         """
         # New acc_type (H200) should match old fallback (h200-sxm-80gb)
-        assert _accelerator_name_matches('H200', ['h200-sxm-80gb'])
-        assert _accelerator_name_matches(
+        assert accelerator_name_matches('H200', ['h200-sxm-80gb'])
+        assert accelerator_name_matches(
             'H200', ['nvidia-h200-sxm-80gb', 'h200-sxm-80gb'])
-        assert _accelerator_name_matches('H100', ['h100-pcie-80gb'])
-        assert _accelerator_name_matches('L40S', ['l40s-48gb'])
+        assert accelerator_name_matches('H100', ['h100-pcie-80gb'])
+        assert accelerator_name_matches('L40S', ['l40s-48gb'])
 
     def test_no_false_positive_prefix(self):
         """Test that partial prefixes don't match incorrectly."""
         # H2 should not match H200 (no dash separator)
-        assert not _accelerator_name_matches('H2', ['h200'])
-        assert not _accelerator_name_matches('H20', ['h200'])
+        assert not accelerator_name_matches('H2', ['h200'])
+        assert not accelerator_name_matches('H20', ['h200'])
         # L4 should not match L40 (different GPU)
-        assert not _accelerator_name_matches('L4', ['l40'])
-        assert not _accelerator_name_matches('L40', ['l4'])
+        assert not accelerator_name_matches('L4', ['l40'])
+        assert not accelerator_name_matches('L40', ['l4'])
         # A10 should not match A100
-        assert not _accelerator_name_matches('A10', ['a100'])
+        assert not accelerator_name_matches('A10', ['a100'])
 
     def test_case_insensitive(self):
         """Test case-insensitive matching."""
-        assert _accelerator_name_matches('H200', ['H200'])
-        assert _accelerator_name_matches('h200', ['H200'])
-        assert _accelerator_name_matches('H200-SXM-80GB', ['h200'])
-        assert _accelerator_name_matches('h200-sxm-80gb', ['H200'])
+        assert accelerator_name_matches('H200', ['H200'])
+        assert accelerator_name_matches('h200', ['H200'])
+        assert accelerator_name_matches('H200-SXM-80GB', ['h200'])
+        assert accelerator_name_matches('h200-sxm-80gb', ['H200'])
 
     def test_multiple_viable_names(self):
         """Test matching against multiple viable names."""
         viable = ['nvidia-h200-sxm-80gb', 'h200']
-        assert _accelerator_name_matches('H200', viable)
-        assert _accelerator_name_matches('H200-SXM-80GB', viable)
-        assert not _accelerator_name_matches('H100', viable)
+        assert accelerator_name_matches('H200', viable)
+        assert accelerator_name_matches('H200-SXM-80GB', viable)
+        assert not accelerator_name_matches('H100', viable)
 
     def test_h100_80gb_backward_compat(self):
         """Test H100 ↔ H100-80GB backward compatibility.
@@ -376,21 +376,21 @@ class TestAcceleratorNameMatches:
         - New SkyPilot: label 'H100-SXM-80GB' → canonical 'H100-80GB'
         - Cluster launched with old SkyPilot has 'H100' in launched_resources
         - After upgrade, viable_names = ['h100-80gb', 'nvidia-h100-sxm-80gb']
-        - _accelerator_name_matches('H100', viable_names) should return True
+        - accelerator_name_matches('H100', viable_names) should return True
         """
         # Old stored 'H100' should match new canonical 'H100-80GB'
-        assert _accelerator_name_matches('H100', ['h100-80gb'])
-        assert _accelerator_name_matches('H100',
-                                         ['h100-80gb', 'nvidia-h100-sxm-80gb'])
+        assert accelerator_name_matches('H100', ['h100-80gb'])
+        assert accelerator_name_matches('H100',
+                                        ['h100-80gb', 'nvidia-h100-sxm-80gb'])
 
         # New stored 'H100-80GB' should match old canonical 'H100'
-        assert _accelerator_name_matches('H100-80GB', ['h100'])
-        assert _accelerator_name_matches('H100-80GB',
-                                         ['h100', 'nvidia-h100-sxm-80gb'])
+        assert accelerator_name_matches('H100-80GB', ['h100'])
+        assert accelerator_name_matches('H100-80GB',
+                                        ['h100', 'nvidia-h100-sxm-80gb'])
 
         # GH200 variants (GH200-480GB is a possible variant)
-        assert _accelerator_name_matches('GH200', ['gh200-480gb'])
-        assert _accelerator_name_matches('GH200-480GB', ['gh200'])
+        assert accelerator_name_matches('GH200', ['gh200-480gb'])
+        assert accelerator_name_matches('GH200-480GB', ['gh200'])
 
     def test_memory_variant_no_oom_match(self):
         """A request must not match a node with less device memory.
@@ -400,33 +400,33 @@ class TestAcceleratorNameMatches:
         direction and same-hardware renames keep matching.
         """
         # OOM direction: 80GB request must not match a 40GB node.
-        assert not _accelerator_name_matches('A100-80GB', ['a100'])
-        assert not _accelerator_name_matches('A100-80GB',
-                                             ['nvidia-a100-sxm4-40gb', 'a100'])
-        assert not _accelerator_name_matches('V100-32GB', ['v100'])
+        assert not accelerator_name_matches('A100-80GB', ['a100'])
+        assert not accelerator_name_matches('A100-80GB',
+                                            ['nvidia-a100-sxm4-40gb', 'a100'])
+        assert not accelerator_name_matches('V100-32GB', ['v100'])
 
         # Same, but with names that are NOT canonicalized. On a Kubernetes-only
         # cluster a user-typed 'A100-80G' (missing the 'B') is not normalized to
         # 'A100-80GB', so the guard must parse the memory suffix to still reject
         # the 40GB node. This is the exact shape that reached production.
-        assert not _accelerator_name_matches('A100-80G', ['a100'])
-        assert not _accelerator_name_matches('A100-80G',
-                                             ['nvidia-a100-sxm4-40gb', 'a100'])
-        assert not _accelerator_name_matches('V100-32G', ['v100'])
+        assert not accelerator_name_matches('A100-80G', ['a100'])
+        assert not accelerator_name_matches('A100-80G',
+                                            ['nvidia-a100-sxm4-40gb', 'a100'])
+        assert not accelerator_name_matches('V100-32G', ['v100'])
 
         # Backward-compat direction: a smaller-memory request may still land
         # on a larger-memory node (pre-existing benign behavior).
-        assert _accelerator_name_matches('A100', ['a100-80gb'])
-        assert _accelerator_name_matches('V100', ['v100-32gb'])
+        assert accelerator_name_matches('A100', ['a100-80gb'])
+        assert accelerator_name_matches('V100', ['v100-32gb'])
 
         # Same-hardware renames (equal memory) must still match.
-        assert _accelerator_name_matches('H100', ['h100-80gb'])
-        assert _accelerator_name_matches('H100-80GB', ['h100'])
+        assert accelerator_name_matches('H100', ['h100-80gb'])
+        assert accelerator_name_matches('H100-80GB', ['h100'])
 
         # H100-MEGA is the same H100 80GB silicon (A3 Mega instance), so
         # cross-matching with H100 is harmless and preserved.
-        assert _accelerator_name_matches('H100', ['h100-mega'])
-        assert _accelerator_name_matches('H100-MEGA', ['h100'])
+        assert accelerator_name_matches('H100', ['h100-mega'])
+        assert accelerator_name_matches('H100-MEGA', ['h100'])
 
     def test_no_cross_variant_matching(self):
         """Test that different GPU variants don't incorrectly match.
@@ -438,10 +438,10 @@ class TestAcceleratorNameMatches:
         2. Not matching would break backward compat for valid cases
         """
         # These will match due to prefix logic - this is expected behavior
-        assert _accelerator_name_matches('H100', ['h100-mega'])
+        assert accelerator_name_matches('H100', ['h100-mega'])
         # But ensure unrelated GPUs don't match
-        assert not _accelerator_name_matches('H200', ['h100-mega'])
-        assert not _accelerator_name_matches('A100', ['h100-mega'])
+        assert not accelerator_name_matches('H200', ['h100-mega'])
+        assert not accelerator_name_matches('A100', ['h100-mega'])
 
 
 class TestKarpenterNeuronLabelFormatter:
