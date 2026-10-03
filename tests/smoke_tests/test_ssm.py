@@ -84,7 +84,9 @@ def test_ssm_private_no_ssh_proxy_command():
     VALIDATE_SSM_OUTPUT = (
         'echo "$s" && echo "==Validating launching==" && '
         f'echo "$s" | grep "{warning_message}" && '
-        'echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
+        # -A 5, not -A 1, for the same reason as VALIDATE_LAUNCH_OUTPUT: the
+        # provisioner may log warnings between the two lines.
+        'echo "$s" | grep -A 5 "Launching on" | grep "is up." && '
         'echo "$s" && echo "==Validating setup output==" && '
         'echo "$s" | grep -A 1 "Setup detached" | grep "Job submitted" && '
         'echo "==Validating running output hints==" && echo "$s" | '
