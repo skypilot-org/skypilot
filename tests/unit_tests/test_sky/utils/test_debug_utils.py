@@ -149,17 +149,19 @@ class TestGetRequestsFromClusters:
 
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_multiple_clusters(self, mock_get_tasks):
-        """Each cluster name should be queried separately."""
-        mock_get_tasks.side_effect = [
-            [_make_request(request_id='req-a')],
-            [_make_request(request_id='req-b')],
+        """All cluster names are queried in one batched call."""
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-a'),
+            _make_request(request_id='req-b'),
         ]
         ctx = _make_context(cluster_names={'cluster-1', 'cluster-2'})
 
         debug_utils._get_requests_from_clusters(ctx)
 
         assert ctx['request_ids'] == {'req-a', 'req-b'}
-        assert mock_get_tasks.call_count == 2
+        mock_get_tasks.assert_called_once()
+        task_filter = mock_get_tasks.call_args[0][0]
+        assert task_filter.cluster_names == ['cluster-1', 'cluster-2']
 
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_empty_cluster_names_is_noop(self, mock_get_tasks):
@@ -185,15 +187,122 @@ class TestGetRequestsFromClusters:
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_deduplicates_request_ids(self, mock_get_tasks):
         """Duplicate request IDs across clusters should be deduplicated."""
-        mock_get_tasks.side_effect = [
-            [_make_request(request_id='req-dup')],
-            [_make_request(request_id='req-dup')],
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-dup'),
+            _make_request(request_id='req-dup'),
         ]
         ctx = _make_context(cluster_names={'cluster-1', 'cluster-2'})
 
         debug_utils._get_requests_from_clusters(ctx)
 
         assert ctx['request_ids'] == {'req-dup'}
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_many_clusters_are_queried_in_chunks(self, mock_get_tasks):
+        """Cluster names are batched into cluster_names IN queries under the
+        DB bind-parameter limit, not one query per cluster."""
+        mock_get_tasks.return_value = []
+        names = sorted(f'cluster-{i:04d}' for i in range(1001))
+        ctx = _make_context(cluster_names=set(names))
+
+        debug_utils._get_requests_from_clusters(ctx)
+
+        assert mock_get_tasks.call_count == 3
+        chunk_sizes = [
+            len(call.args[0].cluster_names)
+            for call in mock_get_tasks.call_args_list
+        ]
+        assert chunk_sizes == [500, 500, 1]
+        queried = sorted(name for call in mock_get_tasks.call_args_list
+                         for name in call.args[0].cluster_names)
+        assert queried == names
+
+
+# ---------------------------------------------------------------------------
+# Tests for _get_requests_bulk
+# ---------------------------------------------------------------------------
+class TestGetRequestsBulk:
+    """The chunked bulk request-metadata fetch."""
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_chunks_ids_over_the_bind_limit(self, mock_get_tasks):
+        """>500 IDs are fetched with one IN query per 500-ID chunk, and the
+        filter carries the chunk's IDs and the requested field projection."""
+        mock_get_tasks.return_value = []
+        ids = [f'req-{i:04d}' for i in range(1001)]
+
+        rows = debug_utils._get_requests_bulk(ids,
+                                              fields=['request_id'],
+                                              component='test',
+                                              resource='bulk')
+
+        assert not rows
+        assert mock_get_tasks.call_count == 3
+        chunk_sizes = [
+            len(call.args[0].request_ids)
+            for call in mock_get_tasks.call_args_list
+        ]
+        assert chunk_sizes == [500, 500, 1]
+        # Each call carries exactly its chunk of IDs and the projection.
+        for index, call in enumerate(mock_get_tasks.call_args_list):
+            assert call.args[0].request_ids == ids[index * 500:(index + 1) *
+                                                   500]
+            assert call.args[0].fields == ['request_id']
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_raising_chunk_records_error_and_continues(self, mock_get_tasks,
+                                                       monkeypatch):
+        """A chunk whose query raises records the error, and later chunks
+        are still fetched."""
+        monkeypatch.setattr(debug_utils, '_REQUEST_DB_CHUNK_SIZE', 1)
+        good_rows = [_make_request(request_id='req-good')]
+        mock_get_tasks.side_effect = [
+            RuntimeError('DB is down'),
+            good_rows,
+        ]
+        errors: List[Dict[str, str]] = []
+
+        rows = debug_utils._get_requests_bulk(['req-a', 'req-b'],
+                                              component='test',
+                                              resource='bulk',
+                                              errors=errors)
+
+        # The failed chunk is recorded, the second chunk still ran.
+        assert mock_get_tasks.call_count == 2
+        assert rows == good_rows
+        assert len(errors) == 1
+        assert errors[0]['resource'] == 'bulk/0'
+        assert 'DB is down' in errors[0]['error']
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_hung_chunk_stops_fetching(self, mock_get_tasks, monkeypatch):
+        """A chunk that never returns records the timeout and stops later
+        chunks from piling on more abandoned workers."""
+        monkeypatch.setattr(debug_utils, '_REQUEST_DB_CHUNK_SIZE', 1)
+        monkeypatch.setattr(debug_utils, '_REQUEST_DB_QUERY_TIMEOUT', 0.2)
+        calls = {'count': 0}
+
+        def _fake_get_tasks(*args, **kwargs):
+            del args, kwargs  # unused
+            calls['count'] += 1
+            if calls['count'] == 1:
+                time.sleep(1.0)  # hung query
+            return []
+
+        mock_get_tasks.side_effect = _fake_get_tasks
+        errors: List[Dict[str, str]] = []
+        orphans: List[Dict[str, Any]] = []
+
+        debug_utils._get_requests_bulk(['req-a', 'req-b', 'req-c'],
+                                       component='test',
+                                       resource='bulk',
+                                       errors=errors,
+                                       orphans=orphans)
+
+        assert mock_get_tasks.call_count == 1
+        assert len(orphans) == 1
+        assert orphans[0]['resource'] == 'bulk/0'
+        assert any('timed out' in e['error'] for e in errors)
 
 
 # ---------------------------------------------------------------------------
@@ -450,65 +559,73 @@ class TestGetRequestsFromManagedJobs:
 # ---------------------------------------------------------------------------
 class TestGetClustersFromRequests:
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_finds_cluster_names_from_requests(self, mock_get_request):
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_finds_cluster_names_from_requests(self, mock_get_tasks):
         """Should collect cluster names from request metadata."""
-        mock_get_request.return_value = _make_request(request_id='req-1',
-                                                      cluster_name='my-cluster')
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-1', cluster_name='my-cluster')
+        ]
         ctx = _make_context(request_ids={'req-1'})
 
         debug_utils._get_clusters_from_requests(ctx)
 
-        assert 'my-cluster' in ctx['cluster_names']
-        mock_get_request.assert_called_once_with('req-1',
-                                                 fields=['cluster_name'])
+        assert ctx['cluster_names'] == {'my-cluster'}
+        mock_get_tasks.assert_called_once()
+        task_filter = mock_get_tasks.call_args[0][0]
+        assert task_filter.request_ids == ['req-1']
+        assert task_filter.fields == ['request_id', 'cluster_name']
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_skips_none_cluster_name(self, mock_get_request):
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_skips_none_cluster_name(self, mock_get_tasks):
         """Requests with None cluster_name should be skipped."""
-        mock_get_request.return_value = _make_request(request_id='req-1',
-                                                      cluster_name=None)
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-1', cluster_name=None)
+        ]
         ctx = _make_context(request_ids={'req-1'})
 
         debug_utils._get_clusters_from_requests(ctx)
 
         assert ctx['cluster_names'] == set()
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_skips_none_request(self, mock_get_request):
-        """If request is not found (returns None), skip it."""
-        mock_get_request.return_value = None
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_skips_missing_request(self, mock_get_tasks):
+        """IDs absent from the bulk result (not in DB) are skipped."""
+        mock_get_tasks.return_value = []
         ctx = _make_context(request_ids={'req-nonexistent'})
 
         debug_utils._get_clusters_from_requests(ctx)
 
         assert ctx['cluster_names'] == set()
+        assert not ctx['errors']
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_empty_request_ids_is_noop(self, mock_get_request):
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_empty_request_ids_is_noop(self, mock_get_tasks):
         """Empty request_ids should not trigger any DB call."""
         ctx = _make_context(request_ids=set())
 
         debug_utils._get_clusters_from_requests(ctx)
 
-        mock_get_request.assert_not_called()
+        mock_get_tasks.assert_not_called()
         assert ctx['cluster_names'] == set()
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_db_failure_logs_warning(self, mock_get_request):
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_db_failure_logs_warning(self, mock_get_tasks):
         """DB failure should log warning but not crash."""
-        mock_get_request.side_effect = RuntimeError('DB error')
+        mock_get_tasks.side_effect = RuntimeError('DB error')
         ctx = _make_context(request_ids={'req-1'})
 
         # Should not raise
         debug_utils._get_clusters_from_requests(ctx)
 
         assert ctx['cluster_names'] == set()
+        assert len(ctx['errors']) == 1
+        assert ctx['errors'][0]['component'] == 'cross_link'
+        assert 'DB error' in ctx['errors'][0]['error']
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_multiple_requests_collect_clusters(self, mock_get_request):
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_multiple_requests_collect_clusters(self, mock_get_tasks):
         """Multiple requests should collect all distinct cluster names."""
-        mock_get_request.side_effect = [
+        mock_get_tasks.return_value = [
             _make_request(request_id='req-1', cluster_name='cluster-a'),
             _make_request(request_id='req-2', cluster_name='cluster-b'),
             _make_request(request_id='req-3', cluster_name='cluster-a'),
@@ -832,26 +949,30 @@ class TestCrossLinkOrdering:
 # ---------------------------------------------------------------------------
 class TestGetManagedJobsFromRequests:
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_extracts_job_id_from_launch(self, mock_get_request):
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_extracts_job_id_from_launch(self, mock_get_tasks):
         """Should extract job_id from a jobs.launch request body."""
         body = SimpleNamespace(job_id=42, job_ids=None)
-        mock_get_request.return_value = _make_request(request_id='req-1',
-                                                      request_body=body,
-                                                      name='sky.jobs.launch')
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-1',
+                          request_body=body,
+                          name='sky.jobs.launch')
+        ]
         ctx = _make_context(request_ids={'req-1'})
 
         debug_utils._get_managed_jobs_from_requests(ctx)
 
         assert 42 in ctx['managed_job_ids']
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_extracts_job_ids_from_cancel(self, mock_get_request):
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_extracts_job_ids_from_cancel(self, mock_get_tasks):
         """Should extract job_ids list from a jobs.cancel request body."""
         body = SimpleNamespace(job_id=None, job_ids=[10, 20])
-        mock_get_request.return_value = _make_request(request_id='req-1',
-                                                      request_body=body,
-                                                      name='sky.jobs.cancel')
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-1',
+                          request_body=body,
+                          name='sky.jobs.cancel')
+        ]
         ctx = _make_context(request_ids={'req-1'})
 
         debug_utils._get_managed_jobs_from_requests(ctx)
@@ -859,25 +980,29 @@ class TestGetManagedJobsFromRequests:
         assert 10 in ctx['managed_job_ids']
         assert 20 in ctx['managed_job_ids']
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_skips_non_managed_job_requests(self, mock_get_request):
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_skips_non_managed_job_requests(self, mock_get_tasks):
         """Should skip requests that are not managed job requests."""
-        mock_get_request.return_value = _make_request(
-            request_id='req-1',
-            request_body=SimpleNamespace(cluster_name='my-cluster'),
-            name='sky.launch')
+        mock_get_tasks.return_value = [
+            _make_request(
+                request_id='req-1',
+                request_body=SimpleNamespace(cluster_name='my-cluster'),
+                name='sky.launch')
+        ]
         ctx = _make_context(request_ids={'req-1'})
 
         debug_utils._get_managed_jobs_from_requests(ctx)
 
         assert ctx['managed_job_ids'] == set()
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_skips_none_body(self, mock_get_request):
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_skips_none_body(self, mock_get_tasks):
         """Should skip requests with None body."""
-        mock_get_request.return_value = _make_request(request_id='req-1',
-                                                      request_body=None,
-                                                      name='sky.jobs.launch')
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-1',
+                          request_body=None,
+                          name='sky.jobs.launch')
+        ]
         ctx = _make_context(request_ids={'req-1'})
 
         debug_utils._get_managed_jobs_from_requests(ctx)
@@ -892,39 +1017,46 @@ class TestGetManagedJobsFromRequests:
 
         assert ctx['managed_job_ids'] == set()
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_db_failure_does_not_crash(self, mock_get_request):
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_db_failure_does_not_crash(self, mock_get_tasks):
         """DB failure should not crash the function."""
-        mock_get_request.side_effect = RuntimeError('DB error')
+        mock_get_tasks.side_effect = RuntimeError('DB error')
         ctx = _make_context(request_ids={'req-1'})
 
         # Should not raise
         debug_utils._get_managed_jobs_from_requests(ctx)
 
         assert ctx['managed_job_ids'] == set()
+        assert len(ctx['errors']) == 1
+        assert ctx['errors'][0]['component'] == 'cross_link'
+        assert 'DB error' in ctx['errors'][0]['error']
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_extracts_job_id_from_return_value(self, mock_get_request):
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_extracts_job_id_from_return_value(self, mock_get_tasks):
         """Should extract job_id from jobs.launch return_value."""
-        mock_get_request.return_value = _make_request(
-            request_id='req-1',
-            request_body=SimpleNamespace(job_id=None, job_ids=None),
-            return_value={'job_id': 42},
-            name='sky.jobs.launch')
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-1',
+                          request_body=SimpleNamespace(job_id=None,
+                                                       job_ids=None),
+                          return_value={'job_id': 42},
+                          name='sky.jobs.launch')
+        ]
         ctx = _make_context(request_ids={'req-1'})
 
         debug_utils._get_managed_jobs_from_requests(ctx)
 
         assert 42 in ctx['managed_job_ids']
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_extracts_job_ids_list_from_return_value(self, mock_get_request):
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_extracts_job_ids_list_from_return_value(self, mock_get_tasks):
         """Should extract list of job_ids from jobs.launch return_value."""
-        mock_get_request.return_value = _make_request(
-            request_id='req-1',
-            request_body=SimpleNamespace(job_id=None, job_ids=None),
-            return_value={'job_id': [42, 43]},
-            name='sky.jobs.launch')
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-1',
+                          request_body=SimpleNamespace(job_id=None,
+                                                       job_ids=None),
+                          return_value={'job_id': [42, 43]},
+                          name='sky.jobs.launch')
+        ]
         ctx = _make_context(request_ids={'req-1'})
 
         debug_utils._get_managed_jobs_from_requests(ctx)
@@ -1153,9 +1285,9 @@ class TestPopulateRecentContext:
 # ---------------------------------------------------------------------------
 class TestCrossLinkCycleBreak:
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_request_added_via_job_does_not_reseed_managed_jobs(
-            self, mock_get_request):
+            self, mock_get_tasks):
         """job → request → job cycle is broken."""
         # Simulate: req-from-job was added by _get_requests_from_managed_jobs
         # (e.g. matched on body.name="sb-sweep-8"). Its body.job_id would
@@ -1163,9 +1295,11 @@ class TestCrossLinkCycleBreak:
         # seed job A. Without the guard, B would be added to
         # managed_job_ids.
         body = SimpleNamespace(job_id=999, job_ids=None)
-        mock_get_request.return_value = _make_request(request_id='req-from-job',
-                                                      request_body=body,
-                                                      name='sky.jobs.launch')
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-from-job',
+                          request_body=body,
+                          name='sky.jobs.launch')
+        ]
         ctx = _make_context(
             request_ids={'req-from-job'},
             request_ids_via_job={'req-from-job'},
@@ -1176,19 +1310,21 @@ class TestCrossLinkCycleBreak:
 
         assert ctx['managed_job_ids'] == {42}
         # The guarded request was never even fetched.
-        mock_get_request.assert_not_called()
+        mock_get_tasks.assert_not_called()
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_request_added_via_cluster_does_not_reseed_clusters(
-            self, mock_get_request):
+            self, mock_get_tasks):
         """cluster → request → cluster cycle is broken."""
         # Simulate: req-from-cluster was added by
         # _get_requests_from_clusters. Its cluster_name points at a
         # DIFFERENT cluster than the seed (since the request also
         # touched another cluster). Without the guard, that other
         # cluster would be added to cluster_names.
-        mock_get_request.return_value = _make_request(
-            request_id='req-from-cluster', cluster_name='other-cluster')
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-from-cluster',
+                          cluster_name='other-cluster')
+        ]
         ctx = _make_context(
             request_ids={'req-from-cluster'},
             request_ids_via_cluster={'req-from-cluster'},
@@ -1198,15 +1334,17 @@ class TestCrossLinkCycleBreak:
         debug_utils._get_clusters_from_requests(ctx)
 
         assert ctx['cluster_names'] == {'seed-cluster'}
-        mock_get_request.assert_not_called()
+        mock_get_tasks.assert_not_called()
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_unrestricted_request_still_expands_jobs(self, mock_get_request):
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_unrestricted_request_still_expands_jobs(self, mock_get_tasks):
         """A user-seeded request (no provenance tag) still expands."""
         body = SimpleNamespace(job_id=42, job_ids=None)
-        mock_get_request.return_value = _make_request(request_id='req-seed',
-                                                      request_body=body,
-                                                      name='sky.jobs.launch')
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-seed',
+                          request_body=body,
+                          name='sky.jobs.launch')
+        ]
         # No provenance tag — this came from user input or recent context.
         ctx = _make_context(request_ids={'req-seed'})
 
@@ -1214,12 +1352,12 @@ class TestCrossLinkCycleBreak:
 
         assert 42 in ctx['managed_job_ids']
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_unrestricted_request_still_expands_clusters(
-            self, mock_get_request):
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_unrestricted_request_still_expands_clusters(self, mock_get_tasks):
         """A user-seeded request (no provenance tag) still expands."""
-        mock_get_request.return_value = _make_request(request_id='req-seed',
-                                                      cluster_name='c1')
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-seed', cluster_name='c1')
+        ]
         ctx = _make_context(request_ids={'req-seed'})
 
         debug_utils._get_clusters_from_requests(ctx)
@@ -1311,10 +1449,9 @@ class TestCrossLinkCycleBreak:
         # Pre-existing request was not tagged → still expandable downstream.
         assert ctx['request_ids_via_job'] == set()
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_all_users_cancel_does_not_drag_unrelated_jobs(
-            self, mock_get_tasks, mock_get_request):
+            self, mock_get_tasks):
         """A historic `cancel --all-users` request must not pollute the
         dump.
 
@@ -1349,7 +1486,8 @@ class TestCrossLinkCycleBreak:
         debug_utils._get_managed_jobs_from_requests(ctx)
 
         assert ctx['managed_job_ids'] == {1}
-        mock_get_request.assert_not_called()
+        # Only step 1's scan queried the DB; step 2 fetched nothing.
+        assert mock_get_tasks.call_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -3071,17 +3209,19 @@ class TestRedactTaskYaml:
 class TestDumpRequestIdInfo:
     """Tests for the _dump_request_id_info function."""
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_happy_path_writes_request_info(self, mock_get_request, tmp_path):
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_happy_path_writes_request_info(self, mock_get_tasks, tmp_path):
         """Should write request_info.json with correct fields."""
-        mock_get_request.return_value = _make_request(
-            request_id='req-1',
-            name='sky.launch',
-            status='SUCCEEDED',
-            cluster_name='my-cluster',
-            created_at=1700000000.0,
-            finished_at=1700001000.0,
-        )
+        mock_get_tasks.return_value = [
+            _make_request(
+                request_id='req-1',
+                name='sky.launch',
+                status='SUCCEEDED',
+                cluster_name='my-cluster',
+                created_at=1700000000.0,
+                finished_at=1700001000.0,
+            )
+        ]
 
         errors: List[Dict[str, str]] = []
         debug_utils._dump_request_id_info({'req-1'}, str(tmp_path), errors)
@@ -3096,10 +3236,10 @@ class TestDumpRequestIdInfo:
         assert data['cluster_name'] == 'my-cluster'
         assert not errors
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_request_not_found(self, mock_get_request, tmp_path):
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_request_not_found(self, mock_get_tasks, tmp_path):
         """Should handle request not found gracefully."""
-        mock_get_request.return_value = None
+        mock_get_tasks.return_value = []
 
         errors: List[Dict[str, str]] = []
         debug_utils._dump_request_id_info({'req-missing'}, str(tmp_path),
@@ -3107,21 +3247,23 @@ class TestDumpRequestIdInfo:
 
         # No crash, no error recorded (not-found is not an error)
         assert not errors
-        info_path = tmp_path / 'requests' / 'req-missing' / 'request_info.json'
+        info_path = (tmp_path / 'requests' / 'req-missing' /
+                     'request_info.json')
         assert not info_path.exists()
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_db_failure_records_error(self, mock_get_request, tmp_path):
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_db_failure_records_error(self, mock_get_tasks, tmp_path):
         """DB failure should record error but not crash."""
-        mock_get_request.side_effect = RuntimeError('DB is down')
+        mock_get_tasks.side_effect = RuntimeError('DB is down')
 
         errors: List[Dict[str, str]] = []
         debug_utils._dump_request_id_info({'req-fail'}, str(tmp_path), errors)
 
-        assert len(errors) == 1
-        assert errors[0]['component'] == 'requests'
-        assert 'DB is down' in errors[0]['error']
-        assert 'traceback' in errors[0]
+        # Both bulk passes (ordering + metadata) record the failure.
+        assert len(errors) == 2
+        assert all(e['component'] == 'requests' for e in errors)
+        assert all('DB is down' in e['error'] for e in errors)
+        assert all('traceback' in e for e in errors)
 
     def test_empty_request_ids_is_noop(self, tmp_path):
         """Empty request_ids should not create any files."""
@@ -3132,11 +3274,11 @@ class TestDumpRequestIdInfo:
         assert not (tmp_path / 'requests').exists()
 
     @mock.patch('sky.utils.debug_utils.log_provider.get_log_provider')
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_copies_log_file_when_exists(self, mock_get_request,
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_copies_log_file_when_exists(self, mock_get_tasks,
                                          mock_get_provider, tmp_path):
         """Should copy request log via the LogProvider."""
-        mock_get_request.return_value = _make_request(request_id='req-log')
+        mock_get_tasks.return_value = [_make_request(request_id='req-log')]
         provider = mock.MagicMock()
         provider.copy_log_file.return_value = True
         mock_get_provider.return_value = provider
@@ -3150,6 +3292,227 @@ class TestDumpRequestIdInfo:
             call.args[2] for call in provider.copy_log_file.call_args_list
         ]
         assert any(p.name == 'request.log' for p in dest_paths)
+
+    @mock.patch('sky.utils.debug_utils.log_provider.get_log_provider')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_hung_metadata_chunk_keeps_processing_remaining(
+            self, mock_get_tasks, mock_get_provider, tmp_path, monkeypatch):
+        """A hung metadata chunk stops further chunk fetching (no piling on
+        abandoned workers) while iteration continues: the remaining requests
+        still get their log-copy attempts and timings entries."""
+        monkeypatch.setattr(debug_utils, '_REQUEST_DB_CHUNK_SIZE', 2)
+        monkeypatch.setattr(debug_utils, '_REQUEST_DB_QUERY_TIMEOUT', 0.2)
+        ids = {'req-a', 'req-b', 'req-c', 'req-d'}
+        order_rows = [
+            _make_request(request_id=rid, created_at=1000.0)
+            for rid in sorted(ids)
+        ]
+        metadata_calls = {'count': 0}
+
+        def _fake_get_tasks(request_task_filter):
+            if request_task_filter.fields:
+                # Ordering pass (request_id, created_at projection).
+                return order_rows
+            metadata_calls['count'] += 1
+            if metadata_calls['count'] == 1:
+                time.sleep(1.0)  # hung metadata query
+            return []
+
+        mock_get_tasks.side_effect = _fake_get_tasks
+        provider = mock.MagicMock()
+        provider.copy_log_file.return_value = False
+        mock_get_provider.return_value = provider
+        errors: List[Dict[str, str]] = []
+        orphans: List[Dict[str, Any]] = []
+
+        debug_utils._dump_request_id_info(ids,
+                                          str(tmp_path),
+                                          errors,
+                                          deadline=None,
+                                          orphans=orphans)
+
+        # Two ordering chunks, then exactly one (hung) metadata chunk --
+        # the second metadata chunk was never attempted.
+        assert mock_get_tasks.call_count == 3
+        assert len(orphans) == 1
+        assert orphans[0]['resource'] == 'requests_metadata/0'
+        # Every request still got both of its log-copy attempts.
+        copied_ids = {
+            call.args[0] for call in provider.copy_log_file.call_args_list
+        }
+        assert copied_ids == ids
+        assert provider.copy_log_file.call_count == 2 * len(ids)
+        # And every request still has a timings entry.
+        with open(tmp_path / 'requests' / '_timings.json',
+                  encoding='utf-8') as f:
+            timings = json.load(f)
+        assert {entry['request_id'] for entry in timings} == ids
+
+    @mock.patch('sky.utils.debug_utils.logger')
+    @mock.patch('sky.utils.debug_utils.log_provider.get_log_provider')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_timed_out_chunk_members_not_reported_as_absent(
+            self, mock_get_tasks, mock_get_provider, mock_logger, tmp_path,
+            monkeypatch):
+        """Members of a metadata chunk that timed out are logged as
+        'metadata not fetched', not as 'not found in DB' -- the rows may well
+        exist; the fetch is what failed."""
+        monkeypatch.setattr(debug_utils, '_REQUEST_DB_CHUNK_SIZE', 2)
+        monkeypatch.setattr(debug_utils, '_REQUEST_DB_QUERY_TIMEOUT', 0.2)
+        ids = {'req-a', 'req-b', 'req-c', 'req-d'}
+        order_rows = [
+            _make_request(request_id=rid, created_at=1000.0)
+            for rid in sorted(ids)
+        ]
+        metadata_calls = {'count': 0}
+
+        def _fake_get_tasks(request_task_filter):
+            if request_task_filter.fields:
+                return order_rows
+            metadata_calls['count'] += 1
+            if metadata_calls['count'] == 1:
+                time.sleep(1.0)  # hung metadata query
+            return []
+
+        mock_get_tasks.side_effect = _fake_get_tasks
+        mock_get_provider.return_value = mock.MagicMock()
+
+        debug_utils._dump_request_id_info(ids, str(tmp_path), deadline=None)
+
+        debug_messages = [
+            str(call.args[0]) for call in mock_logger.debug.call_args_list
+        ]
+        assert any('metadata not fetched' in m for m in debug_messages)
+        assert not any('not found in DB' in m for m in debug_messages)
+
+    @mock.patch('sky.utils.debug_utils.log_provider.get_log_provider')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_skip_blames_section_budget_when_overall_remains(
+            self, mock_get_tasks, mock_get_provider, tmp_path):
+        """When the section cap expires while the overall dump budget still
+        has time, per-request skip records blame the section's share -- the
+        later sections are still running."""
+        ids = {f'req-{i}' for i in range(3)}
+        mock_get_tasks.return_value = [
+            _make_request(request_id=f'req-{i}', created_at=1000.0 + i)
+            for i in range(3)
+        ]
+        provider = mock.MagicMock()
+        provider.copy_log_file.side_effect = lambda *args: time.sleep(0.35)
+        mock_get_provider.return_value = provider
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_request_id_info(ids,
+                                          str(tmp_path),
+                                          errors,
+                                          deadline=time.monotonic() + 1.0,
+                                          overall_deadline=time.monotonic() +
+                                          3600)
+
+        skip_errors = [e for e in errors if e['error'].startswith('Skipped:')]
+        assert skip_errors, 'expected the section cap to expire mid-section'
+        assert all(e['error'] == 'Skipped: request_ids section budget '
+                   'exceeded.' for e in skip_errors)
+        assert not any(
+            'overall debug-dump deadline' in e['error'] for e in errors)
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_skip_blames_overall_deadline_when_overall_also_exceeded(
+            self, mock_get_tasks, tmp_path):
+        """When the overall deadline has also been exceeded at skip time
+        (e.g. an earlier section consumed nearly the whole budget, so this
+        section started with a sliver and its cap is already past), the
+        per-request skip records keep blaming the overall deadline."""
+        # A slow query makes the (already-expired) ordering pass time out
+        # deterministically instead of racing an instant mock against a
+        # non-positive timeout.
+        mock_get_tasks.side_effect = lambda *args, **kwargs: time.sleep(0.05)
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_request_id_info({'req-0', 'req-1', 'req-2'},
+                                          str(tmp_path),
+                                          errors,
+                                          deadline=time.monotonic() - 1.0,
+                                          overall_deadline=time.monotonic() -
+                                          0.5)
+
+        skip_errors = [e for e in errors if e['error'].startswith('Skipped:')]
+        assert len(skip_errors) == 3
+        assert all(e['error'] == 'Skipped: overall debug-dump deadline '
+                   'exceeded.' for e in skip_errors)
+        assert not any('section budget exceeded' in e['error'] for e in errors)
+
+
+class TestDumpRequestIdInfoOrdering:
+    """The dump order is deterministic and relevance-first.
+
+    Hash-order iteration previously let a deadline-truncated partial drop an
+    arbitrary 24% of requests -- including requests launched seconds before
+    the dump -- while fully processing months-old dead rows.
+    """
+
+    @staticmethod
+    def _timings_order(tmp_path) -> List[str]:
+        with open(tmp_path / 'requests' / '_timings.json',
+                  encoding='utf-8') as f:
+            return [entry['request_id'] for entry in json.load(f)]
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_newest_first(self, mock_get_tasks, tmp_path):
+        """Within a tier, newer requests are dumped before older ones."""
+        mock_get_tasks.return_value = [
+            _make_request(request_id='old', created_at=1000.0),
+            _make_request(request_id='new', created_at=2000.0),
+        ]
+
+        debug_utils._dump_request_id_info({'old', 'new'}, str(tmp_path))
+
+        assert self._timings_order(tmp_path) == ['new', 'old']
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_system_daemons_first(self, mock_get_tasks, tmp_path):
+        """Always-include system daemon IDs are dumped before anything
+        else, even when their rows are old (daemon rows are created once
+        and never refreshed)."""
+        daemon_id = debug_utils.SYSTEM_REQUEST_IDS[0]
+        mock_get_tasks.return_value = [
+            _make_request(request_id=daemon_id, created_at=1000.0),
+            _make_request(request_id='fresh-user-req', created_at=2000.0),
+        ]
+
+        debug_utils._dump_request_id_info({daemon_id, 'fresh-user-req'},
+                                          str(tmp_path))
+
+        assert self._timings_order(tmp_path) == [daemon_id, 'fresh-user-req']
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_cross_linked_after_user_seeded(self, mock_get_tasks, tmp_path):
+        """Cross-link-expanded IDs are dumped after user-seeded /
+        recent-context ones, even when they are newer."""
+        mock_get_tasks.return_value = [
+            _make_request(request_id='via-cluster', created_at=2000.0),
+            _make_request(request_id='user-seeded', created_at=1000.0),
+        ]
+
+        debug_utils._dump_request_id_info(
+            {'via-cluster', 'user-seeded'},
+            str(tmp_path),
+            cross_linked_request_ids={'via-cluster'})
+
+        assert self._timings_order(tmp_path) == ['user-seeded', 'via-cluster']
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_deterministic_for_unknown_created_at(self, mock_get_tasks,
+                                                  tmp_path):
+        """IDs with no DB row sort last within their tier, ordered by ID,
+        so the iteration order is reproducible across runs."""
+        mock_get_tasks.return_value = []
+
+        debug_utils._dump_request_id_info({'b', 'a', 'c'},
+                                          str(tmp_path),
+                                          cross_linked_request_ids={'c'})
+
+        assert self._timings_order(tmp_path) == ['a', 'b', 'c']
 
 
 # ---------------------------------------------------------------------------
@@ -3504,9 +3867,9 @@ class TestDumpRequestIdInfoLogCollection:
     """_dump_request_id_info collects logs via the LogProvider."""
 
     @pytest.fixture(autouse=True)
-    def _mock_get_request(self):
-        with mock.patch('sky.utils.debug_utils.requests_lib.get_request',
-                        return_value=None):
+    def _mock_get_request_tasks(self):
+        with mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                        return_value=[]):
             yield
 
     def test_logs_collected_via_log_provider(self, tmp_path):
@@ -4438,6 +4801,12 @@ class TestOverallDeadlineDump:
             name = next(n for n in zf.namelist() if n.endswith('errors.json'))
             return json.loads(zf.read(name))
 
+    @staticmethod
+    def _read_summary(zip_path):
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            name = next(n for n in zf.namelist() if n.endswith('summary.json'))
+            return json.loads(zf.read(name))
+
     def test_past_deadline_skips_sections_but_still_zips(self, tmp_path):
         """An already-passed overall_deadline (e.g. the caller spent the whole
         budget queueing) skips every section with its own recorded reason, yet
@@ -4464,6 +4833,12 @@ class TestOverallDeadlineDump:
         ]
         assert len(skip_records) == len(self._SECTION_FNS)
         assert all(e['resource'] == 'section' for e in skip_records)
+        # Overall-deadline exhaustion never produces section-budget
+        # records: the whole-section skips keep the overall text.
+        assert not [
+            e for e in errors
+            if 'section budget exceeded' in e.get('error', '')
+        ]
 
     def test_no_deadline_runs_all_sections(self, tmp_path):
         """overall_deadline=None == unchanged behavior: every section runs and
@@ -4493,3 +4868,167 @@ class TestOverallDeadlineDump:
         assert result.exists()
         for fn, m in section_mocks.items():
             assert m.call_count == 1, f'{fn} should have run exactly once'
+
+    def test_sections_share_the_budget(self, tmp_path):
+        """With an overall deadline, every section is capped at an equal
+        share of the budget still remaining, so an oversized early section
+        (e.g. request_ids on a server with thousands of requests) cannot
+        consume the whole budget and starve the later sections to 0.0s.
+        Sections that finish early return their unused share to the pool,
+        and the last section is capped only by the overall deadline. Share
+        bounds are asserted against each section's recorded start time (the
+        internal section_start is not observable from here)."""
+        # (section fn name, monotonic start, received deadline), appended by
+        # the mock sections as they run.
+        recorded: List[Any] = []
+
+        def _record(fn_name):
+
+            def _section(*args, **kwargs):
+                del args  # unused
+                recorded.append(
+                    (fn_name, time.monotonic(), kwargs.get('deadline')))
+
+            return _section
+
+        with self._patched_dump(tmp_path) as section_mocks:
+            for fn, m in section_mocks.items():
+                m.side_effect = _record(fn)
+            result = debug_utils.create_debug_dump(
+                cluster_names=['c'], overall_deadline=time.time() + 2.0)
+
+        assert len(recorded) == 5
+        assert all(deadline is not None for _, _, deadline in recorded)
+        # Every section's cap is at most an equal share of the budget still
+        # remaining at its recorded start: the internal overall deadline is
+        # at or before the first section's start plus the requested budget.
+        first_start = recorded[0][1]
+        n_sections = len(recorded)
+        for index, (_, start, deadline) in enumerate(recorded):
+            share_bound = (first_start + 2.0 - start) / (n_sections - index)
+            assert deadline <= start + share_bound + 0.05, (
+                f'section {index} cap exceeds its share')
+        # Instant sections return their unused share: caps are
+        # non-decreasing across the run.
+        deadlines_in_order = [deadline for _, _, deadline in recorded]
+        assert deadlines_in_order == sorted(deadlines_in_order)
+        # Each completed section's share is surfaced in summary.json, so
+        # duration ~= budget_share_s reads as 'capped by design'.
+        timings = self._read_summary(result)['section_timings']
+        assert len(timings) == 5
+        assert all(t['status'] == 'completed' for t in timings)
+        assert all('budget_share_s' in t for t in timings)
+
+    def test_slow_first_section_leaves_budget_for_later_sections(
+            self, tmp_path):
+        """A section that runs to its full cap cannot starve the later ones:
+        every section still runs (none skipped_deadline) and each receives a
+        positive share. Each mock section sleeps until the deadline it
+        receives -- not a fixed duration -- so the budget math, not the
+        test's timing, drives the outcome."""
+        recorded: List[Any] = []
+
+        def _sleep_until_cap(fn_name):
+
+            def _section(*args, **kwargs):
+                del args  # unused
+                deadline = kwargs.get('deadline')
+                recorded.append((fn_name, time.monotonic(), deadline))
+                if deadline is not None:
+                    time.sleep(max(0.0, deadline - time.monotonic()))
+
+            return _section
+
+        with self._patched_dump(tmp_path) as section_mocks:
+            for fn, m in section_mocks.items():
+                m.side_effect = _sleep_until_cap(fn)
+            result = debug_utils.create_debug_dump(
+                cluster_names=['c'], overall_deadline=time.time() + 2.0)
+
+        # All five sections ran -- none was skipped for the deadline.
+        assert len(recorded) == 5
+        # Every section received a positive share of the remaining budget.
+        for _, start, deadline in recorded:
+            assert deadline is not None
+            assert deadline > start
+        # And no more than an equal share of what remained at its start.
+        first_start = recorded[0][1]
+        for index, (_, start, deadline) in enumerate(recorded):
+            share_bound = (first_start + 2.0 - start) / (len(recorded) - index)
+            assert deadline <= start + share_bound + 0.05, (
+                f'section {index} cap exceeds its share')
+        # The summary agrees: everything completed, nothing skipped.
+        timings = self._read_summary(result)['section_timings']
+        assert [t['status'] for t in timings] == ['completed'] * 5
+        # No skip records at all.
+        errors = self._read_errors(result)
+        assert not [
+            e for e in errors if e.get('error', '').startswith('Skipped:')
+        ]
+
+    def test_capped_request_ids_section_keeps_errors_consistent(self, tmp_path):
+        """Integration: a tight section cap on request_ids (real section,
+        slow log copies) followed by completed later sections produces a
+        non-contradictory errors.json -- the per-request skips blame the
+        section's share, nothing blames the overall deadline, and the
+        summary shows every section completed."""
+        with contextlib.ExitStack() as stack:
+            for fn in self._CROSSLINK_FNS:
+                stack.enter_context(mock.patch(f'sky.utils.debug_utils.{fn}'))
+            # Instant sections; request_ids runs for real.
+            for fn in ('_dump_server_info', '_dump_cluster_info',
+                       '_dump_managed_job_info', '_dump_kube_contexts_info'):
+                stack.enter_context(mock.patch(f'sky.utils.debug_utils.{fn}'))
+            stack.enter_context(
+                mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
+                           str(tmp_path / 'debug_dumps')))
+            rows = [
+                _make_request(request_id=rid, created_at=1000.0)
+                for rid in debug_utils.SYSTEM_REQUEST_IDS
+            ]
+            stack.enter_context(
+                mock.patch(
+                    'sky.utils.debug_utils.requests_lib.get_request_tasks',
+                    return_value=rows))
+            provider = mock.MagicMock()
+            provider.copy_log_file.side_effect = lambda *args: time.sleep(0.05)
+            stack.enter_context(
+                mock.patch(
+                    'sky.utils.debug_utils.log_provider.get_log_provider',
+                    return_value=provider))
+            result = debug_utils.create_debug_dump(
+                overall_deadline=time.time() + 2.0)
+
+        # The section populated some requests before its cap expired...
+        with zipfile.ZipFile(result, 'r') as zf:
+            assert any(n.endswith('request_info.json') for n in zf.namelist())
+        # ...per-request skips exist and all blame the section's share...
+        errors = self._read_errors(result)
+        section_skips = [
+            e for e in errors
+            if e.get('error') == 'Skipped: request_ids section budget '
+            'exceeded.'
+        ]
+        assert section_skips
+        # ...and nothing blames the overall deadline (all sections ran).
+        assert not [
+            e for e in errors
+            if 'overall debug-dump deadline' in e.get('error', '')
+        ]
+        # The later sections completed after request_ids was capped.
+        timings = self._read_summary(result)['section_timings']
+        assert [t['status'] for t in timings] == ['completed'] * 5
+        assert all('budget_share_s' in t for t in timings)
+
+    def test_no_deadline_passes_uncapped_sections(self, tmp_path):
+        """overall_deadline=None: sections receive no per-section cap."""
+        with self._patched_dump(tmp_path) as section_mocks:
+            result = debug_utils.create_debug_dump(cluster_names=['c'],
+                                                   overall_deadline=None)
+
+        for fn, m in section_mocks.items():
+            assert m.call_args[1]['deadline'] is None, \
+                f'{fn} should be uncapped'
+        # No share is computed without a deadline.
+        timings = self._read_summary(result)['section_timings']
+        assert all('budget_share_s' not in t for t in timings)
