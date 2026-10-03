@@ -23,6 +23,7 @@ from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
+from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import context_utils
@@ -1966,3 +1967,89 @@ def test_maybe_observe_request_pending_first_execution_only():
         executor._maybe_observe_request_pending(  # pylint: disable=protected-access
             make_request(requests_lib.RequestStatus.WAITING))
         assert observe.call_count == 1
+
+
+def _prepared_request(request_id: str, name: str,
+                      cluster_name: str) -> requests_lib.Request:
+    return requests_lib.Request(request_id=request_id,
+                                name=name,
+                                entrypoint=lambda: None,
+                                request_body=payloads.RequestBody(),
+                                status=requests_lib.RequestStatus.PENDING,
+                                created_at=1.0,
+                                cluster_name=cluster_name,
+                                user_id='test-user')
+
+
+@pytest.mark.asyncio
+async def test_schedule_request_launch_supersedes_older_launches(
+        isolated_database):
+    """Scheduling a cluster launch supersedes older launches for the cluster."""
+    prepared = _prepared_request(
+        'new-launch-request', server_constants.REQUEST_NAME_PREFIX +
+        request_names.RequestName.CLUSTER_LAUNCH.value, 'c1')
+    supersede_calls = []
+
+    async def fake_prepare(*args, **kwargs):
+        return prepared
+
+    async def fake_schedule(*args, **kwargs):
+        return None
+
+    def fake_supersede(cluster_name, request_name, new_request):
+        supersede_calls.append((cluster_name, request_name, new_request))
+        return []
+
+    with mock.patch.object(executor, 'prepare_request_async',
+                           fake_prepare), \
+         mock.patch.object(executor, 'schedule_prepared_request',
+                           fake_schedule), \
+         mock.patch.object(executor.api_requests,
+                           'supersede_cluster_requests', fake_supersede):
+        await executor.schedule_request_async(
+            'new-launch-request',
+            request_names.RequestName.CLUSTER_LAUNCH,
+            payloads.RequestBody(),
+            lambda: None,
+            request_cluster_name='c1')
+
+    assert supersede_calls == [('c1', 'sky.launch', prepared)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('request_name,cluster_name', [
+    (request_names.RequestName.CLUSTER_EXEC, 'c1'),
+    (request_names.RequestName.CLUSTER_LAUNCH, None),
+])
+async def test_schedule_request_does_not_supersede_other_requests(
+        isolated_database, request_name, cluster_name):
+    """Only launches with a cluster name trigger the supersede hook."""
+    prepared = _prepared_request(
+        'other-request',
+        server_constants.REQUEST_NAME_PREFIX + request_name.value,
+        cluster_name or 'c1')
+    supersede_calls = []
+
+    async def fake_prepare(*args, **kwargs):
+        return prepared
+
+    async def fake_schedule(*args, **kwargs):
+        return None
+
+    def fake_supersede(cluster_name, request_name, new_request):
+        supersede_calls.append((cluster_name, request_name, new_request))
+        return []
+
+    with mock.patch.object(executor, 'prepare_request_async',
+                           fake_prepare), \
+         mock.patch.object(executor, 'schedule_prepared_request',
+                           fake_schedule), \
+         mock.patch.object(executor.api_requests,
+                           'supersede_cluster_requests', fake_supersede):
+        await executor.schedule_request_async('other-request',
+                                              request_name,
+                                              payloads.RequestBody(),
+                                              lambda: None,
+                                              request_cluster_name=cluster_name)
+
+    assert supersede_calls == []
