@@ -856,6 +856,25 @@ ENV_VAR_SERVER_DB_CONNECTION_POOL_SIZE = (
 ENV_VAR_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW = (
     f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}DB_CONNECTION_POOL_MAX_OVERFLOW')
 
+# Explicit sizes for the API server's long and short executor pools and, in
+# consolidation mode, its jobs-controller pool, in place of the counts the
+# server derives from CPU and memory (`sky.server.config.compute_server_config`,
+# `sky.utils.controller_utils.get_number_of_jobs_controllers`). Unset by
+# default, in which case the derived sizing decides.
+#
+# The derived counts budget a fixed footprint per process; a deployment whose
+# processes outgrow it can pin the counts to what its pods hold instead. A
+# value outside the server's bounds (long: at least 1; short: at least one
+# idle worker plus one per internal request daemon; controllers: 1 to
+# `controller_utils.MAX_CONTROLLERS`) is refused at startup, not clamped.
+#
+# Server-side only: the SKYPILOT_SERVER_ prefix keeps clients from forwarding
+# them (`sky.server.requests.payloads.request_body_env_vars`).
+ENV_VAR_SERVER_LONG_WORKERS = f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}LONG_WORKERS'
+ENV_VAR_SERVER_SHORT_WORKERS = f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}SHORT_WORKERS'
+ENV_VAR_SERVER_JOBS_CONTROLLERS = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}JOBS_CONTROLLERS')
+
 # Concurrent state-DB connections a server process uses before it starts
 # queueing queries, when the burst size is left to the default.
 DEFAULT_DB_CONNECTION_POOL_MAX_CONCURRENCY = 5

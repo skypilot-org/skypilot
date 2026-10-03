@@ -4441,6 +4441,10 @@ if __name__ == '__main__':
             reserve_extra_for_pool=not os.environ.get(
                 constants.IS_SKYPILOT_SERVE_CONTROLLER)))
 
+    # The controller pool is sized from a background thread that retries on
+    # errors, so an invalid explicit count has to fail here instead.
+    controller_utils.explicit_jobs_controllers()
+
     config = server_config.compute_server_config(
         cmd_args.deploy,
         max_db_connections,
