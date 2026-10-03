@@ -140,6 +140,16 @@ JOB_FINALIZE_DB_RETRY_BACKOFF_BASE_SECONDS = 10
 JOB_FINALIZE_DB_RETRY_BACKOFF_CAP_SECONDS = 5 * 60
 JOB_FINALIZE_DB_RETRY_BUDGET_SECONDS = 60 * 60
 
+# When a transient DB error escapes a job's monitoring, the controller waits
+# for the DB to answer again, backing off between attempts, for at most this
+# budget, and then resumes the job in place. A job already resumed
+# JOB_DB_OUTAGE_MAX_RESUMES times within the budget handles the next DB error
+# as an unexpected error.
+JOB_DB_OUTAGE_WAIT_BACKOFF_BASE_SECONDS = 5
+JOB_DB_OUTAGE_WAIT_BACKOFF_CAP_SECONDS = 30
+JOB_DB_OUTAGE_WAIT_BUDGET_SECONDS = 10 * 60
+JOB_DB_OUTAGE_MAX_RESUMES = 3
+
 # Prefix used for service-account tokens issued to managed jobs that opt in
 # to api_server_access. The expired-token-cleanup daemon uses this prefix to
 # identify managed-job tokens that should be swept once their TTL passes.
