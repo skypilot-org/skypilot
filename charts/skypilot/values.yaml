@@ -714,11 +714,16 @@ runtimeClassName:
 # Refer to https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml for available values.
 # @schema skipProperties:true
 prometheus:
-  # By default, the API server will be annotated with well-known annotations (prometheus.io/*) to be discovered by prometheus.
-  # Set this to true will remove the well-known annotations and use a dedicated scrape config instead, which can be helpful when
-  # you do not want the API server to be discovered by other prometheus instances.
+  # By default, the API Service will be annotated with well-known annotations (prometheus.io/*) to be discovered by Prometheus-compatible service scrapers.
+  # Set this to true to remove the Service annotations and use a dedicated Pod scrape config instead, which can be helpful when
+  # you do not want the API server to be discovered by other Prometheus instances.
   # @schema type: [boolean, null]
   useDedicatedScrapeConfig: false
+  # Keep legacy prometheus.io/* Pod annotations alongside the Service annotations
+  # when explicitly requested. This is useful for manually managed Pod-based
+  # scrapers, but may create duplicate targets unless they are filtered.
+  # @schema type: [boolean, null]
+  preservePodScrapeAnnotations: false
   # Add a scrape job for the API server's /endpoints-metrics federation
   # (model-serving engine metrics, e.g. vLLM, from every connected Kubernetes
   # context) and provision the serving Grafana dashboards. Opt-in: leave false
@@ -728,7 +733,7 @@ prometheus:
   enabled: false
   # Keep the installation minimal by default. If you want to monitor more resources other than the API server,
   # it is recommended to install and manage prometheus separately.
-  # SkyPilot API server will be automatically discovered by the prometheus if it runs with the default kubernetes discovery configuration.
+  # The SkyPilot API Service will be automatically discovered by Prometheus if it runs with the default Kubernetes service discovery configuration.
   server:
     persistentVolume:
       enabled: true
@@ -741,11 +746,25 @@ prometheus:
     retentionSize: "43GB"
   # Configure additional scrape configs using extraScrapeConfigs
   extraScrapeConfigs: |
-    # Static scrape target for SkyPilot API server GPU metrics
+    # Scrape the SkyPilot API server GPU metrics from the named Service port.
     - job_name: 'skypilot-api-server-gpu-metrics'
-      static_configs:
-        # Use the API service created by this Helm chart
-        - targets: ['{{ include "skypilot.fullname" . }}-api-service.{{ .Release.Namespace }}.svc.cluster.local:9090']
+      kubernetes_sd_configs:
+        - role: endpoints
+          namespaces:
+            names:
+            - '{{ .Release.Namespace }}'
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+          action: keep
+          regex: '{{ include "skypilot.fullname" . }}-api-service;metrics'
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: pod
+        - source_labels: [__meta_kubernetes_service_name, __meta_kubernetes_namespace, __meta_kubernetes_endpoint_port_number]
+          action: replace
+          regex: (.+);(.+);(.+)
+          replacement: $1.$2.svc.cluster.local:$3
+          target_label: instance
       metrics_path: '/gpu-metrics'
       scrape_interval: 60s
       scrape_timeout: 45s
@@ -757,16 +776,31 @@ prometheus:
         target_label: node
         replacement: $1
     {{- if .Values.scrapeEndpointMetrics }}
-    # Static scrape target for SkyPilot API server endpoint serving
-    # metrics. The /endpoints-metrics endpoint federates the serving
+    # Scrape the SkyPilot API server endpoint-serving metrics from the named
+    # Service port. The /endpoints-metrics endpoint federates the serving
     # engines' native series (vllm:* today) from every remote Kubernetes
     # context the API server can see, with a cluster=<context> label
     # injected on each series so the serving Grafana dashboards can
     # filter by cluster.
     - job_name: 'skypilot-api-server-endpoints-metrics'
       honor_labels: true
-      static_configs:
-        - targets: ['{{ include "skypilot.fullname" . }}-api-service.{{ .Release.Namespace }}.svc.cluster.local:9090']
+      kubernetes_sd_configs:
+        - role: endpoints
+          namespaces:
+            names:
+            - '{{ .Release.Namespace }}'
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+          action: keep
+          regex: '{{ include "skypilot.fullname" . }}-api-service;metrics'
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: pod
+        - source_labels: [__meta_kubernetes_service_name, __meta_kubernetes_namespace, __meta_kubernetes_endpoint_port_number]
+          action: replace
+          regex: (.+);(.+);(.+)
+          replacement: $1.$2.svc.cluster.local:$3
+          target_label: instance
       metrics_path: '/endpoints-metrics'
       scrape_interval: 60s
       scrape_timeout: 45s
