@@ -3,7 +3,9 @@ import unittest
 from unittest import mock
 
 from sky import core
+from sky import resources as resources_lib
 from sky.server.requests import payloads
+from sky.server.requests.serializers import encoders
 from sky.skylet import constants
 from sky.utils import status_lib
 from sky.utils.cli_utils import status_utils
@@ -14,7 +16,7 @@ class TestCostReportCore(unittest.TestCase):
 
     def test_cost_report_default_days(self):
         """Test cost_report with default days parameter."""
-        with mock.patch('sky.global_user_state.get_clusters_from_history'
+        with mock.patch('sky.global_user_state.iter_clusters_from_history'
                        ) as mock_get_history:
             mock_get_history.return_value = []
 
@@ -31,7 +33,7 @@ class TestCostReportCore(unittest.TestCase):
 
     def test_cost_report_custom_days(self):
         """Test cost_report with custom days parameter."""
-        with mock.patch('sky.global_user_state.get_clusters_from_history'
+        with mock.patch('sky.global_user_state.iter_clusters_from_history'
                        ) as mock_get_history:
             mock_get_history.return_value = []
 
@@ -48,7 +50,7 @@ class TestCostReportCore(unittest.TestCase):
 
     def test_cost_report_none_days(self):
         """Test cost_report with None days parameter."""
-        with mock.patch('sky.global_user_state.get_clusters_from_history'
+        with mock.patch('sky.global_user_state.iter_clusters_from_history'
                        ) as mock_get_history:
             mock_get_history.return_value = []
 
@@ -66,7 +68,7 @@ class TestCostReportCore(unittest.TestCase):
     def test_cost_report_with_cluster_names_filter(self):
         """Test cost_report forwards cluster_names to history and disables
         abbreviation when a name filter is provided."""
-        with mock.patch('sky.global_user_state.get_clusters_from_history'
+        with mock.patch('sky.global_user_state.iter_clusters_from_history'
                        ) as mock_get_history:
             mock_get_history.return_value = []
 
@@ -85,7 +87,7 @@ class TestCostReportCore(unittest.TestCase):
 
     def test_cost_report_with_both_hash_and_name_filters(self):
         """Test cost_report forwards both filters when both are given."""
-        with mock.patch('sky.global_user_state.get_clusters_from_history'
+        with mock.patch('sky.global_user_state.iter_clusters_from_history'
                        ) as mock_get_history:
             mock_get_history.return_value = []
 
@@ -106,7 +108,7 @@ class TestCostReportCore(unittest.TestCase):
         import pickle
 
         # Mock get_clusters_from_history to simulate pickle errors being handled internally
-        with mock.patch('sky.global_user_state.get_clusters_from_history'
+        with mock.patch('sky.global_user_state.iter_clusters_from_history'
                        ) as mock_get_history:
             # Simulate the function handling pickle errors gracefully and returning empty list
             mock_get_history.return_value = []
@@ -121,6 +123,30 @@ class TestCostReportCore(unittest.TestCase):
                 cluster_hashes=None,
                 cluster_names=None,
                 exclude_managed_clusters=False)
+
+    def test_cost_report_encodes_resources_for_the_response(self):
+        """Full reports carry each row's resources already encoded."""
+        launched = resources_lib.Resources(cpus='2')
+        record = {
+            'name': 'c1',
+            'status': None,
+            'num_nodes': 1,
+            'resources': launched,
+            'duration': 60,
+            'launched_at': 1640995200,
+            'cluster_hash': 'h1',
+            'usage_intervals': [(1640995200, 1640995260)],
+            'user_hash': 'u1',
+        }
+        with mock.patch('sky.global_user_state.iter_clusters_from_history',
+                        return_value=iter([record])):
+            result = core.cost_report(days=30)
+
+        expected = encoders.encode_resources(launched)
+        self.assertEqual(result[0]['resources'], expected)
+        # The response encoder leaves already-encoded resources as they are.
+        self.assertEqual(
+            encoders.encode_cost_report(result)[0]['resources'], expected)
 
 
 class TestCostReportStatusUtils(unittest.TestCase):
@@ -268,6 +294,14 @@ class TestCostReportServer(unittest.TestCase):
 class TestHistoricalClusterRobustness(unittest.TestCase):
     """Test cost report handles historical clusters with missing/invalid resources gracefully."""
 
+    def setUp(self):
+        # The records' mock resources cannot be pickled for the response.
+        patcher = mock.patch.object(core.encoders,
+                                    'encode_resources',
+                                    return_value='encoded')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_cost_report_with_missing_instance_type(self):
         """Test cost report doesn't crash when historical cluster has unknown instance type."""
         # Mock a cluster record with an instance type that doesn't exist in catalogs
@@ -294,7 +328,7 @@ class TestHistoricalClusterRobustness(unittest.TestCase):
 
         # Mock catalog functions to return None for unknown instance type
         with mock.patch('sky.catalog.get_hourly_cost', return_value=None):
-            with mock.patch('sky.global_user_state.get_clusters_from_history',
+            with mock.patch('sky.global_user_state.iter_clusters_from_history',
                             return_value=[mock_cluster_record]):
 
                 # This should not raise an exception
@@ -346,7 +380,7 @@ class TestHistoricalClusterRobustness(unittest.TestCase):
         mock_cluster_record['resources'].instance_type = None
         mock_cluster_record['resources'].cloud = None
 
-        with mock.patch('sky.global_user_state.get_clusters_from_history',
+        with mock.patch('sky.global_user_state.iter_clusters_from_history',
                         return_value=[mock_cluster_record]):
 
             # Should handle gracefully and not crash
@@ -374,7 +408,7 @@ class TestHistoricalClusterRobustness(unittest.TestCase):
         mock_cluster_record['resources'].cloud = mock.Mock()
         mock_cluster_record['resources'].cloud.__str__ = lambda: 'gcp'
 
-        with mock.patch('sky.global_user_state.get_clusters_from_history',
+        with mock.patch('sky.global_user_state.iter_clusters_from_history',
                         return_value=[mock_cluster_record]):
 
             # Should handle gracefully
@@ -421,7 +455,7 @@ class TestHistoricalClusterRobustness(unittest.TestCase):
         invalid_cluster['resources'].cloud = mock.Mock()
         invalid_cluster['resources'].cloud.__str__ = lambda: 'nonexistent-cloud'
 
-        with mock.patch('sky.global_user_state.get_clusters_from_history',
+        with mock.patch('sky.global_user_state.iter_clusters_from_history',
                         return_value=[valid_cluster, invalid_cluster]):
 
             # Should return both clusters, even if one has issues
@@ -452,7 +486,7 @@ class TestHistoricalClusterRobustness(unittest.TestCase):
         controller_cluster['resources'].cloud = mock.Mock()
         controller_cluster['resources'].cloud.__str__ = lambda: 'aws'
 
-        with mock.patch('sky.global_user_state.get_clusters_from_history',
+        with mock.patch('sky.global_user_state.iter_clusters_from_history',
                         return_value=[controller_cluster]):
 
             # Should handle controller clusters without issues

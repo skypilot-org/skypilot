@@ -15,7 +15,8 @@ import pickle
 import re
 import time
 import typing
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
+from typing import (Any, Dict, Iterator, List, Literal, Optional, Set, Tuple,
+                    Union)
 import uuid
 
 import sqlalchemy
@@ -2847,6 +2848,33 @@ def get_clusters_from_history(
         exclude_managed_clusters: bool = False) -> List[Dict[str, Any]]:
     """Get cluster reports from history.
 
+    See iter_clusters_from_history for the arguments.
+
+    Returns:
+        List of cluster records with history information, most recently
+        launched first.
+    """
+    return list(
+        iter_clusters_from_history(
+            days=days,
+            abbreviate_response=abbreviate_response,
+            cluster_hashes=cluster_hashes,
+            cluster_names=cluster_names,
+            exclude_managed_clusters=exclude_managed_clusters))
+
+
+def iter_clusters_from_history(
+        days: Optional[int] = None,
+        abbreviate_response: bool = False,
+        cluster_hashes: Optional[List[str]] = None,
+        cluster_names: Optional[List[str]] = None,
+        exclude_managed_clusters: bool = False) -> Iterator[Dict[str, Any]]:
+    """Yield cluster reports from history, most recently launched first.
+
+    A row's launched resources are unpickled when its record is yielded, so a
+    caller that consumes the records as they come holds one row's objects at a
+    time instead of the whole history's.
+
     Args:
         days: If specified, only include historical clusters (those not
               currently active) that were last used within the past 'days'
@@ -2863,8 +2891,8 @@ def get_clusters_from_history(
               controller (managed jobs and services). Rows recorded before the
               is_managed column existed are treated as not managed.
 
-    Returns:
-        List of cluster records with history information.
+    Yields:
+        Cluster records with history information.
     """
     engine = _db_manager.get_engine()
 
@@ -2964,8 +2992,8 @@ def get_clusters_from_history(
     last_cluster_event_dict = _get_last_or_terminal_cluster_event_multiple(
         cluster_hashes)
 
-    records = []
-    for row in rows:
+    # Sort by launch time, descending in recency.
+    for row in sorted(rows, key=lambda row: -(row.launched_at or 0)):
         user_hash = row_to_user_hash[row.cluster_hash]
         user = user_hash_to_user.get(user_hash, None)
         user_name = user.name if user is not None else None
@@ -3022,11 +3050,7 @@ def get_clusters_from_history(
             record['last_creation_yaml'] = None
             record['last_creation_command'] = None
 
-        records.append(record)
-
-    # sort by launch time, descending in recency
-    records = sorted(records, key=lambda record: -(record['launched_at'] or 0))
-    return records
+        yield record
 
 
 @metrics_lib.time_me
