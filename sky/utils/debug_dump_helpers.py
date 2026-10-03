@@ -7,6 +7,7 @@ Extracted to avoid a circular import:
 """
 import copy
 import datetime
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import global_user_state
@@ -14,12 +15,89 @@ from sky import task as task_lib
 from sky.utils import config_utils
 from sky.utils import yaml_utils
 
+REDACTED_VALUE = '<redacted>'
+
 # Sensitive config paths to redact in debug dumps, following the same
 # pattern as provision/common.py:ProvisionConfig.get_redacted_config().
 _SENSITIVE_CONFIG_KEYS: List[Tuple[str, ...]] = [
     ('api_server', 'endpoint'),
     ('api_server', 'service_account_token'),
 ]
+
+# Config paths holding connection URIs: keep the value's shape (host and db
+# name are diagnostic signal) but mask any password component.
+_URI_CONFIG_KEYS: List[Tuple[str, ...]] = [
+    ('db',),
+]
+
+# Env var names whose values are always redacted in debug dumps, even though
+# the name does not match _SENSITIVE_ENV_VAR_NAME_RE (e.g. URI- or
+# AUTH-suffixed names).
+_SENSITIVE_ENV_VAR_NAMES = frozenset({
+    'SKYPILOT_DB_CONNECTION_URI',
+    'SKYPILOT_INITIAL_BASIC_AUTH',
+    'SKYPILOT_SERVICE_ACCOUNT_TOKEN',
+    'SKYPILOT_DOCKER_PASSWORD',
+    'AWS_SECRET_ACCESS_KEY',
+    'AWS_SESSION_TOKEN',
+    'AWS_ACCESS_KEY_ID',
+    'AZURE_CLIENT_SECRET',
+})
+
+# Any env var whose NAME matches this pattern has its value redacted in debug
+# dumps. Deliberately broad: a false positive (redacting a non-secret value
+# whose name merely contains e.g. 'KEY') only costs a little diagnostic
+# signal, while a false negative leaks a credential into a shareable dump.
+_SENSITIVE_ENV_VAR_NAME_RE = re.compile(
+    r'TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL|PASSWD', re.IGNORECASE)
+
+# Password component of URI-shaped values, userinfo style:
+# scheme://user:password@host
+_URI_USERINFO_PASSWORD_RE = re.compile(r'(://[^/@:\s]*):[^/@\s]*@')
+# Password passed as a query/connection parameter: ...password=... (also
+# matches libpq-style 'password=...' keyword/value connection strings).
+_URI_QUERY_PASSWORD_RE = re.compile(r'((?:password|passwd|pwd)=)[^&\s]+',
+                                    re.IGNORECASE)
+
+
+def is_sensitive_env_var(name: str) -> bool:
+    """Whether an env var's value must be redacted in debug dumps."""
+    return (name in _SENSITIVE_ENV_VAR_NAMES or
+            _SENSITIVE_ENV_VAR_NAME_RE.search(name) is not None)
+
+
+def mask_uri_password(value: str) -> str:
+    """Mask the password component of a URI-shaped value.
+
+    Handles both userinfo passwords (scheme://user:password@host) and
+    password query/connection parameters (...?password=...). Values with no
+    password component are returned unchanged.
+    """
+    value = _URI_USERINFO_PASSWORD_RE.sub(rf'\1:{REDACTED_VALUE}@', value)
+    value = _URI_QUERY_PASSWORD_RE.sub(rf'\g<1>{REDACTED_VALUE}', value)
+    return value
+
+
+def redact_env_vars(env_vars: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a copy of env_vars safe to include in a debug dump.
+
+    Names are kept (which vars are set is diagnostic signal). Values of
+    credential-shaped names are replaced with '<redacted>', and any other
+    string value that looks like a URI carrying a password has the password
+    component masked. Used by both the client (sdk.py) and the server
+    (debug_utils.py) for every environment section in a debug dump.
+    """
+    redacted: Dict[str, Any] = {}
+    for name, value in env_vars.items():
+        if is_sensitive_env_var(name):
+            # Keep falsy values (e.g. set-but-empty vars) as-is: there is
+            # nothing to leak, and the emptiness itself is diagnostic signal.
+            redacted[name] = REDACTED_VALUE if value else value
+        elif isinstance(value, str):
+            redacted[name] = mask_uri_password(value)
+        else:
+            redacted[name] = value
+    return redacted
 
 
 def redact_config(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,7 +110,11 @@ def redact_config(config: Dict[str, Any]) -> Dict[str, Any]:
     for field_path in _SENSITIVE_CONFIG_KEYS:
         val = config_copy.get_nested(field_path, default_value=None)
         if val is not None:
-            config_copy.set_nested(field_path, '<redacted>')
+            config_copy.set_nested(field_path, REDACTED_VALUE)
+    for field_path in _URI_CONFIG_KEYS:
+        val = config_copy.get_nested(field_path, default_value=None)
+        if isinstance(val, str):
+            config_copy.set_nested(field_path, mask_uri_password(val))
     return dict(**config_copy)
 
 

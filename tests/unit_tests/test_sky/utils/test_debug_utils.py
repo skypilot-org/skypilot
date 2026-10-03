@@ -2297,15 +2297,89 @@ class TestManifestPathTraversal:
 
 
 # ---------------------------------------------------------------------------
-# Tests for _SENSITIVE_ENV_VARS redaction
+# Tests for sensitive env var redaction
 # ---------------------------------------------------------------------------
 class TestSensitiveEnvVarRedaction:
     """Tests for sensitive environment variable redaction."""
 
-    def test_sensitive_env_vars_redacted(self):
-        """Sensitive env vars should have their values replaced with bool."""
-        assert 'SKYPILOT_DB_CONNECTION_URI' in debug_utils._SENSITIVE_ENV_VARS
-        assert 'SKYPILOT_INITIAL_BASIC_AUTH' in debug_utils._SENSITIVE_ENV_VARS
+    @pytest.mark.parametrize('name', [
+        'SKYPILOT_SOME_TOKEN',
+        'SKYPILOT_MY_SECRET',
+        'SKY_API_KEY',
+        'SKYPILOT_ADMIN_PASSWORD',
+        'SKYPILOT_CLOUD_CREDENTIALS',
+        'SKY_DB_PASSWD',
+        'skypilot_lowercase_token',
+        'SKYPILOT_ACCESS_KEY_ID',
+    ])
+    def test_credential_shaped_names_are_sensitive(self, name):
+        """Names containing TOKEN/SECRET/KEY/... match case-insensitively."""
+        assert debug_dump_helpers.is_sensitive_env_var(name)
+
+    @pytest.mark.parametrize('name', [
+        'SKYPILOT_DEBUG',
+        'SKY_NORMAL_VAR',
+        'SKYPILOT_CONFIG',
+        'SKYPILOT_USER_ID',
+    ])
+    def test_ordinary_names_are_not_sensitive(self, name):
+        assert not debug_dump_helpers.is_sensitive_env_var(name)
+
+    def test_exact_sensitive_names_still_covered(self):
+        """URI/AUTH-suffixed names that miss the pattern stay redacted."""
+        assert debug_dump_helpers.is_sensitive_env_var(
+            'SKYPILOT_DB_CONNECTION_URI')
+        assert debug_dump_helpers.is_sensitive_env_var(
+            'SKYPILOT_INITIAL_BASIC_AUTH')
+
+    def test_redact_env_vars(self):
+        env = {
+            'SKYPILOT_SOME_TOKEN': 'tok-value',
+            'SKY_API_KEY': 'key-value',
+            'SKYPILOT_DEBUG': '1',
+            'SKY_NORMAL_VAR': 'visible',
+        }
+        redacted = debug_dump_helpers.redact_env_vars(env)
+        # Names are all kept; credential-shaped values are replaced.
+        assert set(redacted) == set(env)
+        assert redacted['SKYPILOT_SOME_TOKEN'] == '<redacted>'
+        assert redacted['SKY_API_KEY'] == '<redacted>'
+        # Ordinary vars untouched.
+        assert redacted['SKYPILOT_DEBUG'] == '1'
+        assert redacted['SKY_NORMAL_VAR'] == 'visible'
+        # Input not mutated.
+        assert env['SKYPILOT_SOME_TOKEN'] == 'tok-value'
+
+    def test_redact_env_vars_keeps_empty_values(self):
+        """Set-but-empty sensitive vars stay empty (nothing to leak)."""
+        redacted = debug_dump_helpers.redact_env_vars(
+            {'SKYPILOT_SOME_TOKEN': ''})
+        assert redacted['SKYPILOT_SOME_TOKEN'] == ''
+
+    def test_redact_env_vars_masks_uri_password(self):
+        """A URI-valued var with an ordinary name gets its password masked."""
+        env = {'SKYPILOT_METRICS_URI': 'postgresql://user:hunter2@host:5432/db'}
+        redacted = debug_dump_helpers.redact_env_vars(env)
+        assert redacted['SKYPILOT_METRICS_URI'] == (
+            'postgresql://user:<redacted>@host:5432/db')
+        assert 'hunter2' not in redacted['SKYPILOT_METRICS_URI']
+
+    @pytest.mark.parametrize(
+        'value,expected',
+        [
+            ('postgresql://user:pw@host/db',
+             'postgresql://user:<redacted>@host/db'),
+            ('postgresql://host/db?user=u&password=pw&sslmode=require',
+             'postgresql://host/db?user=u&password=<redacted>&sslmode=require'),
+            ('host=h dbname=d password=pw',
+             'host=h dbname=d password=<redacted>'),
+            # No password component: unchanged.
+            ('postgresql://user@host/db', 'postgresql://user@host/db'),
+            ('https://example.com/path', 'https://example.com/path'),
+            ('plain value', 'plain value'),
+        ])
+    def test_mask_uri_password(self, value, expected):
+        assert debug_dump_helpers.mask_uri_password(value) == expected
 
     @mock.patch('sky.utils.debug_utils.sky_check.check', return_value={})
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request',
@@ -2317,6 +2391,9 @@ class TestSensitiveEnvVarRedaction:
         env_patch = {
             'SKYPILOT_DEBUG': '1',
             'SKYPILOT_DB_CONNECTION_URI': 'postgresql://secret@host/db',
+            'SKYPILOT_SOME_TOKEN': 'tok-value',
+            'SKY_API_KEY': 'key-value',
+            'SKYPILOT_METRICS_URI': 'postgresql://user:hunter2@host/db',
             'SKY_NORMAL_VAR': 'visible',
         }
         with mock.patch.dict(os.environ, env_patch, clear=False):
@@ -2326,10 +2403,20 @@ class TestSensitiveEnvVarRedaction:
             info = json.load(f)
 
         env = info['environment']
+        # Ordinary vars untouched.
         assert env['SKYPILOT_DEBUG'] == '1'
         assert env['SKY_NORMAL_VAR'] == 'visible'
-        # Sensitive var should be redacted to bool
-        assert env['SKYPILOT_DB_CONNECTION_URI'] is True
+        # Exact-name and credential-shaped names are redacted (names kept).
+        assert env['SKYPILOT_DB_CONNECTION_URI'] == '<redacted>'
+        assert env['SKYPILOT_SOME_TOKEN'] == '<redacted>'
+        assert env['SKY_API_KEY'] == '<redacted>'
+        # URI-valued ordinary var: password masked, rest kept.
+        assert env['SKYPILOT_METRICS_URI'] == (
+            'postgresql://user:<redacted>@host/db')
+        raw = json.dumps(info)
+        assert 'tok-value' not in raw
+        assert 'key-value' not in raw
+        assert 'hunter2' not in raw
 
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request',
                 return_value=None)
@@ -2874,6 +2961,18 @@ class TestRedactConfig:
         debug_dump_helpers.redact_config(config)
         assert config['api_server']['service_account_token'] == 'sky_secret'
 
+    def test_db_uri_password_masked(self):
+        """The db connection string keeps its shape, password masked."""
+        config = {'db': 'postgresql://skyuser:hunter2@dbhost:5432/skypilot'}
+        result = debug_dump_helpers.redact_config(config)
+        assert result['db'] == (
+            'postgresql://skyuser:<redacted>@dbhost:5432/skypilot')
+
+    def test_db_uri_without_password_unchanged(self):
+        config = {'db': 'postgresql://dbhost:5432/skypilot'}
+        result = debug_dump_helpers.redact_config(config)
+        assert result['db'] == 'postgresql://dbhost:5432/skypilot'
+
 
 # ---------------------------------------------------------------------------
 # Tests for _REQUEST_BODY_ALLOWLIST coverage
@@ -2981,6 +3080,51 @@ class TestSanitizeRequestBody:
         assert result['env_vars']['NORMAL_VAR'] == 'visible'
         assert result['env_vars']['AWS_SECRET_ACCESS_KEY'] == '<redacted>'
         assert result['env_vars']['SKYPILOT_DB_CONNECTION_URI'] == '<redacted>'
+
+    def test_credential_shaped_env_vars_redacted(self):
+        """Env vars with credential-shaped names are redacted by pattern."""
+
+        class FakeBody:
+
+            def model_dump(self):
+                return {
+                    'cluster_name': 'test',
+                    'env_vars': {
+                        'SKYPILOT_SOME_TOKEN': 'tok-value',
+                        'MY_API_KEY': 'key-value',
+                        'SKYPILOT_DEBUG': '1',
+                    }
+                }
+
+        request = _make_request(name='sky.stop', request_body=FakeBody())
+        result = debug_utils._sanitize_request_body(request)
+        assert result is not None
+        assert result['env_vars']['SKYPILOT_SOME_TOKEN'] == '<redacted>'
+        assert result['env_vars']['MY_API_KEY'] == '<redacted>'
+        assert result['env_vars']['SKYPILOT_DEBUG'] == '1'
+
+    def test_override_config_redacted(self):
+        """Client-supplied config overrides get the config redaction."""
+
+        class FakeBody:
+
+            def model_dump(self):
+                return {
+                    'cluster_name': 'test',
+                    'override_skypilot_config': {
+                        'api_server': {
+                            'service_account_token': 'sky_secret123',
+                        },
+                        'db': 'postgresql://user:hunter2@host/db',
+                    },
+                }
+
+        request = _make_request(name='sky.stop', request_body=FakeBody())
+        result = debug_utils._sanitize_request_body(request)
+        assert result is not None
+        override = result['override_skypilot_config']
+        assert override['api_server']['service_account_token'] == '<redacted>'
+        assert override['db'] == 'postgresql://user:<redacted>@host/db'
 
     def test_task_yaml_field_redacted(self):
         """Task YAML fields should have secrets redacted."""
