@@ -2472,6 +2472,57 @@ Default: ``null``
 
 Security context for the API server pod. Usually left empty to use defaults. Refer to `set the security context for Pod <https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod>`_ for more details.
 
+On Kubernetes 1.30 and later, the chart merges a default ``sysctls`` entry into
+this security context:
+
+.. code-block:: yaml
+
+  sysctls:
+    - name: net.ipv4.ip_local_reserved_ports
+      value: "46580,46581,50011"
+
+The ports are 46580 (the API server itself), 50011 (the multiprocessing queue
+manager), and 46581, reserved alongside them for the auxiliary listener that
+runs in the API server pod in some deployments. All three fall inside Linux's default
+ephemeral port range (``net.ipv4.ip_local_port_range``, ``32768-60999``), so
+another process in the pod's network namespace can be assigned one of them as an
+ephemeral source port. The API server then fails to bind with ``Address already
+in use`` and keeps failing across container restarts, because the network
+namespace outlives the container. Reserving the ports excludes them from
+automatic port assignment only; explicit binds are unaffected.
+
+Setting ``sysctls`` here replaces the default entirely, including when the entry
+you set is unrelated (such as ``net.core.somaxconn``) and including ``[]``, which
+is the way to opt out. All other keys you set are merged with the default rather
+than replacing it.
+
+Version gate and compatibility notes:
+
+- The sysctl only joined the kubelet's safe-sysctl allowlist in Kubernetes 1.27,
+  and an older kubelet rejects the pod with ``SysctlForbidden``. The chart can
+  only see the *control plane* version, while the allowlist is enforced by the
+  kubelet on the node, and the Kubernetes version skew policy allows a kubelet to
+  run up to three minor versions behind ``kube-apiserver``. The default is
+  therefore gated at 1.30, the lowest control plane version at which every
+  permitted kubelet is already 1.27 or newer. Below 1.30 nothing is added. If you
+  run 1.27-1.29 with all nodes on 1.27 or newer, you can set the ``sysctls``
+  entry above explicitly.
+- Helm only knows the real cluster version when it can reach the cluster.
+  ``helm install`` and ``helm upgrade`` do; ``helm template`` without
+  ``--kube-version`` falls back to the Helm binary's built-in version, which is
+  1.29 or newer. If you render manifests offline for a cluster older than 1.30,
+  pass ``--kube-version <your cluster version>``, otherwise the rendered pod
+  carries a sysctl the target kubelet may reject.
+- If the release namespace enforces Pod Security Admission with
+  ``pod-security.kubernetes.io/enforce-version`` pinned below ``v1.27``, the pod
+  is rejected with ``forbidden sysctls (net.ipv4.ip_local_reserved_ports)`` even
+  on a newer cluster, because the ``baseline`` and ``restricted`` profiles only
+  allowed this sysctl from v1.27. Set ``sysctls: []`` in that case, or unpin
+  ``enforce-version``.
+- Because the sysctl is part of the pod template, upgrading to the first chart
+  version that adds it replaces the API server pod once. Under the default
+  ``apiService.upgradeStrategy: Recreate`` that is a brief outage.
+
 Default: ``{}``
 
 .. code-block:: yaml

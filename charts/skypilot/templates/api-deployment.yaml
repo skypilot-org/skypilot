@@ -60,7 +60,50 @@ spec:
     spec:
       automountServiceAccountToken: {{ .Values.kubernetesCredentials.useApiServerCluster }}
       serviceAccountName: {{ include "skypilot.serviceAccountName" . }}
-      {{- with .Values.podSecurityContext }}
+      {{- /* Reserve this pod's fixed listen ports from the kernel's ephemeral
+             port allocator: 46580 (the API server, sky/server/common.py),
+             50011 (the multiprocessing queue manager,
+             sky/server/requests/queues/mp_queue.py), and 46581, reserved
+             alongside them for the auxiliary listener that runs in this pod in
+             some deployments. All three sit inside Linux's default ephemeral
+             port range (net.ipv4.ip_local_port_range, 32768-60999), so any
+             process sharing this pod's network namespace — for example a
+             sidecar opening an outbound connection — can be handed one of them
+             as an ephemeral *source* port, after which the API server's bind()
+             fails with "Address already in use". The failure is sticky: the
+             network namespace belongs to the pod sandbox and outlives container
+             restarts, so the container crash-loops until the pod is recreated.
+             net.ipv4.ip_local_reserved_ports removes the ports from automatic
+             assignment (connect(), bind(0)) while leaving our own explicit
+             bind() working.
+
+             Version gate: this sysctl only joined kubelet's safe-sysctl
+             allowlist in Kubernetes 1.27, and an older kubelet rejects the pod
+             outright with SysctlForbidden — strictly worse than the bug being
+             prevented. .Capabilities.KubeVersion is the *control plane*
+             version, but the allowlist is enforced by the kubelet on the node,
+             and the version skew policy lets a kubelet run up to three minor
+             versions behind kube-apiserver. So the gate is >=1.30: that is the
+             lowest control-plane version at which every kubelet the skew policy
+             permits is already >=1.27. Below it the chart renders exactly what
+             it rendered before this default existed. Note helm only knows the
+             real cluster version when it can reach the cluster — `helm
+             template` without --kube-version falls back to the helm binary's
+             built-in version, so pass --kube-version when rendering offline for
+             an older cluster.
+
+             Setting podSecurityContext.sysctls to any value, including [],
+             replaces this default entirely. merge's destination is a freshly
+             built dict, so .Values is never mutated. */}}
+      {{- $kubeMajorVersion := .Capabilities.KubeVersion.Major | trimSuffix "+" | int }}
+      {{- $kubeMinorVersion := .Capabilities.KubeVersion.Minor | trimSuffix "+" | int }}
+      {{- $sysctlSafe := or (gt $kubeMajorVersion 1) (and (eq $kubeMajorVersion 1) (ge $kubeMinorVersion 30)) }}
+      {{- $podSecurityContext := default (dict) .Values.podSecurityContext }}
+      {{- if and $sysctlSafe (not (hasKey $podSecurityContext "sysctls")) }}
+      {{- $reservedPorts := list (dict "name" "net.ipv4.ip_local_reserved_ports" "value" "46580,46581,50011") }}
+      {{- $podSecurityContext = merge (dict "sysctls" $reservedPorts) $podSecurityContext }}
+      {{- end }}
+      {{- with $podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}

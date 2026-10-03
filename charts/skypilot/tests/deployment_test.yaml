@@ -1318,3 +1318,140 @@ tests:
       - matchRegex:
           path: spec.template.spec.containers[0].args[2]
           pattern: "exec sky api start .*--host=::"
+
+  # Tests for the default net.ipv4.ip_local_reserved_ports sysctl.
+  # NOTE: helm-unittest renders with KubeVersion v1.20.0 unless a test sets
+  # `capabilities`, so the >=1.30 cases below MUST declare it explicitly.
+  # The gate is 1.30, not 1.27: the sysctl is allowlisted by the kubelet from
+  # 1.27, but the chart only sees the control plane version and the version
+  # skew policy lets a kubelet trail kube-apiserver by three minor versions.
+  - it: should reserve the API server listen ports via sysctl on Kubernetes >= 1.30
+    capabilities:
+      majorVersion: 1
+      minorVersion: 30
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.sysctls[0].name
+          value: net.ipv4.ip_local_reserved_ports
+      - equal:
+          path: spec.template.spec.securityContext.sysctls[0].value
+          value: "46580,46581,50011"
+      - lengthEqual:
+          path: spec.template.spec.securityContext.sysctls
+          count: 1
+
+  - it: should not render a pod securityContext at all on Kubernetes 1.29
+    # 1.29 is the skew boundary: a supported cluster here may still run 1.26
+    # kubelets, which reject the pod with SysctlForbidden.
+    capabilities:
+      majorVersion: 1
+      minorVersion: 29
+    asserts:
+      - notExists:
+          path: spec.template.spec.securityContext
+
+  - it: should not render a pod securityContext at all on Kubernetes < 1.27
+    # Older kubelets reject the pod with SysctlForbidden, so these clusters
+    # must render exactly what they rendered before this default existed.
+    capabilities:
+      majorVersion: 1
+      minorVersion: 26
+    asserts:
+      - notExists:
+          path: spec.template.spec.securityContext
+
+  - it: should keep a user-supplied podSecurityContext alongside the default sysctl
+    capabilities:
+      majorVersion: 1
+      minorVersion: 30
+    set:
+      podSecurityContext:
+        runAsUser: 1000
+        fsGroup: 2000
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 1000
+      - equal:
+          path: spec.template.spec.securityContext.fsGroup
+          value: 2000
+      - equal:
+          path: spec.template.spec.securityContext.sysctls[0].name
+          value: net.ipv4.ip_local_reserved_ports
+
+  - it: should render a user-supplied podSecurityContext unchanged below the gate
+    capabilities:
+      majorVersion: 1
+      minorVersion: 26
+    set:
+      podSecurityContext:
+        fsGroup: 2000
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.fsGroup
+          value: 2000
+      - notExists:
+          path: spec.template.spec.securityContext.sysctls
+
+  - it: should let a user-supplied sysctls override the default reservation
+    capabilities:
+      majorVersion: 1
+      minorVersion: 30
+    set:
+      podSecurityContext:
+        sysctls:
+          - name: net.ipv4.ip_local_port_range
+            value: "32768 46579"
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.sysctls[0].name
+          value: net.ipv4.ip_local_port_range
+      - equal:
+          path: spec.template.spec.securityContext.sysctls[0].value
+          value: "32768 46579"
+      - lengthEqual:
+          path: spec.template.spec.securityContext.sysctls
+          count: 1
+
+  - it: should let an unrelated user-supplied sysctl replace the default reservation
+    # Any sysctls value replaces the default wholesale, so a user tuning an
+    # unrelated sysctl drops the port reservation. Documented in values.yaml.
+    capabilities:
+      majorVersion: 1
+      minorVersion: 30
+    set:
+      podSecurityContext:
+        sysctls:
+          - name: net.core.somaxconn
+            value: "1024"
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.sysctls[0].name
+          value: net.core.somaxconn
+      - lengthEqual:
+          path: spec.template.spec.securityContext.sysctls
+          count: 1
+
+  - it: should render no sysctls when podSecurityContext.sysctls is set to an empty list
+    # The knob-free opt-out for clusters with exotic admission policies.
+    capabilities:
+      majorVersion: 1
+      minorVersion: 30
+    set:
+      podSecurityContext:
+        sysctls: []
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.securityContext.sysctls
+          count: 0
+
+  - it: should still apply the default sysctl when podSecurityContext is explicitly null
+    capabilities:
+      majorVersion: 1
+      minorVersion: 30
+    set:
+      podSecurityContext: null
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.sysctls[0].name
+          value: net.ipv4.ip_local_reserved_ports
