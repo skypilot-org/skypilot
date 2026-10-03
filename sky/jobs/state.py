@@ -507,6 +507,36 @@ def _unfinished_dependency_exists() -> sqlalchemy.sql.elements.ColumnElement:
         ))
 
 
+def _under_user_launch_cap(
+    max_concurrent_launches_per_user: Optional[int]
+) -> sqlalchemy.sql.elements.ColumnElement:
+    """False for a non-pool job whose user is at the per-user launch cap.
+
+    Correlates to ``job_info_table`` in the enclosing query. A user is at the
+    cap when at least ``max_concurrent_launches_per_user`` of their non-pool
+    jobs are in LAUNCHING, counted across every controller process. Pool jobs
+    neither count towards the cap nor are held back by it: they run on the
+    pool's own workers and never launch a cluster. A row with no user_hash
+    (submitted before user tracking) is never held back either.
+    """
+    if max_concurrent_launches_per_user is None:
+        return sqlalchemy.true()
+    users_at_cap = sqlalchemy.select(job_info_table.c.user_hash).where(
+        sqlalchemy.and_(
+            job_info_table.c.user_hash.isnot(None),
+            job_info_table.c.pool.is_(None),
+            job_info_table.c.schedule_state ==
+            ManagedJobScheduleState.LAUNCHING.value,
+        )).group_by(job_info_table.c.user_hash).having(
+            sqlalchemy.func.count() >=  # pylint: disable=not-callable
+            max_concurrent_launches_per_user).correlate(None).scalar_subquery()
+    return sqlalchemy.or_(
+        job_info_table.c.pool.isnot(None),
+        job_info_table.c.user_hash.is_(None),
+        ~job_info_table.c.user_hash.in_(users_at_cap),
+    )
+
+
 # Subquery that aggregates batch_state into per-job progress counts.
 # Used by jobs-queue queries to supply batch_total_batches and
 # batch_completed_batches without denormalized columns on job_info.
@@ -3595,11 +3625,20 @@ def get_pool_worker_used_resources(
 
 @db_retries.retry_async
 async def get_waiting_job_async(
-        pid: int, pid_started_at: float) -> Optional[Dict[str, Any]]:
+    pid: int,
+    pid_started_at: float,
+    max_concurrent_launches_per_user: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
 
     Selects the highest-priority WAITING or ALIVE_WAITING job and atomically
     transitions it to LAUNCHING state to prevent race conditions.
+
+    If ``max_concurrent_launches_per_user`` is set, a non-pool job is skipped
+    while its user already has that many non-pool jobs in LAUNCHING, so one
+    user's batch cannot hold every launch slot while other users' jobs wait.
+    The skipped job stays WAITING and is picked up once one of the user's
+    launches completes.
 
     Returns the job information if a job was successfully transitioned to
     LAUNCHING, or None if no suitable job was found.
@@ -3647,6 +3686,7 @@ async def get_waiting_job_async(
                 ),
                 # A job waits until every job it depends on is DONE.
                 ~_unfinished_dependency_exists(),
+                _under_user_launch_cap(max_concurrent_launches_per_user),
             )).order_by(
                 job_info_table.c.priority.desc(),
                 job_info_table.c.spot_job_id.asc(),
