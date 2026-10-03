@@ -1487,6 +1487,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         config = auth.setup_seeweb_authentication(config)
     elif isinstance(cloud, clouds.Mithril):
         config = auth.setup_mithril_authentication(config)
+    elif isinstance(cloud, clouds.Daytona):
+        config = auth.setup_daytona_authentication(config)
     elif isinstance(cloud, clouds.Verda):
         config = auth.setup_verda_authentication(config)
     else:
