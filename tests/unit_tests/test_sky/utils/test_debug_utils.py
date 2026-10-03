@@ -21,12 +21,19 @@ from sky.adaptors import kubernetes as adaptors_kubernetes
 from sky.jobs import utils as managed_job_utils
 from sky.server import constants as server_constants
 from sky.server.requests import log_provider as log_provider_lib
+from sky.server.requests import payloads
 from sky.server.requests import request_names
+from sky.server.requests import requests as requests_lib
 from sky.skylet import constants as skylet_constants
 from sky.utils import common
 from sky.utils import debug_dump_helpers
 from sky.utils import debug_utils
 from sky.utils import status_lib
+
+
+def _dummy_entrypoint():
+    """Picklable no-op entrypoint for constructing real Request rows."""
+    return None
 
 
 class _StubReachability:
@@ -47,6 +54,8 @@ def _make_context(
     errors: Optional[List[Dict[str, str]]] = None,
     request_ids_via_job: Optional[Set[str]] = None,
     request_ids_via_cluster: Optional[Set[str]] = None,
+    request_ids_recent: Optional[Set[str]] = None,
+    recent_request_scan: Optional[Dict[str, int]] = None,
 ) -> debug_utils.DebugDumpContext:
     """Helper to create a DebugDumpContext."""
     return debug_utils.DebugDumpContext(
@@ -55,6 +64,9 @@ def _make_context(
         managed_job_ids=managed_job_ids or set(),
         request_ids_via_job=request_ids_via_job or set(),
         request_ids_via_cluster=request_ids_via_cluster or set(),
+        request_ids_recent=request_ids_recent or set(),
+        recent_request_scan=recent_request_scan
+        if recent_request_scan is not None else {},
         errors=errors if errors is not None else [],
         timed_out_ops=[],
     )
@@ -1083,8 +1095,10 @@ class TestPopulateRecentContext:
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_still_running_requests_included(self, mock_get_tasks,
                                              mock_get_clusters, mock_queue_v2):
-        """Requests without finished_at (still running) should be included
-        because the DB filter uses (finished_at >= ? OR finished_at IS NULL)."""
+        """Unfinished requests created within the window should be
+        included: the DB filter returns them via the
+        finished_at IS NULL arm, and the created_at backstop keeps them
+        (they are recent activity)."""
         running_request = _make_request(request_id='req-running',
                                         finished_at=None)
         mock_get_tasks.return_value = [running_request]
@@ -1097,6 +1111,201 @@ class TestPopulateRecentContext:
                                              reachability=_StubReachability())
 
         assert 'req-running' in ctx['request_ids']
+        assert ctx['recent_request_scan']['included_unfinished'] == 1
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_stale_unfinished_requests_excluded(self, mock_get_tasks,
+                                                mock_get_clusters,
+                                                mock_queue_v2):
+        """Unfinished requests older than the window must be excluded.
+
+        The DB finished_after filter matches every finished_at IS NULL row
+        regardless of age (including terminal rows, e.g. CANCELLED, whose
+        finished_at was never written); without the created_at backstop
+        these stale rows match any cutoff and explode the dump's context
+        via cross-linking."""
+        now = time.time()
+        stale_request = _make_request(request_id='req-stale',
+                                      created_at=now - 93 * 24 * 3600,
+                                      finished_at=None,
+                                      status='CANCELLED')
+        mock_get_tasks.return_value = [stale_request]
+        mock_get_clusters.return_value = []
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
+
+        ctx = _make_context()
+        # SkyPilot loggers do not propagate, so caplog cannot see the
+        # record; patch the logger directly (see test_db_retries.py).
+        with mock.patch.object(debug_utils.logger, 'warning') as warn:
+            debug_utils._populate_recent_context(
+                ctx, minutes=60.0, reachability=_StubReachability())
+
+        assert 'req-stale' not in ctx['request_ids']
+        assert ctx['recent_request_scan']['skipped_stale_unfinished'] == 1
+        assert ctx['recent_request_scan']['included'] == 0
+        # The aggregate composition line is a finished_at-hygiene signal:
+        # it must surface at WARNING (not debug) whenever stale rows were
+        # skipped.
+        assert any(
+            'Recent requests scan:' in c.args[0] for c in warn.call_args_list)
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_finished_in_window_with_old_created_at_included(
+            self, mock_get_tasks, mock_get_clusters, mock_queue_v2):
+        """A request created before the window but finished within it is
+        still recent activity: the created_at backstop only gates
+        unfinished rows, never finished ones."""
+        now = time.time()
+        request = _make_request(request_id='req-finished',
+                                created_at=now - 93 * 24 * 3600,
+                                finished_at=now - 60)
+        mock_get_tasks.return_value = [request]
+        mock_get_clusters.return_value = []
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
+
+        ctx = _make_context()
+        with mock.patch.object(debug_utils.logger, 'warning') as warn, \
+             mock.patch.object(debug_utils.logger, 'debug') as debug_log:
+            debug_utils._populate_recent_context(
+                ctx, minutes=60.0, reachability=_StubReachability())
+
+        assert 'req-finished' in ctx['request_ids']
+        assert ctx['recent_request_scan']['included'] == 1
+        assert ctx['recent_request_scan']['included_unfinished'] == 0
+        assert ctx['recent_request_scan']['skipped_stale_unfinished'] == 0
+        # Nothing was skipped, so the composition line stays at debug.
+        assert not any(
+            'Recent requests scan:' in c.args[0] for c in warn.call_args_list)
+        assert any('Recent requests scan:' in c.args[0]
+                   for c in debug_log.call_args_list)
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_finished_before_cutoff_dropped_by_window_check(
+            self, mock_get_tasks, mock_get_clusters, mock_queue_v2):
+        """A finished row with finished_at < cutoff must never enter the
+        context, even if the DB-level filter fails to exclude it (e.g. a
+        custom request backend with drifted finished_after semantics):
+        the client-side window check drops and counts it. Fail-closed
+        counterpart of the sqlite filter's 'finished_at >= ?' arm."""
+        now = time.time()
+        stale_finished = _make_request(request_id='req-stale-finished',
+                                       created_at=now - 93 * 24 * 3600,
+                                       finished_at=now - 93 * 24 * 3600 + 60,
+                                       status='SUCCEEDED')
+        mock_get_tasks.return_value = [stale_finished]
+        mock_get_clusters.return_value = []
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
+
+        ctx = _make_context()
+        debug_utils._populate_recent_context(ctx,
+                                             minutes=60.0,
+                                             reachability=_StubReachability())
+
+        assert 'req-stale-finished' not in ctx['request_ids']
+        assert ctx['recent_request_scan']['dropped_by_window_check'] == 1
+        assert ctx['recent_request_scan']['included'] == 0
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_recent_scan_tags_only_new_request_ids(self, mock_get_tasks,
+                                                   mock_get_clusters,
+                                                   mock_queue_v2):
+        """The scan tags only IDs it is first to add to the context: an
+        ID that was already user-seeded is matched but not re-tagged, so
+        summary.json attributes it to the user, not the scan (mirrors the
+        via_cluster / via_job tag-only-new idiom)."""
+        now = time.time()
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-new',
+                          created_at=now - 60,
+                          finished_at=None),
+            _make_request(request_id='req-seeded',
+                          created_at=now - 60,
+                          finished_at=None),
+        ]
+        mock_get_clusters.return_value = []
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
+
+        ctx = _make_context(request_ids={'req-seeded'})
+        debug_utils._populate_recent_context(ctx,
+                                             minutes=60.0,
+                                             reachability=_StubReachability())
+
+        assert ctx['request_ids'] == {'req-new', 'req-seeded'}
+        assert ctx['request_ids_recent'] == {'req-new'}
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_scan_composition_counts(self, mock_get_tasks, mock_get_clusters,
+                                     mock_queue_v2):
+        """The scan should record its composition (scanned / included /
+        unfinished among included / stale skipped / dropped by the
+        client-side window check / duration) on the context so it can be
+        surfaced in summary.json."""
+        now = time.time()
+        mock_get_tasks.return_value = [
+            # Finished within the window.
+            _make_request(request_id='req-a', finished_at=now - 60),
+            # Unfinished, created within the window.
+            _make_request(request_id='req-b',
+                          created_at=now - 60,
+                          finished_at=None),
+            # Unfinished, created before the window (stale).
+            _make_request(request_id='req-c',
+                          created_at=now - 93 * 24 * 3600,
+                          finished_at=None,
+                          status='CANCELLED'),
+        ]
+        mock_get_clusters.return_value = []
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
+
+        ctx = _make_context()
+        debug_utils._populate_recent_context(ctx,
+                                             minutes=60.0,
+                                             reachability=_StubReachability())
+
+        assert ctx['request_ids'] == {'req-a', 'req-b'}
+        # Per-key (not dict equality): duration_s is a measured value and
+        # would make an exact-equality assertion flaky. Every successful
+        # scan must produce the same six keys.
+        scan = ctx['recent_request_scan']
+        assert scan['scanned'] == 3
+        assert scan['included'] == 2
+        assert scan['included_unfinished'] == 1
+        assert scan['skipped_stale_unfinished'] == 1
+        assert scan['dropped_by_window_check'] == 0
+        assert scan['duration_s'] >= 0
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_scan_fetches_created_at_for_backstop(self, mock_get_tasks,
+                                                  mock_get_clusters,
+                                                  mock_queue_v2):
+        """The scan must fetch created_at (and status, for the log line)
+        alongside finished_at: the created_at backstop and the enriched
+        per-request log line both depend on them."""
+        mock_get_tasks.return_value = []
+        mock_get_clusters.return_value = []
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
+
+        ctx = _make_context()
+        debug_utils._populate_recent_context(ctx,
+                                             minutes=60.0,
+                                             reachability=_StubReachability())
+
+        task_filter = mock_get_tasks.call_args[0][0]
+        assert 'created_at' in task_filter.fields
+        assert 'status' in task_filter.fields
+        assert 'finished_at' in task_filter.fields
 
     @mock.patch('sky.jobs.server.core.queue_v2')
     @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
@@ -1141,6 +1350,115 @@ class TestPopulateRecentContext:
                                              reachability=_StubReachability())
 
         assert 'newly-launched' in ctx['cluster_names']
+
+
+# ---------------------------------------------------------------------------
+# Tests for the recent-activity request scan against a real requests DB.
+#
+# The tests above mock get_request_tasks; these persist real Request rows
+# through the sqlite backend so the scan's client-side backstop is
+# exercised through the actual SQL + row-decode path.
+# ---------------------------------------------------------------------------
+class TestPopulateRecentContextRealDatabase:
+
+    @pytest.fixture(autouse=True)
+    def isolated_request_database(self, tmp_path):
+        """Create an isolated request database for each test.
+
+        Deliberately duplicated from
+        tests/unit_tests/test_sky/server/requests/test_requests.py rather
+        than imported across test modules (cross-module test imports are
+        fragile).
+        """
+        temp_db_path = tmp_path / 'requests.db'
+        temp_log_path = tmp_path / 'logs'
+        temp_log_path.mkdir()
+        temp_debug_log_path = tmp_path / 'debug_logs'
+        temp_debug_log_path.mkdir()
+        with mock.patch('sky.server.constants.API_SERVER_REQUEST_DB_PATH',
+                        str(temp_db_path)):
+            with mock.patch('sky.server.constants.REQUEST_LOG_PATH_PREFIX',
+                            str(temp_log_path)):
+                with mock.patch('sky.sky_logging.DEBUG_LOG_DIR',
+                                str(temp_debug_log_path)):
+                    # Reset the global database variable to force
+                    # re-initialization.
+                    requests_lib._DB = None
+                    yield
+                    requests_lib._DB = None
+
+    @staticmethod
+    def _persist_request(request_id: str, status: 'requests_lib.RequestStatus',
+                         created_at: float,
+                         finished_at: Optional[float]) -> None:
+        """Persist a real Request row with an explicit created_at."""
+        request = requests_lib.Request(request_id=request_id,
+                                       name='test-request',
+                                       entrypoint=_dummy_entrypoint,
+                                       request_body=payloads.RequestBody(),
+                                       status=status,
+                                       created_at=created_at,
+                                       user_id='test-user',
+                                       finished_at=finished_at)
+        requests_lib._add_or_update_request_no_lock(request)
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
+    @mock.patch('sky.utils.debug_utils._jobs_controller_unreachable_context')
+    def test_scan_through_real_db(self, mock_dead_context, mock_get_clusters,
+                                  mock_queue_v2):
+        """The four production-mirroring row shapes: only the
+        fresh-unfinished and old-created-finished-in-window rows are
+        recent activity; the stale-NULL row is skipped by the created_at
+        backstop and the finished-long-ago row never matches the DB
+        filter."""
+        now = time.time()
+        requests_lib._ensure_db_initialized()
+        # 1. Recent-created, unfinished: recent activity.
+        self._persist_request('req-fresh-unfinished',
+                              requests_lib.RequestStatus.RUNNING,
+                              created_at=now - 60,
+                              finished_at=None)
+        # 2. Old-created, terminal status, finished_at never written
+        #    (the production stale shape): must be excluded.
+        self._persist_request('req-stale-unfinished',
+                              requests_lib.RequestStatus.CANCELLED,
+                              created_at=now - 93 * 24 * 3600,
+                              finished_at=None)
+        # 3. Old-created, finished within the window: recent activity --
+        #    the backstop only gates unfinished rows.
+        self._persist_request('req-old-finished-in-window',
+                              requests_lib.RequestStatus.SUCCEEDED,
+                              created_at=now - 93 * 24 * 3600,
+                              finished_at=now - 60)
+        # 4. Finished long ago: excluded by the DB-level filter itself.
+        self._persist_request('req-finished-long-ago',
+                              requests_lib.RequestStatus.SUCCEEDED,
+                              created_at=now - 93 * 24 * 3600,
+                              finished_at=now - 93 * 24 * 3600 + 60)
+        mock_get_clusters.return_value = []
+        mock_dead_context.return_value = None
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
+
+        ctx = _make_context()
+        debug_utils._populate_recent_context(ctx,
+                                             minutes=60.0,
+                                             reachability=_StubReachability())
+
+        assert ctx['request_ids'] == {
+            'req-fresh-unfinished', 'req-old-finished-in-window'
+        }
+        assert ctx['request_ids_recent'] == ctx['request_ids']
+        scan = ctx['recent_request_scan']
+        # The finished-long-ago row is excluded by the SQL
+        # ('finished_at >= ? OR finished_at IS NULL'), so only three rows
+        # are scanned.
+        assert scan['scanned'] == 3
+        assert scan['included'] == 2
+        assert scan['included_unfinished'] == 1
+        assert scan['skipped_stale_unfinished'] == 1
+        assert scan['dropped_by_window_check'] == 0
+        assert scan['duration_s'] >= 0
 
 
 # ---------------------------------------------------------------------------
@@ -1615,6 +1933,129 @@ class TestCreateDebugDump:
             assert collected['request_count'] >= 2  # At least our 2 + system
             assert collected['cluster_count'] >= 1
             assert collected['managed_job_count'] >= 1
+
+    @mock.patch('sky.utils.debug_utils._dump_managed_job_info')
+    @mock.patch('sky.utils.debug_utils._dump_cluster_info')
+    @mock.patch('sky.utils.debug_utils._dump_request_id_info')
+    @mock.patch('sky.utils.debug_utils._dump_server_info')
+    @mock.patch('sky.utils.debug_utils._get_clusters_from_managed_jobs')
+    @mock.patch('sky.utils.debug_utils._get_clusters_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
+    @mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
+    def test_summary_contains_provenance(
+            self, mock_req_from_clusters, mock_req_from_jobs,
+            mock_jobs_from_req, mock_clusters_from_req, mock_clusters_from_jobs,
+            mock_dump_server, mock_dump_requests, mock_dump_clusters,
+            mock_dump_jobs, tmp_path):
+        """Summary should break down where the collected requests came
+        from, so a scope explosion is explainable from summary.json."""
+        with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
+                        str(tmp_path / 'debug_dumps')):
+            result = debug_utils.create_debug_dump(request_ids=['req-1'],)
+
+        with zipfile.ZipFile(result, 'r') as zf:
+            summary_files = [
+                n for n in zf.namelist() if n.endswith('summary.json')
+            ]
+            summary_data = json.loads(zf.read(summary_files[0]))
+
+        provenance = summary_data['provenance']
+        assert provenance['user_requested'] == 1
+        # Cross-link helpers are mocked out in this test.
+        assert provenance['via_recent_scan'] == 0
+        assert provenance['via_cluster'] == 0
+        assert provenance['via_job'] == 0
+        # System daemon request IDs are always added.
+        assert provenance['system'] >= 1
+        # The six buckets are exclusive and must sum exactly to the
+        # collected request count; untracked is a tripwire for a context
+        # adder that forgets to record provenance.
+        assert provenance['untracked'] == 0
+        bucket_sum = sum(provenance[bucket] for bucket in [
+            'user_requested', 'via_recent_scan', 'via_cluster', 'via_job',
+            'system', 'untracked'
+        ])
+        assert bucket_sum == summary_data['collected']['request_count']
+        # No recent_minutes, so the recent scan did not run.
+        assert provenance['recent_scan'] == {}
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    @mock.patch('sky.utils.debug_utils._jobs_controller_unreachable_context')
+    @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    @mock.patch('sky.utils.debug_utils._dump_managed_job_info')
+    @mock.patch('sky.utils.debug_utils._dump_cluster_info')
+    @mock.patch('sky.utils.debug_utils._dump_request_id_info')
+    @mock.patch('sky.utils.debug_utils._dump_server_info')
+    @mock.patch('sky.utils.debug_utils._get_clusters_from_managed_jobs')
+    @mock.patch('sky.utils.debug_utils._get_clusters_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
+    @mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
+    def test_summary_provenance_with_recent_scan(
+            self, mock_req_from_clusters, mock_req_from_jobs,
+            mock_jobs_from_req, mock_clusters_from_req, mock_clusters_from_jobs,
+            mock_dump_server, mock_dump_requests, mock_dump_clusters,
+            mock_dump_jobs, mock_get_tasks, mock_get_clusters,
+            mock_dead_context, mock_queue_v2, tmp_path):
+        """End-to-end with recent_minutes: _populate_recent_context runs
+        for real (only its DB / kube-context / managed-jobs dependencies
+        are mocked), so the provenance buckets must attribute the
+        scan-added request to via_recent_scan and the six-bucket sum
+        invariant must hold on the produced summary.json."""
+        now = time.time()
+        mock_get_tasks.return_value = [
+            # In-window: unfinished, created within the window.
+            _make_request(request_id='req-recent',
+                          created_at=now - 60,
+                          finished_at=None),
+            # Stale: unfinished, created long before the window.
+            _make_request(request_id='req-stale',
+                          created_at=now - 93 * 24 * 3600,
+                          finished_at=None,
+                          status='CANCELLED'),
+        ]
+        mock_get_clusters.return_value = []
+        mock_dead_context.return_value = None
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
+
+        with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
+                        str(tmp_path / 'debug_dumps')):
+            result = debug_utils.create_debug_dump(request_ids=['req-1'],
+                                                   recent_minutes=60.0)
+
+        with zipfile.ZipFile(result, 'r') as zf:
+            summary_files = [
+                n for n in zf.namelist() if n.endswith('summary.json')
+            ]
+            summary_data = json.loads(zf.read(summary_files[0]))
+
+        provenance = summary_data['provenance']
+        collected = summary_data['collected']
+        # req-1 was user-requested; req-recent was first added by the
+        # recent scan; the stale row was skipped by the created_at
+        # backstop.
+        assert provenance['user_requested'] == 1
+        assert provenance['via_recent_scan'] == 1
+        assert provenance['via_cluster'] == 0
+        assert provenance['via_job'] == 0
+        assert provenance['system'] >= 1
+        assert provenance['untracked'] == 0
+        bucket_sum = sum(provenance[bucket] for bucket in [
+            'user_requested', 'via_recent_scan', 'via_cluster', 'via_job',
+            'system', 'untracked'
+        ])
+        assert bucket_sum == collected['request_count']
+        assert 'req-recent' in collected['request_ids']
+        assert 'req-stale' not in collected['request_ids']
+        scan = provenance['recent_scan']
+        assert scan['scanned'] == 2
+        assert scan['included'] == 1
+        assert scan['included_unfinished'] == 1
+        assert scan['skipped_stale_unfinished'] == 1
+        assert scan['dropped_by_window_check'] == 0
+        assert scan['duration_s'] >= 0
 
     @mock.patch('sky.utils.debug_utils._dump_managed_job_info')
     @mock.patch('sky.utils.debug_utils._dump_cluster_info')
