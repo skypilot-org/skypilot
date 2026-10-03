@@ -83,12 +83,28 @@ def _open_ports_using_ingress(
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     overrides = provider_config.get('cluster_config_overrides')
     # Check if an ingress controller exists
-    if not network_utils.ingress_controller_exists(context):
+    settings = network_utils.get_ingress_settings(context, overrides)
+    if not network_utils.ingress_controller_exists(context,
+                                                   settings['class_name']):
         raise Exception(
-            'Ingress controller not found. '
-            'Install Nginx ingress controller first: '
-            'https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md.'  # pylint: disable=line-too-long
-        )
+            f'No IngressClass named {settings["class_name"]!r} in the cluster. '
+            'Install the Nginx ingress controller '
+            '(https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md), '  # pylint: disable=line-too-long
+            'or set kubernetes.ingress.class_name to the IngressClass of the '
+            'controller you run.')
+    # An IngressClass can exist without the controller Service that endpoints
+    # are resolved from: a Gateway API controller, a leftover CRD, or nginx
+    # installed under other names. Creating Ingress objects anyway leaves the
+    # cluster in PROVISIONING with nothing in the logs pointing at networking.
+    if network_utils.get_ingress_controller_service(context, overrides) is None:
+        raise Exception(
+            'Ingress controller Service '
+            f'{settings["controller_namespace"]}/'
+            f'{settings["controller_service"]} not found; SkyPilot resolves '
+            'ingress endpoints from it. Install the Nginx ingress controller, '
+            'or set kubernetes.ingress.controller_service and '
+            'kubernetes.ingress.controller_namespace to the Service of the '
+            'controller you run.')
 
     # URL path namespace must match the Service's namespace (resolved above
     # from `provider_config`); per-workspace overrides can make these differ.
@@ -293,9 +309,22 @@ def _query_ports_for_ingress(
 ) -> Dict[int, List[common.Endpoint]]:
     context = provider_config.get(
         'context', kubernetes_utils.get_current_kube_config_context_name())
-    ingress_details = network_utils.get_ingress_external_ip_and_ports(context)
+    # Must match what _open_ports_using_ingress resolved: a per-launch
+    # override selects the controller Service that endpoints come from, so
+    # dropping it here would query the default controller and find nothing.
+    overrides = provider_config.get('cluster_config_overrides')
+    ingress_details = network_utils.get_ingress_external_ip_and_ports(
+        context, overrides)
     external_ip, external_ports = ingress_details
     if external_ip is None:
+        # Do not raise: this runs on every status refresh, and returning no
+        # endpoints keeps polling alive. The warning is the only signal the
+        # user gets that the ingress controller is not where we look for it.
+        settings = network_utils.get_ingress_settings(context, overrides)
+        logger.warning('Cannot resolve ingress endpoints: Service '
+                       f'{settings["controller_namespace"]}/'
+                       f'{settings["controller_service"]} not found. See '
+                       'kubernetes.ingress in ~/.sky/config.yaml.')
         return {}
 
     namespace = provider_config.get(
