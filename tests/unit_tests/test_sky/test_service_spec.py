@@ -1,4 +1,5 @@
 """Tests for SkyServiceSpec, specifically pool configuration validation."""
+# pylint: disable=missing-class-docstring
 import pickle
 
 import pytest
@@ -177,9 +178,30 @@ class TestReadinessProbeConfiguration:
             'readiness_probe': '/',
         })
 
+        assert spec.readiness_scheme is None
         assert (spec.endpoint_probe_interval_seconds ==
                 serve_constants.DEFAULT_ENDPOINT_PROBE_INTERVAL_SECONDS)
         assert spec.consecutive_failure_threshold_timeout is None
+
+    def test_readiness_probe_accepts_https_scheme(self):
+        spec = service_spec.SkyServiceSpec.from_yaml_config({
+            'readiness_probe': {
+                'path': '/health',
+                'scheme': 'https',
+            },
+        })
+
+        assert spec.readiness_scheme == 'https'
+        assert spec.to_yaml_config()['readiness_probe']['scheme'] == 'https'
+
+    def test_readiness_probe_rejects_invalid_scheme(self):
+        with pytest.raises(ValueError, match='Invalid service YAML'):
+            service_spec.SkyServiceSpec.from_yaml_config({
+                'readiness_probe': {
+                    'path': '/health',
+                    'scheme': 'ftp',
+                },
+            })
 
     def test_readiness_probe_accepts_probe_overrides(self):
         spec = service_spec.SkyServiceSpec.from_yaml_config({
@@ -201,6 +223,7 @@ class TestReadinessProbeConfiguration:
             'replicas': 1,
         })
         del spec._endpoint_probe_interval_seconds
+        del spec._readiness_scheme
         del spec._lb_stream_timeout_seconds
         del spec._consecutive_failure_threshold_timeout
 
@@ -208,6 +231,7 @@ class TestReadinessProbeConfiguration:
 
         assert (restored.endpoint_probe_interval_seconds ==
                 serve_constants.DEFAULT_ENDPOINT_PROBE_INTERVAL_SECONDS)
+        assert restored.readiness_scheme is None
         assert (restored.lb_stream_timeout_seconds ==
                 serve_constants.DEFAULT_LB_STREAM_TIMEOUT)
         assert restored.consecutive_failure_threshold_timeout is None
@@ -231,6 +255,7 @@ class TestLoadBalancerConfiguration:
         config = spec.to_yaml_config()
 
         assert 'load_balancer' not in config
+        assert 'scheme' not in config['readiness_probe']
         assert 'endpoint_probe_interval_seconds' not in config[
             'readiness_probe']
         assert 'consecutive_failure_threshold_timeout' not in config[

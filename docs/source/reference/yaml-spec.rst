@@ -1323,6 +1323,7 @@ Syntax
   service:
     :ref:`readiness_probe <yaml-spec-service-readiness-probe>`:
       :ref:`path <yaml-spec-service-readiness-probe-path>`: /v1/models
+      :ref:`scheme <yaml-spec-service-readiness-probe-scheme>`: https
       :ref:`post_data <yaml-spec-service-readiness-probe-post-data>`: {'model_name': 'model'}
       :ref:`initial_delay_seconds <yaml-spec-service-readiness-probe-initial-delay-seconds>`: 1200
       :ref:`timeout_seconds <yaml-spec-service-readiness-probe-timeout-seconds>`: 15
@@ -1375,6 +1376,7 @@ OR
   service:
     readiness_probe:
       path: /v1/models
+      scheme: https
       post_data: '{"model_name": "my_model"}'
       initial_delay_seconds: 600
       timeout_seconds: 10
@@ -1399,6 +1401,35 @@ Path to probe. SkyServe sends periodic requests to this path after the initial d
   service:
     readiness_probe:
       path: /v1/models
+
+
+.. _yaml-spec-service-readiness-probe-scheme:
+
+``service.readiness_probe.scheme``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+URL scheme for readiness checks (optional). By default, SkyServe uses the
+scheme returned by the replica endpoint, which is typically ``http``. Set this
+to ``https`` to override that scheme when the endpoint accepts HTTPS and
+presents a certificate trusted by the SkyServe controller.
+
+This setting only affects readiness probes. It does not enable HTTPS for
+requests proxied from the SkyServe load balancer to replicas.
+
+.. note::
+
+  Explicitly setting ``scheme`` requires a SkyServe controller running a
+  version that supports this field. If a service created by an older client
+  already has a controller, tear down and recreate that controller with the
+  upgraded SkyPilot version before setting ``scheme``. The default behavior
+  omits this field and remains compatible with older controllers.
+
+.. code-block:: yaml
+
+  service:
+    readiness_probe:
+      path: /health
+      scheme: https
 
 
 .. _yaml-spec-service-readiness-probe-post-data:
