@@ -2,6 +2,7 @@
 import concurrent.futures
 import contextlib
 import datetime
+import functools
 import json
 import os
 import posixpath
@@ -3563,6 +3564,224 @@ class TestDumpRequestIdInfoLogCollection:
 
         request_dir = tmp_path / 'requests' / 'req-2'
         assert (request_dir / 'request.log').read_text() == 'local content'
+        assert not errors
+
+
+class TestDumpRequestIdInfoParallelism:
+    """_dump_request_id_info dumps requests on a bounded worker pool."""
+
+    def test_requests_dump_concurrently(self, tmp_path):
+        """The per-request loop must actually run in parallel.
+
+        get_request blocks on a barrier sized to the worker count: with a
+        pool of _REQUEST_DUMP_WORKERS threads and at least that many
+        requests, the workers meet at the barrier and pass. If the loop
+        regresses to serial, the barrier times out, get_request raises, and
+        the failures are recorded in errors.
+        """
+        barrier = threading.Barrier(debug_utils._REQUEST_DUMP_WORKERS,
+                                    timeout=10)
+
+        def _blocked_get_request(request_id, fields=None):
+            del request_id, fields  # unused
+            barrier.wait()
+
+        with mock.patch('sky.utils.debug_utils.requests_lib.get_request',
+                        side_effect=_blocked_get_request):
+            request_ids = {
+                f'req-{i}' for i in range(debug_utils._REQUEST_DUMP_WORKERS * 2)
+            }
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info(request_ids, str(tmp_path),
+                                              errors)
+
+        assert not errors
+        assert not list((tmp_path / 'requests').glob('req-*/request_info.json'))
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_output_order_is_sorted_not_completion_order(
+            self, mock_get_request, tmp_path):
+        """Errors and timings must be merged in sorted request-id order.
+
+        req-a's DB fetch is slowed so the other requests complete first;
+        completion order must not leak into errors.json or _timings.json.
+        """
+
+        def _get_request(request_id, fields=None):
+            del fields  # unused
+            if request_id == 'req-a':
+                time.sleep(0.2)
+            raise RuntimeError(f'boom {request_id}')
+
+        mock_get_request.side_effect = _get_request
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_request_id_info({'req-d', 'req-b', 'req-a', 'req-c'},
+                                          str(tmp_path), errors)
+
+        assert [e['resource'] for e in errors
+               ] == ['req-a', 'req-b', 'req-c', 'req-d']
+        timings = json.loads(
+            (tmp_path / 'requests' / '_timings.json').read_text())
+        assert [t['request_id'] for t in timings
+               ] == ['req-a', 'req-b', 'req-c', 'req-d']
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_deadline_expiry_skips_remaining_requests(self, mock_get_request,
+                                                      tmp_path):
+        """Budget exhaustion yields one skip record per remaining request.
+
+        Mirrors the serial loop's semantics: no DB fetch, no per-request
+        dir, and no timing entry for skipped requests.
+        """
+        mock_get_request.return_value = None
+        request_ids = {f'req-{i}' for i in range(5)}
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_request_id_info(request_ids,
+                                          str(tmp_path),
+                                          errors,
+                                          deadline=time.monotonic() - 1)
+
+        assert [e['resource'] for e in errors] == sorted(request_ids)
+        assert all(
+            'Skipped: overall debug-dump deadline exceeded.' in e['error']
+            for e in errors)
+        mock_get_request.assert_not_called()
+        assert not list((tmp_path / 'requests').glob('req-*'))
+        timings = json.loads(
+            (tmp_path / 'requests' / '_timings.json').read_text())
+        assert timings == []
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_one_request_failure_does_not_abort_section(self, mock_get_request,
+                                                        tmp_path):
+        """A failing request records its error; the others are still dumped."""
+
+        def _maybe_fail(request_id, fields=None):
+            del fields  # unused
+            if request_id == 'req-b':
+                raise RuntimeError('DB hiccup')
+            return _make_request(request_id=request_id)
+
+        mock_get_request.side_effect = _maybe_fail
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_request_id_info({'req-a', 'req-b', 'req-c'},
+                                          str(tmp_path), errors)
+
+        assert [e['resource'] for e in errors] == ['req-b']
+        for request_id in ('req-a', 'req-c'):
+            assert (tmp_path / 'requests' / request_id /
+                    'request_info.json').exists()
+
+    def test_log_copy_timeout_records_orphan_under_pool(self, tmp_path):
+        """A timed-out log copy is still recorded when running under the
+        pool: the _run_with_deadline wrappers keep working per request, and
+        the section completes instead of hanging."""
+        provider = mock.MagicMock()
+
+        def _slow_copy(request_id, log_type, dest_path):
+            del request_id, log_type, dest_path  # unused
+            time.sleep(2)
+            return True
+
+        provider.copy_log_file.side_effect = _slow_copy
+        with mock.patch(
+                'sky.utils.debug_utils.log_provider.get_log_provider',
+                return_value=provider), \
+             mock.patch('sky.utils.debug_utils.requests_lib.get_request',
+                        return_value=None):
+            errors: List[Dict[str, str]] = []
+            orphans: List[Dict[str, Any]] = []
+            debug_utils._dump_request_id_info({'req-1', 'req-2'},
+                                              str(tmp_path),
+                                              errors,
+                                              deadline=time.monotonic() + 0.2,
+                                              orphans=orphans)
+
+        assert orphans
+        assert errors
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_bad_request_id_does_not_abort_section(self, mock_get_request,
+                                                   tmp_path):
+        """A request whose directory cannot even be created is recorded as
+        its own error; the rest of the section is unaffected.
+        """
+        mock_get_request.side_effect = (
+            lambda rid: _make_request(request_id=rid))
+
+        errors: List[Dict[str, str]] = []
+        # 'a\0b' makes makedirs fail (embedded null byte).
+        debug_utils._dump_request_id_info({'a\0b', 'req-ok'}, str(tmp_path),
+                                          errors)
+
+        assert (tmp_path / 'requests' / 'req-ok' / 'request_info.json').exists()
+        bad_errors = [e for e in errors if e['resource'] == 'a\0b']
+        assert len(bad_errors) == 1
+        assert 'null byte' in bad_errors[0]['error']
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_deadline_expires_mid_section_skips_unsubmitted(
+            self, mock_get_request, tmp_path):
+        """Once the budget is gone, in-flight requests finish but newly
+        started ones are skipped; the rest get skip records.
+        """
+        ids = [f'req-{i:02d}' for i in range(6)]
+
+        def _slow_get(rid):
+            time.sleep(0.5)
+            return _make_request(request_id=rid)
+
+        mock_get_request.side_effect = _slow_get
+        errors: List[Dict[str, str]] = []
+        with mock.patch.object(debug_utils, '_REQUEST_DUMP_WORKERS', 2):
+            debug_utils._dump_request_id_info(set(ids),
+                                              str(tmp_path),
+                                              errors,
+                                              deadline=time.monotonic() + 0.1)
+
+        # The two requests already in flight when the budget expired still
+        # complete; the rest were skipped at the worker-entry deadline
+        # check.
+        dumped = sorted(rid for rid in ids if (tmp_path / 'requests' / rid /
+                                               'request_info.json').exists())
+        assert len(dumped) == 2
+        skipped = [
+            e['resource'] for e in errors if 'deadline exceeded' in e['error']
+        ]
+        assert skipped == sorted(set(ids) - set(dumped))
+        timings = json.loads(
+            (tmp_path / 'requests' / '_timings.json').read_text())
+        assert sorted(t['request_id'] for t in timings) == dumped
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_pool_unavailable_falls_back_to_serial(self, mock_get_request,
+                                                   tmp_path):
+        """If the pool cannot take work, the requests are dumped serially."""
+        real_executor = concurrent.futures.ThreadPoolExecutor
+
+        class _FlakyExecutor(real_executor):
+
+            def submit(self, fn, *args, **kwargs):
+                # Fail only the section's per-request submits (the driver
+                # submits a functools.partial of _dump_one_request); the
+                # log-copy executors inside _run_with_deadline must keep
+                # working.
+                if (isinstance(fn, functools.partial) and
+                        fn.func is debug_utils._dump_one_request):
+                    raise RuntimeError('cannot start new thread')
+                return super().submit(fn, *args, **kwargs)
+
+        ids = [f'req-{i:02d}' for i in range(3)]
+        mock_get_request.side_effect = (
+            lambda rid: _make_request(request_id=rid))
+        errors: List[Dict[str, str]] = []
+        with mock.patch.object(debug_utils.concurrent.futures,
+                               'ThreadPoolExecutor', _FlakyExecutor):
+            debug_utils._dump_request_id_info(set(ids), str(tmp_path), errors)
+
+        assert mock_get_request.call_count == len(ids)
+        for rid in ids:
+            assert (tmp_path / 'requests' / rid / 'request_info.json').exists()
         assert not errors
 
 
