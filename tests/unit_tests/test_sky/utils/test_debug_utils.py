@@ -687,6 +687,124 @@ class TestGetManagedJobsFromClusters:
         assert len(errors) == 1
         assert errors[0]['resource'] == 'managed_jobs_from_clusters'
 
+    @mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2')
+    def test_queue_v2_call_is_fields_scoped(self, mock_queue):
+        """The remote-controller fetch asks queue_v2 for exactly the fields
+        the cluster-name resolution reads, not every job field (~1.4KB/job
+        with per-job controller work such as the original user YAML reads
+        on large job tables)."""
+        mock_queue.return_value = ([], 0, {}, 0, [])
+        ctx = _make_context(cluster_names={'c1'})
+
+        debug_utils._get_managed_jobs_from_clusters(ctx, _StubReachability())
+
+        mock_queue.assert_called_once_with(
+            refresh=False,
+            job_ids=None,
+            all_users=True,
+            fields=debug_utils._JOB_CLUSTER_FIELDS)
+
+    @mock.patch('sky.utils.debug_utils.workspaces_core.'
+                'get_accessible_workspace_names',
+                return_value={'ws'})
+    @mock.patch('sky.utils.debug_utils.managed_job_utils.'
+                'get_managed_job_queue')
+    @mock.patch('sky.utils.debug_utils.managed_job_utils.is_consolidation_mode')
+    def test_consolidation_mode_reads_local_db(self, mock_consolidation,
+                                               mock_local_queue, _mock_ws):
+        """In consolidation mode the jobs controller shares this process's
+        database, so the scan reads it directly instead of paying a queue_v2
+        controller round-trip (a local subprocess that walks the full job
+        table)."""
+        mock_consolidation.return_value = True
+        mock_local_queue.return_value = {
+            'jobs': [{
+                'job_id': 7,
+                'task_name': 'train',
+                'current_cluster_name': None,
+                'pool': None,
+            }],
+            'total': 1,
+        }
+        name = managed_job_utils.generate_managed_job_cluster_name('train', 7)
+        ctx = _make_context(cluster_names={name})
+
+        with mock.patch('sky.utils.debug_utils.managed_jobs_core.'
+                        'queue_v2') as mock_queue_v2:
+            debug_utils._get_managed_jobs_from_clusters(ctx,
+                                                        _StubReachability())
+
+        assert ctx['managed_job_ids'] == {7}
+        mock_queue_v2.assert_not_called()
+        _, kwargs = mock_local_queue.call_args
+        assert kwargs['job_ids'] is None
+        assert kwargs['fields'] == debug_utils._JOB_CLUSTER_FIELDS
+        # Same workspace visibility queue_v2 would apply.
+        assert kwargs['accessible_workspaces'] == ['ws']
+
+    @mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2')
+    def test_fetch_timeout_records_error_and_orphan(self, mock_queue):
+        """A fetch that overruns its deadline is bounded: the wrapper
+        records the timeout, the expansion is skipped, and the abandoned
+        worker is left as an orphan entry for the straggler log. The same
+        _run_with_deadline wrapper bounds BOTH transports (a wedged local
+        DB read in consolidation mode is bounded identically), so exercising
+        one transport suffices."""
+        release = threading.Event()
+
+        def _blocked_queue(*args, **kwargs):
+            release.wait()
+            return ([], 0, {}, 0, [])
+
+        mock_queue.side_effect = _blocked_queue
+        errors: List[Dict[str, str]] = []
+        ctx = _make_context(cluster_names={'c1'}, errors=errors)
+
+        try:
+            debug_utils._get_managed_jobs_from_clusters(
+                ctx, _StubReachability(), deadline=time.monotonic() + 0.1)
+        finally:
+            # Let the abandoned worker thread exit; it must not linger in
+            # the pytest process.
+            release.set()
+
+        assert ctx['managed_job_ids'] == set()
+        assert len(errors) == 1
+        assert errors[0]['component'] == 'cross_link'
+        assert errors[0]['resource'] == 'managed_jobs_from_clusters'
+        assert len(ctx['timed_out_ops']) == 1
+        assert ctx['timed_out_ops'][0]['resource'] == (
+            'managed_jobs_from_clusters')
+
+    @mock.patch('sky.utils.debug_utils.workspaces_core.'
+                'get_accessible_workspace_names',
+                return_value={'ws'})
+    @mock.patch('sky.utils.debug_utils.managed_job_utils.'
+                'get_managed_job_queue',
+                side_effect=RuntimeError('db down'))
+    @mock.patch('sky.utils.debug_utils.managed_job_utils.is_consolidation_mode')
+    def test_consolidation_mode_db_failure_records_error(
+            self, mock_consolidation, _mock_local_queue, _mock_ws):
+        """A local-DB failure in consolidation mode degrades exactly like a
+        queue_v2 failure on the remote path: the call site's except records
+        the error and the expansion is skipped (the remote-path degrade is
+        pinned by test_queue_failure_records_error above)."""
+        mock_consolidation.return_value = True
+        errors: List[Dict[str, str]] = []
+        ctx = _make_context(cluster_names={'c1'}, errors=errors)
+
+        with mock.patch('sky.utils.debug_utils.managed_jobs_core.'
+                        'queue_v2') as mock_queue_v2:
+            debug_utils._get_managed_jobs_from_clusters(ctx,
+                                                        _StubReachability())
+
+        assert ctx['managed_job_ids'] == set()
+        assert len(errors) == 1
+        assert errors[0]['component'] == 'cross_link'
+        assert errors[0]['resource'] == 'managed_jobs_from_clusters'
+        assert 'db down' in errors[0]['error']
+        mock_queue_v2.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Tests for _get_job_clusters_from_managed_jobs
@@ -1141,6 +1259,72 @@ class TestPopulateRecentContext:
                                              reachability=_StubReachability())
 
         assert 'newly-launched' in ctx['cluster_names']
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_queue_v2_call_is_fields_scoped(self, mock_get_tasks,
+                                            mock_get_clusters, mock_queue_v2):
+        """The remote-controller fetch asks queue_v2 for exactly the recency
+        fields the scan reads, not every job field (~1.4KB/job with per-job
+        controller work such as the original user YAML reads on large job
+        tables)."""
+        mock_get_tasks.return_value = []
+        mock_get_clusters.return_value = []
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
+
+        ctx = _make_context()
+        debug_utils._populate_recent_context(ctx,
+                                             minutes=60.0,
+                                             reachability=_StubReachability())
+
+        mock_queue_v2.assert_called_once_with(
+            refresh=False,
+            job_ids=None,
+            all_users=True,
+            fields=debug_utils._RECENT_JOB_FIELDS)
+
+    @mock.patch('sky.utils.debug_utils.workspaces_core.'
+                'get_accessible_workspace_names',
+                return_value={'ws'})
+    @mock.patch('sky.utils.debug_utils.managed_job_utils.'
+                'get_managed_job_queue')
+    @mock.patch('sky.utils.debug_utils.managed_job_utils.is_consolidation_mode')
+    @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_consolidation_mode_reads_local_db(self, mock_get_tasks,
+                                               mock_get_clusters,
+                                               mock_consolidation,
+                                               mock_local_queue, _mock_ws):
+        """In consolidation mode the jobs controller shares this process's
+        database, so the recent-jobs scan reads it directly instead of
+        paying a queue_v2 controller round-trip (a local subprocess that
+        walks the full job table)."""
+        mock_consolidation.return_value = True
+        now = time.time()
+        mock_get_tasks.return_value = []
+        mock_get_clusters.return_value = []
+        mock_local_queue.return_value = {
+            'jobs': [{
+                'job_id': 1,
+                'submitted_at': now - 1800,
+                'end_at': None,
+            }],
+            'total': 1,
+        }
+
+        ctx = _make_context()
+        with mock.patch('sky.jobs.server.core.queue_v2') as mock_queue_v2:
+            debug_utils._populate_recent_context(
+                ctx, minutes=60.0, reachability=_StubReachability())
+
+        assert 1 in ctx['managed_job_ids']
+        mock_queue_v2.assert_not_called()
+        _, kwargs = mock_local_queue.call_args
+        assert kwargs['job_ids'] is None
+        assert kwargs['fields'] == debug_utils._RECENT_JOB_FIELDS
+        # Same workspace visibility queue_v2 would apply.
+        assert kwargs['accessible_workspaces'] == ['ws']
 
 
 # ---------------------------------------------------------------------------
