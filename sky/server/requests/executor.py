@@ -210,12 +210,13 @@ def executor_initializer(proc_group: str,
                          clean_env: Optional[Dict[str, str]] = None):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
+    # Same rationale as in sky.server.uvicorn.Server.run: reap this
+    # executor's prometheus multiproc files when it exits. Must run before
+    # anything (plugins included) writes a live gauge in this process.
+    metrics_lib.register_multiproc_cleanup_atexit()
     # Load plugins for executor process.
     plugins.load_plugins(
         plugins.ExtensionContext(context=plugins.PluginContext.EXECUTOR))
-    # Same rationale as in sky.server.uvicorn.Server.run: reap this
-    # executor's prometheus multiproc files when it exits.
-    metrics_lib.register_multiproc_cleanup_atexit()
     # The main API server process captures its env at startup and forwards
     # it via initargs (see RequestWorker.run). Adopt that snapshot directly
     # so the worker doesn't depend on its own spawn-time os.environ, which

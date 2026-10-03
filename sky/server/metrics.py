@@ -59,6 +59,11 @@ def register_multiproc_cleanup_atexit() -> None:
     written gauge value visible to every future scrape — for ``liveall``
     gauges this can pin a stale per-pid value indefinitely.
 
+    It also records this process's identity for the reaper (see
+    ``_writer_exited``), and removes the live-gauge files of an earlier
+    writer that held the same pid, so this process does not reopen them.
+    Call it before the process writes any live gauge.
+
     Safe to call more than once per process; only the first call registers.
     Only registers when ``PROMETHEUS_MULTIPROC_DIR`` is set; a no-op in
     single-process / unit-test environments.
@@ -66,11 +71,78 @@ def register_multiproc_cleanup_atexit() -> None:
     global _multiproc_cleanup_registered
     if _multiproc_cleanup_registered:
         return
-    if not os.environ.get('PROMETHEUS_MULTIPROC_DIR'):
+    multiproc_dir = os.environ.get('PROMETHEUS_MULTIPROC_DIR')
+    if not multiproc_dir:
         return
     pid = os.getpid()
-    atexit.register(multiprocess.mark_process_dead, pid)
+    identity = _process_identity(pid)
+    if identity is not None:
+        try:
+            if _read_writer_identity(multiproc_dir,
+                                     pid) not in (None, identity):
+                multiprocess.mark_process_dead(pid, multiproc_dir)
+            with open(_writer_identity_path(multiproc_dir, pid),
+                      'w',
+                      encoding='utf-8') as f:
+                f.write(identity)
+        except OSError:
+            logger.warning(
+                'Failed to record this process as a prometheus '
+                'multiproc writer.',
+                exc_info=True)
+    atexit.register(_forget_writer, multiproc_dir, pid)
     _multiproc_cleanup_registered = True
+
+
+_HAS_PROCFS = os.path.isdir('/proc/self')
+
+
+def _process_identity(pid: int) -> Optional[str]:
+    """A value that differs between processes that held the same pid.
+
+    None when no process holds the pid or the holder is a zombie. Raises
+    psutil.Error when the holder cannot be inspected. On Linux it is the
+    start time in clock ticks since boot (/proc/<pid>/stat field 22), which
+    unlike psutil's create_time() does not depend on when the reading
+    process sampled the boot time.
+    """
+    if _HAS_PROCFS:
+        try:
+            with open(f'/proc/{pid}/stat', 'rb') as f:
+                stat = f.read()
+        except (FileNotFoundError, ProcessLookupError):
+            return None
+        fields = stat[stat.rindex(b')') + 2:].split()
+        return None if fields[0] == b'Z' else fields[19].decode()
+    try:
+        proc = psutil.Process(pid)
+        if proc.status() == psutil.STATUS_ZOMBIE:
+            return None
+        return repr(proc.create_time())
+    except psutil.NoSuchProcess:
+        return None
+
+
+def _writer_identity_path(multiproc_dir: str, pid: int) -> str:
+    return os.path.join(multiproc_dir, f'liveowner_{pid}')
+
+
+def _read_writer_identity(multiproc_dir: str, pid: int) -> Optional[str]:
+    try:
+        with open(_writer_identity_path(multiproc_dir, pid),
+                  'r',
+                  encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        return None
+
+
+def _forget_writer(multiproc_dir: str, pid: int) -> None:
+    multiprocess.mark_process_dead(pid, multiproc_dir)
+    try:
+        os.remove(_writer_identity_path(multiproc_dir, pid))
+    except OSError:
+        pass
 
 
 # Default reap interval. Tuned to give prompt cleanup of stale per-pid
@@ -102,30 +174,35 @@ def _scan_multiproc_pids(multiproc_dir: str) -> Set[int]:
     return pids
 
 
-# pid -> create time of the process that held the pid when the reaper first
-# saw the pid's live-gauge files. Only the reaper daemon touches it.
-_live_gauge_writers: Dict[int, float] = {}
+# pid -> identity of the process that held the pid when the reaper first
+# saw the pid's live-gauge files, for writers that did not record their own
+# identity. Only the reaper daemon touches it.
+_live_gauge_writers: Dict[int, str] = {}
+
+_WRITER_IDENTITY_FILE_PID_RE = re.compile(r'^liveowner_([0-9]+)$')
 
 
-def _writer_exited(pid: int) -> bool:
+def _writer_exited(pid: int, multiproc_dir: str) -> bool:
     """Whether the process that writes ``pid``'s live-gauge files is gone.
 
     An existing pid is not enough: the writer may be a zombie its parent
     has not waited for, or the kernel may have given the pid to another
-    process.
+    process. The writer's identity is the one it recorded when it
+    registered; for a process that did not register, it is the holder of
+    the pid when the reaper first saw its files.
     """
     if not psutil.pid_exists(pid):
         return True
     try:
-        proc = psutil.Process(pid)
-        if proc.status() == psutil.STATUS_ZOMBIE:
-            return True
-        created = proc.create_time()
-    except psutil.NoSuchProcess:
-        return True
+        identity = _process_identity(pid)
     except psutil.Error:
         return False
-    return _live_gauge_writers.setdefault(pid, created) != created
+    if identity is None:
+        return True
+    recorded = _read_writer_identity(multiproc_dir, pid)
+    if recorded is not None:
+        return recorded != identity
+    return _live_gauge_writers.setdefault(pid, identity) != identity
 
 
 def _reap_stale_multiproc_files() -> int:
@@ -139,15 +216,21 @@ def _reap_stale_multiproc_files() -> int:
     file_pids = _scan_multiproc_pids(multiproc_dir)
     for pid in set(_live_gauge_writers) - file_pids:
         del _live_gauge_writers[pid]
+    # Identity files of writers that exited before writing a live gauge.
+    for path in glob.glob(os.path.join(multiproc_dir, 'liveowner_*')):
+        m = _WRITER_IDENTITY_FILE_PID_RE.match(os.path.basename(path))
+        if (m is not None and int(m.group(1)) not in file_pids and
+                _writer_exited(int(m.group(1)), multiproc_dir)):
+            _forget_writer(multiproc_dir, int(m.group(1)))
     if not file_pids:
         return 0
     reaped = 0
     for pid in file_pids:
-        if not _writer_exited(pid):
+        if not _writer_exited(pid, multiproc_dir):
             continue
         _live_gauge_writers.pop(pid, None)
         try:
-            multiprocess.mark_process_dead(pid)
+            _forget_writer(multiproc_dir, pid)
             reaped += 1
         except Exception:  # pylint: disable=broad-except
             # Don't let a single bad file or a race with another reaper
@@ -176,8 +259,8 @@ async def multiproc_reaper_daemon(
 
     Reaps a pid whose live-gauge files are present when no process holds
     the pid, when the process holding it is a zombie, or when it is not
-    the process (by create time) that held the pid when the reaper first
-    saw those files, i.e. the pid was reused. The descendant
+    the writer, i.e. the pid was reused (see ``_writer_exited``). The
+    descendant
     relationship is intentionally not used as the membership signal:
     writers may not always be direct descendants of the main API server
     process (e.g. workers reparented to init after an intermediate
@@ -731,7 +814,8 @@ _CONTAINER_MEMORY_USAGE_HELP = (
 
 _CONTAINER_MEMORY_UNRECLAIMABLE_HELP = (
     'Memory the kernel cannot reclaim from the API server container without '
-    'swap: memory.current minus page cache (memory.stat file), plus shmem. '
+    'swap: memory.current minus page cache (memory.stat file) and '
+    'reclaimable slab (slab_reclaimable), plus shmem. '
     'Compare it with the container\'s memory limit, or with its node\'s '
     'allocatable memory when there is no limit, to see how close the '
     'container is to an OOM kill.')
@@ -740,7 +824,8 @@ _CONTAINER_MEMORY_STAT_HELP = (
     'One field of the API server container\'s cgroup memory.stat: anon is '
     'process memory not backed by files, file is page cache (including '
     'shmem), kernel is kernel memory charged to the container, shmem is '
-    'tmpfs and shared memory.')
+    'tmpfs and shared memory, slab_reclaimable is the part of kernel memory '
+    'the kernel frees under pressure (dentry and inode caches).')
 
 _CONTAINER_MEMORY_LIMIT_HELP = (
     'The API server container\'s cgroup memory limit (memory.max). No series '
