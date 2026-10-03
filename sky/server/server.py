@@ -2257,7 +2257,7 @@ def _extract_members(zipf, members: List[zipfile.ZipInfo],
     for member in members:
         # Determine the new path
         original_path = os.path.normpath(member.filename)
-        new_path = client_file_mounts_dir / original_path.lstrip('/')
+        new_path = resolved_client_file_mounts_dir / original_path.lstrip('/')
 
         # Security check: ensure extracted path stays within target
         # directory to prevent Zip Slip attacks (path traversal via
@@ -2288,6 +2288,10 @@ def _extract_members(zipf, members: List[zipfile.ZipInfo],
 
         # Handle directories
         if member.filename.endswith('/'):
+            # Legacy uploads may leave a mount root pointing at another path.
+            # Replace the link itself, never write into its previous target.
+            if new_path.is_symlink():
+                new_path.unlink()
             new_path.mkdir(parents=True, exist_ok=True)
             continue
 
