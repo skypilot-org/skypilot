@@ -21,6 +21,7 @@ import starlette.types
 import uvicorn
 
 from sky import core
+from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
@@ -1594,7 +1595,10 @@ _FEDERATION_TARGETS = _FederationTargets()
 #
 # 30s accommodates large compute clusters where federate latency plus
 # port-forward setup can run 5-10s warm and longer cold.
-_PER_CONTEXT_TIMEOUT_SECONDS = 30
+#
+# Defined in sky/metrics/utils.py so the phase budgets can derive from it
+# there; aliased here so the call sites below stay unchanged.
+_PER_CONTEXT_TIMEOUT_SECONDS = metrics_utils.PER_CONTEXT_TIMEOUT_SECONDS
 
 _CREDENTIAL_MANAGER_KUBECONFIG_PATH = (
     '/var/skypilot/credentials/kubeconfig/kubeconfig')
@@ -1665,8 +1669,10 @@ def _handle_federation_result(context: str, route: str, result: object,
     On success appends the metrics text; on failure logs a readable, per-
     cluster message that names the context and includes the port-forward vs.
     /federate timing breakdown (so a timeout shows which phase blew the
-    budget). Records the per-context outcome counter. Re-raises non-Exception
-    BaseExceptions (KeyboardInterrupt/SystemExit) to preserve prior behavior.
+    budget). Records the per-context outcome counter, separating a tunnel
+    that never came up ('port-forward-error') from a Prometheus that answered
+    badly ('error'). Re-raises non-Exception BaseExceptions
+    (KeyboardInterrupt/SystemExit) to preserve prior behavior.
 
     All work here is synchronous and non-blocking — no awaits, no I/O beyond
     logging — so it cannot hang the gather loop.
@@ -1680,6 +1686,18 @@ def _handle_federation_result(context: str, route: str, result: object,
             f'({stats.summary()}); the federation attempt exceeded the '
             f'per-context budget; series for this cluster are omitted from '
             f'this scrape')
+        return
+    # Also an Exception subclass, so it has to be checked before the generic
+    # branch below or it would be folded back into 'error'.
+    if isinstance(result, exceptions.PortForwardStartupError):
+        metrics_utils.record_federation_outcome(context, route,
+                                                'port-forward-error')
+        logger.error(
+            f'Failed to get metrics for context {context} (route {route}): '
+            f'{common_utils.format_exception(result)} ({stats.summary()}); '
+            f'the port-forward never became ready, so nothing was asked of '
+            f'this cluster\'s Prometheus; series for this cluster are '
+            f'omitted from this scrape')
         return
     if isinstance(result, Exception):
         metrics_utils.record_federation_outcome(context, route, 'error')

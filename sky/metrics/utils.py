@@ -18,6 +18,7 @@ import urllib.parse
 import httpx
 import prometheus_client as prom
 
+from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.skylet import constants
@@ -62,9 +63,23 @@ _DEFAULT_PROMETHEUS_SERVICE_PORT = 80
 # RBAC be pinned with `resourceNames: ["kube-system"]`.
 _CLUSTER_IDENTITY_NAMESPACE = 'kube-system'
 
+# Whole-attempt budget for federating one context: port-forward, /federate,
+# transfer and stamping. Lives here rather than in sky/server/metrics.py so the
+# phase budgets below can derive from it; that module imports this one. Must
+# also fit inside the deployment's scrape_timeout (45s in the bundled chart).
+PER_CONTEXT_TIMEOUT_SECONDS = 30
+
+# Share of that budget the port-forward may spend becoming ready. A fraction
+# rather than a bare number so the two move together -- whatever it takes must
+# still leave room for the request, the transfer and the teardown. 1/6 keeps
+# the 5s this was before it was derived.
+_PORT_FORWARD_STARTUP_BUDGET_FRACTION = 1 / 6
+_PORT_FORWARD_STARTUP_TIMEOUT_SECONDS = (PER_CONTEXT_TIMEOUT_SECONDS *
+                                         _PORT_FORWARD_STARTUP_BUDGET_FRACTION)
+
 # Timeout for the namespace UID probes used by local-context detection.
-# Must fit within the per-context timeout budget in sky/server/metrics.py
-# (_PER_CONTEXT_TIMEOUT_SECONDS) together with the actual metrics request.
+# Must fit within PER_CONTEXT_TIMEOUT_SECONDS together with the actual
+# metrics request.
 _NAMESPACE_PROBE_TIMEOUT_SECONDS = 5
 
 # Interval between re-probes of a context whose detection concluded
@@ -1049,8 +1064,12 @@ SKY_APISERVER_FEDERATION_PAYLOAD_BYTES = prom.Histogram(
     buckets=_MEM_BUCKETS,
 )
 
-# End-to-end outcome per context+route: success | timeout | error. Alert on a
-# rising timeout rate per context to catch the silent-drop failure mode.
+# End-to-end outcome per context+route:
+# success | timeout | port-forward-error | error. Alert on a rising timeout
+# rate per context to catch the silent-drop failure mode. port-forward-error
+# is separate from error because it is a local kubectl/credential problem
+# rather than the federated Prometheus answering badly, and the two are fixed
+# by different people.
 SKY_APISERVER_FEDERATION_TOTAL = prom.Counter(
     'sky_apiserver_metrics_federation_total',
     'Count of metrics federation attempts per remote context and outcome',
@@ -1649,12 +1668,11 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
     Returns:
         Tuple of (subprocess.Popen process, local_port assigned)
     Raises:
-        RuntimeError: If port forward fails to start
+        exceptions.PortForwardStartupError: If the tunnel does not come up,
+            whether it failed to launch or was still not ready within
+            _PORT_FORWARD_STARTUP_TIMEOUT_SECONDS.
     """
-    # Must be well under the per-context timeout in
-    # metrics.py (_PER_CONTEXT_TIMEOUT_SECONDS) to leave
-    # time for the HTTP request and cleanup.
-    start_port_forward_timeout = 5
+    start_port_forward_timeout = _PORT_FORWARD_STARTUP_TIMEOUT_SECONDS
     terminate_port_forward_timeout = 5  # 5 second timeout
 
     # Use ':service_port' to let kubectl choose the local port
@@ -1723,10 +1741,19 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
 
             # sleep for 100ms to avoid busy-waiting
             time.sleep(0.1)
-    except BaseException:  # pylint: disable=broad-exception-caught
+    except BaseException as e:  # pylint: disable=broad-exception-caught
         if port_forward_process:
             stop_svc_port_forward(port_forward_process,
                                   timeout=terminate_port_forward_timeout)
+        # Launching or polling kubectl failed (a missing binary raises
+        # FileNotFoundError here), so no tunnel came up and nothing was asked
+        # of the Prometheus behind it: same bucket as the failures below.
+        # BaseException keeps propagating unchanged.
+        if isinstance(e, Exception):
+            raise exceptions.PortForwardStartupError(
+                f'Port forward failed to start for service {service} in '
+                f'namespace {namespace} on context {context}: '
+                f'{common_utils.format_exception(e)}') from e
         raise
     finally:
         if poller is not None and fd is not None:
@@ -1736,17 +1763,20 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
                 # FD may already be unregistered or invalid
                 pass
     if port_forward_exit:
-        raise RuntimeError(f'Port forward failed for service {service} in '
-                           f'namespace {namespace} on context {context}')
+        raise exceptions.PortForwardStartupError(
+            f'Port forward failed for service {service} in '
+            f'namespace {namespace} on context {context}')
     if local_port is None:
         try:
             if port_forward_process:
                 stop_svc_port_forward(port_forward_process,
                                       timeout=terminate_port_forward_timeout)
         finally:
-            raise RuntimeError(
+            # Naming the budget makes the number to revisit visible in the log.
+            raise exceptions.PortForwardStartupError(
                 f'Failed to extract local port for service {service} in '
-                f'namespace {namespace} on context {context}')
+                f'namespace {namespace} on context {context} within '
+                f'{start_port_forward_timeout}s')
 
     return port_forward_process, local_port
 
