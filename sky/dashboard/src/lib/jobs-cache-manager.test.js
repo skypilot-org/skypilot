@@ -6,7 +6,7 @@ jest.mock('@/data/connectors/jobs', () => ({
   getManagedJobs: jest.fn(),
 }));
 
-import { JobsCacheManager } from './jobs-cache-manager';
+import { JobsCacheManager, withExternalRowKeys } from './jobs-cache-manager';
 
 describe('JobsCacheManager._groupTasksByJob', () => {
   const row = (id, extra = {}) => ({ id, task_id: 0, ...extra });
@@ -39,5 +39,24 @@ describe('JobsCacheManager._groupTasksByJob', () => {
     const rows = [row(72, { root_job_id: 66 }), row(70)];
     const { jobOrder } = new JobsCacheManager()._groupTasksByJob(rows);
     expect(jobOrder).toEqual([70, 72]);
+  });
+});
+
+describe('withExternalRowKeys', () => {
+  test('backfills task_job_id on an external row that lacks one', () => {
+    const rows = withExternalRowKeys([
+      { id: '41', is_external: true, external_cluster: 'alpha' },
+      { id: '41', is_external: true, external_cluster: 'beta' },
+      { id: '52', is_external: true, task_job_id: 'slurm-a-52' },
+      { id: '9', is_external: true },
+      { id: 7 },
+    ]);
+    expect(rows.map((r) => r.task_job_id)).toEqual([
+      'external:alpha:41',
+      'external:beta:41',
+      'slurm-a-52',
+      'external::9',
+      undefined,
+    ]);
   });
 });
