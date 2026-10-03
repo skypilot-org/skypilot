@@ -431,6 +431,37 @@ def test_recorded_rows_skip_the_fetch(monkeypatch, capacity_store):
     assert fetched == ['ctx-b', 'ctx-a']
 
 
+def test_unreadable_fleet_is_unknown_not_zero(monkeypatch, capacity_store):
+    """Every infra failing reports unknown, not a fleet of zero GPUs."""
+
+    def unreachable(context=None):
+        raise RuntimeError('kube-apiserver unreachable')
+
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils._get_kubernetes_node_info', unreachable)
+
+    assert usage_lib._collect_gpu_fleet(['ctx-a', 'ctx-b'], []) is None
+
+    # A server with no node inventory configured at all has a real,
+    # knowable total of zero, which is reported as such.
+    assert usage_lib._collect_gpu_fleet([], []) == {}
+
+
+def test_partial_fleet_failure_reports_what_could_be_read(
+        monkeypatch, capacity_store):
+    """One unreachable infra drops out; the readable ones still count."""
+
+    def flaky(context=None):
+        if context == 'ctx-b':
+            raise RuntimeError('unreachable')
+        return _fake_nodes_info(_fake_node('H100', 8))
+
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils._get_kubernetes_node_info', flaky)
+
+    assert usage_lib._collect_gpu_fleet(['ctx-a', 'ctx-b'], []) == {'H100': 8}
+
+
 def test_record_gpu_capacity_leaves_fresh_rows_alone(capacity_store):
     """A busy node-info reader must not upsert on every call."""
     counts = {'H100': 8}
@@ -543,9 +574,10 @@ def test_plugins_field_is_provider_gated():
     try:
         properties = usage_lib.messages.server_heartbeat.get_properties()
         assert 'plugins' not in properties
-        # The GPU and infra fields are present regardless.
-        assert properties['total_gpus'] == 0
-        assert properties['gpus_by_type'] == {}
+        # The GPU and infra fields are present regardless, and the fleet
+        # counts read as unknown until the fleet is actually collected.
+        assert properties['total_gpus'] is None
+        assert properties['gpus_by_type'] is None
         assert properties['infra_count'] == {}
 
         usage_lib.ServerHeartbeatMessage.register_provider(

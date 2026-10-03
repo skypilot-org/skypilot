@@ -396,11 +396,14 @@ class ServerHeartbeatMessage(MessageToReport):
         sky_version: str — SkyPilot version
         ingress_host: Optional[str] — ingress DNS hostname if deployed
             with ingress (from SKYPILOT_INGRESS_HOST env var)
-        total_gpus: int — installed accelerator capacity (GPUs, TPUs, Neuron)
-            across all allowed Kubernetes/SSH contexts and Slurm clusters.
-            Cloud VMs have no node inventory and do not contribute.
-        gpus_by_type: Dict[str, int] — per-accelerator-type breakdown of
-            total_gpus; TPU and Neuron types remain distinct from GPU types
+        total_gpus: Optional[int] — installed accelerator capacity (GPUs,
+            TPUs, Neuron) across all allowed Kubernetes/SSH contexts and Slurm
+            clusters. Cloud VMs have no node inventory and do not contribute.
+            ``None`` when the fleet could not be read at all, which is not the
+            same as a fleet of zero GPUs.
+        gpus_by_type: Optional[Dict[str, int]] — per-accelerator-type breakdown
+            of total_gpus; TPU and Neuron types remain distinct from GPU
+            types. ``None`` whenever total_gpus is.
         infra_count: Dict[str, int] — how many infrastructures of each kind
             the server is configured to use, e.g.
             ``{'kubernetes': 3, 'ssh_node_pools': 1, 'slurm': 0, 'clouds': 2}``
@@ -420,9 +423,12 @@ class ServerHeartbeatMessage(MessageToReport):
         self.server_hash: str = common_utils.get_user_hash()
         self.sky_version: str = sky.__version__
         self.ingress_host: Optional[str] = os.getenv('SKYPILOT_INGRESS_HOST')
-        self.total_gpus: int = 0
+        #: Left at ``None`` until the fleet is read, and put back to
+        #: ``None`` when every lookup failed: an unreadable fleet must not be
+        #: reported as a fleet of zero GPUs.
+        self.total_gpus: Optional[int] = None
         #: Per-accelerator-type breakdown, including GPU, TPU and Neuron types.
-        self.gpus_by_type: Dict[str, int] = {}
+        self.gpus_by_type: Optional[Dict[str, int]] = None
         #: Per-infra-kind counts, e.g. ``{'kubernetes': 3, 'clouds': 2}``.
         self.infra_count: Dict[str, int] = {}
 
@@ -825,10 +831,12 @@ def send_server_heartbeat():
         lambda: sky_clouds.Slurm.existing_allowed_clusters(silent=True))
 
     msg = messages.server_heartbeat
-    msg.gpus_by_type = _collect_gpu_fleet(
+    gpus_by_type = _collect_gpu_fleet(
         list(k8s_contexts or []) + list(ssh_contexts or []),
         list(slurm_clusters or []))
-    msg.total_gpus = sum(msg.gpus_by_type.values())
+    msg.gpus_by_type = gpus_by_type
+    msg.total_gpus = (None
+                      if gpus_by_type is None else sum(gpus_by_type.values()))
     msg.infra_count = _collect_infra_count(k8s_contexts, ssh_contexts,
                                            slurm_clusters)
     _send_to_loki(MessageType.SERVER_HEARTBEAT)
@@ -964,7 +972,7 @@ def _fetch_slurm_capacity(cluster: str) -> Dict[str, int]:
 
 
 def _collect_gpu_fleet(contexts: List[Optional[str]],
-                       slurm_clusters: List[str]) -> Dict[str, int]:
+                       slurm_clusters: List[str]) -> Optional[Dict[str, int]]:
     """Sum installed accelerator capacity per type across the fleet.
 
     Covers every allowed Kubernetes and SSH context and every allowed Slurm
@@ -976,6 +984,11 @@ def _collect_gpu_fleet(contexts: List[Optional[str]],
     Recorded rows are read in one query; only infras with no unexpired row
     are queried, in parallel, and each is guarded so an unreachable one drops
     out of the total for this tick rather than failing the heartbeat.
+
+    Returns None when there was something to read and every read of it failed,
+    so that a fleet we could not measure is reported as unknown rather than as
+    a fleet of zero GPUs. A server with no node inventory configured at all
+    has a real, knowable total of zero and returns an empty mapping.
     """
     fetchers: Dict[str, Callable[[], Dict[str, int]]] = {}
     for context in contexts:
@@ -988,21 +1001,28 @@ def _collect_gpu_fleet(contexts: List[Optional[str]],
     recorded = _read_all_capacity()
     misses = [infra for infra in fetchers if infra not in recorded]
 
-    def _fetch(infra: str) -> Dict[str, int]:
+    def _fetch(infra: str) -> Optional[Dict[str, int]]:
         try:
             return fetchers[infra]()
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Heartbeat GPU fleet skipped {infra!r}: {e}')
-            return {}
+            return None
 
     for infra, counts in zip(misses,
                              subprocess_utils.run_in_parallel(_fetch, misses)):
-        recorded[infra] = counts
+        # A failed read leaves the infra unknown rather than recording a zero
+        # for it, so it cannot be summed into the total as if it were empty.
+        if counts is not None:
+            recorded[infra] = counts
+
+    # Sum only what is configured now; rows for removed infras expire alone.
+    known = [infra for infra in fetchers if infra in recorded]
+    if fetchers and not known:
+        return None
 
     gpus_by_type: Dict[str, int] = {}
-    # Sum only what is configured now; rows for removed infras expire alone.
-    for infra in fetchers:
-        for acc_type, count in recorded.get(infra, {}).items():
+    for infra in known:
+        for acc_type, count in recorded[infra].items():
             gpus_by_type[acc_type] = gpus_by_type.get(acc_type, 0) + count
     return gpus_by_type
 
