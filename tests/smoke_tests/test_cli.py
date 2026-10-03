@@ -371,12 +371,14 @@ def test_debug_dump_cluster(generic_cloud: str):
             'assert \\\"name\\\" in d; '
             'assert \\\"status\\\" in d; '
             '"',
-            # Verify summary shows the cluster was collected
+            # Verify the cluster was collected (ID lists live in
+            # ids_manifest.json; counts live in summary.json)
             'cd /tmp/test_debug_dump_cluster/debug_dump_* && '
-            's=$(cat summary.json) && echo "$s" && '
+            's=$(cat ids_manifest.json) && echo "$s" && '
             'echo "$s" | python3 -c "'
-            'import sys, json; d = json.load(sys.stdin); '
-            f'assert \\\"{name}\\\" in d[\\\"collected\\\"][\\\"cluster_names\\\"]; '
+            'import sys, json; m = json.load(sys.stdin); '
+            f'assert \\\"{name}\\\" in m[\\\"cluster_names\\\"]; '
+            'd = json.load(open(\\\"summary.json\\\")); '
             'assert d[\\\"collected\\\"][\\\"cluster_count\\\"] >= 1; '
             # Cross-linked requests from the launch should be present
             'assert d[\\\"collected\\\"][\\\"request_count\\\"] > 0; '
