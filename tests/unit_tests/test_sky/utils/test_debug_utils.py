@@ -1,6 +1,7 @@
 """Tests for sky.utils.debug_utils module."""
 import concurrent.futures
 import contextlib
+import contextvars
 import datetime
 import json
 import os
@@ -24,6 +25,8 @@ from sky.server.requests import log_provider as log_provider_lib
 from sky.server.requests import request_names
 from sky.skylet import constants as skylet_constants
 from sky.utils import common
+from sky.utils import common_utils
+from sky.utils import context as sky_context
 from sky.utils import debug_dump_helpers
 from sky.utils import debug_utils
 from sky.utils import status_lib
@@ -1101,6 +1104,31 @@ class TestPopulateRecentContext:
     @mock.patch('sky.jobs.server.core.queue_v2')
     @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_own_request_stays_in_scope(self, mock_get_tasks, mock_get_clusters,
+                                        mock_queue_v2):
+        """The dump's own (running) request stays in the recent-scan scope.
+
+        Its request_info.json records who triggered the dump; the duplicate
+        of its own log stream is avoided later, at the log-copy level (see
+        test_skip_log_request_ids_keeps_metadata_skips_logs)."""
+        own_request = _make_request(request_id='own-dump-request',
+                                    finished_at=None)
+        other_request = _make_request(request_id='req-other', finished_at=None)
+        mock_get_tasks.return_value = [own_request, other_request]
+        mock_get_clusters.return_value = []
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
+
+        ctx = _make_context()
+        debug_utils._populate_recent_context(ctx,
+                                             minutes=60.0,
+                                             reachability=_StubReachability())
+
+        assert 'own-dump-request' in ctx['request_ids']
+        assert 'req-other' in ctx['request_ids']
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_db_failures_do_not_crash(self, mock_get_tasks, mock_get_clusters,
                                       mock_queue_v2):
         """All DB failures should be caught and not crash the function."""
@@ -1596,7 +1624,15 @@ class TestCreateDebugDump:
             mock_jobs_from_req, mock_clusters_from_req, mock_clusters_from_jobs,
             mock_dump_server, mock_dump_requests, mock_dump_clusters,
             mock_dump_jobs, tmp_path):
-        """Summary should reflect the final collected counts."""
+        """Summary should reflect what the sections report they collected.
+
+        'collected' counts come from the section stats (what was actually
+        written); 'scope' counts come from the planned cross-linked context
+        (which also includes the always-added system request IDs).
+        """
+        mock_dump_requests.return_value = {'dumped': 3}
+        mock_dump_clusters.return_value = {'dumped': 1}
+        mock_dump_jobs.return_value = {'dumped': 1}
         with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
                         str(tmp_path / 'debug_dumps')):
             result = debug_utils.create_debug_dump(
@@ -1610,11 +1646,20 @@ class TestCreateDebugDump:
             summary_files = [n for n in names if n.endswith('summary.json')]
             summary_data = json.loads(zf.read(summary_files[0]))
 
-            # System request IDs are always added
             collected = summary_data['collected']
-            assert collected['request_count'] >= 2  # At least our 2 + system
-            assert collected['cluster_count'] >= 1
-            assert collected['managed_job_count'] >= 1
+            assert collected['request_count'] == 3
+            assert collected['cluster_count'] == 1
+            assert collected['managed_job_count'] == 1
+            # The kubernetes_contexts section is mocked (returns a
+            # MagicMock, not a dict), so its count stays at 0.
+            assert collected['kubernetes_context_count'] == 0
+
+            # System request IDs are always added to the scope
+            scope = summary_data['scope']
+            assert scope['request_count'] >= 2  # At least our 2 + system
+            assert scope['cluster_count'] >= 1
+            assert scope['managed_job_count'] >= 1
+            assert 'req-1' in scope['request_ids']
 
     @mock.patch('sky.utils.debug_utils._dump_managed_job_info')
     @mock.patch('sky.utils.debug_utils._dump_cluster_info')
@@ -1738,7 +1783,7 @@ class TestRequestIdPrefixResolution:
                 zf.read([
                     n for n in zf.namelist() if n.endswith('summary.json')
                 ][0]))
-        collected_ids = summary['collected']['request_ids']
+        collected_ids = summary['scope']['request_ids']
         assert 'abc-111' in collected_ids
         assert 'abc-222' in collected_ids
 
@@ -1771,7 +1816,7 @@ class TestRequestIdPrefixResolution:
                 ][0]))
         # The unmatched prefix should not appear in collected IDs
         # (only system request IDs should be present)
-        assert 'nonexistent' not in summary['collected']['request_ids']
+        assert 'nonexistent' not in summary['scope']['request_ids']
 
 
 # ---------------------------------------------------------------------------
@@ -3084,7 +3129,8 @@ class TestDumpRequestIdInfo:
         )
 
         errors: List[Dict[str, str]] = []
-        debug_utils._dump_request_id_info({'req-1'}, str(tmp_path), errors)
+        stats = debug_utils._dump_request_id_info({'req-1'}, str(tmp_path),
+                                                  errors)
 
         info_path = tmp_path / 'requests' / 'req-1' / 'request_info.json'
         assert info_path.exists()
@@ -3095,6 +3141,12 @@ class TestDumpRequestIdInfo:
         assert data['status'] == 'SUCCEEDED'
         assert data['cluster_name'] == 'my-cluster'
         assert not errors
+        assert stats == {
+            'planned': 1,
+            'dumped': 1,
+            'not_found': 0,
+            'skipped_deadline': 0,
+        }
 
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
     def test_request_not_found(self, mock_get_request, tmp_path):
@@ -3102,13 +3154,49 @@ class TestDumpRequestIdInfo:
         mock_get_request.return_value = None
 
         errors: List[Dict[str, str]] = []
-        debug_utils._dump_request_id_info({'req-missing'}, str(tmp_path),
-                                          errors)
+        stats = debug_utils._dump_request_id_info({'req-missing'},
+                                                  str(tmp_path), errors)
 
         # No crash, no error recorded (not-found is not an error)
         assert not errors
         info_path = tmp_path / 'requests' / 'req-missing' / 'request_info.json'
         assert not info_path.exists()
+        # 'dumped' is disk-derived: the not-found request's directory is
+        # empty (no logs exist for it), so it is not counted.
+        assert stats == {
+            'planned': 1,
+            'dumped': 0,
+            'not_found': 1,
+            'skipped_deadline': 0,
+        }
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_deadline_skip_stats(self, mock_get_request, tmp_path):
+        """An exhausted budget should skip every request and report it.
+
+        The per-item skip records land in errors.json; the section stats
+        (returned here, surfaced in summary.json's section_timings) carry
+        the count so the section can be marked completed_partial.
+        """
+        mock_get_request.return_value = _make_request(request_id='req-1')
+
+        errors: List[Dict[str, str]] = []
+        stats = debug_utils._dump_request_id_info({'req-1', 'req-2', 'req-3'},
+                                                  str(tmp_path),
+                                                  errors,
+                                                  deadline=time.monotonic() - 1)
+
+        assert stats == {
+            'planned': 3,
+            'dumped': 0,
+            'not_found': 0,
+            'skipped_deadline': 3,
+        }
+        assert len(errors) == 3
+        assert all(
+            e['error'] == 'Skipped: overall debug-dump deadline exceeded.'
+            for e in errors)
+        assert not mock_get_request.called
 
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
     def test_db_failure_records_error(self, mock_get_request, tmp_path):
@@ -3126,10 +3214,11 @@ class TestDumpRequestIdInfo:
     def test_empty_request_ids_is_noop(self, tmp_path):
         """Empty request_ids should not create any files."""
         errors: List[Dict[str, str]] = []
-        debug_utils._dump_request_id_info(set(), str(tmp_path), errors)
+        stats = debug_utils._dump_request_id_info(set(), str(tmp_path), errors)
 
         assert not errors
         assert not (tmp_path / 'requests').exists()
+        assert stats is None
 
     @mock.patch('sky.utils.debug_utils.log_provider.get_log_provider')
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
@@ -3150,6 +3239,85 @@ class TestDumpRequestIdInfo:
             call.args[2] for call in provider.copy_log_file.call_args_list
         ]
         assert any(p.name == 'request.log' for p in dest_paths)
+
+    @mock.patch('sky.utils.debug_utils.log_provider.get_log_provider')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_skip_log_request_ids_keeps_metadata_skips_logs(
+            self, mock_get_request, mock_get_provider, tmp_path):
+        """skip_log_request_ids keeps request_info.json but skips both log
+        copies for the listed request -- used for the dump's own request,
+        whose operational trail is already archived in debug_dump.log."""
+        mock_get_request.side_effect = (
+            lambda rid: _make_request(request_id=rid))
+        provider = mock.MagicMock()
+
+        def _fake_copy(request_id, log_type, dest_path):
+            if log_type == log_provider_lib.RequestLogType.REQUEST:
+                dest_path.write_text(f'log of {request_id}')
+                return True
+            return False
+
+        provider.copy_log_file.side_effect = _fake_copy
+        mock_get_provider.return_value = provider
+
+        errors: List[Dict[str, str]] = []
+        stats = debug_utils._dump_request_id_info(
+            {'own-dump-request', 'req-other'},
+            str(tmp_path),
+            errors,
+            skip_log_request_ids={'own-dump-request'})
+
+        # Metadata is written for both requests...
+        for request_id in ('own-dump-request', 'req-other'):
+            assert (tmp_path / 'requests' / request_id /
+                    'request_info.json').exists()
+        # ...but the listed request's logs are never requested from the
+        # provider, while the other request's are.
+        copied_ids = {
+            call.args[0] for call in provider.copy_log_file.call_args_list
+        }
+        assert 'req-other' in copied_ids
+        assert 'own-dump-request' not in copied_ids
+        assert not (tmp_path / 'requests' / 'own-dump-request' /
+                    'request.log').exists()
+        assert (tmp_path / 'requests' / 'req-other' / 'request.log').exists()
+        assert stats['planned'] == 2
+        assert stats['dumped'] == 2
+        assert not errors
+
+    @mock.patch('sky.utils.debug_utils.log_provider.get_log_provider')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_dumped_is_disk_derived_counts_db_failure_with_copied_log(
+            self, mock_get_request, mock_get_provider, tmp_path):
+        """'dumped' is disk-derived: a request whose DB fetch raised but
+        whose log copy landed still counts (it is also recorded in
+        errors.json) -- with the old in-loop counter it appeared in no
+        bucket."""
+        mock_get_request.side_effect = RuntimeError('DB is down')
+        provider = mock.MagicMock()
+
+        def _fake_copy(request_id, log_type, dest_path):
+            del request_id  # unused
+            if log_type == log_provider_lib.RequestLogType.REQUEST:
+                dest_path.write_text('log content')
+                return True
+            return False
+
+        provider.copy_log_file.side_effect = _fake_copy
+        mock_get_provider.return_value = provider
+
+        errors: List[Dict[str, str]] = []
+        stats = debug_utils._dump_request_id_info({'req-flaky'}, str(tmp_path),
+                                                  errors)
+
+        assert (tmp_path / 'requests' / 'req-flaky' / 'request.log').exists()
+        assert stats == {
+            'planned': 1,
+            'dumped': 1,
+            'not_found': 0,
+            'skipped_deadline': 0,
+        }
+        assert any(e['resource'] == 'req-flaky' for e in errors)
 
 
 # ---------------------------------------------------------------------------
@@ -4276,6 +4444,31 @@ class TestDumpKubeContextsInfo:
         assert not (tmp_path / 'kubernetes_contexts').exists()
         assert not errors
 
+    def test_batch_timeout_reports_partial_stats(self, tmp_path):
+        """A batch timeout must read as a partial: planned / dumped plus an
+        inferred skipped_deadline (= planned - dumped), so the section is
+        marked completed_partial by the runner.
+
+        Expectations are derived from the returned dict rather than
+        hard-coded: the in-cluster context is appended unconditionally when
+        running in-cluster, so the scoped context count depends on the
+        environment."""
+        errors: List[Dict[str, str]] = []
+        with self._patch_allowed(['ctx-a', 'ctx-b']), \
+             mock.patch('sky.utils.debug_utils._run_with_deadline',
+                        return_value=(False, None)), \
+             mock.patch('sky.provision.kubernetes.debug.dump_context_resources'
+                       ) as dump:
+            result = debug_utils._dump_kube_contexts_info(str(tmp_path), errors)
+
+        # The batch was abandoned before any worker ran.
+        dump.assert_not_called()
+        assert result is not None
+        assert result['planned'] >= 1
+        assert result['dumped'] == 0
+        assert (result['skipped_deadline'] == result['planned'] -
+                result['dumped'])
+
     def test_allowed_contexts_lookup_failure_is_recorded(self, tmp_path):
         errors: List[Dict[str, str]] = []
         with mock.patch.object(debug_utils.clouds.Kubernetes,
@@ -4493,3 +4686,389 @@ class TestOverallDeadlineDump:
         assert result.exists()
         for fn, m in section_mocks.items():
             assert m.call_count == 1, f'{fn} should have run exactly once'
+
+
+# ---------------------------------------------------------------------------
+# Tests for summary.json truthfulness and the dump's self-accounting
+# (manifest.json, section stats, debug_dump.log level / zip stats).
+# ---------------------------------------------------------------------------
+class TestSummaryTruth:
+    """summary.json must describe what was actually collected, and the dump
+    must account for its own time, size and contents."""
+
+    _CROSSLINK_FNS = (
+        '_get_managed_jobs_from_clusters',
+        '_populate_recent_context',
+        '_get_managed_jobs_from_requests',
+        '_get_job_clusters_from_managed_jobs',
+        '_get_requests_from_clusters',
+        '_get_requests_from_managed_jobs',
+        '_get_clusters_from_requests',
+        '_get_clusters_from_managed_jobs',
+    )
+    _SECTION_FNS = (
+        '_dump_server_info',
+        '_dump_kube_contexts_info',
+        '_dump_request_id_info',
+        '_dump_cluster_info',
+        '_dump_managed_job_info',
+    )
+
+    @contextlib.contextmanager
+    def _patched_dump(self, tmp_path):
+        """Patch all cross-link + section helpers; yield the section mocks.
+
+        Also stubs request-ID prefix resolution (same as
+        TestCreateDebugDump): inputs resolve to themselves.
+        """
+
+        def _fake_prefix_lookup(prefix, fields=None):
+            return [mock.MagicMock(request_id=prefix)]
+
+        with contextlib.ExitStack() as stack:
+            for fn in self._CROSSLINK_FNS:
+                stack.enter_context(mock.patch(f'sky.utils.debug_utils.{fn}'))
+            section_mocks = {
+                fn:
+                stack.enter_context(mock.patch(f'sky.utils.debug_utils.{fn}'))
+                for fn in self._SECTION_FNS
+            }
+            stack.enter_context(
+                mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
+                           str(tmp_path / 'debug_dumps')))
+            with mock.patch(
+                    'sky.utils.debug_utils.requests_lib'
+                    '.get_requests_with_prefix',
+                    side_effect=_fake_prefix_lookup):
+                yield section_mocks
+
+    @staticmethod
+    def _read_from_zip(zip_path, suffix):
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            name = next(n for n in zf.namelist() if n.endswith(suffix))
+            return json.loads(zf.read(name)), zf.namelist()
+
+    def test_section_stats_mark_partial_and_feed_collected(self, tmp_path):
+        """A section that deadline-skipped items must be marked
+        completed_partial with a dumped/skipped breakdown, and the summary's
+        'collected' counts must come from those stats -- not from the planned
+        scope."""
+        with self._patched_dump(tmp_path) as section_mocks:
+            section_mocks['_dump_request_id_info'].return_value = {
+                'planned': 10,
+                'dumped': 7,
+                'not_found': 1,
+                'skipped_deadline': 2,
+            }
+            section_mocks['_dump_cluster_info'].return_value = {
+                'planned': 4,
+                'dumped': 4,
+            }
+            section_mocks['_dump_managed_job_info'].return_value = {
+                # Controller-unreachable shape: nothing attempted, the
+                # failure lives in errors.json -- reads 'completed' with a
+                # planned/dumped disparity (not a partial).
+                'planned': 1,
+                'dumped': 0,
+            }
+            section_mocks['_dump_kube_contexts_info'].return_value = {
+                # Batch-timeout shape: skipped_deadline inferred as
+                # planned - dumped.
+                'planned': 5,
+                'dumped': 3,
+                'skipped_deadline': 2,
+            }
+            result = debug_utils.create_debug_dump(request_ids=['req-1'],
+                                                   cluster_names=['c1'],
+                                                   managed_job_ids=[3])
+
+        summary, _ = self._read_from_zip(result, 'summary.json')
+        timings = {t['section']: t for t in summary['section_timings']}
+        assert timings['request_ids']['status'] == 'completed_partial'
+        assert timings['request_ids']['planned'] == 10
+        assert timings['request_ids']['dumped'] == 7
+        assert timings['request_ids']['not_found'] == 1
+        assert timings['request_ids']['skipped_deadline'] == 2
+        assert timings['clusters']['status'] == 'completed'
+        assert timings['managed_jobs']['status'] == 'completed'
+        assert timings['managed_jobs']['planned'] == 1
+        assert timings['managed_jobs']['dumped'] == 0
+        assert timings['kubernetes_contexts']['status'] == 'completed_partial'
+        assert summary['collected'] == {
+            'request_count': 7,
+            'cluster_count': 4,
+            'managed_job_count': 0,
+            'kubernetes_context_count': 3,
+        }
+        assert summary['truncated'] is True
+        # Per-row reconciliation on the mocked sections: planned equals
+        # dumped + not_found + skipped_deadline for every row that reports
+        # a skip or a not-found. It deliberately does NOT hold for a
+        # not-found request whose logs were copied (the documented overlap)
+        # or for per-item failures recorded only in errors.json -- e.g. the
+        # managed-jobs controller-unreachable row above.
+        for row in timings.values():
+            if row.get('skipped_deadline', 0) or row.get('not_found', 0):
+                assert row['planned'] == (row['dumped'] +
+                                          row.get('not_found', 0) +
+                                          row['skipped_deadline'])
+        # The planned scope still reports the full cross-linked context.
+        assert summary['scope']['request_count'] >= 1
+        assert 'req-1' in summary['scope']['request_ids']
+
+    def test_all_completed_sections_not_truncated(self, tmp_path):
+        """No deadline skips anywhere: no completed_partial status, and
+        'truncated' is False."""
+        with self._patched_dump(tmp_path) as section_mocks:
+            section_mocks['_dump_request_id_info'].return_value = {
+                'planned': 5,
+                'dumped': 5,
+                'not_found': 0,
+                'skipped_deadline': 0,
+            }
+            result = debug_utils.create_debug_dump(request_ids=['req-1'])
+
+        summary, _ = self._read_from_zip(result, 'summary.json')
+        timings = {t['section']: t for t in summary['section_timings']}
+        assert timings['request_ids']['status'] == 'completed'
+        assert summary['truncated'] is False
+
+    def test_past_deadline_collected_is_zero_scope_intact(self, tmp_path):
+        """Deadline-truncated dump: collected counts are all zero (no section
+        wrote anything) while the scope still shows the planned context, and
+        the summary flags the truncation."""
+        with self._patched_dump(tmp_path):
+            result = debug_utils.create_debug_dump(
+                cluster_names=['c'], overall_deadline=time.time() - 1)
+
+        summary, _ = self._read_from_zip(result, 'summary.json')
+        assert summary['collected'] == {
+            'request_count': 0,
+            'cluster_count': 0,
+            'managed_job_count': 0,
+            'kubernetes_context_count': 0,
+        }
+        assert summary['scope']['cluster_count'] == 1
+        assert summary['scope']['cluster_names'] == ['c']
+        assert summary['truncated'] is True
+        statuses = {
+            t['section']: t['status'] for t in summary['section_timings']
+        }
+        assert statuses['clusters'] == 'skipped_deadline'
+
+    def test_summary_and_manifest_account_for_the_dump(self, tmp_path):
+        """summary.json carries budget/duration/size fields and
+        manifest.json carries the file inventory; section_timings covers the
+        context-population phase and attributes bytes per section."""
+        with self._patched_dump(tmp_path) as section_mocks:
+            section_mocks['_dump_request_id_info'].return_value = {
+                'dumped': 1,
+                'not_found': 0,
+                'skipped_deadline': 0,
+            }
+            result = debug_utils.create_debug_dump(
+                request_ids=['req-1'], overall_deadline=time.time() + 3600)
+
+        summary, names = self._read_from_zip(result, 'summary.json')
+        # Self-accounting fields.
+        assert summary['collection_start_time'] > 0
+        assert summary['collection_end_time'] >= summary['collection_start_time']
+        assert summary['total_duration_s'] >= 0
+        assert summary['overall_deadline'] is not None
+        assert summary['overall_deadline'] > summary['collection_start_time']
+        assert summary['budget_remaining_at_start_s'] > 0
+        assert summary['total_size_bytes'] > 0
+        assert summary['file_count'] >= 1
+        assert summary['largest_files']
+        assert all(
+            'size_bytes' in f and 'path' in f for f in summary['largest_files'])
+        # The context-population phase is timed like a section, first.
+        assert summary['section_timings'][0]['section'] == 'context_population'
+        timings = {t['section']: t for t in summary['section_timings']}
+        assert 'size_bytes' in timings['request_ids']
+        assert 'size_bytes' in timings['server_info']
+
+        # manifest.json: a file inventory matching what was zipped. With all
+        # sections mocked, the inventory is exactly the two files written
+        # before the inventory is taken (errors.json + debug_dump.log).
+        manifest, _ = self._read_from_zip(result, 'manifest.json')
+        assert manifest['file_count'] == len(manifest['files'])
+        assert manifest['total_size_bytes'] == summary['total_size_bytes']
+        assert {f['path'] for f in manifest['files']} == {
+            'errors.json',
+            'debug_dump.log',
+        }
+        # Every inventoried file is really in the zip (arcnames carry the
+        # dump directory as their first component).
+        for entry in manifest['files']:
+            assert any(n.endswith('/' + entry['path']) for n in names)
+
+        # The manifest is the FINAL zip entry and carries the zip's own
+        # stats: entry_count is exact (it counts every entry in the zip,
+        # itself included) and the duration is non-negative.
+        manifest_names = [n for n in names if n.endswith('manifest.json')]
+        assert len(manifest_names) == 1
+        assert names[-1] == manifest_names[0]
+        assert manifest['zip']['entry_count'] == len(names)
+        assert manifest['zip']['zip_duration_s'] >= 0
+        assert manifest['zip']['compressed_size_bytes'] > 0
+        assert 'zip.entry_count' in manifest['note']
+
+    def test_debug_dump_log_level_and_zip_stats(self, tmp_path):
+        """debug_dump.log captures the dump's INFO+ trail and the zip-stats
+        lines, but not per-item DEBUG noise; it appears exactly once in the
+        zip."""
+        noisy_marker = 'DEBUG-NOISE-SHOULD-NOT-BE-CAPTURED'
+        warn_marker = 'WARNING-SHOULD-BE-CAPTURED'
+
+        def _noisy_crosslink(debug_dump_context):
+            debug_utils.logger.debug(noisy_marker)
+            debug_utils.logger.warning(warn_marker)
+
+        with self._patched_dump(tmp_path):
+            with mock.patch('sky.utils.debug_utils._get_clusters_from_requests',
+                            side_effect=_noisy_crosslink):
+                result = debug_utils.create_debug_dump(request_ids=['req-1'])
+
+        with zipfile.ZipFile(result, 'r') as zf:
+            names = zf.namelist()
+            log_name = next(n for n in names if n.endswith('debug_dump.log'))
+            log_content = zf.read(log_name).decode('utf-8')
+        assert names.count(log_name) == 1
+        assert noisy_marker not in log_content
+        assert warn_marker in log_content
+        # The zip-stats lines are logged while the handler is still attached
+        # and reach the archived copy of the log.
+        assert 'collection done, zipping' in log_content
+        assert 'debug dump: created' in log_content
+
+    _OWN_REQUEST_ID = 'own-dump-request'
+    _OTHER_REQUEST_ID = 'req-other'
+
+    def _create_dump_as_own_request(self, tmp_path, **kwargs):
+        """Run create_debug_dump as the server-side request
+        ``own-dump-request`` and return the zip path.
+
+        The recent-scan DB calls are mocked so the own (running) request
+        and one other request land in scope; the requests section runs for
+        real (the others are mocked). The request context is set inside a
+        copied contextvars context backed by a fresh SkyPilot context, so
+        nothing leaks into other tests.
+        """
+        own_id = self._OWN_REQUEST_ID
+        other_id = self._OTHER_REQUEST_ID
+
+        def _fake_get_request(request_id):
+            if request_id in (own_id, other_id):
+                return _make_request(request_id=request_id, finished_at=None)
+            return None  # e.g. system daemon request IDs
+
+        provider = mock.MagicMock()
+
+        def _fake_copy(request_id, log_type, dest_path):
+            if log_type == log_provider_lib.RequestLogType.REQUEST:
+                dest_path.write_text(f'log of {request_id}')
+                return True
+            return False
+
+        provider.copy_log_file.side_effect = _fake_copy
+
+        def _fake_prefix_lookup(prefix, fields=None):
+            return [mock.MagicMock(request_id=prefix)]
+
+        def _runner():
+            sky_context.initialize()
+            common_utils.set_request_context(client_entrypoint=None,
+                                             client_command=None,
+                                             using_remote_api_server=False,
+                                             user=None,
+                                             request_id=own_id)
+            return debug_utils.create_debug_dump(**kwargs)
+
+        with contextlib.ExitStack() as stack:
+            for fn in self._CROSSLINK_FNS:
+                if fn == '_populate_recent_context':
+                    continue  # runs for real: puts the own request in scope
+                stack.enter_context(mock.patch(f'sky.utils.debug_utils.{fn}'))
+            for fn in ('_dump_server_info', '_dump_cluster_info',
+                       '_dump_managed_job_info', '_dump_kube_contexts_info'):
+                stack.enter_context(mock.patch(f'sky.utils.debug_utils.{fn}'))
+            stack.enter_context(
+                mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
+                           str(tmp_path / 'debug_dumps')))
+            stack.enter_context(
+                mock.patch(
+                    'sky.utils.debug_utils.requests_lib'
+                    '.get_requests_with_prefix',
+                    side_effect=_fake_prefix_lookup))
+            stack.enter_context(
+                mock.patch('sky.utils.debug_utils.requests_lib.get_request',
+                           side_effect=_fake_get_request))
+            stack.enter_context(
+                mock.patch(
+                    'sky.utils.debug_utils.requests_lib'
+                    '.get_request_tasks',
+                    return_value=[
+                        _make_request(request_id=own_id, finished_at=None),
+                        _make_request(request_id=other_id, finished_at=None),
+                    ]))
+            stack.enter_context(
+                mock.patch(
+                    'sky.utils.debug_utils.global_user_state'
+                    '.get_clusters',
+                    return_value=[]))
+            stack.enter_context(
+                mock.patch('sky.jobs.server.core.queue_v2',
+                           return_value=([], 0, {}, 0, [])))
+            stack.enter_context(
+                mock.patch(
+                    'sky.utils.debug_utils.managed_job_utils'
+                    '.is_consolidation_mode',
+                    return_value=True))
+            stack.enter_context(
+                mock.patch(
+                    'sky.utils.debug_utils.log_provider'
+                    '.get_log_provider',
+                    return_value=provider))
+            return contextvars.copy_context().run(_runner)
+
+    def _assert_own_request_metadata_only(self, zip_path,
+                                          other_request_in_scope):
+        """The own request's request_info.json is in the dump, but neither
+        of its log files is."""
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            names = zf.namelist()
+        own_entries = [
+            n for n in names
+            if n.endswith(f'/{self._OWN_REQUEST_ID}/request_info.json') or
+            n.endswith(f'/{self._OWN_REQUEST_ID}/request.log') or
+            n.endswith(f'/{self._OWN_REQUEST_ID}/request_debug.log')
+        ]
+        assert any(
+            n.endswith(f'/{self._OWN_REQUEST_ID}/request_info.json')
+            for n in own_entries)
+        assert not any(
+            n.endswith((f'/{self._OWN_REQUEST_ID}/request.log',
+                        f'/{self._OWN_REQUEST_ID}/request_debug.log'))
+            for n in own_entries)
+        if other_request_in_scope:
+            # Another request in the same scope does ship its log.
+            assert any(
+                n.endswith(f'/{self._OTHER_REQUEST_ID}/request.log')
+                for n in names)
+
+    def test_own_request_metadata_kept_logs_skipped_recent_scan(self, tmp_path):
+        """Recent-scan path: the dump's own request lands in scope via the
+        scan (it is RUNNING while the dump executes); its metadata ships,
+        its log stream does not."""
+        result = self._create_dump_as_own_request(tmp_path, recent_minutes=60.0)
+        self._assert_own_request_metadata_only(result,
+                                               other_request_in_scope=True)
+
+    def test_own_request_metadata_kept_logs_skipped_explicit(self, tmp_path):
+        """Explicit path: same behavior when the dump's own request ID is
+        requested directly."""
+        result = self._create_dump_as_own_request(
+            tmp_path, request_ids=[self._OWN_REQUEST_ID])
+        self._assert_own_request_metadata_only(result,
+                                               other_request_in_scope=False)
