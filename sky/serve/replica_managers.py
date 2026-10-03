@@ -763,7 +763,13 @@ class ReplicaManager:
     def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
                  version: int) -> None:
         self.lock = threading.Lock()
-        self._next_replica_id: int = 1
+        # Initialize above IDs that survived a controller recovery. This is
+        # only a short-term guard; IDs can still be reused after all replica
+        # rows have been purged.
+        # TODO(jgsweets): Persist a service-level replica ID high-water mark.
+        replica_infos = serve_state.get_replica_infos(service_name)
+        self._next_replica_id: int = max(
+            (info.replica_id for info in replica_infos), default=0) + 1
         self._service_name: str = service_name
         self._uptime: Optional[float] = None
         self._update_mode = serve_utils.DEFAULT_UPDATE_MODE
@@ -799,8 +805,8 @@ class ReplicaManager:
                        update_mode: serve_utils.UpdateMode) -> None:
         raise NotImplementedError
 
-    def get_active_replica_urls(self) -> List[str]:
-        """Get the urls of the active replicas."""
+    def get_active_replica_infos(self) -> List[ReplicaInfo]:
+        """Get the active replica information."""
         raise NotImplementedError
 
 
@@ -1594,19 +1600,18 @@ class SkyPilotReplicaManager(ReplicaManager):
             # TODO(MaoZiming): Probe cloud for early preemption warning.
             time.sleep(self._get_endpoint_probe_interval_seconds())
 
-    def get_active_replica_urls(self) -> List[str]:
-        """Get the urls of all active replicas."""
+    def get_active_replica_infos(self) -> List[ReplicaInfo]:
+        """Get the information of all active replicas."""
         record = serve_state.get_service_from_name(self._service_name)
         assert record is not None, (f'{self._service_name} not found on '
                                     'controller records.')
-        ready_replica_urls = []
         active_versions = set(record['active_versions'])
+        active_replica_infos = []
         for info in serve_state.get_replica_infos(self._service_name):
             if (info.status == serve_state.ReplicaStatus.READY and
                     info.version in active_versions):
-                assert info.url is not None, info
-                ready_replica_urls.append(info.url)
-        return ready_replica_urls
+                active_replica_infos.append(info)
+        return active_replica_infos
 
     ###########################################
     # SkyServe Update and replica versioning. #

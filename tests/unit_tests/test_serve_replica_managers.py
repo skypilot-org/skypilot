@@ -137,3 +137,21 @@ class TestSkyPilotReplicaManagerInitOrdering:
         assert '_thread_pool_refresher' in started_targets
         assert '_job_status_fetcher' in started_targets
         assert '_replica_prober' in started_targets
+
+
+class TestSkyPilotReplicaManagerReplicaIds:
+    """Replica IDs continue above IDs persisted before recovery."""
+
+    def test_initializes_next_replica_id_from_state(self):
+        spec = mock.MagicMock()
+        spec.pool = False
+        spec.readiness_headers = None
+        with mock.patch(
+                'sky.serve.replica_managers.serve_state.get_replica_infos',
+                return_value=[
+                    mock.Mock(replica_id=2),
+                    mock.Mock(replica_id=5),
+                ]):
+            manager = replica_managers.ReplicaManager('svc', spec, 1)
+
+        assert manager._next_replica_id == 6
