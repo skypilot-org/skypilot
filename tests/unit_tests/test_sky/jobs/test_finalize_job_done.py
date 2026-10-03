@@ -131,12 +131,17 @@ class TestFinalizeJobDone:
                                     ]
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize('status,schedule_state', [
+        (ManagedJobStatus.RUNNING, ManagedJobScheduleState.ALIVE),
+        (ManagedJobStatus.PENDING, ManagedJobScheduleState.LAUNCHING),
+        (ManagedJobStatus.STARTING, ManagedJobScheduleState.LAUNCHING),
+    ])
     async def test_abnormal_exit_failed_controller(self,
-                                                   _mock_managed_jobs_db_conn):
+                                                   _mock_managed_jobs_db_conn,
+                                                   status, schedule_state):
         # The controller exited with the job still non-terminal (e.g. launch
-        # failed after MAX_RETRY).
-        job_id = _seed_job([(ManagedJobStatus.RUNNING, None)],
-                           ManagedJobScheduleState.ALIVE)
+        # failed after MAX_RETRY or config loading failed before launch).
+        job_id = _seed_job([(status, None)], schedule_state)
 
         await state.finalize_job_done_async(job_id, cancelling=False)
 
