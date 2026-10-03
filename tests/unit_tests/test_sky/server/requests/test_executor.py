@@ -2,6 +2,7 @@
 import asyncio
 import concurrent.futures
 import functools
+import gc
 import os
 import pathlib
 import queue as queue_lib
@@ -9,6 +10,7 @@ import threading
 import time
 from typing import List
 from unittest import mock
+import weakref
 
 import pytest
 
@@ -1650,6 +1652,49 @@ async def test_wrapper_clears_in_request_execution_after_success(
 
 def _gate_clears_after_success_entrypoint():
     return 'ok'
+
+
+class _Result(list):
+    """A request result that can be weakly referenced."""
+
+
+_result_refs: List['weakref.ReferenceType[_Result]'] = []
+
+
+def _result_entrypoint():
+    result = _Result(['x' * 1024])
+    _result_refs.append(weakref.ref(result))
+    return result
+
+
+@pytest.mark.asyncio
+async def test_wrapper_releases_result_before_release_memory(
+        isolated_database, reset_sigterm_gate, monkeypatch):
+    """The request's result must be freeable when release_memory() runs."""
+    req = requests_lib.Request(request_id='result-released',
+                               name='test',
+                               entrypoint=_result_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+    result_alive = []
+
+    def _check_release_memory():
+        gc.collect()
+        result_alive.append(_result_refs[-1]() is not None)
+
+    monkeypatch.setattr(executor.common_utils, 'release_memory',
+                        _check_release_memory)
+
+    executor._request_execution_wrapper('result-released',
+                                        ignore_return_value=False)
+
+    assert result_alive == [False]
+    assert requests_lib.get_request('result-released').get_return_value() == [
+        'x' * 1024
+    ]
 
 
 def _install_gated_handler_in_worker():

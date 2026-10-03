@@ -834,3 +834,55 @@ class TestGetCurrentRequestActor:
                             lambda: False)
 
         assert common_utils.get_current_request_actor() is None
+
+
+class TestReleaseMemory:
+    """``release_memory`` returns freed heap memory via the active allocator."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_cache(self, monkeypatch):
+        monkeypatch.setattr(common_utils.sys, 'platform', 'linux')
+        common_utils._get_free_memory_returner.cache_clear()
+        yield
+        common_utils._get_free_memory_returner.cache_clear()
+
+    def test_purges_all_jemalloc_arenas(self):
+        process = mock.MagicMock()
+        with mock.patch.object(common_utils.ctypes,
+                               'CDLL',
+                               return_value=process):
+            common_utils.release_memory()
+
+        process.mallctl.assert_called_once_with(b'arena.4096.purge', None, None,
+                                                None, 0)
+        process.malloc_trim.assert_not_called()
+
+    def test_trims_glibc_without_jemalloc(self):
+        process = mock.MagicMock()
+        del process.mallctl
+        with mock.patch.object(common_utils.ctypes,
+                               'CDLL',
+                               return_value=process):
+            common_utils.release_memory()
+
+        process.malloc_trim.assert_called_once_with(0)
+
+    def test_no_op_without_either(self):
+        process = mock.MagicMock()
+        del process.mallctl
+        del process.malloc_trim
+        with mock.patch.object(common_utils.ctypes,
+                               'CDLL',
+                               return_value=process):
+            common_utils.release_memory()
+
+    def test_resolves_the_allocator_once(self):
+        process = mock.MagicMock()
+        with mock.patch.object(common_utils.ctypes,
+                               'CDLL',
+                               return_value=process) as cdll:
+            common_utils.release_memory()
+            common_utils.release_memory()
+
+        cdll.assert_called_once_with(None)
+        assert process.mallctl.call_count == 2
