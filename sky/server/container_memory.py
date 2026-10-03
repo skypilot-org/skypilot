@@ -18,7 +18,7 @@ Measurement only.
 import dataclasses
 import os
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 CGROUP_DIR = '/sys/fs/cgroup'
 PROC_DIR = '/proc'
@@ -243,6 +243,26 @@ def _kib_to_bytes(value: str) -> int:
     return int(parts[0]) * 1024 if parts and parts[0].isdigit() else 0
 
 
+def _count_unlisted_zombies(proc_dir: str, listed: Set[int]) -> int:
+    """Zombies of this cgroup, which cgroup v2 leaves out of cgroup.procs."""
+    own_cgroup = _read(os.path.join(proc_dir, 'self', 'cgroup'))
+    if own_cgroup is None:
+        return 0
+    try:
+        names = os.listdir(proc_dir)
+    except OSError:
+        return 0
+    zombies = 0
+    for name in names:
+        if not name.isdigit() or int(name) in listed:
+            continue
+        status = _read_status(proc_dir, int(name))
+        if (status is not None and status.get('State', '').startswith('Z') and
+                _read(os.path.join(proc_dir, name, 'cgroup')) == own_cgroup):
+            zombies += 1
+    return zombies
+
+
 def scan(main_pid: Optional[int] = None,
          cgroup_dir: str = CGROUP_DIR,
          proc_dir: str = PROC_DIR) -> Optional[Snapshot]:
@@ -259,7 +279,8 @@ def scan(main_pid: Optional[int] = None,
     if main_pid is None:
         main_pid = os.getpid()
     types = {process_type: TypeUsage() for process_type in TYPES}
-    for pid in _read_pids(cgroup_dir):
+    pids = _read_pids(cgroup_dir)
+    for pid in pids:
         status = _read_status(proc_dir, pid)
         if status is None:
             # Exited between the cgroup.procs read and now.
@@ -276,6 +297,9 @@ def scan(main_pid: Optional[int] = None,
         usage_of_type.max_rss_anon_bytes = max(usage_of_type.max_rss_anon_bytes,
                                                rss_anon)
         usage_of_type.rss_bytes += _kib_to_bytes(status.get('VmRSS', ''))
+    unlisted_zombies = _count_unlisted_zombies(proc_dir, set(pids))
+    types[TYPE_ZOMBIE].processes += unlisted_zombies
+    types[TYPE_ZOMBIE].threads += unlisted_zombies
     return Snapshot(usage_bytes=usage_bytes,
                     stat_bytes=stat_bytes,
                     unreclaimable_bytes=unreclaimable_bytes(

@@ -134,9 +134,10 @@ def container(tmp_path):
         'anon 3699441664\nfile 109613056\nkernel 62111744\n'
         'kernel_stack 9000000\nshmem 4096\n')
     _write(os.path.join(cgroup_dir, 'memory.max'), 'max\n')
-    # 999 is listed but has already exited.
+    # 999 is listed but has already exited. Zombies are not listed.
     _write(os.path.join(cgroup_dir, 'cgroup.procs'),
-           '7\n89\n90\n206\n368\n501\n510\n520\n530\n999\n')
+           '7\n89\n90\n206\n368\n501\n510\n520\n999\n')
+    _write(os.path.join(proc_dir, 'self', 'cgroup'), '0::/\n')
     _process(proc_dir, MAIN_PID, 1, ['python', '-m', 'sky.server.server'], 1000,
              54)
     _process(proc_dir, 89, MAIN_PID, _SPAWN_ARGV, 400, 42)
@@ -158,6 +159,13 @@ def container(tmp_path):
              1,
              name='ssh')
     _process(proc_dir, 530, CONTROLLER_PID, [], 0, 1, state='Z (zombie)')
+    _write(os.path.join(proc_dir, '530', 'cgroup'), '0::/\n')
+    # A zombie of another cgroup that shares the pid namespace.
+    _process(proc_dir, 531, 1, [], 0, 1, state='Z (zombie)')
+    _write(os.path.join(proc_dir, '531', 'cgroup'), '0::/../sidecar\n')
+    # A live process of another cgroup.
+    _process(proc_dir, 532, 1, ['pgbouncer'], 5, 1, name='pgbouncer')
+    _write(os.path.join(proc_dir, '532', 'cgroup'), '0::/../sidecar\n')
     return cgroup_dir, proc_dir
 
 
@@ -207,7 +215,10 @@ def test_scan_reports_every_type(container):
                                      cgroup_dir=cgroup_dir,
                                      proc_dir=proc_dir)
     assert tuple(snapshot.types) == container_memory.TYPES
-    assert sum(u.processes for u in snapshot.types.values()) == 1
+    counts = {t: u.processes for t, u in snapshot.types.items()}
+    # The main process plus the zombie, which is found outside cgroup.procs.
+    assert sum(counts.values()) == 2
+    assert counts['main'] == counts['zombie'] == 1
 
 
 def test_scan_reads_memory_limit(container):
