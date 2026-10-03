@@ -619,3 +619,41 @@ class TestCheckWorkspacePermission:
     def test_skips_check_when_workspace_is_none(self, mock_check, _):
         sky_check.check(workspace=None)
         mock_check.assert_not_called()
+
+
+@pytest.mark.parametrize('user_row_missing', [True, False])
+def test_or_refresh_checks_user_scoped_clouds_for_first_time_user(
+        monkeypatch, user_row_missing):
+    """A non-empty shared cache must not hide a missing per-user Slurm row."""
+    monkeypatch.setattr(sky_check.skypilot_config, 'get_active_workspace',
+                        lambda: 'default')
+    monkeypatch.setattr(sky_check.global_user_state, 'get_allowed_clouds',
+                        lambda workspace: ['kubernetes', 'slurm'])
+    monkeypatch.setattr(sky_check, '_get_workspace_allowed_clouds',
+                        lambda workspace: ['kubernetes', 'slurm'])
+    cached = [[sky_clouds.Kubernetes()]]
+    monkeypatch.setattr(sky_check.global_user_state,
+                        'get_cached_enabled_clouds',
+                        lambda capability, workspace: cached[0])
+    monkeypatch.setattr(sky_check.global_user_state,
+                        'is_user_scoped_enabled_clouds_cache_missing',
+                        lambda capability, workspace: user_row_missing)
+    calls = []
+
+    def fake_check_capability(capability,
+                              quiet=False,
+                              clouds=None,
+                              workspace=None):
+        calls.append(clouds)
+        cached[0] = [sky_clouds.Kubernetes(), sky_clouds.Slurm()]
+
+    monkeypatch.setattr(sky_check, 'check_capability', fake_check_capability)
+
+    result = sky_check.get_cached_enabled_clouds_or_refresh(
+        CloudCapability.COMPUTE)
+    if user_row_missing:
+        assert calls == [['slurm']]
+        assert [repr(c) for c in result] == ['Kubernetes', 'Slurm']
+    else:
+        assert not calls
+        assert [repr(c) for c in result] == ['Kubernetes']
