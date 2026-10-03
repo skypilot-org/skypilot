@@ -1067,7 +1067,7 @@ def test_sdk_launch_no_resize_skips_version_guard(_stub_launch_preamble,
 
 @pytest.mark.parametrize('api_version', [None, 24, 56])
 def test_sdk_validate_slurm_host_path_errors_on_old_server(
-        api_version, monkeypatch):
+        api_version, _stub_launch_preamble, monkeypatch):
     """sdk.validate should error for host_path volumes if remote API
     version < 57."""
     import sky
@@ -1087,7 +1087,8 @@ def test_sdk_validate_slurm_host_path_errors_on_old_server(
         sdk.validate(dag)
 
 
-def test_sdk_validate_slurm_host_path_allowed_on_new_server(monkeypatch):
+def test_sdk_validate_slurm_host_path_allowed_on_new_server(
+        _stub_launch_preamble, monkeypatch):
     """sdk.validate should pass the guard for host_path volumes when remote
     API version >= 57. We short-circuit the server request with a sentinel
     so reaching it proves the guard didn't raise."""
