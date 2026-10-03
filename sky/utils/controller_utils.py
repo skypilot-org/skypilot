@@ -2,6 +2,7 @@
 import copy
 import dataclasses
 import enum
+import hashlib
 import os
 import pathlib
 import tempfile
@@ -1077,10 +1078,16 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     if bucket_wth_prefix is None:
         store_type = sub_path = None
         storage_account_name = region = None
-        bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
-            username=common_utils.get_cleaned_username(),
-            user_hash=user_hash,
-            id=run_id)
+        if len(user_hash) > 16:
+            user_hash = hashlib.sha256(user_hash.encode()).hexdigest()[:16]
+        bucket_template = constants.FILE_MOUNTS_BUCKET_NAME
+        username_limit = 63 - len(
+            bucket_template.format(username='', user_hash=user_hash, id=run_id))
+        staging_username = common_utils.get_cleaned_username()
+        staging_username = staging_username[:username_limit].rstrip('-')
+        bucket_name = bucket_template.format(username=staging_username,
+                                             user_hash=user_hash,
+                                             id=run_id)
     else:
         (store_type, bucket_name, sub_path, storage_account_name, region) = (
             storage_lib.StoreType.get_fields_from_store_url(bucket_wth_prefix))
@@ -1250,6 +1257,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                         'still download data and code over the network using '
                         'curl or other tools in the `setup` section of the '
                         'task.') from None
+            raise
 
     # Step 5: Add the file download into the file mounts, such as
     #  /original-dst: s3://spot-fm-file-only-bucket-name/file-0
