@@ -96,11 +96,11 @@
                 "limits": {
                   "cpu": 4.0,
                   "ephemeral-storage": "256.0G",
-                  "memory": "16.0G"
+                  "memory": "16.0Gi"
                 },
                 "requests": {
                   "cpu": 4,
-                  "memory": "16G"
+                  "memory": "16Gi"
                 }
               },
               "volumeMounts": [

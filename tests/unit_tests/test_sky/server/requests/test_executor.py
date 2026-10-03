@@ -42,6 +42,8 @@ def isolated_database(tmp_path):
                         str(temp_log_path)):
             requests_lib._DB = None
             yield
+            if requests_lib._DB is not None:
+                asyncio.run(requests_lib._DB.close())
             requests_lib._DB = None
 
 
@@ -929,6 +931,51 @@ class _RecordingCondition(continue_condition_lib.ContinueCondition):
             'fallback_wait_seconds': fallback_wait_seconds,
         })
         return self._verdict
+
+
+@pytest.mark.parametrize('status', requests_lib.RequestStatus.finished_status())
+@pytest.mark.parametrize('error_type', [
+    exceptions.ExecutionRetryableError,
+    exceptions.ExecutionPausedError,
+])
+def test_retry_callback_preserves_terminal_request(pause_harness, status,
+                                                   error_type):
+    """Cancellation can finish after the worker exits but before its callback."""
+    with requests_lib.update_request(pause_harness.request_id) as request:
+        request.status = status
+        request.status_msg = 'Already finished'
+    future = concurrent.futures.Future()
+    future.set_exception(
+        error_type('Capacity unavailable', hint='Retry', retry_wait_seconds=30))
+
+    pause_harness.worker.handle_task_result(
+        future, (pause_harness.request_id, False, True))
+
+    request = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status', 'status_msg'])
+    assert request.status == status
+    assert request.status_msg == 'Already finished'
+    assert pause_harness.queue_items == []
+    assert pause_harness.sleep_calls == []
+
+
+def test_retry_cancelled_during_backoff_is_not_executed(pause_harness,
+                                                        monkeypatch):
+
+    def cancel_on_sleep(_):
+        with requests_lib.update_request(pause_harness.request_id) as request:
+            request.status = requests_lib.RequestStatus.CANCELLED
+
+    monkeypatch.setattr('time.sleep', cancel_on_sleep)
+    pause_harness.run(None)
+
+    pool = mock.Mock()
+    pause_harness.worker.process_request(
+        pool, executor._get_queue(requests_lib.ScheduleType.LONG))
+    pool.submit_until_success.assert_not_called()
+    request = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status'])
+    assert request.status == requests_lib.RequestStatus.CANCELLED
 
 
 def test_pause_reschedules_when_wait_returns_true(pause_harness):

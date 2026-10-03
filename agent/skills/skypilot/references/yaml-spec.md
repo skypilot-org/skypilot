@@ -1090,8 +1090,8 @@ file_mounts:
   # If a relative path is used, it's evaluated relative to the location from
   # which `sky` is called.
   #
-  # If symlinks are present, they are copied as symlinks, and their targets
-  # must also be synced using file_mounts to ensure correctness.
+  # With an API server, explicitly mounted directory symlinks upload their
+  # contents. Nested symlinks stay links, so their targets must also be synced.
   /remote/dir1/file: /local/dir1/file
   /remote/dir2: /local/dir2
 

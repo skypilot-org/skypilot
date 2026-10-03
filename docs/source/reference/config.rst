@@ -268,6 +268,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
     :ref:`security_group_name <config-yaml-nebius-security-group-name>`: my-sg
 
+  :ref:`runpod <config-yaml-runpod>`:
+    allowed_cuda_versions: ["13.0"]
+
   :ref:`vast <config-yaml-vast>`:
     :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
     :ref:`create_instance_kwargs <config-yaml-vast-create-instance-kwargs>`:
@@ -1756,6 +1759,45 @@ For per-workspace overrides — e.g. sharing a single cluster context across
 teams, with each team scoped to its own namespace — see
 :ref:`Workspaces <workspaces>`.
 
+With API server version 65 or newer, an explicit task namespace binds that
+task's Kubernetes destination. It may override a plain global namespace default,
+but must match the effective workspace or per-context namespace when one is set:
+
+.. code-block:: yaml
+
+  resources:
+    infra: k8s/my-context
+  config:
+    kubernetes:
+      namespace: my-namespace
+
+This binding requires an explicit Kubernetes cloud and concrete context
+(``infra: k8s/<context>``, or ``cloud: kubernetes`` with ``region: <context>``).
+Cloudless, contextless, wildcard, SSH, and other-cloud selections are rejected
+before submission. Specify the context so namespace policy is evaluated against
+the final destination, including when reusing a cluster. Tasks without a namespace
+binding keep their existing placement behavior.
+
+When an admin policy is configured, any effective namespace in its returned
+config is authoritative, including an unchanged global namespace. A conflicting
+task namespace is rejected. A policy can allow task selection by returning no
+namespace constraint. Requests without a task namespace keep the existing
+workspace/context precedence.
+This admission check applies to cluster operations, managed jobs, and services
+before their task and returned config are passed to controllers.
+
+The launch flag ``--config kubernetes.namespace=my-namespace`` has the same
+effect. This changes the flag from an ambient default to a binding request.
+New clients reject it on servers older than API 65, even when the older ambient
+flag previously worked; upgrade both client and server to use the binding.
+``pod_config.metadata.namespace`` does not bind placement: pod creation uses
+the resolved provider namespace. Reusing an existing cluster rejects a task
+binding that differs from its recorded provider namespace, or whose existing
+namespace cannot be verified. Registered PVC volumes and auto-mounts must match
+the bound namespace; new ephemeral volumes inherit it. This does not move an
+existing cluster or PVC. Kubernetes task namespace binding is unsupported on
+SSH node pools and is rejected there.
+
 .. _config-yaml-kubernetes-allowed-nodes:
 
 ``kubernetes.allowed_nodes``
@@ -2879,6 +2921,36 @@ Example:
           us-ashburn-1:
             vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
             vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
+
+.. _config-yaml-runpod:
+
+``runpod``
+----------
+
+``runpod.allowed_cuda_versions`` accepts a nonempty list of CUDA
+``major.minor`` strings, such as ``["13.0"]``. For GPU Pods, SkyPilot passes
+the list to RunPod's host compatibility filter for both on-demand and spot
+launches. A task's ``config`` block can override the global setting. Omit the
+setting to use the provider default; CPU-only instances ignore it. A Docker
+image tag alone does not constrain the host driver.
+
+SkyPilot also passes the selected GPU instance's CPU and provider-native
+host-memory sizes as provisioning minima. The legacy RunPod GPU catalog stores
+nominal GB under the ``MemoryGiB`` column. For matching Sky's GiB requirements,
+SkyPilot conservatively treats each nominal GB as 10\ :sup:`9` bytes, without
+claiming RunPod's undocumented byte basis. Provisioning retains the original
+nominal GB floor: a catalog value of 752 sends 752, while a 550 GiB requirement
+needs at least 591 nominal GB. CPU-only sizing is unchanged. Unknown or invalid
+host sizes fail before provisioning. These constraints can reduce availability;
+SkyPilot does not remove them when a provider rejects the request.
+Previously rendered GPU configurations without these host minima must be
+re-rendered before provisioning another Pod.
+
+.. code-block:: yaml
+
+  config:
+    runpod:
+      allowed_cuda_versions: ["13.0"]
 
 .. _config-yaml-nebius:
 

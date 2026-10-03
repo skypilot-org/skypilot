@@ -1988,12 +1988,18 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
         '"s@session\\s*required\\s*pam_loginuid.so@session optional '
         'pam_loginuid.so@g" -i /etc/pam.d/sshd; '
         'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A; '
-        '$(prefix_cmd) mkdir -p ~/.ssh; '
-        '$(prefix_cmd) chown -R $(whoami) ~/.ssh;'
-        '$(prefix_cmd) chmod 700 ~/.ssh; '
+        # Match the template: use passwd home without changing image HOME.
+        'skypilot_ssh_home=$(unset HOME && builtin printf \'%s\\n\' ~); '
+        'case "$skypilot_ssh_home" in '
+        '/*) ;; '
+        '*) echo "Cannot determine absolute SSH account home" >&2; exit 1 ;; '
+        'esac; '
+        '$(prefix_cmd) mkdir -p "$skypilot_ssh_home/.ssh"; '
+        '$(prefix_cmd) chown -R $(whoami) "$skypilot_ssh_home/.ssh";'
+        '$(prefix_cmd) chmod 700 "$skypilot_ssh_home/.ssh"; '
         '$(prefix_cmd) cat /etc/secret-volume/ssh-publickey* > '
-        '~/.ssh/authorized_keys; '
-        '$(prefix_cmd) chmod 644 ~/.ssh/authorized_keys; '
+        '"$skypilot_ssh_home/.ssh/authorized_keys"; '
+        '$(prefix_cmd) chmod 644 "$skypilot_ssh_home/.ssh/authorized_keys"; '
         '$(prefix_cmd) service ssh restart; '
         # Eliminate the error
         # `mesg: ttyname failed: inappropriate ioctl for device`.

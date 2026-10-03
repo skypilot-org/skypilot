@@ -1,4 +1,8 @@
-import { CLOUDS_LIST, COMMON_GPUS } from '@/data/connectors/constants';
+import {
+  CLOUDS_LIST,
+  COMMON_GPUS,
+  canonicalizeCloudName,
+} from '@/data/connectors/constants';
 
 // Importing from the same directory
 import { apiClient } from '@/data/connectors/client';
@@ -160,7 +164,7 @@ export async function getCloudInfrastructure(forceRefresh = false) {
     // Count clusters per cloud
     clusters.forEach((cluster) => {
       if (cluster.cloud) {
-        const cloudName = cluster.cloud;
+        const cloudName = canonicalizeCloudName(cluster.cloud);
         if (cloudsData[cloudName]) {
           cloudsData[cloudName].clusters += 1;
           // If we have clusters in a cloud, it must be enabled
@@ -172,7 +176,7 @@ export async function getCloudInfrastructure(forceRefresh = false) {
     // Count jobs per cloud
     jobs.forEach((job) => {
       if (job.cloud) {
-        const cloudName = job.cloud;
+        const cloudName = canonicalizeCloudName(job.cloud);
         if (cloudsData[cloudName]) {
           cloudsData[cloudName].jobs += 1;
           // If we have jobs in a cloud, it must be enabled

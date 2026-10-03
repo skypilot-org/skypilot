@@ -1,20 +1,384 @@
+import contextlib
+import inspect
 from unittest import mock
 
 import pytest
+import sqlalchemy
 
+import sky
 from sky import admin_policy as sky_admin_policy
 from sky import clouds
 from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import models
+from sky import skypilot_config
+from sky.backends import backend_utils
+from sky.backends import cloud_vm_ray_backend
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
 from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
+from sky.client import sdk
+from sky.server import constants as server_constants
 from sky.skylet import job_lib
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import config_utils
+from sky.utils import dag_utils
 from sky.utils import status_lib
 from sky.workspaces import constants as workspace_constants
+
+
+@pytest.mark.parametrize('retry_until_up', [False, True])
+@pytest.mark.parametrize('cutoff', [1, 2000000000.75])
+def test_expired_modal_retry_finishes_before_provisioning(
+        cutoff, retry_until_up, monkeypatch):
+    resource = sky.Resources(
+        infra='modal',
+        _cluster_config_overrides={'modal': {
+            'deadline': cutoff
+        }})
+    backend = CloudVmRayBackend()
+    monkeypatch.setattr(backend, '_check_existing_cluster',
+                        mock.Mock(return_value=mock.Mock(resources=resource)))
+    monkeypatch.setattr(cloud_vm_ray_backend.lock_events,
+                        'DistributedLockEvent',
+                        lambda *a: contextlib.nullcontext())
+    monkeypatch.setattr(cloud_vm_ray_backend.rich_utils, 'force_update_status',
+                        lambda *a: None)
+    monkeypatch.setattr(backend, '_maybe_clear_external_cluster_failures',
+                        lambda *a: None)
+    monkeypatch.setattr(cloud_vm_ray_backend.usage_lib.messages.usage,
+                        'update_cluster_resources', lambda *a: None)
+    monkeypatch.setattr(cloud_vm_ray_backend.usage_lib.messages.usage,
+                        'update_cluster_status', lambda *a: None)
+    wheel = mock.Mock(side_effect=RuntimeError('normal provisioning path'))
+    monkeypatch.setattr(cloud_vm_ray_backend.wheel_utils, 'build_sky_wheel',
+                        wheel)
+    error = TimeoutError if cutoff == 1 else RuntimeError
+    with pytest.raises(error,
+                       match='deadline has passed|normal provisioning path'):
+        backend._locked_provision('unused',
+                                  sky.Task(),
+                                  resource,
+                                  False,
+                                  False,
+                                  'existing',
+                                  retry_until_up=retry_until_up)
+    assert wheel.call_count == (0 if cutoff == 1 else 1)
+
+
+@pytest.mark.parametrize('requested,actual', [
+    (None, None),
+    (None, 2000000000.75),
+    (2000000000.75, 2000000000.75),
+    (2000000000.75, None),
+    (2000000000.75, 2000000001.75),
+    (2000000000.75, 1999999999.75),
+])
+@pytest.mark.parametrize('terminated', [False, True])
+@pytest.mark.parametrize('planned', [False, True])
+def test_modal_reuse_preserves_rendered_deadline(requested, actual, terminated,
+                                                 planned, monkeypatch):
+    # Original deadline came from global config, so it is absent from Resources.
+    original = sky.Resources(infra='modal/auto', instance_type='4CPU--16GB')
+    handle = mock.Mock(spec=CloudVmRayResourceHandle,
+                       cluster_name='existing',
+                       cluster_yaml='/generated/existing.yml',
+                       launched_resources=original,
+                       launched_nodes=1)
+    task = sky.Task().set_resources(
+        sky.Resources(infra='modal',
+                      _cluster_config_overrides={} if requested is None else
+                      {'modal': {
+                          'deadline': requested
+                      }}))
+    record = {
+        'handle': handle,
+        'status': status_lib.ClusterStatus.UP,
+        'cluster_ever_up': True,
+        'config_hash': None
+    }
+    monkeypatch.setattr(global_user_state, 'get_cluster_from_name',
+                        lambda *a, **kw: record)
+    monkeypatch.setattr(backend_utils, 'refresh_cluster_record',
+                        lambda *a, **kw: None if terminated else record)
+    monkeypatch.setattr(global_user_state, 'get_status_from_cluster_name',
+                        lambda *a: None)
+    monkeypatch.setattr(
+        global_user_state, 'get_cluster_yaml_str', lambda *a:
+        'available_node_types:\n  ray_head_default:\n    node_config:\n'
+        f'      Deadline: {actual if actual is not None else "null"}\n')
+    backend = CloudVmRayBackend()
+    with skypilot_config.replace_skypilot_config_in_process(
+            config_utils.Config({})):
+        if requested is not None and requested != actual:
+            with pytest.raises(exceptions.ResourcesMismatchError,
+                               match='Existing Modal deadline'):
+                backend._check_existing_cluster(task,
+                                                original if planned else None,
+                                                'existing')
+        else:
+            result = backend._check_existing_cluster(
+                task, original if planned else None, 'existing')
+            assert result.prev_handle is (None if terminated else handle)
+            assert result.resources.cluster_config_overrides.get(
+                'modal', {}).get('deadline') == actual
+    assert not original.cluster_config_overrides
+
+
+@pytest.mark.parametrize('requested,actual', [
+    ('models', 'models'),
+    ('models', 'other'),
+    ('models', None),
+    (None, 'other'),
+])
+def test_existing_cluster_task_namespace(requested, actual, monkeypatch):
+    launched = sky.Resources(infra='k8s/test-context')
+    handle = mock.Mock(cluster_name='existing',
+                       cluster_yaml='/generated/existing.yml',
+                       launched_resources=launched,
+                       launched_nodes=1)
+    config = {} if requested is None else {
+        'kubernetes': {
+            'namespace': requested
+        }
+    }
+    task = sky.Task().set_resources(
+        sky.Resources(infra='k8s/test-context',
+                      _cluster_config_overrides=config))
+    monkeypatch.setattr(global_user_state, 'get_status_from_cluster_name',
+                        lambda *a: None)
+    monkeypatch.setattr(
+        global_user_state, 'get_cluster_yaml_str',
+        lambda *a: f'provider:\n  namespace: {actual or "null"}')
+    backend = CloudVmRayBackend()
+    if requested is not None and requested != actual:
+        with pytest.raises(exceptions.ResourcesMismatchError,
+                           match='Existing Kubernetes namespace'):
+            backend.check_resources_fit_cluster(handle, task)
+    else:
+        assert backend.check_resources_fit_cluster(handle,
+                                                   task) in task.resources
+
+
+@pytest.mark.parametrize('suffix', ['', '.debug'])
+@pytest.mark.parametrize('requested', ['models', 'other'])
+def test_existing_namespace_from_yaml_file(suffix, requested, monkeypatch,
+                                           tmp_path):
+    """Exercise DB-miss file migration through the real YAML accessor."""
+    engine = sqlalchemy.create_engine('sqlite:///:memory:')
+    global_user_state.cluster_yaml_table.create(engine)
+    monkeypatch.setattr(global_user_state._db_manager, 'get_engine',
+                        lambda: engine)
+    monkeypatch.setattr(global_user_state, 'get_status_from_cluster_name',
+                        lambda *a: None)
+    yaml_path = tmp_path / 'generated' / 'existing.yml'
+    yaml_path.parent.mkdir()
+    yaml_path.with_name(yaml_path.name +
+                        suffix).write_text('provider:\n  namespace: models\n')
+    handle = mock.Mock(cluster_name='existing',
+                       cluster_yaml=str(yaml_path),
+                       launched_resources=sky.Resources(infra='k8s/ctx'),
+                       launched_nodes=1)
+    task = sky.Task().set_resources(
+        sky.Resources(
+            infra='k8s/ctx',
+            _cluster_config_overrides={'kubernetes': {
+                'namespace': requested
+            }}))
+    try:
+        if requested == 'models':
+            assert CloudVmRayBackend().check_resources_fit_cluster(
+                handle, task) in task.resources
+        else:
+            with pytest.raises(exceptions.ResourcesMismatchError,
+                               match='Existing Kubernetes namespace: .models.'):
+                CloudVmRayBackend().check_resources_fit_cluster(handle, task)
+        # Both admission and rejection looked up the file and migrated it.
+        assert global_user_state.get_cluster_yaml_str(
+            str(yaml_path)) == 'provider:\n  namespace: models\n'
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize('requested', [None, 'models', 'other'])
+@pytest.mark.parametrize('terminated', [False, True])
+def test_cluster_reuse_preserves_namespace(requested, terminated, monkeypatch):
+    original = sky.Resources(infra='k8s/ctx',
+                             instance_type='2CPU--2GB',
+                             _cluster_config_overrides={
+                                 'kubernetes': {
+                                     'custom_metadata': {
+                                         'labels': {
+                                             'owner': 'original'
+                                         }
+                                     }
+                                 }
+                             })
+    handle = mock.Mock(spec=CloudVmRayResourceHandle,
+                       cluster_name='existing',
+                       cluster_yaml='/generated/existing.yml',
+                       launched_resources=original,
+                       launched_nodes=1)
+    task = sky.Task().set_resources(
+        sky.Resources(infra='k8s/ctx',
+                      _cluster_config_overrides={} if requested is None else
+                      {'kubernetes': {
+                          'namespace': requested
+                      }}))
+    record = {
+        'handle': handle,
+        'status': status_lib.ClusterStatus.UP,
+        'cluster_ever_up': True,
+        'config_hash': None
+    }
+    monkeypatch.setattr(global_user_state, 'get_cluster_from_name',
+                        lambda *a, **kw: record)
+    monkeypatch.setattr(backend_utils, 'refresh_cluster_record',
+                        lambda *a, **kw: None if terminated else record)
+    monkeypatch.setattr(global_user_state, 'get_status_from_cluster_name',
+                        lambda *a: None)
+    monkeypatch.setattr(
+        global_user_state, 'get_cluster_yaml_str',
+        lambda *a: 'provider:\n  namespace: models\n'
+        '  autoscaler_service_account: {metadata: {}}\n'
+        '  autoscaler_role: {metadata: {}}\n'
+        '  autoscaler_role_binding: {metadata: {}}\n  services: []\n'
+        'available_node_types:\n  ray_head_default:\n    node_config:\n'
+        '      metadata: {}\n      spec:\n        containers: []\n')
+    backend = CloudVmRayBackend()
+    config = config_utils.Config(
+        {'kubernetes': {
+            'namespace': 'changed-ambient'
+        }})
+    with skypilot_config.replace_skypilot_config_in_process(config):
+        if requested == 'other':
+            with pytest.raises(exceptions.ResourcesMismatchError):
+                backend._check_existing_cluster(task, None, 'existing')
+        else:
+            result = backend._check_existing_cluster(task, None, 'existing')
+            assert result.prev_handle is (None if terminated else handle)
+            overrides = result.resources.cluster_config_overrides
+            assert overrides['kubernetes']['custom_metadata']['labels'] == {
+                'owner': 'original'
+            }
+            assert skypilot_config.get_effective_namespace(
+                'kubernetes', 'ctx',
+                override_configs=overrides) == (requested or 'changed-ambient')
+    assert 'namespace' not in original.cluster_config_overrides['kubernetes']
+
+
+def test_existing_namespace_without_yaml_path_rejected(monkeypatch):
+    handle = mock.Mock(cluster_name='existing',
+                       cluster_yaml=None,
+                       launched_resources=sky.Resources(infra='k8s/ctx'),
+                       launched_nodes=1)
+    task = sky.Task().set_resources(
+        sky.Resources(
+            infra='k8s/ctx',
+            _cluster_config_overrides={'kubernetes': {
+                'namespace': 'models'
+            }}))
+    monkeypatch.setattr(global_user_state, 'get_status_from_cluster_name',
+                        lambda *a: None)
+    with pytest.raises(exceptions.ResourcesMismatchError,
+                       match='Existing Kubernetes namespace: None'):
+        CloudVmRayBackend().check_resources_fit_cluster(handle, task)
+
+
+@pytest.mark.parametrize('terminated', [False, True])
+@pytest.mark.parametrize('requested', ['unresolved', 'kubernetes', None])
+def test_namespace_binding_cannot_reuse_aws(requested, terminated, monkeypatch):
+    config = {} if requested is None else {
+        'kubernetes': {
+            'namespace': 'models'
+        }
+    }
+    task = sky.Task.from_yaml_config({
+        'config': config,
+        'resources': {
+            'infra': 'k8s/ctx'
+        } if requested == 'kubernetes' else {},
+    })
+    monkeypatch.setattr(clouds.AWS, 'get_accelerators_from_instance_type',
+                        lambda *a: None)
+    original = sky.Resources(infra='aws/us-east-1',
+                             instance_type='m5.large',
+                             cpus=2,
+                             memory=8)
+    handle = mock.Mock(spec=CloudVmRayResourceHandle,
+                       cluster_name='existing',
+                       cluster_yaml='/generated/existing.yml',
+                       launched_resources=original,
+                       launched_nodes=1)
+    record = {
+        'handle': handle,
+        'status': status_lib.ClusterStatus.UP,
+        'cluster_ever_up': True,
+        'config_hash': None
+    }
+    monkeypatch.setattr(global_user_state, 'get_cluster_from_name',
+                        lambda *a, **kw: record)
+    monkeypatch.setattr(backend_utils, 'refresh_cluster_record',
+                        lambda *a, **kw: None if terminated else record)
+    monkeypatch.setattr(global_user_state, 'get_status_from_cluster_name',
+                        lambda *a: None)
+    monkeypatch.setattr(global_user_state, 'get_cluster_yaml_str',
+                        lambda *a: 'provider: {type: aws}\n')
+    backend = CloudVmRayBackend()
+    if requested is not None:
+        with pytest.raises(ValueError,
+                           match='requires explicit Kubernetes placement'):
+            backend._check_existing_cluster(task, None, 'existing')
+    else:
+        result = backend._check_existing_cluster(task, None, 'existing')
+        assert result.resources.cloud.is_same_cloud(clouds.AWS())
+        assert result.resources.cluster_config_overrides == {}
+
+
+@pytest.mark.parametrize('api_version', [None, 24, 64])
+@pytest.mark.parametrize('operation', ['validate', 'optimize'])
+def test_task_namespace_rejected_before_old_server_request(
+        api_version, operation, monkeypatch):
+    task = sky.Task.from_yaml_config({
+        'config': {
+            'kubernetes': {
+                'namespace': 'models'
+            }
+        },
+    })
+    dag = dag_utils.convert_entrypoint_to_dag(task)
+    monkeypatch.setattr(sdk.versions, 'get_remote_api_version',
+                        lambda: api_version)
+    request = mock.Mock(side_effect=AssertionError('unexpected request'))
+    monkeypatch.setattr(sdk.server_common, 'make_authenticated_request',
+                        request)
+    # Exercise the function body without the health/start/usage decorators.
+    with pytest.raises(exceptions.APINotSupportedError,
+                       match='Task kubernetes.namespace.*API_VERSION >= 65'):
+        inspect.unwrap(getattr(sdk, operation))(dag)
+    request.assert_not_called()
+
+
+@pytest.mark.parametrize('namespace', [None, 'models'])
+def test_task_namespace_supported_server_and_absent_override(
+        namespace, monkeypatch):
+    config = {} if namespace is None else {
+        'kubernetes': {
+            'namespace': namespace
+        }
+    }
+    dag = dag_utils.convert_entrypoint_to_dag(
+        sky.Task.from_yaml_config({'config': config}))
+    monkeypatch.setattr(
+        sdk.versions, 'get_remote_api_version', lambda: None if namespace is
+        None else server_constants.MIN_TASK_KUBERNETES_NAMESPACE_API_VERSION)
+    request = mock.Mock(side_effect=RuntimeError('server request'))
+    monkeypatch.setattr(sdk.server_common, 'make_authenticated_request',
+                        request)
+    with pytest.raises(RuntimeError, match='server request'):
+        inspect.unwrap(sdk.validate)(dag)
+    request.assert_called_once()
 
 
 @mock.patch('sky.backends.backend_utils.check_cluster_available')
@@ -490,7 +854,7 @@ def test_check_existing_cluster_resize_uses_task_num_nodes(
     mock_resource = mock.MagicMock()
     mock_resource.ports = None
     mock_resource.docker_login_config = None
-    mock_resource.cluster_config_overrides = None
+    mock_resource.cluster_config_overrides = {}
     task.resources = {mock_resource}
 
     # Capture the task and kwargs passed to check_resources_fit_cluster.
@@ -501,6 +865,7 @@ def test_check_existing_cluster_resize_uses_task_num_nodes(
 
     def _capture(_handle, _task, **kwargs):
         observed.append((_task.num_nodes, kwargs))
+        return mock_resource
 
     mock_check_fit.side_effect = _capture
 
@@ -557,7 +922,7 @@ def test_check_existing_cluster_no_resize_uses_handle_nodes(
     mock_resource = mock.MagicMock()
     mock_resource.ports = None
     mock_resource.docker_login_config = None
-    mock_resource.cluster_config_overrides = None
+    mock_resource.cluster_config_overrides = {}
     mock_resource.less_demanding_than.return_value = True
     task.resources = {mock_resource}
 
@@ -702,7 +1067,7 @@ def test_sdk_launch_no_resize_skips_version_guard(_stub_launch_preamble,
 
 @pytest.mark.parametrize('api_version', [None, 24, 56])
 def test_sdk_validate_slurm_host_path_errors_on_old_server(
-        api_version, monkeypatch):
+        api_version, _stub_launch_preamble, monkeypatch):
     """sdk.validate should error for host_path volumes if remote API
     version < 57."""
     import sky
@@ -722,7 +1087,8 @@ def test_sdk_validate_slurm_host_path_errors_on_old_server(
         sdk.validate(dag)
 
 
-def test_sdk_validate_slurm_host_path_allowed_on_new_server(monkeypatch):
+def test_sdk_validate_slurm_host_path_allowed_on_new_server(
+        _stub_launch_preamble, monkeypatch):
     """sdk.validate should pass the guard for host_path volumes when remote
     API version >= 57. We short-circuit the server request with a sentinel
     so reaching it proves the guard didn't raise."""

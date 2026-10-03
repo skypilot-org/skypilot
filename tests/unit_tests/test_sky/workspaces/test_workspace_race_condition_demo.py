@@ -34,7 +34,7 @@ class TestWorkspaceRaceConditionDemo(unittest.TestCase):
 
         # Patch the config path to use our temporary file
         self.config_path_patcher = mock.patch(
-            'sky.skypilot_config.get_user_config_path',
+            'sky.skypilot_config._resolve_server_config_path',
             return_value=self.temp_config_file)
         self.config_path_patcher.start()
 

@@ -279,18 +279,25 @@ def _compute_zip_blob_id(zip_path: str) -> str:
     """Compute a stable content hash from a zip file.
 
     Iterates over zip entries in sorted order and hashes
-    (filename, content) pairs. Ignores zip metadata (timestamps, OS).
+    filenames, entry types, contents, and restored Unix file permissions.
+    Ignores timestamps and metadata that the server does not restore.
 
     Compared to common_utils.hash_file, this hash is stable across re-zips.
     """
-    entries: list = []
+    entries: list[Tuple[str, bytes, bytes]] = []
     with zipfile.ZipFile(zip_path, 'r') as zipf:
         for info in zipf.infolist():
             name = info.filename
             is_symlink = (info.external_attr >> 28) == 0xA
+            kind = b'L' if is_symlink else b'D' if name.endswith('/') else b'F'
+            mode = info.external_attr >> 16
+            # Distinguish absent metadata from explicit Unix mode 000.
+            permissions = (mode & 0o777 if kind == b'F' and
+                           info.create_system == 3 and mode else 0xFFFF)
+            metadata = kind + permissions.to_bytes(2, 'big')
             if name.endswith('/') and not is_symlink:
                 # Directory entry
-                entries.append((name, hashlib.sha256(b'').digest()))
+                entries.append((name, metadata, hashlib.sha256(b'').digest()))
             else:
                 # File or symlink (symlink content is the target path)
                 eh = hashlib.sha256()
@@ -300,12 +307,14 @@ def _compute_zip_blob_id(zip_path: str) -> str:
                         if not chunk:
                             break
                         eh.update(chunk)
-                entries.append((name, eh.digest()))
+                entries.append((name, metadata, eh.digest()))
 
     entries.sort(key=lambda e: e[0])
-    h = hashlib.sha256()
-    for name, digest in entries:
+    # Avoid old mode-agnostic blobs, including their extracted permissions.
+    h = hashlib.sha256(b'skypilot-file-mounts-v2\0')
+    for name, metadata, digest in entries:
         h.update(name.encode('utf-8'))
+        h.update(metadata)
         h.update(digest)
     return h.hexdigest()
 

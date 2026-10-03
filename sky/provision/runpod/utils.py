@@ -1,6 +1,7 @@
 """RunPod library wrapper for SkyPilot."""
 
 import base64
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -299,18 +300,36 @@ def launch(
     *,
     network_volume_id: Optional[str] = None,
     volume_mount_path: Optional[str] = None,
+    min_vcpu_count: Optional[int] = None,
+    min_memory_in_gb: Optional[int] = None,
+    allowed_cuda_versions: Optional[List[str]] = None,
 ) -> str:
     """Launches an instance with the given parameters.
 
     For CPU instances, we directly use the instance_type for launching the
     instance.
 
-    For GPU instances, we convert the instance_type to the RunPod GPU name,
-    and finds the specs for the GPU, before launching the instance.
+    For GPU instances, convert the instance_type to the RunPod GPU name and
+    retain the selected host CPU/RAM minima and any CUDA compatibility filter.
 
     Returns:
         instance_id: The instance ID.
     """
+    is_cpu_instance = instance_type.startswith('cpu')
+    if not is_cpu_instance:
+        if any(not isinstance(value, int) or isinstance(value, bool) or
+               value <= 0 for value in (min_vcpu_count, min_memory_in_gb)):
+            raise ValueError('RunPod GPU launch requires positive integer '
+                             'host CPU and RAM minima. Re-render the launch '
+                             'configuration if these fields are missing.')
+        if allowed_cuda_versions is not None and (
+                not isinstance(allowed_cuda_versions, list) or
+                not allowed_cuda_versions or
+                any(not isinstance(version, str) or
+                    re.fullmatch(r'[0-9]+\.[0-9]+', version) is None
+                    for version in allowed_cuda_versions)):
+            raise ValueError('RunPod allowed_cuda_versions must be a nonempty '
+                             'list of major.minor version strings.')
     name = f'{cluster_name}-{node_type}'
 
     # TODO(zhwu): keep this align with setups in
@@ -377,7 +396,6 @@ def launch(
 
     # GPU instance types start with f'{gpu_count}x',
     # CPU instance types start with 'cpu'.
-    is_cpu_instance = instance_type.startswith('cpu')
     if is_cpu_instance:
         # RunPod CPU instances can be uniquely identified by the instance_id.
         params.update({
@@ -387,14 +405,15 @@ def launch(
         gpu_type = GPU_NAME_MAP[instance_type.split('_')[1]]
         gpu_quantity = int(instance_type.split('_')[0].replace('x', ''))
         cloud_type = instance_type.split('_')[2]
-        gpu_specs = runpod.runpod.get_gpu(gpu_type)
         params.update({
             'gpu_type_id': gpu_type,
             'cloud_type': cloud_type,
-            'min_vcpu_count': 4 * gpu_quantity,
-            'min_memory_in_gb': gpu_specs['memoryInGb'] * gpu_quantity,
+            'min_vcpu_count': min_vcpu_count,
+            'min_memory_in_gb': min_memory_in_gb,
             'gpu_count': gpu_quantity,
         })
+        if allowed_cuda_versions is not None:
+            params['allowed_cuda_versions'] = allowed_cuda_versions
 
     if preemptible is None or not preemptible:
         new_instance = runpod.runpod.create_pod(**params)

@@ -470,6 +470,11 @@ class RequestWorker:
             # Set request to WAITING status for visibility
             with api_requests.update_request(request_id) as request_task:
                 assert request_task is not None, request_id
+                # Cancellation may finish after the worker exits but before
+                # this callback acquires the request lock. Never revive it.
+                if (request_task.status
+                        in api_requests.RequestStatus.finished_status()):
+                    return
                 request_task.status = api_requests.RequestStatus.WAITING
                 request_task.status_msg = status_msg
             if condition is not None:

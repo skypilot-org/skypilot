@@ -710,6 +710,9 @@ def get_volume_schema():
                     'cleanup_on_deletion': {
                         'type': 'boolean',
                     },
+                    'environment_name': {
+                        'type': 'string',
+                    },
                 },
             },
             **_LABELS_SCHEMA,
@@ -2393,6 +2396,31 @@ def get_config_schema():
                         }
                     },
                 }
+            },
+        },
+        'modal': {
+            'type': 'object',
+            'additionalProperties': False,
+            'properties': {
+                'deadline': {
+                    'type': 'number',
+                    'exclusiveMinimum': 0,
+                },
+            },
+        },
+        'runpod': {
+            'type': 'object',
+            'additionalProperties': False,
+            'properties': {
+                'allowed_cuda_versions': {
+                    'type': 'array',
+                    'minItems': 1,
+                    'uniqueItems': True,
+                    'items': {
+                        'type': 'string',
+                        'pattern': r'^[0-9]+\.[0-9]+$(?!\n)',
+                    },
+                },
             },
         },
         'vast': {

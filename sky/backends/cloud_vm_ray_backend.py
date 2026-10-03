@@ -55,6 +55,7 @@ from sky.provision import metadata_utils
 from sky.provision import provisioner
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.modal import deadline as modal_deadline
 from sky.provision.slurm import utils as slurm_utils
 from sky.serve import constants as serve_constants
 from sky.server import common as server_common
@@ -353,6 +354,7 @@ def _get_cluster_config_template(cloud):
         clouds.Seeweb: 'seeweb-ray.yml.j2',
         clouds.Yotta: 'yotta-ray.yml.j2',
         clouds.Mithril: 'mithril-ray.yml.j2',
+        clouds.Modal: 'modal-ray.yml.j2',
         clouds.Verda: 'verda-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
@@ -1034,8 +1036,6 @@ class RetryingVmProvisioner(object):
         - 'handle': The provisioned cluster handle.
         - 'provision_record': (Only if using the new skypilot provisioner) The
           record returned by provisioner.bulk_provision().
-        - 'resources_vars': (Only if using the new skypilot provisioner) The
-          resources variables given by make_deploy_resources_variables().
         """
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
@@ -1158,10 +1158,16 @@ class RetryingVmProvisioner(object):
                         dryrun=dryrun,
                         keep_launch_fields_in_existing_config=cluster_exists,
                         volume_mounts=volume_mounts,
+                        storage_mounts=task.storage_mounts,
                         cloud_specific_failover_overrides=failover_overrides,
                         extra_template_variables=extra_vars,
                     )
                 except exceptions.ResourcesUnavailableError as e:
+                    if cluster_exists:
+                        # No provisioning or teardown occurred; an INIT
+                        # cluster may still have live resources to preserve.
+                        raise exceptions.ResourcesUnavailableError(
+                            str(e), no_failover=True) from e
                     # Failed due to catalog issue, e.g. image not found, or
                     # GPUs are requested in a Kubernetes cluster but the cluster
                     # does not have nodes labeled with GPU types.
@@ -1324,14 +1330,7 @@ class RetryingVmProvisioner(object):
                         # NOTE: We will handle the logic of '_ensure_cluster_ray_started'
                         # in 'provision_utils.post_provision_runtime_setup()' in the
                         # caller.
-                        resources_vars = (
-                            to_provision.cloud.make_deploy_resources_variables(
-                                to_provision,
-                                resources_utils.ClusterName(
-                                    cluster_name, handle.cluster_name_on_cloud),
-                                region, zones, num_nodes))
                         config_dict['provision_record'] = provision_record
-                        config_dict['resources_vars'] = resources_vars
                         config_dict['handle'] = handle
                         return config_dict
                     except provision_common.StopFailoverError:
@@ -3303,6 +3302,32 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         mismatch_str = (f'To fix: specify a new cluster name, or down the '
                         f'existing cluster first: sky down {cluster_name}')
+        namespace_bound = isinstance(
+            launched_resources.cloud, clouds.Kubernetes) and any(
+                resource.cluster_config_overrides.get('kubernetes', {}).get(
+                    'namespace') is not None for resource in task.resources)
+        actual_namespace = None
+        actual_modal_deadline = None
+        if isinstance(launched_resources.cloud, clouds.Modal):
+            cluster_yaml = global_user_state.get_cluster_yaml_str(
+                handle.cluster_yaml
+            ) if handle.cluster_yaml is not None else None
+            if cluster_yaml is not None:
+                actual_modal_deadline = yaml_utils.safe_load(cluster_yaml).get(
+                    'available_node_types', {}).get('ray_head_default',
+                                                    {}).get('node_config',
+                                                            {}).get('Deadline')
+            mismatch_str += (f' Existing Modal deadline: '
+                             f'{actual_modal_deadline!r}.')
+        if namespace_bound:
+            cluster_yaml = (global_user_state.get_cluster_yaml_str(
+                handle.cluster_yaml)
+                            if handle.cluster_yaml is not None else None)
+            if cluster_yaml is not None:
+                actual_namespace = yaml_utils.safe_load(cluster_yaml).get(
+                    'provider', {}).get('namespace')
+            mismatch_str += (f' Existing Kubernetes namespace: '
+                             f'{actual_namespace!r}.')
         valid_resource = None
         requested_resource_list = []
         # For the validation comparison, optionally treat the node count as
@@ -3311,6 +3336,43 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         fit_num_nodes = (handle.launched_nodes
                          if skip_num_nodes_check else task.num_nodes)
         for resource in task.resources:
+            if isinstance(launched_resources.cloud, clouds.Modal):
+                requested_deadline = skypilot_config.get_nested(
+                    ('modal', 'deadline'),
+                    None,
+                    override_configs={
+                        'modal': resource.cluster_config_overrides.get(
+                            'modal', {})
+                    })
+                if (requested_deadline is not None and
+                        requested_deadline != actual_modal_deadline):
+                    requested_resource_list.append(
+                        f'{task.num_nodes}x {resource} '
+                        f'deadline={requested_deadline!r}')
+                    continue
+                if actual_modal_deadline is not None:
+                    # Reuse/recreation keeps the provider's original cutoff,
+                    # including when the original came from global config.
+                    resource = resource.copy(_cluster_config_overrides={
+                        'modal': {
+                            'deadline': actual_modal_deadline
+                        }
+                    })
+            namespace = resource.cluster_config_overrides.get(
+                'kubernetes', {}).get('namespace')
+            if namespace is not None:
+                skypilot_config.get_effective_namespace(
+                    repr(resource.cloud).lower(),
+                    region=resource.region,
+                    override_configs=resource.cluster_config_overrides)
+                skypilot_config.get_effective_namespace(
+                    repr(launched_resources.cloud).lower(),
+                    region=launched_resources.region,
+                    override_configs=resource.cluster_config_overrides)
+                if namespace != actual_namespace:
+                    requested_resource_list.append(
+                        f'{task.num_nodes}x {resource} namespace={namespace!r}')
+                    continue
             if (fit_num_nodes <= handle.launched_nodes and
                     resource.less_demanding_than(
                         launched_resources,
@@ -3556,6 +3618,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 task, to_provision, cluster_name, dryrun, resize)
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
+            if isinstance(to_provision_config.resources.cloud, clouds.Modal):
+                cutoff = modal_deadline.validate(
+                    skypilot_config.get_nested(
+                        ('modal', 'deadline'),
+                        None,
+                        override_configs=to_provision_config.resources.
+                        cluster_config_overrides))
+                if cutoff is not None:
+                    # A queued retry must finish once its original lifetime
+                    # expires, rather than retrying an impossible admission.
+                    modal_deadline.remaining(cutoff)
 
             prev_cluster_status = to_provision_config.prev_cluster_status
             usage_lib.messages.usage.update_cluster_resources(
@@ -3673,7 +3746,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if config_dict['provisioning_skipped']:
                 # Skip further provisioning.
                 # In this case, we won't have certain fields in the config_dict
-                # ('handle', 'provision_record', 'resources_vars')
+                # ('handle', 'provision_record')
                 # We need to return the handle - but it should be the existing
                 # handle for the cluster.
                 handle = global_user_state.get_handle_from_cluster_name(
@@ -6063,12 +6136,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 code = autostop_lib.AutostopCodeGen.set_autostop(
                     idle_minutes_to_autostop, self.NAME, wait_for, down, hook,
                     hook_timeout, hooks)
-                returncode, _, stderr = self.run_on_head(
+                returncode, stdout, stderr = self.run_on_head(
                     handle, code, require_outputs=True, stream_logs=stream_logs)
                 subprocess_utils.handle_returncode(returncode,
                                                    code,
                                                    'Failed to set autostop',
-                                                   stderr=stderr,
+                                                   stderr=stdout + stderr,
                                                    stream_logs=stream_logs)
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop, down)
@@ -6394,9 +6467,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # non-node hardware (instance type, accelerators, region,
                 # zone, ports, etc.) matches the existing cluster to prevent
                 # ending up with a mixed-resource cluster.
-                self.check_resources_fit_cluster(handle,
-                                                 task,
-                                                 skip_num_nodes_check=True)
+                matched_resource = self.check_resources_fit_cluster(
+                    handle, task, skip_num_nodes_check=True)
                 # Then run resize-specific pre-provision logic (e.g. verify
                 # no running jobs and terminate workers for scale-down).
                 self._handle_resize_pre_provision(
@@ -6405,7 +6477,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     cluster_name,
                     cluster_status=prev_cluster_status)
             else:
-                self.check_resources_fit_cluster(handle, task)
+                matched_resource = self.check_resources_fit_cluster(
+                    handle, task)
 
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
@@ -6424,6 +6497,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                            requested_ports_set)
             to_provision = handle.launched_resources
             assert to_provision is not None
+            modal_config = matched_resource.cluster_config_overrides.get(
+                'modal')
+            if isinstance(to_provision.cloud, clouds.Modal) and modal_config:
+                to_provision = to_provision.copy(
+                    _cluster_config_overrides={'modal': modal_config})
+            namespace = matched_resource.cluster_config_overrides.get(
+                'kubernetes', {}).get('namespace')
+            if namespace is not None:
+                to_provision = to_provision.copy(_cluster_config_overrides={
+                    'kubernetes': {
+                        'namespace': namespace
+                    }
+                })
             to_provision = to_provision.assert_launchable()
             if (to_provision.cloud.OPEN_PORTS_VERSION <=
                     clouds.OpenPortsVersion.LAUNCH_ONLY):
@@ -6561,6 +6647,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 vol_name = vol_mount.get('VolumeNameOnCloud')
                                 if vol_name:
                                     existing_volume_names.add(vol_name)
+                        elif isinstance(to_provision.cloud, clouds.Modal):
+                            # See sky/templates/modal-ray.yml.j2.
+                            volume_mounts_config = node_config.get(
+                                'ModalVolumes', [])
+                            for vol_mount in volume_mounts_config:
+                                vol_name = vol_mount.get('VolumeNameOnCloud')
+                                if vol_name:
+                                    existing_volume_names.add(vol_name)
                         elif isinstance(to_provision.cloud, clouds.Slurm):
                             for vol_mount in node_config.get(
                                     'volume_mounts', []):
@@ -6640,6 +6734,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # later during the retry.
         common_utils.check_cluster_name_is_valid(cluster_name)
 
+        if (to_provision is not None and
+                isinstance(handle_before_refresh, CloudVmRayResourceHandle) and
+                handle_before_refresh.launched_resources is not None and
+                isinstance(handle_before_refresh.launched_resources.cloud,
+                           clouds.Modal)):
+            matched_resource = self.check_resources_fit_cluster(
+                handle_before_refresh, task)
+            modal_config = matched_resource.cluster_config_overrides.get(
+                'modal')
+            if modal_config:
+                to_provision = to_provision.copy(
+                    _cluster_config_overrides={'modal': modal_config})
         if to_provision is None:
             # Recently terminated after refresh. OPTIMIZE usually ran outside
             # the lock, so that decision may be stale by now. Under the lock,
@@ -6652,7 +6758,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     handle_before_refresh.launched_resources is not None):
                 to_provision = handle_before_refresh.launched_resources
                 # Ensure the requested task fits the previous placement.
-                self.check_resources_fit_cluster(handle_before_refresh, task)
+                matched_resource = self.check_resources_fit_cluster(
+                    handle_before_refresh, task)
+                modal_config = matched_resource.cluster_config_overrides.get(
+                    'modal')
+                if isinstance(to_provision.cloud,
+                              clouds.Modal) and modal_config:
+                    to_provision = to_provision.copy(
+                        _cluster_config_overrides={'modal': modal_config})
+                namespace = matched_resource.cluster_config_overrides.get(
+                    'kubernetes', {}).get('namespace')
+                if namespace is not None:
+                    to_provision = to_provision.copy(_cluster_config_overrides={
+                        'kubernetes': {
+                            'namespace': namespace
+                        }
+                    })
                 # Mirror the original message for reuse path.
                 status_before_refresh_str = None
                 if status_before_refresh is not None:
@@ -6852,6 +6973,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # MOUNT_CACHED mode.
         if not storage_mounts:
             return
+
+        if isinstance(handle.launched_resources.cloud, clouds.Modal):
+            return
+
         start = time.time()
         runners = handle.get_command_runners()
         num_threads = subprocess_utils.get_parallel_threads(
