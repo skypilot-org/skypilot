@@ -8,6 +8,11 @@
 the API server. Instead, we provide instructions for updating config 
 (see: https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#setting-the-skypilot-config).
 
+For GitOps deployments, `apiService.configAuthoritative: true` opts into
+using the ConfigMap as the source of truth. It requires a non-empty
+`apiService.config` and overwrites the PVC copy whenever the API server
+starts. Keep it disabled when configuration is managed through the dashboard.
+
 ### Why PVC?
 - **Fast:** Immediate reflection of config changes
 - **Unified:** Consistent with non-Kubernetes deployments  
@@ -20,10 +25,12 @@ the API server. Instead, we provide instructions for updating config
 - **Poor persistence:** Config is not persisted across Kubernetes clusters 
   and backing up is difficult
 
-**Note:** SkyPilot syncs config back to ConfigMap for user convenience, but 
-ConfigMap may not always be in sync with PVC (e.g., user `helm upgrade` with a
-new configMap). Sync occurs when config changes are made through the workspace
-API.
+**Note:** In the default mode, SkyPilot syncs config back to ConfigMap for user
+convenience, but ConfigMap may not always be in sync with PVC (e.g., user
+`helm upgrade` with a new configMap). Sync occurs when config changes are made
+through the workspace API. In authoritative mode, API server config updates are
+rejected and the ConfigMap is never patched at runtime; update the Helm values
+instead.
 
 **TODO:** Provide API to get config directly from API server to eliminate 
 ConfigMap dependency.

@@ -1341,14 +1341,15 @@ To modify your SkyPilot config, use the SkyPilot dashboard: ``http://<api-server
 
     .. note::
 
-        ``apiService.config`` will be IGNORED during an ``helm upgrade`` if there is an existing config, due to the potential accidental loss of existing config. Use the SkyPilot dashboard instead.
+        By default, ``apiService.config`` is ignored during a ``helm upgrade`` if there is an existing config, due to the potential accidental loss of existing config. Use the SkyPilot dashboard instead. For GitOps deployments where the Helm values are the source of truth, set :ref:`apiService.configAuthoritative <helm-values-apiService-configAuthoritative>` to ``true`` together with a non-empty ``apiService.config``. This overwrites the persistent-volume config every time the API server starts and rejects dashboard updates, so do not enable it for configurations managed through the dashboard.
 
     .. note::
 
         If remote database is configured (by setting either
         :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>`
         or :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>`),
-        Skypilot configuration cannot be specified in the helm chart.
+        SkyPilot configuration cannot be specified in the Helm chart and
+        ``apiService.configAuthoritative`` must remain ``false``.
         Use the dashboard once the API server is deployed to set the config.
 
 Optional: Set up GPU monitoring and metrics
