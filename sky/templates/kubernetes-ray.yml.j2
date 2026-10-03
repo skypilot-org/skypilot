@@ -1762,9 +1762,11 @@ available_node_types:
               while true; do sleep infinity & wait $!; done
 
           {% if not k8s_host_network %}
-          # Omitted under hostNetwork: the scheduler's NodePorts predicate
-          # treats containerPort as hostPort and blocks sibling pods even
-          # though the probe assigns Ray's ports dynamically.
+          # Omitted under hostNetwork: these are fixed ports, so declaring
+          # them would have the scheduler's NodePorts predicate block every
+          # sibling pod -- each wants the same number. A hostNetwork pod gets
+          # its ports written in per pod instead (host_network_ports), where
+          # they are randomly assigned and that same blocking is the point.
           ports:
           - containerPort: 22  # Used for SSH
           - containerPort: {{ray_port}}  # Redis port

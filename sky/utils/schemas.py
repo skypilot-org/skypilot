@@ -1632,6 +1632,15 @@ _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
 }
 
 _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
+    # Per context because the constraint it satisfies is per cluster: the
+    # range has to sit outside the node's ephemeral port pool, and that
+    # pool's floor is a per-node sysctl. Measured 32768 on GKE and OCI,
+    # 10240 on CoreWeave -- so one value cannot serve a deployment that
+    # spans them.
+    'host_network_port_range': {
+        'type': 'string',
+        'pattern': r'^\d+-\d+$',
+    },
     'allowed_nodes': {
         'type': 'object',
         'required': [],
