@@ -410,7 +410,7 @@ def _get_cloud_dependencies_installation_commands(
             commands.append(
                 f'echo -en "\\r{step_prefix}Vast{empty_str}" && '
                 '{ pip list | grep vastai_sdk > /dev/null 2>&1 || '
-                'pip install "vastai_sdk>=0.1.12" > /dev/null 2>&1; }')
+                'pip install "vastai_sdk>=0.1.14" > /dev/null 2>&1; }')
 
         python_packages.update(cloud_python_dependencies)
 

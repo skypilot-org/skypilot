@@ -255,7 +255,9 @@ cloud_dependencies: Dict[str, List[str]] = {
     'primeintellect': [],  # No dependencies needed for primeintellect
     # TODO:(jason810496): azure-core 1.38.0+ required for CVE-2026-21226
     'do': ['pydo>=0.3.0', 'azure-core>=1.24.0', 'azure-common'],
-    'vast': ['vastai-sdk>=0.1.12'],
+    # >=0.1.14: earlier query grammars accept only alphanumerics in a
+    # bare value, which truncates GPU names like RTX_3090 to RTX.
+    'vast': ['vastai-sdk>=0.1.14'],
     'vsphere': [
         'pyvmomi==8.0.1.0.2',
         # vsphere-automation-sdk is also required, but it does not have
