@@ -244,3 +244,27 @@ def to_thread_with_executor(executor: Optional[concurrent.futures.Executor],
     func_call: Callable[..., T] = functools.partial(pyctx.run, func, *args,
                                                     **kwargs)
     return loop.run_in_executor(executor, func_call)
+
+
+class ContextSafeThreadPoolExecutor(concurrent.futures.ThreadPoolExecutor):
+    """ThreadPoolExecutor whose tasks run in the submitter's context.
+
+    Worker threads start with an EMPTY contextvars context, so
+    request-scoped state -- the per-request SkyPilotContext installed by
+    @context.contextual, the current user, contextual environment
+    variables -- silently resolves to process-level defaults inside a
+    plain ThreadPoolExecutor. That turns fan-out code that looks correct
+    into code that answers for the wrong identity.
+
+    Each submit() captures contextvars.copy_context() on the submitting
+    thread and runs the task inside that copy: the same semantics
+    asyncio.to_thread and to_thread_with_executor provide, without
+    requiring a running event loop. map() inherits the behavior (the
+    base implementation delegates to submit()), with the context
+    captured once per item at submission time.
+    """
+
+    def submit(self, fn: Callable[P, T], /, *args: P.args,
+               **kwargs: P.kwargs) -> 'concurrent.futures.Future[T]':
+        pyctx = contextvars.copy_context()
+        return super().submit(pyctx.run, functools.partial(fn, *args, **kwargs))
