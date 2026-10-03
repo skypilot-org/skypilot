@@ -22,6 +22,7 @@ History:
 """
 import logging
 import os
+import re
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
@@ -47,6 +48,26 @@ if typing.TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _tenancy_prefix: Optional[str] = None
+
+# AMD Instinct accelerators (MI300X, MI355X, ...) as named in the catalog.
+_AMD_ACCELERATOR_PREFIX = 'MI'
+
+# Shapes whose hosts have Arm CPUs and therefore need an aarch64 image: the
+# GB200/GB300 racks (NVIDIA Grace) and the A1/A2/A4 families (Ampere).
+_ARM_SHAPE_RE = re.compile(r'^(?:BM|VM)\.(?:GPU\.GB\d+|Standard\.A\d)\.')
+# Image tags an Arm shape needs. oci/images.csv does not carry them yet; the
+# moment it does, Arm shapes pick them up without a code change.
+_ARM_GPU_IMAGE_TAG = 'skypilot:gpu-ubuntu-2204-aarch64'
+_ARM_CPU_IMAGE_TAG = 'skypilot:cpu-ubuntu-2204-aarch64'
+
+
+def _is_arm_shape(instance_type: str) -> bool:
+    """Returns whether the shape's host CPUs are Arm (aarch64).
+
+    Works on both plain shapes ('BM.GPU.GB200.4') and the flexible-shape
+    encoding used in the catalog ('VM.Standard.A1.Flex$_4_24').
+    """
+    return _ARM_SHAPE_RE.match(instance_type) is not None
 
 
 @registry.CLOUD_REGISTRY.register
@@ -601,15 +622,24 @@ class OCI(clouds.Cloud):
                                            region=region_name)
 
         if image_id_str.startswith('skypilot:'):
-            image_id_str = catalog.get_image_id_from_tag(image_id_str,
+            image_tag = image_id_str
+            image_id_str = catalog.get_image_id_from_tag(image_tag,
                                                          region_name,
                                                          clouds='oci')
-
-        # Image_id should be impossible be None, except for the case when
-        # user specify an image tag which does not exist in the image.csv
-        # catalog file which only possible in "test" / "evaluation" phase.
-        # Therefore, we use assert here.
-        assert image_id_str is not None
+            if image_id_str is None:
+                # Platform images are catalogued per region, and a region
+                # can be in the shape catalog before the image catalog has
+                # a row for it. Raise ResourcesUnavailableError so the
+                # launch fails with the cause instead of sending OCI a
+                # bogus image id; another region may well have the image,
+                # so failover is left on.
+                which = 'default image' if image_id is None else 'image'
+                raise exceptions.ResourcesUnavailableError(
+                    f'No {which} for tag {image_tag!r} in region '
+                    f'{region_name}: the OCI image catalog has no entry for '
+                    'it there. Set `image_id` in the task resources to the '
+                    f'OCID of an image available in {region_name}, or pick '
+                    'another region.')
 
         logger.debug(f'Got real image_id {image_id_str}')
         return image_id_str
@@ -617,7 +647,7 @@ class OCI(clouds.Cloud):
     def _get_image_str(self, image_id: Optional[Dict[Optional[str], str]],
                        instance_type: str, region: str):
         if image_id is None:
-            image_str = self._get_default_image_tag(instance_type)
+            image_str = self._get_default_image_tag(instance_type, region)
         elif None in image_id:
             image_str = image_id[None]
         else:
@@ -625,14 +655,46 @@ class OCI(clouds.Cloud):
             image_str = image_id[region]
         return image_str
 
-    def _get_default_image_tag(self, instance_type: str) -> str:
+    def _get_default_image_tag(self,
+                               instance_type: str,
+                               region: Optional[str] = None) -> str:
         acc = self.get_accelerators_from_instance_type(instance_type)
+
+        if _is_arm_shape(instance_type):
+            # The default images are x86-64; an Arm host cannot boot them.
+            image_tag = _ARM_GPU_IMAGE_TAG
+            if acc is None:
+                image_tag = _ARM_CPU_IMAGE_TAG
+            if catalog.is_image_tag_valid(image_tag, region, clouds='oci'):
+                return image_tag
+            # Raise ResourcesUnavailableError so CloudVMRayBackend reports
+            # it as a provisioning failure. The image catalog is the same in
+            # every region, so there is no point failing over.
+            raise exceptions.ResourcesUnavailableError(
+                f'{instance_type} has Arm (aarch64) CPUs, but the OCI image '
+                f'catalog has no aarch64 image (tag {image_tag!r}), so the '
+                'default x86-64 image cannot boot on it. Set `image_id` in '
+                'the task resources to the OCID of an aarch64 image for this '
+                'shape, e.g. an Ubuntu aarch64 or an NVIDIA GPU image built '
+                'for Grace.',
+                no_failover=True)
 
         if acc is None:
             image_tag = oci_utils.oci_config.get_default_image_tag()
         else:
             assert len(acc) == 1, acc
-            image_tag = oci_utils.oci_config.get_default_gpu_image_tag()
+            acc_name = next(iter(acc))
+            if acc_name.upper().startswith(_AMD_ACCELERATOR_PREFIX):
+                # The default GPU image is an NVIDIA (CUDA) Marketplace
+                # listing, which is not offered for the AMD Instinct shapes
+                # (BM.GPU.MI300X.8, BM.GPU.MI355X.8). Fall back to the plain
+                # OS image so the instance boots; ROCm has to be installed
+                # in `setup`, or an `image_id` supplied explicitly.
+                logger.info(f'{instance_type} has AMD GPUs; using the '
+                            'general image instead of the NVIDIA GPU image.')
+                image_tag = oci_utils.oci_config.get_default_image_tag()
+            else:
+                image_tag = oci_utils.oci_config.get_default_gpu_image_tag()
 
         return image_tag
 
