@@ -221,6 +221,35 @@ def test_scan_reports_every_type(container):
     assert counts['main'] == counts['zombie'] == 1
 
 
+def test_scan_leaves_out_excluded_pids(container):
+    cgroup_dir, proc_dir = container
+    snapshot = container_memory.scan(main_pid=MAIN_PID,
+                                     cgroup_dir=cgroup_dir,
+                                     proc_dir=proc_dir,
+                                     exclude_pids=(501, 530))
+    assert snapshot.types['kubectl_exec'].processes == 0
+    assert snapshot.types['zombie'].processes == 0
+
+
+def test_scan_in_subprocess_matches_scan(container):
+    cgroup_dir, proc_dir = container
+    in_process = container_memory.scan(main_pid=MAIN_PID,
+                                       cgroup_dir=cgroup_dir,
+                                       proc_dir=proc_dir)
+    in_child = container_memory.scan_in_subprocess(main_pid=MAIN_PID,
+                                                   cgroup_dir=cgroup_dir,
+                                                   proc_dir=proc_dir)
+    assert in_child is not None
+    assert in_child.duration_seconds > 0
+    in_child.duration_seconds = in_process.duration_seconds
+    assert in_child == in_process
+
+
+def test_scan_in_subprocess_without_cgroup_v2_files(tmp_path):
+    assert container_memory.scan_in_subprocess(cgroup_dir=str(tmp_path),
+                                               proc_dir=str(tmp_path)) is None
+
+
 def test_scan_reads_memory_limit(container):
     cgroup_dir, proc_dir = container
     _write(os.path.join(cgroup_dir, 'memory.max'), '322122547200\n')
@@ -284,7 +313,8 @@ def test_collector_exports_snapshot(monkeypatch):
                                                        rss_bytes=80),
         },
         duration_seconds=0.25)
-    monkeypatch.setattr(container_memory, 'scan', lambda: snapshot)
+    monkeypatch.setattr(container_memory, 'scan_in_subprocess',
+                        lambda: snapshot)
     samples = _samples(metrics.ContainerMemoryCollector().collect())
     p = 'sky_apiserver_container_'
     ctl = (('type', 'controller'),)
@@ -316,7 +346,8 @@ def test_collector_without_limit_emits_no_limit_sample(monkeypatch):
                                          limit_bytes=None,
                                          types={},
                                          duration_seconds=0.0)
-    monkeypatch.setattr(container_memory, 'scan', lambda: snapshot)
+    monkeypatch.setattr(container_memory, 'scan_in_subprocess',
+                        lambda: snapshot)
     names = {
         name
         for name, _ in _samples(metrics.ContainerMemoryCollector().collect())
@@ -327,5 +358,5 @@ def test_collector_without_limit_emits_no_limit_sample(monkeypatch):
 
 
 def test_collector_outside_a_container_emits_nothing(monkeypatch):
-    monkeypatch.setattr(container_memory, 'scan', lambda: None)
+    monkeypatch.setattr(container_memory, 'scan_in_subprocess', lambda: None)
     assert not list(metrics.ContainerMemoryCollector().collect())

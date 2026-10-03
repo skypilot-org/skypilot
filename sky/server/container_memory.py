@@ -13,12 +13,21 @@ by type. It reads cgroup v2 files at the root of the cgroup namespace, which
 inside a container is the container's cgroup. Outside a container, or on
 cgroup v1, that root has no memory.current and scan() returns None.
 
+The census reads two /proc files per process, and every read releases the
+GIL. In a process with a CPU-bound thread, each read then waits a full GIL
+switch interval before it resumes, so a census of a few thousand processes
+can take minutes. scan_in_subprocess() runs it in a child interpreter
+instead; the module imports only the standard library for that reason.
+
 Measurement only.
 """
 import dataclasses
+import json
 import os
+import subprocess
+import sys
 import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Collection, Dict, List, Optional, Set, Tuple
 
 CGROUP_DIR = '/sys/fs/cgroup'
 PROC_DIR = '/proc'
@@ -263,9 +272,12 @@ def _count_unlisted_zombies(proc_dir: str, listed: Set[int]) -> int:
     return zombies
 
 
-def scan(main_pid: Optional[int] = None,
-         cgroup_dir: str = CGROUP_DIR,
-         proc_dir: str = PROC_DIR) -> Optional[Snapshot]:
+def scan(
+    main_pid: Optional[int] = None,
+    cgroup_dir: str = CGROUP_DIR,
+    proc_dir: str = PROC_DIR,
+    exclude_pids: Collection[int] = ()
+) -> Optional[Snapshot]:
     """Read the container's memory and count its processes by type.
 
     Returns None when the container's cgroup v2 memory files are not
@@ -279,7 +291,7 @@ def scan(main_pid: Optional[int] = None,
     if main_pid is None:
         main_pid = os.getpid()
     types = {process_type: TypeUsage() for process_type in TYPES}
-    pids = _read_pids(cgroup_dir)
+    pids = [pid for pid in _read_pids(cgroup_dir) if pid not in exclude_pids]
     for pid in pids:
         status = _read_status(proc_dir, pid)
         if status is None:
@@ -297,7 +309,8 @@ def scan(main_pid: Optional[int] = None,
         usage_of_type.max_rss_anon_bytes = max(usage_of_type.max_rss_anon_bytes,
                                                rss_anon)
         usage_of_type.rss_bytes += _kib_to_bytes(status.get('VmRSS', ''))
-    unlisted_zombies = _count_unlisted_zombies(proc_dir, set(pids))
+    unlisted_zombies = _count_unlisted_zombies(proc_dir,
+                                               set(pids) | set(exclude_pids))
     types[TYPE_ZOMBIE].processes += unlisted_zombies
     types[TYPE_ZOMBIE].threads += unlisted_zombies
     return Snapshot(usage_bytes=usage_bytes,
@@ -307,3 +320,48 @@ def scan(main_pid: Optional[int] = None,
                     limit_bytes=_read_limit(cgroup_dir),
                     types=types,
                     duration_seconds=time.monotonic() - start)
+
+
+# A census of a few thousand processes takes well under a second when the
+# child is not starved of CPU.
+_SUBPROCESS_TIMEOUT_SECONDS = 60
+
+
+def scan_in_subprocess(main_pid: Optional[int] = None,
+                       cgroup_dir: str = CGROUP_DIR,
+                       proc_dir: str = PROC_DIR) -> Optional[Snapshot]:
+    """scan() in a child interpreter, which does not share this one's GIL.
+
+    The child leaves itself out of the census. duration_seconds includes the
+    child's startup.
+    """
+    start = time.monotonic()
+    if main_pid is None:
+        main_pid = os.getpid()
+    result = subprocess.run([
+        sys.executable, '-I', '-S',
+        os.path.abspath(__file__),
+        str(main_pid), cgroup_dir, proc_dir
+    ],
+                            capture_output=True,
+                            check=True,
+                            timeout=_SUBPROCESS_TIMEOUT_SECONDS)
+    data = json.loads(result.stdout)
+    if data is None:
+        return None
+    data['types'] = {
+        process_type: TypeUsage(**usage)
+        for process_type, usage in data['types'].items()
+    }
+    data['duration_seconds'] = time.monotonic() - start
+    return Snapshot(**data)
+
+
+def _main(argv: List[str]) -> None:
+    snapshot = scan(int(argv[0]), argv[1], argv[2], exclude_pids=(os.getpid(),))
+    json.dump(None if snapshot is None else dataclasses.asdict(snapshot),
+              sys.stdout)
+
+
+if __name__ == '__main__':
+    _main(sys.argv[1:])

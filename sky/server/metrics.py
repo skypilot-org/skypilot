@@ -775,15 +775,17 @@ _CONTAINER_MAX_RSS_ANON_HELP = (
 
 _CONTAINER_SCAN_DURATION_HELP = (
     'Wall-clock seconds the last read of the container\'s cgroup and '
-    'processes took. Runs off the scrape path.')
+    'processes took, including the start of the child process that does '
+    'it. Runs off the scrape path.')
 
 
 class ContainerMemoryCollector:
     """Collector for the API server container's memory and processes.
 
     See sky/server/container_memory.py. Emits nothing outside a cgroup v2
-    container. The census reads two /proc files per process, so
-    ResilientCollector keeps it off the scrape path.
+    container. The census runs in a child interpreter so that this process's
+    busy threads cannot slow it down, and ResilientCollector keeps it off the
+    scrape path.
     """
 
     def describe(self):
@@ -792,7 +794,7 @@ class ContainerMemoryCollector:
             _CONTAINER_MEMORY_USAGE_HELP)
 
     def collect(self):
-        snapshot = container_memory.scan()
+        snapshot = container_memory.scan_in_subprocess()
         if snapshot is None:
             return
         yield prom_core.GaugeMetricFamily(
