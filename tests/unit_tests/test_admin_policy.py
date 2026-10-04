@@ -2,6 +2,7 @@ import contextlib
 import copy
 import importlib
 import io
+import json
 import logging
 import os
 import subprocess
@@ -24,6 +25,7 @@ from sky.server.requests import request_names
 from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -446,6 +448,22 @@ def test_user_request_encode_decode(task):
         assert decoded_request.at_client_side == False
         assert decoded_request.user == models.User(id='123', name='test')
         assert decoded_request.request_name == request_names.AdminPolicyRequestName.CLUSTER_LAUNCH
+
+
+@pytest.mark.parametrize('groups', [None, [], ['vision', 'research']])
+def test_user_request_groups_round_trip(task, groups):
+    request = sky.UserRequest(
+        task=task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+        skypilot_config=sky.Config(),
+        user=models.User(id='123', name='test', groups=groups))
+    encoded = request.encode()
+    assert sky.UserRequest.decode(encoded).user.groups == groups
+
+    # Older policy messages have no groups field.
+    body = json.loads(encoded)
+    body['user'] = yaml_utils.dump_yaml_str({'id': '123', 'name': 'test'})
+    assert sky.UserRequest.decode(json.dumps(body)).user.groups is None
 
 
 def test_user_request_encode_decode_with_client_version(task):
