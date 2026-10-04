@@ -78,12 +78,26 @@ import {
   usePluginRoutes,
   usePluginRecipeTypes,
 } from '@/plugins/PluginProvider';
+import { useUrlFilterState } from '@/hooks/useUrlFilterState';
 
-// Define filter options for the YAML filter dropdown
-const RECIPE_PROPERTY_OPTIONS = [
-  { label: 'Name', value: 'name' },
-  { label: 'Type', value: 'recipe_type' },
-  { label: 'Owner', value: 'user_name' },
+// The filterable properties, declared once. `key` is the URL parameter and the
+// key into the typeahead's option lists; `label` is what lands on a chip.
+const RECIPE_FILTER_SCHEMA = [
+  { key: 'name', label: 'Name', kind: 'text' },
+  { key: 'type', label: 'Type', kind: 'text' },
+  { key: 'owner', label: 'Owner', kind: 'text' },
+];
+
+const RECIPE_PROPERTY_OPTIONS = RECIPE_FILTER_SCHEMA.map(({ key, label }) => ({
+  label,
+  value: key,
+}));
+
+// Every recipe property is single-valued, so a second chip on one property
+// replaces the first rather than stacking.
+const addRecipeFilter = (prevFilters, property, value) => [
+  ...prevFilters.filter((f) => f.property !== property),
+  { property, operator: ':', value },
 ];
 
 // Generate URL slug from recipe
@@ -252,7 +266,8 @@ function TemplateRow({
 function AllRecipesSection({ recipes, onPin, onDelete }) {
   const pluginRecipeTypes = usePluginRecipeTypes();
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [filters, setFilters] = useState([]);
+  // Filters live in the URL, keyed by name, so a filtered view is shareable.
+  const { filters, setFilters } = useUrlFilterState(RECIPE_FILTER_SCHEMA);
   const [sortConfig, setSortConfig] = useState({
     key: 'updated_at',
     direction: 'descending',
@@ -273,8 +288,8 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
 
     return {
       name: Array.from(names).sort(),
-      recipe_type: Array.from(types).sort(),
-      user_name: Array.from(owners).sort(),
+      type: Array.from(types).sort(),
+      owner: Array.from(owners).sort(),
     };
   }, [recipes]);
 
@@ -693,14 +708,9 @@ const RecipeFilterDropdown = ({
       property: getPropertyLabel(propertyValue),
       value: option,
     });
-    setFilters((prevFilters) => [
-      ...prevFilters,
-      {
-        property: getPropertyLabel(propertyValue),
-        operator: ':',
-        value: option,
-      },
-    ]);
+    setFilters((prevFilters) =>
+      addRecipeFilter(prevFilters, getPropertyLabel(propertyValue), option)
+    );
     setIsOpen(false);
     setValue('');
     inputRef.current.focus();
@@ -712,14 +722,9 @@ const RecipeFilterDropdown = ({
         property: getPropertyLabel(propertyValue),
         value: value,
       });
-      setFilters((prevFilters) => [
-        ...prevFilters,
-        {
-          property: getPropertyLabel(propertyValue),
-          operator: ':',
-          value: value,
-        },
-      ]);
+      setFilters((prevFilters) =>
+        addRecipeFilter(prevFilters, getPropertyLabel(propertyValue), value)
+      );
       setValue('');
       setIsOpen(false);
     } else if (e.key === 'Escape') {

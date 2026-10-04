@@ -89,6 +89,20 @@ class LogProvider(abc.ABC):
         shutil.copy2(src_path, dest_path)
         return True
 
+    def discard_log(self, request_id: str) -> None:
+        """Delete a request's execution log, leaving its debug log alone.
+
+        Called once the response that streamed the log has ended, for
+        requests whose whole output is a tail of a log that lives elsewhere.
+        Providers backed by other log stores may override this to delete the
+        log wherever it lives.
+        """
+        try:
+            local_log_path(request_id,
+                           RequestLogType.REQUEST).unlink(missing_ok=True)
+        except OSError as e:
+            logger.debug(f'Failed to remove log of request {request_id}: {e}')
+
 
 class LocalLogProvider(LogProvider):
     """Default log provider."""

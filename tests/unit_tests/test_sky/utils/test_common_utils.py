@@ -802,3 +802,35 @@ class TestAtomicWriteText:
         assert not target.exists()
         # Crucially: no hidden .tmp file left behind in the directory.
         assert list(tmp_path.iterdir()) == []
+
+
+class TestGetCurrentRequestActor:
+    """``get_current_request_actor`` names the caller of an API request."""
+
+    def test_names_the_user_and_request(self, monkeypatch):
+        monkeypatch.setattr(common_utils, 'is_in_request_context', lambda: True)
+        monkeypatch.setattr(common_utils, 'get_current_user',
+                            lambda: models.User(id='abcd1234', name='alice'))
+        monkeypatch.setattr(common_utils, 'get_current_request_id',
+                            lambda: 'req-1')
+
+        assert common_utils.get_current_request_actor() == (
+            'alice (request ID: req-1)')
+
+    def test_falls_back_to_the_user_hash(self, monkeypatch):
+        """No display name must not mean no identity."""
+        monkeypatch.setattr(common_utils, 'is_in_request_context', lambda: True)
+        monkeypatch.setattr(common_utils, 'get_current_user',
+                            lambda: models.User(id='abcd1234'))
+        monkeypatch.setattr(common_utils, 'get_current_request_id',
+                            lambda: 'req-1')
+
+        assert common_utils.get_current_request_actor() == (
+            'abcd1234 (request ID: req-1)')
+
+    def test_none_outside_a_request(self, monkeypatch):
+        """An in-process caller has no requesting user or request to name."""
+        monkeypatch.setattr(common_utils, 'is_in_request_context',
+                            lambda: False)
+
+        assert common_utils.get_current_request_actor() is None

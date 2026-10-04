@@ -14,6 +14,7 @@ from sky import sky_logging as sky_logging
 from sky.skylet import log_lib as log_lib
 from sky.utils import subprocess_utils as subprocess_utils
 
+MAX_INLINE_COMMAND_LENGTH: int
 GIT_EXCLUDE: str
 RSYNC_DISPLAY_OPTION: str
 RSYNC_FILTER_GITIGNORE: str
@@ -23,9 +24,8 @@ ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD: str
 DEFAULT_SSH_CONTROL_NAME: str
 
 
-def wrap_command_as_user(command: str,
+def wrap_command_as_user(argv: List[str],
                          user: str,
-                         shell_argv0: Optional[str] = ...,
                          use_sudo: bool = ...) -> str:
     ...
 
@@ -61,6 +61,15 @@ class CommandRunner:
         node: Tuple[Any, ...],
         **kwargs,
     ) -> None:
+        ...
+
+    def inline_command_size(self, command: str) -> int:
+        ...
+
+    def max_inline_command_length(self) -> int:
+        ...
+
+    def is_command_length_over_limit(self, command: str) -> bool:
         ...
 
     @typing.overload
@@ -112,6 +121,9 @@ class CommandRunner:
         ...
 
     def get_remote_home_dir(self) -> str:
+        ...
+
+    def command_as_user(self, argv: List[str]) -> str:
         ...
 
     def rsync(

@@ -632,6 +632,7 @@ def test_process_mounts_removes_file_mounts_mapping(tmp_path, monkeypatch):
     task is submitted again (e.g., in jobs scenarios).
     """
     from sky.skylet import constants as skylet_constants
+    from sky.utils import dag_utils
     from sky.utils import yaml_utils
 
     # Mock the API_SERVER_CLIENT_DIR to use tmp_path
@@ -663,19 +664,8 @@ run: python /remote/script.py
                                                       env_vars=env_vars,
                                                       workdir_only=False)
 
-    # Find the translated YAML file
-    user_hash = 'test-user'
-    client_dir = api_server_dir / user_hash
-
-    # Find the translated file (it has _translated.yaml suffix)
-    translated_files = list(client_dir.glob('**/*_translated.yaml'))
-    assert len(translated_files) == 1, \
-        f'Expected 1 translated file, found {len(translated_files)}'
-
-    translated_file = translated_files[0]
-
-    # Read the translated YAML and verify file_mounts_mapping is removed
-    translated_configs = yaml_utils.read_yaml_all(str(translated_file))
+    translated_yaml = dag_utils.dump_dag_to_yaml_str(dag)
+    translated_configs = yaml_utils.read_yaml_all_str(translated_yaml)
 
     for task_config in translated_configs:
         if task_config is None:
@@ -701,6 +691,8 @@ run: python /remote/script.py
                     if isinstance(source, str):
                         assert 'uploaded/' in source, \
                             f'file_mount source should be translated: {source}'
+
+    assert not list(api_server_dir.rglob('*.yaml'))
 
 
 def test_process_mounts_without_mapping(tmp_path, monkeypatch):
@@ -733,6 +725,7 @@ run: echo "hello world"
     # Verify the dag was created successfully
     assert dag is not None
     assert len(dag.tasks) == 1
+    assert not list(api_server_dir.rglob('*.yaml'))
 
 
 def _fake_response(status_code, json_body=None, json_raises=False):

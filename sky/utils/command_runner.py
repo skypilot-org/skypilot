@@ -17,12 +17,14 @@ import threading
 import time
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Tuple, Type,
                     Union)
+import urllib.parse
 import uuid
 
 import colorama
 
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.server import clean_env as clean_env_module
 from sky.skylet import constants
 from sky.skylet import log_lib
@@ -32,9 +34,11 @@ from sky.utils import context_utils
 from sky.utils import control_master_utils
 from sky.utils import env_options
 from sky.utils import git as git_utils
+from sky.utils import infra_utils
 from sky.utils import interactive_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+from sky.utils.db import kv_cache
 
 logger = sky_logging.init_logger(__name__)
 
@@ -44,6 +48,17 @@ _INTERACTIVE_AUTH_LOCK = threading.Lock()
 
 # Pattern to extract home directory from command output
 _HOME_DIR_PATTERN = re.compile(r'SKYPILOT_HOME_DIR: ([^\s\n]+)')
+_SLURM_HOME_DIR_CACHE_TTL_SECONDS = 30
+
+# Largest command, in bytes, to inline into what a runner sends rather than
+# writing to a file and rsyncing it. The command runs via /bin/sh on the remote,
+# so the ceiling is the Linux command line size -- ARG_MAX is 128 KB -- and this
+# leaves headroom for the rest of the arguments the invocation adds.
+# https://github.com/torvalds/linux/blob/master/include/uapi/linux/binfmts.h
+# Transports that are not a shell override max_inline_command_length(); see
+# KubernetesCommandRunner, whose ceiling belongs to the proxy in front of the
+# Kubernetes API instead.
+MAX_INLINE_COMMAND_LENGTH = 100 * 1024
 
 # Rsync options
 # TODO(zhwu): This will print a per-file progress bar (with -P),
@@ -82,20 +97,17 @@ _SSH_AUTH_FAILURE_PATTERNS = [
 ]
 
 
-def wrap_command_as_user(command: str,
+def wrap_command_as_user(argv: List[str],
                          user: str,
-                         shell_argv0: Optional[str] = None,
                          use_sudo: bool = False) -> str:
-    """Build a command that a privileged SSH user runs as a Unix user."""
-    argv = [
-        'su', '--login', '--shell', '/bin/bash', '--command', command, '--',
-        user
-    ]
-    if shell_argv0 is not None:
-        argv.append(shell_argv0)
+    """Build a direct executable invocation as a Unix user."""
+    if not argv or isinstance(argv, str):
+        raise ValueError('User commands must be nonempty argument lists.')
     if use_sudo:
-        argv = ['sudo', '--non-interactive', '--'] + argv
-    return shlex.join(argv)
+        prefix = ['sudo', '--non-interactive', '-H', '-u', user, '--']
+    else:
+        prefix = ['runuser', '-u', user, '--']
+    return shlex.join(prefix + argv)
 
 
 def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
@@ -103,7 +115,8 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     if ssh_control_filename is None:
         return None
     user_hash = common_utils.get_user_hash()
-    path = f'/tmp/skypilot_ssh_{user_hash}/{ssh_control_filename}'
+    # Leave room for OpenSSH's %C hash and temporary suffix on macOS.
+    path = f'/tmp/sky_ssh_{user_hash}/{ssh_control_filename}'
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -354,6 +367,35 @@ class CommandRunner:
     def node_id(self) -> str:
         return '-'.join(str(x) for x in self.node)
 
+    def _inline_command_quote_levels(self) -> int:
+        """Number of shell-quote layers an inline command passes through."""
+        # One for the remote login shell, one for the local shell.
+        return 2
+
+    def inline_command_size(self, command: str) -> int:
+        """Bytes an inlined ``command`` occupies in what this runner sends.
+
+        Runners transmit inline commands differently, so the byte count that
+        matters differs too -- see KubernetesCommandRunner for a transport where
+        it is not a shell-quoted length at all.
+        """
+        for _ in range(self._inline_command_quote_levels()):
+            command = shlex.quote(command)
+        return len(command)
+
+    def max_inline_command_length(self) -> int:
+        """Largest inline command, in ``inline_command_size`` bytes, to send.
+
+        Above this the caller should write the script to a file and rsync it
+        instead of inlining it into the command.
+        """
+        return MAX_INLINE_COMMAND_LENGTH
+
+    def is_command_length_over_limit(self, command: str) -> bool:
+        """Whether inlining ``command`` exceeds what this runner can send."""
+        limit = self.max_inline_command_length()
+        return self.inline_command_size(command) > limit
+
     def get_remote_home_dir(self) -> str:
         # Use pattern matching to extract home directory.
         # Some container images print MOTD when login shells start, which can
@@ -375,6 +417,10 @@ class CommandRunner:
             raise ValueError('Failed to find remote home directory identifier: '
                              f'{output + stderr}')
         return remote_home_dir
+
+    def command_as_user(self, argv: List[str]) -> str:
+        """Quote argv for this runner's execution identity."""
+        return shlex.join(argv)
 
     def _get_command_to_run(
         self,
@@ -1549,6 +1595,38 @@ class KubernetesCommandRunner(CommandRunner):
         else:
             return f'pod/{self.pod_name}'
 
+    def inline_command_size(self, command: str) -> int:
+        """Bytes the command occupies in the ``kubectl exec`` request URL.
+
+        `kubectl exec` passes the command as repeated `command=` query
+        parameters, so an inlined script travels in the request URI and is
+        percent-encoded on the way -- which inflates a shell script by roughly
+        2x. Measuring shell-quoted bytes here would understate the request by
+        about that factor.
+        """
+        # Only one quote layer survives to kubectl's argv: the outer one this
+        # runner adds is consumed by the local shell.
+        return len(urllib.parse.quote(shlex.quote(command), safe=''))
+
+    def max_inline_command_length(self) -> int:
+        # Unlike a shell transport, the ceiling here belongs to whatever proxy
+        # fronts the Kubernetes API, not to the OS. Cloudflare-fronted endpoints
+        # (e.g. CoreWeave CKS) begin rejecting around 64 KB of URL, and
+        # nginx-ingress defaults to about the same for request line plus
+        # headers. Half of that leaves room for the path, the remaining query
+        # parameters and the headers.
+        default = 32 * 1024
+        # An SSH node pool runs through this runner too, but is configured
+        # under its own cloud and without the `ssh-` prefix on its name.
+        context, cloud_str = infra_utils.get_cleaned_context_and_cloud_str(
+            self.context)
+        limit = skypilot_config.get_effective_region_config(
+            cloud=cloud_str,
+            region=context,
+            keys=('max_inline_command_length',),
+            default_value=default)
+        return limit
+
     def port_forward_command(
             self,
             port_forward: List[Tuple[int, int]],
@@ -1884,6 +1962,8 @@ class LocalProcessCommandRunner(CommandRunner):
         """
         del port_forward, ssh_mode, connect_timeout  # Unused.
 
+        if isinstance(cmd, list):
+            cmd = shlex.join(cmd)
         command_str = self._get_command_to_run(
             cmd,
             process_stream,
@@ -1968,18 +2048,51 @@ class SlurmLoginNodeCommandRunner(SSHCommandRunner):
         self.slurm_user = slurm_user
         self._use_sudo = ssh_user != 'root'
 
+    def command_as_user(self, argv: List[str]) -> str:
+        """Quote one executable for the allocation owner."""
+        if self.slurm_user is None:
+            return shlex.join(argv)
+        return wrap_command_as_user(argv,
+                                    self.slurm_user,
+                                    use_sudo=self._use_sudo)
+
     def run(
         self,
         cmd: Union[str, List[str]],
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
-        if self.slurm_user is not None:
-            if isinstance(cmd, list):
-                cmd = ' '.join(cmd)
-            cmd = wrap_command_as_user(cmd,
-                                       self.slurm_user,
-                                       use_sudo=self._use_sudo)
+        """Run argv as the allocation owner, or shell code as the SSH user."""
+        if isinstance(cmd, list):
+            cmd = self.command_as_user(cmd)
         return super().run(cmd, **kwargs)
+
+    def get_remote_home_dir(self) -> str:
+        if self.slurm_user is None:
+            return super().get_remote_home_dir()
+        identity = (self.ip, self.port, self.ssh_user, self.slurm_user,
+                    self._ssh_proxy_command, self._ssh_proxy_jump)
+        identity_hash = hashlib.sha256(repr(identity).encode()).hexdigest()
+        cache_key = f'slurm:home_dir:{identity_hash}'
+        cached_home = kv_cache.get_cache_entry(cache_key)
+        if cached_home is not None:
+            return cached_home
+        rc, stdout, stderr = SSHCommandRunner.run(
+            self,
+            shlex.join(['getent', 'passwd', self.slurm_user]),
+            require_outputs=True,
+            separate_stderr=True,
+            stream_logs=False)
+        if rc == 0:
+            for line in stdout.splitlines():
+                fields = line.split(':')
+                if (len(fields) == 7 and fields[0] == self.slurm_user and
+                        os.path.isabs(fields[5])):
+                    kv_cache.add_or_update_cache_entry(
+                        cache_key, fields[5],
+                        time.time() + _SLURM_HOME_DIR_CACHE_TTL_SECONDS)
+                    return fields[5]
+        raise ValueError(f'Cannot resolve home directory for '
+                         f'{self.slurm_user!r}: {stdout}\n{stderr}')
 
     def rsync(
         self,
@@ -1994,10 +2107,7 @@ class SlurmLoginNodeCommandRunner(SSHCommandRunner):
     ) -> None:
         remote_rsync_command = None
         if self.slurm_user is not None:
-            remote_rsync_command = wrap_command_as_user('exec rsync "$@"',
-                                                        self.slurm_user,
-                                                        shell_argv0='rsync',
-                                                        use_sudo=self._use_sudo)
+            remote_rsync_command = self.command_as_user(['rsync'])
         super().rsync(source,
                       target,
                       up=up,
@@ -2078,6 +2188,9 @@ class SlurmCommandRunner(SlurmLoginNodeCommandRunner):
         self.slurm_node = slurm_node
         self.container_args = container_args
 
+    def get_remote_home_dir(self) -> str:
+        return CommandRunner.get_remote_home_dir(self)
+
     def _rsync_via_srun(
         self,
         source: str,
@@ -2152,15 +2265,12 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                                    f'{common_utils.exception_to_string(e)}')
             return
 
-        rsync_command = (
-            f'exec srun --unbuffered --quiet --overlap {extra_srun_args}'
-            f'--jobid={shlex.quote(self.job_id)} '
-            f'--nodelist={shlex.quote(self.slurm_node)} '
-            f'--nodes=1 --ntasks=1 rsync "$@"')
-        remote_rsync_command = wrap_command_as_user(rsync_command,
-                                                    self.slurm_user,
-                                                    shell_argv0='rsync',
-                                                    use_sudo=self._use_sudo)
+        rsync_command = ('srun --unbuffered --quiet --overlap --chdir=/tmp '
+                         f'{extra_srun_args}'
+                         f'--jobid={shlex.quote(self.job_id)} '
+                         f'--nodelist={shlex.quote(self.slurm_node)} '
+                         f'--nodes=1 --ntasks=1 rsync')
+        remote_rsync_command = self.command_as_user(shlex.split(rsync_command))
         SSHCommandRunner.rsync(self,
                                source,
                                target,
@@ -2171,6 +2281,10 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                                get_remote_home_dir=lambda: remote_home_dir,
                                timeout=timeout,
                                remote_rsync_command=remote_rsync_command)
+
+    def _inline_command_quote_levels(self) -> int:
+        # _run_via_srun adds an `srun ... bash -c` shell.
+        return super()._inline_command_quote_levels() + 1
 
     def _run_via_srun(
         self,
@@ -2194,7 +2308,11 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
             assert self.container_args is not None, (
                 '_run_via_srun with in_container=True called but '
                 'container_args not set')
-            inner_cmd = f'{self._ENV_SETUP} && {cmd}'
+            # Export the runtime dir for keeper files.
+            # They must resolve to the same paths on the host and container.
+            inner_cmd = (f'export {constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
+                         f'"{self.skypilot_runtime_dir}" && '
+                         f'{self._ENV_SETUP} && {cmd}')
             extra_srun_args = f'{self.container_args} '
         else:
             inner_cmd = (f'export {constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
@@ -2204,13 +2322,14 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                          f'{cmd}')
             extra_srun_args = ''
 
-        srun_cmd = (
-            f'srun --unbuffered --quiet --overlap --jobid={self.job_id} '
-            f'--nodelist={self.slurm_node} '
-            f'--nodes=1 --ntasks=1 {extra_srun_args}'
-            f'bash -c {shlex.quote(inner_cmd)}')
+        srun_cmd = ('srun --unbuffered --quiet --overlap --chdir=/tmp '
+                    f'--jobid={self.job_id} '
+                    f'--nodelist={self.slurm_node} '
+                    f'--nodes=1 --ntasks=1 {extra_srun_args}'
+                    f'bash -c {shlex.quote(inner_cmd)}')
 
-        return SlurmLoginNodeCommandRunner.run(self, srun_cmd, **kwargs)
+        return SlurmLoginNodeCommandRunner.run(self, shlex.split(srun_cmd),
+                                               **kwargs)
 
     def rsync(
         self,

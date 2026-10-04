@@ -25,6 +25,8 @@ from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import decimal
+
     import kubernetes
     import urllib3
     import urllib3.exceptions
@@ -427,6 +429,18 @@ def watch(context: Optional[str] = None):
     w = kubernetes.watch.Watch()
     w._api_client = _get_api_client(context)  # pylint: disable=protected-access
     return w
+
+
+def parse_quantity(quantity: str) -> 'decimal.Decimal':
+    """Parses a Kubernetes resource quantity into a number of bytes.
+
+    Kubernetes' own grammar, which is not SkyPilot's: a bare number is bytes,
+    and both binary (`10Gi`) and decimal (`2G`) suffixes are legal, as is
+    exponent notation. Anything read off an object the cluster owns has to be
+    read with these rules -- a claim SkyPilot did not create is written
+    however its author wrote it.
+    """
+    return kubernetes.utils.parse_quantity(quantity)
 
 
 def api_exception():

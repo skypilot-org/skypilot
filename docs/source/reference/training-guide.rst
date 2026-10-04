@@ -182,6 +182,8 @@ Use high-performance networking
 
           num_nodes: 2
 
+        By default SkyPilot uses host networking to reach the RDMA fabric, matching Oracle's bare-metal RDMA setup. If your OKE cluster instead hands out RDMA NICs as SR-IOV virtual functions, set :ref:`kubernetes.rdma.mode: sriov <config-yaml-kubernetes-rdma>` for that context.
+
 
 Using Ray with SkyPilot
 ~~~~~~~~~~~~~~~~~~~~~~~

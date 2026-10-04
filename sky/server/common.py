@@ -20,7 +20,6 @@ from typing import (Any, Callable, cast, Dict, Generic, List, Literal, Optional,
                     Tuple, TypeVar, Union)
 import urllib.parse
 from urllib.request import Request
-import uuid
 
 import cachetools
 import click
@@ -775,6 +774,39 @@ def handle_request_error(response: 'requests.Response') -> None:
                 f'{response.text}')
 
 
+def raise_if_rejected_synchronously(response: 'requests.Response') -> None:
+    """Raises the server's error for a synchronous 400.
+
+    An endpoint that validates before enqueuing replies 400 with a serialized
+    exception instead of a request id; without this the SDK would surface a raw
+    HTTPError. Endpoints opt in by calling this before `get_request_id`.
+
+    Always raises on a 400. A body this cannot decode -- a proxy's HTML error
+    page -- falls back to `handle_request_error`, because a caller with nothing
+    after this call would otherwise read the 400 as success.
+    """
+    if response.status_code != 400:
+        return
+    detail = None
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            detail = payload.get('detail')
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Could not parse the body of a 400 from '
+                     f'{response.url}: {e}')
+    if detail is None:
+        logger.debug(f'A 400 from {response.url} carried no error detail; '
+                     f'falling back to the generic error. '
+                     f'Body: {response.text[:200]}')
+        # No `return`: this raises today, but falling through keeps the
+        # always-raises promise from depending on that. deserialize_exception
+        # turns a None detail into a generic RuntimeError.
+        handle_request_error(response)
+    with ux_utils.print_exception_no_traceback():
+        raise exceptions.deserialize_exception(detail)
+
+
 def get_request_id(response: 'requests.Response') -> RequestId[T]:
     handle_request_error(response)
     request_id = response.headers.get('X-Skypilot-Request-ID')
@@ -984,7 +1016,7 @@ def _set_metrics_env_var(env: Union[Dict[str, str], os._Environ], metrics: bool,
             multiple processes might be running.
     """
     del deploy
-    if metrics or os.getenv(constants.ENV_VAR_SERVER_METRICS_ENABLED) == 'true':
+    if metrics or constants.server_metrics_enabled():
         env[constants.ENV_VAR_SERVER_METRICS_ENABLED] = 'true'
         # Always set the metrics dir since we need to collect metrics from
         # subprocesses like the executor.
@@ -1172,16 +1204,7 @@ def process_mounts_in_task_on_api_server(
 
     user_hash = env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
 
-    # We should not use int(time.time()) as there can be multiple requests at
-    # the same second.
-    task_id = str(uuid.uuid4().hex)
     client_dir = (API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash)
-    client_task_dir = client_dir / 'tasks'
-    client_task_dir.mkdir(parents=True, exist_ok=True)
-
-    client_task_path = client_task_dir / f'{task_id}.yaml'
-    client_task_path.write_text(task)
-
     client_file_mounts_dir = client_dir / 'file_mounts'
     client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1198,7 +1221,7 @@ def process_mounts_in_task_on_api_server(
         return str(file_mounts_base /
                    file_mounts_mapping[original_path].lstrip('/'))
 
-    task_configs = yaml_utils.read_yaml_all(str(client_task_path))
+    task_configs = yaml_utils.read_yaml_all_str(task)
     for task_config in task_configs:
         if task_config is None:
             continue
@@ -1247,13 +1270,8 @@ def process_mounts_in_task_on_api_server(
                         tls[key] = _get_client_file_mounts_path(
                             tls[key], file_mounts_mapping)
 
-    # We can switch to using string, but this is to make it easier to debug, by
-    # persisting the translated task yaml file.
-    translated_client_task_path = client_dir / f'{task_id}_translated.yaml'
-    yaml_utils.dump_yaml(str(translated_client_task_path), task_configs)
-
-    dag = dag_utils.load_dag_from_yaml(str(translated_client_task_path))
-    return dag
+    translated_task = yaml_utils.dump_yaml_str(task_configs)
+    return dag_utils.load_dag_from_yaml_str(translated_task)
 
 
 def api_server_user_logs_dir_prefix(

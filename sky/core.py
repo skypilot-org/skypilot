@@ -357,14 +357,25 @@ def get_cluster_events(
             'transitioned_at' (unix timestamp) fields.
         Events are ordered from oldest to newest.
     """
-    event_type_enums = [
-        global_user_state.ClusterEventType(event_type_str.strip())
-        for event_type_str in event_type.split(',')
-        if event_type_str.strip()
-    ]
+    event_type_enums = []
+    for event_type_str in event_type.split(','):
+        name = event_type_str.strip()
+        if not name:
+            continue
+        try:
+            event_type_enums.append(global_user_state.ClusterEventType(name))
+        except ValueError:
+            # A name this server does not know is dropped, not fatal. The
+            # callers are dashboards shipped separately from the server, so a
+            # newer one routinely asks for a type an older server has no rows
+            # of -- and raising there fails the whole request, taking the
+            # types it *could* have answered with it. Dropping degrades to
+            # "no rows of that type", which is also the truth.
+            logger.debug(f'Ignoring unknown cluster event type {name!r}.')
     if not event_type_enums:
-        # Reject blank/empty input rather than silently matching nothing
-        # (an empty type list translates to `type IN ()`, i.e. no events).
+        # Nothing valid at all is still an error rather than a silent empty
+        # answer: an empty type list translates to `type IN ()`, i.e. no
+        # events, which a caller would read as "this cluster has no history".
         raise ValueError(f'No valid cluster event type in {event_type!r}.')
     return global_user_state.get_cluster_events(
         cluster_name=cluster_name,
@@ -818,7 +829,16 @@ def _graceful_job_cancel(handle: backends.ResourceHandle,
     if timeout:
         flush_script = f'timeout {timeout} bash -c {shlex.quote(flush_script)}'
 
-    runners = handle.get_command_runners()
+    try:
+        runners = handle.get_command_runners()
+    except Exception as e:  # pylint: disable=broad-except
+        # Not every provisioner can produce command runners (e.g. a runtime
+        # that offers no exec access into the instances). Skip the flush
+        # instead of propagating, so the caller can still tear the cluster
+        # down; otherwise its resources would be leaked.
+        logger.warning('Skipping MOUNT_CACHED upload flush on '
+                       f'{cluster_name!r}: failed to get command runners: {e}')
+        return
     node_args = [(i, runner) for i, runner in enumerate(runners)]
     errors = []
     logger.debug(f'Waiting for uploads on {len(runners)} node(s)...')
@@ -857,6 +877,21 @@ def _graceful_job_cancel(handle: backends.ResourceHandle,
         logger.warning(f'Some nodes had flush errors: {errors}')
     else:
         logger.debug(f'All MOUNT_CACHED uploads completed on {cluster_name!r}')
+
+
+def _user_action_event_reason(action: str) -> str:
+    """The cluster-event reason for a user-requested lifecycle action.
+
+    Names the requesting user and the API request that carried the action
+    when they are known, so the cluster's event log records who stopped or
+    terminated a cluster -- the attribution the managed-job event log keeps
+    for a cancellation. Falls back to the plain text when there is no request
+    context to name (an in-process caller).
+    """
+    actor = common_utils.get_current_request_actor()
+    if actor is None:
+        return f'Cluster was {action} by user.'
+    return f'Cluster was {action} by user {actor}.'
 
 
 def user_initiated_down(cluster_name: str,
@@ -909,7 +944,7 @@ def down(cluster_name: str,
         # so its hash can be resolved (teardown deletes the row). There is no
         # TERMINATED cluster status, so new_status is None.
         global_user_state.add_cluster_event(
-            cluster_name, None, 'Cluster was terminated by user.',
+            cluster_name, None, _user_action_event_reason('terminated'),
             global_user_state.ClusterEventType.STATUS_CHANGE)
 
     backend = backend_utils.get_backend_from_handle(handle)
@@ -1051,7 +1086,7 @@ def stop(cluster_name: str,
 
     global_user_state.add_cluster_event(
         cluster_name, status_lib.ClusterStatus.STOPPED,
-        'Cluster was stopped by user.',
+        _user_action_event_reason('stopped'),
         global_user_state.ClusterEventType.STATUS_CHANGE)
 
     backend = backend_utils.get_backend_from_handle(handle)
