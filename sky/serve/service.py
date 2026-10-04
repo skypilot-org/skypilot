@@ -425,6 +425,15 @@ def _start(service_name: str,
     assert task.service is not None, task
     service_spec = task.service
 
+    # In consolidation mode the recovery script is stored before every launch,
+    # so its absence means a purge removed it after a recovery sweep read it.
+    if (serve_utils.is_consolidation_mode(service_spec.pool) and
+            serve_state.get_ha_recovery_script(service_name) is None):
+        logger.warning(f'Service {service_name} has no recovery script; it '
+                       'is being purged, so this controller will not start.')
+        _cleanup_task_run_script(job_id)
+        return
+
     service_dir = os.path.expanduser(
         serve_utils.generate_remote_service_dir_name(service_name))
 

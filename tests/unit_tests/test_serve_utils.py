@@ -1243,3 +1243,89 @@ class TestPurgeTeardown:
         assert env.clusters == {'bulk-1'}
         assert not env.downs
         assert env.signal_file('bulk').read_text() == 'terminate'
+
+
+class TestPurgeCoordination:
+    """Purge must not race a controller on another pod, leave a signal for a
+    recreated service, or skip storage of records that predate stored YAML."""
+
+    # pylint: disable=redefined-outer-name
+
+    @staticmethod
+    def _set_remote_controller(monkeypatch, name):
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+        serve_state.update_service_controller_pid_ip_and_port(
+            name,
+            controller_pid=1,
+            controller_ip='10.0.0.9',
+            controller_port=20001)
+        monkeypatch.setenv('POD_IP', '10.0.0.1')
+
+    def test_remote_controller_is_awaited_until_unreachable(
+            self, purge_env, monkeypatch):
+        env = purge_env
+        env.add_pool('bulk', 'READY', [1])
+        env.clusters.add('bulk-1')
+        self._set_remote_controller(monkeypatch, 'bulk')
+        answers = [True, True, True]
+
+        def _probe(*_args, **_kwargs):
+            if answers:
+                answers.pop()
+                return mock.MagicMock()
+            raise requests_exceptions.ConnectionError()
+
+        monkeypatch.setattr(serve_utils, '_get_to_controller_with_retry',
+                            _probe)
+        serve_utils.terminate_services(['bulk'], purge=True, pool=True)
+
+        assert not answers
+        assert env.downs == ['bulk-1']
+        assert env.records('bulk') == (None, [], None)
+
+    def test_live_remote_controller_fails_purge_without_teardown(
+            self, purge_env, monkeypatch):
+        env = purge_env
+        env.add_pool('bulk', 'READY', [1])
+        env.clusters.add('bulk-1')
+        self._set_remote_controller(monkeypatch, 'bulk')
+        monkeypatch.setattr(serve_utils, '_get_to_controller_with_retry',
+                            mock.Mock(return_value=mock.MagicMock()))
+
+        with pytest.raises(RuntimeError, match='still running'):
+            serve_utils.terminate_services(['bulk'], purge=True, pool=True)
+        assert not env.downs
+        assert env.records('bulk')[1] == ['bulk-1']
+
+    def test_late_signal_for_purged_service_is_dropped(self, purge_env):
+        env = purge_env
+        env.add_pool('bulk', 'NO_REPLICA', [])
+        serve_utils.terminate_services(['bulk'], purge=True, pool=True)
+
+        serve_utils._signal_terminate('bulk')  # pylint: disable=protected-access
+
+        assert not env.signal_file('bulk').exists()
+
+    @pytest.mark.parametrize('yaml_file_exists', [False, True])
+    def test_storage_cleanup_falls_back_to_yaml_file(self, purge_env,
+                                                     monkeypatch,
+                                                     yaml_file_exists):
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+        env = purge_env
+        env.add_pool('bulk', 'NO_REPLICA', [])
+        legacy_yaml = serve_state.get_yaml_content('bulk', 1)
+        monkeypatch.setattr(serve_state, 'get_yaml_content',
+                            mock.Mock(return_value=None))
+        if yaml_file_exists:
+            yaml_path = pathlib.Path(
+                serve_utils.generate_task_yaml_file_name('bulk', 1))
+            yaml_path.parent.mkdir(parents=True, exist_ok=True)
+            yaml_path.write_text(legacy_yaml, encoding='utf-8')
+
+        serve_utils.terminate_services(['bulk'], purge=True, pool=True)
+
+        assert env.records('bulk') == (None, [], None)
+        expected = [legacy_yaml] if yaml_file_exists else []
+        assert env.storage_cleanups == expected

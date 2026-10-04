@@ -1346,9 +1346,40 @@ def _signal_terminate(service_name: str) -> None:
     # Filelock is needed to prevent race condition between signal
     # check/removal and signal writing.
     with filelock.FileLock(str(signal_file) + '.lock'):
+        # A purge may have removed the service since its status was read; a
+        # signal left for an absent service would stop a recreated one.
+        if serve_state.get_service_from_name(service_name) is None:
+            return
         with signal_file.open(mode='w', encoding='utf-8') as f:
             f.write(UserSignal.TERMINATE.value)
             f.flush()
+
+
+def _purge_controller_running(service_name: str,
+                              record: Optional[Dict[str, Any]]) -> bool:
+    """Returns whether a controller of the service may still be running.
+
+    A controller recorded on another pod is probed through its HTTP endpoint,
+    since its process is not visible from this pod.
+    """
+    if _start_in_flight(service_name):
+        return True
+    if record is None:
+        return False
+    controller_ip = record.get('controller_ip')
+    if controller_ip is not None and controller_ip != os.environ.get('POD_IP'):
+        controller_port = record.get('controller_port')
+        if controller_port is None:
+            return True
+        try:
+            _get_to_controller_with_retry(service_name, controller_port,
+                                          '/autoscaler/info')
+        except requests.exceptions.RequestException:
+            return False
+        return True
+    controller_pid = record.get('controller_pid')
+    return (controller_pid is not None and
+            _controller_process_alive(controller_pid, service_name))
 
 
 def _terminate_failed_services(
@@ -1356,8 +1387,8 @@ def _terminate_failed_services(
         service_status: Optional[serve_state.ServiceStatus]) -> None:
     """Forcefully terminate a service and its replica clusters.
 
-    Stops HA recovery, signals and waits for any local controller of this
-    service to exit, tears down its replica clusters, and removes records only
+    Stops HA recovery, signals and waits for any controller of this service
+    to exit, tears down its replica clusters, and removes records only
     after their clusters are gone. Remaining clusters keep their replica rows
     under FAILED_CLEANUP, so a repeated purge resumes the teardown.
 
@@ -1376,10 +1407,7 @@ def _terminate_failed_services(
     deadline = time.time() + _PURGE_CONTROLLER_EXIT_TIMEOUT_SECONDS
     while True:
         record = serve_state.get_service_from_name(service_name)
-        controller_pid = None if record is None else record['controller_pid']
-        if not ((controller_pid is not None and
-                 _controller_process_alive(controller_pid, service_name)) or
-                _start_in_flight(service_name)):
+        if not _purge_controller_running(service_name, record):
             break
         if time.time() > deadline:
             raise RuntimeError(
@@ -1419,9 +1447,13 @@ def _terminate_failed_services(
     # the version records that describe it until cleanup succeeds.
     failed_versions: List[int] = []
     for version in serve_state.get_service_versions(service_name):
-        yaml_content = serve_state.get_yaml_content(service_name, version)
-        if (yaml_content is not None and
-                not service.cleanup_storage(yaml_content)):
+        try:
+            yaml_content = get_yaml_content(service_name, version)
+        except FileNotFoundError:
+            logger.warning(f'No YAML found for version {version} of '
+                           f'{service_name!r}; skipping its storage cleanup.')
+            continue
+        if not service.cleanup_storage(yaml_content):
             failed_versions.append(version)
     if failed_versions:
         serve_state.set_service_status_and_active_versions(
@@ -1443,9 +1475,10 @@ def _terminate_failed_services(
         # success path raced with a purge).
         pass
     # An unconsumed signal must not terminate a recreated service.
-    pathlib.Path(
-        constants.SIGNAL_FILE_PATH.format(service_name)).expanduser().unlink(
-            missing_ok=True)
+    signal_file = pathlib.Path(
+        constants.SIGNAL_FILE_PATH.format(service_name)).expanduser()
+    with filelock.FileLock(str(signal_file) + '.lock'):
+        signal_file.unlink(missing_ok=True)
 
 
 def terminate_services(service_names: Optional[List[str]], purge: bool,
