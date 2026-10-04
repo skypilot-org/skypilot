@@ -895,6 +895,15 @@ class GFDLabelFormatter(GPULabelFormatter):
                                                  '').replace('RTX-', 'RTX')
 
 
+# Lowercase names of one accelerator that the prefix match in
+# _accelerator_name_matches cannot pair, mapped to a shared name. RTX PRO 6000
+# is 'RTXPRO6000' in the GCP catalog, while GKE labels it
+# 'nvidia-rtx-pro-6000', which GKELabelFormatter decodes to 'RTX-PRO-6000'.
+_ACCELERATOR_NAME_ALIASES = {
+    'rtxpro6000': 'rtx-pro-6000',
+}
+
+
 def _accelerator_name_matches(requested_acc: str,
                               viable_names: List[str]) -> bool:
     """Check if requested accelerator matches any viable name.
@@ -908,6 +917,9 @@ def _accelerator_name_matches(requested_acc: str,
       after upgrading, the same label now maps to canonical name (e.g., 'H200').
     - Users specify canonical names but the cluster uses fallback names.
 
+    Names listed in _ACCELERATOR_NAME_ALIASES also match their alias exactly
+    (e.g., 'RTXPRO6000' matches 'RTX-PRO-6000').
+
     Args:
         requested_acc: The accelerator type requested (e.g., from launched_resources).
         viable_names: List of viable accelerator names from node labels.
@@ -916,9 +928,14 @@ def _accelerator_name_matches(requested_acc: str,
         True if the requested accelerator matches any viable name.
     """
     requested_lower = requested_acc.lower()
+    requested_alias = _ACCELERATOR_NAME_ALIASES.get(requested_lower,
+                                                    requested_lower)
     for viable in viable_names:
         viable_lower = viable.lower()
         if requested_lower == viable_lower:
+            return True
+        if requested_alias == _ACCELERATOR_NAME_ALIASES.get(
+                viable_lower, viable_lower):
             return True
         # Check prefix match with '-' separator for backward compatibility.
         # E.g., 'H200' matches 'H200-SXM-80GB' and vice versa.
