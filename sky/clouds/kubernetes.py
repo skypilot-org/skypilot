@@ -1898,6 +1898,8 @@ class Kubernetes(clouds.Cloud):
         # nodes are up -- letting the fallback below still derive an EFA count.
         saw_aws_efa_node = False
         matched_aws_gpu_node = False
+        missing_efa = False
+        efa_counts: List[int] = []
 
         try:
             nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
@@ -1936,8 +1938,6 @@ class Kubernetes(clouds.Cloud):
                             if (not k8s_acc_label_key or not k8s_resource_key or
                                     not acc_count):
                                 return (network_type, metadata)
-                            if not node.is_ready() or node.is_cordoned():
-                                continue
                             if (k8s_acc_label_key not in node.metadata.labels or
                                 (k8s_acc_label_values is not None and
                                  node.metadata.labels[k8s_acc_label_key]
@@ -1964,9 +1964,9 @@ class Kubernetes(clouds.Cloud):
                                                                 node_efa_count)
                                     efa_count = max(
                                         1, min(calculated_efa, node_efa_count))
-                                    metadata = {'efa_count': efa_count}
-                                    return (network_type, metadata)
-                            # No EFA available, but it's an AWS node
+                                    efa_counts.append(efa_count)
+                                    continue
+                            missing_efa = True
                             continue
 
                     # Check for GKE clusters with specific GPUDirect variants
@@ -2034,10 +2034,11 @@ class Kubernetes(clouds.Cloud):
             # If we can't reach the cluster, assume no high perf networking
             pass
 
-        # A running eligible GPU node without advertised EFA can still host the
-        # pod without EFA. Catalog hardware sizing must not make it unschedulable.
+        # An EFA request could exclude an observed matching GPU node that has
+        # no EFA. Use the smallest count that all matching nodes can support.
         if matched_aws_gpu_node:
-            return KubernetesHighPerformanceNetworkType.AWS_EFA, None
+            metadata = None if missing_efa else {'efa_count': min(efa_counts)}
+            return KubernetesHighPerformanceNetworkType.AWS_EFA, metadata
 
         # Autoscaler configured for this context (karpenter/generic/gke), or
         # None on a static cluster. Both cold-start fallbacks below require it:
