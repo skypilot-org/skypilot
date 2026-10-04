@@ -1028,11 +1028,11 @@ class SkyPilotReplicaManager(ReplicaManager):
                            is_scale_down: bool = False,
                            purge: bool = False) -> None:
         left_in_record = not (is_scale_down or purge)
-        # Recovery resumes a teardown whose logs were synced before the
-        # restart or are unreachable, so a missing log sync must not block it.
-        if left_in_record and not sync_down_logs:
-            logger.warning(f'Terminating replica {replica_id} without '
-                           'syncing down its logs.')
+        if left_in_record:
+            assert sync_down_logs, (
+                'For the replica left in the record, '
+                'the logs should always be synced down. '
+                'So that the user can see the logs to debug.')
 
         if replica_id in self._launch_thread_pool:
             info = serve_state.get_replica_info_from_id(self._service_name,
