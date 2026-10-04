@@ -225,6 +225,17 @@ export function groupJobRowsByTree(rows) {
   return groups;
 }
 
+/**
+ * Whether a managed job's task rows form a JobGroup (parallel tasks) rather
+ * than a serial pipeline. The API reports `execution` on every row; the task
+ * count is only a guess for rows that do not carry it.
+ */
+export function isJobGroup(tasks) {
+  const execution = tasks.find((t) => t.execution)?.execution;
+  if (execution) return execution === 'parallel';
+  return tasks.some((t) => t.is_job_group) || tasks.length > 1;
+}
+
 export function getAggregatedStatus(tasks) {
   if (!tasks || tasks.length === 0) return 'PENDING';
   if (tasks.length === 1) return tasks[0].status;
@@ -1806,8 +1817,7 @@ export function ManagedJobsTable({
             // fewer distinct concepts at the group level.
             const totalTasks = own.length + launchedJobs;
             const badgeLabel = `${totalTasks} task${totalTasks === 1 ? '' : 's'}`;
-            const badgeKind =
-              own.length > 1 || item.is_job_group ? 'JobGroup' : 'Job';
+            const badgeKind = isJobGroup(own) ? 'JobGroup' : 'Job';
             return (
               <TableCell className="whitespace-nowrap">
                 <div className="flex items-center">
