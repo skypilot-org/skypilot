@@ -42,6 +42,9 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`jobs <config-yaml-jobs>`:
     :ref:`bucket <config-yaml-jobs-bucket>`: s3://my-bucket/
     :ref:`force_disable_cloud_bucket <config-yaml-jobs-force-disable-cloud-bucket>`: false
+    :ref:`status_check <config-yaml-jobs-status-check>`:
+      min_elapsed_seconds: 60
+      min_retries: 5
     controller:
       :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
         infra: gcp/us-central1
@@ -83,6 +86,7 @@ Below is the configuration syntax and some example values. See detailed explanat
       annotations:
         myannotation: myvalue
     :ref:`provision_timeout <config-yaml-kubernetes-provision-timeout>`: 10
+    :ref:`max_inline_command_length <config-yaml-kubernetes-max-inline-command-length>`: 32768
     :ref:`autoscaler <config-yaml-kubernetes-autoscaler>`: gke
     :ref:`pod_config <config-yaml-kubernetes-pod-config>`:
       metadata:
@@ -106,6 +110,10 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`apt_mirrors <config-yaml-kubernetes-apt-mirrors>`:
       - mirror.math.princeton.edu
       - mirrors.kernel.org
+    :ref:`rdma <config-yaml-kubernetes-rdma>`:
+      mode: sriov
+      resource: nvidia.com/rdma-vf
+      networks: default/rdma-vf
     :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
       context1:
         pod_config:
@@ -149,6 +157,11 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`gpu_partition_map <config-yaml-slurm-gpu-partition-map>`:
       H100: h100-partition
     :ref:`cpu_partition <config-yaml-slurm-cpu-partition>`: cpu-batch
+    :ref:`container_mounts <config-yaml-slurm-container-mounts>`:
+      /datasets: /shared/datasets
+    :ref:`quota <config-yaml-slurm-quota>`:
+      queue: normal          # sbatch --qos
+      account: pre-training  # sbatch --account
     :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`:
       mycluster1:
         submit_as_user: true
@@ -159,6 +172,10 @@ Below is the configuration syntax and some example values. See detailed explanat
         gpu_partition_map:
           H100: h100-custom
         cpu_partition: cpu-only
+        prometheus:
+          url: http://prometheus.internal:9090
+          filter:
+            cluster: mycluster1-fleet
 
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
@@ -245,6 +262,7 @@ Below is the configuration syntax and some example values. See detailed explanat
         fabric: fabric-5
     :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
     :ref:`use_static_ip_address <config-yaml-nebius-use-static-ip-address>`: true
+    :ref:`disk_encrypted <config-yaml-nebius-disk-encrypted>`: true
     :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
@@ -459,6 +477,35 @@ Example:
 
   jobs:
     force_disable_cloud_bucket: true
+
+.. _config-yaml-jobs-status-check:
+
+``jobs.status_check``
+~~~~~~~~~~~~~~~~~~~~~
+
+Tune how long the managed jobs controller tolerates consecutive failures of its job-status check before treating the job as unhealthy and recovering it (which cancels the job and relaunches it).
+
+A status check can fail for reasons that say nothing about whether the job is alive -- for example a transport error on the way to the cluster, or a provider API error while refreshing cluster status. The controller retries such failures, and recovers the job only once **both** of these budgets are exhausted:
+
+- ``min_elapsed_seconds``: seconds elapsed since the first failure in the run.
+- ``min_retries``: retries made since the first failure in the run.
+
+Requiring both matters, because either alone is unreliable. A single status-check round can itself take longer than the time budget, since the cluster-status refresh performed before recovery does its own retried probes of the cluster; an elapsed-time-only budget can therefore be spent within the round that opened it, and the job is recovered without ever being retried. Conversely, a burst of failures that each return immediately can exhaust a retry-count-only budget within a couple of seconds, before a transient condition has had a chance to clear.
+
+Raise either value if the controller reaches its clusters over a link that is known to be slow or intermittent, and you would rather wait than have a long-running job relaunched.
+
+A successful status check ends the run and resets both budgets.
+
+Defaults: ``min_elapsed_seconds: 60``, ``min_retries: 5``.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    status_check:
+      min_elapsed_seconds: 600
+      min_retries: 10
 
 .. _config-yaml-jobs-controller:
 .. _config-yaml-jobs-controller-consolidation-mode:
@@ -785,6 +832,38 @@ Example:
       my-tag: my-value
 
 
+
+.. _config-yaml-aws-enforce-tags:
+
+``aws.enforce_tags``
+~~~~~~~~~~~~~~~~~~~~
+
+Resource types whose tagging must not be given up (optional).
+
+SkyPilot tags the EC2 instances it launches and the EBS volumes attached to
+them. If the credentials in use are not allowed to tag volumes, the volume tags
+are skipped with a warning and the cluster still comes up -- see
+:ref:`cloud-permissions-aws`.
+
+That is the right default for most deployments, but not for one that has to
+*guarantee* tag coverage: a warning in a log is not an enforcement mechanism,
+and a cluster that launches with untagged volumes may be out of compliance.
+Listing ``volume`` here makes such a refusal fail the launch instead, naming
+the missing permission.
+
+Supported values are ``instance`` and ``volume``, lowercase. Instance tagging
+is already required -- SkyPilot finds, stops and terminates a cluster by its
+instance tags -- so listing ``instance`` only records that expectation.
+
+Default: ``[]`` (tag volumes when permitted, warn when not).
+
+Example:
+
+.. code-block:: yaml
+
+  aws:
+    enforce_tags:
+      - volume
 
 .. _config-yaml-aws-vpc-names:
 
@@ -1736,6 +1815,38 @@ Custom metadata for Kubernetes resources (optional).
 
 Custom labels and annotations to apply to all Kubernetes resources.
 
+.. _config-yaml-kubernetes-max-inline-command-length:
+
+``kubernetes.max_inline_command_length``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Largest command to inline into a ``kubectl exec``, in bytes of request URL
+(optional).
+
+``kubectl exec`` passes the command as query parameters, so a command SkyPilot
+inlines travels in the request URL. Proxies in front of the Kubernetes API
+(e.g. Cloudflare, nginx-ingress) cap request size well below the operating
+system's command line limit and reject anything larger, sometimes without a
+usable error. Above this many bytes SkyPilot writes the script to a file and
+uploads it instead.
+
+Lower this if your API server sits behind a proxy stricter than the default
+assumes; the only cost of a lower value is an extra file upload per job
+submission. The same key is available for SSH Node Pools under ``ssh``, keyed
+by pool name without the ``ssh-`` prefix.
+
+Default: ``32768`` (32 KB), about half of what Cloudflare-fronted endpoints and
+nginx-ingress accept by default, leaving room for the path, the remaining query
+parameters and the headers.
+
+.. code-block:: yaml
+
+    kubernetes:
+      max_inline_command_length: 16384
+      context_configs:
+        my-strict-proxy-context:
+          max_inline_command_length: 8192
+
 .. _config-yaml-kubernetes-provision-timeout:
 
 ``kubernetes.provision_timeout``
@@ -1921,6 +2032,11 @@ which starts once the pods are admitted. Set to ``-1`` to wait
 indefinitely.
 
 Default: ``86400`` (24 hours).
+
+SkyServe replicas and pool workers are standing requests for capacity, so
+when this field is not set they wait for admission indefinitely instead of
+failing after 24 hours and re-entering the queue at the back. Set the field
+explicitly to bound their wait as well.
 
 .. _config-yaml-kubernetes-dws:
 
@@ -2110,6 +2226,92 @@ Example:
 
 Can also be set per-context via ``context_configs``.
 
+.. _config-yaml-kubernetes-rdma:
+
+``kubernetes.rdma``
+~~~~~~~~~~~~~~~~~~~
+
+How RDMA NICs are delivered to pods on an RDMA-capable cluster (optional).
+
+.. note::
+
+    This setting currently applies **only to Oracle OKE RoCE clusters** — those
+    that SkyPilot detects as OCI RoCE when a task requests
+    :ref:`network_tier: best <yaml-spec-resources-network-tier>`.
+
+Oracle documents two ways for a pod to reach the RDMA fabric on OKE, and a
+cluster is set up for one of them:
+
+- **Host networking** (default). The pod shares the node's network namespace
+  and reaches the RDMA devices through a ``/dev/infiniband`` hostPath, which
+  requires a privileged container. This is what SkyPilot has always done on an
+  OKE RoCE cluster, so leave ``rdma`` unset for it.
+- **SR-IOV**. The pod keeps its own network namespace; the RDMA NICs arrive as
+  SR-IOV virtual functions, requested as an extended resource and attached by
+  Multus. Select it with ``mode: sriov``.
+
+Fields:
+
+- ``mode``: ``sriov`` to use the SR-IOV model. Unset means host networking.
+- ``resource``: the extended resource advertised by the RDMA device plugin,
+  e.g. ``nvidia.com/rdma-vf``. Required when ``mode: sriov``.
+- ``networks``: the ``NetworkAttachmentDefinition`` to attach, named the way
+  Multus expects — either ``<name>`` (looked up in the pod's namespace) or
+  ``<namespace>/<name>``, e.g. ``default/rdma-vf``. Required when
+  ``mode: sriov``.
+
+``resource`` and ``networks`` both name objects that whoever installed the
+device plugin chose, so SkyPilot cannot infer them and fails with an actionable
+error if ``mode: sriov`` is set without them. The number of NICs is not
+configurable: SkyPilot reads the VF-to-GPU ratio off a node that is running and
+can host the request, then scales it to the GPUs requested. A context whose
+RDMA node pool is scaled to zero therefore has no node to read, and launches
+fail naming the resource rather than waiting for the autoscaler.
+
+SkyPilot also sets ``NCCL_IB_HCA`` to the ``mlx5`` family prefix under
+``mode: sriov``, rather than the exact device list it uses for host networking —
+a pod holding virtual functions never sees the host's physical function names.
+Narrow it through task ``envs:`` if your ``SriovNetworkNodePolicy`` also exposes
+NICs that are not part of the compute fabric.
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    context_configs:
+      my-oke-cluster:
+        rdma:
+          mode: sriov
+          resource: nvidia.com/rdma-vf
+          networks: default/rdma-vf
+
+With ``mode: sriov``, SkyPilot does not enable host networking and does not
+mount ``/dev/infiniband`` or run the container privileged — an SR-IOV device
+plugin configured with ``isRdma`` injects the RDMA character devices itself.
+
+.. note::
+
+    This is a deliberate deviation from Oracle's SR-IOV example manifest, which
+    keeps both. There are two ways a container can receive RDMA character
+    devices, and it needs one: a ``/dev/infiniband`` hostPath, which grants no
+    device-cgroup access and so requires ``privileged: true``; or a device
+    plugin running with ``isRdma``, which grants both and hands the pod only
+    its own virtual functions. Doing both means the hostPath shadows the
+    injected devices with every device on the node, which puts ``privileged``
+    back — the thing the SR-IOV model exists to avoid.
+
+    If your device plugin does *not* set ``isRdma``, nothing injects the
+    devices and the pod has no RDMA. Add them back through
+    :ref:`pod_config <config-yaml-kubernetes-pod-config>`.
+
+Two cluster-side prerequisites are outside SkyPilot's control. Multus must be
+installed, since the attachment is delivered through its annotation. And if the
+context uses :ref:`Kueue <config-yaml-kubernetes-kueue>`, the ClusterQueue must
+list the VF resource in ``coveredResources`` *and* give it a quota in a
+ResourceFlavor — a ClusterQueue that does not cover a requested extended
+resource never admits the workload, so jobs sit pending with no error.
+
 .. _config-yaml-kubernetes-context-configs:
 
 ``kubernetes.context_configs``
@@ -2188,11 +2390,18 @@ SkyPilot maps the username to the portion before ``@``. For example,
 a lowercase letter or ``_`` and contain only lowercase letters, digits, ``_``,
 ``.``, or ``-``. The account must already exist on the Slurm cluster.
 
-When enabled, the ``User`` in ``~/.slurm/config`` must be ``root`` or have
-passwordless ``sudo`` permission to run ``su``. SkyPilot connects as that SSH
-user, then runs job lifecycle commands and file transfers as the mapped Unix
-user. A missing account or insufficient privilege causes the operation to fail
-without falling back to the SSH user.
+When enabled, the ``User`` in ``~/.slurm/config`` must be ``root`` (using
+``runuser``) or have passwordless ``sudo`` permission for individual Slurm
+executables and the required file operations as the mapped Unix users.
+SkyPilot runs shell orchestration as the SSH user and invokes commands such as
+``sudo -n -H -u alice -- sbatch ...``. Workload scripts execute inside Slurm
+allocations through ``srun``. A missing account or insufficient privilege causes
+the operation to fail without falling back to the SSH user.
+
+See :ref:`Submitting as authenticated users <slurm-submit-as-user>` for the
+executable list, directory scopes, environment configuration, and an example
+sudoers policy. Restrict run-as identities to workload accounts without
+administrative privileges.
 
 Cluster-wide inventory commands run as the SSH user so monitoring and capacity
 views do not depend on the user requesting them. The SSH user must have
@@ -2211,6 +2420,44 @@ Example:
 ``submit_as_user`` can also be set per cluster using
 :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`. The per-cluster
 value overrides the global value.
+
+.. _config-yaml-slurm-service-account-user-mapping:
+
+``slurm.username_map``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Map full SkyPilot usernames or service-account names to Unix users when
+``slurm.submit_as_user`` is enabled. Use the name shown in the dashboard.
+
+.. code-block:: yaml
+
+  slurm:
+    submit_as_user: true
+    username_map:
+      jane.doe@example.com: jdoe
+      inference-prod: inference-svc
+    cluster_configs:
+      training:
+        username_map:
+          inference-prod: inference-training
+
+A cluster-specific mapping overrides the tenant mapping for the same name.
+A service account without an entry uses its creator's Unix identity: the
+creator's cluster mapping, then tenant mapping, then email local part. If the
+creator is another service account, the same resolution applies to that account.
+Human users without an entry use their email local part. If the creator cannot
+be found, configure an explicit mapping for the service account.
+
+This changes the Unix submit identity only; it does not grant SkyPilot roles
+or workspace access.
+All mapped accounts need the same login-node impersonation permissions as
+human submit users. Account existence and impersonation are checked before
+allocation creation, with a 15-second timeout.
+
+These are API-server settings and cannot be overridden by clients or tasks.
+They only apply when ``submit_as_user`` is enabled. SkyPilot ownership remains
+the authenticated service account; Slurm ownership uses the mapped Unix user.
+Existing allocation lifecycle operations use the stored submit identity.
 
 .. _config-yaml-slurm-provision-timeout:
 
@@ -2361,6 +2608,84 @@ Example:
 using the ``config:`` block in a task YAML. Per-cluster values override
 global values.
 
+.. _config-yaml-slurm-container-mounts:
+
+``slurm.container_mounts``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Host path bind mounts applied to every containerized (Pyxis/Enroot) Slurm job
+(optional).
+
+Each entry maps a container path to either a host path string, mounted
+read-only, or a mapping with ``host_path`` and an optional ``mode``
+(``ro``, the default, or ``rw``).
+
+Jobs without a container image ignore these mounts. If a task YAML
+:ref:`volume <yaml-spec-new-volumes>` binds the same container path, the task
+YAML entry wins.
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    container_mounts:
+      /datasets: /shared/datasets
+      /scratch:
+        host_path: /nvme/$SLURM_JOB_ID
+        mode: rw
+
+``container_mounts`` can also be set per-cluster using
+:ref:`cluster_configs <config-yaml-slurm-cluster-configs>`. Entries are merged
+per container path, with per-cluster values overriding global values.
+
+.. _config-yaml-slurm-quota:
+
+``slurm.quota``
+~~~~~~~~~~~~~~~
+
+The queue and account a Slurm job is submitted with (optional).
+
+- ``queue``: The QOS the job requests, submitted as ``sbatch --qos``.
+- ``account``: The account the job is charged to, submitted as
+  ``sbatch --account``. Set it when the QOS is only allowed on some
+  accounts' associations, or when the submitting user belongs to several
+  accounts and the job must be charged to a specific one.
+
+Both can be set at the cloud level, per cluster and per partition under
+:ref:`cluster_configs <config-yaml-slurm-cluster-configs>`, per workspace,
+and per task in the task YAML's ``config`` block. The most specific scope
+wins: a workspace value outranks any global value, and within a workspace or
+the global config, partition outranks cluster, which outranks cloud. A task
+``config`` value applies at the scope it is written at; to override a
+per-partition server value, write it under the same
+``cluster_configs.<cluster>.partition_configs.<partition>`` path.
+
+When set at any scope, ``quota.queue`` and ``quota.account`` take precedence
+over ``sbatch_options.qos`` and ``sbatch_options.account``.
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    quota:
+      queue: normal
+    cluster_configs:
+      mycluster:
+        partition_configs:
+          h100:
+            quota:
+              queue: high
+              account: pre-training
+
+  workspaces:
+    pre-training:
+      slurm:
+        quota:
+          queue: high
+          account: pre-training
+
 .. _config-yaml-slurm-cluster-configs:
 
 ``slurm.cluster_configs``
@@ -2398,6 +2723,60 @@ Supported fields:
   :ref:`CPU partition <config-yaml-slurm-cpu-partition>` override at the
   cluster level. Per-cluster values override the global value.
 
+- ``container_mounts``:
+  :ref:`Container mounts <config-yaml-slurm-container-mounts>` overrides at
+  the cluster level. Entries are merged per container path, with per-cluster
+  values overriding global values.
+
+- ``quota``: :ref:`Queue and account <config-yaml-slurm-quota>` overrides at
+  both the cluster and partition level. The most specific level wins.
+
+- ``prometheus``: Opts the cluster into GPU metrics federation, surfacing its
+  DCGM and node-exporter metrics in the SkyPilot dashboard. Sub-fields:
+
+  - ``url``: URL of a Prometheus that scrapes the cluster's DCGM and
+    node exporters, reachable from a login node (the cluster's own, or the
+    ``via`` cluster's). SkyPilot runs ``GET /federate`` against it from the
+    login node, so the API server never needs direct network access to it.
+  - ``filter``: Label matchers (label name to exact value) scoping this
+    cluster's slice of ``url``, for a central Prometheus that aggregates
+    metrics from several clusters. Without a filter, all series returned by
+    ``url`` are attributed to this cluster. Clusters sharing a ``url``
+    automatically exclude each other's filtered slices, so a fleet is never
+    counted twice.
+  - ``via``: Name of another Slurm cluster whose login node runs the
+    ``/federate`` request instead of this cluster's own, for a central
+    Prometheus reachable from only some login nodes. The fetched series are
+    still attributed to this cluster.
+
+  The flat ``prometheus_url`` field is a deprecated spelling of
+  ``prometheus.url`` and is still honored; ``prometheus.url`` wins when both
+  are set.
+
+  ``url`` and ``via`` can also be set once at the cloud level under
+  ``slurm.prometheus`` as shared defaults, inherited by any cluster that does
+  not override them. This suits the common case of one central Prometheus,
+  reachable through a single fleet's login node, serving every cluster: set
+  ``url`` (and ``via``) once and give each cluster only its own ``filter``.
+
+  .. code-block:: yaml
+
+    slurm:
+      # Shared defaults: one central Prometheus, reachable only through
+      # hub's login node, serving every cluster.
+      prometheus:
+        url: http://prometheus.internal:9090
+        via: hub
+      cluster_configs:
+        hub:
+          prometheus:
+            filter:
+              cluster: hub-fleet
+        edge:
+          prometheus:
+            filter:
+              cluster: edge-fleet
+
 Example:
 
 .. code-block:: yaml
@@ -2423,6 +2802,14 @@ Example:
           cpu: 0.06
           accelerators:
             A100: 4.00   # Override A100; V100 inherited
+        # Surface this cluster's GPU metrics in the SkyPilot dashboard,
+        # federated from a Prometheus reachable from the login node.
+        prometheus:
+          url: http://prometheus.internal:9090
+          # Only needed when the Prometheus aggregates several clusters:
+          # collect only the series carrying these labels.
+          filter:
+            cluster: mycluster1-fleet
 
       mycluster2:
         workdir: /home/$USER
@@ -2442,6 +2829,15 @@ Example:
             pricing:
               accelerators:
                 H100: 5.00
+        # GPU metrics federation from a central Prometheus that aggregates
+        # both clusters but is reachable only from mycluster1's login node.
+        prometheus:
+          url: http://prometheus.internal:9090
+          # Run the /federate request on mycluster1's login node.
+          via: mycluster1
+          # Collect only this cluster's slice of the shared Prometheus.
+          filter:
+            cluster: mycluster2-fleet
 
 .. _config-yaml-oci:
 
@@ -2590,6 +2986,19 @@ Set to ``false`` to use only publicly available pricing information.
 Pricing tiers and free quotas are ignored in this estimate, and the final cost could be lower or higher.
 
 Default: ``true``.
+
+.. _config-yaml-nebius-disk-encrypted:
+
+``nebius.disk_encrypted``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Encrypted boot disk (optional).
+
+Set to ``true`` to enable Nebius-managed encryption for Network SSD
+Non-replicated and Network SSD IO M3 boot disks launched by SkyPilot. Network
+SSD boot disks are encrypted by default.
+
+Default: ``false``.
 
 .. _config-yaml-nebius-ssh-proxy-command:
 

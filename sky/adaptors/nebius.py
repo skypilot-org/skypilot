@@ -159,10 +159,42 @@ class _NebiusDeprecationFilter(logging.Filter):
         return f'{os.sep}nebius{os.sep}' not in record.pathname
 
 
+class _NebiusGrpcPollerFilter(logging.Filter):
+    """Downgrades grpc.aio poller errors logged to the 'asyncio' logger.
+
+    The nebius SDK's grpc.aio channels raise exceptions in event-loop
+    callbacks (PollerCompletionQueue._handle_events, e.g.
+    'BlockingIOError: [Errno 11] Resource temporarily unavailable') when
+    the SDK's pollers race with fd availability. asyncio's default
+    exception handler logs them at ERROR to the 'asyncio' logger, which
+    propagates to the root logger and pollutes user-facing CLI output.
+    The exceptions are internal to grpc's poller and are not actionable;
+    real API errors are still raised to callers through sync_call().
+
+    The loop-scoped handler installed by _get_event_loop() only covers
+    the dedicated loop used by sync_call(), but the SDK also runs
+    pollers on its own internal loops, whose records we can only
+    intercept here. The records are re-logged at debug level instead of
+    being dropped, so SKYPILOT_DEBUG=1 still shows them for diagnostics.
+
+    Only records mentioning the grpc poller are downgraded, so unrelated
+    asyncio errors (from any library) keep their original level.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if 'PollerCompletionQueue' not in record.getMessage():
+            return True
+        logger.debug('nebius SDK grpc.aio poller: %s',
+                     record.getMessage(),
+                     exc_info=record.exc_info)
+        return False
+
+
 def _set_nebius_loggers() -> None:
     # https://github.com/grpc/grpc/issues/37642 to avoid spam in console
     os.environ['GRPC_VERBOSITY'] = 'NONE'
     logging.getLogger('deprecation').addFilter(_NebiusDeprecationFilter())
+    logging.getLogger('asyncio').addFilter(_NebiusGrpcPollerFilter())
 
 
 nebius = common.LazyImport('nebius',
@@ -205,8 +237,8 @@ def iam():
 
 def billing():
     # pylint: disable=import-outside-toplevel
-    from nebius.api.nebius.billing import v1alpha1 as billing_v1alpha1
-    return billing_v1alpha1
+    from nebius.api.nebius.billing import v1 as billing_v1
+    return billing_v1
 
 
 def nebius_common():
@@ -282,18 +314,40 @@ def sdk():
     return _sdk(None, default_cred_path)
 
 
+def _user_agent_prefix() -> str:
+    # Import locally to avoid a circular import while sky is initialized.
+    # pylint: disable=import-outside-toplevel
+    from sky import __version__
+    return f'skypilot/{__version__}'
+
+
 @annotations.lru_cache(scope='request')
 def _sdk(token: Optional[str], cred_path: Optional[str]):
     # Exactly one of token or cred_path must be provided
     assert (token is None) != (cred_path is None), (token, cred_path)
     if token is not None:
-        return nebius.sdk.SDK(credentials=token, domain=api_domain())
+        return nebius.sdk.SDK(credentials=token,
+                              domain=api_domain(),
+                              user_agent_prefix=_user_agent_prefix())
     if cred_path is not None:
         return nebius.sdk.SDK(
             credentials_file_name=os.path.expanduser(cred_path),
             domain=api_domain(),
+            user_agent_prefix=_user_agent_prefix(),
         )
     raise ValueError('Either token or credentials file path must be provided')
+
+
+def clear_sdk_cache() -> None:
+    """Drops the cached SDK client.
+
+    The SDK is cached per credentials and holds grpc.aio channels bound to the
+    event loop that first used them. `asyncio.run()` closes the loop it
+    creates, and once a request has failed on such a channel, later calls from
+    a fresh loop raise "Event loop is closed". Callers that drive more than one
+    `asyncio.run()` cycle in a single process must reset the client in between.
+    """
+    _sdk.cache_clear()
 
 
 def get_nebius_credentials(boto3_session):

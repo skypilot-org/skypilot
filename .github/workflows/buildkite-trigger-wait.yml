@@ -48,7 +48,7 @@ on:
     secrets:
       BUILDKITE_TOKEN:
         required: true
-        description: "Buildkite API token with read access"
+        description: "Buildkite API token; needs write access so a cancelled run can cancel its build"
     outputs:
       build_number:
         description: "Buildkite build number"

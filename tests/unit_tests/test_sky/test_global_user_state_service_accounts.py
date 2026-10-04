@@ -6,6 +6,7 @@ from unittest import mock
 import pytest
 
 from sky import global_user_state
+from sky import models
 from sky.skylet import constants
 from sky.utils.db import db_utils
 
@@ -218,6 +219,28 @@ class TestServiceAccountDatabaseOperations:
             )
             mock_session.commit.assert_called_once()
 
+    def test_update_service_account_token_last_used_conditional(
+            self, mock_engine, mock_session):
+        """With min_interval_seconds set, staleness rides the WHERE clause.
+
+        The conditional filter (last_used_at IS NULL OR older than the
+        interval) must be part of the UPDATE itself so concurrent callers
+        that all read a stale timestamp cannot herd on the row: only the
+        first commit writes, the rest match zero rows.
+        """
+        with mock.patch('time.time', return_value=1234567999):
+            global_user_state.update_service_account_token_last_used(
+                'token123', min_interval_seconds=60)
+
+            filter_by = mock_session.query.return_value.filter_by
+            filter_by.assert_called_once_with(token_id='token123')
+            # The staleness condition is applied as an additional filter...
+            filter_by.return_value.filter.assert_called_once()
+            # ...and the update runs on the filtered query.
+            filter_by.return_value.filter.return_value.update.assert_called_once(
+            )
+            mock_session.commit.assert_called_once()
+
     def test_delete_service_account_token_success(self, mock_engine,
                                                   mock_session):
         """Test successfully deleting a service account token."""
@@ -405,3 +428,30 @@ class TestGetExpiredServiceAccountTokensByNamePrefix:
                 'prefix%', now))
 
         assert {r['token_id'] for r in results} == {'literal-match'}
+
+
+def test_service_account_creator_lookup_and_rotation(tmp_path, monkeypatch):
+    monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, str(tmp_path))
+    monkeypatch.setattr(
+        global_user_state, '_db_manager',
+        db_utils.DatabaseManager('state', global_user_state.create_table))
+    creator = models.User(id='creator', name='jane.doe@example.com')
+    global_user_state.add_or_update_user(creator)
+    global_user_state.add_or_update_user(
+        models.User(id='sa-test', name='inference'))
+    assert global_user_state.get_service_account_creator('sa-test') is None
+    global_user_state.add_service_account_token(
+        token_id='test-token',
+        token_name='inference',
+        token_hash='hash',
+        creator_user_hash=creator.id,
+        service_account_user_id='sa-test')
+    found = global_user_state.get_service_account_creator('sa-test')
+    assert found is not None
+    assert (found.id, found.name) == (creator.id, creator.name)
+    global_user_state.rotate_service_account_token('test-token', 'rotated-hash')
+    found = global_user_state.get_service_account_creator('sa-test')
+    assert found is not None
+    assert found.id == creator.id
+    global_user_state.delete_user(creator.id)
+    assert global_user_state.get_service_account_creator('sa-test') is None

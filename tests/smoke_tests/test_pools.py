@@ -1621,7 +1621,10 @@ def test_pools_double_launch(generic_cloud: str):
                                                       pool_yaml=pool_yaml.name),
                 wait_until_pool_ready(pool_name, timeout=timeout),
                 _TEARDOWN_POOL.format(pool_name=pool_name),
-                'sleep 60',  # Wait a little bit to ensure the pool is fully shut down.
+                # Wait until the pool is fully shut down; re-applying while it
+                # is still shutting down is rejected. A fixed sleep is too
+                # short on clouds with slow teardown (e.g. Nebius).
+                check_pool_not_in_status(pool_name),
                 _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
                                                       pool_yaml=pool_yaml.name),
                 wait_until_pool_ready(pool_name, timeout=timeout),
@@ -1633,13 +1636,20 @@ def test_pools_double_launch(generic_cloud: str):
 
 
 def check_pool_not_in_status(pool_name: str,
-                             timeout: int = 30,
+                             timeout: int = 300,
                              time_between_checks: int = 5):
     """Check that a pool does not appear in `sky jobs pool status`.
+
+    Only a successful status query that shows the pool is gone counts: either
+    "No existing pools." or a pool table without the pool. Anything else (e.g.
+    a controller-unavailable message, which also lacks the pool name) keeps
+    polling, so a transient controller error cannot pass as a completed
+    teardown.
 
     Args:
         pool_name: The name of the pool to check for.
         timeout: Maximum time in seconds to wait for the pool to be removed.
+            Pool teardown can take minutes on some clouds (e.g. Nebius).
         time_between_checks: Time in seconds to wait between checks.
     """
     return (
@@ -1647,19 +1657,22 @@ def check_pool_not_in_status(pool_name: str,
         'while true; do '
         f'if (( $SECONDS - $start_time > {timeout} )); then '
         f'  echo "Timeout after {timeout} seconds waiting for pool {pool_name} to be removed"; '
-        f'  s=$(sky jobs pool status); '
-        f'  echo "$s"; '
-        f'  if echo "$s" | grep "{pool_name}"; then '
-        f'    echo "ERROR: Pool {pool_name} still exists in pool status"; '
-        f'    exit 1; '
-        f'  fi; '
-        f'  exit 0; '
+        '  echo "Last pool status output:"; '
+        '  echo "$s"; '
+        f'  echo "ERROR: Could not confirm pool {pool_name} was removed"; '
+        '  exit 1; '
         'fi; '
-        f's=$(sky jobs pool status); '
-        'echo "$s"; '
-        f'if ! echo "$s" | grep "{pool_name}"; then '
-        f'  echo "Pool {pool_name} correctly removed from pool status"; '
-        '  break; '
+        'if s=$(sky jobs pool status); then '
+        '  echo "$s"; '
+        '  if echo "$s" | grep -q "No existing pools." || '
+        '     { echo "$s" | grep -qE "^NAME +VERSION" && '
+        f'       ! echo "$s" | grep -qF "{pool_name}"; }}; then '
+        f'    echo "Pool {pool_name} correctly removed from pool status"; '
+        '    break; '
+        '  fi; '
+        'else '
+        '  echo "$s"; '
+        '  echo "sky jobs pool status failed; retrying"; '
         'fi; '
         f'echo "Waiting for pool {pool_name} to be removed..."; '
         f'sleep {time_between_checks}; '
@@ -1800,7 +1813,7 @@ def test_pool_down_single_pool(generic_cloud: str):
                     'sleep 10',
                     wait_until_job_status(
                         job_name, ['CANCELLED'], bad_statuses=[], timeout=30),
-                    check_pool_not_in_status(pool_name, timeout=30),
+                    check_pool_not_in_status(pool_name),
                 ],
                 timeout=timeout,
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),

@@ -13,6 +13,7 @@ from sky.skylet import constants
 from sky.skylet import runtime_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import env_options
 from sky.utils import yaml_utils
 
 # Constants based on profiling the peak memory usage while serving various
@@ -29,6 +30,7 @@ from sky.utils import yaml_utils
 # TODO(luca): The future is now! ^^^
 LONG_WORKER_MEM_GB = 0.4
 SHORT_WORKER_MEM_GB = 0.3
+SERVER_WORKER_MEM_GB = 0.4
 # To control the number of long workers.
 _CPU_MULTIPLIER_FOR_LONG_WORKERS = 2
 # Limit the number of long workers of local API server, since local server is
@@ -129,6 +131,16 @@ def compute_server_config(
     if reserved_memory_mb is not None:
         mem_size_gb -= (reserved_memory_mb / 1024)
     logger.debug(f'Memory size: {mem_size_gb}GB')
+    num_server_workers = cpu_count if deploy else 1
+    if env_options.Options.MEMORY_AWARE_WORKER_SIZING.get():
+        # Server workers are resident for the lifetime of the API server. The
+        # pools already hold back _min_avail_mem_gb(), which is what covered
+        # them before, so only the excess comes off the top. In deployment mode
+        # the workers are children of a parent process that stays resident too.
+        resident = (num_server_workers + 1) if deploy else num_server_workers
+        excess = max(0.0, resident * SERVER_WORKER_MEM_GB - _min_avail_mem_gb())
+        mem_size_gb = max(0.0, mem_size_gb - excess)
+        logger.debug(f'Memory size for executor pools: {mem_size_gb}GB')
     max_parallel_for_long = _max_long_worker_parallism(cpu_count,
                                                        mem_size_gb,
                                                        local=not deploy)
@@ -141,7 +153,6 @@ def compute_server_config(
     # to conserve the number of concurrent db connections.
     # This could lead to performance degradation.
     num_db_connections_per_worker = 0
-    num_server_workers = cpu_count
 
     # +1 for the event loop running the main process
     # and gc daemons in the '__main__' body of sky/server/server.py
@@ -151,19 +162,13 @@ def compute_server_config(
     if not deploy:
         # For local mode, use local queue backend since we only run 1 uvicorn
         # worker in local mode and no multiprocessing is needed.
-        num_server_workers = 1
         queue_backend = QueueBackend.LOCAL
         # Enable burstable workers for local API server.
         burstable_parallel_for_long = _BURSTABLE_WORKERS_FOR_LOCAL
         burstable_parallel_for_short = _BURSTABLE_WORKERS_FOR_LOCAL
         # Runs in low resource mode if the available memory is less than
         # server_constants.MIN_AVAIL_MEM_GB.
-        # pylint: disable=import-outside-toplevel
-        import sky.jobs.utils as job_utils
-        max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
-                      if job_utils.is_consolidation_mode() else
-                      server_constants.MIN_AVAIL_MEM_GB)
-        if not deploy and mem_size_gb < max_memory:
+        if not deploy and mem_size_gb < _min_avail_mem_gb():
             # Permanent worker process may have significant memory consumption
             # (~350MB per worker) after running commands like `sky check`, so we
             # don't start any permanent workers in low resource local mode. This
@@ -212,17 +217,21 @@ def compute_server_config(
     )
 
 
+def _min_avail_mem_gb() -> float:
+    """The memory SkyPilot tries not to use, to prevent OOM."""
+    # pylint: disable=import-outside-toplevel
+    import sky.jobs.utils as job_utils
+    return (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
+            if job_utils.is_consolidation_mode() else
+            server_constants.MIN_AVAIL_MEM_GB)
+
+
 def _max_long_worker_parallism(cpu_count: int,
                                mem_size_gb: float,
                                local=False) -> int:
     """Max parallelism for long workers."""
     # Reserve min available memory to avoid OOM.
-    # pylint: disable=import-outside-toplevel
-    import sky.jobs.utils as job_utils
-    max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
-                  if job_utils.is_consolidation_mode() else
-                  server_constants.MIN_AVAIL_MEM_GB)
-    available_mem = max(0, mem_size_gb - max_memory)
+    available_mem = max(0, mem_size_gb - _min_avail_mem_gb())
     cpu_based_max_parallel = cpu_count * _CPU_MULTIPLIER_FOR_LONG_WORKERS
     mem_based_max_parallel = int(available_mem * _MAX_MEM_PERCENT_FOR_BLOCKING /
                                  LONG_WORKER_MEM_GB)
@@ -246,12 +255,8 @@ def _max_short_worker_parallism(mem_size_gb: float,
                                 long_worker_parallism: int) -> int:
     """Max parallelism for short workers."""
     # Reserve memory for long workers and min available memory.
-    # pylint: disable=import-outside-toplevel
-    import sky.jobs.utils as job_utils
-    max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
-                  if job_utils.is_consolidation_mode() else
-                  server_constants.MIN_AVAIL_MEM_GB)
-    reserved_mem = max_memory + (long_worker_parallism * LONG_WORKER_MEM_GB)
+    reserved_mem = (_min_avail_mem_gb() +
+                    (long_worker_parallism * LONG_WORKER_MEM_GB))
     available_mem = max(0, mem_size_gb - reserved_mem)
     n = max(_get_min_short_workers(), int(available_mem / SHORT_WORKER_MEM_GB))
     return n

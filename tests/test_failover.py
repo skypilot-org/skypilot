@@ -51,9 +51,14 @@ def test_aws_region_failover(enable_all_clouds, _mock_db_conn, mock_aws_backend,
 
     region_attempt_count = {'count': 0}
 
-    def mock_create_instances(ec2_fail_fast, cluster_name, node_config, tags,
-                              count, associate_public_ip_address,
-                              max_efa_interfaces):
+    def mock_create_instances(ec2_fail_fast,
+                              cluster_name,
+                              node_config,
+                              tags,
+                              count,
+                              associate_public_ip_address,
+                              max_efa_interfaces,
+                              enforce_volume_tags=False):
         region = ec2_fail_fast.meta.client.meta.region_name
         region_attempt_count['count'] += 1
         if region == 'us-east-1' and region_attempt_count['count'] == 1:

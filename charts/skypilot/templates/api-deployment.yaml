@@ -196,6 +196,21 @@ spec:
             resourceFieldRef:
               containerName: skypilot-api
               resource: requests.memory
+        {{- $apiResources := default dict .Values.apiService.resources }}
+        {{- if hasKey (default dict $apiResources.limits) "ephemeral-storage" }}
+        - name: SKYPILOT_POD_EPHEMERAL_STORAGE_BYTES_LIMIT
+          valueFrom:
+            resourceFieldRef:
+              containerName: skypilot-api
+              resource: limits.ephemeral-storage
+        {{- end }}
+        {{- if hasKey (default dict $apiResources.requests) "ephemeral-storage" }}
+        - name: SKYPILOT_POD_EPHEMERAL_STORAGE_BYTES_REQUEST
+          valueFrom:
+            resourceFieldRef:
+              containerName: skypilot-api
+              resource: requests.ephemeral-storage
+        {{- end }}
         {{- if not $podIpInExtraEnvs }}
         - name: POD_IP
           valueFrom:

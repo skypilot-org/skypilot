@@ -9,6 +9,16 @@ Batch inference with Sky Batch
 
 Sky Batch lets you distribute data processing across cloud GPUs and on-prem clusters at scale. Given a dataset and a processing function, Sky Batch splits the data into batches, distributes them across a pool of workers, and collects the results, all in a few lines of Python.
 
+.. figure:: ../../images/batch-architecture.svg
+   :width: 100%
+   :align: center
+   :alt: Sky Batch architecture: a Python script calls ds.map() on a pool of workers. Input JSONL in cloud storage is split into batches and distributed across warm workers that span clouds and GPU types — worker 0 on an AWS L4, workers 1 and 2 on Nebius H200s. Results are written back to cloud storage by JsonWriter or ImageWriter.
+
+   **Sky Batch** splits your input data into batches, distributes them across a pool of
+   warm workers, and collects the results back into cloud storage. Workers in one pool can
+   land on different clouds and GPU types, and the pool outlives the job — so the next
+   ``ds.map()`` skips setup entirely.
+
 .. contents:: Contents
    :local:
    :backlinks: none
@@ -21,10 +31,28 @@ Processing large datasets on GPUs and compute clusters (running inference on mil
 
 Sky Batch handles all of this for you:
 
-#. **Simple Python API**: Define your processing logic as a Python function. Sky Batch distributes it across workers automatically.
-#. **Automatic data distribution**: Your dataset is split into batches and assigned to workers. No manual sharding or coordination needed.
-#. **Reuse runtime environments**: Workers are reused across jobs, so expensive setup (installing packages, downloading model weights, loading models onto GPUs) only happens once.
-#. **Multi-cloud storage**: Read inputs from and write outputs to Amazon S3 (``s3://``) or Google Cloud Storage (``gs://``).
+.. grid:: 1 1 2 2
+    :gutter: 3
+
+    .. grid-item-card:: 🐍 Simple Python API
+
+        Define your processing logic as a plain Python function. Sky Batch distributes it
+        across workers automatically — see :ref:`batch-processing-mapper`.
+
+    .. grid-item-card:: 🔀 Automatic data distribution
+
+        Your dataset is split into batches and assigned to workers. No manual sharding or
+        coordination needed.
+
+    .. grid-item-card:: ♻️ Reuse runtime environments
+
+        Workers are reused across jobs, so expensive setup (installing packages, downloading
+        model weights, loading models onto GPUs) only happens once.
+
+    .. grid-item-card:: ☁️ Multi-cloud storage
+
+        Read inputs from and write outputs to Amazon S3 (``s3://``) or Google Cloud
+        Storage (``gs://``).
 
 
 How it works
@@ -32,24 +60,19 @@ How it works
 
 Sky Batch has three steps:
 
-1. **Create a Dataset**: Point to your input data in cloud storage.
-2. **Start a worker pool**: Define the hardware and software each worker needs.
-3. **Map a function over the dataset**: Write your processing logic and let Sky Batch distribute it.
+.. list-table::
+   :widths: 6 30 64
+   :header-rows: 0
 
-.. code-block:: text
-
-  ┌──────────────────────┐
-  │ Your Python script   │
-  │                      │
-  │  ds = Dataset(...)   │      ┌────────────────┐
-  │  ds.map(my_fn, ...)  │─────▶│  Worker Pool   │
-  │                      │      │  ┌──────────┐  │
-  └──────────────────────┘      │  │ Worker 0 │  │  ──▶  Results in
-                                │  │ Worker 1 │  │       cloud storage
-         Input data             │  │ Worker 2 │  │
-       (cloud storage)  ───────▶│  │   ...    │  │
-                                │  └──────────┘  │
-                                └────────────────┘
+   * - **1**
+     - :ref:`Create a Dataset <batch-processing-dataset>`
+     - Point to your input data in cloud storage.
+   * - **2**
+     - :ref:`Start a worker pool <batch-processing-pool>`
+     - Define the hardware and software each worker needs.
+   * - **3**
+     - :ref:`Map a function over the dataset <batch-processing-running>`
+     - Write your processing logic and let Sky Batch distribute it.
 
 
 Quickstart
@@ -181,6 +204,7 @@ The worker pool defines what hardware and software each worker has. Create a YAM
     pip install vllm    # Install dependencies
 
 .. list-table::
+   :widths: 26 40 34
    :header-rows: 1
 
    * - Field
@@ -211,6 +235,15 @@ Writing a mapper function
 -------------------------
 
 The mapper function contains your processing logic. It runs on each worker in the pool.
+
+.. figure:: ../../images/batch-worker-lifecycle.svg
+   :width: 100%
+   :align: center
+   :alt: What runs when on a Sky Batch worker: the pool's setup command runs once at pool creation, the mapper code before the for-loop runs once per worker per job, and the loop body — load, your code, save_results — repeats for every batch.
+
+   What runs when on a worker. Everything **before** the ``for`` loop runs once; only the
+   loop body repeats per batch. This is what makes expensive one-time work (loading model
+   weights onto the GPU) amortize across the whole dataset.
 
 .. code-block:: python
 
@@ -270,6 +303,7 @@ For example, if your mapper calls:
 This writes two rows:
 
 .. list-table::
+   :widths: 22 52 26
    :header-rows: 1
 
    * - prompt
@@ -288,6 +322,7 @@ Output formats
 Sky Batch provides built-in output writers:
 
 .. list-table::
+   :widths: 38 62
    :header-rows: 1
 
    * - Writer
@@ -352,6 +387,7 @@ Call :code:`ds.map()` to distribute your function across the worker pool:
   )
 
 .. list-table::
+   :widths: 24 76
    :header-rows: 1
 
    * - Parameter

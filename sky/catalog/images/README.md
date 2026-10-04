@@ -82,10 +82,22 @@ packer build  --var vm_generation=2 --var client_secret=${SECRET} --var use_grid
 ### Kubernetes
 1. Build the image
 ```bash
-export REGION=europe  # Update this: us, europe, asia
-./skypilot-k8s-image.sh -p -l -r ${REGION}
-./skypilot-k8s-image.sh -p -l -g -r ${REGION}
+export REGION=us  # Update this: us, europe, asia
+./skypilot-k8s-image.sh -p -r ${REGION}
+./skypilot-k8s-image.sh -p -g -r ${REGION}
 ```
+2. To rebuild the same recipe on a different base, e.g. Ubuntu 24.04 for a newer
+glibc, pass `-b` for the base and `-s` for a tag suffix. Without `-b` the build
+uses the `BASE_IMAGE` pinned in `Dockerfile_k8s{,_gpu}`, which is what the
+default images ship on.
+```bash
+./skypilot-k8s-image.sh -p -r ${REGION} -b ubuntu:24.04 -s ubuntu2404
+./skypilot-k8s-image.sh -p -g -r ${REGION} \
+    -b nvidia/cuda:12.8.1-runtime-ubuntu24.04 -s ubuntu2404
+```
+Pass both: `-s` is what keeps the variant off the default build's tag, giving
+`<date>-ubuntu2404` above. Keep the CPU and GPU bases on the same Ubuntu
+release, since the GPU base is layered on the CPU one.
 
 ## Test Images
 1. Minimal GPU test: `sky launch --image ${IMAGE_ID} --gpus=L4:1 --cloud ${CLOUD}` then run `nvidia-smi` in the launched instance.
@@ -114,3 +126,7 @@ python aws_utils/image_delete.py --tag ${TAG}
 
 ### Azure
 1. Update Catalog with new images: [example PR](https://github.com/skypilot-org/skypilot-catalog/pull/92)
+
+### Kubernetes
+1. Add rows for the new tag to Catalog's `kubernetes/images.csv`, then point
+`Kubernetes.IMAGE_CPU` / `IMAGE_GPU` in `sky/clouds/kubernetes.py` at them.

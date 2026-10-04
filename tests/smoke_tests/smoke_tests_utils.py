@@ -16,6 +16,7 @@ from types import MethodType
 from typing import (Any, BinaryIO, Callable, Dict, Generator, List, NamedTuple,
                     Optional, Sequence, Set, Tuple, Union)
 from unittest.mock import patch
+import urllib.parse
 import uuid
 
 import colorama
@@ -25,6 +26,7 @@ from smoke_tests.docker import docker_utils
 
 import sky
 from sky import clouds
+from sky import jobs
 from sky import serve
 from sky import skypilot_config
 from sky.client import sdk
@@ -48,7 +50,10 @@ from sky.utils import yaml_utils
 # manual termination with aws ec2 does not accidentally terminate other clusters
 # for the different managed jobs launch with the same job name but a
 # different job id.
-test_id = str(uuid.uuid4())[-2:]
+# 4 chars: on a long-lived API server the jobs table accumulates every past
+# run of a test, so 2 chars (256 possible names per test) collides with an
+# older same-named job roughly N_history/256 of the time.
+test_id = str(uuid.uuid4())[-4:]
 
 LAMBDA_GPU_TYPE = 'A100'
 LAMBDA_TYPE = f'--infra lambda --gpus {LAMBDA_GPU_TYPE}'
@@ -229,7 +234,13 @@ _WAIT_UNTIL_VOLUME_IS_NOT_FOUND = (
     'start_time=$SECONDS; '
     'while true; do '
     'vols=$(sky volumes ls); '
-    'if ! echo "$vols" | grep -q "{volume_name}"; then '
+    # Matched on the whole first field, as the readiness wait is, so that a
+    # longer name containing this one -- another test's, or the same test's in
+    # a concurrent run -- cannot hold the wait open. `{awk_match}` widens that
+    # to a prefix, for a caller waiting on every volume of one cluster.
+    'found=$(echo "$vols" | awk -v n="{volume_name}" '
+    '\'{awk_match} {{print $1; exit}}\'); '
+    'if [ -z "$found" ]; then '
     '  echo "Volume {volume_name} successfully removed."; break; '
     'fi; '
     'if (( $SECONDS - $start_time > {timeout} )); then '
@@ -243,9 +254,72 @@ _WAIT_UNTIL_VOLUME_IS_NOT_FOUND = (
 
 
 def get_cmd_wait_until_volume_is_not_found(volume_name: str,
-                                           timeout: int = 120):
+                                           timeout: int = 120,
+                                           match_prefix: bool = False):
+    """Blocks until no volume named `volume_name` is listed.
+
+    With `match_prefix`, until no volume whose name *starts with* it is: the
+    volumes a launch creates for a task's inline `volumes:` entries are named
+    after the cluster, one per mount path, so that is how a caller waits for
+    all of them.
+    """
+    awk_match = 'index($1, n) == 1' if match_prefix else '$1 == n'
     return _WAIT_UNTIL_VOLUME_IS_NOT_FOUND.format(volume_name=volume_name,
-                                                  timeout=timeout)
+                                                  timeout=timeout,
+                                                  awk_match=awk_match)
+
+
+_WAIT_UNTIL_VOLUME_IS_READY = (
+    # A while loop to wait until a volume is mountable, or timeout.
+    # `sky volumes apply` only *starts* provisioning: on a storage class with
+    # `volumeBindingMode: Immediate` the PersistentVolume is created
+    # asynchronously, so the claim stays Pending -- and the volume NOT_READY --
+    # after the command returns. Mounting it before then is refused with
+    # VolumeNotReadyError, so a test that creates a volume must wait for it,
+    # exactly as a user would.
+    # Deliberately not `--refresh`: that re-probes the backing resource and so
+    # would end the wait the moment the claim binds, but it refreshes the whole
+    # volume table -- a file lock and a database round-trip per volume -- and
+    # would contend with the volume operations of every other test sharing the
+    # API server. Read the row the refresh daemon maintains instead, which
+    # costs the server nothing and bounds the wait by its 60s interval.
+    'start_time=$SECONDS; '
+    'while true; do '
+    'vols=$(sky volumes ls); '
+    # Read the status out of the volume's own row -- matched on the whole first
+    # field, so a longer name containing this one is not mistaken for it -- at
+    # the character offset the header gives for the STATUS column. The table is
+    # space-padded and left-aligned, and columns before STATUS hold spaces of
+    # their own ("alice (SA)", "3 secs"), so splitting the row on whitespace
+    # would not line up. Taking the column rather than searching the row also
+    # keeps NOT_READY, or a stray word in MESSAGE, from passing for READY.
+    'status=$(echo "$vols" | awk -v n="{volume_name}" '
+    '\'$1 == "NAME" {{c = index($0, "STATUS")}} '
+    '$1 == n && c {{split(substr($0, c), f, " "); print f[1]; exit}}\'); '
+    # IN_USE is READY plus a mount; both are mountable.
+    'if [ "$status" = READY ] || [ "$status" = IN_USE ]; then '
+    '  echo "Volume {volume_name} is ready."; break; '
+    'fi; '
+    'if (( $SECONDS - $start_time > {timeout} )); then '
+    '  echo "$vols"; '
+    '  echo "Timeout after {timeout} seconds waiting for volume '
+    '{volume_name} to be ready"; exit 1; '
+    'fi; '
+    'echo "Waiting for volume {volume_name}: ${{status:-not found}}"; '
+    'sleep 5; '
+    'done')
+
+
+def get_cmd_wait_until_volume_is_ready(volume_name: str, timeout: int = 300):
+    """Blocks until a volume is mountable.
+
+    The default timeout leaves room for a cloud storage class to provision its
+    first volume plus the up-to-60s lag of the status refresh daemon this reads
+    from, and is still short enough that a genuinely broken volume fails the
+    step well inside the test timeout.
+    """
+    return _WAIT_UNTIL_VOLUME_IS_READY.format(volume_name=volume_name,
+                                              timeout=timeout)
 
 
 _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
@@ -424,6 +498,26 @@ def get_cmd_wait_until_job_status_succeeded(cluster_name: str,
 
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
+# Per-command timeout for tests that configure `logs.store`.
+#
+# Configuring a log store adds a "Setting up logging agent" step to every
+# cluster launch, which installs fluent-bit on each node. That install runs
+# `apt-get update` and `apt-get install` against the distro package mirrors
+# before fetching fluent-bit itself. On a freshly booted VM the package index
+# refresh is the dominant cost -- it has been observed taking anywhere from 4 to
+# 19 minutes when a mirror is serving at ~100 kB/s, while the (much larger)
+# fluent-bit package downloads from its own CDN in seconds. That pushes a single
+# `sky launch` past the default budget, so give these tests enough room to ride
+# out a slow mirror instead of relying on retries.
+LOG_STORE_CMD_TIMEOUT = 30 * 60
+
+# Time for a managed job to go from submitted to RUNNING when a log store is
+# configured: the job's cluster is provisioned from scratch and pays the
+# fluent-bit install described above before the job can start. Kept below
+# LOG_STORE_CMD_TIMEOUT so that this wait, rather than the enclosing per-command
+# timeout, is what reports the failure.
+LOG_STORE_JOB_START_TIMEOUT = 25 * 60
+
 
 class Test(NamedTuple):
     name: str
@@ -520,6 +614,35 @@ def get_replica_cluster_name_on_gcp(name: str, replica_id: int) -> str:
     cluster_name = serve.generate_replica_cluster_name(name, replica_id)
     return common_utils.make_cluster_name_on_cloud(
         cluster_name, sky.GCP.max_cluster_name_length())
+
+
+def get_managed_job_cluster_name_prefix_on_gcp(job_name: str) -> str:
+    """Prefix of a managed job's GCP cluster name that is safe to filter on.
+
+    The jobs controller names a job's cluster
+    ``<job_name[:JOBS_CLUSTER_NAME_PREFIX_LENGTH]>-<job_id>`` and the GCP
+    provisioner then applies ``make_cluster_name_on_cloud`` with GCP's 35-char
+    limit, which truncates the display name and appends
+    ``-<2-char hash>-<8-char user hash>``. The 24- to 25-char names that
+    ``get_cluster_name`` produces no longer fit, so the job id and the tail of
+    the name are cut off and a ``labels.ray-cluster-name:<full name>`` filter
+    never matches. Only the leading ``35 - 2 - 1 - 9 = 23`` characters are
+    guaranteed to survive, so return those. gcloud's ``:`` operator is a
+    word-prefix match, so the prefix also matches when nothing was truncated.
+    Matching on ~23 chars keeps the first two chars of ``test_id``, the same
+    entropy the filter had before ``test_id`` grew to four chars.
+    """
+    display_name_prefix = common_utils.make_cluster_name_on_cloud(
+        job_name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+    # '-<user hash>' is appended after the cluster name hash.
+    user_hash_length = common_utils.USER_HASH_LENGTH + 1
+    max_length = sky.GCP.max_cluster_name_length()
+    assert max_length is not None
+    keep = (max_length - common_utils.CLUSTER_NAME_HASH_LENGTH - 1 -
+            user_hash_length)
+    # A cut can land on a separator; a trailing '-' would make the gcloud
+    # ':' pattern end in an empty word.
+    return display_name_prefix[:keep].rstrip('-')
 
 
 def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
@@ -721,6 +844,14 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
     if test.env:
         env_dict.update(test.env)
 
+    # The test's overall exit status. Tracked separately from any single
+    # `proc` because a command may be a callable, which has no process
+    # behind it: a test whose first command is a callable would otherwise
+    # reach the reporting block below with `proc` unbound and die with
+    # `UnboundLocalError`, masking the real failure in the pytest summary.
+    returncode = 0
+    command = None
+
     with override_sky_config(test, env_dict, config_dict=test.config_dict):
         for command in test.commands:
             if callable(command):
@@ -736,7 +867,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                     test.echo(error_in_callable)
                     write(error_in_callable + '\n')
                     flush()
-                    proc.returncode = 1
+                    returncode = 1
                     break
                 continue
             write(f'+ {command}\n')
@@ -759,18 +890,18 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                 flush()
                 # Kill the current process.
                 proc.terminate()
-                proc.returncode = 1  # None if we don't set it.
+                returncode = 1  # proc.returncode is None if we don't set it.
                 break
 
-            if proc.returncode:
+            returncode = proc.returncode
+            if returncode:
                 break
 
         style = colorama.Style
         fore = colorama.Fore
-        outcome = (
-            f'{fore.RED}Failed{style.RESET_ALL} (returned {proc.returncode})'
-            if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
-        reason = f'\nReason: {command}' if proc.returncode else ''
+        outcome = (f'{fore.RED}Failed{style.RESET_ALL} (returned {returncode})'
+                   if returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
+        reason = f'\nReason: {command}' if returncode else ''
         msg = (f'{outcome}.'
                f'{reason}')
         if log_to_stdout:
@@ -780,7 +911,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
             test.echo(msg)
             write(msg)
 
-        if proc.returncode:
+        if returncode:
             # Fetch controller logs for failed jobs
             script_path = os.path.join(os.path.dirname(__file__), 'scripts',
                                        'fetch_failed_job_logs.sh')
@@ -825,7 +956,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                     write(f'Server log file not found: {log_path}')
                 write('=== End of Sky API Server Log ===')
 
-        if (proc.returncode == 0 or
+        if (returncode == 0 or
                 pytest.terminate_on_failure) and test.teardown is not None:
             subprocess_utils.run(
                 test.teardown,
@@ -836,7 +967,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                 env=env_dict,
             )
 
-        if proc.returncode:
+        if returncode:
             if log_to_stdout:
                 raise Exception(f'test failed')
             else:
@@ -1283,7 +1414,14 @@ def services_account_token_configured_in_env_file() -> bool:
     if file_path is not None:
         with open(file_path, 'r') as f:
             content = f.read()
-            print(content, file=sys.stderr, flush=True)
+            # Which env-file config a run picked up is worth seeing in the
+            # log, but the file is a client config: it carries
+            # api_server.service_account_token in plaintext. Print it through
+            # the same redaction the config dumps use, never raw.
+            print(config_utils.dump_redacted_yaml(
+                yaml_utils.safe_load(content)),
+                  file=sys.stderr,
+                  flush=True)
             return 'service_account_token' in content
     return False
 
@@ -1305,6 +1443,33 @@ def get_api_server_url() -> str:
                 return endpoint
         return docker_utils.get_api_server_endpoint_inside_docker()
     return server_common.get_server_url()
+
+
+def endpoint_url_has_credentials() -> bool:
+    """Whether the API server endpoint URL embeds basic-auth credentials.
+
+    TEMPORARY. This exists to work around a known gap in OSS auth and every
+    caller must be removed once that gap is fixed.
+
+    A URL of the form ``https://user:pw@host`` is the documented login for the
+    helm chart's basic-auth ingress. A job launched with ``api_server_access``
+    gets that URL copied into its pod next to a service-account token. When
+    the pod's client sends a request, ``requests`` builds a Basic header from
+    the URL credentials and overwrites the ``Authorization: Bearer`` header
+    the token was set on (``PreparedRequest.prepare_auth``; reproduced on
+    requests 2.34.2). The ingress validates Basic and strips the header, so
+    the API server gets no credential and records the job under the pod's
+    self-generated user id instead of the launching user's.
+
+    A test that expects the launching user to see a job launched from a task
+    cannot pass under this condition. Callers relax to all-users queries when
+    this returns True and stay strict everywhere else. Returns False when the
+    endpoint URL cannot be parsed.
+    """
+    try:
+        return urllib.parse.urlsplit(get_api_server_url()).username is not None
+    except ValueError:
+        return False
 
 
 def get_metrics_server_url() -> str:
@@ -1506,7 +1671,31 @@ def get_enabled_cloud_storages() -> List[clouds.Cloud]:
                 except ValueError:
                     pass
         return enabled_clouds
-    return [clouds.AWS()]
+    # Local API server: the client shares the server's state, so the cached
+    # enabled-storage-clouds list is authoritative and cheaper than shelling
+    # out to `sky check`.
+    #
+    # Do not hardcode a cloud here. Callers use this to decide which object
+    # stores are usable, so a wrong answer is wrong in both directions: too
+    # narrow silently drops real store coverage, too wide pins a store whose
+    # cloud is disabled and fails the job at FAILED_PRECHECKS.
+    #
+    # Imported lazily: smoke_tests_utils is imported by every test module,
+    # including the limited-dependency lane, and sky.data.storage pulls in the
+    # optional cloud storage SDKs.
+    from sky.data import storage as storage_lib
+    enabled_clouds = []
+    for cloud_name in (
+            storage_lib.get_cached_enabled_storage_cloud_names_or_refresh()):
+        try:
+            cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud_name)
+        except ValueError:
+            # Non-cloud object stores (R2, CoreWeave, VAST, HuggingFace) are
+            # not in the cloud registry.
+            continue
+        if cloud_obj is not None:
+            enabled_clouds.append(cloud_obj)
+    return enabled_clouds
 
 
 def write_blob(file: BinaryIO, total_size: int):
@@ -1520,22 +1709,230 @@ def write_blob(file: BinaryIO, total_size: int):
     file.flush()
 
 
-def wait_for_managed_job_status_sdk(job_name: str,
-                                    target_statuses: list,
-                                    timeout: int = 360) -> dict:
+def wait_for_managed_job_status_sdk(job_name: Optional[str] = None,
+                                    target_statuses: Optional[list] = None,
+                                    timeout: int = 360,
+                                    job_id: Optional[int] = None,
+                                    all_users: bool = False) -> dict:
     """Wait for a managed job to reach one of the target statuses.
+
+    ``all_users`` widens the query past the calling user. Only pass it when
+    the job under test is known to belong to someone else.
+
+    Identify the job by ``job_id`` where possible: job names are not unique,
+    so on a long-lived API server a name-based wait can match a terminal
+    job left over from an earlier run of the same test and return before
+    the current job has even started. When only ``job_name`` is given, the
+    newest exactly-matching job is tracked for the same reason.
 
     Returns the job record when the status is reached.
     """
+    assert target_statuses, 'target_statuses must be non-empty'
+    assert (job_id is None) != (job_name is None), (
+        'Exactly one of job_id or job_name must be provided.')
     start_time = time.time()
     while time.time() - start_time < timeout:
         jobs_list = sky.get(
-            sky.jobs.queue_v2(refresh=False, fields=['job_name', 'status']))[0]
-        for job in jobs_list:
-            if job['job_name'] == job_name:
-                if job['status'] in target_statuses:
-                    return job
-            print(f'Job {job_name} status: {job["status"]}')
+            sky.jobs.queue_v2(refresh=False,
+                              all_users=all_users,
+                              job_ids=None if job_id is None else [job_id],
+                              fields=['job_id', 'job_name', 'status']))[0]
+        if job_id is None:
+            matches = [j for j in jobs_list if j['job_name'] == job_name]
+        else:
+            matches = jobs_list
+        if matches:
+            job = max(matches, key=lambda j: j['job_id'])
+            if job['status'] in target_statuses:
+                return job
+            print(f'Job {job_name or job_id} status: {job["status"]}')
         time.sleep(5)
-    raise TimeoutError(
-        f'Timeout waiting for job {job_name} to reach {target_statuses}')
+    raise TimeoutError(f'Timeout waiting for job {job_name or job_id} to reach '
+                       f'{target_statuses}')
+
+
+def unprovisionable_storage_class_name(test_name: str) -> str:
+    """Name of a per-test storage class that can never provision a volume."""
+    return f'{test_name}-noprov'
+
+
+def create_unprovisionable_storage_class_cmd(test_name: str,
+                                             binding_mode: str = 'Immediate'
+                                            ) -> str:
+    """Creates a storage class whose provisioner does not exist.
+
+    This is how a test gets a volume that is genuinely not ready without
+    waiting on -- or paying for -- real storage. The class has to exist, or
+    `sky volumes apply` rejects the volume up front when it validates the
+    storage class; with the class present the claim is accepted and then sits
+    unbound forever, because nothing is watching for it.
+
+    `binding_mode` picks which of the two situations to reproduce. Immediate
+    claims are unbound as soon as they are created, so the volume is knowably
+    unusable before any launch. WaitForFirstConsumer claims are not touched
+    until a pod needs them, so nothing about them looks wrong until a launch is
+    already under way.
+    """
+    sc_name = unprovisionable_storage_class_name(test_name)
+    return (f'kubectl apply -f - <<EOF\n'
+            f'apiVersion: storage.k8s.io/v1\n'
+            f'kind: StorageClass\n'
+            f'metadata:\n'
+            f'  name: {sc_name}\n'
+            f'provisioner: skypilot.co/does-not-exist\n'
+            f'volumeBindingMode: {binding_mode}\n'
+            f'EOF')
+
+
+def delete_unprovisionable_storage_class_cmd(test_name: str) -> str:
+    sc_name = unprovisionable_storage_class_name(test_name)
+    return f'kubectl delete sc {sc_name} --ignore-not-found'
+
+
+# A ReadWriteMany StorageClass cannot be fabricated the way the unprovisionable
+# one above can: RWX needs a real backend behind it. The Buildkite kind lane
+# installs a non-default 'nfs-rwx' class (provisioner nfs.csi.k8s.io); a cloud
+# lane has Filestore or EFS under whatever name the cluster gave it, so point
+# this at that name.
+RWX_STORAGE_CLASS_ENV_VAR = 'PYTEST_SKYPILOT_RWX_STORAGE_CLASS'
+_DEFAULT_RWX_STORAGE_CLASS = 'nfs-rwx'
+
+
+def storage_class_exists(name: str) -> bool:
+    return subprocess.run(['kubectl', 'get', 'sc', name],
+                          capture_output=True,
+                          check=False).returncode == 0
+
+
+def rwx_storage_class_name() -> Optional[str]:
+    """The ReadWriteMany StorageClass to test against, if the cluster has one.
+
+    Returns None when it does not, for the caller to fall back to a volume type
+    that needs no storage backend. Falling back rather than skipping keeps the
+    rest of the test -- everything that is not specific to RWX -- running on
+    every lane.
+
+    Raises:
+        AssertionError: if RWX_STORAGE_CLASS_ENV_VAR names a class the cluster
+            does not have. An explicit request that cannot be honoured is an
+            error, not a reason to quietly test something else.
+    """
+    explicit = os.environ.get(RWX_STORAGE_CLASS_ENV_VAR)
+    if explicit is not None:
+        assert storage_class_exists(explicit), (
+            f'{RWX_STORAGE_CLASS_ENV_VAR}={explicit!r} is not a StorageClass '
+            f'on the cluster kubectl points at.')
+        return explicit
+    if storage_class_exists(_DEFAULT_RWX_STORAGE_CLASS):
+        return _DEFAULT_RWX_STORAGE_CLASS
+    return None
+
+
+# How to make each CSI driver refuse to provision. A class whose provisioner
+# does not exist is not enough for the tests that need a *rejection*: nothing
+# answers such a claim at all, so it only ever collects Normal events, and a
+# claim that reports nothing cannot be told from one that is merely slow. What
+# these entries produce is a ProvisioningFailed carrying a terminal gRPC code,
+# which is what a launch is supposed to fail on at once.
+#
+# Both were confirmed against the driver rather than assumed: nfs.csi.k8s.io
+# answers a class with no parameters with `code = InvalidArgument desc = server
+# is a required parameter`, and the Filestore driver answers a tier its API does
+# not have with `code = InvalidArgument desc = Invalid value at 'instance.tier'`.
+# Two other candidates do not work and are recorded so they are not retried: an
+# unreachable `server` binds anyway (the driver does not check connectivity, so
+# the failure only shows up at mount time), and an absurd capacity binds anyway
+# too (an NFS volume is a directory, whatever size it claims).
+_REJECTED_BY_PROVISIONER = {
+    'nfs.csi.k8s.io': '',
+    'filestore.csi.storage.gke.io': '  tier: not-a-real-tier\n',
+}
+
+
+def _storage_class_provisioner(name: str) -> Optional[str]:
+    proc = subprocess.run(
+        ['kubectl', 'get', 'sc', name, '-o', 'jsonpath={.provisioner}'],
+        capture_output=True,
+        text=True,
+        check=False)
+    return proc.stdout.strip() or None
+
+
+def rejecting_storage_class_name(test_name: str) -> str:
+    return f'{test_name}-reject'
+
+
+def create_rejecting_storage_class_cmd(
+        test_name: str,
+        binding_mode: str = 'WaitForFirstConsumer') -> Optional[str]:
+    """Command creating a class whose driver refuses the claims made on it.
+
+    `binding_mode` picks when the refusal arrives. Under
+    WaitForFirstConsumer the driver is not called until a pod asks for the
+    claim, so the volume is correctly ready right up to the launch that breaks
+    it -- the one situation no pre-launch check can catch. Under Immediate the
+    driver is called when the claim is created, so the volume is knowably
+    unusable before any launch.
+
+    Borrows the provisioner from the cluster's RWX class, which is the one
+    driver a lane is known to have. Returns None when that driver has no known
+    way to refuse, for the caller to skip: guessing risks the opposite of the
+    intended failure, a class that provisions real storage.
+    """
+    rwx_class = rwx_storage_class_name()
+    if rwx_class is None:
+        return None
+    provisioner = _storage_class_provisioner(rwx_class)
+    parameters = _REJECTED_BY_PROVISIONER.get(provisioner)
+    if parameters is None:
+        return None
+    body = (f'apiVersion: storage.k8s.io/v1\n'
+            f'kind: StorageClass\n'
+            f'metadata:\n'
+            f'  name: {rejecting_storage_class_name(test_name)}\n'
+            f'provisioner: {provisioner}\n'
+            f'volumeBindingMode: {binding_mode}\n')
+    if parameters:
+        body += f'parameters:\n{parameters}'
+    return f'kubectl apply -f - <<EOF\n{body}EOF'
+
+
+def delete_rejecting_storage_class_cmd(test_name: str) -> str:
+    sc_name = rejecting_storage_class_name(test_name)
+    return f'kubectl delete sc {sc_name} --ignore-not-found'
+
+
+def wait_until_volume_is_rejected_cmd(volume_name: str,
+                                      timeout: int = 180) -> str:
+    """A step that blocks until the volume's record carries a rejection.
+
+    A volume on a rejecting class is not-ready from the moment it is created,
+    but for the first refresh cycle the recorded reason is that it is still
+    being provisioned -- which is what `volume_apply` can see without waiting.
+    Only once the status refresh has read the driver's answer does the record
+    say it was refused, and that is what a launch is refused over: the reason,
+    not the not-ready flag, since being provisioned is also not-ready.
+
+    Measured on the kind lane: the driver answers within seconds, the record
+    catches up in about a minute (the refresh daemon's interval).
+    """
+    return (f'start_time=$SECONDS; '
+            f'while true; do '
+            f'  vols=$(sky volumes ls); '
+            f'  row=$(echo "$vols" | grep {volume_name} || true); '
+            f'  echo "$row"; '
+            f'  if echo "$row" | grep -q ProvisioningFailed; then '
+            f'    echo "Volume {volume_name} is recorded as refused."; break; '
+            f'  fi; '
+            f'  if (( $SECONDS - $start_time > {timeout} )); then '
+            f'    echo "$vols"; '
+            f'    echo "Timeout after {timeout} seconds waiting for volume '
+            f'{volume_name} to be recorded as refused"; exit 1; '
+            f'  fi; '
+            f'  sleep 10; '
+            f'done')
+
+
+# Pins a command to the cluster the agent's kubectl points at, so a volume and
+# the storage class created for it land together.
+AGENT_K8S_INFRA = '--infra k8s/$(kubectl config current-context)'

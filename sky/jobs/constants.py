@@ -22,7 +22,9 @@ DEFAULT_MANAGED_JOB_FIELDS = ('job_id', 'task_id', 'workspace', 'job_name',
                               'task_name', 'resources', 'submitted_at',
                               'end_at', 'job_duration', 'recovery_count',
                               'status', 'pool', 'is_primary_in_job_group',
-                              'batch_total_batches', 'batch_completed_batches')
+                              'batch_total_batches', 'batch_completed_batches',
+                              'root_job_id', 'parent_job_id', 'parent_task_id',
+                              'dynamic_task_index')
 
 JOB_CONTROLLER_INDICATOR_FILE = '~/.sky/is_jobs_controller'
 
@@ -84,7 +86,7 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # job.utils.ManagedJobCodeGen to handle the version update.
 # WARNING: If you update this due to a codegen change, make sure to make the
 # corresponding change in the ManagedJobsService AND bump the SKYLET_VERSION.
-MANAGED_JOBS_VERSION = 22  # add submitted_after/submitted_before to job table
+MANAGED_JOBS_VERSION = 27  # include_tree on the job table query
 
 # Emergency recovery: when the job controller hits an unexpected internal
 # error (e.g. external mutation of the job state, or an unhandled exception
@@ -131,6 +133,12 @@ EMERGENCY_RECOVERY_BACKOFF_CAP_SECONDS = 30 * 60
 # resetting on success would let a recurring-but-recoverable error relaunch
 # the cluster forever.
 EMERGENCY_RECOVERY_RESET_WINDOW_SECONDS = 6 * 60 * 60
+
+# A job's final cleanup and bookkeeping retry transient DB errors in place,
+# backing off between attempts, until this budget is spent.
+JOB_FINALIZE_DB_RETRY_BACKOFF_BASE_SECONDS = 10
+JOB_FINALIZE_DB_RETRY_BACKOFF_CAP_SECONDS = 5 * 60
+JOB_FINALIZE_DB_RETRY_BUDGET_SECONDS = 60 * 60
 
 # Prefix used for service-account tokens issued to managed jobs that opt in
 # to api_server_access. The expired-token-cleanup daemon uses this prefix to

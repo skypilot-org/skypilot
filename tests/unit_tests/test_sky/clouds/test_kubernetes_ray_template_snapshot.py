@@ -113,6 +113,7 @@ def base_variables() -> Dict[str, Any]:
         'k8s_acc_label_key': None,
         'k8s_acc_label_values': None,
         'k8s_service_account_name': 'skypilot-service-account',
+        'k8s_is_controller': False,
         'k8s_automount_sa_token': 'true',
         'k8s_fuse_device_required': False,
         'k8s_kueue_local_queue_name': None,
@@ -131,6 +132,7 @@ def base_variables() -> Dict[str, Any]:
         },
         'image_id': 'us-docker.pkg.dev/skypilot-oss/skypilot/skypilot:latest',
         'ray_installation_commands': 'RAY_INSTALLATION_COMMANDS',
+        'ray_patches_cmd': 'RAY_PATCHES_CMD',
         'ray_head_start_command': 'RAY_HEAD_START_COMMAND',
         'skypilot_ray_port': 6380,
         'ray_worker_start_command': 'RAY_WORKER_START_COMMAND',
@@ -156,6 +158,7 @@ def base_variables() -> Dict[str, Any]:
         'k8s_enable_gpudirect_rdma_a4': False,
         'k8s_ipc_lock_capability': False,
         'k8s_enable_oci_roce': False,
+        'k8s_rdma_host_device_access': False,
         'k8s_apt_mirrors': None,
         'k8s_enable_docker_all': False,
         'k8s_enable_docker_build': False,
@@ -277,6 +280,10 @@ CASES: Dict[str, Dict[str, Any]] = {
         'k8s_service_account_name': 'my-custom-sa',
         'k8s_automount_sa_token': 'false',
     },
+    'controller': {
+        'k8s_service_account_name': 'skypilot-controller-service-account',
+        'k8s_is_controller': True,
+    },
     'user_labels': {
         'labels': {
             'team': 'research',
@@ -354,8 +361,29 @@ CASES: Dict[str, Dict[str, Any]] = {
         'k8s_resource_key': 'nvidia.com/gpu',
         'k8s_network_type': 'oci_roce',
         'k8s_enable_oci_roce': True,
+        'k8s_rdma_host_device_access': True,
         'k8s_ipc_lock_capability': True,
         'k8s_host_network': True,
+        'k8s_env_vars': _GPU_ENV_VARS,
+    },
+    # The SR-IOV delivery model: the pod keeps its own network namespace and
+    # receives virtual functions, so none of hostNetwork, the /dev/infiniband
+    # hostPath or privileged appear -- and the Multus attachment count has to
+    # agree with the resource request. Rendering the whole manifest is what
+    # pins those against each other in one artifact.
+    'oci_roce_sriov': {
+        'accelerator_count': '8',
+        'k8s_acc_label_key': _GPU_LABEL_KEY,
+        'k8s_acc_label_values': ['H100'],
+        'k8s_resource_key': 'nvidia.com/gpu',
+        'k8s_network_type': 'oci_roce',
+        'k8s_enable_oci_roce': True,
+        'k8s_rdma_host_device_access': False,
+        'k8s_ipc_lock_capability': True,
+        'k8s_host_network': False,
+        'k8s_rdma_nic_resource': 'nvidia.com/rdma-vf',
+        'k8s_rdma_nic_count': 16,
+        'k8s_rdma_networks': ','.join(['default/rdma-vf'] * 16),
         'k8s_env_vars': _GPU_ENV_VARS,
     },
     'volume_mounts': {
@@ -534,6 +562,134 @@ def test_kubernetes_ray_template_snapshot(case_name: str) -> None:
     variables = _build_variables(case_name)
     rendered = _render(variables)
     _assert_matches_snapshot(case_name, _normalize(rendered))
+
+
+def test_sriov_pod_is_coherent() -> None:
+    """The SR-IOV manifest's invariants, asserted rather than just golden-ed.
+
+    A golden pins these too, but accepts whatever a careless UPDATE_SNAPSHOT=1
+    produces. These are the properties that make the pod work at all: one
+    Multus attachment per requested VF, and none of the bare-metal device
+    access the VF model exists to avoid.
+    """
+    rendered = _render(_build_variables('oci_roce_sriov'))
+    pod = yaml.safe_load(
+        rendered)['available_node_types']['ray_head_default']['node_config']
+
+    annotation = pod['metadata']['annotations']['k8s.v1.cni.cncf.io/networks']
+    container = pod['spec']['containers'][0]
+    nic_count = container['resources']['limits']['nvidia.com/rdma-vf']
+    assert len(annotation.split(',')) == int(nic_count)
+    # Requesting without limiting would let the pod schedule with fewer NICs.
+    assert container['resources']['requests']['nvidia.com/rdma-vf'] == nic_count
+
+    assert 'hostNetwork' not in pod['spec']
+    assert 'dnsPolicy' not in pod['spec']
+    assert not container['securityContext'].get('privileged')
+    assert 'IPC_LOCK' in container['securityContext']['capabilities']['add']
+    mounts = [m['mountPath'] for m in container.get('volumeMounts', [])]
+    assert '/dev/infiniband' not in mounts
+
+
+# Verbs Kubernetes' privilege-escalation prevention does NOT gate on RBAC
+# objects. `create` and `update` are checked against what the requester
+# already holds; deletion is not checked at all, so granting it to a workload
+# pod lets that pod remove bindings the control plane depends on.
+_UNGATED_RBAC_VERBS = {'delete', 'deletecollection', '*'}
+
+_RBAC_RESOURCES = {'clusterroles', 'clusterrolebindings', '*'}
+
+
+@pytest.mark.parametrize('case_name', list(CASES.keys()))
+def test_cluster_role_grants_no_ungated_rbac_verb(case_name: str) -> None:
+    """The workload ClusterRole never grants a deletion verb on RBAC objects.
+
+    A golden pins the verb list too, but would accept whatever a careless
+    UPDATE_SNAPSHOT=1 produces. This is the property that matters: every pod
+    SkyPilot launches holds this ClusterRole, and deletion of RBAC objects is
+    the one verb no admission check stands in front of.
+    """
+    rendered = yaml.safe_load(_render(_build_variables(case_name)))
+    cluster_role = rendered['provider'].get('autoscaler_cluster_role')
+    if cluster_role is None:
+        # Not rendered at all for a workload cluster, which is stronger than
+        # rendering it without the verb.
+        return
+    rules = cluster_role['rules']
+
+    offenders = [
+        rule for rule in rules if _RBAC_RESOURCES &
+        set(rule.get('resources') or []) and _UNGATED_RBAC_VERBS &
+        set(rule.get('verbs') or [])
+    ]
+    assert not offenders, (
+        f'ClusterRole grants an ungated deletion verb on RBAC objects: '
+        f'{offenders}')
+
+
+_PROVISIONER_ONLY_ROLES = (
+    'autoscaler_cluster_role',
+    'autoscaler_cluster_role_binding',
+    'autoscaler_skypilot_system_role',
+    'autoscaler_skypilot_system_role_binding',
+    'autoscaler_ingress_role',
+    'autoscaler_ingress_role_binding',
+)
+
+
+def test_workload_cluster_gets_no_provisioner_roles() -> None:
+    """A workload cluster requests none of the provisioner-only roles.
+
+    Conditional rendering is only a boundary because the two kinds of cluster
+    also resolve to different service accounts — bindings naming one shared
+    account would re-grant every pod in the namespace regardless of which
+    cluster created them. So both halves are asserted together.
+    """
+    workload = yaml.safe_load(_render(_build_variables('base_cpu')))['provider']
+    controller = yaml.safe_load(_render(
+        _build_variables('controller')))['provider']
+
+    assert (workload['autoscaler_service_account']['metadata']['name'] !=
+            controller['autoscaler_service_account']['metadata']['name'])
+
+    for field in _PROVISIONER_ONLY_ROLES:
+        assert field not in workload, (
+            f'workload cluster should not request {field}')
+        assert field in controller, (f'controller cluster still needs {field}')
+
+    # The namespaced role is autodown's, so both keep it -- each bound to its
+    # own account rather than to one shared subject.
+    for spec in (workload, controller):
+        assert spec['autoscaler_role_binding']['subjects'][0]['name'] == (
+            spec['autoscaler_service_account']['metadata']['name'])
+
+
+def test_controller_prefix_resolves_to_the_controller_identity() -> None:
+    """What the identity branch keys on: the display name's prefix."""
+    from sky.utils import common
+
+    assert common.is_controller_name('sky-jobs-controller-abc123')
+    assert common.is_controller_name('sky-serve-controller-abc123')
+    # name_on_cloud is transformed and never carries the prefix; reading it
+    # instead of display_name would make the check silently always False.
+    assert not common.is_controller_name('my-cluster')
+    assert not common.is_controller_name('jobs-controller')
+
+
+def test_a_user_cannot_claim_the_controller_identity_by_naming() -> None:
+    """Launching under a controller prefix is refused, so naming can't escalate.
+
+    Because the identity branch keys on that prefix, this guard is now
+    load-bearing for a permission boundary rather than a naming convention --
+    and nothing at the guard itself says so. Relaxing it would silently turn
+    into privilege escalation, and this test is what fails on that day.
+    """
+    from sky import exceptions
+    from sky.utils import controller_utils
+
+    for name in ('sky-jobs-controller-mine', 'sky-serve-controller-mine'):
+        with pytest.raises(exceptions.NotSupportedError):
+            controller_utils.check_cluster_name_not_controller(name)
 
 
 @pytest.mark.parametrize('case_name', list(CASES.keys()))

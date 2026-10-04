@@ -97,8 +97,16 @@ def cleanup_storage(yaml_content: str) -> bool:
         # FAILED_CLEANUP, ha_recovery_for_consolidation_mode respawns the
         # controller, the controller re-reads the same yaml and crashes on
         # the same stale entry — forever.
+        # Only construct the storages that teardown_ephemeral_storage()
+        # below will actually delete (persistent=False). Constructing a
+        # persistent storage here is not just unnecessary, it is harmful:
+        # construct() auto-creates missing buckets, so if the user deletes
+        # their bucket after the service finishes, this cleanup would
+        # silently re-create and leak it.
         for storage_name in list(task.storage_mounts.keys()):
             storage = task.storage_mounts[storage_name]
+            if storage.persistent:
+                continue
             try:
                 storage.construct()
             except exceptions.StorageBucketGetError as e:
@@ -380,7 +388,11 @@ def _bail_on_boot_failure(service_name: str,
     os._exit(1)  # pylint: disable=protected-access
 
 
-def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
+def _start(service_name: str,
+           tmp_task_yaml: str,
+           job_id: int,
+           entrypoint: str,
+           user_hash: Optional[str] = None):
     """Starts the service.
     This including the controller and load balancer.
     """
@@ -439,7 +451,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
                 pool=service_spec.pool,
                 controller_pid=os.getpid(),
                 controller_ip=pod_ip,
-                entrypoint=entrypoint)
+                entrypoint=entrypoint,
+                user_hash=user_hash)
         # Directly throw an error here. See sky/serve/api.py::up
         # for more details.
         if not success:
@@ -734,8 +747,15 @@ if __name__ == '__main__':
                         type=str,
                         help='Entrypoint to launch the service',
                         required=True)
+    # Optional for backward compatibility: a controller started by an older
+    # API server will not pass this flag.
+    parser.add_argument('--user-hash',
+                        type=str,
+                        default=None,
+                        help='User hash of the user creating the service')
     args = parser.parse_args()
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.
     multiprocessing.set_start_method('spawn', force=True)
-    _start(args.service_name, args.task_yaml, args.job_id, args.entrypoint)
+    _start(args.service_name, args.task_yaml, args.job_id, args.entrypoint,
+           args.user_hash)

@@ -472,10 +472,13 @@ class TestCleanupStorageStaleBucket:
         from sky import exceptions as sky_exc
 
         stale_storage = mock.MagicMock()
+        # Ephemeral storage: it is a teardown target, so cleanup constructs it.
+        stale_storage.persistent = False
         stale_storage.construct.side_effect = sky_exc.StorageBucketGetError(
             'Attempted to use a non-existent bucket as a source: s3://gone')
 
         live_storage = mock.MagicMock()
+        live_storage.persistent = False
         # construct() returns normally → storage stays in storage_mounts.
 
         mock_task = mock.MagicMock()
@@ -508,6 +511,7 @@ class TestCleanupStorageStaleBucket:
         """Non-bucket-missing construct errors still fail cleanup — we
         don't want to silently swallow real bugs like expired creds."""
         broken_storage = mock.MagicMock()
+        broken_storage.persistent = False
         broken_storage.construct.side_effect = RuntimeError(
             'credential expired')
 
@@ -528,3 +532,35 @@ class TestCleanupStorageStaleBucket:
             'unexpected construct errors must propagate as cleanup failure')
         # The broader except block aborted before reaching teardown.
         mock_backend.teardown_ephemeral_storage.assert_not_called()
+
+    def test_persistent_storage_not_constructed(self):
+        """A persistent storage must NOT be constructed during cleanup.
+
+        construct() auto-creates a missing bucket, so constructing a
+        persistent storage whose bucket the user just deleted would silently
+        re-create and leak it. teardown_ephemeral_storage() only deletes
+        persistent=False storages, so persistent ones need no construction.
+        """
+        persistent_storage = mock.MagicMock()
+        persistent_storage.persistent = True
+
+        mock_task = mock.MagicMock()
+        mock_task.storage_mounts = {'/persist': persistent_storage}
+        mock_task.file_mounts = None
+
+        mock_backend = mock.MagicMock()
+
+        with mock.patch('sky.serve.service.task_lib.Task.from_yaml_str',
+                        return_value=mock_task), \
+             mock.patch(
+                 'sky.serve.service.cloud_vm_ray_backend.CloudVmRayBackend',
+                 return_value=mock_backend):
+            result = service.cleanup_storage('dummy: yaml')
+
+        assert result is True
+        persistent_storage.construct.assert_not_called()
+        # It stays in storage_mounts and teardown (which skips persistent
+        # storages) is still invoked for the ephemeral ones.
+        assert '/persist' in mock_task.storage_mounts
+        mock_backend.teardown_ephemeral_storage.assert_called_once_with(
+            mock_task)
