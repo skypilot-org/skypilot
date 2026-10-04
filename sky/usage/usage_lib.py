@@ -834,6 +834,15 @@ def send_server_heartbeat():
     gpus_by_type = _collect_gpu_fleet(
         list(k8s_contexts or []) + list(ssh_contexts or []),
         list(slurm_clusters or []))
+    if (gpus_by_type is not None and not gpus_by_type and
+            None in (k8s_contexts, ssh_contexts, slurm_clusters)):
+        # Nothing readable was found, and at least one kind of infrastructure
+        # could not even be enumerated. That is not a fleet of zero GPUs; it
+        # is a fleet we could not measure. Mirrors _collect_gpu_fleet, which
+        # returns None when every inventory read fails but reports a partial
+        # sum when some succeed: here a kind that did enumerate and did have
+        # GPUs still reports them.
+        gpus_by_type = None
     msg.gpus_by_type = gpus_by_type
     msg.total_gpus = (None
                       if gpus_by_type is None else sum(gpus_by_type.values()))
