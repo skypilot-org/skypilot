@@ -3889,6 +3889,8 @@ class TestKubernetesDetectNetworkType(unittest.TestCase):
         mock_node = mock.MagicMock()
         mock_node.metadata.labels = labels or {}
         mock_node.status.allocatable = allocatable or {}
+        mock_node.is_ready.return_value = True
+        mock_node.is_cordoned.return_value = False
         return mock_node
 
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
@@ -4107,7 +4109,8 @@ class TestKubernetesDetectNetworkType(unittest.TestCase):
 
         self.assertEqual(
             result,
-            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, None))
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.AWS_EFA,
+             None))
 
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     def test_aws_efa_detection_node_without_gpu_label(self, mock_get_nodes):
@@ -4164,7 +4167,8 @@ class TestKubernetesDetectNetworkType(unittest.TestCase):
 
         self.assertEqual(
             result,
-            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, None))
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.AWS_EFA,
+             None))
 
 
 class TestKubernetesCheckSingleContextForwardsCloud(unittest.TestCase):
@@ -4268,10 +4272,12 @@ class TestDetectNetworkTypeEfaScaleFromZero(unittest.TestCase):
         'node.kubernetes.io/instance-type': 'm6i.large',
     }
 
-    def _node(self, labels, allocatable):
+    def _node(self, labels, allocatable, ready=True, cordoned=False):
         node = mock.MagicMock()
         node.metadata.labels = dict(labels)
         node.status.allocatable = dict(allocatable)
+        node.is_ready.return_value = ready
+        node.is_cordoned.return_value = cordoned
         return node
 
     def _cold_aws_nodes(self):
@@ -4284,7 +4290,8 @@ class TestDetectNetworkTypeEfaScaleFromZero(unittest.TestCase):
                 acc_type,
                 derived_efa=None,
                 tier=None,
-                autoscaler='karpenter'):
+                autoscaler='karpenter',
+                acc_label_values=None):
         # autoscaler defaults to a configured value: the scale-from-zero EFA
         # fallback only fires on a cluster that can actually scale up a GPU
         # node. Pass autoscaler=None to model a static cluster.
@@ -4302,7 +4309,8 @@ class TestDetectNetworkTypeEfaScaleFromZero(unittest.TestCase):
                 k8s_acc_label_key='nvidia.com/gpu.product',
                 k8s_resource_key='nvidia.com/gpu',
                 acc_count=acc_count,
-                acc_type=acc_type)
+                acc_type=acc_type,
+                k8s_acc_label_values=acc_label_values)
 
     def test_cold_aws_node_requests_catalog_derived_efa(self):
         net, meta = self._detect(self._cold_aws_nodes(),
@@ -4314,7 +4322,7 @@ class TestDetectNetworkTypeEfaScaleFromZero(unittest.TestCase):
         self.assertIsNotNone(meta)
         self.assertEqual(meta['efa_count'], 32)
 
-    def test_matching_gpu_without_efa_uses_catalog(self):
+    def test_matching_gpu_without_efa_does_not_request_efa(self):
         node = self._node(
             {
                 **self._AWS_SYSTEM_NODE_LABELS,
@@ -4323,7 +4331,70 @@ class TestDetectNetworkTypeEfaScaleFromZero(unittest.TestCase):
         net, meta = self._detect([node], 8, 'H100', derived_efa=32)
         self.assertEqual(
             net, kubernetes.KubernetesHighPerformanceNetworkType.AWS_EFA)
-        self.assertEqual(meta, {'efa_count': 32})
+        self.assertIsNone(meta)
+
+    def test_unavailable_gpu_does_not_suppress_catalog_fallback(self):
+        for ready, cordoned in [(False, False), (True, True)]:
+            with self.subTest(ready=ready, cordoned=cordoned):
+                node = self._node(
+                    {
+                        **self._AWS_SYSTEM_NODE_LABELS,
+                        'nvidia.com/gpu.product': 'H100',
+                    }, {'nvidia.com/gpu': '8'}, ready, cordoned)
+                net, meta = self._detect([node],
+                                         8,
+                                         'H100',
+                                         derived_efa=32,
+                                         acc_label_values=['H100'])
+                self.assertEqual(
+                    net,
+                    kubernetes.KubernetesHighPerformanceNetworkType.AWS_EFA)
+                self.assertEqual(meta, {'efa_count': 32})
+
+    def test_other_gpu_efa_does_not_override_matching_gpu(self):
+        h100 = self._node(
+            {
+                **self._AWS_SYSTEM_NODE_LABELS,
+                'nvidia.com/gpu.product': 'H100',
+            }, {'nvidia.com/gpu': '8'})
+        a100 = self._node(
+            {
+                **self._AWS_SYSTEM_NODE_LABELS,
+                'nvidia.com/gpu.product': 'A100',
+            }, {
+                'nvidia.com/gpu': '8',
+                'vpc.amazonaws.com/efa': '4'
+            })
+        net, meta = self._detect([h100, a100],
+                                 8,
+                                 'H100',
+                                 derived_efa=32,
+                                 acc_label_values=['H100'])
+        self.assertEqual(
+            net, kubernetes.KubernetesHighPerformanceNetworkType.AWS_EFA)
+        self.assertIsNone(meta)
+
+    def test_later_matching_gpu_with_efa_is_used(self):
+        no_efa = self._node(
+            {
+                **self._AWS_SYSTEM_NODE_LABELS,
+                'nvidia.com/gpu.product': 'H100',
+            }, {'nvidia.com/gpu': '8'})
+        with_efa = self._node(
+            {
+                **self._AWS_SYSTEM_NODE_LABELS,
+                'nvidia.com/gpu.product': 'H100',
+            }, {
+                'nvidia.com/gpu': '8',
+                'vpc.amazonaws.com/efa': '4'
+            })
+        net, meta = self._detect([no_efa, with_efa],
+                                 8,
+                                 'H100',
+                                 acc_label_values=['H100'])
+        self.assertEqual(
+            net, kubernetes.KubernetesHighPerformanceNetworkType.AWS_EFA)
+        self.assertEqual(meta, {'efa_count': 4})
 
     def test_cold_aws_node_no_autoscaler_gets_no_efa(self):
         # A static cluster (no autoscaler) with no GPU node can never schedule

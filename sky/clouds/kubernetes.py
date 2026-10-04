@@ -875,7 +875,7 @@ class Kubernetes(clouds.Cloud):
 
         network_type, metadata = self._detect_network_type(
             context, resources.network_tier, k8s_acc_label_key,
-            k8s_resource_key, acc_count, acc_type)
+            k8s_resource_key, acc_count, acc_type, k8s_acc_label_values)
 
         k8s_efa_count = None
         if network_type == KubernetesHighPerformanceNetworkType.AWS_EFA:
@@ -1602,6 +1602,7 @@ class Kubernetes(clouds.Cloud):
         k8s_resource_key: Optional[str] = None,
         acc_count: Optional[int] = None,
         acc_type: Optional[str] = None,
+        k8s_acc_label_values: Optional[List[str]] = None,
     ) -> Tuple[KubernetesHighPerformanceNetworkType, Optional[Dict[str, Any]]]:
         """Detect the type of Kubernetes network based on node labels.
 
@@ -1615,6 +1616,8 @@ class Kubernetes(clouds.Cloud):
             acc_type: The accelerator type requested (e.g. 'H100'). Used to
                 derive the EFA interface count on AWS scale-from-zero clusters
                 where no GPU+EFA node is running to scan.
+            k8s_acc_label_values: Accepted accelerator label values for the
+                pod's node affinity.
 
         Returns:
             A tuple of (network_type, metadata).
@@ -1632,6 +1635,7 @@ class Kubernetes(clouds.Cloud):
         # so this stays True on a scale-from-zero cluster where only system
         # nodes are up -- letting the fallback below still derive an EFA count.
         saw_aws_efa_node = False
+        matched_aws_gpu_node = False
 
         try:
             nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
@@ -1670,13 +1674,19 @@ class Kubernetes(clouds.Cloud):
                             if (not k8s_acc_label_key or not k8s_resource_key or
                                     not acc_count):
                                 return (network_type, metadata)
+                            if not node.is_ready() or node.is_cordoned():
+                                continue
                             if (k8s_acc_label_key not in node.metadata.labels or
+                                (k8s_acc_label_values is not None and
+                                 node.metadata.labels[k8s_acc_label_key]
+                                 not in k8s_acc_label_values) or
                                     k8s_resource_key
                                     not in node.status.allocatable or
                                     int(node.status.
                                         allocatable[k8s_resource_key]) <
                                     acc_count):
                                 continue
+                            matched_aws_gpu_node = True
                             # Calculate EFA count proportionally
                             if AWS_EFA_RESOURCE_KEY in node.status.allocatable:
                                 node_gpu_count = int(
@@ -1761,6 +1771,11 @@ class Kubernetes(clouds.Cloud):
         except exceptions.KubeAPIUnreachableError:
             # If we can't reach the cluster, assume no high perf networking
             pass
+
+        # A running eligible GPU node without advertised EFA can still host the
+        # pod without EFA. Catalog hardware sizing must not make it unschedulable.
+        if matched_aws_gpu_node:
+            return KubernetesHighPerformanceNetworkType.AWS_EFA, None
 
         # Autoscaler configured for this context (karpenter/generic/gke), or
         # None on a static cluster. Both cold-start fallbacks below require it:
