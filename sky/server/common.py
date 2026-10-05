@@ -1203,6 +1203,12 @@ def process_mounts_in_task_on_api_server(
     versions.check_recipe_client_version(task)
 
     user_hash = env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
+    # The user id is joined as a directory component below (and mkdir'd), so an
+    # unvalidated value would create dirs outside the clients dir. With auth off
+    # this id comes straight from the client. Reject a non-component value here,
+    # before any mkdir.
+    if not common_utils.is_single_path_component(user_hash):
+        raise ValueError(f'Invalid user id: {user_hash!r}')
 
     client_dir = (API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash)
     client_file_mounts_dir = client_dir / 'file_mounts'
