@@ -67,6 +67,7 @@ def test_kubernetes_host_network_coexistence():
     1. Both launches succeed (probe avoided port collision).
     2. SSH to both heads works (per-pod sshd port rebind worked).
     3. The two heads' probed GCS ports are distinct.
+    4. Each cluster's job runs on that cluster (each skylet on its own port).
     """
     # Unique anchor so concurrent test runs don't co-locate onto each
     # other. The label is placed on cluster A's pod; cluster B's
@@ -148,6 +149,15 @@ def test_kubernetes_host_network_coexistence():
             'echo "A_GCS=$A_GCS B_GCS=$B_GCS" && '
             '[ -n "$A_GCS" ] && [ -n "$B_GCS" ] && '
             '[ "$A_GCS" != "$B_GCS" ]',
+
+            # 4. Each cluster's job runs on that cluster. The two skylets
+            #    share the node's ports; when both took the default, B's
+            #    job was queued on A's skylet and ran on A. Not `hostname`:
+            #    under hostNetwork that is the node's, the same for both.
+            f's=$(sky exec {name_a} \'echo RAN_ON=$SKYPILOT_POD_NAME\' 2>&1)'
+            f' && echo "$s" | grep "RAN_ON={name_a}-"',
+            f's=$(sky exec {name_b} \'echo RAN_ON=$SKYPILOT_POD_NAME\' 2>&1)'
+            f' && echo "$s" | grep "RAN_ON={name_b}-"',
         ],
         teardown=(f'sky down -y {name_a}; sky down -y {name_b}; '
                   f'rm -f {cfg_a} {cfg_b}'),

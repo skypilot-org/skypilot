@@ -2646,7 +2646,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             local_port = random.randint(10000, 65535)
             try:
                 ssh_tunnel_proc = backend_utils.open_ssh_tunnel(
-                    head_runner, (local_port, constants.SKYLET_GRPC_PORT))
+                    head_runner, (local_port, self.skylet_port))
             except exceptions.CommandError as e:
                 # Don't retry if the error is due to timeout,
                 # connection refused, Kubernetes pods not found,
@@ -2725,6 +2725,19 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if external_ssh_ports:
             return external_ssh_ports[0]
         return None
+
+    @property
+    def skylet_port(self) -> int:
+        """The port the head's skylet listens on.
+
+        The default, except on a Kubernetes hostNetwork head, which shares its
+        node's ports with other clusters' heads and so is assigned one.
+        """
+        info = self.cached_cluster_info
+        head = info.get_head_instance() if info is not None else None
+        # getattr: an InstanceInfo pickled before the field existed.
+        return (getattr(head, 'skylet_port', None) or
+                constants.SKYLET_GRPC_PORT)
 
     @property
     def num_ips_per_node(self) -> int:

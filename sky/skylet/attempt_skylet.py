@@ -199,11 +199,21 @@ def restart_skylet():
     except OSError:
         pass  # Best effort cleanup
 
-    # TODO(kevin): Handle race conditions here. Race conditions can only
-    # happen on Slurm, where there could be multiple clusters running in
-    # one network namespace. For other clouds, the behaviour will be that
-    # it always gets port 46590 (default port).
-    port = common_utils.find_free_port(constants.SKYLET_GRPC_PORT)
+    # TODO(kevin): Handle race conditions here. They happen where several
+    # clusters share one network namespace: on Slurm, and on Kubernetes under
+    # hostNetwork for a pod created before the server assigned skylet a port.
+    assigned = os.environ.get(constants.SKYLET_PORT_ENV_VAR)
+    if assigned:
+        # The server assigned this port (a Kubernetes hostNetwork pod) and
+        # dials exactly it, so drifting to the next free one would hand this
+        # cluster's requests to whatever holds it. Fail instead.
+        port = int(assigned)
+        if common_utils.find_free_port(port) != port:
+            raise RuntimeError(
+                f'skylet port {port}, assigned to this pod, is already in use '
+                'on its node.')
+    else:
+        port = common_utils.find_free_port(constants.SKYLET_GRPC_PORT)
     if on_slurm:
         _start_skylet_via_keeper(port)
     else:

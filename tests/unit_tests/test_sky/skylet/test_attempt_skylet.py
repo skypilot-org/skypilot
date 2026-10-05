@@ -132,6 +132,53 @@ class TestRestartSkylet:
         self.restart_skylet()
         assert mock_run.called
 
+    def _no_running_skylet(self, monkeypatch):
+        monkeypatch.setattr(attempt_skylet, '_find_running_skylet_pids',
+                            lambda: [])
+
+    def test_an_assigned_port_is_used_not_the_next_free_one(self, monkeypatch):
+        """Under hostNetwork the server dials exactly the port it assigned;
+        another cluster's skylet may hold the default on the same node."""
+        self._no_running_skylet(monkeypatch)
+        monkeypatch.setenv(constants.SKYLET_PORT_ENV_VAR, '29070')
+        monkeypatch.setattr('sky.utils.common_utils.find_free_port',
+                            lambda port: port)
+        calls = []
+        monkeypatch.setattr(
+            'subprocess.run',
+            lambda cmd, **kwargs: calls.append(cmd) or mock.Mock(returncode=0))
+        self.restart_skylet()
+        assert '--port=29070' in calls[0]
+        assert self.env['port_file'].read_text() == '29070'
+
+    def test_a_busy_assigned_port_fails_and_starts_nothing(self, monkeypatch):
+        """Drifting to the next free port would hand this cluster's requests
+        to whatever holds the assigned one."""
+        self._no_running_skylet(monkeypatch)
+        monkeypatch.setenv(constants.SKYLET_PORT_ENV_VAR, '29070')
+        monkeypatch.setattr('sky.utils.common_utils.find_free_port',
+                            lambda port: port + 1)
+        run = mock.Mock()
+        monkeypatch.setattr('subprocess.run', run)
+        with pytest.raises(RuntimeError, match='29070'):
+            self.restart_skylet()
+        run.assert_not_called()
+
+    def test_without_an_assignment_the_default_port_still_floats(
+            self, monkeypatch):
+        self._no_running_skylet(monkeypatch)
+        monkeypatch.delenv(constants.SKYLET_PORT_ENV_VAR, raising=False)
+        asked = []
+        monkeypatch.setattr('sky.utils.common_utils.find_free_port',
+                            lambda port: asked.append(port) or port + 1)
+        calls = []
+        monkeypatch.setattr(
+            'subprocess.run',
+            lambda cmd, **kwargs: calls.append(cmd) or mock.Mock(returncode=0))
+        self.restart_skylet()
+        assert asked == [constants.SKYLET_GRPC_PORT]
+        assert f'--port={constants.SKYLET_GRPC_PORT + 1}' in calls[0]
+
     def test_complete_flow_with_pid_file(self, monkeypatch):
         """Complete flow: kill by PID, start new skylet, write all files."""
         old_pid = 88888
