@@ -22,6 +22,7 @@ from sky.clouds.gcp import GCP
 from sky.clouds.hyperbolic import Hyperbolic
 from sky.clouds.ibm import IBM
 from sky.clouds.kubernetes import Kubernetes
+from sky.clouds.latitude import Latitude
 from sky.clouds.lambda_cloud import Lambda
 from sky.clouds.mithril import Mithril
 from sky.clouds.nebius import Nebius
@@ -32,6 +33,7 @@ from sky.clouds.runpod import RunPod
 from sky.clouds.scp import SCP
 from sky.clouds.seeweb import Seeweb
 from sky.clouds.shadeform import Shadeform
+from sky.clouds.spheron import Spheron
 from sky.clouds.slurm import Slurm
 from sky.clouds.ssh import SSH
 from sky.clouds.vast import Vast
@@ -55,6 +57,8 @@ __all__ = [
     'Slurm',
     'RunPod',
     'Shadeform',
+    'Spheron',
+    'Latitude',
     'Vast',
     'OCI',
     'Verda',

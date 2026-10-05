@@ -23,14 +23,35 @@ from sky.utils import resources_utils
 
 
 def test_gcp_rtxpro6000_instance_type_mapping():
-    # RTXPRO6000 (GCP G4) maps to g4-standard-{48,96,192,384} for 1/2/4/8 GPUs.
+    # RTXPRO6000 (GCP G4) maps every g4-standard-* shape GCP bundles the GPU
+    # with at count 1 DELIBERATELY. g4-standard-6/12/24 are 1/8, 1/4 and 1/2
+    # fractional vGPU slices and only g4-standard-48 is the whole card, but
+    # this dict is the CATALOG's pricing view, not a launchability claim: the
+    # catalog SHOULD be able to price every G4 shape.
+    #
+    # Launchability is enforced one layer down, in uRun's runner, which pins
+    # count 1 to g4-standard-48 and denylists -6/-12/-24 in
+    # _CATALOG_UNTRUSTED_SKUS. A previous revision of this test asserted
+    # fractional keys; that moved enforcement into the catalog, duplicated the
+    # denylist, left the fractional shapes unpriceable, and tripped the
+    # controller's build-time FORK PIN CHECK -- the guard that exists because
+    # skypilot-controller#342 pinned count 1 to g4-standard-6 and burned three
+    # VMs of paid time on "NVRM: ... not supported by open nvidia.ko".
     assert gcp_catalog._ACC_INSTANCE_TYPE_DICTS['RTXPRO6000'] == {
-        1: ['g4-standard-48'],
+        1: [
+            'g4-standard-6',
+            'g4-standard-12',
+            'g4-standard-24',
+            'g4-standard-48',
+        ],
         2: ['g4-standard-96'],
         4: ['g4-standard-192'],
         8: ['g4-standard-384'],
     }
     expected = {
+        'g4-standard-6': 1,
+        'g4-standard-12': 1,
+        'g4-standard-24': 1,
         'g4-standard-48': 1,
         'g4-standard-96': 2,
         'g4-standard-192': 4,
@@ -42,9 +63,10 @@ def test_gcp_rtxpro6000_instance_type_mapping():
         }
 
 
-@pytest.mark.parametrize(
-    'instance_type',
-    ['g4-standard-48', 'g4-standard-96', 'g4-standard-192', 'g4-standard-384'])
+@pytest.mark.parametrize('instance_type', [
+    'g4-standard-6', 'g4-standard-12', 'g4-standard-24', 'g4-standard-48',
+    'g4-standard-96', 'g4-standard-192', 'g4-standard-384'
+])
 def test_gcp_g4_uses_hyperdisk_balanced(instance_type):
     # G4 only supports hyperdisk-balanced (no pd-* support), like n4/a4.
     tier2name = gcp_volume_utils.get_data_disk_tier_mapping(instance_type)

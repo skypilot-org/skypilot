@@ -33,6 +33,20 @@ class Shadeform(clouds.Cloud):
     multiple cloud providers.
     """
 
+    # The canonical cloud name. NOT decoration: Cloud._REPR is what
+    # Cloud.validate_region_zone and Cloud.is_image_tag_valid pass to the
+    # catalog as `clouds=cls._REPR.lower()`, and Shadeform overrides neither.
+    # Without this the inherited base default '<Cloud>' lowercases to
+    # '<cloud>', so every launch died in the catalog loader with
+    #
+    #   ValueError: Cannot find module "sky.catalog.<cloud>_catalog"
+    #               for cloud "<cloud>"
+    #
+    # It hid because Shadeform defines its own __repr__, so repr() and str()
+    # both read "Shadeform" everywhere a human looks -- only the two sites
+    # that read _REPR directly broke, and one of them is on the launch path.
+    _REPR = 'Shadeform'
+
     # Shadeform doesn't have explicit cluster name limits, but conservative
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
 

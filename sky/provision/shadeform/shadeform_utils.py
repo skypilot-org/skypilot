@@ -39,7 +39,25 @@ def make_request(method: str, endpoint: str, **kwargs) -> Any:
     }
 
     response = requests.request(method, url, headers=headers, **kwargs)
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as e:
+        # requests' raise_for_status() message carries only the status line;
+        # the BODY is the actionable part. Live evidence (dev-usw2,
+        # 2026-09-23): a 409 on /instances/create carried
+        # {"error_code": "INSUFFICIENT_FUNDS", "error": "Balance must be a
+        # minimum of $5 to launch an instance. ..."} — an ACCOUNT refusal
+        # that reads like a stockout from its status line alone, and which
+        # the caller could not see at all without this. Preserve the body
+        # verbatim in the raised error so the provisioner log line
+        # (instance.py's 'Failed to create instance: {e}') and the
+        # re-raised exception both carry it. The status-line prefix is kept
+        # byte-identical so downstream classifiers matching on
+        # '409 Client Error: ... for url: <endpoint>' keep matching.
+        body = response.text.strip()
+        if body:
+            raise requests.HTTPError(f'{e}: {body}', response=response) from e
+        raise
 
     # Some APIs (like delete) return empty responses with just 200 status
     if response.text.strip():

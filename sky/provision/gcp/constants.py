@@ -260,6 +260,23 @@ SSD_AUTO_ATTACH_MACHINE_TYPES = {
     'z3-highmem-176': 12,
 }
 
+# Machine families whose local SSD attaches ONLY in fixed multi-unit groups,
+# so a single-volume instance-storage request is REJECTED by the GCP
+# bulkInsert API. Live receipt 2026-09-30 (prod-usw2, g4-standard-48 walk for
+# the RTX PRO 6000 lane): requesting one 375GB NVMe local-ssd disk on
+# g4-standard-48 fails with "The selected machine type(g4-standard-48) should
+# have [0, 4] local SSD(s)." (HTTP 400, reason badRequest) — the G4 family
+# attaches its Titanium SSD in 4-unit groups on -48 and 8-unit groups on -96,
+# so the requested count must be 0 or the family count. Unlike the
+# SSD_AUTO_ATTACH_MACHINE_TYPES above (where GCP attaches the devices itself
+# and no disk is requested), G4 needs the request to carry the FULL group.
+# Value = how many local-SSD devices ONE requested instance-storage volume
+# expands to on that machine type.
+INSTANCE_STORAGE_SSD_UNIT_COUNT = {
+    'g4-standard-48': 4,
+    'g4-standard-96': 8,
+}
+
 # Below parameters are from the default VPC on GCP.
 # https://cloud.google.com/vpc/docs/firewalls#more_rules_default_vpc
 VPC_TEMPLATE: dict = {

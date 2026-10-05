@@ -14,6 +14,31 @@ from sky.adaptors import vast
 
 logger = sky_logging.init_logger(__name__)
 
+# The SDK's search_offers silently prepends its own default filter
+# (verified=true external=false rentable=true rented=false) unless
+# no_default=True. Vast does not set `verified` on Secure-Cloud datacenter
+# offers (verified=None on every live RTX PRO 6000 Max-Q, measured
+# 2026-10-01: the defaulted search returned 4 offers, the same query with
+# no_default returned 16 incl. the Max-Q), so the default hid the one
+# rentable KVM GPU this lane serves. Every search passes no_default=True and
+# states the remaining three terms explicitly; datacenter=true +
+# hosting_type>=1 are the lane's trust filter.
+SEARCH_BASE_TERMS = 'rentable=true rented=false external=false'
+
+# Vast boots a KVM VM only for images from this repository
+# (docs.vast.ai/guides/instances/virtual-machines); every other image is a
+# Docker container.
+VM_IMAGE_REPO = 'docker.io/vastai/kvm'
+
+
+def is_vm_image(image: Optional[str]) -> bool:
+    """Whether `image` makes Vast boot a KVM VM instead of a container."""
+    name = str(image or '').strip()
+    if name.startswith('docker:'):
+        name = name[len('docker:'):]
+    return (name == VM_IMAGE_REPO or name.startswith(VM_IMAGE_REPO + ':') or
+            name.startswith('vastai/kvm:'))
+
 
 def list_instances() -> Dict[str, Dict[str, Any]]:
     """Lists instances associated with API key."""
@@ -111,25 +136,82 @@ def launch(name: str,
     # `ports` is currently unused. Keep it in the signature for caller
     # compatibility and future use (port-forwarding is handled separately).
     del ports
-    cpu_ram = float(instance_type.split('-')[-1]) / 1024
-    gpu_name = instance_type.split('-')[1].replace('_', ' ')
-    num_gpus = int(instance_type.split('-')[0].replace('x', ''))
+    # uRun lane requirements: on-demand KVM VMs only (never the plain
+    # unprivileged container offers), CUDA-13 capable driver for the cu130
+    # wheels, contracts lasting at least 3 days, direct SSH ports for the
+    # SkyPilot provision loop, >=96 GB host RAM for the qwen3.6-27b bf16
+    # boot, and Secure Cloud datacenters only.
+    if not secure_only:
+        raise RuntimeError(
+            'Vast launches must set sky config vast.datacenter_only=true '
+            '(Secure Cloud); community hosts can read the instance disk')
+    # Instance type is '{n}x-{gpu_name}-{cpu_cores}-{cpu_ram}' with spaces in
+    # gpu_name stubbed to '_' (fetch_vast.create_instance_type). gpu_name may
+    # itself contain '-' ('RTX PRO 6000 Max-Q'), so only the first and last
+    # two fields are fixed.
+    type_fields = instance_type.split('-')
+    num_gpus = int(type_fields[0].replace('x', ''))
+    gpu_name = '-'.join(type_fields[1:-2]).replace('_', ' ')
+    cpu_ram = float(type_fields[-1])
 
     query = [
         'chunked=true',
         'georegion=true',
-        f'geolocation="{region[-2:]}"',
+        'type=ondemand',
+        # 'vm=true' REMOVED: the bundles API rejects `vm` as a search key
+        # (measured 2026-09-29: HTTP 400 "vm is not a valid search key").
+        # The server-side KVM filter is vms_enabled (measured: 200 with
+        # {"vms_enabled":{"eq":True}}); the per-offer `vm` field is not
+        # filterable. Keeping vm=true 400s EVERY launch query.
+        'vms_enabled=true',
+        # NO geolocation TERM: the API exact-matches it against the full
+        # "Country, CC, GEO" string, so geolocation="EU" matches NOTHING
+        # (measured 2026-09-30: the live launch refused "Failed acquire
+        # resources in all zones in EU" while the EU offer was present).
+        # Region is filtered client-side after the search (below).
+        # UNITS: the SDK's parse_query scales cpu_ram/gpu_ram by 1000 (GB)
+        # and duration by 86400 (days) before sending (vastai offers_mult),
+        # so terms are written in GB and days. Raw API units here asked for
+        # cpu_ram>=65536 GB and duration>=259200 days, matching nothing
+        # (measured 2026-10-01: the lane's full query returned 0 offers;
+        # in GB/days it returned the live CZ RTX PRO 6000 Max-Q).
         f'disk_space>={disk_size}',
         f'num_gpus={num_gpus}',
         f'gpu_name="{gpu_name}"',
-        f'cpu_ram>="{cpu_ram}"',
+        # Host-RAM floor: the instance type's own RAM (catalog MB -> GB),
+        # never below 64 GB — enough for the VM bootstrap (docker +
+        # tailscale + juicefs + KV-cache headroom for a 27B bf16 GPU
+        # server). The previous 96 GB invention excluded the only
+        # affordable Secure-Cloud KVM RTX 6000D offer (94.4 GB) measured
+        # 2026-09-29.
+        f'cpu_ram>={max(64.0, cpu_ram / 1024):g}',
+        'cuda_max_good>=13.0',
+        # Contract lasts at least 3 days.
+        'duration>=3',
+        'direct_port_count>=1',
     ]
     if secure_only:
         query.append('datacenter=true')
         query.append('hosting_type>=1')
-    query_str = ' '.join(query)
+    query_str = ' '.join([SEARCH_BASE_TERMS] + query)
 
-    instance_list = vast.vast().search_offers(query=query_str)
+    instance_list = vast.vast().search_offers(query=query_str, no_default=True)
+
+    # REGION IS FILTERED CLIENT-SIDE, NOT IN THE QUERY: the API exact-matches
+    # geolocation against the full "Country, CC, GEO" string, so
+    # geolocation="EU" matches NOTHING (measured 2026-09-30: the live launch
+    # refused "Failed acquire resources in all zones in EU" while the EU
+    # offer was present — the same full-string-vs-token mismatch the
+    # catalog fetcher's Region emission hit). The catalog's Region IS the
+    # trailing georegion token (fetch_vast.py), so filter each offer's
+    # geolocation trailing token against it.
+    region_token = str(region or '').split(',')[-1].strip()
+    if region_token:
+        instance_list = [
+            offer for offer in instance_list
+            if str(offer.get('geolocation') or '').split(',')[-1].strip()
+            == region_token
+        ]
 
     if isinstance(instance_list, int) or len(instance_list) == 0:
         raise RuntimeError('Failed to create instances, could not find an '
@@ -175,12 +257,12 @@ def launch(name: str,
             'Private docker registry requested but no login credentials '
             'were provided.')
 
-    # Handle price/bid_price - user can override
-    # Vast.ai SDK uses 'price' since SDK v6+; normalize bid_price for compat
-    if 'bid_price' in launch_params:
-        launch_params['price'] = launch_params.pop('bid_price')
-    if 'price' not in launch_params and preemptible:
-        launch_params['price'] = instance_touse.get('min_bid')
+    # Vast interruptible capacity is bid/price based and stops (billing disk)
+    # when outbid. The uRun Vast lane is destroy-only and on-demand-only.
+    if preemptible:
+        raise RuntimeError('Vast interruptible instances are not supported; use on-demand capacity')
+    if 'bid_price' in launch_params or 'price' in launch_params:
+        raise RuntimeError('Vast on-demand launches must not pass price/bid_price')
 
     # Handle onstart_cmd - read from file if onstart path provided
     user_onstart_cmd = launch_params.pop('onstart_cmd', None)
@@ -201,7 +283,6 @@ def launch(name: str,
     # even when using a template
     skypilot_onstart = [
         'touch ~/.no_auto_tmux',
-        f'echo "{vast.vast().client.api_key}" > ~/.vast_api_key',
     ]
 
     # Inject SSH public key into authorized_keys if provided
@@ -220,7 +301,19 @@ def launch(name: str,
 
     if user_onstart_cmd:
         skypilot_onstart.append(user_onstart_cmd)
-    launch_params['onstart_cmd'] = ';'.join(skypilot_onstart)
+    # KVM VM images (docker.io/vastai/kvm) run onstart inside the guest,
+    # where Vast requires an interpreter shebang (docs.vast.ai/
+    # linux-virtual-machines: "the interpreter must be specified by a
+    # shebang"); a ';'-joined Docker-style line is not a valid VM script.
+    # VMs also need the direct SSH mapping: the proxy host does not serve
+    # VMs (measured 2026-10-01: proxy refused, direct 22/tcp authenticated).
+    if is_vm_image(launch_params.get('image') or image_name):
+        launch_params['onstart_cmd'] = '\n'.join(['#!/bin/bash'] +
+                                                 skypilot_onstart)
+        launch_params['ssh'] = True
+        launch_params['direct'] = True
+    else:
+        launch_params['onstart_cmd'] = ';'.join(skypilot_onstart)
 
     # Handle env - Vast.ai SDK requires env as a dict, not a CLI-style string.
     # Merge user-provided env (dict or legacy string) with skypilot metadata.

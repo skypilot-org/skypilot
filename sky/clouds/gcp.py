@@ -1309,6 +1309,25 @@ class GCP(clouds.Cloud):
         ssd_index = 0
         # TPU data disk index starts from 1, 0 is the boot disk
         tpu_disk_index = 1
+        # Fail loud at config time, never at the provider: a family with a
+        # fixed multi-unit SSD group has a HARD total budget (g4-standard-48
+        # allows exactly 0 or 4 devices), so the requested unit groups must
+        # fit it — silently emitting 8 devices would 400 the bulkInsert
+        # anyway, one paid attempt later.
+        if instance_type is not None and instance_type in constants.INSTANCE_STORAGE_SSD_UNIT_COUNT:
+            requested_units = sum(
+                constants.INSTANCE_STORAGE_SSD_UNIT_COUNT[instance_type]
+                for volume in volumes
+                if volume.get(
+                    'storage_type') == resources_utils.StorageType.INSTANCE)
+            if requested_units > constants.INSTANCE_STORAGE_SSD_UNIT_COUNT[
+                    instance_type]:
+                raise exceptions.ResourcesUnavailableError(
+                    f'The instance type {instance_type} attaches its local '
+                    f'SSD in fixed groups of '
+                    f'{constants.INSTANCE_STORAGE_SSD_UNIT_COUNT[instance_type]}'
+                    f' devices, but {requested_units} are requested; reduce '
+                    'the number of instance-storage volumes.')
         for i, volume in enumerate(volumes):
             volume_spec = {
                 'device_name': f'sky-disk-{i}',
@@ -1348,6 +1367,20 @@ class GCP(clouds.Cloud):
                     # so we skip the following steps.
                     continue
 
+                # Machine families that attach local SSD in fixed multi-unit
+                # groups (G4) reject a one-device request outright
+                # ("should have [0, 4] local SSD(s)." — HTTP 400 badRequest),
+                # so one requested instance-storage volume expands to the
+                # family's full unit group. Only the FIRST device carries the
+                # mount point; the remaining units of the group are attached
+                # and auto-deleted with the instance but deliberately left
+                # unmounted (the JuiceFS block cache mounts the first NVMe
+                # device only).
+                unit_count = 1
+                if instance_type is not None:
+                    unit_count = constants.INSTANCE_STORAGE_SSD_UNIT_COUNT.get(
+                        instance_type, 1)
+
                 volume_spec['disk_tier'] = constants.INSTANCE_STORAGE_DISK_TYPE
                 volume_spec[
                     'interface_type'] = constants.INSTANCE_STORAGE_INTERFACE_TYPE
@@ -1355,6 +1388,22 @@ class GCP(clouds.Cloud):
                 # Disk size of instance storage is fixed to 375GB
                 volume_spec['disk_size'] = None
                 volume_spec['auto_delete'] = True
+                volumes_specs.append(volume_spec)
+                for extra_index in range(1, unit_count):
+                    device_name = f'{constants.INSTANCE_STORAGE_DEVICE_NAME_PREFIX}{ssd_index}'
+                    ssd_index += 1
+                    volumes_specs.append({
+                        # Distinct deviceName per disk: duplicate deviceNames
+                        # in one bulkInsert are invalid.
+                        'device_name': f'sky-disk-{i}-{extra_index}',
+                        'disk_tier': constants.INSTANCE_STORAGE_DISK_TYPE,
+                        'interface_type':
+                            constants.INSTANCE_STORAGE_INTERFACE_TYPE,
+                        'storage_type': constants.INSTANCE_STORAGE_TYPE,
+                        'disk_size': None,
+                        'auto_delete': True,
+                    })
+                continue
             else:
                 # TODO(hailong): this should be fixed when move the
                 # disk creation out of the instance creation phase

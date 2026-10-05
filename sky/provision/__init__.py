@@ -22,6 +22,7 @@ from sky.provision import fluidstack
 from sky.provision import gcp
 from sky.provision import hyperbolic
 from sky.provision import kubernetes
+from sky.provision import latitude
 from sky.provision import lambda_cloud
 from sky.provision import mithril
 from sky.provision import nebius
@@ -31,6 +32,7 @@ from sky.provision import runpod
 from sky.provision import scp
 from sky.provision import seeweb
 from sky.provision import shadeform
+from sky.provision import spheron
 from sky.provision import slurm
 from sky.provision import ssh
 from sky.provision import vast

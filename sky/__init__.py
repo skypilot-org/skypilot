@@ -45,7 +45,7 @@ def _get_git_commit():
 
 
 __commit__ = _get_git_commit()
-__version__ = '1.0.0-dev0'
+__version__ = '0.13.0'
 __root_dir__ = directory_utils.get_sky_dir()
 
 
@@ -164,6 +164,7 @@ Paperspace = clouds.Paperspace
 PrimeIntellect = clouds.PrimeIntellect
 RunPod = clouds.RunPod
 Vast = clouds.Vast
+Latitude = clouds.Latitude
 Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
 Nebius = clouds.Nebius

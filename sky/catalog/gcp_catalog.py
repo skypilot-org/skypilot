@@ -129,7 +129,29 @@ _ACC_INSTANCE_TYPE_DICTS = {
         8: ['a4-highgpu-8g'],
     },
     'RTXPRO6000': {
-        1: ['g4-standard-48'],
+        # All four G4 shapes stay at count 1 DELIBERATELY. g4-standard-6/12/24
+        # are 1/8, 1/4 and 1/2 fractional vGPU slices of one physical RTX PRO
+        # 6000 and only g4-standard-48 is the whole card -- but this mapping is
+        # the CATALOG's pricing view, not a launchability claim. uRun's runner
+        # is what refuses the fractional three: it pins count 1 to
+        # g4-standard-48 and denylists -6/-12/-24 in _CATALOG_UNTRUSTED_SKUS
+        # (urun-sh/skypilot-controller runner/skypilot_runner.py).
+        #
+        # Do NOT "fix" this to fractional keys. Doing so moves enforcement into
+        # the catalog, duplicating the runner's denylist, and leaves the
+        # fractional shapes unpriceable. It also trips the controller's
+        # build-time FORK PIN CHECK, which exists because
+        # skypilot-controller#342 pinned count 1 to g4-standard-6 on exactly
+        # the belief that the four are interchangeable: the fractional shape
+        # needs Google's vGPU/GRID guest driver, SkyPilot's GCP GPU image ships
+        # the passthrough driver, and three VMs burned PAID time dying at
+        # "NVRM: ... not supported by open nvidia.ko" before it was caught.
+        1: [
+            'g4-standard-6',
+            'g4-standard-12',
+            'g4-standard-24',
+            'g4-standard-48',
+        ],
         2: ['g4-standard-96'],
         4: ['g4-standard-192'],
         8: ['g4-standard-384'],

@@ -1444,6 +1444,21 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
             clouds.DO,
             clouds.Nebius,
             clouds.Yotta,
+            # Spheron takes the generic path DELIBERATELY: its public key is
+            # registered per-DEPLOYMENT by the provisioner
+            # (sky/provision/spheron/instance.py::_ensure_key reads
+            # node_config['PublicKey'] and calls client.ensure_ssh_key), so
+            # there is no account-level upload for an auth hook to perform.
+            # All this step must do is guarantee the local keypair exists and
+            # substitute it into the template's `skypilot:ssh_public_key_content`
+            # placeholder -- which is exactly configure_ssh_info. Shadeform
+            # differs only because it ALSO uploads to the account, and even it
+            # ends with `return configure_ssh_info(config)`.
+            clouds.Spheron,
+            # Latitude registers its SSH key per-deployment too
+            # (sky/provision/latitude/instance.py matches key MATERIAL), so
+            # it takes the same generic configure_ssh_info path as Spheron.
+            clouds.Latitude,
         )):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):

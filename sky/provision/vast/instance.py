@@ -184,8 +184,8 @@ def stop_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
-    return action_instances('stop', cluster_name_on_cloud, provider_config,
-                            worker_only)
+    """Vast stop keeps billing storage; destroy instead of stopping."""
+    return terminate_instances(cluster_name_on_cloud, provider_config, worker_only)
 
 
 def terminate_instances(
@@ -229,16 +229,23 @@ def get_cluster_info(
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
     for instance_id, instance_info in running_instances.items():
-        # Vast.ai routes SSH through a gateway (ssh_host, e.g. ssh3.vast.ai).
-        # Using public_ipaddr directly causes SSH timeouts because direct
-        # access is blocked; the gateway is the only reachable path.
-        # ssh_port is always set; ports['22/tcp'] may be None in newer API.
-        ssh_host = (instance_info.get('ssh_host') or
-                    instance_info.get('public_ipaddr', ''))
+        # SSH endpoint: the DIRECT pair (public_ipaddr + the host port mapped
+        # to 22/tcp) when Vast mapped one, else the PROXY pair (ssh_host +
+        # ssh_port). Never mix them: the proxy host does not listen on the
+        # direct port, and the direct IP does not listen on the proxy port.
+        # Measured 2026-10-01 on a KVM VM: root@public_ipaddr:<22/tcp
+        # HostPort> authenticated on the first try, while the proxy host
+        # (sshN.vast.ai) refused/was unreachable — so the old
+        # `ssh_host or public_ipaddr` + direct-port mix never connected.
+        # This matches vast-cli's own _ssh_url.
         ports_dict = instance_info.get('ports') or {}
         tcp22 = ports_dict.get('22/tcp') or []
-        ssh_port = (int(tcp22[0]['HostPort'])
-                    if tcp22 else instance_info.get('ssh_port'))
+        if tcp22 and instance_info.get('public_ipaddr'):
+            ssh_host = instance_info['public_ipaddr']
+            ssh_port = int(tcp22[0]['HostPort'])
+        else:
+            ssh_host = instance_info.get('ssh_host') or ''
+            ssh_port = instance_info.get('ssh_port')
         instances[instance_id] = [
             common.InstanceInfo(
                 instance_id=instance_id,

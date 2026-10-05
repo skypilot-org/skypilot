@@ -17,6 +17,19 @@ if typing.TYPE_CHECKING:
 
 _CREDENTIAL_PATH = '~/.config/vastai/vast_api_key'
 
+# Default image when a task names none: a Vast KVM VM image. Vast launches a
+# VM only for images from docker.io/vastai/kvm (docs.vast.ai/guides/
+# instances/virtual-machines); any other image -- the old 'vastai/base:0.0.2'
+# default included -- starts an unprivileged Docker container even on a
+# vms_enabled host (measured 2026-10-01: /.dockerenv present, PID 1 bash, no
+# /dev/fuse or /dev/net/tun), where the VM bootstrap (systemd, dockerd,
+# FUSE, tailscale) cannot run. Vast VMs require an SSH key on the creating
+# account (create fails 'no_ssh_key_for_vm' otherwise); for a team API key
+# that is the team owner's PERSONAL account, since team accounts cannot hold
+# SSH keys. Measured on this tag 2026-10-01: KVM guest, systemd running,
+# docker + nvidia runtime, /dev/fuse and /dev/net/tun present.
+DEFAULT_VM_IMAGE = 'docker.io/vastai/kvm:ubuntu_cli_22.04-2025-11-21'
+
 
 @registry.CLOUD_REGISTRY.register
 class Vast(clouds.Cloud):
@@ -203,7 +216,7 @@ class Vast(clouds.Cloud):
             acc_dict)
 
         if resources.image_id is None:
-            image_id: Optional[str] = 'vastai/base:0.0.2'
+            image_id: Optional[str] = DEFAULT_VM_IMAGE
         elif resources.extract_docker_image() is not None:
             image_id = resources.extract_docker_image()
         else:
