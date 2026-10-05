@@ -3245,7 +3245,7 @@ async def api_status(
                     for d in daemons.HIDDEN_REQUEST_NAMES
                 ],
                 limit=limit,
-                fields=fields,
+                fields=requests_lib.get_request_fields_for_display(fields),
                 sort=True,
             ))
         return requests_lib.encode_requests(request_tasks,
@@ -3254,7 +3254,8 @@ async def api_status(
         encoded_request_tasks = []
         for request_id in request_ids:
             request_tasks = await requests_lib.get_requests_async_with_prefix(
-                request_id)
+                request_id,
+                fields=requests_lib.get_request_fields_for_display())
             if request_tasks is None:
                 continue
             for request_task in request_tasks:

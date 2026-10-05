@@ -1578,6 +1578,54 @@ def test_api_status_scopes_to_caller(_request_authz_env, monkeypatch):
     assert {'alice-req-1', 'bob-req-1'} <= ids
 
 
+@pytest.mark.parametrize('by_id', [False, True])
+@pytest.mark.parametrize(
+    'fields',
+    [None, [], ['request_id', 'status'], ['return_value', 'error'], ['pid']])
+def test_api_status_does_not_load_results(_request_authz_env, monkeypatch,
+                                          by_id, fields):
+    """Status reads never deserialize stored results, even with explicit fields."""
+    from fastapi.testclient import TestClient
+
+    from sky.server.requests import requests as requests_lib
+
+    _scope_as(monkeypatch, None)
+    result = json.dumps({'large_result': 'unused' * 10000})
+    error = json.dumps({'message': 'unused error'})
+    with requests_lib._DB.conn:
+        requests_lib._DB.conn.execute(
+            'UPDATE requests SET return_value = ?, error = ?', (result, error))
+
+    decode = requests_lib.Request.decode
+    seen = []
+
+    def decode_metadata(cls, payload):
+        assert payload.return_value == 'null'
+        assert payload.error == 'null'
+        seen.append(payload)
+        return decode(payload)
+
+    params = {'all_status': True}
+    if fields is not None:
+        params['fields'] = fields
+    if by_id:
+        params['request_ids'] = ['alice-req', 'bob-req']
+    with monkeypatch.context() as patch:
+        patch.setattr(requests_lib.Request, 'decode',
+                      classmethod(decode_metadata))
+        response = TestClient(server.app).get('/api/status', params=params)
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+    assert len(seen) == 2
+    assert all(row['return_value'] == 'null' and row['error'] == 'null'
+               for row in response.json())
+    # Status projection must not discard the persisted result or affect reads
+    # that actually need it, including /api/get.
+    task = requests_lib.get_request('alice-req-1')
+    assert task.return_value == json.loads(result)
+    assert task.error == json.loads(error)
+
+
 def test_api_completion_scopes_to_caller(_request_authz_env, monkeypatch):
     from fastapi.testclient import TestClient
     client = TestClient(server.app)
