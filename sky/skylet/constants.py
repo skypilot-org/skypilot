@@ -604,6 +604,9 @@ CONTROLLER_K8S_MEMORY_FILE = '~/.sky/_internal_k8s_pod_memory'
 
 # Used when an managed jobs are created and
 # files are synced up to the cloud.
+# Shared jobs.bucket / serve.bucket uploads. Lets bucket IAM enforce RBAC
+# per workspace. Per-job buckets (config bucket unset) do not use this.
+FILE_MOUNTS_WORKSPACE_SUBPATH = 'workspaces/{workspace}'
 FILE_MOUNTS_WORKDIR_SUBPATH = 'job-{run_id}/workdir'
 FILE_MOUNTS_SUBPATH = 'job-{run_id}/local-file-mounts/{i}'
 FILE_MOUNTS_TMP_SUBPATH = 'job-{run_id}/tmp-files'

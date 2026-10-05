@@ -4,6 +4,7 @@ import dataclasses
 import enum
 import os
 import pathlib
+import re
 import tempfile
 import typing
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
@@ -1011,6 +1012,31 @@ def translate_local_file_mounts_to_two_hop(
     return first_hop_file_mounts
 
 
+def _shared_bucket_workspace_prefix(config_sub_path: Optional[str],
+                                    workspace_name: str) -> str:
+    """Prefix a shared-bucket object key with the active workspace.
+
+    Keys land under ``workspaces/<workspace>/`` so bucket IAM can enforce
+    RBAC. ``config_sub_path`` is the path already present on ``jobs.bucket``
+    or ``serve.bucket``.
+
+    Raises:
+        ValueError: ``workspace_name`` is not a single safe path segment.
+    """
+    if re.fullmatch(constants.WORKSPACE_NAME_VALID_REGEX,
+                    workspace_name) is None:
+        raise ValueError(
+            f'Workspace {workspace_name!r} cannot scope a shared bucket '
+            'upload. Names must match '
+            f'{constants.WORKSPACE_NAME_VALID_REGEX!r} so bucket IAM can '
+            'enforce RBAC on one prefix.')
+    workspace_prefix = constants.FILE_MOUNTS_WORKSPACE_SUBPATH.format(
+        workspace=workspace_name)
+    if not config_sub_path:
+        return workspace_prefix
+    return os.path.join(config_sub_path, workspace_prefix).strip('/')
+
+
 # (maybe translate local file mounts) and (sync up)
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                                                   task_type: str) -> None:
@@ -1029,6 +1055,9 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     between jobs, because jobs might have different resources requirements, and
     sharing storage between jobs may cause egress costs or slower transfer
     speeds.
+
+    When jobs.bucket or serve.bucket is set, objects are stored under
+    ``workspaces/<active-workspace>/`` so bucket IAM can enforce RBAC.
     """
 
     # ================================================================
@@ -1098,6 +1127,9 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             store_kwargs['storage_account_name'] = storage_account_name
         if region is not None:
             store_kwargs['region'] = region
+        # Scope the shared bucket by workspace so bucket IAM can enforce RBAC.
+        sub_path = _shared_bucket_workspace_prefix(
+            sub_path, skypilot_config.get_active_workspace())
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}

@@ -1182,3 +1182,23 @@ def test_download_and_stream_job_log_no_logs_returns_none(tmp_path):
 
     assert result is None
     assert not called
+
+
+def test_shared_bucket_prefix_scopes_workspace():
+    """Shared-bucket keys include the workspace so IAM can enforce RBAC."""
+    prefix = controller_utils._shared_bucket_workspace_prefix(None, 'team-a')
+    assert prefix == 'workspaces/team-a'
+
+    prefixed = controller_utils._shared_bucket_workspace_prefix(
+        'custom/root', 'team_b1')
+    assert prefixed == 'custom/root/workspaces/team_b1'
+
+    trimmed = controller_utils._shared_bucket_workspace_prefix(
+        'custom/root/', 'default')
+    assert trimmed == 'custom/root/workspaces/default'
+
+
+def test_shared_bucket_prefix_rejects_unsafe_workspace_name():
+    """A workspace name with a path separator cannot widen the IAM prefix."""
+    with pytest.raises(ValueError, match='cannot scope a shared bucket'):
+        controller_utils._shared_bucket_workspace_prefix(None, 'team/other')
