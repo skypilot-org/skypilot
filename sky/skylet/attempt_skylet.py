@@ -3,6 +3,7 @@
 import os
 import shlex
 import signal
+import socket
 import subprocess
 import time
 from typing import List, Optional, Tuple
@@ -166,6 +167,23 @@ def _check_version_match() -> Tuple[bool, Optional[str]]:
     return False, version
 
 
+def _port_is_free(port: int) -> bool:
+    """Whether skylet's gRPC server could listen on ``port``.
+
+    Binds with SO_REUSEADDR, as that server does: connections the previous
+    skylet left in TIME_WAIT do not hold the port, a live listener does. A
+    plain bind would report busy after every restart that had a client.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(('', port))
+            s.listen(1)
+            return True
+        except OSError:
+            return False
+
+
 def restart_skylet():
     # Kills old skylet if it is running.
     # TODO(zhwu): make the killing graceful, e.g., use a signal to tell
@@ -208,7 +226,7 @@ def restart_skylet():
         # dials exactly it, so drifting to the next free one would hand this
         # cluster's requests to whatever holds it. Fail instead.
         port = int(assigned)
-        if common_utils.find_free_port(port) != port:
+        if not _port_is_free(port):
             raise RuntimeError(
                 f'skylet port {port}, assigned to this pod, is already in use '
                 'on its node.')
