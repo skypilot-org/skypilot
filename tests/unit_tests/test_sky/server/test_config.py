@@ -11,6 +11,7 @@ import jwt as pyjwt
 import pytest
 
 from sky.server import config
+from sky.server import daemons
 from sky.skylet import constants as skylet_constants
 from sky.utils import annotations
 from sky.utils import controller_utils
@@ -331,26 +332,29 @@ def test_pinned_short_floor_counts_disabled_daemons():
 
 @mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=48)
 @mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
-def test_short_floor_rising_after_startup_keeps_sizing_working(
+def test_daemons_enabled_after_startup_leave_an_idle_short_worker(
         cpu_count, mem_size_gb):
-    """A daemon enabled by live config later must not break sizing."""
+    """Live config enables every daemon after startup on a pinned pool."""
+    pinned = config._min_pinned_short_workers()
     with mock.patch.object(controller_utils, 'is_jobs_consolidation_mode',
                            return_value=True), \
          mock.patch.object(controller_utils, '_is_consolidation_mode',
                            return_value=True), \
-         mock.patch('sky.jobs.utils.is_consolidation_mode', return_value=True):
-        floor = config._min_pinned_short_workers()
-        with _explicit_counts(short=floor):
-            config.validate_explicit_worker_counts()
-            with mock.patch.object(config,
-                                   '_get_min_short_workers',
-                                   return_value=floor + 1):
-                # The derived controller count re-runs compute_server_config().
-                annotations.clear_request_level_cache()
-                c = config.compute_server_config(deploy=True, quiet=True)
-                controllers = controller_utils.get_number_of_jobs_controllers()
+         mock.patch('sky.jobs.utils.is_consolidation_mode', return_value=True), \
+         _explicit_counts(short=pinned):
+        config.validate_explicit_worker_counts()
+        with mock.patch.object(config,
+                               '_get_min_short_workers',
+                               return_value=config._MIN_IDLE_SHORT_WORKERS +
+                               len(daemons.INTERNAL_REQUEST_DAEMONS)):
+            # The derived controller count re-runs compute_server_config().
+            annotations.clear_request_level_cache()
+            c = config.compute_server_config(deploy=True, quiet=True)
+            controllers = controller_utils.get_number_of_jobs_controllers()
     annotations.clear_request_level_cache()
-    assert c.short_worker_config.garanteed_parallelism == floor
+    short = c.short_worker_config.garanteed_parallelism
+    assert short == pinned
+    assert short - len(daemons.INTERNAL_REQUEST_DAEMONS) >= 1
     assert controllers >= 1
 
 
