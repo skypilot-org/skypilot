@@ -377,8 +377,8 @@ Slurm
 
 .. note::
 
-    Slurm support is under active development. We'd love to hear from you —
-    please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
+    Have questions or feedback on running SkyPilot with Slurm? We'd love to
+    hear from you — please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
 
 SkyPilot can run workloads on Slurm clusters. The only requirement is SSH access to a Slurm login node.
 
