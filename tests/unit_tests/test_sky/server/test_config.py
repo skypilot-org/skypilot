@@ -308,7 +308,7 @@ def test_invalid_explicit_long_workers_rejected(value, message):
 
 def test_explicit_short_workers_below_daemon_floor_rejected_at_startup():
     """The short pool may not be pinned below the internal daemons' need."""
-    floor = config._get_min_short_workers()
+    floor = config._min_pinned_short_workers()
     with _explicit_counts(short=floor - 1), pytest.raises(ValueError,
                                                           match='at least'):
         config.validate_explicit_worker_counts()
@@ -316,6 +316,17 @@ def test_explicit_short_workers_below_daemon_floor_rejected_at_startup():
         config.validate_explicit_worker_counts()
         c = config.compute_server_config(deploy=True, quiet=True)
     assert c.short_worker_config.garanteed_parallelism == floor
+
+
+def test_pinned_short_floor_counts_disabled_daemons():
+    """A daemon disabled at startup can be enabled later by live config."""
+    all_daemons = config._min_pinned_short_workers()
+    with mock.patch.object(config,
+                           '_get_min_short_workers',
+                           return_value=all_daemons - 1), \
+         _explicit_counts(short=all_daemons - 1), \
+         pytest.raises(ValueError, match='at least'):
+        config.validate_explicit_worker_counts()
 
 
 @mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=48)
@@ -328,8 +339,7 @@ def test_short_floor_rising_after_startup_keeps_sizing_working(
          mock.patch.object(controller_utils, '_is_consolidation_mode',
                            return_value=True), \
          mock.patch('sky.jobs.utils.is_consolidation_mode', return_value=True):
-        annotations.clear_request_level_cache()
-        floor = config._get_min_short_workers()
+        floor = config._min_pinned_short_workers()
         with _explicit_counts(short=floor):
             config.validate_explicit_worker_counts()
             with mock.patch.object(config,
@@ -356,6 +366,7 @@ def test_short_floor_computed_only_when_needed(cpu_count, mem_size_gb):
         config.compute_server_config(deploy=True, quiet=True)
         assert floor.call_count == 1
         with _explicit_counts(short=40):
+            config.validate_explicit_worker_counts()
             config.compute_server_config(deploy=True, quiet=True)
         assert floor.call_count == 1
 

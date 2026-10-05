@@ -267,11 +267,8 @@ def explicit_process_count(env_var: str,
 def validate_explicit_worker_counts() -> None:
     """Checks the explicit long and short pool sizes against their bounds.
 
-    Called once at server startup. compute_server_config() only parses the
-    values: it also runs on request paths through the derived controller and
-    service counts, and the short-pool floor depends on which internal daemons
-    the live config enables, so checking the floor there could fail a running
-    server after a config change.
+    Called once at server startup; compute_server_config() only parses the
+    values, since it also runs on request paths.
 
     Raises:
         ValueError: if a value is not an integer or is below its floor.
@@ -281,12 +278,22 @@ def validate_explicit_worker_counts() -> None:
     short = explicit_process_count(constants.ENV_VAR_SERVER_SHORT_WORKERS,
                                    minimum=1)
     if short is not None:
-        floor = _get_min_short_workers()
+        floor = _min_pinned_short_workers()
         if short < floor:
             raise ValueError(
                 f'{constants.ENV_VAR_SERVER_SHORT_WORKERS}={short} must be at '
-                f'least {floor}: one idle worker plus one per enabled internal '
-                'request daemon.')
+                f'least {floor}: one idle worker plus one per internal request '
+                'daemon, enabled or not.')
+
+
+def _min_pinned_short_workers() -> int:
+    """Floor for an explicit short pool: one idle worker plus every daemon.
+
+    Counts daemons whether or not they are enabled now. A uvicorn worker
+    restart schedules any daemon the live config has enabled since startup,
+    and a pinned pool does not grow to make room for it.
+    """
+    return _MIN_IDLE_SHORT_WORKERS + len(daemons.INTERNAL_REQUEST_DAEMONS)
 
 
 def _sizing_source(explicit: Optional[int], env_var: str) -> str:
