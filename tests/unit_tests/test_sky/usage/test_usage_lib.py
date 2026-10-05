@@ -252,8 +252,9 @@ def _fake_node(acc_type, count):
 
 
 def _fake_nodes_info(*nodes):
-    return types.SimpleNamespace(
-        node_info_dict={f'n{i}': n for i, n in enumerate(nodes)})
+    return types.SimpleNamespace(node_info_dict={
+        f'n{i}': n for i, n in enumerate(nodes)
+    })
 
 
 def _fake_slurm_node(node, gres, partition='batch'):
@@ -431,6 +432,136 @@ def test_recorded_rows_skip_the_fetch(monkeypatch, capacity_store):
     assert fetched == ['ctx-b', 'ctx-a']
 
 
+def test_unreadable_fleet_is_unknown_not_zero(monkeypatch, capacity_store):
+    """Every infra failing reports unknown, not a fleet of zero GPUs."""
+
+    def unreachable(context=None):
+        raise RuntimeError('kube-apiserver unreachable')
+
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils._get_kubernetes_node_info', unreachable)
+
+    assert usage_lib._collect_gpu_fleet(['ctx-a', 'ctx-b'], []) is None
+
+    # A server with no node inventory configured at all has a real,
+    # knowable total of zero, which is reported as such.
+    assert usage_lib._collect_gpu_fleet([], []) == {}
+
+
+def _send_heartbeat_with(monkeypatch, k8s, ssh, slurm, node_info):
+    """Drive send_server_heartbeat with stubbed discovery; return the payload.
+
+    Each of ``k8s``/``ssh``/``slurm`` is a list of names, or an exception
+    instance to make that kind's discovery fail.
+    """
+    _reset_module_state()
+
+    def discovery(values):
+
+        def _lookup(silent):
+            if isinstance(values, Exception):
+                raise values
+            return list(values)
+
+        return _lookup
+
+    monkeypatch.setattr(skypilot_config,
+                        'get_nested',
+                        lambda keys, default_value=None, **kw: default_value)
+    monkeypatch.setattr(sky_clouds.Kubernetes, 'existing_allowed_contexts',
+                        discovery(k8s))
+    monkeypatch.setattr(sky_clouds.SSH, 'existing_allowed_contexts',
+                        discovery(ssh))
+    monkeypatch.setattr(sky_clouds.Slurm, 'existing_allowed_clusters',
+                        discovery(slurm))
+    monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',
+                        lambda *args: [])
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils._get_kubernetes_node_info', node_info)
+    sent = []
+    monkeypatch.setattr(
+        usage_lib.requests, 'post', lambda *args, **kwargs: sent.append(kwargs[
+            'data']) or types.SimpleNamespace(status_code=204, text=''))
+    usage_lib.send_server_heartbeat()
+    return json.loads(json.loads(sent[0])['streams'][0]['values'][0][1])
+
+
+def test_discovery_failure_is_unknown_not_zero(monkeypatch, capacity_store):
+    """Failing to enumerate infrastructure is not a fleet of zero GPUs.
+
+    This is the layer above the inventory reads: if the kubeconfig cannot
+    be read at all, there are no contexts to query, and summing nothing
+    must not come out as a measured zero.
+    """
+    boom = RuntimeError('kubeconfig unreadable')
+    payload = _send_heartbeat_with(monkeypatch,
+                                   k8s=boom,
+                                   ssh=boom,
+                                   slurm=boom,
+                                   node_info=lambda context: None)
+    assert payload['total_gpus'] is None
+    assert payload['gpus_by_type'] is None
+    # Every infra lookup failed, so none is reported; clouds are enumerated
+    # from the state DB and are unaffected.
+    assert payload['infra_count'] == {'clouds': 0}
+
+
+def test_discovery_failure_with_no_other_gpus_is_unknown(
+        monkeypatch, capacity_store):
+    """One kind failing and the rest empty is unknown, not zero."""
+    payload = _send_heartbeat_with(monkeypatch,
+                                   k8s=RuntimeError('unreadable'),
+                                   ssh=[],
+                                   slurm=[],
+                                   node_info=lambda context: None)
+    assert payload['total_gpus'] is None
+    assert payload['infra_count'] == {
+        'ssh_node_pools': 0,
+        'slurm': 0,
+        'clouds': 0
+    }
+
+
+def test_discovery_failure_still_reports_readable_gpus(monkeypatch,
+                                                       capacity_store):
+    """A kind that failed drops out; kinds that enumerated still count."""
+    payload = _send_heartbeat_with(
+        monkeypatch,
+        k8s=['ctx-a'],
+        ssh=RuntimeError('ssh node pools unreadable'),
+        slurm=[],
+        node_info=lambda context: _fake_nodes_info(_fake_node('H100', 8)))
+    assert payload['total_gpus'] == 8
+    assert payload['gpus_by_type'] == {'H100': 8}
+    assert payload['infra_count'] == {'kubernetes': 1, 'slurm': 0, 'clouds': 0}
+
+
+def test_nothing_configured_is_a_real_zero(monkeypatch, capacity_store):
+    """Every kind enumerated and found nothing: that is a measured zero."""
+    payload = _send_heartbeat_with(monkeypatch,
+                                   k8s=[],
+                                   ssh=[],
+                                   slurm=[],
+                                   node_info=lambda context: None)
+    assert payload['total_gpus'] == 0
+    assert payload['gpus_by_type'] == {}
+
+
+def test_partial_fleet_failure_reports_what_could_be_read(
+        monkeypatch, capacity_store):
+    """One unreachable infra drops out; the readable ones still count."""
+
+    def flaky(context=None):
+        if context == 'ctx-b':
+            raise RuntimeError('unreachable')
+        return _fake_nodes_info(_fake_node('H100', 8))
+
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils._get_kubernetes_node_info', flaky)
+
+    assert usage_lib._collect_gpu_fleet(['ctx-a', 'ctx-b'], []) == {'H100': 8}
+
+
 def test_record_gpu_capacity_leaves_fresh_rows_alone(capacity_store):
     """A busy node-info reader must not upsert on every call."""
     counts = {'H100': 8}
@@ -543,9 +674,10 @@ def test_plugins_field_is_provider_gated():
     try:
         properties = usage_lib.messages.server_heartbeat.get_properties()
         assert 'plugins' not in properties
-        # The GPU and infra fields are present regardless.
-        assert properties['total_gpus'] == 0
-        assert properties['gpus_by_type'] == {}
+        # The GPU and infra fields are present regardless, and the fleet
+        # counts read as unknown until the fleet is actually collected.
+        assert properties['total_gpus'] is None
+        assert properties['gpus_by_type'] is None
         assert properties['infra_count'] == {}
 
         usage_lib.ServerHeartbeatMessage.register_provider(
