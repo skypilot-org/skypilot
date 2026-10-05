@@ -19,6 +19,7 @@ from sky.provision import constants
 from sky.provision import docker_utils
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
+from sky.provision.kubernetes import host_network_ports
 from sky.provision.kubernetes import host_network_probe
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
@@ -2433,6 +2434,52 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             'This is likely a resource leak. '
             'Use "sky down" to terminate the cluster.')
 
+    # hostNetwork port blocks, assigned per pod BEFORE the parallel dispatch
+    # below. Head and workers are created concurrently, so a worker cannot read
+    # the head's ports off a live head pod that may not exist yet -- but it
+    # needs the head's GCS port to join. So the server resolves every pod's
+    # block up front and hands the head's GCS port to all of them.
+    #
+    # Per pod rather than per cluster: podAntiAffinity already keeps
+    # same-cluster pods off one node, so sharing a block buys nothing, while a
+    # shared block means one pod that cannot schedule can never be given a
+    # different one without moving a healthy head.
+    host_network_port_blocks: Dict[str, Dict[str, int]] = {}
+    head_gcs_port: Optional[int] = None
+    if pod_spec.get('spec', {}).get('hostNetwork', False):
+        head_name = f'{cluster_name_on_cloud}-head'
+        # Only the head needs a ConfigMap fallback. A cluster created before
+        # this change declares no ports, so its head's block is only knowable
+        # from what the old probe published -- and a new worker that guesses
+        # instead would be handed a GCS port the head is not listening on.
+        # Workers need no fallback: an existing one is not recreated, and a
+        # new one is new.
+        #
+        # This is reached by RECOVERY, not by scaling: `sky launch --num-nodes`
+        # against an existing cluster is refused before provisioning, by
+        # check_resources_fit_cluster ("specify a new cluster name, or down
+        # the existing cluster first"). The live path is a pod lost to node
+        # failure or manual termination, where a launch at the SAME node count
+        # recreates it against a Running head -- the case the comment at the
+        # parallel dispatch below describes. Do not read "you cannot scale a
+        # cluster" as "a worker is never created next to an existing head".
+        head_pod = running_pods.get(head_name)
+        head_block = host_network_ports.resolve_block(
+            head_pod,
+            # Only a live pre-change head can be served by the ConfigMap, so
+            # there is nothing to read when there is no head pod -- and every
+            # post-change launch would otherwise pay for the lookup.
+            _head_block_from_configmap(cluster_name_on_cloud, namespace,
+                                       context, head_name)
+            if head_pod is not None else None,
+            context)
+        host_network_port_blocks[head_name] = head_block
+        head_gcs_port = head_block['gcs']
+        for i in range(1, config.count):
+            name = f'{cluster_name_on_cloud}-worker{i}'
+            host_network_port_blocks[name] = host_network_ports.resolve_block(
+                running_pods.get(name), configmap_ports=None, context=context)
+
     # Add nvidia runtime class if it exists
     nvidia_runtime_exists = False
     try:
@@ -2492,6 +2539,16 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 return
             pod_spec_copy['metadata']['name'] = pod_name
             pod_spec_copy['metadata']['labels']['component'] = pod_name
+
+        if host_network_port_blocks:
+            assert head_gcs_port is not None
+            # Read the name back off the spec rather than tracking it in a
+            # second variable: only the worker branch above binds pod_name,
+            # while both branches set metadata.name.
+            this_pod = pod_spec_copy['metadata']['name']
+            host_network_ports.apply_to_pod_spec(
+                pod_spec_copy, host_network_port_blocks[this_pod],
+                head_gcs_port, context)
 
         # Inject cache volume + volumeMount for the Docker sidecar container.
         if docker_config:
@@ -3054,6 +3111,41 @@ _HOST_NETWORK_SSHD_WAIT_TIMEOUT_S = 60
 _HOST_NETWORK_SSHD_WAIT_INTERVAL_S = 2
 
 
+def _head_block_from_configmap(cluster_name_on_cloud: str, namespace: str,
+                               context: Optional[str],
+                               head_name: str) -> Optional[Dict[str, int]]:
+    """The head's port block as the pre-change probe published it.
+
+    Kept for one release so a cluster created before ports moved into the pod
+    spec can still be added to. Absent ConfigMap, or a cluster created after
+    the change, returns None and the caller allocates.
+    """
+    name = host_network_probe.ray_ports_configmap_name(cluster_name_on_cloud)
+    try:
+        cm = kubernetes.core_api(context).read_namespaced_config_map(
+            name=name, namespace=namespace)
+    except kubernetes.api_exception() as e:
+        if e.status != 404:
+            raise
+        return None
+    data = cm.data or {}
+    block: Dict[str, int] = {}
+    for port_name in host_network_probe.HEAD_PORT_NAMES:
+        key = (f'{host_network_probe.SSHD_KEY_PREFIX}{head_name}'
+               if port_name == 'sshd' else port_name)
+        value = data.get(key)
+        if value is None:
+            return None
+        try:
+            block[port_name] = int(value)
+        except ValueError:
+            logger.warning(f'ConfigMap {namespace}/{name} has a non-integer '
+                           f'value for {key!r}: {value!r}. Ignoring it and '
+                           'allocating a fresh host port block.')
+            return None
+    return block
+
+
 def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
                                   context: Optional[str],
                                   expected_pods: List[str]) -> Dict[str, int]:
@@ -3126,16 +3218,29 @@ def get_cluster_info(
         port = kubernetes_utils.get_head_ssh_port(cluster_name_on_cloud,
                                                   namespace, context)
 
-    # Each hostNetwork pod's sshd binds a probed port (host:22 is the
-    # K8s node's own sshd). The SSH config writer needs that port per
-    # pod, so wait for every hostNetwork pod's entry to land in the
-    # ConfigMap before caching the result.
-    host_network_pods = [
-        name for name, pod in running_pods.items() if pod.spec.host_network
-    ]
-    pod_sshd_ports = _read_host_network_sshd_ports(cluster_name_on_cloud,
-                                                   namespace, context,
-                                                   host_network_pods)
+    # A hostNetwork pod's sshd is not on 22 -- the K8s node's own sshd owns
+    # that -- so the SSH config writer needs the real port per pod. Read it
+    # off the pod, which declares it; a pod created before ports moved into
+    # the spec declares nothing, so fall back to the ConfigMap its probe
+    # published. Same order as the assignment side -- pod first, ConfigMap
+    # second -- but per pod rather than head-only: the ConfigMap carries
+    # sshd_<pod> for every pod, and SSH to a pre-existing *worker* needs its
+    # own entry. (The assignment side only ever needs the head's block, which
+    # is the only full block the ConfigMap holds.)
+    pod_sshd_ports: Dict[str, int] = {}
+    legacy_pods = []
+    for name, pod in running_pods.items():
+        if not pod.spec.host_network:
+            continue
+        declared = host_network_ports.ports_from_pod(pod, context)
+        if declared is not None:
+            pod_sshd_ports[name] = declared['sshd']
+        else:
+            legacy_pods.append(name)
+    if legacy_pods:
+        pod_sshd_ports.update(
+            _read_host_network_sshd_ports(cluster_name_on_cloud, namespace,
+                                          context, legacy_pods))
 
     head_pod_name = None
     cpu_request = None

@@ -84,7 +84,10 @@ _OOM_FAILURE_SIGNATURES = ('oomkilled', 'out of memory', 'out-of-memory')
 
 def _is_oom_failure(exception: Exception) -> bool:
     """Whether `exception` indicates an out-of-memory pod termination."""
-    message = common_utils.format_exception(exception).lower()
+    message = common_utils.format_exception(exception)
+    # The container's own output follows the marker; it is the workload's
+    # text, not a termination reason.
+    message = message.split(constants.CONTAINER_OUTPUT_MARKER, 1)[0].lower()
     return any(sig in message for sig in _OOM_FAILURE_SIGNATURES)
 
 
