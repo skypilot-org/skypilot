@@ -4410,7 +4410,8 @@ async def set_recovered_async(job_id: int,
                               task_id: int,
                               recovered_time: float,
                               callback_func: AsyncCallbackType,
-                              count_recovery: bool = True):
+                              count_recovery: bool = True,
+                              reason: Optional[str] = None):
     """Set the task to recovered.
 
     recovery_count only counts genuine failure recoveries: the increment is
@@ -4420,10 +4421,13 @@ async def set_recovered_async(job_id: int,
     without inflating the user-visible count. Callers pass
     count_recovery=False when completing a RECOVERING status that never was
     a recovery episode at all (e.g. a kept-STARTING resume whose relaunch
-    retry moved the row to RECOVERING).
+    retry moved the row to RECOVERING, or an emergency recovery that
+    re-attached to a job that kept running on its cluster).
+
+    reason overrides the RUNNING event's text ('Job has recovered').
     """
     await add_job_event_async(job_id, task_id, ManagedJobStatus.RUNNING,
-                              'Job has recovered')
+                              reason or 'Job has recovered')
     if count_recovery:
         count_expr = spot_table.c.recovery_count + sqlalchemy.case(
             (sqlalchemy.or_(spot_table.c.recovering_from_failure.is_(None),
@@ -4467,11 +4471,15 @@ async def set_emergency_recovering_async(job_id: int,
     """Set the task to RECOVERING due to an unexpected controller error.
 
     Used when the controller hits an unexpected internal error and will
-    retry managing the job in place (the retry tears down and relaunches
-    the cluster, like any other forced recovery). The visible status is the
-    normal RECOVERING; the emergency cause is recorded on the RECOVERING
-    job event. The episode's failure credit (spot.recovering_from_failure)
-    is set to FALSE only when no episode is already open: an emergency is a
+    retry managing the job in place. The visible status is the normal
+    RECOVERING; the emergency cause is recorded on the RECOVERING job event.
+    What the retry does with the cluster depends on the task: a task that was
+    RUNNING keeps its cluster, and the retry re-attaches to the job and
+    restores RUNNING when the job answers (JobController._run_one_task,
+    get_latest_recovery_source_async); any other task is torn down and
+    relaunched like any other forced recovery. The episode's failure credit
+    (spot.recovering_from_failure) is set to FALSE only when no episode is
+    already open: an emergency is a
     system-driven interruption, so it neither grants failure credit nor
     erases the credit of an in-flight failure recovery it interrupts — that
     recovery must still count toward recovery_count when it eventually
@@ -4564,6 +4572,32 @@ async def set_emergency_recovering_async(job_id: int,
             logger.warning('Emergency recovery callback failed '
                            f'(continuing): {common_utils.format_exception(e)}')
     return True
+
+
+@db_retries.retry_async
+async def get_latest_recovery_source_async(
+        job_id: int, task_id: int) -> Optional[RecoverySource]:
+    """Return the recovery_source of the task's most recent RECOVERING event.
+
+    Tells a resuming controller why the task's open RECOVERING episode was
+    opened: EMERGENCY means the previous attempt hit an unexpected error
+    (and, for a task that was RUNNING, kept its cluster so the retry can
+    re-attach); FAILURE and RESTART mean a relaunch was in flight. None when
+    the task has no RECOVERING event, or its latest one predates the column
+    (treated as FAILURE by consumers).
+    """
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        value = await session.scalar(
+            sqlalchemy.select(job_events_table.c.recovery_source).where(
+                job_events_table.c.spot_job_id == job_id,
+                job_events_table.c.task_id == task_id,
+                job_events_table.c.new_status ==
+                ManagedJobStatus.RECOVERING.value,
+            ).order_by(job_events_table.c.id.desc()).limit(1))
+    if value is None:
+        return None
+    return RecoverySource(value)
 
 
 @db_retries.retry_async

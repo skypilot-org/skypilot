@@ -117,11 +117,24 @@ EMERGENCY_RECOVERY_MAX_ATTEMPTS = 10
 # discards the job from `starting` (JobController._release_launch_slot) to
 # cover the cases it does not — an error in pre/post-launch bookkeeping, or
 # a pool job (which never enters scheduled_launch's slot accounting). The
-# retry re-adds it when it actually relaunches. (The job's own cluster may
-# be reaped by the 10-minute autodown backstop during a long backoff; that
-# is fine — the retry always relaunches from scratch.)
+# retry re-adds it when it actually relaunches.
 EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS = 60
 EMERGENCY_RECOVERY_BACKOFF_CAP_SECONDS = 30 * 60
+# A task that was RUNNING keeps its cluster through the backoff (the retry
+# re-attaches instead of relaunching), and a running job keeps that cluster's
+# idle autodown from firing. If the job finishes during a long backoff, its
+# cluster is autodowned ten minutes later and the retry, finding no cluster,
+# relaunches a job that already completed; managed jobs are idempotent, and
+# that is accepted so that the ladder above stays long enough for a
+# persistent error to be remediated by hand before the budget runs out.
+# The emergency bookkeeping (budget, event, launching slot, schedule state)
+# needs the database, and a database outage is the most likely reason to be
+# there in the first place. Keep retrying it for this long before failing
+# the job: while it retries, the job keeps running on its cluster, so a
+# database outage shorter than this costs the job one attempt and nothing
+# else. A longer outage ends the job FAILED_CONTROLLER with full cleanup,
+# since nothing can be recorded without the database.
+EMERGENCY_BOOKKEEPING_DEADLINE_SECONDS = 30 * 60
 # If the previous emergency recovery attempt is older than this window, the
 # attempt counter restarts at 1: a long-running job that hits a rare
 # incident every few days should recover every time, while a tight crash

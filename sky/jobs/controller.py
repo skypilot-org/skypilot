@@ -184,13 +184,6 @@ def _build_task_specs(
     return base_specs
 
 
-# How many times to retry the emergency-recovery bookkeeping itself (each
-# individual DB call inside it additionally retries transient errors via
-# sky.utils.db.retries). Only when both layers are exhausted do we fall
-# back to failing the job.
-_EMERGENCY_BOOKKEEPING_ROUNDS = 5
-
-
 def _runtime_infra(
     handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle']
 ) -> Dict[str, Optional[str]]:
@@ -865,6 +858,7 @@ class JobController:
         # If resuming from a controller failure, check the previous state
         # and determine if we need to force recovery.
         force_transit_to_recovering = False
+        restore_running_on_reattach = False
         if is_resume:
             prev_status = await (
                 managed_job_state.get_job_status_with_task_id_async(
@@ -883,14 +877,36 @@ class JobController:
                     logger.info(f'Task {task_id} was being cancelled, '
                                 're-raising cancellation')
                     raise asyncio.CancelledError()
-            if prev_status != managed_job_state.ManagedJobStatus.RUNNING:
-                # Force recovery (cleanup + relaunch). This covers both an
-                # interrupted in-flight recovery and an emergency retry: an
-                # emergency always relaunches the cluster, even if the task
-                # was RUNNING when the error hit — the error may be caused
-                # by the cluster's own state, so re-attaching could just
-                # keep hitting it. Relaunching is always safe (managed jobs
-                # are idempotent); it only costs time.
+            if prev_status == managed_job_state.ManagedJobStatus.RECOVERING:
+                # An emergency recovery of a RUNNING task marks it RECOVERING
+                # but keeps its cluster (_emergency_bookkeeping_latest_task).
+                # When that is the open episode and the cluster record is
+                # still there, re-attach instead of relaunching: the monitor
+                # loop restores RUNNING once the job answers, and its own
+                # checks relaunch only if the cluster fails them. Any other
+                # RECOVERING resume (a FAILURE or RESTART episode, or an
+                # emergency that tore the cluster down) is a relaunch that
+                # was in flight; force it.
+                latest_source = await (
+                    managed_job_state.get_latest_recovery_source_async(
+                        self._job_id, task_id))
+                if (latest_source == managed_job_state.RecoverySource.EMERGENCY
+                        and await asyncio.to_thread(
+                            global_user_state.get_handle_from_cluster_name,
+                            cluster_name) is not None):
+                    logger.info(f'Task {task_id} is RECOVERING from an '
+                                'emergency that kept its cluster; '
+                                're-attaching to the job.')
+                    restore_running_on_reattach = True
+            if (prev_status != managed_job_state.ManagedJobStatus.RUNNING and
+                    not restore_running_on_reattach):
+                # Force recovery (cleanup + relaunch): the task was mid-launch
+                # or mid-recovery when the previous attempt stopped (a
+                # controller restart, or a relaunching emergency retry), so
+                # whatever is on the cluster may be half-submitted and
+                # cannot be trusted. A RUNNING task is not forced: the
+                # monitor loop re-attaches, and its own job and cluster
+                # checks decide whether a relaunch is needed.
                 force_transit_to_recovering = True
 
             await self._strategy_executor.on_resume(cluster_name)
@@ -920,6 +936,7 @@ class JobController:
             callback_func=callback_func,
             cleanup_cluster_on_success=True,
             force_transit_to_recovering=force_transit_to_recovering,
+            restore_running_on_reattach=restore_running_on_reattach,
         )
 
     async def _run_batch_coordinator_task(
@@ -1043,6 +1060,7 @@ class JobController:
         cleanup_cluster_on_success: bool = True,
         force_transit_to_recovering: bool = False,
         on_recovery: Optional[typing.Callable[[], typing.Coroutine]] = None,
+        restore_running_on_reattach: bool = False,
     ) -> bool:
         """Monitor a single task until completion with recovery support.
 
@@ -1065,6 +1083,9 @@ class JobController:
                 iteration (used when resuming from controller failure).
             on_recovery: Optional async callback called after recovery.
                 Used by JobGroups to re-setup networking.
+            restore_running_on_reattach: The task is RECOVERING from an
+                emergency that kept its cluster; restore it to RUNNING as
+                soon as its job answers a status poll (see _run_one_task).
 
         Returns:
             True if the task succeeded, False otherwise.
@@ -1088,6 +1109,7 @@ class JobController:
                 force_transit_to_recovering=force_transit_to_recovering,
                 on_recovery=on_recovery,
                 status_logger=status_logger,
+                restore_running_on_reattach=restore_running_on_reattach,
             )
         finally:
             status_logger.flush()
@@ -1104,6 +1126,7 @@ class JobController:
         cleanup_cluster_on_success: bool = True,
         force_transit_to_recovering: bool = False,
         on_recovery: Optional[typing.Callable[[], typing.Coroutine]] = None,
+        restore_running_on_reattach: bool = False,
     ) -> bool:
         """Body of the monitoring loop; see _monitor_one_task for the contract.
 
@@ -1204,6 +1227,23 @@ class JobController:
                         f'Exception: {common_utils.format_exception(fetch_e)}\n'
                         f'Traceback: {traceback.format_exc()}')
                     # Fall through to recovery logic below
+
+            if restore_running_on_reattach and job_status is not None:
+                # The emergency left the task RECOVERING while its job kept
+                # running on its cluster, and the job just answered: close
+                # the episode (no recovery count: nothing was recovered)
+                # before the status is acted on below. A job that did not
+                # answer stays RECOVERING, and the recovery path below owns
+                # it.
+                await managed_job_state.set_recovered_async(
+                    self._job_id,
+                    task_id,
+                    recovered_time=time.time(),
+                    callback_func=callback_func,
+                    count_recovery=False,
+                    reason=('Job has recovered: the controller re-attached '
+                            'to the job, which kept running on its cluster'))
+                restore_running_on_reattach = False
 
             if not force_transit_to_recovering:
                 # While the job is running, surface external links harvested
@@ -1422,14 +1462,30 @@ class JobController:
                 # Fetch and log cluster events to provide context on why the
                 # cluster entered INIT/non-UP state.
                 try:
-                    events = await asyncio.to_thread(
-                        global_user_state.get_cluster_events,
-                        cluster_name=cluster_name,
-                        cluster_hash=None,
-                        event_type=global_user_state.ClusterEventType.
-                        STATUS_CHANGE,
-                        include_timestamps=True,
-                        limit=5)
+                    try:
+                        events = await asyncio.to_thread(
+                            global_user_state.get_cluster_events,
+                            cluster_name=cluster_name,
+                            cluster_hash=None,
+                            event_type=global_user_state.ClusterEventType.
+                            STATUS_CHANGE,
+                            include_timestamps=True,
+                            limit=5)
+                    except ValueError:
+                        # The cluster record is gone (torn down, autodowned
+                        # or removed by a status refresh), so the name no
+                        # longer resolves to a cluster hash. The events
+                        # outlive the record; read them by name, newest
+                        # first, and keep the oldest-first order the log
+                        # and the reason below expect.
+                        events = list(
+                            reversed(await asyncio.to_thread(
+                                global_user_state.get_cluster_events_by_name,
+                                cluster_name, [
+                                    global_user_state.ClusterEventType.
+                                    STATUS_CHANGE
+                                ],
+                                limit=5)))
                     if events:
                         event_strs = []
                         for event in events:
@@ -1702,6 +1758,9 @@ class JobController:
             # failed or the job status is failed to be fetched.
             logger.info(f'Starting recovery for task {task_id}, '
                         f'it is currently {job_status}')
+            # A re-attach that never saw the job answer ends here: the
+            # recovery below closes the RECOVERING episode itself.
+            restore_running_on_reattach = False
             # How to announce this recovery. The forced first post-resume
             # iteration derives it from the task's current status:
             # - RECOVERING: a recovery episode is already open (an
@@ -2918,9 +2977,10 @@ class JobController:
         """Decide how to handle an unexpected error in the job loop.
 
         Runs the emergency-recovery bookkeeping with an outer retry layer
-        (each DB call inside additionally retries transient errors). Only
-        when every round fails do we give up and fail the job — we never
-        trade a known-bad state for an unknown one.
+        (each DB call inside additionally retries transient errors) for up
+        to EMERGENCY_BOOKKEEPING_DEADLINE_SECONDS. Only when the deadline
+        passes do we give up and fail the job — we never trade a known-bad
+        state for an unknown one.
 
         Returns None to retry managing the job in place (emergency
         recovery). Returns a failure note (appended to the failure_reason)
@@ -2931,22 +2991,44 @@ class JobController:
         """
         # Per escaped error, reset the memoized episode state: the attempt
         # number is computed once and reused across the outer-retry rounds
-        # (so a re-run cannot double-spend the budget), and the RECOVERING
+        # (so a re-run cannot double-spend the budget), and the emergency
         # event is emitted once (so a re-run cannot append a duplicate).
         self._emergency_attempt: Optional[int] = None
         self._emergency_event_emitted = False
         backoff = common_utils.Backoff(initial_backoff=10, max_backoff_factor=5)
-        for round_idx in range(_EMERGENCY_BOOKKEEPING_ROUNDS):
+        # The bookkeeping needs the database. A database outage is the
+        # most likely reason to land here in the first place, so keep
+        # retrying it for a long time: while it retries, the job keeps
+        # running on its cluster. Only once the deadline passes is the job
+        # failed, since nothing can be recorded without the database.
+        deadline = (time.monotonic() +
+                    jobs_constants.EMERGENCY_BOOKKEEPING_DEADLINE_SECONDS)
+        round_idx = 0
+        while True:
+            round_idx += 1
             try:
                 return await self._attempt_emergency_recovery(error)
             except asyncio.CancelledError:  # pylint: disable=try-except-raise
                 raise
             except Exception as bookkeeping_error:  # pylint: disable=broad-except
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    deadline_minutes = (
+                        jobs_constants.EMERGENCY_BOOKKEEPING_DEADLINE_SECONDS /
+                        60)
+                    logger.error(
+                        'Emergency recovery bookkeeping failed for '
+                        f'{round_idx} rounds over {deadline_minutes:.0f} '
+                        'minutes; giving up: '
+                        f'{common_utils.format_exception(bookkeeping_error)}')
+                    break
+                delay = min(backoff.current_backoff(), remaining)
                 logger.warning(
                     'Emergency recovery bookkeeping failed (round '
-                    f'{round_idx + 1}/{_EMERGENCY_BOOKKEEPING_ROUNDS}): '
+                    f'{round_idx}; retrying in {delay:.0f}s, giving up in '
+                    f'{remaining / 60:.0f} minutes): '
                     f'{common_utils.format_exception(bookkeeping_error)}')
-                await asyncio.sleep(backoff.current_backoff())
+                await asyncio.sleep(delay)
         return ('(Also, emergency recovery was attempted but its '
                 'bookkeeping failed repeatedly.)')
 
@@ -3051,10 +3133,21 @@ class JobController:
         """Single-job / chain-pipeline pre-retry bookkeeping.
 
         Exactly one task can be mid-flight in these shapes, so operate on
-        the latest task: mark it RECOVERING (recovery_source=EMERGENCY) and
-        tear its cluster down early (the retry force-relaunches it, so it
-        is doomed anyway — do not leave it running through a backoff of up
-        to 30 minutes).
+        the latest task, by its status:
+
+        - RUNNING: mark it RECOVERING (recovery_source=EMERGENCY) but leave
+          its cluster alone. The error is evidence about the controller,
+          not about the workload. The retry re-attaches to the job
+          (_run_one_task sees the EMERGENCY-opened episode and the cluster
+          record), and the monitor loop restores RUNNING once the job
+          answers; it relaunches only when the cluster fails its checks.
+        - STARTING / RECOVERING (and any other non-terminal status): mark
+          it RECOVERING (recovery_source=EMERGENCY) and tear its cluster
+          down early. The task never reached RUNNING, or was already
+          relaunching, so whatever is on the cluster cannot be trusted and
+          the retry force-relaunches it; do not leave the doomed cluster
+          running through a backoff of up to 30 minutes.
+        - PENDING: untouched; the retry relaunches it fresh.
 
         Returns True to retry the job loop immediately (no backoff): the
         task is CANCELLING or terminal, so the resume logic owns completion.
@@ -3079,6 +3172,23 @@ class JobController:
             logger.info(f'Job {self._job_id} task {task_id} is PENDING; '
                         'relaunching fresh after the emergency backoff.')
         else:
+            # The job of a RUNNING task keeps running on its cluster. Keep
+            # the cluster: tearing it down here would restart a healthy
+            # workload for every controller-side error (a database outage,
+            # a bug in the monitor loop), costing the job its progress since
+            # its last checkpoint and its GPUs, and the relaunch can preempt
+            # other jobs. The retry re-attaches instead (see _run_one_task)
+            # and restores RUNNING once the job answers.
+            #
+            # The last attempt of an episode relaunches instead: an error
+            # that recurs on every re-attach can be tied to the cluster or
+            # handle the controller keeps re-reading, and one relaunch is
+            # the only thing that can clear it before the budget runs out
+            # and the job fails.
+            keep_cluster = (cur_status
+                            in (managed_job_state.ManagedJobStatus.RUNNING,
+                                managed_job_state.ManagedJobStatus.WINDING_DOWN)
+                            and attempt < max_attempts)
             # Mark the latest task RECOVERING (recovery_source=EMERGENCY on
             # the event). Emit the event only once per escaped error, so an
             # outer-retry re-run does not append a duplicate.
@@ -3086,6 +3196,9 @@ class JobController:
                 f'Unexpected controller error (emergency recovery attempt '
                 f'{attempt}/{max_attempts}): ' +
                 common_utils.format_exception(error, use_bracket=True))
+            if keep_cluster:
+                reason += (' The job keeps running on its cluster; the '
+                           'controller re-attaches after the backoff.')
             emit_event = not self._emergency_event_emitted
             applied = await managed_job_state.set_emergency_recovering_async(
                 self._job_id,
@@ -3108,13 +3221,19 @@ class JobController:
                             'or terminal; retrying the job loop to let it '
                             'complete.')
                 return True
+            if keep_cluster:
+                logger.info(f'Job {self._job_id} task {task_id} was '
+                            f'{cur_status.value}; keeping its cluster. The '
+                            'retry re-attaches and restores RUNNING once the '
+                            'job answers.')
+                return False
 
             # 3. Tear down the task's cluster now (best-effort) instead of
-            # leaving it to the retry's forced recovery: the retry always
-            # relaunches from scratch, so the cluster is doomed anyway —
-            # don't leave it running (and billing) through a backoff that can
-            # be up to 30 minutes. terminate_cluster is idempotent and the
-            # retry's forced recovery runs the same cleanup again, so a
+            # leaving it to the retry's forced recovery: the retry relaunches
+            # a non-RUNNING task from scratch, so the cluster is doomed
+            # anyway — don't leave it running (and billing) through a backoff
+            # that can be up to 30 minutes. terminate_cluster is idempotent
+            # and the retry's forced recovery runs the same cleanup again, so a
             # failure here only delays the teardown. Pool jobs keep their
             # shared cluster (no dedicated cluster to tear down) — the
             # retry's forced recovery cancels the stale pool submission and
@@ -3142,14 +3261,17 @@ class JobController:
         """One round of the emergency-recovery bookkeeping.
 
         Sequence: spend one unit of the bounded retry budget (once per
-        escaped error, memoized), free the launching slot, mark the latest
-        task RECOVERING (recovery_source=EMERGENCY on the event; a PENDING
-        task is left untouched so the retry relaunches it fresh), tear the
-        cluster down after a runtime log-capture hook, and reset any stuck
-        launch-adjacent schedule state. Every step is idempotent so that the
-        outer retry in _handle_unexpected_error can safely re-run the whole
-        sequence after a transient failure without double-spending the
-        budget or duplicating the RECOVERING event.
+        escaped error, memoized), free the launching slot, run the
+        shape-specific bookkeeping (mark the latest task RECOVERING with
+        recovery_source=EMERGENCY; a task that was RUNNING keeps its
+        cluster for the retry to re-attach to, any other task has its
+        cluster torn down after a runtime log-capture hook; a PENDING task
+        is left untouched so the retry relaunches it fresh), and reset any
+        stuck launch-adjacent schedule state. Every
+        step is idempotent so that the outer retry in
+        _handle_unexpected_error can safely re-run the whole sequence after
+        a transient failure without double-spending the budget or
+        duplicating the emergency event.
 
         Returns None to retry managing the job in place, or a failure note
         to fail the job (budget exhausted).
