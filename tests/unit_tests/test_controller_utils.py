@@ -12,6 +12,9 @@ import pytest
 from sky import clouds
 from sky import exceptions
 from sky import resources as resources_lib
+from sky import skypilot_config
+from sky import task as task_lib
+from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
 from sky.serve import constants as serve_constants
 from sky.skylet import constants
@@ -1202,3 +1205,86 @@ def test_shared_bucket_prefix_rejects_unsafe_workspace_name():
     """A workspace name with a path separator cannot widen the IAM prefix."""
     with pytest.raises(ValueError, match='cannot scope a shared bucket'):
         controller_utils._shared_bucket_workspace_prefix(None, 'team/other')
+
+
+def test_shared_bucket_upload_paths_are_scoped_per_workspace(
+        tmp_path, monkeypatch):
+    """Workdir, directory, and file uploads use the active workspace prefix.
+
+    Two workspaces sharing one bucket must not produce the same object keys.
+    """
+    workdir = tmp_path / 'workdir'
+    workdir.mkdir()
+    (workdir / 'main.py').write_text('print(1)\n')
+    folder = tmp_path / 'folder'
+    folder.mkdir()
+    (folder / 'data.txt').write_text('data\n')
+    one_file = tmp_path / 'one.txt'
+    one_file.write_text('file\n')
+
+    blob = mock.Mock()
+    blob.file_mounts_tmp_dir.return_value = str(tmp_path / 'blob')
+    monkeypatch.setattr(controller_utils.bs, 'get_blob_storage', lambda: blob)
+    monkeypatch.setattr(controller_utils, '_generate_run_uuid',
+                        lambda: 'run12345')
+    def _bucket_only(keys, default_value, override_configs=None):
+        del override_configs  # patched get_nested; only the jobs bucket is stubbed
+        if keys == ('jobs', 'bucket'):
+            return 'gs://file-mounts-bucket'
+        return default_value
+
+    monkeypatch.setattr(controller_utils.skypilot_config, 'get_nested',
+                        _bucket_only)
+    monkeypatch.setattr(
+        controller_utils.storage_lib,
+        'get_cached_enabled_storage_cloud_names_or_refresh',
+        lambda: ['GCP'])
+
+    class _RecordingStorage:
+        """Stand-in that records the object key and skips the cloud upload."""
+
+        def __init__(self, **kwargs):
+            self.name = kwargs['name']
+            self.source = kwargs['source']
+            self.mode = kwargs['mode']
+            self.persistent = kwargs['persistent']
+            self.force_delete = False
+            self.bucket_sub_path = kwargs['_bucket_sub_path']
+            self.stores = {
+                storage_lib.StoreType.GCS: mock.Mock(spec=storage_lib.GcsStore)
+            }
+
+    monkeypatch.setattr(controller_utils.storage_lib, 'Storage',
+                        _RecordingStorage)
+
+    paths_by_workspace = {}
+    file_urls_by_workspace = {}
+    for workspace in ('team-a', 'team-b'):
+        task = task_lib.Task(
+            workdir=str(workdir),
+            file_mounts={
+                '/remote/folder': str(folder),
+                '/remote/one.txt': str(one_file),
+            },
+        )
+        monkeypatch.setattr(task, 'sync_storage_mounts', lambda: None)
+        with skypilot_config.local_active_workspace_ctx(workspace):
+            controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+                task, 'jobs')
+        mounts = task.storage_mounts
+        paths_by_workspace[workspace] = {
+            path: storage.bucket_sub_path for path, storage in mounts.items()
+        }
+        file_urls_by_workspace[workspace] = task.file_mounts['/remote/one.txt']
+
+    run = 'job-run12345'
+    for workspace, paths in paths_by_workspace.items():
+        prefix = f'workspaces/{workspace}/{run}'
+        assert paths[constants.SKY_REMOTE_WORKDIR] == f'{prefix}/workdir'
+        assert paths['/remote/folder'] == f'{prefix}/local-file-mounts/0'
+        tmp_dir = constants.FILE_MOUNTS_REMOTE_TMP_DIR.format('jobs')
+        assert paths[tmp_dir] == f'{prefix}/tmp-files'
+        assert file_urls_by_workspace[workspace] == (
+            f'gs://file-mounts-bucket/{prefix}/tmp-files/file-0')
+
+    assert paths_by_workspace['team-a'] != paths_by_workspace['team-b']
