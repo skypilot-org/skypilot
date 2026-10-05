@@ -106,10 +106,10 @@ def _execute_bounded(sql, params, fetch):
     and each new leader's catch-up work adds more pressure, a feedback
     loop. A fresh direct connection per call cannot be starved by any
     shared pool state; at the renew cadence (one short statement every
-    ``renew_interval_seconds`` per held lease) the per-connection setup
-    cost is negligible, and holding a persistent connection instead would
-    reintroduce the standing per-process backend this backend exists to
-    avoid."""
+    ``renew_interval_seconds`` per held lease, plus one lease check per won
+    advisory bid) the per-connection setup cost is negligible, and holding a
+    persistent connection instead would reintroduce the standing per-process
+    backend this backend exists to avoid."""
     engine = db_utils.get_engine(None, direct=True, no_pool=True)
     with engine.connect() as conn:
         conn.execute(
@@ -187,11 +187,6 @@ class AdvisoryLockElector(LeaderElector):
     process-local lock, which is exactly right for single-node deployments.
     """
 
-    _LIVE_LEASE_SQL = sqlalchemy.text(f"""
-        SELECT 1 FROM {_LEASE_TABLE}
-         WHERE lock_id = :lock_id AND expires_at >= now()
-    """)
-
     def __init__(self, lock_id: str):
         super().__init__(lock_id)
         self._lock: Optional[locks.DistributedLock] = None
@@ -217,9 +212,7 @@ class AdvisoryLockElector(LeaderElector):
     def _lease_is_live(self) -> bool:
         """Whether a lease holds this lock id; True if the check fails."""
         try:
-            return _execute_bounded(self._LIVE_LEASE_SQL,
-                                    {'lock_id': self._lock_id},
-                                    fetch=True) is not None
+            return PgLeaseElector.is_held(self._lock_id)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning('%s: lease check failed: %s', self._lock_id, e)
             return True
@@ -273,13 +266,9 @@ class PgLeaseElector(LeaderElector):
     # The bid fails while any session holds the advisory lock for the same
     # lock id (see ``AdvisoryLockElector.try_acquire``).
     _ACQUIRE_SQL = sqlalchemy.text(f"""
-        WITH advisory AS (
-          SELECT pg_try_advisory_xact_lock(:advisory_key) AS free
-        )
         INSERT INTO {_LEASE_TABLE} (lock_id, holder, epoch, expires_at)
         SELECT :lock_id, :holder, 1, now() + make_interval(secs => :ttl)
-          FROM advisory
-         WHERE advisory.free
+         WHERE pg_try_advisory_xact_lock(:advisory_key)
         ON CONFLICT (lock_id) DO UPDATE
           SET holder = :holder,
               epoch = CASE WHEN {_LEASE_TABLE}.holder = :holder
@@ -315,6 +304,11 @@ class PgLeaseElector(LeaderElector):
         WHERE lock_id = :lock_id AND holder = :holder
     """)
 
+    _IS_HELD_SQL = sqlalchemy.text(f"""
+        SELECT 1 FROM {_LEASE_TABLE}
+         WHERE lock_id = :lock_id AND expires_at >= now()
+    """)
+
     def __init__(
             self,
             lock_id: str,
@@ -324,7 +318,6 @@ class PgLeaseElector(LeaderElector):
             renew_deadline_seconds: float = DEFAULT_RENEW_DEADLINE_SECONDS):
         super().__init__(lock_id)
         self._holder = holder or _HOLDER_ID
-        self._advisory_key = locks.postgres_lock_key(lock_id)
         self._ttl = ttl_seconds
         self._renew_interval = renew_interval_seconds
         self._renew_deadline = renew_deadline_seconds
@@ -345,7 +338,7 @@ class PgLeaseElector(LeaderElector):
                 f'interval={renew_interval_seconds}, '
                 f'deadline={renew_deadline_seconds}, ttl={ttl_seconds}')
 
-    def _run_epoch_stmt(self, sql, **extra_params) -> bool:
+    def _run_epoch_stmt(self, sql) -> bool:
         """Run an ``epoch``-returning lease statement (acquire or renew).
 
         True iff a row came back (we hold the lease); records ``epoch`` as the
@@ -359,7 +352,7 @@ class PgLeaseElector(LeaderElector):
                 'lock_id': self._lock_id,
                 'holder': self._holder,
                 'ttl': self._ttl,
-                **extra_params,
+                'advisory_key': locks.postgres_lock_key(self._lock_id),
             },
                                    fetch=True)
         except Exception as e:  # pylint: disable=broad-except
@@ -384,8 +377,7 @@ class PgLeaseElector(LeaderElector):
         return self._renew_deadline
 
     def try_acquire(self) -> bool:
-        return self._run_epoch_stmt(self._ACQUIRE_SQL,
-                                    advisory_key=self._advisory_key)
+        return self._run_epoch_stmt(self._ACQUIRE_SQL)
 
     def renew(self) -> bool:
         return self._run_epoch_stmt(self._RENEW_SQL)
@@ -408,6 +400,12 @@ class PgLeaseElector(LeaderElector):
 
     def fencing_token(self) -> Optional[int]:
         return self._epoch
+
+    @classmethod
+    def is_held(cls, lock_id: str) -> bool:
+        """Whether any holder has a valid lease on ``lock_id``."""
+        return _execute_bounded(cls._IS_HELD_SQL, {'lock_id': lock_id},
+                                fetch=True) is not None
 
 
 def get_backend() -> str:

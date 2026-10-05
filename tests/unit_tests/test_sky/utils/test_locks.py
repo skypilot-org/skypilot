@@ -208,14 +208,15 @@ class TestPostgresLock:
         assert lock._connection is None
         assert not lock._shared_lock
 
-    def test_postgres_lock_string_to_lock_key(self):
+    def test_postgres_lock_key(self):
         """Test string to lock key conversion is deterministic across processes."""
-        lock = locks.PostgresLock('test_lock')
+        assert locks.PostgresLock('test_lock')._lock_key == (
+            locks.postgres_lock_key('test_lock'))
 
         # Test deterministic behavior - same input always produces same output
-        key1 = lock._string_to_lock_key('test_string')
-        key2 = lock._string_to_lock_key('test_string')
-        key3 = lock._string_to_lock_key('different_string')
+        key1 = locks.postgres_lock_key('test_string')
+        key2 = locks.postgres_lock_key('test_string')
+        key3 = locks.postgres_lock_key('different_string')
 
         # Same string should produce same key
         assert key1 == key2
@@ -234,7 +235,7 @@ class TestPostgresLock:
         ]
 
         for input_str, expected_key in test_cases:
-            actual_key = lock._string_to_lock_key(input_str)
+            actual_key = locks.postgres_lock_key(input_str)
             assert actual_key == expected_key, (
                 f"Expected deterministic key {expected_key} for '{input_str}', "
                 f"but got {actual_key}. This indicates the hash function is "

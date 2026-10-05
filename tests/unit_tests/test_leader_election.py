@@ -140,46 +140,35 @@ def test_advisory_elector_filelock_lifecycle(monkeypatch):
     execute_bounded.assert_not_called()
 
 
-def _postgres_lock(monkeypatch):
-    lock = mock.create_autospec(locks.PostgresLock, instance=True)
-    monkeypatch.setattr(leader_election.locks, 'get_lock',
-                        lambda *args, **kwargs: lock)
-    return lock
-
-
 @pytest.mark.parametrize('lease_check,expected', [
-    (lambda *args, **kwargs: None, True),
-    (lambda *args, **kwargs: (1,), False),
+    (mock.Mock(return_value=None), True),
+    (mock.Mock(return_value=(1,)), False),
     (mock.Mock(side_effect=RuntimeError('db down')), False),
 ],
                          ids=['no-lease', 'live-lease', 'check-failed'])
 def test_advisory_elector_yields_to_a_live_lease(monkeypatch, lease_check,
                                                  expected):
     """A live lease, or a lease check that fails, gives the lock back."""
-    lock = _postgres_lock(monkeypatch)
+    lock = mock.create_autospec(locks.PostgresLock, instance=True)
+    lock.is_session_alive.return_value = True
+    monkeypatch.setattr(leader_election.locks, 'get_lock',
+                        lambda *args, **kwargs: lock)
     monkeypatch.setattr(leader_election, '_execute_bounded', lease_check)
     e = leader_election.AdvisoryLockElector('lock')
     assert e.try_acquire() is expected
     assert lock.release.called is not expected
-    lock.is_session_alive.return_value = True
     assert e.renew() is expected
 
 
 def test_lease_bid_carries_the_advisory_key_of_its_lock_id(monkeypatch):
     """The lease bid must test the same key a ``PostgresLock`` holds."""
-    calls = []
-
-    def record(sql, params, fetch):
-        del fetch
-        calls.append((str(sql), params))
-        return (1,)
-
-    monkeypatch.setattr(leader_election, '_execute_bounded', record)
+    execute_bounded = mock.Mock(return_value=(1,))
+    monkeypatch.setattr(leader_election, '_execute_bounded', execute_bounded)
     e = leader_election.PgLeaseElector('some-lock', holder='a')
     assert e.try_acquire() is True
-    sql, params = calls[0]
-    assert 'pg_try_advisory_xact_lock(:advisory_key)' in sql
-    assert params['advisory_key'] == locks.PostgresLock('some-lock')._lock_key
+    sql, params = execute_bounded.call_args.args
+    assert 'pg_try_advisory_xact_lock(:advisory_key)' in str(sql)
+    assert params['advisory_key'] == locks.postgres_lock_key('some-lock')
 
 
 # --- Postgres-backed lease SQL (opt-in via SKYPILOT_TEST_PG_URL) -----------

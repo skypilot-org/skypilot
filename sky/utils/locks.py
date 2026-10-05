@@ -199,15 +199,10 @@ class PostgresLock(DistributedLock):
                 advisory lock (default).
         """
         super().__init__(lock_id, timeout, poll_interval)
-        # Convert string lock_id to integer for postgres advisory locks
-        self._lock_key = self._string_to_lock_key(lock_id)
+        self._lock_key = postgres_lock_key(lock_id)
         self._shared_lock = shared_lock
         self._acquired = False
         self._connection: Optional[sqlalchemy.pool.PoolProxiedConnection] = None
-
-    def _string_to_lock_key(self, s: str) -> int:
-        """Convert string to a 64-bit integer for advisory lock key."""
-        return postgres_lock_key(s)
 
     @db_retries.retry
     def _get_connection(self) -> sqlalchemy.pool.PoolProxiedConnection:
