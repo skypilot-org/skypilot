@@ -1,11 +1,16 @@
 """Unit tests for skylet log_lib."""
 
 from io import StringIO
+import os
 import subprocess
 import tempfile
+import time
 import unittest
 
+import psutil
+
 from sky.skylet import log_lib
+from sky.utils import context
 
 
 class TestLogBuffer(unittest.TestCase):
@@ -149,6 +154,34 @@ class TestRunWithLogTimeout(unittest.TestCase):
                 process_stream=False,
                 timeout=1,
             )
+
+    def test_context_timeout_kills_process_tree(self):
+        """Under a SkyPilot context, as in a jobs controller, the timeout kills
+        the shell and the child that holds its pipes."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = os.path.join(tmp, 'run.log')
+            pid_file = os.path.join(tmp, 'child.pid')
+
+            @context.contextual
+            def run():
+                return log_lib.run_with_log(
+                    f'sleep 60 & echo $! > {pid_file}; wait',
+                    log_path,
+                    shell=True,
+                    require_outputs=True,
+                    timeout=1)
+
+            start = time.time()
+            with self.assertRaises(subprocess.TimeoutExpired):
+                run()
+            self.assertLess(time.time() - start, 15)
+            with open(pid_file, encoding='utf-8') as f:
+                child = int(f.read())
+            try:
+                status = psutil.Process(child).status()
+            except psutil.NoSuchProcess:
+                status = None
+            self.assertIn(status, (None, psutil.STATUS_ZOMBIE))
 
     def test_no_stream_timeout_not_exceeded(self):
         """Test normal completion with process_stream=False and timeout set."""

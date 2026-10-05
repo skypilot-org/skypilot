@@ -4819,8 +4819,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self,
         handle: CloudVmRayResourceHandle,
         job_ids: Optional[List[int]] = None,
-        stream_logs: bool = True
+        stream_logs: bool = True,
+        timeout: Optional[int] = None,
     ) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
+        """Returns the status of the given jobs on the cluster.
+
+        Args:
+            timeout: Seconds after which the remote command (e.g. `kubectl
+                exec` or ssh) is killed and subprocess.TimeoutExpired is
+                raised. None waits until the command exits.
+        """
         if handle.is_grpc_enabled_with_flag:
             try:
                 request = jobsv1_pb2.GetJobStatusRequest(job_ids=job_ids)
@@ -4840,7 +4848,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       code,
                                                       stream_logs=stream_logs,
                                                       require_outputs=True,
-                                                      separate_stderr=True)
+                                                      separate_stderr=True,
+                                                      timeout=timeout)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to get job status.', stderr)
         if not stdout:
