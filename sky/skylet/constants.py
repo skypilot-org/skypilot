@@ -825,8 +825,13 @@ ENV_VAR_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW = (
 # The derived counts budget a fixed footprint per process; a deployment whose
 # processes outgrow it can pin the counts to what its pods hold instead. A
 # value outside the server's bounds (long: at least 1; short: at least one
-# idle worker plus one per internal request daemon; controllers: 1 to
+# idle worker plus one per enabled internal request daemon; controllers: 1 to
 # `controller_utils.MAX_CONTROLLERS`) is refused at startup, not clamped.
+#
+# With SKYPILOT_MEMORY_AWARE_WORKER_SIZING on, the memory the pools leave for
+# consolidation-mode controllers is sized from system memory and is shared with
+# the serve and pool controllers, so pinning the jobs-controller count alone
+# does not grow the pools. Pin both pools along with it.
 #
 # Server-side only: the SKYPILOT_SERVER_ prefix keeps clients from forwarding
 # them (`sky.server.requests.payloads.request_body_env_vars`).

@@ -142,12 +142,12 @@ def compute_server_config(
         mem_size_gb = max(0.0, mem_size_gb - excess)
         logger.debug(f'Memory size for executor pools: {mem_size_gb}GB')
     # An explicit count wins over the derived one; the derived short count
-    # still budgets against whatever long count is in effect.
+    # still budgets against whatever long count is in effect. The short-pool
+    # floor is checked once at startup, see validate_explicit_worker_counts().
     explicit_long = explicit_process_count(
         constants.ENV_VAR_SERVER_LONG_WORKERS, minimum=_MIN_LONG_WORKERS)
     explicit_short = explicit_process_count(
-        constants.ENV_VAR_SERVER_SHORT_WORKERS,
-        minimum=_get_min_short_workers())
+        constants.ENV_VAR_SERVER_SHORT_WORKERS, minimum=1)
     if explicit_long is not None:
         max_parallel_for_long = explicit_long
     else:
@@ -262,6 +262,31 @@ def explicit_process_count(env_var: str,
     if maximum is not None and count > maximum:
         raise ValueError(f'{env_var}={raw!r} must be at most {maximum}.')
     return count
+
+
+def validate_explicit_worker_counts() -> None:
+    """Checks the explicit long and short pool sizes against their bounds.
+
+    Called once at server startup. compute_server_config() only parses the
+    values: it also runs on request paths through the derived controller and
+    service counts, and the short-pool floor depends on which internal daemons
+    the live config enables, so checking the floor there could fail a running
+    server after a config change.
+
+    Raises:
+        ValueError: if a value is not an integer or is below its floor.
+    """
+    explicit_process_count(constants.ENV_VAR_SERVER_LONG_WORKERS,
+                           minimum=_MIN_LONG_WORKERS)
+    short = explicit_process_count(constants.ENV_VAR_SERVER_SHORT_WORKERS,
+                                   minimum=1)
+    if short is not None:
+        floor = _get_min_short_workers()
+        if short < floor:
+            raise ValueError(
+                f'{constants.ENV_VAR_SERVER_SHORT_WORKERS}={short} must be at '
+                f'least {floor}: one idle worker plus one per enabled internal '
+                'request daemon.')
 
 
 def _sizing_source(explicit: Optional[int], env_var: str) -> str:

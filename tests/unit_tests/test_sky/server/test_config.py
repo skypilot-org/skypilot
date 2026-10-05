@@ -306,15 +306,58 @@ def test_invalid_explicit_long_workers_rejected(value, message):
         config.compute_server_config(deploy=True, quiet=True)
 
 
-def test_explicit_short_workers_below_daemon_floor_rejected():
+def test_explicit_short_workers_below_daemon_floor_rejected_at_startup():
     """The short pool may not be pinned below the internal daemons' need."""
     floor = config._get_min_short_workers()
     with _explicit_counts(short=floor - 1), pytest.raises(ValueError,
                                                           match='at least'):
-        config.compute_server_config(deploy=True, quiet=True)
+        config.validate_explicit_worker_counts()
     with _explicit_counts(short=floor):
+        config.validate_explicit_worker_counts()
         c = config.compute_server_config(deploy=True, quiet=True)
     assert c.short_worker_config.garanteed_parallelism == floor
+
+
+@mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=48)
+@mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
+def test_short_floor_rising_after_startup_keeps_sizing_working(
+        cpu_count, mem_size_gb):
+    """A daemon enabled by live config later must not break sizing."""
+    with mock.patch.object(controller_utils, 'is_jobs_consolidation_mode',
+                           return_value=True), \
+         mock.patch.object(controller_utils, '_is_consolidation_mode',
+                           return_value=True), \
+         mock.patch('sky.jobs.utils.is_consolidation_mode', return_value=True):
+        annotations.clear_request_level_cache()
+        floor = config._get_min_short_workers()
+        with _explicit_counts(short=floor):
+            config.validate_explicit_worker_counts()
+            with mock.patch.object(config,
+                                   '_get_min_short_workers',
+                                   return_value=floor + 1):
+                # The derived controller count re-runs compute_server_config().
+                annotations.clear_request_level_cache()
+                c = config.compute_server_config(deploy=True, quiet=True)
+                controllers = controller_utils.get_number_of_jobs_controllers()
+    annotations.clear_request_level_cache()
+    assert c.short_worker_config.garanteed_parallelism == floor
+    assert controllers >= 1
+
+
+@mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=48)
+@mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
+def test_short_floor_computed_only_when_needed(cpu_count, mem_size_gb):
+    """The floor walks the daemon skip checks, some of which log."""
+    with mock.patch.object(config,
+                           '_get_min_short_workers',
+                           wraps=config._get_min_short_workers) as floor:
+        config.validate_explicit_worker_counts()
+        assert floor.call_count == 0
+        config.compute_server_config(deploy=True, quiet=True)
+        assert floor.call_count == 1
+        with _explicit_counts(short=40):
+            config.compute_server_config(deploy=True, quiet=True)
+        assert floor.call_count == 1
 
 
 @mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=48)
