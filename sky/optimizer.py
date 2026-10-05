@@ -1967,11 +1967,14 @@ def _fill_in_launchable_resources(
                 # Assume feasible_resources is sorted by prices. Guaranteed by
                 # the implementation of get_feasible_launchable_resources and
                 # the underlying catalog filtering
-                cheapest = feasible_resources.resources_list[0]
-                # Generate region/zone-specified resources.
-                launchable[resources].extend(
-                    resources_utils.make_launchables_for_valid_region_zones(
-                        cheapest))
+                # try the next SKU after blocking.
+                for candidate in feasible_resources.resources_list:
+                    available = _filter_out_blocked_launchable_resources(
+                        resources_utils.make_launchables_for_valid_region_zones(
+                            candidate), blocked_resources)
+                    if available:
+                        launchable[resources].extend(available)
+                        break
                 # Each cloud can occur multiple times in feasible_list,
                 # for different region/zone.
                 cloud_candidates[cloud].extend(
