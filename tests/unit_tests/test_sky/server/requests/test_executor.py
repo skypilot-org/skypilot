@@ -10,7 +10,6 @@ import time
 from typing import List
 from unittest import mock
 
-import fastapi
 import pytest
 
 from sky import exceptions
@@ -2001,19 +2000,20 @@ class TestClientUserIdValidation:
                 schedule_type=requests_lib.ScheduleType.SHORT,
                 auth_user=auth_user)
 
+    @pytest.mark.parametrize(
+        'user_id',
+        [
+            'abc%123',  # the shape reported in #9621
+            '',
+            '-leading-hyphen',
+            '../x',  # path traversal characters
+            '/abs',
+            'abcdef12\n',  # trailing newline: a distinct identity
+        ])
     @pytest.mark.asyncio
-    async def test_malformed_user_id_is_rejected(self):
-        """The '%' from the issue must not reach the request record."""
-        with pytest.raises(fastapi.HTTPException) as exc_info:
-            await self._prepare('abc%123')
-        assert exc_info.value.status_code == 400
-        assert 'Invalid user id' in exc_info.value.detail
-
-    @pytest.mark.asyncio
-    async def test_empty_user_id_is_rejected(self):
-        with pytest.raises(fastapi.HTTPException) as exc_info:
-            await self._prepare('')
-        assert exc_info.value.status_code == 400
+    async def test_malformed_user_id_is_rejected(self, user_id):
+        with pytest.raises(exceptions.InvalidUserIdError):
+            await self._prepare(user_id)
 
     @pytest.mark.asyncio
     async def test_valid_user_id_passes_through(self):
