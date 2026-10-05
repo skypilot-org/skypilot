@@ -1227,6 +1227,7 @@ def test_shared_bucket_upload_paths_are_scoped_per_workspace(
     monkeypatch.setattr(controller_utils.bs, 'get_blob_storage', lambda: blob)
     monkeypatch.setattr(controller_utils, '_generate_run_uuid',
                         lambda: 'run12345')
+
     def _bucket_only(keys, default_value, override_configs=None):
         del override_configs  # patched get_nested; only the jobs bucket is stubbed
         if keys == ('jobs', 'bucket'):
@@ -1235,10 +1236,9 @@ def test_shared_bucket_upload_paths_are_scoped_per_workspace(
 
     monkeypatch.setattr(controller_utils.skypilot_config, 'get_nested',
                         _bucket_only)
-    monkeypatch.setattr(
-        controller_utils.storage_lib,
-        'get_cached_enabled_storage_cloud_names_or_refresh',
-        lambda: ['GCP'])
+    monkeypatch.setattr(controller_utils.storage_lib,
+                        'get_cached_enabled_storage_cloud_names_or_refresh',
+                        lambda: ['GCP'])
 
     class _RecordingStorage:
         """Stand-in that records the object key and skips the cloud upload."""
