@@ -2833,7 +2833,9 @@ def test_pool_autoscaling_scale_up_to_max_then_down_to_zero(generic_cloud: str):
         infra=generic_cloud,
         setup_cmd='echo hi',
         upscale_delay_seconds=20,
-        downscale_delay_seconds=20,
+        # The queue empties as soon as the first worker absorbs all jobs; keep
+        # the target at 3 long enough for the last worker to become READY.
+        downscale_delay_seconds=120,
     )
 
     # Quick job that just echoes hi and finishes instantly
@@ -2874,7 +2876,7 @@ def test_pool_autoscaling_scale_up_to_max_then_down_to_zero(generic_cloud: str):
                     wait_for_message_in_pool_logs(
                         pool_name, 'SCALE_DOWN_TO_ZERO', timeout=300),
                     # Verify we scale down to 0 workers
-                    wait_until_num_workers(pool_name, 0, timeout=300),
+                    wait_until_num_workers(pool_name, 0, timeout=600),
                 ],
                 timeout=timeout * 3,  # Autoscaling takes time
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=10),
