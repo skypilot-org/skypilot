@@ -391,6 +391,29 @@ class TestUpdateClusterStatusBareHandle:
         assert not any(status == status_lib.ClusterStatus.UP
                        for status, _ in events), events
 
+    def test_healthy_ray_without_cached_ips_is_not_promoted_to_up(self):
+        # An interrupted launch saves its handle with has_ray=True and the
+        # provisioner's cluster info but no stable IPs. The runtime setup it
+        # started on the nodes can finish on its own, so the ray health
+        # check can pass; the record is still unusable (head_ip=None) until
+        # a relaunch writes the IPs, so it must stay INIT.
+        handle = _make_handle()
+        handle.provision_runtime_metadata.has_ray = True
+        handle.head_ip = None
+        head_runner = mock.Mock()
+        head_runner.run.return_value = (0, ' 1 node_abc123\n', '')
+        handle.get_command_runners.return_value = [head_runner]
+
+        add_or_update, events = self._refresh(handle)
+
+        head_runner.run.assert_called_once()
+        assert add_or_update.call_count == 1
+        assert add_or_update.call_args.kwargs['ready'] is False
+        # Not marked UP (and the record is already INIT, so no INIT event is
+        # re-added either).
+        assert not any(status == status_lib.ClusterStatus.UP
+                       for status, _ in events), events
+
 
 class TestUpdateClusterStatusInterruptedRelaunch:
     """A relaunch of an existing cluster saves its INIT handle with the
