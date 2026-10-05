@@ -192,3 +192,29 @@ def test_read_stops_at_max_bytes(log_path, monkeypatch):
     lines, end_pos = log_lib.tail_lines_from_end(log_path, 5)
     assert lines == ['last line\n']
     assert end_pos == len(data)
+
+
+def test_offset_lines_beyond_max_bytes(log_path, monkeypatch):
+    block = log_lib._TAIL_BLOCK_SIZE  # pylint: disable=protected-access
+    monkeypatch.setattr(log_lib, '_TAIL_MAX_BYTES', 16 * block)
+    content = [f'{i:03d}' + 'x' * block + '\n' for i in range(100)]
+    _write_lines(log_path, content)
+    lines, _ = log_lib.tail_lines_from_end(log_path, 10, offset=40)
+    assert lines == content[50:60]
+
+
+@pytest.mark.parametrize('offset', [3, 1000, 15_000, 19_995, 20_000])
+def test_offset_beyond_max_bytes_matches_splitlines(log_path, monkeypatch,
+                                                    offset):
+    block = log_lib._TAIL_BLOCK_SIZE  # pylint: disable=protected-access
+    monkeypatch.setattr(log_lib, '_TAIL_MAX_BYTES', 2 * block)
+    rng = random.Random(11)
+    parts = []
+    for i in range(20_000):
+        parts.append(f'{i:05d}' + 'q' * rng.randint(0, 40))
+        parts.append(rng.choice(['\n', '\r', '\r\n']))
+    data = ''.join(parts).encode()
+    _write_bytes(log_path, data)
+    expected = data.decode().splitlines(keepends=True)[:-offset]
+    actual, _ = log_lib.tail_lines_from_end(log_path, 10, offset)
+    assert actual == expected[-10:]

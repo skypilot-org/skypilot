@@ -8,6 +8,7 @@ import io
 import multiprocessing.pool
 import os
 import queue as queue_lib
+import re
 import shlex
 import subprocess
 import sys
@@ -15,8 +16,8 @@ import tempfile
 import textwrap
 import threading
 import time
-from typing import (Dict, Iterable, Iterator, List, Optional, TextIO, Tuple,
-                    Union)
+from typing import (BinaryIO, Dict, Iterable, Iterator, List, Optional, TextIO,
+                    Tuple, Union)
 
 import colorama
 
@@ -507,13 +508,44 @@ def _follow_job_logs(file,
 # to fit the tail of typical log files in a single read while keeping
 # memory bounded for very long lines.
 _TAIL_BLOCK_SIZE = 64 * 1024
-# Most bytes the tail reader reads back from EOF.
+# Most bytes the tail reader reads for the returned lines.
 _TAIL_MAX_BYTES = 64 * 1024 * 1024
+_LINE_BREAK_RE = re.compile(rb'\r\n|\r|\n')
 
 
 def _count_line_breaks(chunk: bytes) -> int:
     """Counts the ``\\n``, ``\\r`` and ``\\r\\n`` breaks in ``chunk``."""
     return chunk.count(b'\n') + chunk.count(b'\r') - chunk.count(b'\r\n')
+
+
+def _start_of_last_lines(f: BinaryIO, end_pos: int, count: int) -> int:
+    """Returns the byte position where the last ``count`` lines start.
+
+    Scans backwards one block at a time. Returns 0 if the file has at most
+    ``count`` lines.
+    """
+    # A last line without a trailing break has no break of its own.
+    f.seek(max(end_pos - 1, 0))
+    if f.read(1) in (b'\n', b'\r'):
+        count += 1
+    pos = end_pos
+    next_byte = b''
+    while pos > 0:
+        read_size = min(_TAIL_BLOCK_SIZE, pos)
+        pos -= read_size
+        f.seek(pos)
+        chunk = f.read(read_size)
+        # A '\r\n' split across two blocks was counted at its '\n'.
+        split_crlf = chunk.endswith(b'\r') and next_byte == b'\n'
+        breaks = _count_line_breaks(chunk) - int(split_crlf)
+        if breaks >= count:
+            ends = [m.end() for m in _LINE_BREAK_RE.finditer(chunk)]
+            if split_crlf:
+                ends.pop()
+            return pos + ends[-count]
+        count -= breaks
+        next_byte = chunk[:1]
+    return 0
 
 
 def tail_lines_from_end(path: str,
@@ -526,9 +558,11 @@ def tail_lines_from_end(path: str,
     is the difference between ~10 s and ~1 ms per call.
 
     Lines end at ``\\n``, ``\\r`` or ``\\r\\n``, as in ``str.splitlines``,
-    so progress bars that only write ``\\r`` count as lines. At most
-    ``_TAIL_MAX_BYTES`` are read; when that is not enough to reach
-    ``tail + offset`` lines, the lines found in that window are returned.
+    so progress bars that only write ``\\r`` count as lines. The ``offset``
+    lines are skipped by scanning back one block at a time, and at most
+    ``_TAIL_MAX_BYTES`` are read for the returned lines; when that is not
+    enough to reach ``tail`` lines, the lines found in that window are
+    returned.
 
     Args:
         path: File path to read.
@@ -544,7 +578,6 @@ def tail_lines_from_end(path: str,
         returns ``([], end_pos)``.
     """
     assert tail > 0
-    needed = tail + max(offset, 0)
     chunks: List[bytes] = []
     line_count = 0
     pos = 0
@@ -552,9 +585,12 @@ def tail_lines_from_end(path: str,
     with open(path, 'rb') as f:
         f.seek(0, os.SEEK_END)
         end_pos = f.tell()
-        pos = end_pos
-        while (pos > 0 and line_count <= needed and
-               end_pos - pos < _TAIL_MAX_BYTES):
+        window_end = end_pos
+        if offset > 0:
+            window_end = _start_of_last_lines(f, end_pos, offset)
+        pos = window_end
+        while (pos > 0 and line_count <= tail and
+               window_end - pos < _TAIL_MAX_BYTES):
             read_size = min(_TAIL_BLOCK_SIZE, pos)
             pos -= read_size
             f.seek(pos)
@@ -573,11 +609,6 @@ def tail_lines_from_end(path: str,
     # see only complete lines.
     if pos > 0 and lines:
         lines = lines[1:]
-    if offset > 0:
-        if offset >= len(lines):
-            return [], end_pos
-        # pylint: disable=invalid-unary-operand-type
-        lines = lines[:-offset]
     return lines[-tail:], end_pos
 
 
