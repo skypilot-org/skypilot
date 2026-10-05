@@ -448,11 +448,14 @@ job_events_table = sqlalchemy.Table(
     sqlalchemy.Column('timestamp',
                       sqlalchemy.DateTime(timezone=True),
                       index=True),
-    # For new_status='RECOVERING' events only: a RecoverySource value
-    # (FAILURE / EMERGENCY / HA) recording why the job is recovering, so
-    # consumers can count only failure-driven recoveries. NULL on all other
-    # events and on RECOVERING events written before this column existed
-    # (treated as FAILURE for back-compat).
+    # A RecoverySource value (FAILURE / EMERGENCY / RESTART) recording why
+    # the job is recovering, so consumers can count only failure-driven
+    # recoveries. Set on new_status='RECOVERING' events, and on the
+    # RUNNING / WINDING_DOWN event an emergency recovery writes when it
+    # keeps the task on its cluster instead of relaunching it
+    # (record_emergency_kept_running_async). NULL on all other events and
+    # on RECOVERING events written before this column existed (treated as
+    # FAILURE for back-compat).
     sqlalchemy.Column('recovery_source', sqlalchemy.Text, server_default=None),
 )
 
@@ -502,8 +505,8 @@ def _unfinished_dependency_exists() -> sqlalchemy.sql.elements.ColumnElement:
             job_info_table.c.spot_job_id,
             dependency_info.c.spot_job_id ==
             job_dependencies_table.c.depends_on_job_id,
-            dependency_info.c.schedule_state !=
-            ManagedJobScheduleState.DONE.value,
+            dependency_info.c.schedule_state
+            != ManagedJobScheduleState.DONE.value,
         ))
 
 
@@ -1003,6 +1006,11 @@ class RecoverySource(enum.Enum):
     consumers can distinguish failure-driven recoveries (which reflect real
     value delivered to the user) from system-driven ones. Only FAILURE counts
     toward recovery ROI; EMERGENCY and RESTART are SkyPilot-internal.
+
+    EMERGENCY is also recorded on a RUNNING (or WINDING_DOWN) event when an
+    emergency recovery keeps the task on its cluster instead of relaunching
+    it (record_emergency_kept_running_async); that event marks an emergency
+    episode, not a recovery.
 
     Old RECOVERING events written before this column existed have a NULL
     recovery_source; consumers should treat NULL as FAILURE for back-compat.
@@ -1669,8 +1677,8 @@ def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
         # non-legacy jobs that are not DONE
         condition1 = sqlalchemy.and_(
             job_info_table.c.schedule_state.is_not(None),
-            job_info_table.c.schedule_state !=
-            ManagedJobScheduleState.DONE.value)
+            job_info_table.c.schedule_state
+            != ManagedJobScheduleState.DONE.value)
         # legacy or that are in non-terminal status or
         # DONE jobs that are in non-terminal status
         condition2 = sqlalchemy.and_(
@@ -2543,14 +2551,18 @@ def get_status_counts_by_workspace_user_cloud(
 
 def get_recovery_event_counts_by_source_workspace(
 ) -> List[Tuple[str, Optional[str], int]]:
-    """Return RECOVERING job_events counts grouped by source/workspace.
+    """Return recovery job_events counts grouped by source/workspace.
 
-    Each tuple is (recovery_source, workspace, count). Counts the
-    RECOVERING events currently retained in ``job_events``; the table
-    has a retention window (see the job-event retention daemon), so the
-    numbers are NOT monotone — rows aging out decrease them. Consumers
-    that want rates must window with ``delta`` and clamp, never
-    ``increase``.
+    Each tuple is (recovery_source, workspace, count). Counts the events
+    currently retained in ``job_events`` that carry a ``recovery_source``:
+    every RECOVERING event, plus the RUNNING events an emergency recovery
+    writes when it keeps a running job on its cluster instead of
+    relaunching it (record_emergency_kept_running_async), so that the
+    EMERGENCY series covers every emergency episode whether or not it
+    relaunched. The table has a retention window (see the job-event
+    retention daemon), so the numbers are NOT monotone — rows aging out
+    decrease them. Consumers that want rates must window with ``delta``
+    and clamp, never ``increase``.
 
     Rows written before the ``recovery_source`` column existed carry
     NULL and are excluded: user-facing consumers treat NULL as FAILURE
@@ -2567,13 +2579,21 @@ def get_recovery_event_counts_by_source_workspace(
         job_events_table.outerjoin(
             job_info_table,
             job_events_table.c.spot_job_id == job_info_table.c.spot_job_id,
-        )).where(
-            job_events_table.c.new_status == ManagedJobStatus.RECOVERING.value,
-            job_events_table.c.recovery_source.isnot(None),
-        ).group_by(
-            job_events_table.c.recovery_source,
-            job_info_table.c.workspace,
         )
+    ).where(
+        # Keep the (new_status, recovery_source) index usable: list the
+        # statuses that can carry a source instead of dropping the
+        # status predicate.
+        job_events_table.c.new_status.in_([
+            ManagedJobStatus.RECOVERING.value,
+            ManagedJobStatus.RUNNING.value,
+            ManagedJobStatus.WINDING_DOWN.value,
+        ]),
+        job_events_table.c.recovery_source.isnot(None),
+    ).group_by(
+        job_events_table.c.recovery_source,
+        job_info_table.c.workspace,
+    )
 
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
@@ -3335,8 +3355,8 @@ def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
         updated_count = session.query(job_info_table).filter(
             sqlalchemy.and_(
                 job_info_table.c.spot_job_id == job_id,
-                job_info_table.c.schedule_state !=
-                ManagedJobScheduleState.DONE.value,
+                job_info_table.c.schedule_state
+                != ManagedJobScheduleState.DONE.value,
             )).update({
                 job_info_table.c.schedule_state:
                     ManagedJobScheduleState.DONE.value
@@ -4466,9 +4486,11 @@ async def set_emergency_recovering_async(job_id: int,
                                          emit_event: bool = True) -> bool:
     """Set the task to RECOVERING due to an unexpected controller error.
 
-    Used when the controller hits an unexpected internal error and will
-    retry managing the job in place (the retry tears down and relaunches
-    the cluster, like any other forced recovery). The visible status is the
+    Used when the controller hits an unexpected internal error while the
+    task is STARTING or RECOVERING and will retry managing the job in place
+    (the retry tears down and relaunches the cluster, like any other forced
+    recovery). A RUNNING task keeps its status and its cluster instead; see
+    record_emergency_kept_running_async. The visible status is the
     normal RECOVERING; the emergency cause is recorded on the RECOVERING
     job event. The episode's failure credit (spot.recovering_from_failure)
     is set to FALSE only when no episode is already open: an emergency is a
@@ -4564,6 +4586,50 @@ async def set_emergency_recovering_async(job_id: int,
             logger.warning('Emergency recovery callback failed '
                            f'(continuing): {common_utils.format_exception(e)}')
     return True
+
+
+async def record_emergency_kept_running_async(job_id: int, task_id: int,
+                                              reason: str) -> bool:
+    """Record an unexpected controller error that keeps a running task as is.
+
+    The controller retries managing the job in place without touching the
+    task's status or its cluster: the retry re-attaches to the running job
+    the way a controller restart does. Nothing about the job changed, so no
+    status transition and no callback; the emergency is recorded as a job
+    event carrying the task's current status (RUNNING or WINDING_DOWN) and
+    recovery_source=EMERGENCY, so emergency alerting and metrics still see
+    the episode. These are the only events whose recovery_source is set
+    without a RECOVERING status; consumers that count recoveries must keep
+    filtering on new_status=RECOVERING.
+
+    Returns True if the event was recorded; False if the task is no longer
+    running (cancelled, or finished by another writer since the caller
+    looked), in which case the caller lets the resume logic complete it.
+    """
+
+    async def _op(session: sql_async.AsyncSession) -> bool:
+        status = await session.scalar(
+            sqlalchemy.select(spot_table.c.status).where(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.end_at.is_(None),
+            ))
+        if status not in (ManagedJobStatus.RUNNING.value,
+                          ManagedJobStatus.WINDING_DOWN.value):
+            return False
+        await _insert_job_event(session,
+                                job_id,
+                                task_id,
+                                ManagedJobStatus(status),
+                                reason,
+                                recovery_source=RecoverySource.EMERGENCY)
+        await session.commit()
+        return True
+
+    recorded = await _retry_session(_op)
+    if recorded:
+        logger.info('=== Emergency recovery: keeping the running job ===')
+    return recorded
 
 
 @db_retries.retry_async
@@ -5009,8 +5075,8 @@ async def finalize_job_done_async(
                     job_info_table.c.spot_job_id == job_id,
                     sqlalchemy.or_(
                         job_info_table.c.schedule_state.is_(None),
-                        job_info_table.c.schedule_state !=
-                        ManagedJobScheduleState.DONE.value,
+                        job_info_table.c.schedule_state
+                        != ManagedJobScheduleState.DONE.value,
                     ))).values({
                         job_info_table.c.schedule_state:
                             ManagedJobScheduleState.DONE.value
@@ -5066,8 +5132,8 @@ async def scheduler_set_done_async(job_id: int,
             sqlalchemy.update(job_info_table).where(
                 sqlalchemy.and_(
                     job_info_table.c.spot_job_id == job_id,
-                    job_info_table.c.schedule_state !=
-                    ManagedJobScheduleState.DONE.value,
+                    job_info_table.c.schedule_state
+                    != ManagedJobScheduleState.DONE.value,
                 )).values({
                     job_info_table.c.schedule_state:
                         ManagedJobScheduleState.DONE.value
@@ -5211,8 +5277,8 @@ def get_unfinished_dependencies(job_ids: List[int]) -> Dict[int, List[int]]:
             where(
                 sqlalchemy.and_(
                     job_dependencies_table.c.spot_job_id.in_(job_ids),
-                    dependency_info.c.schedule_state !=
-                    ManagedJobScheduleState.DONE.value,
+                    dependency_info.c.schedule_state
+                    != ManagedJobScheduleState.DONE.value,
                 )).order_by(
                     job_dependencies_table.c.spot_job_id,
                     job_dependencies_table.c.depends_on_job_id)).fetchall()
@@ -5383,10 +5449,10 @@ def reset_jobs_for_recovery() -> None:
             job_info_table.c.controller_pid.isnot(None),
             # Schedule state should be alive.
             job_info_table.c.schedule_state.isnot(None),
-            (job_info_table.c.schedule_state !=
-             ManagedJobScheduleState.WAITING.value),
-            (job_info_table.c.schedule_state !=
-             ManagedJobScheduleState.DONE.value),
+            (job_info_table.c.schedule_state
+             != ManagedJobScheduleState.WAITING.value),
+            (job_info_table.c.schedule_state
+             != ManagedJobScheduleState.DONE.value),
         ).update({
             job_info_table.c.controller_pid: None,
             job_info_table.c.controller_pid_started_at: None,
@@ -5524,8 +5590,8 @@ def get_controller_logs_to_clean(retention_seconds: int,
                 # cycle.
                 sqlalchemy.or_(
                     sqlalchemy.func.max(spot_table.c.end_at).is_(None),
-                    sqlalchemy.func.max(spot_table.c.end_at) <
-                    (now - retention_seconds))).limit(batch_size))
+                    sqlalchemy.func.max(spot_table.c.end_at)
+                    < (now - retention_seconds))).limit(batch_size))
         rows = result.fetchall()
         return [{'job_id': row[0]} for row in rows]
 
@@ -5652,7 +5718,9 @@ async def add_job_event_async(
         reason: A description of why the event occurred.
         code: Optional error category code for failures.
         recovery_source: For RECOVERING events, why the job is recovering
-            (FAILURE / EMERGENCY / HA). NULL on all other events.
+            (FAILURE / EMERGENCY / RESTART); EMERGENCY also on the
+            RUNNING / WINDING_DOWN event of an emergency recovery that kept
+            the task on its cluster. NULL on all other events.
         timestamp: The timestamp of the event. If None, uses current time.
     """
     engine = await _db_manager.get_async_engine()
@@ -5727,8 +5795,9 @@ def _get_latest_event_reasons(
     reason covers any recovery cause (preemption/failure, emergency, or
     restart resume), surfaced in the `details` column.
     """
-    result: Dict['ManagedJobStatus',
-                 Dict[int, str]] = {status: {} for status in job_ids_by_status}
+    result: Dict['ManagedJobStatus', Dict[int, str]] = {
+        status: {} for status in job_ids_by_status
+    }
     conditions = [
         sqlalchemy.and_(
             job_events_table.c.new_status == status.value,

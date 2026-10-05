@@ -86,22 +86,29 @@ class TestRecoveryEventCounts:
         _seed_event(engine, 1, 'RECOVERING', 'EMERGENCY')
         _seed_event(engine, 1, 'RECOVERING', 'FAILURE')
         _seed_event(engine, 2, 'RECOVERING', 'EMERGENCY')
+        # An emergency recovery that kept the job on its cluster records a
+        # RUNNING (or WINDING_DOWN) event tagged EMERGENCY; it counts too.
+        _seed_event(engine, 1, 'RUNNING', 'EMERGENCY')
+        _seed_event(engine, 2, 'WINDING_DOWN', 'EMERGENCY')
 
         rows = set(state.get_recovery_event_counts_by_source_workspace())
         assert rows == {
-            ('EMERGENCY', 'ws-a', 2),
+            ('EMERGENCY', 'ws-a', 3),
             ('FAILURE', 'ws-a', 1),
-            ('EMERGENCY', 'ws-b', 1),
+            ('EMERGENCY', 'ws-b', 2),
         }
 
-    def test_excludes_null_source_and_non_recovering(
+    def test_excludes_null_source_and_unsourced_statuses(
             self, _mock_managed_jobs_db_conn):
         engine = _mock_managed_jobs_db_conn
         _seed_job(engine, 1)
         # Pre-migration RECOVERING row: NULL source — excluded.
         _seed_event(engine, 1, 'RECOVERING', None)
-        # Non-RECOVERING events never count, sourced or not.
+        # An ordinary RUNNING event ('Job has started') carries no source.
+        _seed_event(engine, 1, 'RUNNING', None)
+        # Other statuses never count, sourced or not.
         _seed_event(engine, 1, 'SUCCEEDED', None)
+        _seed_event(engine, 1, 'SUCCEEDED', 'EMERGENCY')
 
         assert state.get_recovery_event_counts_by_source_workspace() == []
 

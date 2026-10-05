@@ -25,6 +25,7 @@ from sky.jobs import constants as jobs_constants
 from sky.jobs import controller
 from sky.jobs import scheduler
 from sky.jobs import state
+from sky.jobs import utils as managed_job_utils
 from sky.utils import controller_utils
 
 _PID = 1234
@@ -247,6 +248,56 @@ class TestEmergencyRecoveryState:
         assert _get_task_row(engine)['status'] == 'RECOVERING'
         assert _get_recovering_events(engine, 1) == []
         assert not calls
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('status', ['RUNNING', 'WINDING_DOWN'])
+    async def test_record_emergency_kept_running(self,
+                                                 _mock_managed_jobs_db_conn,
+                                                 status):
+        """An emergency on a running task changes nothing about the task:
+        no status flip, no duration accounting, no callback. It is recorded
+        as a job event carrying the task's current status, tagged EMERGENCY,
+        so alerting and metrics still see the episode."""
+        engine = _mock_managed_jobs_db_conn
+        started_running_at = time.time() - 100
+        _seed_job(engine,
+                  status=status,
+                  last_recovered_at=started_running_at,
+                  job_duration=12.5)
+
+        recorded = await state.record_emergency_kept_running_async(
+            1, 0, reason='kept running')
+
+        assert recorded is True
+        row = _get_task_row(engine)
+        assert row['status'] == status
+        assert row['last_recovered_at'] == started_running_at
+        assert row['job_duration'] == 12.5
+        assert row['recovering_from_failure'] is None
+        events = state.get_job_events(1)
+        assert [(e['new_status'], e['reason']) for e in events
+               ] == [(state.ManagedJobStatus(status), 'kept running')]
+        # Not a recovery: no RECOVERING event, but the EMERGENCY source is on
+        # the event and the metric counts it.
+        assert _get_recovering_events(engine, 1) == []
+        assert state.get_recovery_event_counts_by_source_workspace() == [
+            (state.RecoverySource.EMERGENCY.value, None, 1)
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        'status', ['PENDING', 'STARTING', 'RECOVERING', 'CANCELLING', 'FAILED'])
+    async def test_record_emergency_kept_running_requires_running(
+            self, _mock_managed_jobs_db_conn, status):
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine, status=status)
+
+        recorded = await state.record_emergency_kept_running_async(
+            1, 0, reason='kept running')
+
+        assert recorded is False
+        assert _get_task_row(engine)['status'] == status
+        assert not state.get_job_events(1)
 
     @pytest.mark.asyncio
     async def test_set_emergency_recovering_accumulates_duration(
@@ -614,6 +665,11 @@ class _RetryLoopHarness:
                             self.get_latest_task)
         monkeypatch.setattr(f'{mjs}.set_emergency_recovering_async',
                             self.set_emergency)
+        # The adopt path (RUNNING task keeps its cluster) records the
+        # emergency on a job event instead of changing the status.
+        self.record_kept_running = AsyncMock(return_value=True)
+        monkeypatch.setattr(f'{mjs}.record_emergency_kept_running_async',
+                            self.record_kept_running)
         monkeypatch.setattr(
             f'{mjs}.normalize_schedule_state_for_emergency_retry_async',
             self.normalize)
@@ -630,6 +686,8 @@ class TestEmergencyRetryLoop:
 
     @pytest.mark.asyncio
     async def test_unexpected_error_retries_and_succeeds(self, monkeypatch):
+        """A RUNNING task keeps its status and its cluster: the retry
+        re-attaches instead of relaunching."""
         h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
 
         await h.jc.run()
@@ -641,12 +699,136 @@ class TestEmergencyRetryLoop:
         assert h.record_attempt.await_args.args[1] == 1  # attempt count
         _assert_jittered(
             h.sleeps, [jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS])
-        # The doomed cluster is torn down during the bookkeeping (before the
-        # backoff), not left running until the retry's forced recovery.
-        h.jc._cleanup_cluster.assert_awaited_once()
+        # No status flip and no teardown: the job stays RUNNING on its
+        # cluster through the backoff.
+        h.set_emergency.assert_not_awaited()
+        h.jc._cleanup_cluster.assert_not_awaited()
+        # The emergency is still recorded, on a job event, with the attempt
+        # number the on-call tooling keys on.
+        h.record_kept_running.assert_awaited_once()
+        reason = h.record_kept_running.await_args.kwargs['reason']
+        assert 'emergency recovery attempt 1/' in reason
+        assert 'keeps running on its cluster' in reason
+        assert '[RuntimeError] boom' in reason
         # Normal finally ran exactly once.
         h.set_cancelling.assert_awaited_once()
         h.set_cancelled.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('status', [
+        state.ManagedJobStatus.STARTING,
+        state.ManagedJobStatus.RECOVERING,
+    ])
+    async def test_not_running_task_marks_recovering_and_tears_down(
+            self, monkeypatch, status):
+        """A task that never reached RUNNING (or was already relaunching)
+        keeps the relaunch path: RECOVERING + early teardown, then the
+        retry's forced recovery."""
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        h.get_latest_task.return_value = (0, status)
+
+        await h.jc.run()
+
+        assert h.jc._run_one_task.call_count == 2
+        h.set_emergency.assert_awaited_once()
+        assert 'emergency recovery attempt 1/' in (
+            h.set_emergency.await_args.kwargs['reason'])
+        # The doomed cluster is torn down during the bookkeeping (before the
+        # backoff), not left running until the retry's forced recovery.
+        h.jc._cleanup_cluster.assert_awaited_once()
+        h.record_kept_running.assert_not_awaited()
+        _assert_jittered(
+            h.sleeps, [jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS])
+
+    @pytest.mark.asyncio
+    async def test_winding_down_task_keeps_cluster(self, monkeypatch):
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        h.get_latest_task.return_value = (0,
+                                          state.ManagedJobStatus.WINDING_DOWN)
+
+        await h.jc.run()
+
+        h.set_emergency.assert_not_awaited()
+        h.jc._cleanup_cluster.assert_not_awaited()
+        h.record_kept_running.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_running_task_last_attempt_relaunches(self, monkeypatch):
+        """The last attempt of an episode relaunches instead of re-attaching:
+        an error that recurs on every re-attach may be tied to the cluster
+        or handle, and one relaunch is the only thing that can clear it
+        before the budget runs out."""
+        max_attempts = jobs_constants.EMERGENCY_RECOVERY_MAX_ATTEMPTS
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        h.get_budget.return_value = (max_attempts - 1, time.time())
+
+        await h.jc.run()
+
+        assert h.record_attempt.await_args.args[1] == max_attempts
+        h.record_kept_running.assert_not_awaited()
+        h.set_emergency.assert_awaited_once()
+        h.jc._cleanup_cluster.assert_awaited_once()
+        h.jc._update_failed_task_state.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_running_task_event_recorded_once_across_rounds(
+            self, monkeypatch):
+        """A transient failure after the event is recorded must not make
+        the outer retry record it again."""
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        normalize_calls = {'n': 0}
+
+        async def _normalize(job_id):
+            normalize_calls['n'] += 1
+            if normalize_calls['n'] == 1:
+                raise ConnectionError('db blip after recording the event')
+
+        h.normalize.side_effect = _normalize
+
+        await h.jc.run()
+
+        assert normalize_calls['n'] == 2  # the round was re-run
+        h.record_kept_running.assert_awaited_once()
+        h.jc._update_failed_task_state.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_running_task_gone_retries_without_backoff(self, monkeypatch):
+        """If the task stopped running between the status read and the
+        event write (cancelled, or finished by another writer), the resume
+        logic owns it: retry the job loop immediately."""
+        h = _RetryLoopHarness(monkeypatch,
+                              [RuntimeError('boom'),
+                               asyncio.CancelledError()])
+        h.record_kept_running.return_value = False
+
+        with pytest.raises(asyncio.CancelledError):
+            await h.jc.run()
+
+        assert h.jc._run_one_task.call_count == 2
+        assert not h.sleeps
+        h.jc._cleanup_cluster.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_kept_cluster_backoff_keeps_full_ladder(self, monkeypatch):
+        """A task that keeps its cluster sleeps the same full jittered ladder
+        as a torn-down one, so a persistent error still takes hours to
+        exhaust the budget and there is time to remediate by hand."""
+        attempt = 5
+        base = jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS
+        nominal = base * 2**(attempt - 1)
+
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        h.get_budget.return_value = (attempt - 1, time.time())
+        await h.jc.run()
+        _assert_jittered(h.sleeps, [nominal])
+        h.jc._cleanup_cluster.assert_not_awaited()
+
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        h.get_budget.return_value = (attempt - 1, time.time())
+        h.get_latest_task.return_value = (0, state.ManagedJobStatus.STARTING)
+        await h.jc.run()
+        _assert_jittered(h.sleeps, [nominal])
+        h.jc._cleanup_cluster.assert_awaited_once()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('error,expected_status', [
@@ -710,6 +892,7 @@ class TestEmergencyRetryLoop:
         h = _RetryLoopHarness(monkeypatch,
                               [RuntimeError('boom'),
                                asyncio.CancelledError()])
+        h.get_latest_task.return_value = (0, state.ManagedJobStatus.STARTING)
         h.set_emergency.return_value = False
 
         with pytest.raises(asyncio.CancelledError):
@@ -770,6 +953,10 @@ class TestEmergencyRetryLoop:
     @pytest.mark.asyncio
     async def test_bookkeeping_exhausted_falls_back_to_failing(
             self, monkeypatch):
+        # The bookkeeping retries until a wall-clock deadline; shrink it so
+        # the test observes the give-up path without waiting.
+        monkeypatch.setattr(jobs_constants,
+                            'EMERGENCY_BOOKKEEPING_DEADLINE_SECONDS', 0.05)
         h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom')])
         h.get_budget.side_effect = ConnectionError('db down')
 
@@ -783,8 +970,10 @@ class TestEmergencyRetryLoop:
 
     @pytest.mark.asyncio
     async def test_backoff_sequence_and_final_escape(self, monkeypatch):
+        """A task on the relaunch path sleeps the full jittered ladder."""
         max_attempts = jobs_constants.EMERGENCY_RECOVERY_MAX_ATTEMPTS
         h = _RetryLoopHarness(monkeypatch, RuntimeError('boom'))
+        h.get_latest_task.return_value = (0, state.ManagedJobStatus.STARTING)
         now = time.time()
         h.get_budget.side_effect = [
             (i, None if i == 0 else now) for i in range(max_attempts + 1)
@@ -806,12 +995,41 @@ class TestEmergencyRetryLoop:
             state.ManagedJobStatus.FAILED_CONTROLLER)
 
     @pytest.mark.asyncio
+    async def test_running_task_episode_keeps_cluster_until_last_attempt(
+            self, monkeypatch):
+        """A RUNNING task that keeps failing is re-attached on every
+        attempt but the last, sleeping the full ladder (hours in total, so
+        there is time to remediate by hand); the last attempt relaunches;
+        then the budget is exhausted and the job fails."""
+        max_attempts = jobs_constants.EMERGENCY_RECOVERY_MAX_ATTEMPTS
+        h = _RetryLoopHarness(monkeypatch, RuntimeError('boom'))
+        now = time.time()
+        h.get_budget.side_effect = [
+            (i, None if i == 0 else now) for i in range(max_attempts + 1)
+        ]
+
+        await h.jc.run()
+
+        base = jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS
+        cap = jobs_constants.EMERGENCY_RECOVERY_BACKOFF_CAP_SECONDS
+        nominal = [min(base * 2**i, cap) for i in range(max_attempts)]
+        _assert_jittered(h.sleeps, nominal)
+        assert h.record_kept_running.await_count == max_attempts - 1
+        h.set_emergency.assert_awaited_once()
+        h.jc._cleanup_cluster.assert_awaited_once()
+        assert h.jc._run_one_task.call_count == max_attempts + 1
+        h.jc._update_failed_task_state.assert_awaited_once()
+        assert h.jc._update_failed_task_state.await_args.args[1] == (
+            state.ManagedJobStatus.FAILED_CONTROLLER)
+
+    @pytest.mark.asyncio
     async def test_backoff_is_jittered(self, monkeypatch):
         """The backoff is not deterministic: repeated attempts at the same
         nominal (the capped steady state) produce different sleeps, each
         within +/-50% of the nominal."""
         max_attempts = jobs_constants.EMERGENCY_RECOVERY_MAX_ATTEMPTS
         h = _RetryLoopHarness(monkeypatch, RuntimeError('boom'))
+        h.get_latest_task.return_value = (0, state.ManagedJobStatus.STARTING)
         now = time.time()
         h.get_budget.side_effect = [
             (i, None if i == 0 else now) for i in range(max_attempts + 1)
@@ -902,11 +1120,13 @@ class TestEmergencyRetryLoop:
     @pytest.mark.asyncio
     async def test_emergency_calls_on_before_recovery_before_teardown(
             self, monkeypatch):
-        """The emergency path tears the cluster down before the retry runs,
-        so it must give the runtime a chance to snapshot the about-to-be-lost
-        run's logs first (on_before_recovery), mirroring the normal recovery
-        path. Otherwise every emergency records a capture failure."""
+        """The emergency path tears a STARTING task's cluster down before
+        the retry runs, so it must give the runtime a chance to snapshot the
+        about-to-be-lost run's logs first (on_before_recovery), mirroring the
+        normal recovery path. Otherwise every emergency records a capture
+        failure. (A RUNNING task keeps its cluster, so neither runs.)"""
         h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        h.get_latest_task.return_value = (0, state.ManagedJobStatus.STARTING)
         order = []
 
         monkeypatch.setattr(
@@ -931,6 +1151,43 @@ class TestEmergencyRetryLoop:
 
         # The hook ran, and it ran before the teardown.
         assert order[:2] == ['hook', 'teardown']
+
+    @pytest.mark.asyncio
+    async def test_running_task_skips_hook_and_teardown(self, monkeypatch):
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        order = []
+
+        monkeypatch.setattr(
+            'sky.jobs.controller.managed_job_runtime.is_registered',
+            lambda: True)
+        monkeypatch.setattr(
+            'sky.jobs.controller.managed_job_runtime.on_before_recovery',
+            lambda *args, **kwargs: order.append('hook'))
+
+        async def _cleanup(name):
+            order.append('teardown')
+
+        h.jc._cleanup_cluster = AsyncMock(side_effect=_cleanup)
+
+        await h.jc.run()
+
+        assert order == []
+        assert h.jc._run_one_task.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_bookkeeping_retries_past_five_rounds(self, monkeypatch):
+        """The bookkeeping is bounded by a deadline, not a round count: a
+        database outage that outlasts a handful of rounds still ends in an
+        in-place retry once the database is back."""
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        h.get_budget.side_effect = [ConnectionError('db down')] * 8 + [(0, None)
+                                                                      ]
+
+        await h.jc.run()
+
+        h.jc._update_failed_task_state.assert_not_called()
+        assert h.jc._run_one_task.call_count == 2
+        assert h.get_budget.await_count == 9
 
 
 class TestBatchCoordinatorEmergencyResume:
@@ -1178,8 +1435,11 @@ class TestJobGroupEmergencyRecovery:
 
     @pytest.mark.asyncio
     async def test_single_task_surgery_unchanged(self, monkeypatch):
-        """Regression pin: single jobs keep the mark + early teardown."""
+        """Regression pin: a single job's task that is not RUNNING keeps the
+        mark + early teardown; a RUNNING one keeps its cluster but still
+        resolves the latest task (not the group-only bulk probe)."""
         h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        h.get_latest_task.return_value = (0, state.ManagedJobStatus.STARTING)
 
         await h.jc.run()
 
@@ -1187,3 +1447,12 @@ class TestJobGroupEmergencyRecovery:
         h.jc._cleanup_cluster.assert_awaited_once()
         # The group-only bulk status probe is never used on this path.
         h.get_task_statuses.assert_not_awaited()
+
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+
+        await h.jc.run()
+
+        h.get_latest_task.assert_awaited_once()
+        h.get_task_statuses.assert_not_awaited()
+        h.set_emergency.assert_not_awaited()
+        h.jc._cleanup_cluster.assert_not_awaited()
