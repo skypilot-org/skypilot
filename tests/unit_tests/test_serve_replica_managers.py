@@ -4,6 +4,7 @@ Currently focused on `SkyPilotReplicaManager.__init__` startup ordering:
 the daemon threads (especially `_job_status_fetcher`) must NOT race the
 main thread for `self.lock` before `_recover_replica_operations` runs.
 """
+import threading
 from unittest import mock
 
 from sky.serve import replica_managers
@@ -137,3 +138,40 @@ class TestSkyPilotReplicaManagerInitOrdering:
         assert '_thread_pool_refresher' in started_targets
         assert '_job_status_fetcher' in started_targets
         assert '_replica_prober' in started_targets
+
+
+class TestRecoveryContinuesReplicaIds:
+    """After a controller restart, new replica ids continue after the
+    recorded ones instead of restarting at 1."""
+
+    def _manager(self) -> replica_managers.SkyPilotReplicaManager:
+        manager = replica_managers.SkyPilotReplicaManager.__new__(
+            replica_managers.SkyPilotReplicaManager)
+        manager.lock = threading.Lock()
+        manager._service_name = 'svc'
+        manager._next_replica_id = 1
+        manager._launch_thread_pool = {}
+        manager._down_thread_pool = {}
+        return manager
+
+    def _recover(self, manager, recorded_ids):
+        recorded = [
+            mock.Mock(replica_id=replica_id) for replica_id in recorded_ids
+        ]
+        with mock.patch(
+                'sky.serve.replica_managers.serve_state.get_replica_infos',
+                return_value=recorded), \
+             mock.patch(
+                 'sky.serve.replica_managers.serve_state.get_replicas_at_status',
+                 return_value=[]):
+            manager._recover_replica_operations()
+
+    def test_next_replica_id_follows_recorded_replicas(self):
+        manager = self._manager()
+        self._recover(manager, [4, 5, 6])
+        assert manager._next_replica_id == 7
+
+    def test_next_replica_id_starts_at_one_without_replicas(self):
+        manager = self._manager()
+        self._recover(manager, [])
+        assert manager._next_replica_id == 1

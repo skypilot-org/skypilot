@@ -875,6 +875,12 @@ class SkyPilotReplicaManager(ReplicaManager):
         assert (not self._launch_thread_pool and not self._down_thread_pool
                ), 'We should not have any running threads in a recovery run'
 
+        # A reused replica id would reuse a live replica's cluster name.
+        self._next_replica_id = max(
+            (info.replica_id
+             for info in serve_state.get_replica_infos(self._service_name)),
+            default=0) + 1
+
         # There is a FIFO queue with capacity _MAX_NUM_LAUNCH for
         # _launch_replica.
         # We prioritize PROVISIONING replicas since they were previously
