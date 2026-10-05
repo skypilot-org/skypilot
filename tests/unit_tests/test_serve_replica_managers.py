@@ -142,7 +142,8 @@ class TestSkyPilotReplicaManagerInitOrdering:
 
 class TestRecoveryContinuesReplicaIds:
     """After a controller restart, new replica ids continue after the
-    recorded ones instead of restarting at 1."""
+    recorded replicas and the service's existing clusters instead of
+    restarting at 1."""
 
     def _manager(self) -> replica_managers.SkyPilotReplicaManager:
         manager = replica_managers.SkyPilotReplicaManager.__new__(
@@ -154,7 +155,7 @@ class TestRecoveryContinuesReplicaIds:
         manager._down_thread_pool = {}
         return manager
 
-    def _recover(self, manager, recorded_ids):
+    def _recover(self, manager, recorded_ids, cluster_names=()):
         recorded = [
             mock.Mock(replica_id=replica_id) for replica_id in recorded_ids
         ]
@@ -163,7 +164,11 @@ class TestRecoveryContinuesReplicaIds:
                 return_value=recorded), \
              mock.patch(
                  'sky.serve.replica_managers.serve_state.get_replicas_at_status',
-                 return_value=[]):
+                 return_value=[]), \
+             mock.patch(
+                 'sky.serve.replica_managers.global_user_state.'
+                 'get_cluster_names_start_with',
+                 return_value=list(cluster_names)):
             manager._recover_replica_operations()
 
     def test_next_replica_id_follows_recorded_replicas(self):
@@ -175,3 +180,10 @@ class TestRecoveryContinuesReplicaIds:
         manager = self._manager()
         self._recover(manager, [])
         assert manager._next_replica_id == 1
+
+    def test_next_replica_id_skips_cluster_without_replica_record(self):
+        manager = self._manager()
+        # svc-6 outlived its record; svc-2-1 belongs to another service.
+        self._recover(manager, [4, 5],
+                      cluster_names=['svc-4', 'svc-5', 'svc-6', 'svc-2-1'])
+        assert manager._next_replica_id == 7
