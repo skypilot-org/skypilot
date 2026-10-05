@@ -14,16 +14,19 @@ import pytest
 
 from sky import exceptions
 from sky import global_user_state
+from sky import models
 from sky import skypilot_config
 from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import daemons as server_daemons
+from sky.server import versions
 from sky.server.requests import continue_condition as continue_condition_lib
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
 from sky.server.requests import requests as requests_lib
+from sky.server.requests import workspace_access
 from sky.skylet import constants
 from sky.utils import context_utils
 from sky.utils.db import db_utils
@@ -1510,6 +1513,41 @@ def stub_override_request_env_deps(monkeypatch):
 
     monkeypatch.setattr('sky.global_user_state.add_or_update_user',
                         fake_add_or_update_user)
+    return fake_user
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('authenticated, groups, expected',
+                         [(False, None, None), (True, None, None),
+                          (True, [], []), (True, ['vision'], ['vision'])])
+async def test_authenticated_groups_survive_request_handoff(
+        stub_override_request_env_deps, monkeypatch, tmp_path, authenticated,
+        groups, expected):
+    """Workers see only IdP groups, preserving absent versus empty."""
+    monkeypatch.setattr(server_constants, 'REQUEST_LOG_PATH_PREFIX',
+                        str(tmp_path))
+    monkeypatch.setattr(requests_lib, 'create_if_not_exists_async',
+                        mock.AsyncMock(return_value=True))
+    monkeypatch.setattr(versions, 'get_remote_api_version', lambda: None)
+    monkeypatch.setattr(workspace_access, 'for_current_request', lambda: None)
+    body = payloads.RequestBody(
+        env_vars={
+            constants.USER_GROUPS_ENV_VAR: 'client-spoofed',
+            constants.USER_ID_ENV_VAR: 'client-user-id',
+            constants.USER_ENV_VAR: 'client-user',
+        })
+    request = await executor.prepare_request_async(
+        request_id='test-groups',
+        request_name='test.groups',
+        request_body=body,
+        func=dummy_entrypoint,
+        auth_user=(models.User(id='test-user-id',
+                               name='user@example.com',
+                               groups=groups) if authenticated else None))
+    with executor.override_request_env_and_config(request.request_body,
+                                                  request_id=request.request_id,
+                                                  request_name=request.name):
+        assert stub_override_request_env_deps.groups == expected
 
 
 def test_override_env_skipped_for_daemon_request(stub_override_request_env_deps,

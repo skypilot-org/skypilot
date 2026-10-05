@@ -738,6 +738,11 @@ def override_request_env_and_config(
                 name=request_body.env_vars[constants.USER_ENV_VAR])
             _, user = global_user_state.add_or_update_user(user,
                                                            return_user=True)
+            # add_or_update_user returns the persisted row, which has no
+            # groups column by design. Re-attach them from the env so the
+            # policy sees what the IdP asserted for THIS request.
+            user.groups = models.parse_groups(
+                request_body.env_vars.get(constants.USER_GROUPS_ENV_VAR))
             using_remote_api_server = request_body.using_remote_api_server
 
         # Force color to be enabled.
@@ -1245,6 +1250,8 @@ async def prepare_request_async(
     auth_user: Optional[models.User] = None,
 ) -> api_requests.Request:
     """Prepare a request for execution."""
+    # Only the authenticated identity may assert groups, never the request body.
+    request_body.env_vars.pop(constants.USER_GROUPS_ENV_VAR, None)
     if auth_user is not None:
         assert auth_user.name is not None
         # Use the authenticated user identity as the single source of truth
@@ -1253,6 +1260,11 @@ async def prepare_request_async(
         # Set user identity for executors.
         request_body.env_vars[constants.USER_ID_ENV_VAR] = user_id
         request_body.env_vars[constants.USER_ENV_VAR] = auth_user.name
+        # Groups are not persisted with the user. A missing assertion must
+        # remain distinct from an explicit empty group list.
+        if auth_user.groups is not None:
+            request_body.env_vars[constants.USER_GROUPS_ENV_VAR] = ','.join(
+                auth_user.groups)
     else:
         # Fallback to legacy environment variable based identity if no
         # authentication is set.

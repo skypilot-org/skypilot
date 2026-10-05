@@ -27,6 +27,19 @@ class UserType(enum.Enum):
     LEGACY = 'legacy'
 
 
+def parse_groups(header: Optional[str]) -> Optional[List[str]]:
+    """Parse the comma-separated X-Auth-Request-Groups header.
+
+    Returns None when the header is absent, so callers can distinguish "the IdP
+    did not assert groups" from "the user is in no groups". An admin policy that
+    conflates the two will silently mis-attribute every request on a server
+    where the groups scope is not configured.
+    """
+    if header is None:
+        return None
+    return [g.strip() for g in header.split(',') if g.strip()]
+
+
 @dataclasses.dataclass
 class User:
     """Dataclass to store user information."""
@@ -41,6 +54,10 @@ class User:
     # Resolution and RBAC validation live in sky/workspaces/; this field is
     # just the persisted value. None means "no preference set".
     preferred_workspace: Optional[str] = None
+    # Groups asserted by the identity provider for this request, from the auth
+    # proxy's X-Auth-Request-Groups header. Not persisted: group membership
+    # belongs to the IdP, and a stored copy would go stale silently.
+    groups: Optional[List[str]] = None
 
     def __init__(
         self,
@@ -50,6 +67,7 @@ class User:
         created_at: Optional[int] = None,
         user_type: Optional[str] = None,
         preferred_workspace: Optional[str] = None,
+        groups: Optional[List[str]] = None,
     ):
         self.id = id.strip().lower()
         self.name = name
@@ -57,6 +75,7 @@ class User:
         self.created_at = created_at
         self.user_type = user_type
         self.preferred_workspace = preferred_workspace
+        self.groups = groups
 
     def to_dict(self) -> Dict[str, Any]:
         return {

@@ -58,6 +58,7 @@ tests:
       ingress.oauth2-proxy.client-id: "test-client-id"
       ingress.oauth2-proxy.client-secret: "test-client-secret"
       ingress.oauth2-proxy.email-domain: "example.com"
+      ingress.oauth2-proxy.scope: "openid email profile groups"
       ingress.oauth2-proxy.session-store-type: "redis"
     template: templates/oauth2-proxy-deployment.yaml
     asserts:
@@ -72,6 +73,9 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].args
           content: "--email-domain=example.com"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--scope=openid email profile groups"
       - contains:
           path: spec.template.spec.containers[0].args
           content: "--redis-connection-url=redis://$(SERVICE_NAME)-oauth2-proxy-redis:6379/0"
@@ -199,7 +203,7 @@ tests:
           value: "http://$host/oauth2/auth"
       - equal:
           path: metadata.annotations["nginx.ingress.kubernetes.io/auth-response-headers"]
-          value: "X-Auth-Request-Email, X-Skypilot-Auth"
+          value: "X-Auth-Request-Email, X-Auth-Request-Groups, X-Skypilot-Auth"
       - matchRegex:
           path: metadata.annotations["nginx.ingress.kubernetes.io/auth-snippet"]
           pattern: 'if \(\$http_authorization ~ "\^Bearer sky_\.\+"'
@@ -254,9 +258,14 @@ tests:
       auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
       auth.oauth.client-id: "test-client-id"
       auth.oauth.client-secret: "test-client-secret"
+      auth.oauth.scope: "openid email profile groups"
     asserts:
       - hasDocuments:
           count: 1
+        template: templates/oauth2-proxy-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--scope=openid email profile groups"
         template: templates/oauth2-proxy-deployment.yaml
       - hasDocuments:
           count: 1
@@ -264,6 +273,18 @@ tests:
       - hasDocuments:
           count: 2  # Deployment and Service for Redis
         template: templates/oauth2-proxy-redis.yaml
+
+  - it: should leave oauth2-proxy scopes at their default when unset
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+    template: templates/oauth2-proxy-deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: "--scope=openid email profile groups"
 
   - it: should configure API deployment with oauth environment variables (new auth)
     set:
