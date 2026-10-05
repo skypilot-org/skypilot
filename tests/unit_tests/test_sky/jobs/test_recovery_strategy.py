@@ -222,6 +222,10 @@ def _make_launch_executor():
     """Build a minimally-initialized StrategyExecutor for _launch tests."""
     executor = _make_bare_executor()
     executor.job_id = 1
+    executor.max_restarts_on_errors = 0
+    executor.restart_cnt_on_failure = 0
+    executor.runtime_restart_cnt_on_failure = 0
+    executor.recover_on_exit_codes = []
     executor.task_id = 0
     executor.pool = None
     executor.cluster_name = 'test-cluster'
@@ -265,6 +269,9 @@ def _patch_launch_environment(monkeypatch):
                         set_restarting)
     monkeypatch.setattr(recovery_strategy.state, 'set_backoff_pending_async',
                         set_backoff_pending)
+    monkeypatch.setattr(recovery_strategy.state,
+                        'get_runtime_user_restarts_async',
+                        mock.AsyncMock(return_value=0))
     monkeypatch.setattr(recovery_strategy.sdk, 'api_start', mock.MagicMock())
     sdk_launch = mock.MagicMock(return_value='req-123')
     monkeypatch.setattr(recovery_strategy.sdk, 'launch', sdk_launch)
@@ -586,6 +593,99 @@ async def test_cancel_launch_request_tolerates_api_cancel_failure(monkeypatch):
     await executor._cancel_launch_request('req-1')
 
     sdk_get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_launch_forwards_remaining_runtime_recovery_budget(monkeypatch):
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor.max_restarts_on_errors = 5
+    executor.restart_cnt_on_failure = 1
+    executor.recover_on_exit_codes = [137]
+    executor.extra_launch_context = mock.Mock(
+        return_value={'other': 'retained'})
+    monkeypatch.setattr(recovery_strategy.state,
+                        'get_runtime_user_restarts_async',
+                        mock.AsyncMock(return_value=2))
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+    assert await executor._launch(max_retry=1, raise_on_failure=True) == 123.45
+    context = patches.sdk_launch.call_args.kwargs['_extra_launch_context']
+    assert context == {
+        'other': 'retained',
+        'runtime_observation_target': {
+            'kind': 'managed_task',
+            'job_id': executor.job_id,
+            'task_id': executor.task_id,
+        },
+        'managed_job_recovery': {
+            'max_restarts_on_errors': 2,
+            'recover_on_exit_codes': [137]
+        }
+    }
+    assert executor.runtime_restart_cnt_on_failure == 2
+    assert executor.should_restart_on_failure([7])
+    assert executor.should_restart_on_failure([7])
+    assert not executor.should_restart_on_failure([7])
+    assert executor.should_restart_on_failure([137])
+    for future in executor._stream_futures:
+        future.cancel()
+
+
+@pytest.mark.asyncio
+async def test_resume_restores_runtime_consumed_retry_budget(monkeypatch):
+    executor = _make_launch_executor()
+    executor.max_restarts_on_errors = 2
+    monkeypatch.setattr(recovery_strategy.state,
+                        'get_runtime_user_restarts_async',
+                        mock.AsyncMock(return_value=2))
+    await executor.on_resume('cluster')
+    assert not executor.should_restart_on_failure([7])
+
+
+def test_make_forwards_retry_budget_after_removing_resource_recovery(
+        monkeypatch):
+    from sky import resources
+    from sky import task as task_lib
+    task = task_lib.Task(run='true')
+    task.set_resources(
+        resources.Resources(
+            job_recovery={
+                'strategy': 'EAGER_NEXT_REGION',
+                'max_restarts_on_errors': 4,
+                'recover_on_exit_codes': [137]
+            }))
+    factory = mock.Mock(return_value=mock.Mock())
+    monkeypatch.setattr(
+        recovery_strategy.registry.JOBS_RECOVERY_STRATEGY_REGISTRY, 'from_str',
+        lambda _: factory)
+    recovery_strategy.StrategyExecutor.make('cluster', mock.Mock(), task, 1,
+                                            0, None, set(), mock.Mock(),
+                                            mock.Mock())
+    assert list(task.resources)[0].job_recovery is None
+    assert factory.call_args.args[3] == 4
+    assert factory.call_args.args[10] == [137]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status_name', ['PENDING', 'SUCCEEDED', 'CANCELLED'])
+async def test_start_wait_uses_runtime_before_cluster_refresh(
+        monkeypatch, status_name):
+    from sky.skylet import job_lib
+    executor = _make_bare_executor()
+    executor.cluster_name = 'test-cluster'
+    runtime = recovery_strategy.managed_job_runtime
+    monkeypatch.setattr(runtime, 'is_registered', lambda: True)
+    monkeypatch.setattr(recovery_strategy.global_user_state,
+                        'get_handle_from_cluster_name', lambda _: object())
+    monkeypatch.setattr(
+        runtime, 'get_job_status', lambda *_:
+        (getattr(job_lib.JobStatus, status_name), None))
+    monkeypatch.setattr(runtime, 'get_job_submitted_at', lambda *_: 123.45)
+    refresh = mock.Mock(side_effect=AssertionError('must retain allocation'))
+    monkeypatch.setattr(recovery_strategy.backend_utils,
+                        'refresh_cluster_status_handle', refresh)
+    assert await executor._wait_until_job_starts_on_cluster() == (123.45, None)
+    refresh.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

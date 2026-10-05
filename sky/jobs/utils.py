@@ -170,6 +170,8 @@ _NON_DB_FIELDS = _CLUSTER_HANDLE_FIELDS + [
     'details',
     # is_job_group is derived from execution column (execution == 'parallel')
     'is_job_group',
+    # From the job_dependencies table.
+    'depends_on',
 ]
 
 
@@ -633,6 +635,9 @@ async def get_job_status(
     cluster_name: str,
     job_id: Optional[int],
     status_logger: Optional[JobStatusLogger] = None,
+    *,
+    handle: Optional['backends.CloudVmRayResourceHandle'] = None,
+    runtime_checked: bool = False,
 ) -> Tuple[Optional['job_lib.JobStatus'], Optional[str]]:
     """Check the status of the job running on a managed job cluster.
 
@@ -643,6 +648,8 @@ async def get_job_status(
         status_logger: If provided, the result is logged through it, so that
             consecutive identical results are collapsed into one logline. If
             None, every result is logged.
+        handle: Reuse the caller's cluster handle when available.
+        runtime_checked: The caller already asked the runtime for job status.
 
     Returns:
         job_status: The status of the job.
@@ -652,8 +659,9 @@ async def get_job_status(
     # TODO(zhwu, cooperc): Make this get job status aware of cluster status, so
     # that it can exit retry early if the cluster is down.
     # TODO(luca) make this async
-    handle = await asyncio.to_thread(
-        global_user_state.get_handle_from_cluster_name, cluster_name)
+    if handle is None:
+        handle = await asyncio.to_thread(
+            global_user_state.get_handle_from_cluster_name, cluster_name)
 
     def _log(message: str) -> None:
         if status_logger is not None:
@@ -664,7 +672,7 @@ async def get_job_status(
     def _log_job_status(status: Optional['job_lib.JobStatus']) -> None:
         _log('No job found.' if status is None else f'Job status: {status}')
 
-    if managed_job_runtime.is_registered():
+    if not runtime_checked and managed_job_runtime.is_registered():
         result = await asyncio.to_thread(managed_job_runtime.get_job_status,
                                          handle, cluster_name)
         if result is not None:
@@ -2316,6 +2324,15 @@ def stream_logs_by_id(
                     f'Valid task IDs are {valid_range}.',
                     exceptions.JobExitCode.NOT_FOUND)
 
+    runtime_log_result = managed_job_runtime.tail_managed_job_logs(
+        job_id=job_id,
+        task_id=filtered_task_id,
+        follow=follow,
+        tail=tail,
+        tail_offset=tail_offset)
+    if runtime_log_result is not None:
+        return '', runtime_log_result
+
     # Follow the jobs controller log during provisioning so the user sees the
     # same spinner messages that `sky launch` shows. The controller relays the
     # inner cluster-launch rich-status payloads into its per-job log (see
@@ -3188,15 +3205,18 @@ def _get_launch_reasons_by_task(
     return reasons
 
 
-def _format_job_details(*,
-                        job: Dict[str, Any],
-                        highest_blocking_priority: int,
-                        recovery_reason: Optional[str] = None,
-                        pending_reason: Optional[str] = None,
-                        cancel_reason: Optional[str] = None,
-                        launch_reason: Optional[str] = None) -> None:
+def _format_job_details(
+        *,
+        job: Dict[str, Any],
+        highest_blocking_priority: int,
+        recovery_reason: Optional[str] = None,
+        pending_reason: Optional[str] = None,
+        cancel_reason: Optional[str] = None,
+        launch_reason: Optional[str] = None,
+        unfinished_dependencies: Optional[List[int]] = None) -> None:
     """Add details about schedule state / backoff / recovery / pending /
-    who requested a cancellation / what a launch is waiting on."""
+    who requested a cancellation / what a launch is waiting on / which jobs it
+    depends on are still running."""
     if cancel_reason:
         # Surface who asked for the cancellation, and under which API
         # request, e.g. 'Cancellation requested by user alice (request ID:
@@ -3213,6 +3233,11 @@ def _format_job_details(*,
     state_details = None
     if job['schedule_state'] == 'ALIVE_BACKOFF':
         state_details = 'In backoff, waiting for resources'
+    elif job['schedule_state'] == 'WAITING' and unfinished_dependencies:
+        label = ('Dependency'
+                 if len(unfinished_dependencies) == 1 else 'Dependencies')
+        state_details = (
+            f'{label}: {", ".join(str(d) for d in unfinished_dependencies)}')
     elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
         priority = job.get('priority')
         if (priority is not None and priority < highest_blocking_priority):
@@ -3568,6 +3593,11 @@ def get_managed_job_queue(
     pending_reasons: Dict[int, str] = {}
     cancel_reasons: Dict[int, str] = {}
     launch_reasons: Dict[Tuple[int, Optional[int]], str] = {}
+    unfinished_dependencies: Dict[int, List[int]] = {}
+    dependencies: Dict[int, List[int]] = {}
+    if not fields or 'depends_on' in fields:
+        dependencies = managed_job_state.get_jobs_dependencies(
+            list({job['job_id'] for job in jobs}))
     if not fields or 'details' in fields:
         recovering_job_ids = [
             job['job_id'] for job in jobs if job['status'] ==
@@ -3604,6 +3634,13 @@ def get_managed_job_queue(
         # provisioned (e.g. 'Launching (pending: QOSGrpGRES)' on Slurm), so
         # `details` answers why the job has not started yet.
         launch_reasons = _get_launch_reasons_by_task(jobs)
+        unfinished_dependencies = (
+            managed_job_state.get_unfinished_dependencies(
+                list({
+                    job['job_id']
+                    for job in jobs
+                    if job['schedule_state'] == 'WAITING'
+                })))
 
     for job in jobs:
         if not fields or 'details' in fields:
@@ -3614,11 +3651,15 @@ def get_managed_job_queue(
                 pending_reason=pending_reasons.get(job['job_id']),
                 cancel_reason=cancel_reasons.get(job['job_id']),
                 launch_reason=launch_reasons.get(
-                    (job['job_id'], job.get('task_id'))))
+                    (job['job_id'], job.get('task_id'))),
+                unfinished_dependencies=unfinished_dependencies.get(
+                    job['job_id']))
 
         # Derive is_job_group from execution column
         job['is_job_group'] = (
             job.get('execution') == DagExecution.PARALLEL.value)
+        if not fields or 'depends_on' in fields:
+            job['depends_on'] = dependencies.get(job['job_id'])
 
     return {
         'jobs': jobs,

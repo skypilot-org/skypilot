@@ -278,6 +278,14 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
 DEFAULT_NAMESPACE = 'default'
 
 DEFAULT_SERVICE_ACCOUNT_NAME = 'skypilot-service-account'
+# Controller clusters provision other clusters, so they need permissions no
+# pod running user code should hold. They get their own account; the name
+# above stays with workload pods, because operator-written policy (quotas,
+# admission rules, their own RoleBindings) references it by string.
+CONTROLLER_SERVICE_ACCOUNT_NAME = 'skypilot-controller-service-account'
+# Service accounts SkyPilot creates and reconciles itself.
+MANAGED_SERVICE_ACCOUNT_NAMES = (DEFAULT_SERVICE_ACCOUNT_NAME,
+                                 CONTROLLER_SERVICE_ACCOUNT_NAME)
 
 MEMORY_SIZE_UNITS = {
     'm': 0.001,
@@ -2224,10 +2232,11 @@ def pod_terminated_abnormally(pod: 'kubernetes_models.V1Pod') -> bool:
 # Canonical Kubernetes failure-reason -> remediation hint table, shared by the
 # provision-failure formatter (sky/backends/cloud_vm_ray_backend.py, via
 # match_kubernetes_failure_hint) and the pod-OOM diagnosis path
-# (diagnose_terminated_pod). Each entry maps a list of case-sensitive
-# substrings (matched against a failure reason) to a hint. A hint may contain a
-# literal `{dashboard_url}` token; callers that can resolve the dashboard URL
-# substitute the real URL, others fall back to a generic phrase.
+# (diagnose_terminated_pod). Each entry maps a list of case-sensitive tokens to
+# a hint; a token matches a failure reason that names it, not one that merely
+# contains it inside a longer word (see reason_matches_failure_token). A hint
+# may contain a literal `{dashboard_url}` token; callers that can resolve the
+# dashboard URL substitute the real URL, others fall back to a generic phrase.
 KUBERNETES_FAILURE_HINTS: List[Tuple[List[str], str]] = [
     (['ImagePullBackOff', 'ErrImagePull'],
      'To fix: Verify the image tag exists and registry credentials are configured.'
@@ -2262,14 +2271,44 @@ KUBERNETES_FAILURE_HINTS: List[Tuple[List[str], str]] = [
 ]
 
 
-def match_kubernetes_failure_hint(reason: str) -> Optional[str]:
-    """Return the remediation hint whose substrings match `reason`, or None.
+def reason_matches_failure_token(reason: str, token: str) -> bool:
+    """Whether `reason` names `token`, rather than merely containing it.
 
-    The returned hint may contain a literal `{dashboard_url}` token for the
-    caller to substitute.
+    Kubernetes reasons are camelCase identifiers, so a plain substring test
+    also fires on any longer word a token happens to sit inside. A queue
+    controller evicting an admitted workload leaves
+    `WorkloadEvictedDueToPodsReadyTimeout`, which contains 'Evicted': matching
+    it hands that user the node-pressure remediation ("increase
+    `resources.memory` or `resources.disk_size`"), which cannot fix a queue
+    eviction. So a match may not run on into the surrounding word: the
+    characters adjoining it may not extend the token's alphanumeric edges.
+    'Evicted:' and 'Pod Evicted' still match; 'WorkloadEvictedDueTo...' and
+    'PodEvicted' no longer do.
+
+    Only edges that are alphanumeric are anchored, so a token wrapped in
+    punctuation still matches -- notably the multi-word
+    NO_MEMORY_LIMIT_MARKER inside 'OOMKilled (exit code 137, no memory limit
+    set)'.
     """
-    for substrings, hint in KUBERNETES_FAILURE_HINTS:
-        if any(s in reason for s in substrings):
+    if not token:
+        return False
+    pattern = re.escape(token)
+    if token[0].isalnum():
+        pattern = r'(?<![0-9A-Za-z])' + pattern
+    if token[-1].isalnum():
+        pattern = pattern + r'(?![0-9A-Za-z])'
+    return re.search(pattern, reason) is not None
+
+
+def match_kubernetes_failure_hint(reason: str) -> Optional[str]:
+    """Return the remediation hint whose tokens match `reason`, or None.
+
+    A token matches when `reason` names it as a word of its own; see
+    reason_matches_failure_token. The returned hint may contain a literal
+    `{dashboard_url}` token for the caller to substitute.
+    """
+    for tokens, hint in KUBERNETES_FAILURE_HINTS:
+        if any(reason_matches_failure_token(reason, token) for token in tokens):
             return hint
     return None
 
@@ -2287,13 +2326,201 @@ def match_kubernetes_failure_hint_text(reason: str) -> Optional[str]:
 
 
 def get_failure_hint_reasons() -> List[str]:
-    """The reason substrings KUBERNETES_FAILURE_HINTS recognizes, flattened.
+    """The reason tokens KUBERNETES_FAILURE_HINTS recognizes, flattened.
 
-    A reason matching one of these names a specific failure cause (since we
+    A reason naming one of these names a specific failure cause (since we
     carry a remediation hint for it). Callers that gate work on "is the cause
-    already specific" can derive from this instead of duplicating the list.
+    already specific" can derive from this instead of duplicating the list;
+    they should test them with reason_matches_failure_token, so that a token
+    buried in a longer word does not count for them either.
     """
-    return [s for substrings, _ in KUBERNETES_FAILURE_HINTS for s in substrings]
+    return [token for tokens, _ in KUBERNETES_FAILURE_HINTS for token in tokens]
+
+
+def event_last_observed(event: Any) -> Optional[float]:
+    """When ``event`` was last observed, in unix seconds; None if unknown.
+
+    Prefers the last-observed time over the creation time. Kubernetes folds a
+    repeated event back into the original object -- bumping ``count`` and
+    ``last_timestamp`` (``series.last_observed_time`` on the events.k8s.io
+    path) while ``metadata.creation_timestamp`` stays pinned to the first
+    occurrence -- so the creation time says when a condition started, and only
+    the last-observed time says whether it is still happening.
+    """
+    series = getattr(event, 'series', None)
+    ts = (getattr(series, 'last_observed_time', None) or
+          getattr(event, 'last_timestamp', None) or
+          getattr(event, 'event_time', None) or
+          getattr(getattr(event, 'metadata', None), 'creation_timestamp', None))
+    if not isinstance(ts, datetime.datetime):
+        # Absent, or a field the API server did not populate.
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=datetime.timezone.utc)
+    return ts.timestamp()
+
+
+# How far before a pod was created an event may have been observed and still
+# be treated as evidence about that pod. Kubernetes keeps Events for an hour
+# by default and SkyPilot's pod names are a function of the cluster name, so a
+# relaunch inherits the events of the pod it replaces: with no lower bound, a
+# pod deleted by a user could be reported as the queue eviction that removed
+# the *previous* incarnation. The allowance absorbs the skew between the
+# component that stamps an event (a kubelet, a controller) and the API server
+# that stamped the pod the bound comes from -- and this process's clock, on
+# the paths where when the launch started is the only bound available. It is
+# deliberately small, because anything larger reaches back into the previous
+# pod.
+_POD_EVENT_CLOCK_SKEW_SECONDS = 60
+
+# Pod-event reasons that name *why* a pod was deleted, mapped to
+# (decisiveness, how the reason is reported). The events are ranked by
+# decisiveness rather than by recency because the informative event is
+# usually not the last one: the kubelet's generic 'Killing' follows whatever
+# actually caused the deletion, and would otherwise shadow it. The reported
+# form matches the '<Reason>: <message>' shape get_condensed_pod_reason
+# produces from a pod status, so a caller reads the same sentence whether the
+# pod is still there or only its events are.
+#
+# The Kueue entries were verified against Kueue v0.19.3. On eviction the pod
+# integration writes a TerminationTarget condition and deletes the pod
+# (pkg/controller/jobs/pod/pod_controller.go, (*Pod).Stop), and the job
+# framework emits a Normal 'Stopped' event on every pod it stopped, whose
+# message is the eviction message -- 'Exceeded the PodsReady timeout
+# <namespace>/<workload>' for a waitForPodsReady timeout, 'Preempted to
+# accommodate a workload (UID: ...) due to <reason>; ...' for preemption
+# (pkg/controller/jobframework/reconciler.go, stopJob).
+_POD_DELETION_EVENT_REASONS: Dict[str, Tuple[int, str]] = {
+    'NodeNotReady': (1, 'NodeNotReady'),
+    'TaintManagerEviction': (2, 'TaintManagerEviction'),
+    'DeletingNode': (3, 'DeletingNode'),
+    # The kubelet's eviction manager emits this as a Warning ('The node was
+    # low on resource: ...'), but drain controllers reuse the reason -- a node
+    # autoscaler consolidating a node emits a Normal 'Evicted' for every pod
+    # it drains -- so the event's own message is left to name whoever did it.
+    'Evicted': (4, 'Evicted'),
+    'ExcessPodDeleted': (5, 'ExcessPodDeleted'),
+    'Preempted': (6, 'Preempted'),
+    # Kueue's eviction event. Reported with its actor, because 'Stopped' on
+    # its own reads like the user stopped something.
+    'Stopped': (7, 'Stopped by Kueue'),
+}
+
+# Reasons that say a pod was on its way out without saying who deleted it, or
+# why. These are reported as context -- the last thing said about the pod --
+# and never as the cause: the kubelet emits 'Killing' for every deletion,
+# including the ones nothing explains, so treating it as an answer would
+# replace "no cause could be derived", which is what sends a user looking at
+# their own controllers, with a restatement of the deletion.
+_POD_DELETION_CONTEXT_EVENT_REASONS = frozenset({'Killing'})
+
+
+def _events_since(events: List[Any],
+                  since: Optional[datetime.datetime]) -> List[Any]:
+    """The events that can be evidence about the pod that exists now.
+
+    Events the API server left without a usable timestamp are kept: not
+    knowing when something happened is not evidence that it happened before
+    the pod did.
+    """
+    if since is None:
+        return events
+    cutoff = since.timestamp() - _POD_EVENT_CLOCK_SKEW_SECONDS
+    kept = []
+    for event in events:
+        observed_at = event_last_observed(event)
+        if observed_at is None or observed_at >= cutoff:
+            kept.append(event)
+    return kept
+
+
+def reason_from_pod_events(
+        events: List[Any],
+        since: Optional[datetime.datetime] = None) -> Optional[str]:
+    """Why a pod was deleted, from its own events; None if not derivable.
+
+    Only events that name a deletion cause count, because what comes back is
+    reported as the cause; everything else a deleted pod's events hold -- the
+    scheduler's complaint that it could not place the pod, the kubelet's note
+    that it is stopping the containers -- describes the state the pod was in
+    when somebody deleted it, not the deletion.
+
+    Kubernetes Events are separate objects with their own TTL (an hour by
+    default), so they outlive the pod they describe. That is what makes this
+    usable at all where it matters most: by the time we look, the pod object
+    itself is exactly the thing that no longer exists. ``since`` is when the
+    pod that is being explained was created, and drops the events of whatever
+    held the same pod name before it. ``events`` are expected newest-first,
+    which is what decides between two events of equal rank.
+    """
+    best_rank = 0
+    best_reason: Optional[str] = None
+    for event in _events_since(events, since):
+        ranked = _POD_DELETION_EVENT_REASONS.get(event.reason)
+        if ranked is None:
+            continue
+        rank, reported_as = ranked
+        if rank > best_rank:
+            best_rank = rank
+            message = (event.message or '').strip()
+            best_reason = f'{reported_as}: {message}' if message else reported_as
+    return best_reason
+
+
+def last_pod_event_context(
+        events: List[Any],
+        since: Optional[datetime.datetime] = None) -> Optional[str]:
+    """The last thing said about a pod, when nothing said why it was deleted.
+
+    A pod still waiting to be scheduled always carries the scheduler's
+    FailedScheduling complaint, and a deleted one carries the kubelet's
+    'Killing'. Neither says why anybody deleted the pod, so they are offered
+    for what they are -- the last thing said about it -- and the caller still
+    says plainly that no cause could be derived.
+    """
+    for event in _events_since(events, since):
+        # Events arrive newest-first.
+        if (event.type == 'Warning' or
+                event.reason in _POD_DELETION_CONTEXT_EVENT_REASONS):
+            message = (event.message or '').strip()
+            reason = event.reason or 'Unknown'
+            return f'{reason}: {message}' if message else reason
+    return None
+
+
+def _with_failure_hint(message: str, reason: str) -> str:
+    """Append the remediation hint `reason` earns, when it earns one."""
+    hint = match_kubernetes_failure_hint_text(reason)
+    if hint is not None:
+        message += f'\nHint: {hint}'
+    return message
+
+
+def _diagnose_deleted_pod(context: Optional[str], namespace: str,
+                          pod_name: str) -> Optional[str]:
+    """Why a pod that no longer exists was deleted; None when nothing says.
+
+    The pod's events outlive the pod, and for one that something else deleted
+    -- a queue controller evicting the workload, the taint manager, a node
+    going away -- they are the only record left of who did it.
+    """
+    try:
+        events = kubernetes.core_api(context).list_namespaced_event(
+            namespace,
+            field_selector=(f'involvedObject.kind=Pod,'
+                            f'involvedObject.name={pod_name}'),
+            _request_timeout=kubernetes.API_TIMEOUT).items
+        events = sorted(events,
+                        key=lambda event: event.metadata.creation_timestamp,
+                        reverse=True)
+    except Exception:  # pylint: disable=broad-except
+        return None
+    reason = reason_from_pod_events(events)
+    if reason is None:
+        # A pod that is merely absent is not news: every `sky down` leaves
+        # one, and the caller asks about all of them.
+        return None
+    return _with_failure_hint(f'Pod {pod_name} was deleted: {reason}.', reason)
 
 
 def diagnose_terminated_pod(context: Optional[str], namespace: str,
@@ -2302,23 +2529,25 @@ def diagnose_terminated_pod(context: Optional[str], namespace: str,
 
     Reads the pod and, if it terminated abnormally, returns a user-facing
     message including the condensed reason (e.g. OOMKilled) and a remediation
-    hint when one applies. Returns None if the pod is healthy, finished
-    cleanly, missing, or cannot be read -- this is purely additive context, so
-    it must never raise.
+    hint when one applies. When the pod no longer exists, falls back to its
+    events, which outlive it and are the only place a deletion by something
+    else is recorded. Returns None if the pod is healthy, finished cleanly, or
+    cannot be explained -- this is purely additive context, so it must never
+    raise.
     """
     try:
         pod = kubernetes.core_api(context).read_namespaced_pod(
             pod_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
+    except kubernetes.api_exception() as e:
+        if getattr(e, 'status', None) != 404:
+            return None
+        return _diagnose_deleted_pod(context, namespace, pod_name)
     except Exception:  # pylint: disable=broad-except
         return None
     if not pod_terminated_abnormally(pod):
         return None
     reason = get_condensed_pod_reason(pod)
-    msg = f'Pod {pod_name} terminated: {reason}.'
-    hint = match_kubernetes_failure_hint_text(reason)
-    if hint is not None:
-        msg += f'\nHint: {hint}'
-    return msg
+    return _with_failure_hint(f'Pod {pod_name} terminated: {reason}.', reason)
 
 
 @dataclasses.dataclass

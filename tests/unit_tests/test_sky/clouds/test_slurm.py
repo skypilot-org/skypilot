@@ -4,10 +4,13 @@ import os
 from pathlib import Path
 import re
 import shlex
+import sqlite3
+import subprocess
 from unittest.mock import call
 from unittest.mock import patch
 import unittest.mock as mock
 
+import jsonschema
 import pytest
 
 from sky import clouds
@@ -21,6 +24,7 @@ from sky.clouds import slurm as slurm_cloud
 from sky.provision.slurm import instance as slurm_instance
 from sky.provision.slurm import utils as slurm_utils
 from sky.skylet import constants
+from sky.utils import schemas
 from sky.utils import yaml_utils
 
 
@@ -61,6 +65,34 @@ class TestStopFeatureSupport:
 
 class TestGetSubmitUser:
 
+    @pytest.mark.parametrize('cluster_scoped', [False, True])
+    def test_mapped_user_with_plus(self, cluster_scoped):
+        mapping = {'alice@example.com': 'alice+lab'}
+        cluster_config = {'username_map': mapping} if cluster_scoped else {}
+        global_mapping = {} if cluster_scoped else mapping
+        config = {
+            'slurm': {
+                'submit_as_user': True,
+                'username_map': global_mapping,
+                'cluster_configs': {
+                    'my-cluster': cluster_config
+                },
+            }
+        }
+        jsonschema.validate(config, schemas.get_config_schema())
+        nested = {
+            ('slurm', 'username_map'): global_mapping,
+            ('slurm', 'cluster_configs', 'my-cluster'): cluster_config,
+        }
+        with patch.object(skypilot_config, 'get_nested',
+                          side_effect=lambda keys, **_: nested[keys]), \
+             patch.object(skypilot_config, 'get_effective_region_config',
+                          return_value=True), \
+             patch('sky.provision.slurm.utils.common_utils.get_current_user',
+                   return_value=models.User(id='human',
+                                            name='alice@example.com')):
+            assert slurm_utils.get_submit_user('my-cluster') == 'alice+lab'
+
     def test_config_is_server_managed(self):
         key = ('slurm', 'submit_as_user')
         assert key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS
@@ -69,6 +101,7 @@ class TestGetSubmitUser:
         ('alice@example.com', 'alice'),
         ('alice', 'alice'),
         ('alice.ml@example.com', 'alice.ml'),
+        ('alice+ml@example.com', 'alice+ml'),
     ])
     @patch('sky.provision.slurm.utils.common_utils.get_current_user')
     @patch('sky.provision.slurm.utils.skypilot_config.'
@@ -95,7 +128,7 @@ class TestGetSubmitUser:
     @pytest.mark.parametrize('user_name', [
         '@example.com',
         'Alice@example.com',
-        'alice+ml@example.com',
+        'alice;ml@example.com',
         '-alice@example.com',
     ])
     @patch('sky.provision.slurm.utils.common_utils.get_current_user')
@@ -1650,8 +1683,70 @@ class TestCreateVirtualInstance:
         mock_slurm_client.return_value.submit_job.assert_called_once()
         assert '--container-image=ubuntu:24.04' in script
         assert 'rank0.sqsh' not in script
-        assert 'jobs.db' not in script
+        assert 'cp -f ' not in script
         assert f'/test-cluster/{"b" * 32}/manifest.json' in script
+
+    @pytest.mark.parametrize('cached', [False, True])
+    def test_generated_term_handler_preserves_exit_code(self, tmp_path, cached):
+        script = (SBATCH_TESTDATA_DIR / 'basic.sh').read_text()
+        start = script.index('terminate() {')
+        end = script.index('trap terminate TERM', start)
+        handler = script[start:end]
+        # Substitute only the runtime path; execute the generated shell body.
+        runtime = re.search(r'export SKY_RUNTIME_DIR=(\S+)', handler).group(1)
+        handler = handler.replace(runtime, str(tmp_path))
+        state = tmp_path / '.sky'
+        state.mkdir()
+        with sqlite3.connect(state / 'jobs.db') as conn:
+            conn.execute('CREATE TABLE jobs (job_id INTEGER PRIMARY KEY, '
+                         'status TEXT, exit_codes TEXT)')
+            conn.execute("INSERT INTO jobs VALUES (1, 'FAILED', '143')")
+        cache = Path(str(tmp_path) + '.exitcode.123')
+        stale_cache = Path(str(tmp_path) + '.exitcode.122')
+        stale_cache.write_text('0\n')
+        if cached:
+            cache.write_text('143\n')
+            (state / 'jobs.db').unlink()
+        try:
+            result = subprocess.run(['bash', '-c', handler + '\nterminate'],
+                                    env={
+                                        **os.environ, 'SLURM_JOB_ID': '123'
+                                    },
+                                    capture_output=True,
+                                    text=True,
+                                    check=False)
+            assert result.returncode == 143
+            assert result.stderr == ''
+        finally:
+            cache.unlink(missing_ok=True)
+            stale_cache.unlink()
+
+    @pytest.mark.parametrize('exit_code', [0, 7])
+    def test_container_exit_cleanup_preserves_result_during_term(
+            self, tmp_path, exit_code):
+        script = (SBATCH_TESTDATA_DIR / 'containers.sh').read_text()
+        start = script.index('cleanup() {')
+        end = script.index('# Create sky home directory', start)
+        handlers = script[start:end]
+        handlers = handlers.replace('/tmp/test-cluster', str(tmp_path / 'run'))
+        handlers = handlers.replace('/home/testuser', str(tmp_path / 'home'))
+        cache = tmp_path / 'run.exitcode.123'
+        cache.write_text(f'{exit_code}\n')
+        # Deliver the batch TERM after cleanup has removed the task state.
+        stub = f"""
+srun() {{
+    command rm -f {cache}
+    kill -TERM $$
+}}
+"""
+        result = subprocess.run(['bash', '-c', stub + handlers + '\nexit 143'],
+                                env={
+                                    **os.environ, 'SLURM_JOB_ID': '123'
+                                },
+                                capture_output=True,
+                                text=True,
+                                check=False)
+        assert result.returncode == exit_code, result.stderr
 
     def _run_and_capture_script(self, cluster_name, config) -> str:
         """Run _create_virtual_instance and capture the generated script."""

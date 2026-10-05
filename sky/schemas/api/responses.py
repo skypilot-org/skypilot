@@ -265,6 +265,8 @@ class ManagedJobRecord(ResponseBaseModel):
     # are 0..n-1, dynamic tasks number on from n in attach order. None for
     # top-level jobs.
     dynamic_task_index: Optional[int] = None
+    # Managed jobs this job waits for. None for a job without dependencies.
+    depends_on: Optional[List[int]] = None
 
     @property
     def group_job_id(self) -> Optional[int]:

@@ -1,8 +1,11 @@
 """Util constants/functions for the backends."""
 import asyncio
+import collections
 from datetime import datetime
+from datetime import timezone
 import enum
 import fnmatch
+import functools
 import hashlib
 import math
 import os
@@ -11,14 +14,15 @@ import pprint
 import queue as queue_lib
 import re
 import shlex
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, Iterator, List, Optional, Sequence,
-                    Set, Tuple, TypeVar, Union)
+from typing import (Any, Callable, Deque, Dict, IO, Iterator, List, Optional,
+                    Sequence, Set, Tuple, TypeVar, Union)
 import uuid
 
 import aiohttp
@@ -262,6 +266,8 @@ _FILE_MOUNT_BASENAMES_SKIP_HASH = frozenset({
 
 _ACK_MESSAGE = 'ack'
 _FORWARDING_FROM_MESSAGE = 'Forwarding from'
+# Trailing lines of tunnel process output kept for error messages.
+_TUNNEL_OUTPUT_TAIL_LINES = 100
 
 
 def _caller_is_viewer() -> bool:
@@ -1025,6 +1031,14 @@ def write_cluster_config(
     is_custom_docker = ('true' if to_provision.extract_docker_image()
                         is not None else 'false')
 
+    # Create the default user Python environment on VMs and bare Slurm nodes
+    # when conda is not installed. Kubernetes images bake it in, and custom
+    # docker images manage their own Python. On Slurm, $HOME is the
+    # cluster-specific directory, so each cluster gets its own env (created the
+    # same way as the SkyPilot runtime env under the same $HOME).
+    create_user_env = (not install_conda and is_custom_docker == 'false' and
+                       not isinstance(cloud, clouds.Kubernetes))
+
     # Check if the cluster name is a controller name.
     is_remote_controller = False
     controller = controller_utils.Controllers.from_name(
@@ -1248,7 +1262,10 @@ def write_cluster_config(
                         '{is_custom_docker}', is_custom_docker)
                 if install_conda else '',
             # UV setup
-            'uv_installation_commands': constants.UV_INSTALLATION_COMMANDS,
+            'uv_installation_commands':
+                constants.UV_INSTALLATION_COMMANDS +
+                (constants.SKY_USER_ENV_CREATION_COMMANDS
+                 if create_user_env else ''),
             # Currently only used by Slurm. For other clouds, it is
             # already part of ray_skypilot_installation_commands
             'setup_sky_dirs_commands': constants.SETUP_SKY_DIRS_COMMANDS,
@@ -2866,16 +2883,25 @@ def _update_cluster_status(
     # kept running, all_nodes_up can be True here, e.g. Kubernetes pods
     # report Running long before the runtime is set up. Every operation on
     # an UP cluster requires handle.head_ip (see check_cluster_available),
-    # and a runtime without Ray has no health check to catch this, so fall
-    # through to the abnormal-cluster handling below to keep it INIT.
+    # so promoting would only trade INIT for a ClusterNotUpError later.
+    # Fall through to the abnormal-cluster handling below to keep it INIT.
+    #
+    # Only apply this gate when the ray health check is skipped: a runtime
+    # without Ray has no health check to catch this. When the check runs,
+    # it is the authority: it already fails closed when there is no way to
+    # reach the head node, and it is what surfaces the recovery hint for a
+    # cluster restarted outside SkyPilot. Stopping a cluster clears head_ip
+    # on purpose (see global_user_state.remove_cluster), so a
+    # stopped-then-manually-restarted cluster also has head_ip=None here;
+    # gating it on head_ip would skip the probe and drop that hint.
     handle_has_cached_ips = handle.head_ip is not None
-    if all_nodes_up and not handle_has_cached_ips:
+    if all_nodes_up and not should_check_ray and not handle_has_cached_ips:
         ray_status_details = ('no cached IPs on the cluster handle; the '
                               'last launch was likely interrupted before '
                               'the SkyPilot runtime was set up')
-    if (all_nodes_up and handle_has_cached_ips and
-        (not should_check_ray or run_ray_status_to_check_ray_cluster_healthy())
-            and not external_cluster_failures):
+    if (all_nodes_up and (run_ray_status_to_check_ray_cluster_healthy()
+                          if should_check_ray else handle_has_cached_ips) and
+            not external_cluster_failures):
         # NOTE: all_nodes_up calculation is fast due to calling cloud CLI;
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
         # head-ip/worker-ips`.
@@ -3037,9 +3063,26 @@ def _update_cluster_status(
                     handle.cluster_yaml)
                 if ray_config and 'provider' in ray_config:
                     pod_names = list(node_statuses.keys())
+                    # Only read events from this cluster's launch onwards.
+                    # Pod names are a function of the cluster name and
+                    # Kubernetes keeps Events for an hour, so a cluster that
+                    # reuses the name of one that was torn down would
+                    # otherwise be told why the pods of that earlier cluster
+                    # were deleted. launched_at is the right bound: it is
+                    # written again every time the cluster is launched, and
+                    # the earlier cluster's record has to be removed before
+                    # its name can be reused, so everything that cluster left
+                    # behind was written before this one was launched. The
+                    # pods themselves are not in hand here to give a tighter
+                    # bound -- the status query returns a status and a reason
+                    # per pod, not the pod objects.
+                    launched_at = record.get('launched_at')
+                    since = (datetime.fromtimestamp(launched_at,
+                                                    tz=timezone.utc)
+                             if launched_at is not None else None)
                     status_reason = (
                         k8s_instance.get_cluster_failure_reason_from_events(
-                            ray_config['provider'], pod_names) or
+                            ray_config['provider'], pod_names, since=since) or
                         k8s_instance.get_cluster_failure_reason_from_pods(
                             ray_config['provider'], pod_names) or '')
                     # Lands in status_reason, not node_statuses, so the
@@ -4613,9 +4656,35 @@ def workspace_lock_id(workspace_name: str) -> str:
     return f'{workspace_name}_workspace'
 
 
+@functools.lru_cache(maxsize=1)
+def skylet_tunnel_owner_id() -> str:
+    """Identifies this host among API servers that share one database.
+
+    A skylet tunnel is a process on the host that opened it, so tunnel
+    bookkeeping and locking are keyed by this id.
+    """
+    return socket.gethostname()
+
+
 def cluster_tunnel_lock_id(cluster_name: str) -> str:
-    """Get the lock ID for cluster tunnel operations."""
-    return f'{cluster_name}_ssh_tunnel'
+    """Get the lock ID for this host's tunnel operations on the cluster."""
+    return f'{cluster_name}_{skylet_tunnel_owner_id()}_ssh_tunnel'
+
+
+def _drain_tunnel_pipe(pipe: IO[str],
+                       tail: Deque[str],
+                       first_line: Optional[queue_lib.Queue] = None) -> None:
+    """Reads a tunnel process pipe until EOF, keeping its last lines in tail.
+
+    If first_line is given, the first line read is also put on it.
+    """
+    # Iteration ends at EOF, which arrives when the tunnel process exits and
+    # its end of the pipe closes, so the thread lives as long as the process.
+    for line in pipe:
+        if first_line is not None:
+            first_line.put(line)
+            first_line = None
+        tail.append(line)
 
 
 def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
@@ -4649,14 +4718,38 @@ def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
                                        stderr=subprocess.PIPE,
                                        start_new_session=True,
                                        text=True)
+    # The tunnel process writes to stdout and stderr for its whole lifetime
+    # (kubectl port-forward prints a line for every accepted connection before
+    # forwarding it), so both pipes are read until EOF to keep the process
+    # from blocking on a full pipe.
+    queue: queue_lib.Queue = queue_lib.Queue()
+    stdout_tail: Deque[str] = collections.deque(
+        maxlen=_TUNNEL_OUTPUT_TAIL_LINES)
+    stderr_tail: Deque[str] = collections.deque(
+        maxlen=_TUNNEL_OUTPUT_TAIL_LINES)
+
+    assert ssh_tunnel_proc.stdout is not None
+    assert ssh_tunnel_proc.stderr is not None
+
+    def _drain_stderr(pipe: IO[str]) -> None:
+        _drain_tunnel_pipe(pipe, stderr_tail)
+        if stderr_tail:
+            last_lines = ''.join(stderr_tail)
+            logger.debug(f'Port forward process {ssh_tunnel_proc.pid} closed '
+                         f'stderr. Last lines:\n{last_lines}')
+
+    drain_threads = [
+        threading.Thread(target=_drain_tunnel_pipe,
+                         args=(ssh_tunnel_proc.stdout, stdout_tail, queue),
+                         daemon=True),
+        threading.Thread(target=_drain_stderr,
+                         args=(ssh_tunnel_proc.stderr,),
+                         daemon=True),
+    ]
+    for thread in drain_threads:
+        thread.start()
     # Wait until we receive an ack from the remote cluster or
     # the SSH connection times out.
-    queue: queue_lib.Queue = queue_lib.Queue()
-    stdout_thread = threading.Thread(
-        target=lambda queue, stdout: queue.put(stdout.readline()),
-        args=(queue, ssh_tunnel_proc.stdout),
-        daemon=True)
-    stdout_thread.start()
     while ssh_tunnel_proc.poll() is None:
         try:
             ack = queue.get_nowait()
@@ -4714,7 +4807,10 @@ def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
             break
 
     if ssh_tunnel_proc.poll() is not None:
-        stdout, stderr = ssh_tunnel_proc.communicate()
+        for thread in drain_threads:
+            thread.join(timeout=5)
+        stdout = ''.join(stdout_tail)
+        stderr = ''.join(stderr_tail)
         error_msg = 'Port forward failed'
         if stdout:
             error_msg += f'\n-- stdout --\n{stdout}\n'

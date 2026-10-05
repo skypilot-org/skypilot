@@ -269,12 +269,8 @@ cloud_dependencies: Dict[str, List[str]] = {
     'nebius': [
         # Nebius requires grpcio and protobuf, so we need to include
         # our constraints here.
-        # >=0.3.77 exposes the billing v1 calculator API used by catalog
-        # fetching.
-        # 0.4.1 and 0.4.2 pool grpc.aio channels without event loop affinity
-        # and fail with "attached to a different loop"; fixed in 0.4.3.
-        # https://github.com/nebius/pysdk/issues/178
-        'nebius>=0.3.77,!=0.4.1,!=0.4.2',
+        # 0.6.12 adds explicit spot price-taking in Compute instance specs.
+        'nebius>=0.6.12',
         GRPC,
         PROTOBUF,
     ] + aws_dependencies,
@@ -282,13 +278,17 @@ cloud_dependencies: Dict[str, List[str]] = {
     'seeweb': ['ecsapi==0.4.0'],
     'mithril': [],  # No dependencies needed for mithril
     'shadeform': [],  # No dependencies needed for shadeform
-    'slurm': ['python-hostlist'],
+    # Slurm hostlist expansion is implemented in sky.utils.hostlist_utils.
+    'slurm': [],
     'yotta': [],  # No dependencies needed for Yotta
     'verda': [],  # No dependencies needed for verda
 }
 
 # Calculate which clouds should be included in the [all] installation.
 clouds_for_all = set(cloud_dependencies)
+# Vast is opt-in (`pip install "skypilot[vast]"`): its SDK brings a large
+# dependency tree that most installations never use.
+clouds_for_all.remove('vast')
 
 if sys.version_info < (3, 10):
     # Nebius needs python3.10. If python 3.9 [all] will not install nebius
@@ -302,9 +302,6 @@ if sys.version_info >= (3, 12):
     # The version of ray we use does not work with >= 3.12, so avoid clouds
     # that require ray.
     clouds_for_all -= set(clouds_with_ray)
-    # vast requires setuptools==51.1.1 which will not work with python >= 3.12
-    # TODO: Remove once https://github.com/vast-ai/vast-sdk/pull/6 is released
-    clouds_for_all.remove('vast')
 
 cloud_extras = {
     cloud: dependencies + server_dependencies

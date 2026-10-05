@@ -113,6 +113,7 @@ def base_variables() -> Dict[str, Any]:
         'k8s_acc_label_key': None,
         'k8s_acc_label_values': None,
         'k8s_service_account_name': 'skypilot-service-account',
+        'k8s_is_controller': False,
         'k8s_automount_sa_token': 'true',
         'k8s_fuse_device_required': False,
         'k8s_kueue_local_queue_name': None,
@@ -278,6 +279,10 @@ CASES: Dict[str, Dict[str, Any]] = {
     'custom_service_account': {
         'k8s_service_account_name': 'my-custom-sa',
         'k8s_automount_sa_token': 'false',
+    },
+    'controller': {
+        'k8s_service_account_name': 'skypilot-controller-service-account',
+        'k8s_is_controller': True,
     },
     'user_labels': {
         'labels': {
@@ -584,6 +589,107 @@ def test_sriov_pod_is_coherent() -> None:
     assert 'IPC_LOCK' in container['securityContext']['capabilities']['add']
     mounts = [m['mountPath'] for m in container.get('volumeMounts', [])]
     assert '/dev/infiniband' not in mounts
+
+
+# Verbs Kubernetes' privilege-escalation prevention does NOT gate on RBAC
+# objects. `create` and `update` are checked against what the requester
+# already holds; deletion is not checked at all, so granting it to a workload
+# pod lets that pod remove bindings the control plane depends on.
+_UNGATED_RBAC_VERBS = {'delete', 'deletecollection', '*'}
+
+_RBAC_RESOURCES = {'clusterroles', 'clusterrolebindings', '*'}
+
+
+@pytest.mark.parametrize('case_name', list(CASES.keys()))
+def test_cluster_role_grants_no_ungated_rbac_verb(case_name: str) -> None:
+    """The workload ClusterRole never grants a deletion verb on RBAC objects.
+
+    A golden pins the verb list too, but would accept whatever a careless
+    UPDATE_SNAPSHOT=1 produces. This is the property that matters: every pod
+    SkyPilot launches holds this ClusterRole, and deletion of RBAC objects is
+    the one verb no admission check stands in front of.
+    """
+    rendered = yaml.safe_load(_render(_build_variables(case_name)))
+    cluster_role = rendered['provider'].get('autoscaler_cluster_role')
+    if cluster_role is None:
+        # Not rendered at all for a workload cluster, which is stronger than
+        # rendering it without the verb.
+        return
+    rules = cluster_role['rules']
+
+    offenders = [
+        rule for rule in rules if _RBAC_RESOURCES &
+        set(rule.get('resources') or []) and _UNGATED_RBAC_VERBS &
+        set(rule.get('verbs') or [])
+    ]
+    assert not offenders, (
+        f'ClusterRole grants an ungated deletion verb on RBAC objects: '
+        f'{offenders}')
+
+
+_PROVISIONER_ONLY_ROLES = (
+    'autoscaler_cluster_role',
+    'autoscaler_cluster_role_binding',
+    'autoscaler_skypilot_system_role',
+    'autoscaler_skypilot_system_role_binding',
+    'autoscaler_ingress_role',
+    'autoscaler_ingress_role_binding',
+)
+
+
+def test_workload_cluster_gets_no_provisioner_roles() -> None:
+    """A workload cluster requests none of the provisioner-only roles.
+
+    Conditional rendering is only a boundary because the two kinds of cluster
+    also resolve to different service accounts — bindings naming one shared
+    account would re-grant every pod in the namespace regardless of which
+    cluster created them. So both halves are asserted together.
+    """
+    workload = yaml.safe_load(_render(_build_variables('base_cpu')))['provider']
+    controller = yaml.safe_load(_render(
+        _build_variables('controller')))['provider']
+
+    assert (workload['autoscaler_service_account']['metadata']['name'] !=
+            controller['autoscaler_service_account']['metadata']['name'])
+
+    for field in _PROVISIONER_ONLY_ROLES:
+        assert field not in workload, (
+            f'workload cluster should not request {field}')
+        assert field in controller, (f'controller cluster still needs {field}')
+
+    # The namespaced role is autodown's, so both keep it -- each bound to its
+    # own account rather than to one shared subject.
+    for spec in (workload, controller):
+        assert spec['autoscaler_role_binding']['subjects'][0]['name'] == (
+            spec['autoscaler_service_account']['metadata']['name'])
+
+
+def test_controller_prefix_resolves_to_the_controller_identity() -> None:
+    """What the identity branch keys on: the display name's prefix."""
+    from sky.utils import common
+
+    assert common.is_controller_name('sky-jobs-controller-abc123')
+    assert common.is_controller_name('sky-serve-controller-abc123')
+    # name_on_cloud is transformed and never carries the prefix; reading it
+    # instead of display_name would make the check silently always False.
+    assert not common.is_controller_name('my-cluster')
+    assert not common.is_controller_name('jobs-controller')
+
+
+def test_a_user_cannot_claim_the_controller_identity_by_naming() -> None:
+    """Launching under a controller prefix is refused, so naming can't escalate.
+
+    Because the identity branch keys on that prefix, this guard is now
+    load-bearing for a permission boundary rather than a naming convention --
+    and nothing at the guard itself says so. Relaxing it would silently turn
+    into privilege escalation, and this test is what fails on that day.
+    """
+    from sky import exceptions
+    from sky.utils import controller_utils
+
+    for name in ('sky-jobs-controller-mine', 'sky-serve-controller-mine'):
+        with pytest.raises(exceptions.NotSupportedError):
+            controller_utils.check_cluster_name_not_controller(name)
 
 
 @pytest.mark.parametrize('case_name', list(CASES.keys()))

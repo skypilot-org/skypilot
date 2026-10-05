@@ -1174,6 +1174,63 @@ def resolve_blob_dir(blob_id: str, user_hash: str) -> str:
     return storage.resolve_blob_to_dir(user_hash, blob_id)
 
 
+def mount_containment_enforced(deploy: bool, host: str) -> bool:
+    """Whether a server started with (deploy, host) contains mount sources.
+
+    Enforced on a deployed server or any non-loopback bind; a loopback
+    ``sky api start`` is exempt because its legitimate local sources are
+    arbitrary local paths on the same host.
+    """
+    if deploy:
+        return True
+    if host == 'localhost':
+        return False
+    try:
+        return not ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        # A hostname we cannot classify as loopback -> treat as reachable.
+        return True
+
+
+def set_mount_containment_enforced(enforced: bool) -> None:
+    """Record the enforce decision in the process env for workers to inherit."""
+    os.environ[constants.ENV_VAR_ENFORCE_MOUNT_CONTAINMENT] = ('1' if enforced
+                                                               else '0')
+
+
+def init_mount_containment_enforced(deploy: bool, host: str) -> None:
+    """Set the enforce flag at startup unless it was set explicitly.
+
+    An operator can export ``ENV_VAR_ENFORCE_MOUNT_CONTAINMENT`` before starting
+    the server to force the decision (e.g. ``0`` to opt out on a deployed server
+    whose clients are all on the same trusted host); that explicit value wins.
+    Otherwise it is computed from the server's mode (see
+    ``mount_containment_enforced``).
+    """
+    if constants.ENV_VAR_ENFORCE_MOUNT_CONTAINMENT in os.environ:
+        return
+    set_mount_containment_enforced(mount_containment_enforced(deploy, host))
+
+
+def should_enforce_mount_containment() -> bool:
+    """Whether the current worker must contain file-mount sources.
+
+    Reads the server-set flag (see ``set_mount_containment_enforced``). Unset
+    defaults to enforce (fail closed).
+    """
+    return os.environ.get(constants.ENV_VAR_ENFORCE_MOUNT_CONTAINMENT,
+                          '1') != '0'
+
+
+def _is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
+    """Whether path is parent or a subpath of it (py3.8-safe)."""
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
 def process_mounts_in_task_on_api_server(
         task: str,
         env_vars: Dict[str, str],
@@ -1203,6 +1260,12 @@ def process_mounts_in_task_on_api_server(
     versions.check_recipe_client_version(task)
 
     user_hash = env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
+    # The user id is joined as a directory component below (and mkdir'd), so an
+    # unvalidated value would create dirs outside the clients dir. With auth off
+    # this id comes straight from the client. Reject a non-component value here,
+    # before any mkdir.
+    if not common_utils.is_single_path_component(user_hash):
+        raise ValueError(f'Invalid user id: {user_hash!r}')
 
     client_dir = (API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash)
     client_file_mounts_dir = client_dir / 'file_mounts'
@@ -1216,49 +1279,61 @@ def process_mounts_in_task_on_api_server(
         file_mounts_base = client_file_mounts_dir
     file_mounts_base.mkdir(parents=True, exist_ok=True)
 
-    def _get_client_file_mounts_path(
-            original_path: str, file_mounts_mapping: Dict[str, str]) -> str:
-        return str(file_mounts_base /
-                   file_mounts_mapping[original_path].lstrip('/'))
+    enforce = should_enforce_mount_containment()
+    # Every non-cloud source that becomes a server path must resolve under one
+    # of the caller's staging roots, so a client cannot mount an arbitrary
+    # server file (e.g. /etc/passwd) and have the backend rsync it to their
+    # cluster. Roots come from the blob backend because it decides where a blob
+    # resolves (local clients dir vs a shared FS plus a local cache).
+    roots = [client_file_mounts_dir.resolve()]
+    roots += [r.resolve() for r in bs.get_blob_storage().user_roots(user_hash)]
 
-    task_configs = yaml_utils.read_yaml_all_str(task)
-    for task_config in task_configs:
-        if task_config is None:
-            continue
-        file_mounts_mapping = task_config.pop('file_mounts_mapping', {})
-        if not file_mounts_mapping:
-            # We did not mount any files to new paths on the remote server
-            # so no need to resolve filepaths.
-            continue
+    def _check_contained(src: str) -> None:
+        if data_utils.is_cloud_store_url(src):
+            return
+        resolved = pathlib.Path(src).expanduser().resolve()
+        if not any(_is_relative_to(resolved, root) for root in roots):
+            raise ValueError('File mount source resolves outside the allowed '
+                             f'directories: {src!r}')
+
+    def _make_translator(mapping: Dict[str, str]) -> Callable[[str], str]:
+
+        def _translate(original_path: str) -> str:
+            result = str(file_mounts_base / mapping[original_path].lstrip('/'))
+            # A mapping value containing '..' would escape file_mounts_base; a
+            # mapped value is server-side staging and is never '..', so reject
+            # unconditionally (even on an exempt loopback server).
+            _check_contained(result)
+            return result
+
+        return _translate
+
+    def _check_only(src: str) -> str:
+        _check_contained(src)
+        return src
+
+    def _walk_sources(task_config: Dict[str, Any],
+                      apply: Callable[[str], str]) -> None:
         if 'workdir' in task_config:
             workdir = task_config['workdir']
             if isinstance(workdir, str):
-                task_config['workdir'] = str(
-                    file_mounts_base / file_mounts_mapping[workdir].lstrip('/'))
+                task_config['workdir'] = apply(workdir)
         if workdir_only:
-            continue
+            return
         if 'file_mounts' in task_config:
             file_mounts = task_config['file_mounts']
             for dst, src in file_mounts.items():
                 if isinstance(src, str):
                     if not data_utils.is_cloud_store_url(src):
-                        file_mounts[dst] = _get_client_file_mounts_path(
-                            src, file_mounts_mapping)
+                        file_mounts[dst] = apply(src)
                 elif isinstance(src, dict):
                     if 'source' in src:
                         source = src['source']
                         if isinstance(source, str):
-                            if data_utils.is_cloud_store_url(source):
-                                continue
-                            src['source'] = _get_client_file_mounts_path(
-                                source, file_mounts_mapping)
+                            if not data_utils.is_cloud_store_url(source):
+                                src['source'] = apply(source)
                         else:
-                            new_source = []
-                            for src_item in source:
-                                new_source.append(
-                                    _get_client_file_mounts_path(
-                                        src_item, file_mounts_mapping))
-                            src['source'] = new_source
+                            src['source'] = [apply(s) for s in source]
                 else:
                     raise ValueError(f'Unexpected file_mounts value: {src}')
         if 'service' in task_config:
@@ -1267,8 +1342,23 @@ def process_mounts_in_task_on_api_server(
                 tls = service['tls']
                 for key in ['keyfile', 'certfile']:
                     if key in tls:
-                        tls[key] = _get_client_file_mounts_path(
-                            tls[key], file_mounts_mapping)
+                        tls[key] = apply(tls[key])
+
+    task_configs = yaml_utils.read_yaml_all_str(task)
+    for task_config in task_configs:
+        if task_config is None:
+            continue
+        file_mounts_mapping = task_config.pop('file_mounts_mapping', {})
+        if not file_mounts_mapping:
+            # No mapping: sources stay as untranslated client strings. On a
+            # deployed server, still confirm each stays within the caller's
+            # roots (an empty mapping is how an absolute server path slips
+            # through untouched). A loopback local server legitimately mounts
+            # arbitrary local paths, so it is exempt.
+            if enforce:
+                _walk_sources(task_config, _check_only)
+            continue
+        _walk_sources(task_config, _make_translator(file_mounts_mapping))
 
     translated_task = yaml_utils.dump_yaml_str(task_configs)
     return dag_utils.load_dag_from_yaml_str(translated_task)
