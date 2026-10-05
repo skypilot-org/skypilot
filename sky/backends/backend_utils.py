@@ -2899,14 +2899,18 @@ def _update_cluster_status(
     # restarted cluster also has head_ip=None here; skipping the probe for
     # it would drop that hint.
     handle_has_cached_ips = handle.head_ip is not None
-    runtime_healthy = (run_ray_status_to_check_ray_cluster_healthy()
-                       if all_nodes_up and should_check_ray else True)
-    if (all_nodes_up and runtime_healthy and not handle_has_cached_ips and
+    # The runtime is healthy only when every node is up and, for a runtime
+    # with Ray, the ray health check passes; the check is skipped when
+    # some node is down (short-circuit), as before.
+    runtime_healthy = all_nodes_up and (
+        run_ray_status_to_check_ray_cluster_healthy()
+        if should_check_ray else True)
+    if (runtime_healthy and not handle_has_cached_ips and
             ray_status_details is None):
         ray_status_details = ('no cached IPs on the cluster handle; the '
                               'last launch was likely interrupted before '
                               'it finished')
-    if (all_nodes_up and runtime_healthy and handle_has_cached_ips and
+    if (runtime_healthy and handle_has_cached_ips and
             not external_cluster_failures):
         # NOTE: all_nodes_up calculation is fast due to calling cloud CLI;
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
