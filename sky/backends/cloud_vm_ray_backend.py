@@ -1239,12 +1239,16 @@ class RetryingVmProvisioner(object):
                     cluster_info=prev_cluster_info,
                 )
                 # Status refresh and teardown read this metadata from the INIT
-                # write below until provisioning completes.
-                handle.provision_runtime_metadata = (
-                    provision_lib.get_initial_runtime_metadata(
-                        repr(to_provision.cloud),
-                        global_user_state.get_cluster_yaml_dict(
-                            cluster_config_file).get('provider', {})))
+                # write below until provisioning completes. Only clouds on
+                # the SkyPilot provisioner have a provision module to ask;
+                # the legacy Ray-autoscaler clouds keep the handle's default.
+                if (to_provision.cloud.PROVISIONER_VERSION ==
+                        clouds.ProvisionerVersion.SKYPILOT):
+                    handle.provision_runtime_metadata = (
+                        provision_lib.get_initial_runtime_metadata(
+                            repr(to_provision.cloud),
+                            global_user_state.get_cluster_yaml_dict(
+                                cluster_config_file).get('provider', {})))
                 usage_lib.messages.usage.update_final_cluster_status(
                     status_lib.ClusterStatus.INIT)
 
