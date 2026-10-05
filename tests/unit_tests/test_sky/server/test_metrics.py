@@ -18,6 +18,7 @@ from prometheus_client import CONTENT_TYPE_LATEST
 from prometheus_client import core as prom_core
 from prometheus_client import generate_latest
 from prometheus_client import multiprocess
+from prometheus_client import values as prom_values
 import prometheus_client as prom
 import pytest
 
@@ -281,7 +282,26 @@ def test_reap_stale_multiproc_files_removes_only_dead_pids(tmp_path):
     ]
 
 
-def _reap_with(tmp_path, holders):
+def _fake_process(tmp_path, open_files):
+    """psutil.Process stand-in. open_files maps pid -> names of the files in
+    tmp_path its holder has open, or None when it cannot be inspected."""
+
+    def process(pid):
+        names = open_files.get(pid, ())
+        proc = MagicMock()
+        if names is None:
+            proc.open_files.side_effect = metrics.psutil.AccessDenied(pid)
+        else:
+            proc.open_files.return_value = [
+                types.SimpleNamespace(path=os.path.realpath(tmp_path / name))
+                for name in names
+            ]
+        return proc
+
+    return process
+
+
+def _reap_with(tmp_path, holders, open_files=None):
     """One reaper tick; holders maps pid -> identity of the process holding
     it (None for a zombie). Pids not in holders are free."""
     with patch.dict(os.environ,
@@ -289,7 +309,9 @@ def _reap_with(tmp_path, holders):
          patch('sky.server.metrics.psutil.pid_exists',
                side_effect=lambda pid: pid in holders), \
          patch('sky.server.metrics._process_identity',
-               side_effect=holders.get):
+               side_effect=holders.get), \
+         patch('sky.server.metrics.psutil.Process',
+               side_effect=_fake_process(tmp_path, open_files or {})):
         return metrics._reap_stale_multiproc_files()
 
 
@@ -297,13 +319,16 @@ def _live_files(tmp_path, pid):
     return sorted(p.name for p in tmp_path.glob(f'gauge_live*_{pid}.db'))
 
 
-def _register_as(tmp_path, pid, identity):
-    """register_multiproc_cleanup_atexit() in a process with this pid."""
+def _register_as(tmp_path, pid, identity, open_files=()):
+    """register_multiproc_cleanup_atexit() in a process with this pid that
+    has the named files open."""
     with patch.dict(os.environ, {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
          patch.object(metrics, '_multiproc_cleanup_registered', False), \
          patch('sky.server.metrics.atexit.register'), \
          patch('sky.server.metrics.os.getpid', return_value=pid), \
-         patch('sky.server.metrics._process_identity', return_value=identity):
+         patch('sky.server.metrics._process_identity', return_value=identity), \
+         patch('sky.server.metrics.psutil.Process',
+               side_effect=_fake_process(tmp_path, {pid: open_files})):
         metrics.register_multiproc_cleanup_atexit()
 
 
@@ -334,12 +359,51 @@ def test_reap_stale_multiproc_files_keeps_writer_that_reused_pid(
     _touch_live_gauge_files(str(tmp_path), 991)
     assert _reap_with(tmp_path, {991: '100'}) == 0
     # Writer 100 is SIGKILLed; writer 500 starts with the same pid before
-    # the next sweep. It drops the old files and writes its own.
-    _register_as(tmp_path, 991, '500')
-    assert not _live_files(tmp_path, 991)
+    # the next sweep. It keeps the livesum file it opened at import, drops
+    # the old writer's other files and writes its own.
+    _register_as(tmp_path, 991, '500', open_files=['gauge_livesum_991.db'])
+    assert _live_files(tmp_path, 991) == ['gauge_livesum_991.db']
     _touch_live_gauge_files(str(tmp_path), 991)
     assert _reap_with(tmp_path, {991: '500'}) == 0
     assert _reap_with(tmp_path, {991: '500'}) == 0
+    assert len(_live_files(tmp_path, 991)) == 4
+
+
+def test_register_keeps_a_live_gauge_opened_before_registration(
+        tmp_path, monkeypatch):
+    """Unlabeled gauges open this pid's livesum file at import, before the
+    process registers. A dead writer's identity under the same pid must not
+    make registration unlink it."""
+    monkeypatch.setenv('PROMETHEUS_MULTIPROC_DIR', str(tmp_path))
+    monkeypatch.setattr(prom_values, 'ValueClass',
+                        prom_values.MultiProcessValue())
+    gauge = prom.Gauge('sky_test_executors',
+                       'Test.',
+                       multiprocess_mode='livesum',
+                       registry=None)
+    (tmp_path / f'liveowner_{os.getpid()}').write_text('100')
+    with patch.object(metrics, '_multiproc_cleanup_registered', False), \
+         patch('sky.server.metrics.atexit.register'), \
+         patch('sky.server.metrics._process_identity', return_value='500'):
+        metrics.register_multiproc_cleanup_atexit()
+    gauge.set(3)
+    registry = CollectorRegistry()
+    multiprocess.MultiProcessCollector(registry, path=str(tmp_path))
+    assert registry.get_sample_value('sky_test_executors') == 3
+
+
+def test_reap_stale_multiproc_files_keeps_files_the_holder_has_open(
+        tmp_path, monkeypatch):
+    """A worker that got a dead writer's pid opens the pid's livesum file at
+    import; a sweep before it registers keeps the files."""
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _register_as(tmp_path, 991, '100')
+    _touch_live_gauge_files(str(tmp_path), 991)
+    assert _reap_with(tmp_path, {991: '500'},
+                      open_files={991: ['gauge_livesum_991.db']}) == 0
+    assert len(_live_files(tmp_path, 991)) == 4
+    # The holder's open files cannot be read.
+    assert _reap_with(tmp_path, {991: '500'}, open_files={991: None}) == 0
     assert len(_live_files(tmp_path, 991)) == 4
 
 

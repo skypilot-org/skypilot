@@ -61,8 +61,9 @@ def register_multiproc_cleanup_atexit() -> None:
 
     It also records this process's identity for the reaper (see
     ``_writer_exited``), and removes the live-gauge files of an earlier
-    writer that held the same pid, so this process does not reopen them.
-    Call it before the process writes any live gauge.
+    writer that held the same pid, except those this process already has
+    open (see ``_open_live_gauge_files``). Call it before the process writes
+    any live gauge.
 
     Safe to call more than once per process; only the first call registers.
     Only registers when ``PROMETHEUS_MULTIPROC_DIR`` is set; a no-op in
@@ -80,7 +81,9 @@ def register_multiproc_cleanup_atexit() -> None:
         try:
             if _read_writer_identity(multiproc_dir,
                                      pid) not in (None, identity):
-                multiprocess.mark_process_dead(pid, multiproc_dir)
+                open_files = _open_live_gauge_files(pid, multiproc_dir)
+                if open_files is not None:
+                    _remove_live_gauge_files(multiproc_dir, pid, open_files)
             with open(_writer_identity_path(multiproc_dir, pid),
                       'w',
                       encoding='utf-8') as f:
@@ -139,6 +142,36 @@ def _read_writer_identity(multiproc_dir: str, pid: int) -> Optional[str]:
         return None
 
 
+def _live_gauge_file_paths(multiproc_dir: str, pid: int) -> Set[str]:
+    return {
+        os.path.realpath(path) for path in glob.glob(
+            os.path.join(multiproc_dir, f'gauge_live*_{pid}.db'))
+    }
+
+
+def _open_live_gauge_files(pid: int, multiproc_dir: str) -> Optional[Set[str]]:
+    """The pid's live-gauge files that the process holding the pid has open.
+
+    None when the holder cannot be inspected. A worker that got a dead
+    writer's pid opens that pid's existing files when it creates its
+    unlabeled gauges at import, before it registers. Unlinking an open file
+    hides everything the process writes to it for the rest of its life.
+    """
+    files = _live_gauge_file_paths(multiproc_dir, pid)
+    try:
+        return {f.path for f in psutil.Process(pid).open_files()} & files
+    except psutil.NoSuchProcess:
+        return set()
+    except psutil.Error:
+        return None
+
+
+def _remove_live_gauge_files(multiproc_dir: str, pid: int,
+                             keep: Set[str]) -> None:
+    for path in _live_gauge_file_paths(multiproc_dir, pid) - keep:
+        os.remove(path)
+
+
 def _forget_writer(multiproc_dir: str, pid: int) -> None:
     multiprocess.mark_process_dead(pid, multiproc_dir)
     try:
@@ -191,7 +224,8 @@ def _writer_exited(pid: int, multiproc_dir: str) -> bool:
     has not waited for, or the kernel may have given the pid to another
     process. The writer's identity is the one it recorded when it
     registered; for a process that did not register, it is the holder of
-    the pid when the reaper first saw its files.
+    the pid when the reaper first saw its files. A holder that has one of
+    the files open writes to them, whatever its identity.
     """
     if not psutil.pid_exists(pid):
         return True
@@ -202,9 +236,10 @@ def _writer_exited(pid: int, multiproc_dir: str) -> bool:
     if identity is None:
         return True
     recorded = _read_writer_identity(multiproc_dir, pid)
-    if recorded is not None:
-        return recorded != identity
-    return _live_gauge_writers.setdefault(pid, identity) != identity
+    if recorded is None:
+        recorded = _live_gauge_writers.setdefault(pid, identity)
+    return (recorded != identity and
+            _open_live_gauge_files(pid, multiproc_dir) == set())
 
 
 def _reap_stale_multiproc_files() -> int:
