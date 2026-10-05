@@ -4455,6 +4455,12 @@ if __name__ == '__main__':
             reserve_extra_for_pool=not os.environ.get(
                 constants.IS_SKYPILOT_SERVE_CONTROLLER)))
 
+    # Explicit pool sizes are checked here, before requests are accepted: the
+    # controller pool starts from a background thread that retries on errors,
+    # and compute_server_config() does not check the short-pool floor.
+    server_config.validate_explicit_worker_counts()
+    controller_utils.explicit_jobs_controllers()
+
     config = server_config.compute_server_config(
         cmd_args.deploy,
         max_db_connections,

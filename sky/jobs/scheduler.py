@@ -318,7 +318,11 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
                 started += 1
 
             if started > 0:
-                logger.info(f'Started {started} controllers')
+                explicit = controller_utils.explicit_jobs_controllers()
+                source = ('derived' if explicit is None else
+                          f'from {constants.ENV_VAR_SERVER_JOBS_CONTROLLERS}')
+                logger.info(f'Started {started} controllers '
+                            f'(pool size {wanted}, {source})')
 
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock
