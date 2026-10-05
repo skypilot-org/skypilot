@@ -4106,14 +4106,16 @@ class TestKubernetesDetectNetworkType(unittest.TestCase):
                         })
         mock_get_nodes.return_value = [mock_node]
 
-        result = kubernetes.Kubernetes._detect_network_type(
-            context='test-context',
-            network_tier=resources_utils.NetworkTier.BEST,
-            k8s_acc_label_key='nvidia.com/gpu.product',
-            k8s_resource_key='nvidia.com/gpu',
-            acc_count=8)
+        with patch('sky.skypilot_config.get_effective_region_config',
+                   return_value=None):
+            result = kubernetes.Kubernetes._detect_network_type(
+                context='test-context',
+                network_tier=resources_utils.NetworkTier.BEST,
+                k8s_acc_label_key='nvidia.com/gpu.product',
+                k8s_resource_key='nvidia.com/gpu',
+                acc_count=8,
+                acc_type='H100')
 
-        # Should return AWS_EFA type but without efa_count metadata
         self.assertEqual(
             result,
             (kubernetes_utils.KubernetesHighPerformanceNetworkType.AWS_EFA,
@@ -4162,14 +4164,16 @@ class TestKubernetesDetectNetworkType(unittest.TestCase):
             })
         mock_get_nodes.return_value = [mock_node]
 
-        result = kubernetes.Kubernetes._detect_network_type(
-            context='test-context',
-            network_tier=resources_utils.NetworkTier.BEST,
-            k8s_acc_label_key='nvidia.com/gpu.product',
-            k8s_resource_key='nvidia.com/gpu',
-            acc_count=8)
+        with patch('sky.skypilot_config.get_effective_region_config',
+                   return_value=None):
+            result = kubernetes.Kubernetes._detect_network_type(
+                context='test-context',
+                network_tier=resources_utils.NetworkTier.BEST,
+                k8s_acc_label_key='nvidia.com/gpu.product',
+                k8s_resource_key='nvidia.com/gpu',
+                acc_count=8,
+                acc_type='H100')
 
-        # EFA count is 0, so AWS_EFA is still returned but without efa_count metadata
         self.assertEqual(
             result,
             (kubernetes_utils.KubernetesHighPerformanceNetworkType.AWS_EFA,
@@ -4293,7 +4297,8 @@ class TestDetectNetworkTypeEfaScaleFromZero(unittest.TestCase):
                 acc_type,
                 derived_efa=None,
                 tier=None,
-                autoscaler='karpenter'):
+                autoscaler='karpenter',
+                acc_label_values=None):
         # autoscaler defaults to a configured value: the scale-from-zero EFA
         # fallback only fires on a cluster that can actually scale up a GPU
         # node. Pass autoscaler=None to model a static cluster.
@@ -4311,7 +4316,8 @@ class TestDetectNetworkTypeEfaScaleFromZero(unittest.TestCase):
                 k8s_acc_label_key='nvidia.com/gpu.product',
                 k8s_resource_key='nvidia.com/gpu',
                 acc_count=acc_count,
-                acc_type=acc_type)
+                acc_type=acc_type,
+                k8s_acc_label_values=acc_label_values)
 
     def test_cold_aws_node_requests_catalog_derived_efa(self):
         net, meta = self._detect(self._cold_aws_nodes(),
@@ -4322,6 +4328,91 @@ class TestDetectNetworkTypeEfaScaleFromZero(unittest.TestCase):
             net, kubernetes.KubernetesHighPerformanceNetworkType.AWS_EFA)
         self.assertIsNotNone(meta)
         self.assertEqual(meta['efa_count'], 32)
+
+    def test_matching_gpu_without_efa_does_not_request_efa(self):
+        node = self._node(
+            {
+                **self._AWS_SYSTEM_NODE_LABELS,
+                'nvidia.com/gpu.product': 'H100',
+            }, {'nvidia.com/gpu': '8'})
+        net, meta = self._detect([node], 8, 'H100', derived_efa=32)
+        self.assertEqual(
+            net, kubernetes.KubernetesHighPerformanceNetworkType.AWS_EFA)
+        self.assertIsNone(meta)
+
+    def test_other_gpu_efa_does_not_override_matching_gpu(self):
+        h100 = self._node(
+            {
+                **self._AWS_SYSTEM_NODE_LABELS,
+                'nvidia.com/gpu.product': 'H100',
+            }, {'nvidia.com/gpu': '8'})
+        a100 = self._node(
+            {
+                **self._AWS_SYSTEM_NODE_LABELS,
+                'nvidia.com/gpu.product': 'A100',
+            }, {
+                'nvidia.com/gpu': '8',
+                'vpc.amazonaws.com/efa': '4'
+            })
+        net, meta = self._detect([h100, a100],
+                                 8,
+                                 'H100',
+                                 derived_efa=32,
+                                 acc_label_values=['H100'])
+        self.assertEqual(
+            net, kubernetes.KubernetesHighPerformanceNetworkType.AWS_EFA)
+        self.assertIsNone(meta)
+
+    def test_matching_gpu_without_efa_prevents_efa_request(self):
+        no_efa = self._node(
+            {
+                **self._AWS_SYSTEM_NODE_LABELS,
+                'nvidia.com/gpu.product': 'H100',
+            }, {'nvidia.com/gpu': '8'})
+        with_efa = self._node(
+            {
+                **self._AWS_SYSTEM_NODE_LABELS,
+                'nvidia.com/gpu.product': 'H100',
+            }, {
+                'nvidia.com/gpu': '8',
+                'vpc.amazonaws.com/efa': '4'
+            })
+        net, meta = self._detect([no_efa, with_efa],
+                                 8,
+                                 'H100',
+                                 acc_label_values=['H100'])
+        self.assertEqual(
+            net, kubernetes.KubernetesHighPerformanceNetworkType.AWS_EFA)
+        self.assertIsNone(meta)
+
+    def test_matching_gpu_nodes_use_smallest_efa_count(self):
+        large = self._node(
+            {
+                **self._AWS_SYSTEM_NODE_LABELS,
+                'nvidia.com/gpu.product': 'H100',
+            }, {
+                'nvidia.com/gpu': '8',
+                'vpc.amazonaws.com/efa': '32'
+            })
+        small = self._node(
+            {
+                **self._AWS_SYSTEM_NODE_LABELS,
+                'nvidia.com/gpu.product': 'H100',
+            }, {
+                'nvidia.com/gpu': '1',
+                'vpc.amazonaws.com/efa': '1'
+            })
+        for nodes in [[large, small], [small, large]]:
+            with self.subTest(first_efa=nodes[0].status.
+                              allocatable['vpc.amazonaws.com/efa']):
+                net, meta = self._detect(nodes,
+                                         1,
+                                         'H100',
+                                         acc_label_values=['H100'])
+                self.assertEqual(
+                    net,
+                    kubernetes.KubernetesHighPerformanceNetworkType.AWS_EFA)
+                self.assertEqual(meta, {'efa_count': 1})
 
     def test_cold_aws_node_no_autoscaler_gets_no_efa(self):
         # A static cluster (no autoscaler) with no GPU node can never schedule

@@ -905,7 +905,7 @@ class Kubernetes(clouds.Cloud):
 
         network_type, metadata = self._detect_network_type(
             context, resources.network_tier, k8s_acc_label_key,
-            k8s_resource_key, acc_count, acc_type)
+            k8s_resource_key, acc_count, acc_type, k8s_acc_label_values)
         oci_roce_enabled = (
             network_type == KubernetesHighPerformanceNetworkType.OCI_ROCE)
         # Resolved here rather than next to the rest of the RDMA handling
@@ -1864,6 +1864,7 @@ class Kubernetes(clouds.Cloud):
         k8s_resource_key: Optional[str] = None,
         acc_count: Optional[int] = None,
         acc_type: Optional[str] = None,
+        k8s_acc_label_values: Optional[List[str]] = None,
     ) -> Tuple[KubernetesHighPerformanceNetworkType, Optional[Dict[str, Any]]]:
         """Detect the type of Kubernetes network based on node labels.
 
@@ -1877,6 +1878,8 @@ class Kubernetes(clouds.Cloud):
             acc_type: The accelerator type requested (e.g. 'H100'). Used to
                 derive the EFA interface count on AWS scale-from-zero clusters
                 where no GPU+EFA node is running to scan.
+            k8s_acc_label_values: Accepted accelerator label values for the
+                pod's node affinity.
 
         Returns:
             A tuple of (network_type, metadata).
@@ -1894,6 +1897,9 @@ class Kubernetes(clouds.Cloud):
         # so this stays True on a scale-from-zero cluster where only system
         # nodes are up -- letting the fallback below still derive an EFA count.
         saw_aws_efa_node = False
+        matched_aws_gpu_node = False
+        missing_efa = False
+        efa_counts: List[int] = []
 
         try:
             nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
@@ -1933,12 +1939,16 @@ class Kubernetes(clouds.Cloud):
                                     not acc_count):
                                 return (network_type, metadata)
                             if (k8s_acc_label_key not in node.metadata.labels or
+                                (k8s_acc_label_values is not None and
+                                 node.metadata.labels[k8s_acc_label_key]
+                                 not in k8s_acc_label_values) or
                                     k8s_resource_key
                                     not in node.status.allocatable or
                                     int(node.status.
                                         allocatable[k8s_resource_key]) <
                                     acc_count):
                                 continue
+                            matched_aws_gpu_node = True
                             # Calculate EFA count proportionally
                             if AWS_EFA_RESOURCE_KEY in node.status.allocatable:
                                 node_gpu_count = int(
@@ -1954,10 +1964,10 @@ class Kubernetes(clouds.Cloud):
                                                                 node_efa_count)
                                     efa_count = max(
                                         1, min(calculated_efa, node_efa_count))
-                                    metadata = {'efa_count': efa_count}
-                                    return (network_type, metadata)
-                            # No EFA available, but it's an AWS node
-                            return (network_type, metadata)
+                                    efa_counts.append(efa_count)
+                                    continue
+                            missing_efa = True
+                            continue
 
                     # Check for GKE clusters with specific GPUDirect variants
                     machine_family = node.metadata.labels.get(
@@ -2023,6 +2033,12 @@ class Kubernetes(clouds.Cloud):
         except exceptions.KubeAPIUnreachableError:
             # If we can't reach the cluster, assume no high perf networking
             pass
+
+        # An EFA request could exclude an observed matching GPU node that has
+        # no EFA. Use the smallest count that all matching nodes can support.
+        if matched_aws_gpu_node:
+            metadata = None if missing_efa else {'efa_count': min(efa_counts)}
+            return KubernetesHighPerformanceNetworkType.AWS_EFA, metadata
 
         # Autoscaler configured for this context (karpenter/generic/gke), or
         # None on a static cluster. Both cold-start fallbacks below require it:
