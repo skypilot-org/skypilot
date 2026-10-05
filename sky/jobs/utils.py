@@ -146,10 +146,10 @@ _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 120
 # Content written to the jobs cancel signal file.
 _JOBS_GRACEFUL_CANCEL_SIGNAL = 'graceful'
 
-# How many jobs the consolidation-mode recovery sweep settles before pausing.
+# How many jobs the consolidation-mode recovery sweep resets before pausing.
 # Small enough that one batch's DB work is a short burst rather than a long
-# hold on a pooled connection, large enough that the fixed per-batch queries
-# (a few) stay negligible next to the per-job work they replace.
+# hold on a pooled connection, large enough that the fixed per-batch cost
+# stays negligible next to the per-job work it replaces.
 _RECOVERY_SWEEP_BATCH_SIZE = 100
 
 # Multiple of a batch's own duration to pause for before the next batch. 1.0
@@ -423,7 +423,6 @@ def ha_recovery_for_consolidation_mode() -> None:
         f.write(f'{len(candidates)} job(s) to check, '
                 f'{len(orphaned)} without a live controller\n')
 
-        finished = 0
         recovered = 0
         batch_seconds = 0.0
         batches = _batched(orphaned, _RECOVERY_SWEEP_BATCH_SIZE)
@@ -434,28 +433,15 @@ def ha_recovery_for_consolidation_mode() -> None:
                 # added latency with no batch left to protect.
                 _throttle_recovery_sweep(batch_seconds, f)
             batch_start = time.time()
-            # Jobs that are already finished need no controller at all;
-            # sending them through the normal path would have a controller
-            # read the job's DAG just to observe that there is nothing left
-            # to run. Settle them directly.
-            done = _jobs_needing_no_controller(batch)
-            done_ids = sorted(done)
-            reset_ids = [job_id for job_id in batch if job_id not in done]
-            finished += managed_job_state.set_jobs_done_batch(done_ids)
-            recovered += managed_job_state.reset_jobs_for_recovery_batch(
-                reset_ids)
-            if done_ids:
-                f.write(f'Settled already-finished job(s) {done_ids}\n')
-            if reset_ids:
-                f.write(f'Reset job(s) {reset_ids} for recovery\n')
+            recovered += managed_job_state.reset_jobs_for_recovery_batch(batch)
+            f.write(f'Reset job(s) {batch} for recovery\n')
             # Flush per batch: this file is how an operator watches a sweep
             # that is still in progress, and a sweep that pauses between
             # batches can be in progress for a while.
             f.flush()
             batch_seconds = time.time() - batch_start
 
-        message = (f'Recovered {recovered} job(s), settled {finished} '
-                   f'already-finished job(s)')
+        message = f'Recovered {recovered} job(s)'
         logger.info(message)
         f.write(f'{message}\n')
         f.write(f'HA recovery completed at {datetime.now()}\n')
@@ -499,30 +485,6 @@ def _controller_still_running(job: Dict[str, Any], log_file: TextIO) -> bool:
         logger.warning(message, exc_info=True)
         log_file.write(message)
     return False
-
-
-def _jobs_needing_no_controller(job_ids: List[int]) -> Set[int]:
-    """Subset of ``job_ids`` that recovery can settle without a controller.
-
-    A job qualifies when all its tasks are CANCELLED -- which, per
-    ``get_job_ids_with_all_tasks_cancelled``, means its cleanup already
-    completed -- and none of its clusters is still in the cluster table, so
-    there is provably nothing left for controller cleanup to tear down. The
-    cluster check is belt and braces for a job that reached CANCELLED by some
-    path that skipped teardown; such a job goes through the normal
-    reset-to-WAITING route and a controller cleans up after it.
-    """
-    cancelled = managed_job_state.get_job_ids_with_all_tasks_cancelled(job_ids)
-    if not cancelled:
-        return set()
-    cluster_name_to_job: Dict[str, int] = {}
-    for job_id, task_name in managed_job_state.get_non_pool_task_names(
-            sorted(cancelled)):
-        cluster_name_to_job.setdefault(
-            generate_managed_job_cluster_name(task_name, job_id), job_id)
-    still_around = global_user_state.filter_existing_cluster_names(
-        set(cluster_name_to_job))
-    return cancelled - {cluster_name_to_job[name] for name in still_around}
 
 
 def _throttle_recovery_sweep(batch_seconds: float, log_file: TextIO) -> None:

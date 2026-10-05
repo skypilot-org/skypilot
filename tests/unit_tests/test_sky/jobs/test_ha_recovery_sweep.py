@@ -1,8 +1,7 @@
 """Unit tests for the consolidation-mode HA recovery sweep.
 
 Covers the state-layer queries the sweep is built on (against a real SQLite
-state DB) and then the sweep itself, which decides per job whether to hand it
-back to a controller or settle it directly.
+state DB) and then the sweep itself.
 """
 import contextlib
 from unittest import mock
@@ -143,82 +142,6 @@ def test_needing_recovery_check_returns_one_row_per_job(jobs_db):
 
 
 # ---------------------------------------------------------------------------
-# get_job_ids_with_all_tasks_cancelled
-# ---------------------------------------------------------------------------
-
-
-def test_all_tasks_cancelled_partitions_jobs(jobs_db):
-    _add_job(jobs_db,
-             1,
-             ScheduleState.LAUNCHING,
-             task_statuses=(Status.CANCELLED,))
-    _add_job(jobs_db,
-             2,
-             ScheduleState.LAUNCHING,
-             task_statuses=(Status.CANCELLED, Status.CANCELLED))
-    # One task not cancelled: the job is not finished.
-    _add_job(jobs_db,
-             3,
-             ScheduleState.LAUNCHING,
-             task_statuses=(Status.CANCELLED, Status.RUNNING))
-    # Terminal but not CANCELLED: cleanup may not have run, so not eligible.
-    _add_job(jobs_db,
-             4,
-             ScheduleState.LAUNCHING,
-             task_statuses=(Status.SUCCEEDED,))
-    _add_job(jobs_db,
-             5,
-             ScheduleState.LAUNCHING,
-             task_statuses=(Status.FAILED_CONTROLLER,))
-
-    assert state.get_job_ids_with_all_tasks_cancelled([1, 2, 3, 4, 5]) == {1, 2}
-
-
-def test_all_tasks_cancelled_excludes_job_without_tasks(jobs_db):
-    """A job_info row with no spot rows is mid-submission, not finished."""
-    _add_job(jobs_db, 1, ScheduleState.LAUNCHING)
-
-    assert state.get_job_ids_with_all_tasks_cancelled([1]) == set()
-
-
-def test_all_tasks_cancelled_handles_more_ids_than_one_chunk(jobs_db):
-    job_ids = list(range(1, state._RECOVERY_CHUNK_SIZE * 2 + 5))
-    for job_id in job_ids:
-        _add_job(jobs_db,
-                 job_id,
-                 ScheduleState.LAUNCHING,
-                 task_statuses=(Status.CANCELLED,))
-
-    assert state.get_job_ids_with_all_tasks_cancelled(job_ids) == set(job_ids)
-
-
-def test_all_tasks_cancelled_empty_input(jobs_db):
-    assert state.get_job_ids_with_all_tasks_cancelled([]) == set()
-
-
-# ---------------------------------------------------------------------------
-# get_non_pool_task_names
-# ---------------------------------------------------------------------------
-
-
-def test_non_pool_task_names_excludes_pool_jobs(jobs_db):
-    _add_job(jobs_db,
-             1,
-             ScheduleState.LAUNCHING,
-             task_statuses=(Status.CANCELLED, Status.CANCELLED),
-             task_name='solo')
-    _add_job(jobs_db,
-             2,
-             ScheduleState.LAUNCHING,
-             task_statuses=(Status.CANCELLED,),
-             pool='my-pool',
-             task_name='pooled')
-
-    assert sorted(state.get_non_pool_task_names([1, 2])) == [(1, 'solo0'),
-                                                             (1, 'solo1')]
-
-
-# ---------------------------------------------------------------------------
 # batched writes
 # ---------------------------------------------------------------------------
 
@@ -248,19 +171,6 @@ def test_reset_batch_leaves_jobs_that_no_longer_need_recovery(jobs_db):
     }
 
 
-def test_set_done_batch(jobs_db):
-    _add_job(jobs_db, 1, ScheduleState.LAUNCHING, controller_pid=11)
-    _add_job(jobs_db, 2, ScheduleState.WAITING, controller_pid=22)
-
-    # Job 2 is WAITING, which needs no recovery, so it is left alone.
-    assert state.set_jobs_done_batch([1, 2]) == 1
-
-    assert _schedule_states(jobs_db, [1, 2]) == {
-        1: (ScheduleState.DONE.value, None),
-        2: (ScheduleState.WAITING.value, 22),
-    }
-
-
 def test_batched_writes_handle_more_ids_than_one_chunk(jobs_db):
     job_ids = list(range(1, state._RECOVERY_CHUNK_SIZE * 2 + 5))
     for job_id in job_ids:
@@ -278,7 +188,6 @@ def test_batched_writes_handle_more_ids_than_one_chunk(jobs_db):
 
 def test_batched_writes_empty_input(jobs_db):
     assert state.reset_jobs_for_recovery_batch([]) == 0
-    assert state.set_jobs_done_batch([]) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -294,19 +203,14 @@ def sweep_env(jobs_db, tmp_path, monkeypatch):
                         str(tmp_path / '{}recovery.log'))
     monkeypatch.setattr(managed_job_utils.scheduler, 'maybe_start_controllers',
                         mock.Mock())
-    # No cluster rows exist unless a test says otherwise.
-    existing = mock.Mock(return_value=set())
-    monkeypatch.setattr(managed_job_utils.global_user_state,
-                        'filter_existing_cluster_names', existing)
     throttle = mock.Mock()
     monkeypatch.setattr(managed_job_utils, '_throttle_recovery_sweep', throttle)
-    yield mock.Mock(engine=jobs_db,
-                    existing_clusters=existing,
-                    throttle=throttle)
+    yield mock.Mock(engine=jobs_db, throttle=throttle)
 
 
-def test_sweep_settles_cancelled_jobs_and_recovers_the_rest(sweep_env):
-    """All-cancelled jobs go straight to DONE; live jobs go back to WAITING."""
+def test_sweep_recovers_every_job_without_a_live_controller(sweep_env):
+    """Jobs whose tasks already finished go back to a controller too, which
+    does their cleanup and moves them to DONE."""
     _add_job(sweep_env.engine,
              1,
              ScheduleState.LAUNCHING,
@@ -323,27 +227,9 @@ def test_sweep_settles_cancelled_jobs_and_recovers_the_rest(sweep_env):
     managed_job_utils.ha_recovery_for_consolidation_mode()
 
     assert _schedule_states(sweep_env.engine, [1, 2, 3]) == {
-        1: (ScheduleState.DONE.value, None),
+        1: (ScheduleState.WAITING.value, None),
         2: (ScheduleState.WAITING.value, None),
         3: (ScheduleState.WAITING.value, None),
-    }
-
-
-def test_sweep_recovers_cancelled_job_whose_cluster_survives(sweep_env):
-    """A leftover cluster means cleanup must run, so use a controller."""
-    _add_job(sweep_env.engine,
-             1,
-             ScheduleState.LAUNCHING,
-             task_statuses=(Status.CANCELLED,),
-             task_name='leaky')
-    cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-        'leaky0', 1)
-    sweep_env.existing_clusters.return_value = {cluster_name}
-
-    managed_job_utils.ha_recovery_for_consolidation_mode()
-
-    assert _schedule_states(sweep_env.engine, [1]) == {
-        1: (ScheduleState.WAITING.value, None)
     }
 
 

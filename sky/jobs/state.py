@@ -4568,72 +4568,6 @@ def get_jobs_needing_recovery_check() -> List[Dict[str, Any]]:
     } for row in rows]
 
 
-def get_job_ids_with_all_tasks_cancelled(job_ids: List[int]) -> Set[int]:
-    """Of ``job_ids``, those whose every task row is already CANCELLED.
-
-    Such a job has nothing left for a controller to do. CANCELLED
-    specifically -- rather than any terminal status -- because it is the one
-    terminal status a controller only ever writes *after* its cleanup
-    succeeded: ``set_cancelled`` transitions CANCELLING -> CANCELLED, and the
-    controller reaches that transition after cluster teardown and ephemeral
-    storage teardown have returned (a cleanup failure leaves the task
-    FAILED_CONTROLLER instead). The other route to CANCELLED is a job
-    cancelled while still PENDING, which never provisioned anything. Either
-    way there is nothing outstanding for a controller to clean up, which is
-    what makes skipping the controller safe.
-
-    A job with no task rows at all is *not* returned: it exists in
-    ``job_info`` but its tasks are not recorded yet (mid-submission), which is
-    the opposite of finished.
-    """
-    if not job_ids:
-        return set()
-    engine = _db_manager.get_engine()
-    not_cancelled = sqlalchemy.case(
-        (spot_table.c.status == ManagedJobStatus.CANCELLED.value, 0),
-        else_=1,
-    )
-    all_cancelled: Set[int] = set()
-    with orm.Session(engine) as session:
-        for chunk in _chunked(job_ids):
-            query = sqlalchemy.select(spot_table.c.spot_job_id).where(
-                spot_table.c.spot_job_id.in_(chunk)).group_by(
-                    spot_table.c.spot_job_id).having(
-                        sqlalchemy.func.sum(not_cancelled) == 0)
-            all_cancelled.update(row[0] for row in session.execute(query))
-    return all_cancelled
-
-
-def get_non_pool_task_names(job_ids: List[int]) -> List[Tuple[int, str]]:
-    """(job_id, task name) for tasks of ``job_ids`` that ran outside a pool.
-
-    The caller turns these into managed-job cluster names to check whether a
-    finished job still has a cluster to tear down. Pool tasks are excluded:
-    they run on a cluster owned by the pool, which managed-job cleanup never
-    terminates.
-    """
-    if not job_ids:
-        return []
-    engine = _db_manager.get_engine()
-    names: List[Tuple[int, str]] = []
-    with orm.Session(engine) as session:
-        for chunk in _chunked(job_ids):
-            query = sqlalchemy.select(
-                spot_table.c.spot_job_id,
-                spot_table.c.task_name,
-            ).select_from(
-                spot_table.outerjoin(
-                    job_info_table, spot_table.c.spot_job_id ==
-                    job_info_table.c.spot_job_id)).where(
-                        sqlalchemy.and_(
-                            spot_table.c.spot_job_id.in_(chunk),
-                            job_info_table.c.pool.is_(None),
-                            spot_table.c.task_name.is_not(None),
-                        ))
-            names.extend((row[0], row[1]) for row in session.execute(query))
-    return names
-
-
 def reset_jobs_for_recovery_batch(job_ids: List[int]) -> int:
     """Reset a batch of jobs to WAITING, dropping their controller pids.
 
@@ -4643,26 +4577,6 @@ def reset_jobs_for_recovery_batch(job_ids: List[int]) -> int:
 
     Returns the number of rows updated.
     """
-    return _update_jobs_schedule_state_batch(
-        job_ids, ManagedJobScheduleState.WAITING.value)
-
-
-def set_jobs_done_batch(job_ids: List[int]) -> int:
-    """Mark a batch of already-finished jobs DONE, dropping controller pids.
-
-    For jobs whose tasks are all terminal and which have no cluster left to
-    clean up, DONE is the state a controller would reach anyway. Guarded by
-    the same predicate as :func:`reset_jobs_for_recovery_batch` so a
-    concurrent transition wins.
-
-    Returns the number of rows updated.
-    """
-    return _update_jobs_schedule_state_batch(job_ids,
-                                             ManagedJobScheduleState.DONE.value)
-
-
-def _update_jobs_schedule_state_batch(job_ids: List[int],
-                                      schedule_state: str) -> int:
     if not job_ids:
         return 0
     engine = _db_manager.get_engine()
@@ -4677,7 +4591,8 @@ def _update_jobs_schedule_state_batch(job_ids: List[int],
                     )).values({
                         job_info_table.c.controller_pid: None,
                         job_info_table.c.controller_pid_started_at: None,
-                        job_info_table.c.schedule_state: schedule_state,
+                        job_info_table.c.schedule_state:
+                            ManagedJobScheduleState.WAITING.value,
                     }))
             updated += result.rowcount
         session.commit()
