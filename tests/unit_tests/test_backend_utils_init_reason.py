@@ -286,16 +286,16 @@ class TestUpdateClusterStatusInitReason:
 
 
 class TestUpdateClusterStatusBareHandle:
-    """A bare pre-provision handle (no cached IPs, has_ray=False) must not
-    be promoted to UP by a status refresh.
+    """A handle without cached IPs must not be promoted to UP by a status
+    refresh.
 
-    `sky launch` persists such a handle at INIT before provisioning starts;
-    the completed handle is only persisted after runtime setup. If the launch
-    is interrupted in between while the nodes keep running (on Kubernetes,
-    pods report Running long before runtime setup finishes), a refresh used
-    to skip the ray health check (has_ray=False) and mark the cluster UP
-    with head_ip=None — making every subsequent operation (e.g. sky exec)
-    fail with ClusterNotUpError.
+    `sky launch` saves the handle at INIT before provisioning starts and adds
+    the IPs only in its final write. If the launch is interrupted in between
+    while the nodes keep running (on Kubernetes, pods report Running long
+    before runtime setup finishes), a runtime without Ray (has_ray=False) has
+    no health check to catch it, and marking the cluster UP with
+    head_ip=None makes every later operation (e.g. sky exec) fail with
+    ClusterNotUpError.
     """
 
     def _refresh(self, handle):
@@ -390,3 +390,102 @@ class TestUpdateClusterStatusBareHandle:
         assert add_or_update.call_args.kwargs['ready'] is False
         assert not any(status == status_lib.ClusterStatus.UP
                        for status, _ in events), events
+
+    def test_healthy_ray_without_cached_ips_is_not_promoted_to_up(self):
+        # An interrupted launch saves its handle with has_ray=True and the
+        # provisioner's cluster info but no stable IPs. The runtime setup it
+        # started on the nodes can finish on its own, so the ray health
+        # check can pass; the record is still unusable (head_ip=None) until
+        # a relaunch writes the IPs, so it must stay INIT.
+        handle = _make_handle()
+        handle.provision_runtime_metadata.has_ray = True
+        handle.head_ip = None
+        head_runner = mock.Mock()
+        head_runner.run.return_value = (0, ' 1 node_abc123\n', '')
+        handle.get_command_runners.return_value = [head_runner]
+
+        add_or_update, events = self._refresh(handle)
+
+        head_runner.run.assert_called_once()
+        assert add_or_update.call_count == 1
+        assert add_or_update.call_args.kwargs['ready'] is False
+        # Not marked UP (and the record is already INIT, so no INIT event is
+        # re-added either).
+        assert not any(status == status_lib.ClusterStatus.UP
+                       for status, _ in events), events
+
+
+class TestUpdateClusterStatusInterruptedRelaunch:
+    """A relaunch of an existing cluster saves its INIT handle with the
+    previous launch's IPs. If the relaunch is interrupted while the nodes keep
+    running, the refresh must check Ray before marking the cluster UP.
+    """
+
+    @staticmethod
+    def _relaunch_handle():
+        # Built like the handle `sky launch` saves at INIT for an existing
+        # cluster: a new handle carrying the previous IPs and ports.
+        resources = mock.Mock(unsafe=True)
+        resources.cloud = clouds.Kubernetes()
+        resources.accelerators = None
+        resources.use_spot = False
+        resources.assert_launchable.return_value = resources
+        return backends.CloudVmRayResourceHandle(
+            cluster_name='test-cluster',
+            cluster_name_on_cloud='test-cluster-1234',
+            cluster_yaml='/fake/path/cluster.yaml',
+            launched_nodes=1,
+            launched_resources=resources,
+            stable_internal_external_ips=[('10.0.0.5', '10.0.0.5')],
+            stable_ssh_ports=[22])
+
+    def _refresh(self, ray_status):
+        handle = self._relaunch_handle()
+        record = _make_record(handle, status=status_lib.ClusterStatus.INIT)
+
+        backend = mock.Mock(spec=backends.CloudVmRayBackend)
+        backend.is_definitely_autostopping.return_value = False
+
+        external_failure = mock.Mock()
+        external_failure.get.return_value = None
+
+        runner = mock.Mock()
+        runner.run.return_value = ray_status
+        get_command_runners = mock.Mock(return_value=[runner])
+
+        add_or_update = mock.Mock()
+        with mock.patch.object(backend_utils,
+                               '_query_cluster_status_via_cloud_api',
+                               return_value={
+                                   'pod-0': (status_lib.ClusterStatus.UP, None)
+                               }), \
+             mock.patch.object(backend_utils, 'ExternalFailureSource',
+                               external_failure), \
+             mock.patch.object(backend_utils, 'get_backend_from_handle',
+                               return_value=backend), \
+             mock.patch.object(backend_utils.global_user_state,
+                               'add_cluster_event'), \
+             mock.patch.object(backend_utils.global_user_state,
+                               'add_or_update_cluster', add_or_update), \
+             mock.patch.object(backend_utils.global_user_state,
+                               'get_cluster_from_name',
+                               return_value=record), \
+             mock.patch.object(backend_utils.global_user_state,
+                               'get_cluster_yaml_dict', return_value={}), \
+             mock.patch.object(backend_utils.time, 'sleep'), \
+             mock.patch.object(backends.CloudVmRayResourceHandle,
+                               'get_command_runners', get_command_runners):
+            backend_utils._update_cluster_status('test-cluster',
+                                                 record,
+                                                 retry_if_missing=False)
+        return add_or_update.call_args.kwargs['ready'], get_command_runners
+
+    def test_ray_down_stays_init(self):
+        ready, get_command_runners = self._refresh(
+            (1, '', 'Ray is not running'))
+        get_command_runners.assert_called()
+        assert ready is False
+
+    def test_ray_healthy_is_promoted_to_up(self):
+        ready, _ = self._refresh((0, ' 1 node_abc123\n', ''))
+        assert ready is True

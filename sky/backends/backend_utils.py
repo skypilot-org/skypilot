@@ -2876,33 +2876,41 @@ def _update_cluster_status(
     # from cloud -> provision layer.
     should_check_ray = (cloud is not None and cloud.uses_ray() and
                         handle.provision_runtime_metadata.has_ray)
-    # A handle without cached IPs is the bare pre-provision handle that
-    # `sky launch` persists (at INIT) before provisioning starts; the
-    # completed handle (with IPs and has_ray=True) is only persisted after
-    # runtime setup finishes. If the launch is interrupted in that window
+    # A handle without cached IPs comes from a launch that did not finish:
+    # `sky launch` saves the handle at INIT before provisioning starts and
+    # adds the IPs only in its final write. If that launch was interrupted
     # (process death, cancellation, a lost cluster lock) while the nodes
-    # keep running, all_nodes_up can be True here — e.g. Kubernetes pods
-    # report Running long before the runtime is set up. Never mark such a
-    # cluster UP: with has_ray=False the ray health check (which fails
-    # closed on missing IPs) is skipped entirely, and every operation on
+    # kept running, all_nodes_up can be True here, e.g. Kubernetes pods
+    # report Running long before the runtime is set up. Every operation on
     # an UP cluster requires handle.head_ip (see check_cluster_available),
     # so promoting would only trade INIT for a ClusterNotUpError later.
-    # Fall through to the abnormal-cluster handling below to keep it INIT.
+    # Never promote such a handle, whatever the ray health check says: the
+    # provisioner saves the cluster info before runtime setup, so the check
+    # can reach the nodes, and the runtime setup an interrupted launch
+    # started on them may well have finished on its own; the record is
+    # still unusable until a relaunch writes the IPs. Fall through to the
+    # abnormal-cluster handling below to keep it INIT.
     #
-    # Only apply this gate when the ray health check is skipped. When it
-    # runs, it is the authority: it already fails closed when there is no
-    # way to reach the head node, and it is what surfaces the recovery hint
-    # for a cluster restarted outside SkyPilot. Stopping a cluster clears
-    # head_ip on purpose (see global_user_state.remove_cluster), so a
-    # stopped-then-manually-restarted cluster also has head_ip=None here;
-    # gating it on head_ip would skip the probe and drop that hint.
+    # The ray health check still runs first when the runtime has Ray: it
+    # is the authority on health once the IPs are there, and it is what
+    # surfaces the recovery hint for a cluster restarted outside SkyPilot.
+    # Stopping a cluster clears head_ip on purpose (see
+    # global_user_state.remove_cluster), so a stopped-then-manually-
+    # restarted cluster also has head_ip=None here; skipping the probe for
+    # it would drop that hint.
     handle_has_cached_ips = handle.head_ip is not None
-    if all_nodes_up and not should_check_ray and not handle_has_cached_ips:
+    # The runtime is healthy only when every node is up and, for a runtime
+    # with Ray, the ray health check passes; the check is skipped when
+    # some node is down (short-circuit), as before.
+    runtime_healthy = all_nodes_up and (
+        run_ray_status_to_check_ray_cluster_healthy()
+        if should_check_ray else True)
+    if (runtime_healthy and not handle_has_cached_ips and
+            ray_status_details is None):
         ray_status_details = ('no cached IPs on the cluster handle; the '
                               'last launch was likely interrupted before '
-                              'the SkyPilot runtime was set up')
-    if (all_nodes_up and (run_ray_status_to_check_ray_cluster_healthy()
-                          if should_check_ray else handle_has_cached_ips) and
+                              'it finished')
+    if (runtime_healthy and handle_has_cached_ips and
             not external_cluster_failures):
         # NOTE: all_nodes_up calculation is fast due to calling cloud CLI;
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
