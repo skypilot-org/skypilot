@@ -12,7 +12,7 @@ them, this module assigns them, and one list serves both.
 """
 import os
 import random
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sky import skypilot_config
 from sky.provision.kubernetes import constants as k8s_constants
@@ -90,19 +90,19 @@ def resolve_range(context: Optional[str]) -> Tuple[int, int]:
 # says so; a default means a test has to happen to cover that pair.
 PORT_RANGE_START, PORT_RANGE_END = _DEFAULT_RANGE
 
-# One contiguous block per pod, sized for the head; a worker not using three of
+# One contiguous block per pod, sized for the head; a worker not using four of
 # them costs nothing and keeps a single pod spec for every pod in the cluster.
 #
 # Contiguous rather than N independent ports because it collides *less*: two
-# blocks overlap only if their starts are within BLOCK_SIZE-1 (~0.17% over this
-# range), where N independent ports collide if any single one does (~0.81%).
+# blocks overlap only if their starts are within BLOCK_SIZE-1 (~0.19% over this
+# range), where N independent ports collide if any single one does (~1.0%).
 BLOCK_SIZE = len(host_network_probe.HEAD_PORT_NAMES)
 
 # The client's SSH proxy command finds the pod's sshd port by this name.
 SSHD_PORT_NAME = 'ssh'
 
 # Test-only: pin the block start so two clusters are handed the same one.
-# The collision this design exists to arbitrate has a ~0.17% chance of
+# The collision this design exists to arbitrate has a ~0.19% chance of
 # occurring naturally over the range, so an e2e case that waits for it tests
 # nothing. Unset in every normal run.
 _PINNED_START_ENV = 'SKYPILOT_HOST_NETWORK_PORT_START'
@@ -137,20 +137,26 @@ def ports_from_pod(pod: Any,
     * no ports at all -> ``None``. A pod created before this change declares
       none (the template rendered ``ports:`` only for non-hostNetwork pods),
       so the caller falls back and then allocates.
-    * exactly one contiguous in-range block -> that block.
+    * exactly one contiguous in-range block -> that block. A block one short,
+      on a pod never handed a skylet port, was made before the trailing
+      ``skylet`` slot existed: every name but ``skylet``, whose skylet is on
+      the default port.
     * anything else -> raise. Treating a partial read as "legacy" would
       allocate a fresh block for a pod that is running and listening on the
-      old one. That is not hypothetical: ``BLOCK_SIZE`` is
-      ``len(HEAD_PORT_NAMES)``, so adding a tenth port name would make every
-      existing pod's nine ports look partial, cluster-wide, on upgrade.
+      old one. ``BLOCK_SIZE`` is ``len(HEAD_PORT_NAMES)``, so a new slot makes
+      every existing pod's block look partial unless it is taught here.
     """
     lo, hi = resolve_range(context)
     spec = getattr(pod, 'spec', None)
     declared: List[int] = []
+    env_names: Set[str] = set()
     for container in (getattr(spec, 'containers', None) or []):
         if getattr(container, 'name',
                    None) != k8s_constants.RAY_NODE_CONTAINER_NAME:
             continue
+        env = getattr(container, 'env', None)
+        if isinstance(env, list):
+            env_names.update(str(getattr(e, 'name', '') or '') for e in env)
         for port in (getattr(container, 'ports', None) or []):
             host_port = getattr(port, 'host_port', None)
             # In-range only. The container also carries the user's pod_config
@@ -163,7 +169,14 @@ def ports_from_pod(pod: Any,
     if not declared:
         return None
     start = min(declared)
-    expected = list(range(start, start + BLOCK_SIZE))
+    names = host_network_probe.HEAD_PORT_NAMES
+    # One short is a block made before the trailing skylet slot existed, but
+    # only if the pod was also never handed that port: otherwise a range
+    # narrowed by one would silently read as "skylet on the default port".
+    if (len(declared) == BLOCK_SIZE - 1 and
+            host_network_probe.env_var_for_port('skylet') not in env_names):
+        names = names[:-1]
+    expected = list(range(start, start + len(names)))
     if sorted(declared) != expected or start < lo or expected[-1] > hi:
         pod_name = getattr(getattr(pod, 'metadata', None), 'name', '<unknown>')
         raise RuntimeError(
@@ -172,10 +185,7 @@ def ports_from_pod(pod: Any,
             f'{lo}-{hi}. Refusing to guess: '
             'allocating a new block would point the cluster at ports nothing '
             'is listening on.')
-    return {
-        name: start + offset
-        for offset, name in enumerate(host_network_probe.HEAD_PORT_NAMES)
-    }
+    return {name: start + offset for offset, name in enumerate(names)}
 
 
 def resolve_block(

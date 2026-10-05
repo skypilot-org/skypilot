@@ -210,6 +210,9 @@ SKYLET_PORT_FILE = '.sky/skylet_port'
 # The Slurm skylet keeper consumes this start spec.
 SKYLET_START_FILE = '.sky/skylet_start'
 SKYLET_GRPC_PORT = 46590
+# Set on a Kubernetes hostNetwork pod: the port the server assigned to skylet
+# (host_network_probe's 'skylet' slot) and will dial.
+SKYLET_PORT_ENV_VAR = 'SKYPILOT_SKYLET_PORT'
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
 # TODO(zpoint): legacy autostop-hook log path, kept so the new
 # tail_hook_logs(event='stop') can fall back to it on clusters

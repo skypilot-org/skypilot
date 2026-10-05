@@ -3228,6 +3228,8 @@ def get_cluster_info(
     # own entry. (The assignment side only ever needs the head's block, which
     # is the only full block the ConfigMap holds.)
     pod_sshd_ports: Dict[str, int] = {}
+    # Only pods that declare a skylet slot; the rest run skylet on the default.
+    pod_skylet_ports: Dict[str, int] = {}
     legacy_pods = []
     for name, pod in running_pods.items():
         if not pod.spec.host_network:
@@ -3235,6 +3237,8 @@ def get_cluster_info(
         declared = host_network_ports.ports_from_pod(pod, context)
         if declared is not None:
             pod_sshd_ports[name] = declared['sshd']
+            if 'skylet' in declared:
+                pod_skylet_ports[name] = declared['skylet']
         else:
             legacy_pods.append(name)
     if legacy_pods:
@@ -3260,6 +3264,7 @@ def get_cluster_info(
                 internal_ip=internal_ip,
                 external_ip=None,
                 ssh_port=pod_sshd_ports.get(pod_name, port),
+                skylet_port=pod_skylet_ports.get(pod_name),
                 tags=pod.metadata.labels,
                 # TODO(hailong): `cluster.local` may need to be configurable
                 # Service name is same as the pod name for now.

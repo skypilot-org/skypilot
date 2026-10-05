@@ -13,6 +13,8 @@ import pytest
 
 from sky.provision.kubernetes import host_network_ports as ports
 from sky.provision.kubernetes import host_network_probe
+from sky.provision.kubernetes import instance as k8s_instance
+from sky.skylet import constants as skylet_constants
 
 # Linux default ip_local_port_range floor, measured on the dev clusters.
 _EPHEMERAL_FLOOR = 32768
@@ -20,18 +22,28 @@ _EPHEMERAL_FLOOR = 32768
 _NODEPORT_FLOOR = 30000
 
 
-def _container(name, host_ports):
+def _container(name, host_ports, env_names=()):
     c = mock.Mock()
     c.name = name
     c.ports = [mock.Mock(host_port=p) for p in host_ports]
+    env = []
+    for env_name in env_names:
+        e = mock.Mock()
+        e.name = env_name
+        env.append(e)
+    c.env = env
     return c
 
 
-def _pod(host_ports=None, phase='Running', conditions=(), sidecar_ports=()):
+def _pod(host_ports=None,
+         phase='Running',
+         conditions=(),
+         sidecar_ports=(),
+         env_names=()):
     containers = []
     if sidecar_ports:
         containers.append(_container('my-sidecar', sidecar_ports))
-    containers.append(_container('ray-node', host_ports or []))
+    containers.append(_container('ray-node', host_ports or [], env_names))
     pod = mock.Mock()
     pod.spec.containers = containers
     pod.metadata.name = 'c-head'
@@ -380,9 +392,29 @@ class TestPartialDeclarationIsNotLegacy:
 
     def test_a_short_block_raises_rather_than_reallocating(self):
         block = ports.allocate_block(None)
-        short = sorted(block.values())[:-1]
+        short = sorted(block.values())[:-2]
         with pytest.raises(RuntimeError, match='contiguous'):
             ports.ports_from_pod(_pod(host_ports=short), None)
+
+    def test_a_block_from_before_the_skylet_slot_reads_without_it(self):
+        """Its skylet is on the default port; sshd keeps its offset."""
+        block = ports.allocate_block(None)
+        pre_slot = sorted(block.values())[:-1]
+        read = ports.ports_from_pod(_pod(host_ports=pre_slot), None)
+        assert 'skylet' not in read
+        assert read['sshd'] == block['sshd']
+        assert read['gcs'] == block['gcs']
+
+    def test_one_short_with_a_skylet_port_assigned_raises(self):
+        """The pod was handed a skylet port, so a missing tenth port is a
+        mis-read (say a range narrowed by one), not a pod from before."""
+        block = ports.allocate_block(None)
+        pre_slot = sorted(block.values())[:-1]
+        with pytest.raises(RuntimeError, match='contiguous'):
+            ports.ports_from_pod(
+                _pod(host_ports=pre_slot,
+                     env_names=[host_network_probe.env_var_for_port('skylet')]),
+                None)
 
     def test_a_gap_in_the_block_raises(self):
         start = ports.PORT_RANGE_START
@@ -417,8 +449,8 @@ def test_port_name_order_is_part_of_the_on_cluster_format():
     joins. Verified: with the list sorted, all 1261 tests in this area still
     pass, because they all derive their expectations from the same list.
 
-    **To add a port, append it.** A longer list makes every existing pod's
-    block fail the contiguity check loudly, which is the outcome you want.
+    **To add a port, append it**, and teach ports_from_pod what a block from
+    before it looks like, as it does for `skylet`.
     Reordering is the one edit with no loud failure, so this is the only thing
     standing in front of it -- if it fails, do not update it to match.
     """
@@ -432,7 +464,31 @@ def test_port_name_order_is_part_of_the_on_cluster_format():
         'runtime_env_agent',
         'metrics_export',
         'sshd',
+        'skylet',
     ]
+
+
+def test_skylet_is_assigned_on_the_head_only():
+    """Only the head runs skylet; a worker's slot goes unused."""
+    assert 'skylet' in host_network_probe.HEAD_PORT_NAMES
+    assert 'skylet' not in host_network_probe.WORKER_PORT_NAMES
+
+
+def test_the_skylet_env_var_is_the_one_skylet_reads():
+    """The probe ships standalone and cannot import the constant; the two
+    spellings must agree or the server assigns a port skylet never sees."""
+    assert (host_network_probe.env_var_for_port('skylet') ==
+            skylet_constants.SKYLET_PORT_ENV_VAR)
+
+
+def test_the_assigned_skylet_port_reaches_the_pod_spec():
+    block = ports.allocate_block(None)
+    spec = {'spec': {'containers': [{'name': 'ray-node'}]}}
+    ports.apply_to_pod_spec(spec, block, block['gcs'], None)
+    container = spec['spec']['containers'][0]
+    env = {e['name']: e['value'] for e in container['env']}
+    assert env['SKYPILOT_SKYLET_PORT'] == str(block['skylet'])
+    assert block['skylet'] in [p['hostPort'] for p in container['ports']]
 
 
 def test_the_reserved_range_is_part_of_the_on_cluster_format():
@@ -599,3 +655,47 @@ class TestRangeIsPerContext:
             p['hostPort'] for p in spec['spec']['containers'][0]['ports']
         ]
         assert ports.ports_from_pod(_pod(host_ports=declared), 'ctx') == block
+
+
+class TestClusterInfoCarriesTheHeadsSkyletPort:
+    """get_cluster_info is where the server learns which port to dial."""
+
+    def _pod(self, name, host_ports, env_names=(), kind='head'):
+        pod = _pod(host_ports=host_ports, env_names=env_names)
+        pod.metadata.name = name
+        pod.metadata.labels = {'ray-node-type': kind}
+        pod.spec.host_network = True
+        pod.spec.node_name = 'node-a'
+        pod.status.pod_ip = '10.0.0.1'
+        return pod
+
+    def _cluster_info(self, monkeypatch, pods):
+        utils = k8s_instance.kubernetes_utils
+        monkeypatch.setattr(utils, 'get_namespace_from_config', lambda c: 'ns')
+        monkeypatch.setattr(utils, 'get_execution_context_from_config',
+                            lambda c: None)
+        monkeypatch.setattr(utils, 'filter_pods', lambda *a, **k: pods)
+        container = mock.Mock()
+        container.resources.requests = {'cpu': '1', 'memory': '1Gi'}
+        monkeypatch.setattr(utils, 'get_pod_primary_container',
+                            lambda pod: container)
+        runner = mock.Mock()
+        runner.run.return_value = (0, 'SKYPILOT_SSH_USER: sky', '')
+        monkeypatch.setattr(k8s_instance.command_runner,
+                            'KubernetesCommandRunner', lambda *a, **k: runner)
+        return k8s_instance.get_cluster_info(
+            'ctx', 'c', provider_config={'use_internal_ips': True})
+
+    def test_a_declared_skylet_port_reaches_the_head_instance(
+            self, monkeypatch):
+        block = ports.allocate_block(None)
+        head = self._pod('c-head', sorted(block.values()))
+        info = self._cluster_info(monkeypatch, {'c-head': head})
+        assert info.get_head_instance().skylet_port == block['skylet']
+
+    def test_a_block_from_before_the_slot_leaves_it_unset(self, monkeypatch):
+        """Its skylet floated from the default; the dialer uses the default."""
+        block = ports.allocate_block(None)
+        head = self._pod('c-head', sorted(block.values())[:-1])
+        info = self._cluster_info(monkeypatch, {'c-head': head})
+        assert info.get_head_instance().skylet_port is None
