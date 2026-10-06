@@ -4707,6 +4707,8 @@ class TestKubernetesOciRoceHostNetworkOptOut(unittest.TestCase):
 
 _UNSET = object()
 
+_OCI_SHAPE_BY_GPU = {'GB300': 'BM.GPU.GB300.4', 'GB200': 'BM.GPU.GB200.4'}
+
 
 class TestKubernetesRdmaMode(unittest.TestCase):
     """`kubernetes.rdma.mode` selects how RDMA NICs reach the pod.
@@ -4759,6 +4761,9 @@ class TestKubernetesRdmaMode(unittest.TestCase):
             alloc.setdefault('memory', '32Gi')
             node = mock.MagicMock()
             node.metadata.labels = {'accelerator': label_value}
+            if label_value in _OCI_SHAPE_BY_GPU:
+                node.metadata.labels['node.kubernetes.io/instance-type'] = (
+                    _OCI_SHAPE_BY_GPU[label_value])
             node.status.allocatable = alloc
             # adjust_resources_to_allocatable() reads capacity as well.
             node.status.capacity = dict(alloc)
@@ -4793,7 +4798,9 @@ class TestKubernetesRdmaMode(unittest.TestCase):
              patch('sky.catalog.get_image_id_from_tag',
                    return_value='img:latest'), \
              patch('sky.clouds.kubernetes.Kubernetes._detect_network_type',
-                   return_value=(network_type or N.OCI_ROCE, None)):
+                   return_value=(network_type or N.OCI_ROCE, None)), \
+             patch('sky.provision.kubernetes.oci_nccl._read_configmap',
+                   return_value=None) as self.mock_read_cm:
             mock_ws.return_value.get.return_value = None
             mock_pm.return_value.value = 'portforward'
             k8s_cloud = kubernetes.Kubernetes()
@@ -4897,6 +4904,19 @@ class TestKubernetesRdmaMode(unittest.TestCase):
         deploy_vars = self._deploy_vars()
         self.assertTrue(
             deploy_vars['k8s_env_vars']['NCCL_IB_HCA'].startswith('=mlx5_0'))
+
+    def test_node_shape_selects_the_profile(self):
+        # The GB300 node is labelled BM.GPU.GB300.4, so its Oracle set plus
+        # SkyPilot's GDR level, not the generic RoCE profile.
+        env = self._deploy_vars()['k8s_env_vars']
+        self.assertEqual(env['NCCL_NET_PLUGIN'], 'none')
+        self.assertEqual(env['NCCL_NET_GDR_LEVEL'], 'PHB')
+        self.mock_read_cm.assert_called_once()
+
+    def test_non_oci_never_reads_a_configmap(self):
+        self._deploy_vars(network_type=kubernetes_utils.
+                          KubernetesHighPerformanceNetworkType.COREWEAVE)
+        self.mock_read_cm.assert_not_called()
 
     def test_cpu_only_task_needs_no_virtual_functions(self):
         """OCI RoCE is detected from node labels, with no GPU request implied.
