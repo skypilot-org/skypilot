@@ -132,7 +132,7 @@ Trigger CI tests on pull requests using comments:
 - `/smoke-test --kubernetes --postgres` - Test with PostgreSQL backend on Kubernetes
 - `/smoke-test --kubernetes --remote-server --postgres` - Test remote API server with PostgreSQL
 
-**Do not run smoke tests locally** (`pytest tests/smoke_tests/`). They launch real cloud clusters under your own credentials, and an interrupted run leaks them. Trigger them via the PR comments above.
+**Do not run smoke tests locally** (`pytest tests/smoke_tests/`). CI runs them under a dedicated account whose resources are cleaned up automatically, even when a run is interrupted. A local run uses your own credentials, which nothing cleans up, so an interrupted run leaks its clusters. Trigger them via the PR comments above.
 
 ### Test Configuration
 
