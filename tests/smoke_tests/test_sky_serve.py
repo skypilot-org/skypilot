@@ -1413,9 +1413,10 @@ def test_skyserve_ha_kill_during_update():
             f'sky serve update {name} {resource_arg} -y tests/skyserve/update/bump_version_after.yaml',
             # sleep to wait for update to be registered.
             'sleep 40',
-            _check_replica_in_status(name, [
-                (2, False, 'READY'), (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)
-            ]) + _check_service_version(name, "2"),
+            _check_replica_in_status(
+                name, [(2, False, 'READY'),
+                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)],
+                timeout_seconds=60) + _check_service_version(name, "2"),
             # Kill controller while replica 3 is launching
             smoke_tests_utils.kill_and_wait_controller(name, 'serve'),
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3),
@@ -1423,7 +1424,7 @@ def test_skyserve_ha_kill_during_update():
             _check_replica_in_status(name, [(3, False, 'READY')]) +
             _check_service_version(name, "2") +
             # Make sure no new replicas are started after the recovery.
-            f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 3',
+            f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep "^3$"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=30 * 60,
