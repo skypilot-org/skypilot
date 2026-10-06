@@ -166,6 +166,12 @@ REQUEST_COLUMNS = [
     COL_FILE_MOUNTS_BLOB_ID,
 ]
 
+# Columns a request listing reads. Listings never show the return value or
+# the error, which can be large.
+DISPLAY_COLUMNS = [
+    col for col in REQUEST_COLUMNS if col not in ('return_value', 'error')
+]
+
 
 def _request_body_for_display(body: 'payloads.RequestBody', owner_user_id: str,
                               caller_user_id: Optional[str]) -> str:
