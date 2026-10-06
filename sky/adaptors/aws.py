@@ -64,6 +64,8 @@ _session_creation_lock = threading.RLock()
 # botocore caches parsed service models (about 25 MiB for EC2) per loader, and
 # each new session gets its own loader. Sessions are rebuilt per request and per
 # thread, so all sessions share one loader per AWS_DATA_PATH value.
+# Only the loader is shared. Sessions are not thread-safe and stay thread-local
+# (see session()); the loader only reads and caches model files.
 # Guarded by _session_creation_lock.
 _loaders: Dict[Optional[str], Any] = {}
 
@@ -124,7 +126,11 @@ class _UniqueList(list):
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def _new_session(profile: Optional[str]) -> 'boto3.session.Session':
-    """Create a boto3 session that uses the shared botocore loader."""
+    """Create a boto3 session that uses the shared botocore loader.
+
+    The returned session must not be shared across threads; session() caches
+    it per thread.
+    """
     from botocore import loaders
     from botocore import session as botocore_session
 
