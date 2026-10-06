@@ -277,6 +277,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'seeweb': ['ecsapi==0.4.0'],
     'mithril': [],  # No dependencies needed for mithril
+    'modal': ['modal>=1.5.0; python_version>="3.10"'],
     'shadeform': [],  # No dependencies needed for shadeform
     # Slurm hostlist expansion is implemented in sky.utils.hostlist_utils.
     'slurm': [],
@@ -294,6 +295,7 @@ if sys.version_info < (3, 10):
     # Nebius needs python3.10. If python 3.9 [all] will not install nebius
     clouds_for_all.remove('nebius')
     clouds_for_all.remove('seeweb')
+    clouds_for_all.remove('modal')
     # latest ibm-cloud-sdk-core installation fails on Python 3.9,
     # so we remove it from the [all] installation.
     clouds_for_all.remove('ibm')

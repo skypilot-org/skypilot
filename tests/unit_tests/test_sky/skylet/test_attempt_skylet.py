@@ -1,5 +1,8 @@
 """Unit tests for attempt_skylet module."""
+import importlib.util
+import runpy
 import signal
+import sys
 from unittest import mock
 
 import psutil
@@ -440,3 +443,86 @@ class TestSlurmDetection:
 
         (home / attempt_skylet._SLURM_MARKER_FILE).touch()
         assert not attempt_skylet._is_inside_slurm_cluster()
+
+
+class TestEntryPoint:
+    """Importing helpers must not perform the executable restart operation."""
+
+    def test_import_does_not_inspect_or_restart_skylet(self, tmp_path,
+                                                       monkeypatch):
+        monkeypatch.setenv('SKY_RUNTIME_DIR', str(tmp_path))
+        forbidden = mock.Mock(
+            side_effect=AssertionError('import touched a process'))
+        monkeypatch.setattr(attempt_skylet.subprocess, 'run', forbidden)
+        monkeypatch.setattr(attempt_skylet.os, 'kill', forbidden)
+        monkeypatch.setattr(attempt_skylet.psutil, 'Process', forbidden)
+        spec = importlib.util.spec_from_file_location(
+            'attempt_skylet_import_test', attempt_skylet.__file__)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        forbidden.assert_not_called()
+        assert not list(tmp_path.iterdir())
+
+    @pytest.mark.parametrize('running', [False, True])
+    @pytest.mark.parametrize('version_match', [False, True])
+    def test_main_preserves_restart_decision(self, running, version_match,
+                                             monkeypatch):
+        find = mock.Mock(return_value=[123] if running else [])
+        version = mock.Mock(return_value=(version_match, 'old'))
+        restart = mock.Mock()
+        monkeypatch.setattr(attempt_skylet, '_find_running_skylet_pids', find)
+        monkeypatch.setattr(attempt_skylet, '_check_version_match', version)
+        monkeypatch.setattr(attempt_skylet, 'restart_skylet', restart)
+        attempt_skylet.main()
+        find.assert_called_once_with()
+        version.assert_called_once_with()
+        assert restart.call_count == int(not running or not version_match)
+
+    def test_executable_entry_calls_main_once(self, tmp_path, monkeypatch):
+        monkeypatch.setenv('SKY_RUNTIME_DIR', str(tmp_path))
+        sky_dir = tmp_path / '.sky'
+        sky_dir.mkdir()
+        run = mock.Mock(return_value=mock.Mock(returncode=1, stdout=''))
+        monkeypatch.setattr(attempt_skylet.subprocess, 'run', run)
+        monkeypatch.setattr(
+            attempt_skylet.os, 'kill',
+            mock.Mock(side_effect=AssertionError('unexpected kill')))
+        monkeypatch.setattr(attempt_skylet.common_utils, 'find_free_port',
+                            lambda _: constants.SKYLET_GRPC_PORT)
+        main_calls = []
+
+        def record_main(frame, event, _arg):
+            if (event == 'call' and frame.f_code.co_name == 'main' and
+                    frame.f_code.co_filename == attempt_skylet.__file__):
+                main_calls.append(frame.f_code.co_name)
+
+        previous = sys.getprofile()
+        try:
+            sys.setprofile(record_main)
+            runpy.run_path(attempt_skylet.__file__, run_name='__main__')
+        finally:
+            sys.setprofile(previous)
+        assert main_calls == ['main']
+        starts = [
+            call for call in run.call_args_list
+            if call.args[0].startswith('nohup ')
+        ]
+        assert len(starts) == 1
+        assert starts[0].kwargs == {'shell': True, 'check': True}
+        assert (sky_dir / 'skylet_port').read_text() == str(
+            constants.SKYLET_GRPC_PORT)
+        assert (sky_dir /
+                'skylet_version').read_text() == constants.SKYLET_VERSION
+
+    def test_main_preserves_restart_failure(self, monkeypatch):
+        failure = RuntimeError('restart failed')
+        monkeypatch.setattr(attempt_skylet, '_find_running_skylet_pids',
+                            lambda: [])
+        monkeypatch.setattr(attempt_skylet, '_check_version_match', lambda:
+                            (False, None))
+        monkeypatch.setattr(attempt_skylet, 'restart_skylet',
+                            mock.Mock(side_effect=failure))
+        with pytest.raises(RuntimeError) as error:
+            attempt_skylet.main()
+        assert error.value is failure

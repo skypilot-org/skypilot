@@ -1,5 +1,6 @@
 """Blob lookup metrics through the client upload and server routes."""
 import functools
+import stat
 
 import fastapi
 from fastapi import testclient
@@ -91,6 +92,7 @@ def test_client_upload_records_size_on_miss_and_hit(blob_upload_app, tmp_path,
     (workdir / 'code.py').write_text('print("hello")\n' * 1000)
     mount = tmp_path / 'data.txt'
     mount.write_text('data\n' * 1000)
+    mount.chmod(0o644)
     dag = dag_lib.Dag()
     dag.add(
         task_lib.Task(workdir=str(workdir),
@@ -123,6 +125,26 @@ def test_client_upload_records_size_on_miss_and_hit(blob_upload_app, tmp_path,
     assert _sample(registry, 'count', 'hit') == before['hit', 'count'] + 1
     assert _sample(registry, 'sum', 'hit') == before['hit', 'sum'] + size
     assert _sample(registry, 'count', 'miss') == before['miss', 'count'] + 1
+    assert not list(tmp_path.glob('*.zip'))
+
+    # A chmod-only change must miss the old blob, then reuse the new one.
+    mount.chmod(0o555)
+    requests.clear()
+    _, changed_blob_id = client_common.upload_mounts_to_api_server(dag)
+    assert changed_blob_id != blob_id
+    assert any(method == 'POST' for method, _ in requests)
+    changed_dir = server.bs.get_blob_storage().get_target_dir(
+        'test-user', changed_blob_id)
+    received = changed_dir / str(mount).lstrip('/')
+    assert received.read_bytes() == mount.read_bytes()
+    assert stat.S_IMODE(received.stat().st_mode) == 0o555
+    assert stat.S_IMODE(
+        (blob_dir / str(mount).lstrip('/')).stat().st_mode) == 0o644
+
+    requests.clear()
+    _, retried_blob_id = client_common.upload_mounts_to_api_server(dag)
+    assert retried_blob_id == changed_blob_id
+    assert len(requests) == 1 and requests[0][0] == 'GET'
     assert not list(tmp_path.glob('*.zip'))
 
 

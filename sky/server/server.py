@@ -1785,6 +1785,8 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
 
     try:
         dag = dag_utils.load_dag_from_yaml_str(validate_body.dag)
+        versions.check_modal_deadline_api(dag,
+                                          versions.get_remote_api_version())
         # Apply admin policy and validate DAG is blocking, run it in a separate
         # thread executor to avoid blocking the uvicorn event loop.
         await asyncio.to_thread(validate_dag, dag)
@@ -2264,16 +2266,17 @@ def _is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
 def _extract_members(zipf, members: List[zipfile.ZipInfo],
                      client_file_mounts_dir: pathlib.Path) -> None:
     """Writes the zip's members under *client_file_mounts_dir*."""
+    resolved_client_file_mounts_dir = client_file_mounts_dir.resolve()
     for member in members:
         # Determine the new path
         original_path = os.path.normpath(member.filename)
-        new_path = client_file_mounts_dir / original_path.lstrip('/')
+        new_path = resolved_client_file_mounts_dir / original_path.lstrip('/')
 
         # Security check: ensure extracted path stays within target
         # directory to prevent Zip Slip attacks (path traversal via
         # malicious "../" sequences in archive member names).
         resolved_path = new_path.resolve()
-        if not _is_relative_to(resolved_path, client_file_mounts_dir):
+        if not _is_relative_to(resolved_path, resolved_client_file_mounts_dir):
             raise ValueError(f'Zip member {member.filename!r} would extract '
                              'outside target directory. Aborted.')
 
@@ -2285,7 +2288,8 @@ def _extract_members(zipf, members: List[zipfile.ZipInfo],
             # Since target is a relative path, we need to check that
             # it is under `client_file_mounts_dir` for security.
             full_target_path = (new_path.parent / target).resolve()
-            if not _is_relative_to(full_target_path, client_file_mounts_dir):
+            if not _is_relative_to(full_target_path,
+                                   resolved_client_file_mounts_dir):
                 raise ValueError(f'Symlink target {target} leads to a '
                                  'file not in userspace. Aborted.')
 
@@ -2297,15 +2301,26 @@ def _extract_members(zipf, members: List[zipfile.ZipInfo],
 
         # Handle directories
         if member.filename.endswith('/'):
+            # Legacy uploads may leave a mount root pointing at another path.
+            # Replace the link itself, never write into its previous target.
+            if new_path.is_symlink():
+                new_path.unlink()
             new_path.mkdir(parents=True, exist_ok=True)
             continue
 
         # Handle files
         new_path.parent.mkdir(parents=True, exist_ok=True)
+        # A previous upload or overlapping mount may have made this read-only.
+        # Replace its checked target, preserving any in-root symlink to it.
+        resolved_path.unlink(missing_ok=True)
         with zipf.open(member) as member_file, new_path.open('wb') as f:
             # Use shutil.copyfileobj to copy files in chunks,
             # so it does not load the entire file into memory.
             shutil.copyfileobj(member_file, f)
+        # Keep Unix permissions without setuid/setgid/sticky bits.
+        mode = member.external_attr >> 16
+        if member.create_system == 3 and mode:
+            new_path.chmod(mode & 0o777)
 
 
 async def unzip_file(zip_file_path: pathlib.Path,

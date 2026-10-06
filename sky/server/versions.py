@@ -11,6 +11,7 @@ from packaging import version as version_lib
 import sky
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.server import constants
 from sky.utils import ux_utils
 
@@ -291,3 +292,27 @@ def check_recipe_client_version(task: str) -> None:
         raise RuntimeError(
             'Launching recipes requires a newer SkyPilot client. '
             'Please upgrade your SkyPilot installation.')
+
+
+def check_modal_deadline_api(dag: 'sky.Dag',
+                             peer_version: Optional[int]) -> None:
+    """Reject a deadline that an older client/server may silently discard."""
+    if not any(
+            skypilot_config.get_nested(
+                ('modal', 'deadline'),
+                None,
+                override_configs={
+                    'modal': resource.cluster_config_overrides.get('modal', {})
+                }) is not None
+            for task in dag.tasks
+            for resource in task.resources
+            if resource.cloud is None or
+            isinstance(resource.cloud, sky.clouds.Modal)):
+        return
+    if (peer_version is None or
+            peer_version < constants.MIN_MODAL_SANDBOX_DEADLINE_API_VERSION):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                'Modal Sandbox deadlines require API_VERSION >= '
+                f'{constants.MIN_MODAL_SANDBOX_DEADLINE_API_VERSION} on both '
+                'client and server. Upgrade the older peer before launching.')

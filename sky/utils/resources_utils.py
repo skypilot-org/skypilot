@@ -317,8 +317,8 @@ def simplify_ports(ports: List[str]) -> List[str]:
     return port_set_to_ranges(port_ranges_to_set(ports))
 
 
-# The Kubernetes pod template writes the spec memory as decimal gigabytes
-# ('{{memory}}G'), while the actual request read back from the pod is
+# Older Kubernetes pod templates wrote spec memory as decimal gigabytes
+# ('{{memory}}G'), while the actual request read back from those pods is
 # normalized to GiB (2**30). A spec value of X GB therefore reads back as
 # X * this ratio even when nothing modified the pod, which must not be
 # reported as a divergence.

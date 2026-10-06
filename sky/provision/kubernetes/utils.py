@@ -3805,24 +3805,17 @@ def parse_cpu_or_gpu_resource(resource_qty_str: str) -> Union[int, float]:
         return float(resource_str)
 
 
-def parse_memory_resource(resource_qty_str: str,
-                          unit: str = 'B') -> Union[int, float]:
-    """Returns memory size in chosen units given a resource quantity string."""
+def parse_memory_resource(resource_qty_str: str, unit: str = 'B') -> float:
+    """Parse Kubernetes quantities; output K/M/G units denote KiB/MiB/GiB."""
     if unit not in MEMORY_SIZE_UNITS:
         valid_units = ', '.join(MEMORY_SIZE_UNITS.keys())
         raise ValueError(
             f'Invalid unit: {unit}. Valid units are: {valid_units}')
 
-    resource_str = str(resource_qty_str)
-    bytes_value: Union[int, float]
-    try:
-        bytes_value = int(resource_str)
-    except ValueError:
-        memory_size = re.sub(r'([KMGTPBm]+)', r' \1', resource_str)
-        number, unit_index = [item.strip() for item in memory_size.split()]
-        unit_index = unit_index[0]
-        bytes_value = float(number) * MEMORY_SIZE_UNITS[unit_index]
-    return bytes_value / MEMORY_SIZE_UNITS[unit]
+    # Input suffixes follow Kubernetes: G is decimal, Gi is binary. Preserve
+    # the existing binary output units used for Sky's resource accounting.
+    bytes_value = kubernetes.parse_quantity(str(resource_qty_str))
+    return float(bytes_value) / MEMORY_SIZE_UNITS[unit]
 
 
 class KubernetesInstanceType:
@@ -5592,7 +5585,7 @@ def process_skypilot_pods(
             resources = resources_lib.Resources(
                 cloud=clouds.Kubernetes(),
                 cpus=int(cpu_request),
-                memory=int(memory_request),
+                memory=memory_request,
                 accelerators=(f'{gpu_name}:{gpu_count}'
                               if gpu_count > 0 else None))
             if pod.status.phase == 'Pending':

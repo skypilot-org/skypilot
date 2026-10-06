@@ -1235,7 +1235,8 @@ def process_mounts_in_task_on_api_server(
         task: str,
         env_vars: Dict[str, str],
         workdir_only: bool,
-        file_mounts_blob_id: Optional[str] = None) -> 'dag_lib.Dag':
+        file_mounts_blob_id: Optional[str] = None,
+        client_api_version: Optional[int] = None) -> 'dag_lib.Dag':
     """Translates the file mounts path in a task to the path on API server.
 
     When a task involves file mounts, the client will invoke
@@ -1258,6 +1259,12 @@ def process_mounts_in_task_on_api_server(
     from sky.utils import dag_utils  # pylint: disable=import-outside-toplevel
 
     versions.check_recipe_client_version(task)
+    # Check before creating mount directories or entering a provider. New peers
+    # already preserve this config; old peers must never silently lose it.
+    if (client_api_version is None or client_api_version <
+            server_constants.MIN_MODAL_SANDBOX_DEADLINE_API_VERSION):
+        versions.check_modal_deadline_api(
+            dag_utils.load_dag_from_yaml_str(task), client_api_version)
 
     user_hash = env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
     # The user id is joined as a directory component below (and mkdir'd), so an

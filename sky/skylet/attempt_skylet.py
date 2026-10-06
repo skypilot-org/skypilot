@@ -224,22 +224,27 @@ def restart_skylet():
         v_f.write(constants.SKYLET_VERSION)
 
 
-# Check if our skylet is running
-running = bool(_find_running_skylet_pids())
+def main() -> None:
+    """Check the running skylet and restart it when needed."""
+    # Check if our skylet is running
+    running = bool(_find_running_skylet_pids())
 
-version_match, found_version = _check_version_match()
+    version_match, found_version = _check_version_match()
 
-version_string = (f' (found version {found_version}, new version '
-                  f'{constants.SKYLET_VERSION})')
-if not running:
-    print('Skylet is not running. Starting (version '
-          f'{constants.SKYLET_VERSION})...')
-elif not version_match:
-    print(f'Skylet is stale{version_string}. Restarting...')
-else:
-    print(
-        f'Skylet is running with the latest version {constants.SKYLET_VERSION}.'
-    )
+    version_string = (f' (found version {found_version}, new version '
+                      f'{constants.SKYLET_VERSION})')
+    if not running:
+        print('Skylet is not running. Starting (version '
+              f'{constants.SKYLET_VERSION})...')
+    elif not version_match:
+        print(f'Skylet is stale{version_string}. Restarting...')
+    else:
+        print('Skylet is running with the latest version '
+              f'{constants.SKYLET_VERSION}.')
 
-if not running or not version_match:
-    restart_skylet()
+    if not running or not version_match:
+        restart_skylet()
+
+
+if __name__ == '__main__':
+    main()

@@ -46,6 +46,7 @@ import {
 } from '@/data/connectors/infra';
 import {
   CLOUDS_LIST,
+  canonicalizeCloudName,
   MANAGED_JOBS_SUMMARY_ARGS,
 } from '@/data/connectors/constants';
 import {
@@ -3089,7 +3090,8 @@ export function GPUs() {
       const cloudCounts = {};
       jobs.forEach((job) => {
         if (job.cloud) {
-          cloudCounts[job.cloud] = (cloudCounts[job.cloud] || 0) + 1;
+          const cloudName = canonicalizeCloudName(job.cloud);
+          cloudCounts[cloudName] = (cloudCounts[cloudName] || 0) + 1;
         }
       });
       setCloudJobCounts(cloudCounts);
@@ -3117,7 +3119,8 @@ export function GPUs() {
       const cloudCounts = {};
       clusters.forEach((cluster) => {
         if (cluster.cloud) {
-          cloudCounts[cluster.cloud] = (cloudCounts[cluster.cloud] || 0) + 1;
+          const cloudName = canonicalizeCloudName(cluster.cloud);
+          cloudCounts[cloudName] = (cloudCounts[cloudName] || 0) + 1;
         }
       });
       setCloudClusterCounts(cloudCounts);
