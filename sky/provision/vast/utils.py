@@ -48,6 +48,27 @@ _DEAD_ON_ARRIVAL_HOSTS = frozenset({
 })
 
 
+# The claim's proven whole-instance hourly price ceiling rides in
+# create_instance_kwargs (the same control-key channel 'login' and
+# 'api_key' use): the runner injects it via the launch Resources'
+# cluster_config_overrides -> the vast-ray template's provider.config ->
+# provision.instance -> here. launch() POPS it before anything is sent to
+# the Vast API, so the control key can never leak into a create call.
+MAX_HOURLY_COST_USD_KWARG = 'max_hourly_cost_usd'
+
+
+class VastOfferPriceExceedsCeilingError(RuntimeError):
+    """Every surviving offer costs more than the claim's price ceiling.
+
+    Distinct from the stockout refusal on purpose: the runner must be able
+    to tell "no offers at all" (transient supply; keep hunting) from
+    "offers exist but every one is over the claim's proven ceiling"
+    (either the market repriced above the cap or the catalog row the
+    quote approved is stale; a human decision, never an auto-retry loop).
+    The message carries the ceiling, the offending machine ids and their
+    live whole-box prices -- the provider body, preserved.
+    """
+
 def is_vm_image(image: Optional[str]) -> bool:
     """Whether `image` makes Vast boot a KVM VM instead of a container."""
     name = str(image or '').strip()
@@ -153,6 +174,15 @@ def launch(name: str,
     # `ports` is currently unused. Keep it in the signature for caller
     # compatibility and future use (port-forwarding is handled separately).
     del ports
+
+    # The claim's proven whole-instance price ceiling (ENG-493): a CONTROL
+    # key inside create_instance_kwargs, popped FIRST -- before the search
+    # and before launch_params is built, so it can never reach the Vast
+    # API create call. None (the usual case for config-file-only launches)
+    # keeps the unfiltered behavior exactly.
+    create_instance_kwargs = dict(create_instance_kwargs or {})
+    ceiling_raw = create_instance_kwargs.pop(MAX_HOURLY_COST_USD_KWARG, None)
+
     # uRun lane requirements: on-demand KVM VMs only (never the plain
     # unprivileged container offers), CUDA-13 capable driver for the cu130
     # wheels, contracts lasting at least 3 days, direct SSH ports for the
@@ -238,6 +268,52 @@ def launch(name: str,
         offer for offer in instance_list
         if offer.get('machine_id') not in _DEAD_ON_ARRIVAL_HOSTS
     ]
+
+    # CLAIM-CEILING FILTER (ENG-493, CodeRabbit skc#512 finding 3): the
+    # catalog row the controller priced is a BUCKET snapshot refreshed on
+    # a cadence, but offers reprice live between refresh and launch -- so
+    # the quote can approve $1.60 while the offer now bills $3.00. When
+    # the claim's proven ceiling is present, every surviving offer is
+    # checked against its live whole-box dph_total: unpriced offers
+    # cannot be proven under the cap and are refused too. If EVERY
+    # survivor is over the ceiling the refusal is the TYPED error (a
+    # human decision, distinguishable at the runner from a stockout).
+    if ceiling_raw is not None:
+        ceiling = float(ceiling_raw)
+        under = [
+            offer for offer in instance_list
+            if offer.get('dph_total') is not None
+            and float(offer['dph_total']) <= ceiling
+        ]
+        if instance_list and not under:
+            detail = ', '.join(
+                'machine {machine_id} ${price}/hr'.format(
+                    machine_id=offer.get('machine_id'),
+                    price=(offer.get('dph_total')
+                           if offer.get('dph_total') is not None
+                           else 'unpriced'))
+                for offer in instance_list[:5])
+            raise VastOfferPriceExceedsCeilingError(
+                'every offer exceeds the claim\'s price ceiling '
+                f'${ceiling}/hr (whole instance): {detail}; refusing '
+                'rather than launching an over-cap offer (the catalog '
+                'row the quote approved may be stale, or the market '
+                f'repriced above the cap); query "{query_str}"')
+        instance_list = under
+
+    # CHEAPEST-OFFER-FIRST among the survivors: the API's default
+    # ordering is a relevance score, not a price -- picking score-first
+    # can rent a dearer host while a cheaper qualifying one sits in the
+    # same bucket. Price ascending, then machine id as the deterministic
+    # tie-break; unpriced offers (only reachable when no ceiling was
+    # proven) sort last rather than first.
+    def _offer_price(offer):
+        price = offer.get('dph_total')
+        return float(price) if price is not None else float('inf')
+
+    instance_list = sorted(
+        instance_list,
+        key=lambda offer: (_offer_price(offer), offer.get('machine_id')))
 
     if isinstance(instance_list, int) or len(instance_list) == 0:
         raise RuntimeError('Failed to create instances, could not find an '
