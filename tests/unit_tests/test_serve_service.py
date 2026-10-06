@@ -564,3 +564,37 @@ class TestCleanupStorageStaleBucket:
         assert '/persist' in mock_task.storage_mounts
         mock_backend.teardown_ephemeral_storage.assert_called_once_with(
             mock_task)
+
+
+class TestStartSkipsPurgedService:
+    """A recovery sweep can read the recovery script just before a purge
+    removes it. In consolidation mode every launch stores that script first,
+    so `_start` without one must exit instead of re-adding the service."""
+
+    @pytest.mark.parametrize('consolidation', [True, False])
+    def test_start_without_recovery_script(self, tmp_path, consolidation):
+        task_yaml = tmp_path / 'task.yaml'
+        task_yaml.write_text('name: bulk\nrun: echo\npool:\n  workers: 1\n')
+        reached = RuntimeError('reached add_service')
+        with mock.patch('sky.serve.service.auth_utils.get_or_generate_keys'), \
+             mock.patch('sky.serve.service.serve_state.get_service_from_name',
+                        return_value=None), \
+             mock.patch('sky.serve.service.serve_utils.is_consolidation_mode',
+                        return_value=consolidation), \
+             mock.patch(
+                 'sky.serve.service.serve_state.get_ha_recovery_script',
+                 return_value=None), \
+             mock.patch(
+                 'sky.serve.service.controller_utils.can_start_new_process',
+                 return_value=True), \
+             mock.patch('sky.serve.service.serve_state.add_service',
+                        side_effect=reached) as add_service, \
+             mock.patch('sky.serve.service._cleanup_task_run_script'
+                       ) as cleanup_run_script:
+            if consolidation:
+                service._start('bulk', str(task_yaml), 7, 'entry')  # pylint: disable=protected-access
+                add_service.assert_not_called()
+                cleanup_run_script.assert_called_once_with(7)
+            else:
+                with pytest.raises(RuntimeError, match='reached add_service'):
+                    service._start('bulk', str(task_yaml), 7, 'entry')  # pylint: disable=protected-access
