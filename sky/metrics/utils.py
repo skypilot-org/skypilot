@@ -568,7 +568,7 @@ SKY_APISERVER_THREADS_EXHAUSTED_TOTAL = prom.Counter(
 #       exactly that reason, so do not read it as auth-pool pressure.
 #
 # `cause` says which timeout ended the call:
-#   `deadline` -- the client-side `asyncio.wait_for` deadline elapsed; the
+#   `deadline` -- the client-side `asyncio_utils.wait_for` deadline elapsed; the
 #       thread is still held (see above).
 #   anything else -- the database ended the call at one of the server-side
 #       timeouts the auth path sets on its own transaction (`lock_timeout`,
@@ -1205,7 +1205,7 @@ class FederationStats:
     (get_metrics_for_slurm_cluster() fills only the federate phase). The
     caller (the /gpu-metrics or /endpoints-metrics gather loop) holds a
     reference and reads it when logging the result — crucially, this still
-    works when the attempt is cancelled by asyncio.wait_for(): the fields
+    works when the attempt is cancelled by asyncio_utils.wait_for(): the fields
     written before the timeout (e.g. a completed port-forward) are preserved,
     so the timeout log can show exactly how far the attempt got.
     """
@@ -1783,12 +1783,12 @@ def stop_svc_port_forward_off_loop(
         port_forward_process: subprocess.Popen) -> None:
     """Tears a port forward down without spending event-loop time on it.
 
-    The teardown cannot be awaited: asyncio.wait_for() cancels the federation
-    coroutine at the per-context budget, and an `await` in the `finally` that
-    follows re-raises CancelledError immediately -- the kubectl child would
-    leak. Running it inline instead keeps the guarantee but charges the
-    terminate-and-wait to the loop that also serves /metrics, once per
-    context. A detached thread keeps both: the teardown always runs to
+    The teardown cannot be awaited: asyncio_utils.wait_for() cancels the
+    federation coroutine at the per-context budget, and an `await` in the
+    `finally` that follows re-raises CancelledError immediately -- the kubectl
+    child would leak. Running it inline instead keeps the guarantee but
+    charges the terminate-and-wait to the loop that also serves /metrics, once
+    per context. A detached thread keeps both: the teardown always runs to
     completion, and the loop never waits for it.
     """
     threading.Thread(target=stop_svc_port_forward,
@@ -1879,8 +1879,8 @@ async def send_metrics_request_with_port_forward(
 
     finally:
         # Hand the teardown to a detached thread: it must run even when this
-        # coroutine is being cancelled by asyncio.wait_for(), and it must not
-        # be charged to the loop that serves /metrics. See
+        # coroutine is being cancelled by asyncio_utils.wait_for(), and it must
+        # not be charged to the loop that serves /metrics. See
         # stop_svc_port_forward_off_loop.
         if port_forward_process:
             stop_svc_port_forward_off_loop(port_forward_process)
@@ -2305,7 +2305,7 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
 
     Timeouts mirror the Kubernetes path's single per-context budget: the
     SSH invocation is hard-killed at ``timeout`` (a hung login node cannot
-    leak the worker thread past the scrape — asyncio.wait_for() cancels
+    leak the worker thread past the scrape — asyncio_utils.wait_for() cancels
     only the awaiting coroutine, never the thread), and curl's own limit
     sits a few seconds inside it to leave room for the SSH connect.
 
