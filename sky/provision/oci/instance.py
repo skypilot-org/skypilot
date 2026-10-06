@@ -385,7 +385,7 @@ def _get_filtered_nodes(region: str,
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
     for inst in insts:
-        inst_id = inst.identifier
+        inst_id = inst.id
         return_nodes.append({
             'inst_id': inst_id,
             'name': inst.display_name,
