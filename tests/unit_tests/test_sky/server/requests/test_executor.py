@@ -1670,7 +1670,7 @@ def _result_entrypoint():
 @pytest.mark.asyncio
 async def test_wrapper_releases_result_before_release_memory(
         isolated_database, reset_sigterm_gate, monkeypatch):
-    """The request's result must be freeable when release_memory() runs."""
+    """The peak RSS sample sees the result; release_memory() can free it."""
     req = requests_lib.Request(request_id='result-released',
                                name='test',
                                entrypoint=_result_entrypoint,
@@ -1687,10 +1687,22 @@ async def test_wrapper_releases_result_before_release_memory(
 
     monkeypatch.setattr(executor.common_utils, 'release_memory',
                         _check_release_memory)
+    result_alive_at_rss_sample = []
+
+    class _Process(executor.psutil.Process):
+
+        def memory_info(self):
+            ref = _result_refs[-1] if _result_refs else None
+            result_alive_at_rss_sample.append(ref is not None and
+                                              ref() is not None)
+            return super().memory_info()
+
+    monkeypatch.setattr(executor.psutil, 'Process', _Process)
 
     executor._request_execution_wrapper('result-released',
                                         ignore_return_value=False)
 
+    assert True in result_alive_at_rss_sample
     assert result_alive == [False]
     assert requests_lib.get_request('result-released').get_return_value() == [
         'x' * 1024

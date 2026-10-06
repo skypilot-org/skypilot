@@ -1044,12 +1044,13 @@ def _request_execution_wrapper(request_id: str,
     finally:
         _in_request_execution = False
         _restore_output()
-        # Unreference the request's payload and result before release_memory()
-        # so that their memory can be returned too.
-        return_value = request_task = None
         try:
-            # Capture the peak RSS before GC.
+            # Capture the peak RSS while the request's result is still
+            # referenced.
             peak_rss = max(proc.memory_info().rss, metrics_lib.peak_rss_bytes)
+            # Unreference the request's payload and result before
+            # release_memory() so that their memory can be returned too.
+            return_value = request_task = None
             # Clear request level cache to release all memory used by the
             # request.
             annotations.clear_request_level_cache()
