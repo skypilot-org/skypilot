@@ -202,7 +202,7 @@ _SHAPE_NCCL_OVERLAY: Dict[str, Dict[str, str]] = {
 
 # Grace Blackwell shapes (GB200/GB300) get no UCX settings, as before: UCX_TLS
 # =tcp would push UCX users such as NIXL off RDMA and NVLink.
-# ponytail: relies on OCI's shape naming; list the shapes if that ever breaks.
+# Relies on OCI's shape naming; list the shapes if that ever breaks.
 # TODO(hailong): no shape needs pod-wide UCX settings (Oracle passes them on
 # its mpirun lines only); drop them everywhere once verified on hardware.
 _GRACE_SHAPE_PREFIX = 'BM.GPU.GB'
