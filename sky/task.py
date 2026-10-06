@@ -637,11 +637,10 @@ class Task:
                     'Workdir must be a valid directory (or '
                     f'a symlink to a directory). {user_workdir} not found.')
 
+        # Uploaded paths belong to the server; provenance belongs to the client.
+        if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+            return
         git_commit = common_utils.get_git_commit(self.workdir)
-        # Always prefer the workdir's commit over any previously set value
-        # (e.g. from the YAML file's repo). But don't overwrite a valid
-        # value with None, which happens on the server where the uploaded
-        # blob directory is not a git repo.
         if git_commit is not None:
             self._metadata['git_commit'] = git_commit
         self._metadata.update(
