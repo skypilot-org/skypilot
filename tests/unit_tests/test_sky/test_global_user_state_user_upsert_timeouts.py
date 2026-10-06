@@ -23,6 +23,11 @@ These tests pin:
   configured deadline otherwise, always `lock < statement < idle <= deadline`,
   and read from the same source as `db_lookup.AUTH_DB_TIMEOUT_SECONDS`; a
   nonsensical setting is refused loudly instead of reaching the database;
+* under an auth-path deadline, with the deadline-aware engine listener of
+  `sky.utils.db.deadline` attached to the engine, the explicit statements are
+  skipped (the listener prepends deadline-sized ones to the transaction's
+  first statement instead); without the listener, or without a deadline,
+  they stay;
 * SQLite: no SET LOCAL at all (unsupported there); behavior unchanged.
 """
 
@@ -30,6 +35,7 @@ These tests pin:
 import os
 import subprocess
 import sys
+import time
 from unittest import mock
 
 import pytest
@@ -43,6 +49,7 @@ from sky import models
 from sky.server.auth import db_lookup
 from sky.skylet import constants
 from sky.utils.db import db_utils
+from sky.utils.db import deadline as db_deadline
 
 _DEADLINE_ENV = constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS
 
@@ -323,6 +330,61 @@ class TestServerStartupReadsTheSetting:
         assert result.returncode != 0
         assert 'ValueError' in result.stderr
         assert _DEADLINE_ENV in result.stderr
+
+
+class TestUnderAnAuthDeadline:
+    """On the auth path the engine listener in `sky.utils.db.deadline` sizes
+    the same three timeouts from the remaining budget and prepends them to
+    the transaction's first statement (no extra round trips); the explicit
+    statements here are for callers without a deadline -- and for any engine
+    the listener is not attached to, deadline or not."""
+
+    @pytest.fixture
+    def listener_installed(self):
+        # The fixture's engine is a mock, so mark it the way `install` would
+        # (the listener itself is tested in test_deadline.py).
+        engine = global_user_state._db_manager._engine
+        db_deadline._installed.add(engine)
+        yield engine
+        db_deadline._installed.discard(engine)
+
+    def test_the_explicit_set_local_is_skipped(self, postgres_session,
+                                               listener_installed):
+        del listener_installed
+        db_deadline.set_deadline(time.monotonic() + 5)
+        try:
+            global_user_state.add_or_update_user(
+                models.User(id='u-1', name='tester'))
+        finally:
+            db_deadline.clear_deadline()
+        statements = postgres_session.statements
+        assert _set_local_texts(statements) == []
+        assert isinstance(statements[0], postgresql.Insert)
+
+    def test_without_a_deadline_the_explicit_bounds_apply(
+            self, postgres_session, listener_installed):
+        del listener_installed
+        assert db_deadline.get_deadline() is None
+        global_user_state.add_or_update_user(
+            models.User(id='u-1', name='tester'))
+        assert _set_local_texts(
+            postgres_session.statements[:3]) == _expected_set_local()
+
+    def test_an_engine_without_the_listener_keeps_the_explicit_bounds(
+            self, postgres_session):
+        """The skip trusts nothing it cannot see: a deadline alone does not
+        remove the explicit bounds unless this engine's listener will add its
+        own."""
+        assert global_user_state._db_manager._engine not in (
+            db_deadline._installed)
+        db_deadline.set_deadline(time.monotonic() + 5)
+        try:
+            global_user_state.add_or_update_user(
+                models.User(id='u-1', name='tester'))
+        finally:
+            db_deadline.clear_deadline()
+        assert _set_local_texts(
+            postgres_session.statements[:3]) == _expected_set_local()
 
 
 def _fresh_sqlite_db(tmp_path, monkeypatch):
