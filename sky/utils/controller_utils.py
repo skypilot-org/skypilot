@@ -1643,7 +1643,22 @@ def _get_parallelism(pool: bool, raw_resource_per_unit: float) -> int:
     return max(int(total_memory_mb / resource_per_unit), 1)
 
 
+def explicit_jobs_controllers() -> Optional[int]:
+    """The controller pool size set in the environment, None when unset.
+
+    Raises:
+        ValueError: if set but not an integer in [1, MAX_CONTROLLERS].
+    """
+    return server_config.explicit_process_count(
+        constants.ENV_VAR_SERVER_JOBS_CONTROLLERS,
+        minimum=1,
+        maximum=MAX_CONTROLLERS)
+
+
 def get_number_of_jobs_controllers() -> int:
+    explicit = explicit_jobs_controllers()
+    if explicit is not None:
+        return explicit
     return min(
         MAX_CONTROLLERS,
         _get_parallelism(pool=True, raw_resource_per_unit=JOB_WORKER_MEMORY_MB))

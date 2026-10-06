@@ -791,6 +791,16 @@ ENV_VAR_SERVER_AUTH_USER_HEADER = f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_USER_HEADER'
 # skypilot server.
 ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
 
+# Server-set flag (never from a client request) telling request workers whether
+# to contain task file-mount sources to the caller's staging roots. Set at
+# server startup and inherited by workers via os.environ. It uses the
+# SKYPILOT_SERVER_ prefix, so the client never forwards it and the server strips
+# every SKYPILOT_SERVER_-prefixed key from request env vars before overlaying
+# them -- a client cannot forge it. See
+# sky.server.common.should_enforce_mount_containment.
+ENV_VAR_ENFORCE_MOUNT_CONTAINMENT = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}ENFORCE_MOUNT_CONTAINMENT')
+
 # Optional: route the state DB through a transaction-mode connection pooler
 # (e.g. PgBouncer). When set, regular state-DB engines connect through the
 # pooler while session-scoped advisory locks keep a direct connection (see
@@ -858,6 +868,31 @@ ENV_VAR_SERVER_DB_CONNECTION_POOL_SIZE = (
 # connections and still wants burst room states the value here.
 ENV_VAR_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW = (
     f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}DB_CONNECTION_POOL_MAX_OVERFLOW')
+
+# Explicit sizes for the API server's long and short executor pools and, in
+# consolidation mode, its jobs-controller pool, in place of the counts the
+# server derives from CPU and memory (`sky.server.config.compute_server_config`,
+# `sky.utils.controller_utils.get_number_of_jobs_controllers`). Unset by
+# default, in which case the derived sizing decides.
+#
+# The derived counts budget a fixed footprint per process; a deployment whose
+# processes outgrow it can pin the counts to what its pods hold instead. A
+# value outside the server's bounds (long: at least 1; short: at least one
+# idle worker plus one per internal request daemon, enabled or not;
+# controllers: 1 to `controller_utils.MAX_CONTROLLERS`) is refused at startup,
+# not clamped.
+#
+# With SKYPILOT_MEMORY_AWARE_WORKER_SIZING on, the memory the pools leave for
+# consolidation-mode controllers is sized from system memory and is shared with
+# the serve and pool controllers, so pinning the jobs-controller count alone
+# does not grow the pools. Pin both pools along with it.
+#
+# Server-side only: the SKYPILOT_SERVER_ prefix keeps clients from forwarding
+# them (`sky.server.requests.payloads.request_body_env_vars`).
+ENV_VAR_SERVER_LONG_WORKERS = f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}LONG_WORKERS'
+ENV_VAR_SERVER_SHORT_WORKERS = f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}SHORT_WORKERS'
+ENV_VAR_SERVER_JOBS_CONTROLLERS = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}JOBS_CONTROLLERS')
 
 # Concurrent state-DB connections a server process uses before it starts
 # queueing queries, when the burst size is left to the default.

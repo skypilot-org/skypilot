@@ -324,6 +324,43 @@ async def test_waiting_request_is_executed_not_skipped(mock_fd_operations,
     assert updated.return_value == 'success'
 
 
+class _ResultTooLargeError(Exception):
+    """A database error that carries the statement's parameters."""
+
+    def __init__(self, params):
+        super().__init__('invalid memory alloc request size 1073741824')
+        self.params = params
+
+
+@pytest.mark.asyncio
+async def test_result_that_cannot_be_stored_fails_the_request(
+        mock_fd_operations, mock_global_user_state, mock_skypilot_config):
+    """A result the database rejects ends the request FAILED, not RUNNING."""
+    req = requests_lib.Request(request_id='result-not-stored',
+                               name='test',
+                               entrypoint=_success_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    await requests_lib.create_if_not_exists_async(req)
+
+    error = _ResultTooLargeError(params={'return_value': 'x' * 10000})
+    with mock.patch.object(requests_lib,
+                           'set_request_succeeded',
+                           side_effect=error):
+        executor._request_execution_wrapper('result-not-stored',
+                                            ignore_return_value=False)
+
+    updated = requests_lib.get_request('result-not-stored')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+    message = updated.get_error()['message']
+    assert 'invalid memory alloc request size' in message
+    # The rejected result is not copied into the stored error.
+    assert 'x' * 100 not in message
+
+
 def _test_isolation_worker_fn(expected_env_a: str, expected_env_b: str,
                               expected_labels: dict, **kwargs):
     """Worker that verifies it sees the correct env vars and config overrides."""

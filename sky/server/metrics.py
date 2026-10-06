@@ -28,6 +28,7 @@ from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.jobs import stall
 from sky.metrics import utils as metrics_utils
 from sky.server import constants as server_constants
+from sky.server import container_memory
 from sky.server import local_disk
 from sky.server import loop_stall
 from sky.server import middleware_utils
@@ -58,6 +59,12 @@ def register_multiproc_cleanup_atexit() -> None:
     written gauge value visible to every future scrape — for ``liveall``
     gauges this can pin a stale per-pid value indefinitely.
 
+    It also records this process's identity for the reaper (see
+    ``_writer_exited``), and removes the live-gauge files of an earlier
+    writer that held the same pid, except those this process already has
+    open (see ``_open_live_gauge_files``). Call it before the process writes
+    any live gauge.
+
     Safe to call more than once per process; only the first call registers.
     Only registers when ``PROMETHEUS_MULTIPROC_DIR`` is set; a no-op in
     single-process / unit-test environments.
@@ -65,16 +72,117 @@ def register_multiproc_cleanup_atexit() -> None:
     global _multiproc_cleanup_registered
     if _multiproc_cleanup_registered:
         return
-    if not os.environ.get('PROMETHEUS_MULTIPROC_DIR'):
+    multiproc_dir = os.environ.get('PROMETHEUS_MULTIPROC_DIR')
+    if not multiproc_dir:
         return
     pid = os.getpid()
-    atexit.register(multiprocess.mark_process_dead, pid)
+    identity = _process_identity(pid)
+    if identity is not None:
+        try:
+            if _read_writer_identity(multiproc_dir,
+                                     pid) not in (None, identity):
+                open_files = _open_live_gauge_files(pid, multiproc_dir)
+                if open_files is not None:
+                    _remove_live_gauge_files(multiproc_dir, pid, open_files)
+            with open(_writer_identity_path(multiproc_dir, pid),
+                      'w',
+                      encoding='utf-8') as f:
+                f.write(identity)
+        except OSError:
+            logger.warning(
+                'Failed to record this process as a prometheus '
+                'multiproc writer.',
+                exc_info=True)
+    atexit.register(_forget_writer, multiproc_dir, pid)
     _multiproc_cleanup_registered = True
 
 
+_HAS_PROCFS = os.path.isdir('/proc/self')
+
+
+def _process_identity(pid: int) -> Optional[str]:
+    """A value that differs between processes that held the same pid.
+
+    None when no process holds the pid or the holder is a zombie. Raises
+    psutil.Error when the holder cannot be inspected. On Linux it is the
+    start time in clock ticks since boot (/proc/<pid>/stat field 22), which
+    unlike psutil's create_time() does not depend on when the reading
+    process sampled the boot time.
+    """
+    if _HAS_PROCFS:
+        try:
+            with open(f'/proc/{pid}/stat', 'rb') as f:
+                stat = f.read()
+        except (FileNotFoundError, ProcessLookupError):
+            return None
+        except PermissionError as e:
+            raise psutil.AccessDenied(pid) from e
+        fields = stat[stat.rindex(b')') + 2:].split()
+        return None if fields[0] == b'Z' else fields[19].decode()
+    try:
+        proc = psutil.Process(pid)
+        if proc.status() == psutil.STATUS_ZOMBIE:
+            return None
+        return repr(proc.create_time())
+    except psutil.NoSuchProcess:
+        return None
+
+
+def _writer_identity_path(multiproc_dir: str, pid: int) -> str:
+    return os.path.join(multiproc_dir, f'liveowner_{pid}')
+
+
+def _read_writer_identity(multiproc_dir: str, pid: int) -> Optional[str]:
+    try:
+        with open(_writer_identity_path(multiproc_dir, pid),
+                  'r',
+                  encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        return None
+
+
+def _live_gauge_file_paths(multiproc_dir: str, pid: int) -> Set[str]:
+    return {
+        os.path.realpath(path) for path in glob.glob(
+            os.path.join(multiproc_dir, f'gauge_live*_{pid}.db'))
+    }
+
+
+def _open_live_gauge_files(pid: int, multiproc_dir: str) -> Optional[Set[str]]:
+    """The pid's live-gauge files that the process holding the pid has open.
+
+    None when the holder cannot be inspected. A worker that got a dead
+    writer's pid opens that pid's existing files when it creates its
+    unlabeled gauges at import, before it registers. Unlinking an open file
+    hides everything the process writes to it for the rest of its life.
+    """
+    files = _live_gauge_file_paths(multiproc_dir, pid)
+    try:
+        return {f.path for f in psutil.Process(pid).open_files()} & files
+    except psutil.NoSuchProcess:
+        return set()
+    except psutil.Error:
+        return None
+
+
+def _remove_live_gauge_files(multiproc_dir: str, pid: int,
+                             keep: Set[str]) -> None:
+    for path in _live_gauge_file_paths(multiproc_dir, pid) - keep:
+        os.remove(path)
+
+
+def _forget_writer(multiproc_dir: str, pid: int) -> None:
+    multiprocess.mark_process_dead(pid, multiproc_dir)
+    try:
+        os.remove(_writer_identity_path(multiproc_dir, pid))
+    except OSError:
+        pass
+
+
 # Default reap interval. Tuned to give prompt cleanup of stale per-pid
-# files without measurable overhead: one directory glob + one pid_exists()
-# check per unique pid per tick.
+# files without measurable overhead: one directory glob + a few /proc reads
+# per unique pid per tick.
 _REAPER_INTERVAL_SECONDS = 60
 # Matches the per-pid live-gauge file names written by
 # ``prometheus_client.multiprocess``: ``gauge_live{all,sum,max,min}_<pid>.db``.
@@ -101,8 +209,41 @@ def _scan_multiproc_pids(multiproc_dir: str) -> Set[int]:
     return pids
 
 
+# pid -> identity of the process that held the pid when the reaper first
+# saw the pid's live-gauge files, for writers that did not record their own
+# identity. Only the reaper daemon touches it.
+_live_gauge_writers: Dict[int, str] = {}
+
+_WRITER_IDENTITY_FILE_PID_RE = re.compile(r'^liveowner_([0-9]+)$')
+
+
+def _writer_exited(pid: int, multiproc_dir: str) -> bool:
+    """Whether the process that writes ``pid``'s live-gauge files is gone.
+
+    An existing pid is not enough: the writer may be a zombie its parent
+    has not waited for, or the kernel may have given the pid to another
+    process. The writer's identity is the one it recorded when it
+    registered; for a process that did not register, it is the holder of
+    the pid when the reaper first saw its files. A holder that has one of
+    the files open writes to them, whatever its identity.
+    """
+    if not psutil.pid_exists(pid):
+        return True
+    try:
+        identity = _process_identity(pid)
+    except psutil.Error:
+        return False
+    if identity is None:
+        return True
+    recorded = _read_writer_identity(multiproc_dir, pid)
+    if recorded is None:
+        recorded = _live_gauge_writers.setdefault(pid, identity)
+    return (recorded != identity and
+            _open_live_gauge_files(pid, multiproc_dir) == set())
+
+
 def _reap_stale_multiproc_files() -> int:
-    """Remove prometheus multiproc files for pids that no longer exist.
+    """Remove prometheus multiproc files of writers that have exited.
 
     Returns the number of pids reaped.
     """
@@ -110,14 +251,23 @@ def _reap_stale_multiproc_files() -> int:
     if not multiproc_dir:
         return 0
     file_pids = _scan_multiproc_pids(multiproc_dir)
+    for pid in set(_live_gauge_writers) - file_pids:
+        del _live_gauge_writers[pid]
+    # Identity files of writers that exited before writing a live gauge.
+    for path in glob.glob(os.path.join(multiproc_dir, 'liveowner_*')):
+        m = _WRITER_IDENTITY_FILE_PID_RE.match(os.path.basename(path))
+        if (m is not None and int(m.group(1)) not in file_pids and
+                _writer_exited(int(m.group(1)), multiproc_dir)):
+            _forget_writer(multiproc_dir, int(m.group(1)))
     if not file_pids:
         return 0
     reaped = 0
     for pid in file_pids:
-        if psutil.pid_exists(pid):
+        if not _writer_exited(pid, multiproc_dir):
             continue
+        _live_gauge_writers.pop(pid, None)
         try:
-            multiprocess.mark_process_dead(pid)
+            _forget_writer(multiproc_dir, pid)
             reaped += 1
         except Exception:  # pylint: disable=broad-except
             # Don't let a single bad file or a race with another reaper
@@ -141,23 +291,18 @@ async def multiproc_reaper_daemon(
     live-gauge value can be served by ``/metrics`` indefinitely (until
     the API server pod itself restarts and wipes the metrics dir). This
     daemon scans the multiproc dir from the main API server process and
-    invokes ``mark_process_dead`` on behalf of any writer whose pid no
-    longer exists.
+    invokes ``mark_process_dead`` on behalf of any writer that has
+    exited.
 
-    Reaps any pid whose live-gauge file is present but for which
-    ``psutil.pid_exists`` returns False (i.e. the pid no longer maps to
-    any running process). The descendant relationship is intentionally
-    not used as the membership signal: writers may not always be direct
-    descendants of the main API server process (e.g. workers reparented
-    to init after an intermediate exits), and a strict descendant filter
-    would leak files from those legitimate writers.
-
-    Known false-negative: if a dead worker's pid is later reused by an
-    unrelated process inside the same pod, its files keep being scraped
-    until either that unrelated process exits, the worker's pid wraps to
-    another value, or a same-pid SkyPilot writer overwrites the file.
-    PID reuse within a pod's lifetime is rare in practice (Linux pid_max
-    is large and pids are allocated sequentially), so this is accepted.
+    Reaps a pid whose live-gauge files are present when no process holds
+    the pid, when the process holding it is a zombie, or when it is not
+    the writer, i.e. the pid was reused (see ``_writer_exited``). The
+    descendant
+    relationship is intentionally not used as the membership signal:
+    writers may not always be direct descendants of the main API server
+    process (e.g. workers reparented to init after an intermediate
+    exits), and a strict descendant filter would leak files from those
+    legitimate writers.
 
     No-op when ``PROMETHEUS_MULTIPROC_DIR`` is unset.
     """
@@ -695,6 +840,149 @@ _LOCAL_DISK_USAGE_COLLECTOR = _wrap_collector(LocalDiskUsageCollector())
 
 try:
     prom.REGISTRY.register(_LOCAL_DISK_USAGE_COLLECTOR)  # non-multiprocess
+except ValueError:
+    pass
+
+_CONTAINER_MEMORY_USAGE_HELP = (
+    'Memory charged to the API server container\'s cgroup (memory.current), '
+    'including page cache the kernel can reclaim. See '
+    'sky_apiserver_container_memory_unreclaimable_bytes for the part it '
+    'cannot.')
+
+_CONTAINER_MEMORY_UNRECLAIMABLE_HELP = (
+    'Memory the kernel cannot reclaim from the API server container without '
+    'swap: memory.current minus page cache (memory.stat file) and '
+    'reclaimable slab (slab_reclaimable), plus shmem. '
+    'Compare it with the container\'s memory limit, or with its node\'s '
+    'allocatable memory when there is no limit, to see how close the '
+    'container is to an OOM kill.')
+
+_CONTAINER_MEMORY_STAT_HELP = (
+    'One field of the API server container\'s cgroup memory.stat: anon is '
+    'process memory not backed by files, file is page cache (including '
+    'shmem), kernel is kernel memory charged to the container, shmem is '
+    'tmpfs and shared memory, slab_reclaimable is the part of kernel memory '
+    'the kernel frees under pressure (dentry and inode caches).')
+
+_CONTAINER_MEMORY_LIMIT_HELP = (
+    'The API server container\'s cgroup memory limit (memory.max). No series '
+    'is emitted when the container has no limit, in which case its node\'s '
+    'allocatable memory is the bound.')
+
+_CONTAINER_PROCESSES_HELP = (
+    'Processes in the API server container, by type: main (the server '
+    'process), server (uvicorn workers), worker:<group> (executor workers), '
+    'controller (managed-job controllers), kubectl_exec, '
+    'kubectl_port_forward, kubectl_other, subprocess_daemon, aws (AWS CLI), '
+    'shell (sh/bash), ssh_mux (ssh ControlMaster), ssh_other, '
+    'resource_tracker (multiprocessing), zombie (exited, not yet waited '
+    'for), python_other and other. Every type is always reported.')
+
+_CONTAINER_THREADS_HELP = (
+    'Threads in the API server container\'s processes, by process type.')
+
+_CONTAINER_RSS_ANON_HELP = (
+    'Sum of RssAnon over the API server container\'s processes, by process '
+    'type. Unlike per-process RSS it leaves out file pages, so summed over '
+    'types it is comparable to memory.stat anon.')
+
+_CONTAINER_RSS_HELP = (
+    'Sum of VmRSS (anon, file and shmem pages) over the API server '
+    'container\'s processes, by process type. A page mapped by several '
+    'processes is counted once per process.')
+
+_CONTAINER_MAX_RSS_ANON_HELP = (
+    'RssAnon of the largest process of each type in the API server '
+    'container.')
+
+_CONTAINER_SCAN_DURATION_HELP = (
+    'Wall-clock seconds the last read of the container\'s cgroup and '
+    'processes took, including the start of the child process that does '
+    'it. Runs off the scrape path.')
+
+
+class ContainerMemoryCollector:
+    """Collector for the API server container's memory and processes.
+
+    See sky/server/container_memory.py. Emits nothing outside a cgroup v2
+    container. The census runs in a child interpreter so that this process's
+    busy threads cannot slow it down, and ResilientCollector keeps it off the
+    scrape path.
+    """
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_memory_usage_bytes',
+            _CONTAINER_MEMORY_USAGE_HELP)
+
+    def collect(self):
+        snapshot = container_memory.scan_in_subprocess()
+        if snapshot is None:
+            return
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_memory_usage_bytes',
+            _CONTAINER_MEMORY_USAGE_HELP,
+            value=snapshot.usage_bytes)
+        unreclaimable = prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_memory_unreclaimable_bytes',
+            _CONTAINER_MEMORY_UNRECLAIMABLE_HELP)
+        if snapshot.unreclaimable_bytes is not None:
+            unreclaimable.add_metric([], snapshot.unreclaimable_bytes)
+        yield unreclaimable
+        stat = prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_memory_stat_bytes',
+            _CONTAINER_MEMORY_STAT_HELP,
+            labels=['stat'])
+        for key, value in snapshot.stat_bytes.items():
+            stat.add_metric([key], value)
+        yield stat
+        limit = prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_memory_limit_bytes',
+            _CONTAINER_MEMORY_LIMIT_HELP)
+        if snapshot.limit_bytes is not None:
+            limit.add_metric([], snapshot.limit_bytes)
+        yield limit
+
+        processes = prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_processes',
+            _CONTAINER_PROCESSES_HELP,
+            labels=['type'])
+        threads = prom_core.GaugeMetricFamily('sky_apiserver_container_threads',
+                                              _CONTAINER_THREADS_HELP,
+                                              labels=['type'])
+        rss_anon = prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_rss_anon_bytes',
+            _CONTAINER_RSS_ANON_HELP,
+            labels=['type'])
+        max_rss_anon = prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_max_rss_anon_bytes',
+            _CONTAINER_MAX_RSS_ANON_HELP,
+            labels=['type'])
+        rss = prom_core.GaugeMetricFamily('sky_apiserver_container_rss_bytes',
+                                          _CONTAINER_RSS_HELP,
+                                          labels=['type'])
+        for process_type, usage in sorted(snapshot.types.items()):
+            processes.add_metric([process_type], usage.processes)
+            threads.add_metric([process_type], usage.threads)
+            rss_anon.add_metric([process_type], usage.rss_anon_bytes)
+            max_rss_anon.add_metric([process_type], usage.max_rss_anon_bytes)
+            rss.add_metric([process_type], usage.rss_bytes)
+        yield processes
+        yield threads
+        yield rss_anon
+        yield max_rss_anon
+        yield rss
+
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_scan_duration_seconds',
+            _CONTAINER_SCAN_DURATION_HELP,
+            value=snapshot.duration_seconds)
+
+
+_CONTAINER_MEMORY_COLLECTOR = _wrap_collector(ContainerMemoryCollector())
+
+try:
+    prom.REGISTRY.register(_CONTAINER_MEMORY_COLLECTOR)  # non-multiprocess
 except ValueError:
     pass
 
@@ -1409,6 +1697,7 @@ def metrics() -> fastapi.Response:
         registry.register(_SQLITE_DB_SIZE_COLLECTOR)
         registry.register(_WORKSPACE_USAGE_COLLECTOR)
         registry.register(_LOCAL_DISK_USAGE_COLLECTOR)
+        registry.register(_CONTAINER_MEMORY_COLLECTOR)
         registry.register(_COLLECTOR_HEALTH_COLLECTOR)
         registry.register(_SERVER_START_TIME_COLLECTOR)
         if _MANAGED_JOBS_COLLECTOR is not None:

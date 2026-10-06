@@ -88,6 +88,18 @@ def is_valid_user_hash(user_hash: Optional[str]) -> bool:
     return bool(re.match(r'^[a-zA-Z0-9][a-zA-Z0-9-]*$', user_hash))
 
 
+def is_single_path_component(name: Optional[str]) -> bool:
+    """Whether `name` is safe to join as a single path component.
+
+    Rejects a name that is empty, '.', '..', or contains a path separator or
+    NUL byte, i.e. anything that would not stay directly inside the directory
+    it is joined under. Used to validate a client-supplied user id before it
+    becomes a directory under the API server's clients dir.
+    """
+    return (name is not None and name not in ('', '.', '..') and
+            not any(c in name for c in ('/', '\\', '\x00')))
+
+
 def generate_user_hash() -> str:
     """Generates a unique user-machine specific hash."""
     hash_str = user_and_hostname_hash()
