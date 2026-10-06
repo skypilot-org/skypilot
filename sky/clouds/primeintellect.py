@@ -2,11 +2,10 @@
 import json
 import os
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
-from sky.provision.primeintellect import utils
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -16,38 +15,65 @@ if typing.TYPE_CHECKING:
 
 CredentialCheckResult = Tuple[bool, Optional[Union[str, Dict[str, str]]]]
 
+# The lane's local credential store (the API-skill manual's): the env var
+# PRIME_INTELLECT_API_KEY is the task secret channel's spelling; this file
+# (mode 600, key material only) is the local fallback.
 _CREDENTIAL_FILES = [
-    'config.json',
+    'credentials',
 ]
 
 
 @registry.CLOUD_REGISTRY.register
 class PrimeIntellect(clouds.Cloud):
     """Prime Intellect GPU Cloud"""
+
+    # `_REPR` IS THE CATALOG NAME (sky.catalog.primeintellect_catalog is
+    # resolved through it). Upstream set it correctly; kept verbatim so
+    # the catalog never regresses to the ABC's `<Cloud>` placeholder.
     _REPR = 'PrimeIntellect'
+
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 120
+
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.AUTOSTOP: 'Stopping not supported.',
-        clouds.CloudImplementationFeatures.AUTODOWN:
-            ('Auto down not supported yet.'),
-        clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
+        clouds.CloudImplementationFeatures.STOP:
+            ('there is no stop endpoint on this API — DELETE is the only '
+             'teardown and nothing on the pod\'s disk survives it — so stop '
+             'is refused rather than silently destroy.'),
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
+            ('the lane rents on-demand offers only (spot exists upstream '
+             'but is interruptible and unpriced for our identities).'),
         clouds.CloudImplementationFeatures.MULTI_NODE:
-            ('Multi-node not supported yet.'),
+            ('Multi-node clusters are not supported on this lane.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
-            ('Custom disk tier not supported yet.'),
+            ('Offers ship fixed included disks; disk tier is not '
+             'selectable.'),
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
-            ('Custom network tier not supported yet.'),
-        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
-            ('Customized multiple network interfaces are not supported'),
+            ('Network tier is not selectable on Prime Intellect.'),
+        clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
+            ('Object storage mounting is not supported on Prime '
+             'Intellect (persistent network disks are a separate product, '
+             'not SkyPilot storage).'),
+        clouds.CloudImplementationFeatures.HOST_CONTROLLERS:
+            ('Host controllers are not supported on Prime Intellect.'),
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+            ('High availability controllers are not supported on Prime '
+             'Intellect.'),
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
+            ('Disk cloning is not supported on the lane (DELETE teardown '
+             'does not preserve the pod\'s disk).'),
         clouds.CloudImplementationFeatures.IMAGE_ID:
-            ('Custom image not supported yet.'),
+            ('Images are per-offer platform templates (ubuntu_22_cuda_12, '
+             '...); an arbitrary image id cannot be requested.'),
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-            ('Custom docker image not supported yet.'),
+            ('VM-class offers boot the OS directly; docker images are the '
+             'container-class upstreams\' product, not this lane\'s.'),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ('Custom multi-network is not supported on Prime Intellect.'),
         clouds.CloudImplementationFeatures.LOCAL_DISK:
-            ('Local disk is not supported yet.'),
+            ('Local disk is not selectable on Prime Intellect.'),
     }
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
-    _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
 
     @classmethod
@@ -60,6 +86,20 @@ class PrimeIntellect(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
+    def _unsupported_features_for_resources(
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        del resources, region  # unused
+        return cls._CLOUD_UNSUPPORTED_FEATURES
+
+    def __repr__(self):
+        return 'PrimeIntellect'
+
+    # -- catalog-backed lookups -------------------------------------------
+
+    @classmethod
     def regions_with_offering(
         cls,
         instance_type: str,
@@ -70,17 +110,13 @@ class PrimeIntellect(clouds.Cloud):
         resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
         """Returns the regions that offer the specified resources."""
-        del accelerators
+        del accelerators, resources
+        assert zone is None, 'Prime Intellect does not support zones.'
         regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'primeintellect')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
-        if zone is not None:
-            for r in regions:
-                assert r.zones is not None, r
-                r.set_zones([z for z in r.zones if z.name == zone])
-            regions = [r for r in regions if r.zones]
         return regions
 
     @classmethod
@@ -102,14 +138,23 @@ class PrimeIntellect(clouds.Cloud):
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[Optional[List['clouds.Zone']]]:
-        """Returns an iterator over zones for provisioning."""
+        """Returns an iterator over zones for provisioning.
+
+        One yield PER region that has an offering (the base contract): a
+        single yield for "any region" turned a first-region capacity
+        failure into the end of provisioning on the Spheron lane
+        (urun-sh/skypilot#5/#6). Zoneless here — the dataCenter token IS
+        the region — so every yielded zones value is None.
+        """
+        del num_nodes, accelerators, use_spot
         regions = cls.regions_with_offering(instance_type,
-                                            accelerators,
-                                            use_spot,
+                                            None,
+                                            False,
                                             region=region,
-                                            zone=None)
+                                            zone=None,
+                                            resources=None)
         for r in regions:
-            assert r.zones is not None, r
+            assert r.zones is None, r
             yield r.zones
 
     def instance_type_to_hourly_cost(self,
@@ -129,11 +174,16 @@ class PrimeIntellect(clouds.Cloud):
                                     use_spot: bool,
                                     region: Optional[str] = None,
                                     zone: Optional[str] = None) -> float:
-        """Returns the cost, or the cheapest cost among all zones for spot."""
+        """Returns cost, cheapest cost among all zones for spot."""
         del accelerators, use_spot, region, zone  # Unused.
+        # An offer's hourly price is for the whole box (GPUs included);
+        # there is no separate per-GPU line item to add.
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
+        del num_gigabytes
+        # The broker publishes no egress schedule; nothing to price here.
+        # Revisit if overage billing ever appears.
         return 0.0
 
     def is_same_cloud(self, other: clouds.Cloud) -> bool:
@@ -183,8 +233,8 @@ class PrimeIntellect(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None
     ) -> Dict[str, Optional[str]]:
-        del dryrun, cluster_name, num_nodes, volume_mounts
-        assert zones is not None, (region, zones)
+        del cluster_name, dryrun, num_nodes, volume_mounts
+        assert zones is None, 'Prime Intellect does not support zones.'
 
         resources = resources.assert_launchable()
         acc_dict = self.get_accelerators_from_instance_type(
@@ -194,12 +244,14 @@ class PrimeIntellect(clouds.Cloud):
         else:
             custom_resources = None
 
+        # `region.name` is the dataCenter token (the same token the
+        # catalog row's Region column carries and the create body's
+        # dataCenterId takes); the provisioner re-resolves the LIVE offer
+        # for the InstanceType token inside it.
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
-            'zones': zones[0].name,
-            'availability_zone': zones[0].name,
         }
 
     def _get_feasible_launchable_resources(
@@ -234,13 +286,9 @@ class PrimeIntellect(clouds.Cloud):
                 use_spot=resources.use_spot,
                 max_hourly_cost=resources.max_hourly_cost)
             if default_instance_type is None:
-                # TODO(pokgak): Add hints to all return values in this method
-                # to help users understand why the resources are not
-                # launchable.
                 return resources_utils.FeasibleResources([], [], None)
-            else:
-                return resources_utils.FeasibleResources(
-                    _make([default_instance_type]), [], None)
+            return resources_utils.FeasibleResources(
+                _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
@@ -261,49 +309,70 @@ class PrimeIntellect(clouds.Cloud):
         return resources_utils.FeasibleResources(_make(instance_list),
                                                  fuzzy_candidate_list, None)
 
-    @classmethod
-    def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Verify that the user has valid credentials for Prime Intellect."""
-
-        primeintellect_config_file = '~/.prime/config.json'
-        if not os.path.isfile(os.path.expanduser(primeintellect_config_file)):
-            return (False, f'{primeintellect_config_file} does not exist.')
-
-        with open(os.path.expanduser(primeintellect_config_file),
-                  encoding='UTF-8') as f:
-            data = json.load(f)
-            api_key = data.get('api_key')
-            if not api_key:
-                print('API key is missing or empty')
-
-        client = utils.PrimeIntellectAPIClient()
-        try:
-            client.list_instances()
-        except utils.PrimeintellectAPIError as e:
-            if e.status_code == 403:
-                return False, (
-                    'Please check that your API key has the correct '
-                    'permissions, generate a new one at '
-                    'https://app.primeintellect.ai/dashboard/tokens, '
-                    'or run \'prime login\' to configure a new API key.')
-        return True, None
+    # -- identity / credentials -------------------------------------------
 
     @classmethod
-    def _check_compute_credentials(cls) -> CredentialCheckResult:
-        """Checks if the user has access credentials to Prime Intellect's
-        compute service."""
-        return cls._check_credentials()
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
+        return None
 
-    def get_credential_file_mounts(self) -> Dict[str, str]:
-        """Returns a dict of credential file paths to mount paths."""
-        return {
-            f'~/.prime/{filename}': f'~/.prime/{filename}'
-            for filename in _CREDENTIAL_FILES
-        }
+    @classmethod
+    def get_current_user_identity_str(cls) -> Optional[str]:
+        return None
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
         return None
+
+    def get_credential_file_mounts(self) -> Dict[str, str]:
+        """Returns a dict of credential file paths to mount paths."""
+        return {
+            f'~/.prime-intellect/{filename}': f'~/.prime-intellect/{filename}'
+            for filename in _CREDENTIAL_FILES
+        }
+
+    @classmethod
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Verify we can talk to Prime Intellect (GET /user/whoami)."""
+        # pylint: disable=import-outside-toplevel
+        from sky.adaptors import primeintellect as api
+
+        key = os.environ.get(api.API_KEY_ENV, '').strip()
+        if not key:
+            path = os.path.expanduser(api.API_KEY_FILE)
+            if os.path.exists(path):
+                with open(path, encoding='utf-8') as handle:
+                    key = handle.read().strip()
+        if not key:
+            return False, (
+                f'{api.API_KEY_ENV} is not set and {api.API_KEY_FILE} does '
+                'not exist. Create a key at '
+                'https://app.primeintellect.ai/dashboard/tokens (the lane '
+                'needs Instances Read and write + Availability Read).')
+        try:
+            api.PrimeIntellectClient(key).get_whoami()
+        except api.PrimeintellectError as exc:
+            return False, str(exc)
+        return True, None
+
+    @classmethod
+    def check_credentials(
+            cls, cloud_capability: clouds.CloudCapability
+    ) -> Tuple[bool, Optional[str]]:
+        """Check Prime Intellect credentials for the requested capability.
+
+        MUST accept ``cloud_capability``: ``sky check`` calls this with
+        the capability positionally, so a no-arg override raises
+        TypeError, the cloud is reported DISABLED, and every launch fails
+        with "Task requires primeintellect which is not enabled" — with
+        nothing pointing at the real cause (the bug urun-sh/skypilot#4
+        fixed for Spheron; the same fix QuantaCloud carries).
+        """
+        if cloud_capability == clouds.CloudCapability.COMPUTE:
+            return cls._check_compute_credentials()
+        return False, (
+            f'Prime Intellect does not support {cloud_capability.value}.')
+
+    # -- provisioning ------------------------------------------------------
 
     def instance_type_exists(self, instance_type: str) -> bool:
         return catalog.instance_type_exists(instance_type, 'primeintellect')
@@ -314,19 +383,24 @@ class PrimeIntellect(clouds.Cloud):
                                             clouds='primeintellect')
 
     @classmethod
-    def _unsupported_features_for_resources(
+    def query_status(
         cls,
-        resources: 'resources_lib.Resources',
-        region: Optional[str] = None,
-    ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        """The features not supported based on the resources provided.
+        name: str,
+        tag_filters: Dict[str, str],
+        region: Optional[str],
+        zone: Optional[str],
+        **kwargs,
+    ) -> List[Any]:
+        # STATUS_VERSION is SKYPILOT, so the provisioner's query_instances
+        # is the authority and this path is not used.
+        raise NotImplementedError(
+            'Prime Intellect uses StatusVersion.SKYPILOT; status comes '
+            'from sky.provision.primeintellect.query_instances.')
 
-        This method is used by check_features_are_supported() to check if the
-        cloud implementation supports all the requested features.
-
-        Returns:
-            A dict of {feature: reason} for the features not supported by the
-            cloud implementation.
-        """
-        del resources  # unused
-        return cls._CLOUD_UNSUPPORTED_FEATURES
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
+        del image_id, region
+        # Images are provider-side platform templates; their size is not
+        # exposed. 0.0 lets every image through (same policy as the
+        # Vast/Latitude/QuantaCloud clouds).
+        return 0.0

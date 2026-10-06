@@ -498,21 +498,27 @@ def setup_primeintellect_authentication(
         config: Dict[str, Any]) -> Dict[str, Any]:
     """Sets up SSH authentication for Prime Intellect.
     - Generates a new SSH key pair if one does not exist.
-    - Adds the public SSH key to the user's Prime Intellect account.
+    - Adds the public SSH key to the user's Prime Intellect account
+      (by key MATERIAL, so a re-created keypair never mints a duplicate).
     """
     # Ensure local SSH keypair exists and fetch public key content
     _, public_key_path = auth_utils.get_or_generate_keys()
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
 
-    # Register the public key with Prime Intellect (no-op if already exists)
-    client = primeintellect_utils.PrimeIntellectAPIClient()
-    client.get_or_add_ssh_key(public_key)
+    # Register the public key with Prime Intellect (keys are ACCOUNT-level
+    # and injected into every pod at deploy time; matching is by material
+    # — the API's key list returns the public key verbatim).
+    client = primeintellect_utils.client_from_env()
+    client.ensure_ssh_key(primeintellect_utils.SSH_KEY_NAME, public_key)
 
-    # Set up auth section for Ray template
+    # Set up auth section for Ray template.
     config.setdefault('auth', {})
-    # Default username for Prime Intellect images
-    config['auth']['ssh_user'] = 'ubuntu'
+    # The DOCUMENTED user (docs example: root@<ip> -p 22) — UNMEASURED
+    # until the first funded deploy (ENG-507's docs-said-root lesson).
+    # The provisioner reads the live pod's sshConnection once ACTIVE;
+    # this value only drives the initial ray bootstrap SSH.
+    config['auth']['ssh_user'] = 'root'
     config['auth']['ssh_public_key'] = public_key_path
 
     return configure_ssh_info(config)

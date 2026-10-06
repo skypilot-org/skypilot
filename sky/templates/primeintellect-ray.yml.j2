@@ -1,3 +1,34 @@
+# Prime Intellect cluster config, rendered by sky.backends.cloud_vm_ray_backend.
+#
+# Mirrors quantacloud-ray.yml.j2 -- the closest in-tree analogue, a
+# single-node rented-GPU box with no VPC/subnet/security-group to
+# bootstrap -- and differs in exactly the ways the Prime Intellect wire
+# protocol demands:
+#
+#   * ssh_user is `root`: the DOCUMENTED value (the docs' pod-status
+#     example is `root@<ip> -p 22` on primecompute) but UNMEASURED on a
+#     real box -- ENG-507's lesson is that the manual can lie (Latitude
+#     said root, reality was ubuntu), so the first funded deploy MUST
+#     measure it and fix this line if it differs. The provisioner reads
+#     the live pod's reported sshConnection (see
+#     sky/provision/primeintellect/instance.py get_cluster_info); this
+#     literal only drives the initial ray bootstrap SSH.
+#   * node_config carries InstanceType = the "<provider>:<gpuType>:<count>"
+#     catalog token (e.g. dc_gnu:RTX_PRO_6000B_96GB:1). The offer's
+#     cloudId behind it is a LIVE-MARKET upstream plan token -- the
+#     provisioner re-resolves the concrete in-stock offer from the live
+#     availability list at launch and echoes that row verbatim
+#     (cloudId/gpuType/socket/gpuCount/dataCenterId/country/security,
+#     plus the image). There is no OS variable: the image is chosen from
+#     the offer's own list (ubuntu_22_cuda_12 preferred).
+#   * The setup_commands carry the #495 unattended-upgrades mask: the
+#     stock Ubuntu images auto-upgrade NVIDIA drivers into a broken
+#     state; stopping/disabling unattended-upgrades at init is mandatory
+#     on every Ubuntu host this lane rents.
+#
+# The public key is NOT threaded here as a value: `configure_ssh_info`
+# substitutes the literal below, and the provisioner refuses the literal
+# unsubstituted (see sky/provision/primeintellect/instance.py).
 cluster_name: {{cluster_name_on_cloud}}
 
 # The maximum number of workers nodes to launch in addition to the head node.
@@ -9,19 +40,21 @@ provider:
   type: external
   module: sky.provision.primeintellect
   region: "{{region}}"
-  zones: "{{zones}}"
+  disable_launch_config_check: true
 
 auth:
-  ssh_user: skypilot:ssh_user
+  ssh_user: root
   ssh_private_key: {{ssh_private_key}}
 
 available_node_types:
   ray_head_default:
+{%- if custom_resources %}
+    resources: {{custom_resources}}
+{%- else %}
     resources: {}
+{%- endif %}
     node_config:
       InstanceType: {{instance_type}}
-      DiskSize: {{disk_size}}
-      ImageId: {{image_id}}
       PublicKey: |-
         skypilot:ssh_public_key_content
 
@@ -33,7 +66,6 @@ file_mounts: {
   "{{sky_remote_path}}/{{sky_wheel_hash}}": "{{sky_local_path}}",
 {%- for remote_path, local_path in credentials.items() %}
   "{{remote_path}}": "{{local_path}}",
-  "~/.ssh/sky-cluster-key": "{{ssh_private_key}}",
 {%- endfor %}
 }
 
@@ -49,10 +81,11 @@ initialization_commands: []
 # Increment the following for catching performance bugs easier:
 #   current num items (num SSH connections): 1
 setup_commands:
-  # Disable unattended-upgrades and handle apt-get locks
-  # Install patch utility for Ray
-  # Install conda and Ray
-  # Set system limits for Ray performance (nofile and TasksMax)
+  # #495 init-stage mask: unattended upgrades break NVIDIA drivers.
+  # Create ~/.ssh/config file in case the file does not exist in the image.
+  # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
+  # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
+  # Line 'mkdir -p ..': disable host key check
   - {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}
@@ -63,11 +96,15 @@ setup_commands:
     sudo pkill -9 apt-get;
     sudo pkill -9 dpkg;
     sudo dpkg --configure -a;
-    which patch > /dev/null || sudo apt install -y patch;
+    mkdir -p ~/.ssh; touch ~/.ssh/config; which patch > /dev/null || sudo apt install -y patch;
     {{ conda_installation_commands }}
     {{ uv_installation_commands }}
     {{ ray_skypilot_installation_commands }}
     {{ copy_skypilot_templates_commands }}
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
+    (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     {{ ssh_max_sessions_config }}
+
+# Command to start ray clusters are now placed in `sky.provision.instance_setup`.
+# We do not need to list it here anymore.
