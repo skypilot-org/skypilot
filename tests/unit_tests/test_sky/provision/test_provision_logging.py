@@ -14,7 +14,10 @@ def fixture_provision_logger():
     logger = logging.getLogger('sky.provision')
     original = logger.propagate
     logger.propagate = True
+    # A test that fails mid-overlap must not leave the count raised.
+    provision_logging._active_provisions = 0  # pylint: disable=protected-access
     yield logger
+    provision_logging._active_provisions = 0  # pylint: disable=protected-access
     logger.propagate = original
 
 
