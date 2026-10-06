@@ -1199,7 +1199,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_values': k8s_acc_label_values,
             # Merged into the rendered pod by write_cluster_config().
-            'k8s_pod_fields': kubernetes_utils.get_pod_fields(
+            'pod_fields': kubernetes_utils.get_pod_fields(
                 k8s_acc_label_key, k8s_acc_label_values, avoid_label_keys),
             'k8s_service_account_name': k8s_service_account_name,
             # Gates the provisioner-only roles: only a controller pod

@@ -468,7 +468,7 @@ CASES: Dict[str, Dict[str, Any]] = {
 def _build_variables(case_name: str) -> Dict[str, Any]:
     """Merges a case onto the base and derives the computed pod fields.
 
-    ``k8s_pod_fields`` is built by calling the same production helper
+    ``pod_fields`` is built by calling the same production helper
     (``kubernetes_utils.get_pod_fields``) that
     ``make_deploy_resources_variables`` uses, from the raw accelerator-label
     vars the case carries. Deriving it here rather than hard-coding it is what
@@ -476,7 +476,7 @@ def _build_variables(case_name: str) -> Dict[str, Any]:
     """
     variables = base_variables()
     variables.update(CASES[case_name])
-    variables['k8s_pod_fields'] = kubernetes_utils.get_pod_fields(
+    variables['pod_fields'] = kubernetes_utils.get_pod_fields(
         variables['k8s_acc_label_key'],
         variables['k8s_acc_label_values'],
         variables['avoid_label_keys'],
@@ -487,18 +487,19 @@ def _build_variables(case_name: str) -> Dict[str, Any]:
 def _render(variables: Dict[str, Any]) -> str:
     """Render the manifest the way write_cluster_config builds it.
 
-    The template goes through the production fill_template helper, and the
-    pod fields computed in Python are merged in by the production
-    combine_pod_fields helper.
+    The pod fields computed in Python are taken out of the variables, the
+    template goes through the production fill_template helper, and the
+    production combine_pod_fields helper merges the pod fields in.
     """
+    variables = dict(variables)
+    pod_fields = variables.pop('pod_fields')
     with tempfile.TemporaryDirectory() as tmpdir:
         output_path = os.path.join(tmpdir, 'rendered.yml')
         common_utils.fill_template(TEMPLATE_NAME, variables, output_path)
         with open(output_path, 'r', encoding='utf-8') as f:
             rendered = yaml.safe_load(f.read())
     return yaml.safe_dump(
-        kubernetes_utils.combine_pod_fields(rendered,
-                                            variables['k8s_pod_fields']))
+        kubernetes_utils.combine_pod_fields(rendered, pod_fields))
 
 
 # Fields whose values are large generated shell blobs, not structural or

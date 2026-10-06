@@ -1341,6 +1341,9 @@ def write_cluster_config(
         variables.update(cloud_specific_failover_overrides)
     if extra_template_variables is not None:
         variables.update(extra_template_variables)
+    # Kubernetes pod fields are merged into the rendered pod below. A template
+    # that also rendered them would apply them twice.
+    pod_fields = variables.pop('pod_fields', None)
     common_utils.fill_template(cluster_config_template,
                                variables,
                                output_path=tmp_yaml_path)
@@ -1355,7 +1358,7 @@ def write_cluster_config(
         cluster_yaml_obj = yaml_utils.safe_load(tmp_yaml_str)
         # The user's pod_config is merged on top of these.
         cluster_yaml_obj = kubernetes_utils.combine_pod_fields(
-            cluster_yaml_obj, variables['k8s_pod_fields'])
+            cluster_yaml_obj, pod_fields)
         combined_yaml_obj = kubernetes_utils.combine_pod_config_fields_and_metadata(
             cluster_yaml_obj,
             cluster_config_overrides=cluster_config_overrides,

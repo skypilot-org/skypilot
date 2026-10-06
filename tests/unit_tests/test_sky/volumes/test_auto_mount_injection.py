@@ -117,7 +117,7 @@ def inject_fixture(monkeypatch, tmp_path):
                             'get_volume_by_name', _get_volume_by_name)
         # Everything the launch would do besides resolve and inject volumes.
         monkeypatch.setattr(Resources, 'make_deploy_variables',
-                            lambda *a, **kw: {'k8s_pod_fields': {}})
+                            lambda *a, **kw: {'pod_fields': {}})
         yaml_path = str(tmp_path / 'cluster.yml')
         monkeypatch.setattr(backend_utils, '_get_yaml_path_from_cluster_name',
                             lambda *a, **kw: yaml_path)

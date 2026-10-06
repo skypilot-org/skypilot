@@ -229,7 +229,10 @@ def test_write_cluster_config_w_post_provision_runcmd_kubernetes(
             return_value=[])
 @mock.patch('sky.provision.kubernetes.utils.get_accelerator_label_keys',
             return_value=['skypilot.co/accelerator'])
-def test_write_cluster_config_merges_pod_fields_kubernetes(*mocks):
+@mock.patch('sky.utils.common_utils.fill_template',
+            wraps=common_utils.fill_template)
+def test_write_cluster_config_merges_pod_fields_kubernetes(
+        mock_fill_template, *mocks):
     """Pod fields computed in Python reach the pod in the cluster YAML."""
     os.environ[
         skypilot_config.
@@ -255,6 +258,8 @@ def test_write_cluster_config_merges_pod_fields_kubernetes(*mocks):
     assert pod_spec['affinity'][
         'nodeAffinity'] == kubernetes_utils.get_node_affinity(
             None, None, ['skypilot.co/accelerator'])
+    # They get there through the merge, not as a template variable.
+    assert 'pod_fields' not in mock_fill_template.call_args[0][1]
 
 
 @mock.patch.object(skypilot_config, '_global_config_context',
