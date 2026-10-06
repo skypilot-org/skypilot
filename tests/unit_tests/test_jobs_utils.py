@@ -162,12 +162,14 @@ async def test_get_job_status_keeps_a_cancel_that_lands_as_the_fetch_completes(
     mock_backend = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayBackend)
     task = None
     fetches = 0
+    cancel_sent = asyncio.Event()
 
     def cancel_after(remaining):
         if remaining:
             loop.call_soon(cancel_after, remaining - 1)
         else:
             task.cancel()
+            cancel_sent.set()
 
     def fetch_status(*args, **kwargs):
         del args, kwargs
@@ -188,6 +190,10 @@ async def test_get_job_status_keeps_a_cancel_that_lands_as_the_fetch_completes(
                                        handle=mock_handle)
 
     task = asyncio.ensure_future(poll_loop())
+    # Two seconds from the cancel, however slow the runner is to get there.
+    await asyncio.wait({asyncio.ensure_future(cancel_sent.wait()), task},
+                       return_when=asyncio.FIRST_COMPLETED)
+    assert cancel_sent.is_set(), task
     done, _ = await asyncio.wait({task}, timeout=2)
     if task not in done:
         while not task.done():
