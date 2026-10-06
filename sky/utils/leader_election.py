@@ -287,12 +287,17 @@ class PgLeaseElector(LeaderElector):
     # lease has lapsed or been taken over, gets zero rows and a ``False`` return
     # rather than silently (re)acquiring inside a renew. Re-acquisition after a
     # lapse goes through ``try_acquire`` instead, which bumps ``epoch``.
+    #
+    # Like the bid, the renew fails while any session holds the advisory lock
+    # for the lock id: ``now()`` is the transaction start, so a renew delayed
+    # past the expiry must not extend a lease an advisory leader saw expire.
     _RENEW_SQL = sqlalchemy.text(f"""
         UPDATE {_LEASE_TABLE}
            SET expires_at = now() + make_interval(secs => :ttl)
          WHERE lock_id = :lock_id
            AND holder = :holder
            AND {_LEASE_TABLE}.expires_at >= now()
+           AND pg_try_advisory_xact_lock(:advisory_key)
         RETURNING epoch
     """)
 

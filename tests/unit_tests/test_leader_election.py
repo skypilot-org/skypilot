@@ -6,6 +6,7 @@ exercised where a Postgres fixture is available.
 """
 import os
 import re
+import time
 from unittest import mock
 
 import pytest
@@ -160,12 +161,14 @@ def test_advisory_elector_yields_to_a_live_lease(monkeypatch, lease_check,
     assert e.renew() is expected
 
 
-def test_lease_bid_carries_the_advisory_key_of_its_lock_id(monkeypatch):
-    """The lease bid must test the same key a ``PostgresLock`` holds."""
+@pytest.mark.parametrize('statement', ['try_acquire', 'renew'])
+def test_lease_statements_test_the_advisory_key_of_their_lock_id(
+        monkeypatch, statement):
+    """Bid and renew must test the same key a ``PostgresLock`` holds."""
     execute_bounded = mock.Mock(return_value=(1,))
     monkeypatch.setattr(leader_election, '_execute_bounded', execute_bounded)
     e = leader_election.PgLeaseElector('some-lock', holder='a')
-    assert e.try_acquire() is True
+    assert getattr(e, statement)() is True
     sql, params = execute_bounded.call_args.args
     assert 'pg_try_advisory_xact_lock(:advisory_key)' in str(sql)
     assert params['advisory_key'] == locks.postgres_lock_key('some-lock')
@@ -328,3 +331,50 @@ def test_pg_advisory_bid_waits_for_a_live_lease(lease_db, monkeypatch):
     lease.release()
     assert advisory.try_acquire() is True
     advisory.release()
+
+
+@pg_only
+@pytest.mark.xdist_group('leader_election_lease')
+def test_pg_renew_fails_while_an_advisory_holder_exists(lease_db):
+    lease = leader_election.PgLeaseElector('lock', holder='a')
+    assert lease.try_acquire() is True
+    advisory = locks.PostgresLock('lock')
+    advisory.acquire(blocking=False)
+    try:
+        assert lease.renew() is False
+    finally:
+        advisory.release()
+    assert lease.renew() is True
+
+
+@pg_only
+@pytest.mark.xdist_group('leader_election_lease')
+def test_pg_delayed_renew_loses_to_an_advisory_leader(lease_db, monkeypatch):
+    """A renew whose transaction began before the expiry still sees the old
+    ``now()``; it must not extend a lease an advisory leader saw expire."""
+    monkeypatch.setattr(leader_election.locks, '_detect_lock_type',
+                        lambda: 'postgres')
+    lease = leader_election.PgLeaseElector('lock', holder='a')
+    assert lease.try_acquire() is True
+    with lease_db.connect() as delayed:
+        delayed.execute(sqlalchemy.text('SELECT now()'))
+        with lease_db.connect() as conn:
+            conn.execute(
+                sqlalchemy.text('UPDATE leader_leases SET expires_at = '
+                                'clock_timestamp() + make_interval(secs => '
+                                '0.2) WHERE lock_id = :l'), {'l': 'lock'})
+            conn.commit()
+        time.sleep(0.5)
+        advisory = leader_election.AdvisoryLockElector('lock')
+        assert advisory.try_acquire() is True
+        try:
+            assert delayed.execute(
+                lease._RENEW_SQL, {
+                    'lock_id': 'lock',
+                    'holder': 'a',
+                    'ttl': 60,
+                    'advisory_key': locks.postgres_lock_key('lock'),
+                }).fetchone() is None
+        finally:
+            delayed.rollback()
+            advisory.release()
