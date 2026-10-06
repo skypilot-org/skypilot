@@ -153,11 +153,11 @@ class TestGetEnvVars:
         assert env['UCX_NET_DEVICES'] == 'eth0'
 
     def test_grace_shapes_reproduce_master(self):
-        """GB200.4 and GB300.4 still get exactly master's NCCL settings."""
+        """GB200.4 and GB300.4 still get exactly master's env, no UCX."""
         env, _ = self._env({'BM.GPU.GB200.4'})
-        assert self._nccl(env) == self._MASTER_GB200
+        assert env == self._MASTER_GB200
         env, _ = self._env({'BM.GPU.GB300.4'})
-        assert self._nccl(env) == self._MASTER_GB300
+        assert env == self._MASTER_GB300
         for shape in ('BM.GPU.GB200.4', 'BM.GPU.GB300.4'):
             env, _ = self._env({shape}, pod_local_rdma=True)
             assert env['NCCL_IB_HCA'] == 'mlx5', shape
@@ -236,9 +236,25 @@ class TestGetEnvVars:
         assert self._nccl(env) == self._MASTER_GB200
         # Different sets: the env cannot depend on the scheduler's pick.
         env, _ = self._env({'BM.GPU.GB200.4', 'BM.GPU.GB200-v3.4'})
-        assert env == self._GENERIC
+        assert env == self._nccl(self._GENERIC)
         # One shape without any set makes the whole request ambiguous.
         env, _ = self._env({'BM.GPU.GB200.4', 'BM.GPU.X.8'})
+        assert env == self._GENERIC
+
+    def test_grace_shapes_get_no_ucx(self):
+        """UCX_TLS=tcp would push UCX users (e.g. NIXL) off RDMA and NVLink."""
+        name = 'oci-nccl-parameters-bm-gpu-gb300-v2-4'
+        cms = {('default', name): 'NCCL_MNNVL_ENABLE=1'}
+        for shapes in (
+            {'BM.GPU.GB200-v2.4'},
+            {'BM.GPU.GB200-v3.4'},
+            {'BM.GPU.GB300-v2.4'},  # Not in the table: ConfigMap only.
+            {'BM.GPU.GB200.4', 'BM.GPU.GB200-v3.4'},  # Generic fallback.
+        ):
+            env, _ = self._env(shapes, cms)
+            assert not [k for k in env if k.startswith('UCX_')], shapes
+        # Any non-Grace shape in the pool keeps the generic profile's UCX.
+        env, _ = self._env({'BM.GPU.GB200.4', 'BM.GPU.B200.8'})
         assert env == self._GENERIC
 
     def test_unlabeled_node_makes_the_shape_unknown(self):

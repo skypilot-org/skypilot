@@ -200,9 +200,18 @@ _SHAPE_NCCL_OVERLAY: Dict[str, Dict[str, str]] = {
     },
 }
 
+# Grace Blackwell shapes (GB200/GB300) get no UCX settings, as before: UCX_TLS
+# =tcp would push UCX users such as NIXL off RDMA and NVLink.
+# ponytail: relies on OCI's shape naming; list the shapes if that ever breaks.
+# TODO(hailong): no shape needs pod-wide UCX settings (Oracle passes them on
+# its mpirun lines only); drop them everywhere once verified on hardware.
+_GRACE_SHAPE_PREFIX = 'BM.GPU.GB'
+
 _CONFIGMAP_KEY = 'nccl.conf'
-# Only NCCL/RCCL settings are taken from the ConfigMap: anyone who can write
-# a ConfigMap in `default` must not be able to set e.g. LD_PRELOAD in pods.
+# Only NCCL/RCCL settings are taken from the ConfigMap. This scopes it to NCCL
+# tuning and is not a security boundary: NCCL uses the values as given, and
+# e.g. NCCL_NET_PLUGIN names a library it loads. Whoever can write these
+# ConfigMaps is trusted like a cluster admin.
 _NCCL_CONF_KEY_PATTERN = re.compile(r'^[NR]CCL_[A-Z0-9_]+$')
 
 
@@ -307,6 +316,8 @@ def get_env_vars(context: Optional[str], namespace: str, shapes: Set[str],
     """
     base = (kubernetes_utils.KubernetesHighPerformanceNetworkType.OCI_ROCE.
             get_network_env_vars())
+    if shapes and all(s.startswith(_GRACE_SHAPE_PREFIX) for s in shapes):
+        base = {k: v for k, v in base.items() if not k.startswith('UCX_')}
     namespaces = list(
         dict.fromkeys([namespace, kubernetes_utils.DEFAULT_NAMESPACE]))
     resolved: Dict[str, Tuple[Dict[str, str], str]] = {}
