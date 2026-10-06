@@ -17,7 +17,9 @@ How it renders
 Each case is rendered through the same helper production uses,
 ``common_utils.fill_template``, so the tests exercise the real Jinja
 environment (undefined-variable and whitespace semantics), not a hand-rolled
-one.
+one. The pod fields computed in Python (``kubernetes_utils.get_pod_fields``)
+are then merged into the rendered pod with
+``kubernetes_utils.combine_pod_fields``, as ``write_cluster_config`` does.
 
 The fixture
 -----------
@@ -464,17 +466,17 @@ CASES: Dict[str, Dict[str, Any]] = {
 
 
 def _build_variables(case_name: str) -> Dict[str, Any]:
-    """Merges a case onto the base and derives the computed template vars.
+    """Merges a case onto the base and derives the computed pod fields.
 
-    ``k8s_node_affinity`` is built by calling the same production helper
-    (``kubernetes_utils.get_node_affinity``) that
+    ``k8s_pod_fields`` is built by calling the same production helper
+    (``kubernetes_utils.get_pod_fields``) that
     ``make_deploy_resources_variables`` uses, from the raw accelerator-label
     vars the case carries. Deriving it here rather than hard-coding it is what
     makes the goldens a semantic-identity proof for the Python lift.
     """
     variables = base_variables()
     variables.update(CASES[case_name])
-    variables['k8s_node_affinity'] = kubernetes_utils.get_node_affinity(
+    variables['k8s_pod_fields'] = kubernetes_utils.get_pod_fields(
         variables['k8s_acc_label_key'],
         variables['k8s_acc_label_values'],
         variables['avoid_label_keys'],
@@ -483,12 +485,20 @@ def _build_variables(case_name: str) -> Dict[str, Any]:
 
 
 def _render(variables: Dict[str, Any]) -> str:
-    """Render the template through the production fill_template helper."""
+    """Render the manifest the way write_cluster_config builds it.
+
+    The template goes through the production fill_template helper, and the
+    pod fields computed in Python are merged in by the production
+    combine_pod_fields helper.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         output_path = os.path.join(tmpdir, 'rendered.yml')
         common_utils.fill_template(TEMPLATE_NAME, variables, output_path)
         with open(output_path, 'r', encoding='utf-8') as f:
-            return f.read()
+            rendered = yaml.safe_load(f.read())
+    return yaml.safe_dump(
+        kubernetes_utils.combine_pod_fields(rendered,
+                                            variables['k8s_pod_fields']))
 
 
 # Fields whose values are large generated shell blobs, not structural or

@@ -5751,6 +5751,99 @@ class TestGetNodeAffinity:
         }
 
 
+class TestPodFields:
+    """Tests for utils.get_pod_fields and utils.combine_pod_fields."""
+
+    @staticmethod
+    def _cluster_yaml(pod_spec):
+        return {
+            'available_node_types': {
+                'ray_head_default': {
+                    'node_config': {
+                        'spec': pod_spec
+                    }
+                }
+            }
+        }
+
+    @staticmethod
+    def _pod_spec(cluster_yaml):
+        return cluster_yaml['available_node_types']['ray_head_default'][
+            'node_config']['spec']
+
+    def test_empty_when_no_field_applies(self):
+        assert utils.get_pod_fields(None, None, None) == {}
+
+    def test_node_affinity_is_a_pod_spec_field(self):
+        pod_fields = utils.get_pod_fields('skypilot.co/accelerator', ['H100'],
+                                          ['some-other-key'])
+        assert pod_fields == {
+            'spec': {
+                'affinity': {
+                    'nodeAffinity': utils.get_node_affinity(
+                        'skypilot.co/accelerator', ['H100'], ['some-other-key'])
+                }
+            }
+        }
+
+    def test_combine_keeps_what_the_template_rendered(self):
+        """The merge adds to an affinity the template already rendered."""
+        pod_affinity = {
+            'preferredDuringSchedulingIgnoredDuringExecution': [{
+                'weight': 1
+            }]
+        }
+        cluster_yaml = self._cluster_yaml({
+            'containers': [{
+                'name': 'ray-node'
+            }],
+            'affinity': {
+                'podAffinity': pod_affinity
+            },
+        })
+        pod_fields = utils.get_pod_fields('skypilot.co/accelerator', ['H100'],
+                                          None)
+
+        combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
+
+        assert self._pod_spec(combined) == {
+            'containers': [{
+                'name': 'ray-node'
+            }],
+            'affinity': {
+                'podAffinity': pod_affinity,
+                'nodeAffinity': pod_fields['spec']['affinity']['nodeAffinity'],
+            },
+        }
+
+    def test_combine_adds_an_affinity_the_template_did_not_render(self):
+        cluster_yaml = self._cluster_yaml(
+            {'containers': [{
+                'name': 'ray-node'
+            }]})
+        pod_fields = utils.get_pod_fields(None, None, ['some-other-key'])
+
+        combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
+
+        assert self._pod_spec(
+            combined)['affinity'] == pod_fields['spec']['affinity']
+
+    def test_combine_leaves_its_inputs_untouched(self):
+        cluster_yaml = self._cluster_yaml(
+            {'containers': [{
+                'name': 'ray-node'
+            }]})
+        pod_fields = utils.get_pod_fields('skypilot.co/accelerator', ['H100'],
+                                          None)
+        expected_pod_fields = copy.deepcopy(pod_fields)
+
+        combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
+        self._pod_spec(combined)['affinity']['nodeAffinity'].clear()
+
+        assert 'affinity' not in self._pod_spec(cluster_yaml)
+        assert pod_fields == expected_pod_fields
+
+
 def _make_pod_with_spec(*,
                         container_name='c',
                         memory_limit=None,

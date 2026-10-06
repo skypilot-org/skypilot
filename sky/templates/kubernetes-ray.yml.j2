@@ -477,10 +477,8 @@ available_node_types:
             cloud.google.com/gke-flex-start: "true"
             {% endif %}
         {% endif %}
-        {% if k8s_node_affinity or k8s_host_network %}
+        {% if (k8s_acc_label_key is not none and k8s_acc_label_values is not none) or k8s_host_network %}
         affinity:
-          {% if k8s_node_affinity %}
-          nodeAffinity: {{k8s_node_affinity | tojson}}
           {% if k8s_acc_label_key is not none and k8s_acc_label_values is not none %}
           podAffinity:
             preferredDuringSchedulingIgnoredDuringExecution:
@@ -508,7 +506,6 @@ available_node_types:
                     skypilot-cluster-name: {{cluster_name_on_cloud}}
                 topologyKey: topology.kubernetes.io/zone
             {% endif %}
-          {% endif %}
           {% endif %}
           {% if k8s_host_network %}
           # Mode b: one cluster pod per K8s node. Under hostNetwork a pod
