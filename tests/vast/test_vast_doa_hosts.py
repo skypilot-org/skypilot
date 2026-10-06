@@ -28,7 +28,9 @@ def _offer(offer_id, machine_id, gpu_name='RTX PRO 6000 WS', price=1.60):
         'num_gpus': 1,
         'cpu_cores': 32,
         'cpu_ram': 65536,
-        'search': {'totalHour': price},
+        'search': {
+            'totalHour': price
+        },
         'dph_total': price,
         'geolocation': 'Czechia, CZ, EU',
         'hosting_type': 1,
@@ -62,8 +64,8 @@ class TestDeadOnArrivalHosts(unittest.TestCase):
     def test_launch_skips_the_dead_host_and_rents_the_healthy_one(self):
         client = mock.Mock()
         client.search_offers.return_value = [
-            _offer(111, 152941),   # the DOA host, listed first
-            _offer(222, 999999),   # a healthy host in the same bucket
+            _offer(111, 152941),  # the DOA host, listed first
+            _offer(222, 999999),  # a healthy host in the same bucket
         ]
         client.create_instance.return_value = {'new_contract': 'inst-ok'}
         client.show_instance.return_value = {'id': 'vast-53903136'}
@@ -78,8 +80,7 @@ class TestDeadOnArrivalHosts(unittest.TestCase):
         client = mock.Mock()
         client.search_offers.return_value = [_offer(111, 152941)]
 
-        with self.assertRaisesRegex(
-                RuntimeError, 'could not find an offer'):
+        with self.assertRaisesRegex(RuntimeError, 'could not find an offer'):
             _launch(client)
 
         client.create_instance.assert_not_called()
@@ -89,10 +90,16 @@ class TestDeadOnArrivalHosts(unittest.TestCase):
         # not be dropped by the blocklist filter (absent id != dead id).
         client = mock.Mock()
         client.search_offers.return_value = [
-            {'id': 333, 'gpu_name': 'RTX PRO 6000 WS', 'num_gpus': 1,
-             'cpu_cores': 32, 'cpu_ram': 65536,
-             'dph_total': 1.60, 'geolocation': 'Czechia, CZ, EU',
-             'hosting_type': 1},
+            {
+                'id': 333,
+                'gpu_name': 'RTX PRO 6000 WS',
+                'num_gpus': 1,
+                'cpu_cores': 32,
+                'cpu_ram': 65536,
+                'dph_total': 1.60,
+                'geolocation': 'Czechia, CZ, EU',
+                'hosting_type': 1
+            },
         ]
         client.create_instance.return_value = {'new_contract': 'inst-ok'}
         client.show_instance.return_value = {'id': 'vast-53903136'}
