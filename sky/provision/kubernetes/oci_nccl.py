@@ -17,6 +17,9 @@ logger = sky_logging.init_logger(__name__)
 
 # Node label carrying the OCI shape, e.g. 'BM.GPU.B300.8'.
 SHAPE_LABEL_KEY = 'node.kubernetes.io/instance-type'
+# Stands in for an eligible node without that label: its NICs are unknown, so
+# no shape's exact set may be claimed for the pod.
+UNLABELED_SHAPE = '<no instance-type label>'
 
 # Oracle's recommended NCCL parameters per OCI bare-metal NVIDIA GPU shape,
 # verbatim from oracle-quickstart/oci-hpc-oke
@@ -256,10 +259,13 @@ def _read_configmap(context: Optional[str], namespaces: List[str],
             logger.warning(f'Failed to read ConfigMap {namespace}/{name}: '
                            f'{common_utils.format_exception(e)}')
             return None
-        conf = (cm.data or {}).get(_CONFIGMAP_KEY)
-        if conf is None:
+        params = parse_nccl_conf((cm.data or {}).get(_CONFIGMAP_KEY) or '')
+        if not params:
+            # An empty or placeholder ConfigMap must not wipe the tuning.
+            logger.warning(f'ConfigMap {namespace}/{name} has no NCCL '
+                           'settings; ignoring it.')
             continue
-        return parse_nccl_conf(conf), f'ConfigMap {namespace}/{name}'
+        return params, f'ConfigMap {namespace}/{name}'
     return None
 
 
@@ -278,9 +284,7 @@ def candidate_shapes(context: Optional[str], k8s_acc_label_key: Optional[str],
             continue
         if any(labels.get(k) != v for k, v in node_selector.items()):
             continue
-        shape = labels.get(SHAPE_LABEL_KEY)
-        if shape:
-            shapes.add(shape)
+        shapes.add(labels.get(SHAPE_LABEL_KEY) or UNLABELED_SHAPE)
     return shapes
 
 
@@ -308,6 +312,9 @@ def get_env_vars(context: Optional[str], namespace: str, shapes: Set[str],
     resolved: Dict[str, Tuple[Dict[str, str], str]] = {}
     missing = []
     for shape in sorted(shapes):
+        if shape == UNLABELED_SHAPE:
+            missing.append(shape)
+            continue
         found = _read_configmap(context, namespaces, shape)
         if found is None and shape in _SHAPE_NCCL_PARAMS:
             found = (_SHAPE_NCCL_PARAMS[shape],

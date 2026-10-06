@@ -241,6 +241,26 @@ class TestGetEnvVars:
         env, _ = self._env({'BM.GPU.GB200.4', 'BM.GPU.X.8'})
         assert env == self._GENERIC
 
+    def test_unlabeled_node_makes_the_shape_unknown(self):
+        env, reads = self._env({'BM.GPU.GB200.4', oci_nccl.UNLABELED_SHAPE})
+        assert env == self._GENERIC
+        # The placeholder is never looked up as a ConfigMap name.
+        assert {name for _, name in reads
+               } == {'oci-nccl-parameters-bm-gpu-gb200-4'}
+
+    def test_empty_configmap_is_ignored(self):
+        name = 'oci-nccl-parameters-bm-gpu-b300-8'
+        table = self._env({'BM.GPU.B300.8'})[0]
+        for conf in ('', '# pending configuration', 'LD_PRELOAD=/x.so'):
+            env, _ = self._env({'BM.GPU.B300.8'}, {('skypilot', name): conf})
+            assert env == table, conf
+        # An empty copy in the pod namespace defers to the one in `default`.
+        env, _ = self._env({'BM.GPU.B300.8'}, {
+            ('skypilot', name): '',
+            ('default', name): 'NCCL_IB_HCA=default-ns',
+        })
+        assert env['NCCL_IB_HCA'] == 'default-ns'
+
     def test_sriov_widens_any_exact_list(self):
         name = 'oci-nccl-parameters-bm-gpu-gb200-v3-4'
         cms = {('default', name): self._GB200_V3_CONF}
@@ -276,11 +296,9 @@ class TestCandidateShapes:
     @staticmethod
     def _node(gpu, shape, **extra_labels):
         node = mock.MagicMock()
-        node.metadata.labels = {
-            'gpu': gpu,
-            'node.kubernetes.io/instance-type': shape,
-            **extra_labels
-        }
+        node.metadata.labels = {'gpu': gpu, **extra_labels}
+        if shape is not None:
+            node.metadata.labels['node.kubernetes.io/instance-type'] = shape
         return node
 
     def _shapes(self, nodes, values=('B300',), node_selector=None):
@@ -308,6 +326,13 @@ class TestCandidateShapes:
                 nodes, ('GB200',),
                 {'node.kubernetes.io/instance-type': 'BM.GPU.GB200-v3.4'}),
             {'BM.GPU.GB200-v3.4'})
+
+    def test_unlabeled_eligible_node_is_kept(self):
+        nodes = [
+            self._node('B300', 'BM.GPU.B300.8'),
+            self._node('B300', None),
+        ]
+        _eq(self._shapes(nodes), {'BM.GPU.B300.8', oci_nccl.UNLABELED_SHAPE})
 
     def test_cpu_only_request_has_no_shape(self):
         nodes = [self._node('B300', 'BM.GPU.B300.8')]
