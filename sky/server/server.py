@@ -3198,7 +3198,9 @@ async def api_status(
     limit: Optional[int] = fastapi.Query(
         None, description='Number of requests to show.'),
     fields: Optional[List[str]] = fastapi.Query(
-        None, description='Fields to get. If None, get all fields.'),
+        None,
+        description=('Fields to get. If None, get all fields except '
+                     'return_value and error. Ignored if request_ids is set.')),
     cluster_name: Optional[str] = fastapi.Query(
         None, description='Filter requests by cluster name.'),
 ) -> List[payloads.RequestPayload]:
