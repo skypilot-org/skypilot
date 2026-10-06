@@ -1392,6 +1392,48 @@ def test_skyserve_ha_kill_during_shutdown():
 
 
 @pytest.mark.kubernetes
+@pytest.mark.gcp
+@pytest.mark.serve
+def test_skyserve_ha_kill_during_update():
+    """Test HA recovery when killing controller during an update."""
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping HA test in non-docker remote api server environment as '
+            'controller might be managed by different user/test agents')
+    name = _get_service_name()
+    resource_arg = f'--infra gcp {smoke_tests_utils.LOW_RESOURCE_ARG}'
+    test = smoke_tests_utils.Test(
+        'test-skyserve-ha-kill-during-update',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            f'sky serve up -n {name} {resource_arg} -y tests/skyserve/update/bump_version_before.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            # Only the replica count changes, so replicas 1 and 2 move to
+            # version 2 in place and replica 3 is launched.
+            f'sky serve update {name} {resource_arg} -y tests/skyserve/update/bump_version_after.yaml',
+            # sleep to wait for update to be registered.
+            'sleep 40',
+            _check_replica_in_status(name, [
+                (2, False, 'READY'), (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)
+            ]) + _check_service_version(name, "2"),
+            # Kill controller while replica 3 is launching
+            smoke_tests_utils.kill_and_wait_controller(name, 'serve'),
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3),
+            'sleep 60',
+            _check_replica_in_status(name, [(3, False, 'READY')]) +
+            _check_service_version(name, "2") +
+            # Make sure no new replicas are started after the recovery.
+            f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 3',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=30 * 60,
+        env={
+            skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/skyserve/high_availability/config.yaml'
+        })
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
 @pytest.mark.serve
 @pytest.mark.no_remote_server
 def test_skyserve_log_expansion_no_duplicates():
