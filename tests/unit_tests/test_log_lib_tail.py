@@ -181,7 +181,28 @@ def test_carriage_return_progress_reads_one_block(log_path, monkeypatch):
         raising=False)
     lines, _ = log_lib.tail_lines_from_end(log_path, 10)
     assert lines == ['step\r'] * 10
-    assert sum(reads) == log_lib._TAIL_BLOCK_SIZE  # pylint: disable=protected-access
+    assert sum(reads) < 2 * log_lib._TAIL_BLOCK_SIZE  # pylint: disable=protected-access
+
+
+@pytest.mark.parametrize('block_size', [1, 2, 7])
+@pytest.mark.parametrize('last_line', ['', 'no break at EOF'])
+def test_small_blocks_match_splitlines(log_path, monkeypatch, block_size,
+                                       last_line):
+    """Block boundaries fall everywhere, including inside ``\\r\\n``."""
+    monkeypatch.setattr(log_lib, '_TAIL_BLOCK_SIZE', block_size)
+    rng = random.Random(block_size)
+    parts = []
+    for _ in range(300):
+        parts.append('x' * rng.randint(0, 5))
+        parts.append(rng.choice(['\n', '\r', '\r\n']))
+    data = (''.join(parts) + last_line).encode()
+    _write_bytes(log_path, data)
+    expected = data.decode().splitlines(keepends=True)
+    for tail in [1, 2, 5, 50, 1000]:
+        for offset in [0, 1, 3, 100, 299, 300, 400]:
+            actual, _ = log_lib.tail_lines_from_end(log_path, tail, offset)
+            kept = expected[:-offset] if offset > 0 else expected
+            assert actual == kept[-tail:], (tail, offset)
 
 
 def test_read_stops_at_max_bytes(log_path, monkeypatch):

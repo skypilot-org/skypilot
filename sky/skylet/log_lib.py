@@ -564,11 +564,14 @@ def _count_line_breaks(chunk: bytes) -> int:
     return chunk.count(b'\n') + chunk.count(b'\r') - chunk.count(b'\r\n')
 
 
-def _start_of_last_lines(f: BinaryIO, end_pos: int, count: int) -> int:
+def _start_of_last_lines(f: BinaryIO,
+                         end_pos: int,
+                         count: int,
+                         min_pos: int = 0) -> int:
     """Returns the byte position where the last ``count`` lines start.
 
-    Scans backwards one block at a time. Returns 0 if the file has at most
-    ``count`` lines.
+    Scans backwards one block at a time, not past ``min_pos``. Returns
+    ``min_pos`` if fewer than ``count`` lines start after it.
     """
     # A last line without a trailing break has no break of its own.
     f.seek(max(end_pos - 1, 0))
@@ -576,8 +579,8 @@ def _start_of_last_lines(f: BinaryIO, end_pos: int, count: int) -> int:
         count += 1
     pos = end_pos
     next_byte = b''
-    while pos > 0:
-        read_size = min(_TAIL_BLOCK_SIZE, pos)
+    while pos > min_pos:
+        read_size = min(_TAIL_BLOCK_SIZE, pos - min_pos)
         pos -= read_size
         f.seek(pos)
         chunk = f.read(read_size)
@@ -591,7 +594,7 @@ def _start_of_last_lines(f: BinaryIO, end_pos: int, count: int) -> int:
             return pos + ends[-count]
         count -= breaks
         next_byte = chunk[:1]
-    return 0
+    return min_pos
 
 
 def tail_lines_from_end(path: str,
@@ -624,36 +627,21 @@ def tail_lines_from_end(path: str,
         returns ``([], end_pos)``.
     """
     assert tail > 0
-    chunks: List[bytes] = []
-    line_count = 0
-    pos = 0
-    end_pos = 0
     with open(path, 'rb') as f:
         f.seek(0, os.SEEK_END)
         end_pos = f.tell()
         window_end = end_pos
         if offset > 0:
             window_end = _start_of_last_lines(f, end_pos, offset)
-        pos = window_end
-        while (pos > 0 and line_count <= tail and
-               window_end - pos < _TAIL_MAX_BYTES):
-            read_size = min(_TAIL_BLOCK_SIZE, pos)
-            pos -= read_size
-            f.seek(pos)
-            chunk = f.read(read_size)
-            line_count += _count_line_breaks(chunk)
-            if (chunks and chunk.endswith(b'\r') and
-                    chunks[-1].startswith(b'\n')):
-                # A '\r\n' split across two blocks is one break.
-                line_count -= 1
-            chunks.append(chunk)
-    data = b''.join(reversed(chunks))
+        min_pos = max(window_end - _TAIL_MAX_BYTES, 0)
+        start = _start_of_last_lines(f, window_end, tail, min_pos)
+        f.seek(start)
+        data = f.read(window_end - start)
     text = data.decode('utf-8', errors='replace')
     lines = text.splitlines(keepends=True)
-    # If we stopped before reaching offset 0, the first decoded line is
-    # almost certainly partial (we landed mid-line). Drop it so callers
+    # A start at the read cap can be mid-line. Drop that line so callers
     # see only complete lines.
-    if pos > 0 and lines:
+    if start > 0 and start == min_pos and lines:
         lines = lines[1:]
     return lines[-tail:], end_pos
 
