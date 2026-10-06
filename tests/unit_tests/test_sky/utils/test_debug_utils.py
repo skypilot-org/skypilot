@@ -4496,36 +4496,27 @@ class TestOverallDeadlineDump:
             assert m.call_count == 1, f'{fn} should have run exactly once'
 
 
-@mock.patch('sky.utils.debug_utils._dump_managed_job_info')
-@mock.patch('sky.utils.debug_utils._dump_cluster_info')
-@mock.patch('sky.utils.debug_utils._dump_request_id_info')
-@mock.patch('sky.utils.debug_utils._dump_server_info')
-@mock.patch('sky.utils.debug_utils._get_clusters_from_managed_jobs')
-@mock.patch('sky.utils.debug_utils._get_clusters_from_requests')
-@mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
-@mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
-@mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
-def test_debug_dump_log_writes_provision_records_once(
-        mock_req_from_clusters, mock_req_from_jobs, mock_jobs_from_req,
-        mock_clusters_from_req, mock_clusters_from_jobs, mock_dump_server,
-        mock_dump_requests, mock_dump_clusters, mock_dump_jobs, tmp_path):
+def test_debug_dump_log_writes_provision_records_once(tmp_path):
     """The dump's handler sits on both `sky` and `sky.provision`.
 
     Outside a provision `sky.provision` propagates, so without dedupe a
-    sky.provision.* record would land in debug_dump.log twice.
+    sky.provision.* record would land in debug_dump.log twice. Only the
+    handler wiring runs: the dump body is replaced, so nothing is collected.
     """
-    del (mock_req_from_clusters, mock_req_from_jobs, mock_jobs_from_req,
-         mock_clusters_from_req, mock_clusters_from_jobs, mock_dump_requests,
-         mock_dump_clusters, mock_dump_jobs)
-    mock_dump_server.side_effect = lambda *args, **kwargs: logging.getLogger(
-        'sky.provision.test').warning('dump-marker-6414')
+
+    def build(*args, **kwargs):
+        del args, kwargs
+        logging.getLogger('sky.provision.test').warning('dump-marker-6414')
+
     provision_logger = logging.getLogger('sky.provision')
     original = provision_logger.propagate
     provision_logger.propagate = True
     try:
         with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
-                        str(tmp_path / 'debug_dumps')):
-            result = debug_utils.create_debug_dump(request_ids=['req-1'])
+                        str(tmp_path / 'debug_dumps')), \
+             mock.patch('sky.utils.debug_utils._build_debug_dump',
+                        side_effect=build):
+            result = debug_utils.create_debug_dump()
     finally:
         provision_logger.propagate = original
     with zipfile.ZipFile(result, 'r') as zf:
