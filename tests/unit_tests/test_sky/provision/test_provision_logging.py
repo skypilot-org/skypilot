@@ -3,7 +3,9 @@ import logging
 
 import pytest
 
+from sky import sky_logging
 from sky.provision import logging as provision_logging
+from sky.skylet import constants
 
 
 @pytest.fixture(name='provision_logger')
@@ -40,4 +42,47 @@ def test_overlapping_provisions_restore_after_the_last(provision_logger,
     # The second provision is still running: its logs stay out of the console.
     assert provision_logger.propagate is False
     second.__exit__(None, None, None)
+    assert provision_logger.propagate is True
+
+
+class _Collect(logging.Handler):
+
+    def __init__(self):
+        super().__init__(logging.DEBUG)
+        self.messages = []
+
+    def emit(self, record):
+        self.messages.append(record.getMessage())
+
+
+def test_handler_on_both_loggers_writes_each_record_once(provision_logger):
+    handler = _Collect()
+    sky_logging.attach_to_sky_and_provision(handler)
+    try:
+        child = logging.getLogger('sky.provision.test')
+        child.warning('propagating')
+        provision_logger.propagate = False
+        child.warning('not propagating')
+    finally:
+        sky_logging.detach_from_sky_and_provision(handler)
+    assert handler.messages == ['propagating', 'not propagating']
+
+
+def test_request_debug_log_has_no_duplicates(provision_logger, tmp_path,
+                                             monkeypatch):
+    del provision_logger  # Propagating, as outside any provision.
+    monkeypatch.setenv(constants.ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING, 'true')
+    monkeypatch.setattr(sky_logging, 'DEBUG_LOG_DIR', str(tmp_path))
+    with sky_logging.add_debug_log_handler('req'):
+        logging.getLogger('sky.provision.test').warning('marker-6414')
+    assert (tmp_path / 'req.log').read_text().count('marker-6414') == 1
+
+
+def test_setup_failure_is_not_masked(provision_logger, tmp_path):
+    """A failure before the handlers exist surfaces as itself."""
+    not_a_dir = tmp_path / 'file'
+    not_a_dir.write_text('')
+    with pytest.raises(OSError):
+        with provision_logging.setup_provision_logging(str(not_a_dir / 'x')):
+            pass
     assert provision_logger.propagate is True

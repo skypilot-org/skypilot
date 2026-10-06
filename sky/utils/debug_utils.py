@@ -2509,18 +2509,15 @@ def create_debug_dump(
 
         # Attach a file handler to capture debug-level logs into the dump
         # itself. We attach to the root 'sky' logger so that logs from all sky.*
-        # modules are captured, not just sky.utils.debug_utils.  Also attach to
-        # sky.provision which has propagate=False.  This mirrors
-        # sky_logging.add_debug_log_handler().
+        # modules are captured, not just sky.utils.debug_utils, and to
+        # sky.provision, which stops propagating during a provision. Same
+        # helper as sky_logging.add_debug_log_handler().
         debug_handler = logging.FileHandler(
             os.path.join(dump_dir, 'debug_dump.log'))
         debug_handler.setFormatter(sky_logging.FORMATTER)
         debug_handler.setLevel(logging.DEBUG)
-        sky_root_logger = logging.getLogger('sky')
-        provision_logger = logging.getLogger('sky.provision')
         try:
-            sky_root_logger.addHandler(debug_handler)
-            provision_logger.addHandler(debug_handler)
+            sky_logging.attach_to_sky_and_provision(debug_handler)
             # Pass original user inputs so "requested" reflects what the
             # user asked for, even if some IDs didn't resolve.
             original_requested = {
@@ -2539,8 +2536,7 @@ def create_debug_dump(
             # detach the handler, so it lands in debug_dump.log too).
             _log_timed_out_stragglers(debug_dump_context['timed_out_ops'])
         finally:
-            sky_root_logger.removeHandler(debug_handler)
-            provision_logger.removeHandler(debug_handler)
+            sky_logging.detach_from_sky_and_provision(debug_handler)
             debug_handler.flush()
             debug_handler.close()
 

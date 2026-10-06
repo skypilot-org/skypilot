@@ -37,6 +37,9 @@ def setup_provision_logging(log_dir: str):
         # Disable propagation to avoid streaming logs to the console, which
         # is set up for sky root logger.
         provision_logger.propagate = False
+    provisioner_logger = logging.getLogger('sky.provisioner')
+    fh = None
+    stream_handler = None
     try:
         # Redirect underlying provision logs to file.
         log_path = os.path.expanduser(os.path.join(log_dir, 'provision.log'))
@@ -50,7 +53,6 @@ def setup_provision_logging(log_dir: str):
         # time stamps are logged. We use sky.provisioner for getting the logger
         # because we do not want it to be affected by the handler added to the
         # sky.provision logger. Refer to sky.provision.provisioner.
-        provisioner_logger = logging.getLogger('sky.provisioner')
         provisioner_logger.addHandler(fh)
 
         stream_handler = logging.StreamHandler(sys.stdout)
@@ -70,11 +72,14 @@ def setup_provision_logging(log_dir: str):
                 # Otherwise every later sky.provision.* log in this process
                 # outside a provision goes nowhere: no handler, no propagation.
                 provision_logger.propagate = _saved_propagate
-        provisioner_logger.removeHandler(fh)
-        provision_logger.removeHandler(fh)
-        provision_logger.removeHandler(stream_handler)
-        stream_handler.close()
-        fh.close()
+        # Guarded, so a failure while setting up is not masked by a NameError.
+        if fh is not None:
+            provisioner_logger.removeHandler(fh)
+            provision_logger.removeHandler(fh)
+            fh.close()
+        if stream_handler is not None:
+            provision_logger.removeHandler(stream_handler)
+            stream_handler.close()
 
 
 def get_log_path() -> pathlib.Path:
