@@ -1459,6 +1459,12 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
             # (sky/provision/latitude/instance.py matches key MATERIAL), so
             # it takes the same generic configure_ssh_info path as Spheron.
             clouds.Latitude,
+            # QuantaCloud registers its SSH key per-deployment too
+            # (sky/provision/quantacloud/instance.py matches key MATERIAL
+            # via the SHA256 fingerprint derived from the public key blob),
+            # so it takes the same generic configure_ssh_info path as
+            # Spheron/Latitude.
+            clouds.Quantacloud,
         )):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):

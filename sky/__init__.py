@@ -165,6 +165,7 @@ PrimeIntellect = clouds.PrimeIntellect
 RunPod = clouds.RunPod
 Vast = clouds.Vast
 Latitude = clouds.Latitude
+Quantacloud = clouds.Quantacloud
 Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
 Nebius = clouds.Nebius

@@ -285,6 +285,9 @@ cloud_dependencies: Dict[str, List[str]] = {
     # Latitude.sh talks to api.latitude.sh over urllib from
     # sky/adaptors/latitude.py.
     'latitude': [],
+    # QuantaCloud talks to core.quantacloud.net over urllib from
+    # sky/adaptors/quantacloud.py.
+    'quantacloud': [],
     'slurm': ['python-hostlist'],
     'yotta': [],  # No dependencies needed for Yotta
     'verda': [],  # No dependencies needed for verda
