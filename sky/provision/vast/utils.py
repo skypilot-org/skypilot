@@ -30,6 +30,23 @@ SEARCH_BASE_TERMS = 'rentable=true rented=false external=false'
 # Docker container.
 VM_IMAGE_REPO = 'docker.io/vastai/kvm'
 
+# HOST-LEVEL distrust for launch-time offer selection (ENG-493 runs 3-4):
+# Vast machine ids whose offers go dark before the bootstrap ever runs.
+# The controller prices catalog BUCKETS (one row per gpu/count/ram
+# bundle), so a bucket-level refusal there would block every future
+# healthy host in the bundle; the machine id is only visible here, at the
+# offer level, which is where the blocklist stays. launch() filters these
+# hosts out after the search, fail-closed: a bucket whose only offers are
+# dead hosts refuses rather than launching one.
+_DEAD_ON_ARRIVAL_HOSTS = frozenset({
+    # The RTX PRO 6000 WS host: created instances 53903136 (run 4) and
+    # 53876457's sibling attempt went 'offline' with the port mapping gone
+    # before any bootstrap stage stamped, twice in a row, while the host
+    # kept cycling through renters. Not a pin -- remove the id
+    # deliberately when the host is demonstrably healthy.
+    152941,
+})
+
 
 def is_vm_image(image: Optional[str]) -> bool:
     """Whether `image` makes Vast boot a KVM VM instead of a container."""
@@ -212,6 +229,15 @@ def launch(name: str,
             if str(offer.get('geolocation') or '').split(',')[-1].strip()
             == region_token
         ]
+    # Same client-side treatment as the region token above: drop offers
+    # from the dead-on-arrival hosts (_DEAD_ON_ARRIVAL_HOSTS, ENG-493
+    # runs 3-4) BEFORE the empty check, so a bucket whose only offers are
+    # dead hosts refuses here instead of renting one. Host-scoped on
+    # purpose: a healthy host in the same bucket still launches.
+    instance_list = [
+        offer for offer in instance_list
+        if offer.get('machine_id') not in _DEAD_ON_ARRIVAL_HOSTS
+    ]
 
     if isinstance(instance_list, int) or len(instance_list) == 0:
         raise RuntimeError('Failed to create instances, could not find an '
