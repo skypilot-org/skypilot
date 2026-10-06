@@ -2833,7 +2833,9 @@ def test_pool_autoscaling_scale_up_to_max_then_down_to_zero(generic_cloud: str):
         infra=generic_cloud,
         setup_cmd='echo hi',
         upscale_delay_seconds=20,
-        downscale_delay_seconds=20,
+        # The queue empties as soon as the first worker absorbs all jobs; keep
+        # the target at 3 long enough for the last worker to become READY.
+        downscale_delay_seconds=120,
     )
 
     # Quick job that just echoes hi and finishes instantly
@@ -2874,7 +2876,7 @@ def test_pool_autoscaling_scale_up_to_max_then_down_to_zero(generic_cloud: str):
                     wait_for_message_in_pool_logs(
                         pool_name, 'SCALE_DOWN_TO_ZERO', timeout=300),
                     # Verify we scale down to 0 workers
-                    wait_until_num_workers(pool_name, 0, timeout=300),
+                    wait_until_num_workers(pool_name, 0, timeout=600),
                 ],
                 timeout=timeout * 3,  # Autoscaling takes time
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=10),
@@ -2964,5 +2966,63 @@ def test_pool_scale_down_with_job_count_priority(generic_cloud: str):
                 ],
                 timeout=timeout,
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
+def test_pool_local_file_mounts_two_hop(generic_cloud: str):
+    """A pool with local file_mounts/workdir and no cloud bucket reaches READY.
+
+    With no cloud bucket the server stages worker sources via the two-hop relay
+    under ~/.sky/tmp/controller. On a deployed server (file-mount containment
+    on) in consolidation mode, the replica manager launches workers on the
+    local endpoint, so without special handling the containment check would
+    reject those staged sources and the workers would never become READY.
+    Regression test for the serve two-hop + consolidation + containment path;
+    only discriminates on a deployed (remote) server, where containment is on.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+    marker = f'pool-two-hop-{name}'
+    with tempfile.TemporaryDirectory() as workdir:
+        with open(os.path.join(workdir, 'hello.txt'), 'w') as f:
+            f.write(marker)
+        pool_config = textwrap.dedent(f"""
+        workdir: {workdir}
+        file_mounts:
+          /data/hello.txt: {workdir}/hello.txt
+        pool:
+            workers: 1
+        resources:
+            infra: {generic_cloud}
+            cpus: 2+
+        setup: echo "pool setup"
+        """)
+        job_config = basic_job_conf(
+            job_name=name,
+            run_cmd='cat /data/hello.txt; cat ~/sky_workdir/hello.txt')
+        with tempfile.NamedTemporaryFile(suffix='.yaml') as pool_yaml, \
+                tempfile.NamedTemporaryFile(suffix='.yaml') as job_yaml:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
+            test = smoke_tests_utils.Test(
+                'test_pool_local_file_mounts_two_hop',
+                [
+                    # Force the two-hop path (no cloud bucket) regardless of
+                    # whether a storage cloud is enabled.
+                    f'sky jobs pool apply -p {pool_name} {pool_yaml.name} '
+                    f'--config serve.force_disable_cloud_bucket=true -y '
+                    f'2>&1 | tee /dev/stderr | grep "Successfully created pool"',
+                    # Workers must reach READY -- the fix keeps containment from
+                    # rejecting the staged sources.
+                    wait_until_pool_ready(
+                        pool_name,
+                        timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+                    # The job runs on a worker and reads the pool's file mount.
+                    f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} -y); '
+                    f'echo "$s"; echo "$s" | grep "{marker}"',
+                ],
+                teardown=cancel_jobs_and_teardown_pool(pool_name),
+                timeout=smoke_tests_utils.get_timeout(generic_cloud),
             )
             smoke_tests_utils.run_one_test(test)
