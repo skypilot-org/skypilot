@@ -1150,7 +1150,8 @@ class JobController:
         # the first dispatch and again after each recovery, whose relaunch
         # may persist observations of its own (see
         # provisioning_observation_target). Between those points this loop is
-        # the only writer, and observe_runtime_async returns what it wrote.
+        # the only writer, and observe_runtime_async returns the cursor as
+        # persisted after each observation.
         runtime_cursor: Optional[managed_job_runtime.RuntimeCursor] = None
         runtime_cursor_stale = True
 
@@ -1283,14 +1284,16 @@ class JobController:
             if runtime_recovery is not None:
                 job_status = runtime_recovery.job_status
                 phase = runtime_recovery.phase
-                new_cursor = await managed_job_state.observe_runtime_async(
+                runtime_cursor = await managed_job_state.observe_runtime_async(
                     self._job_id,
                     task_id,
                     runtime_recovery,
                     callback_func=callback_func,
                     infra=_runtime_infra(runtime_handle))
-                if new_cursor is not None:
-                    runtime_cursor = new_cursor
+                # No cursor came back (for example from a wrapper that drops
+                # the return value): read it from the database before the
+                # next dispatch rather than pass a stale one.
+                runtime_cursor_stale = runtime_cursor is None
                 if phase == managed_job_runtime.RuntimePhase.NEEDS_REPLACEMENT:
                     job_status = None
                 elif job_status == job_lib.JobStatus.CANCELLED:
