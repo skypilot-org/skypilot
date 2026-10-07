@@ -1268,6 +1268,19 @@ async def prepare_request_async(
         # Fallback to legacy environment variable based identity if no
         # authentication is set.
         user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
+        # This identity comes straight from the client and is stored as the
+        # owner of any cluster the request creates, so reject a malformed one
+        # here. A well-formed id is an invariant elsewhere in the codebase
+        # (controller_utils asserts it), and an id that does not round-trip to
+        # a real user leaves clusters that the owner filter in get_clusters()
+        # can never associate back with anyone. See #9621. The SDK's
+        # get_user_hash() only ever returns a valid id, so this guards
+        # non-SDK callers of the API.
+        # Skipped for system requests, whose id is replaced below anyway.
+        if (not is_skypilot_system and
+                not common_utils.is_valid_user_hash(user_id)):
+            raise exceptions.InvalidUserIdError(
+                f'Invalid user id: {user_id!r}.')
     if is_skypilot_system:
         user_id = constants.SKYPILOT_SYSTEM_USER_ID
         global_user_state.add_or_update_user(

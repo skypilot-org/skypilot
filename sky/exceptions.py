@@ -489,6 +489,11 @@ class InvalidWorkspaceNameError(Exception):
     pass
 
 
+class InvalidUserIdError(Exception):
+    """Raised when a user id does not have the expected form."""
+    pass
+
+
 class WorkspaceConfigConflictError(Exception):
     """Raised when a workspace update was based on an outdated config.
 

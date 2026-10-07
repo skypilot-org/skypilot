@@ -14,6 +14,7 @@ import pytest
 
 from sky import exceptions
 from sky import global_user_state
+from sky import models
 from sky import skypilot_config
 from sky.server import config as server_config
 from sky.server import constants as server_constants
@@ -2003,3 +2004,69 @@ def test_maybe_observe_request_pending_first_execution_only():
         executor._maybe_observe_request_pending(  # pylint: disable=protected-access
             make_request(requests_lib.RequestStatus.WAITING))
         assert observe.call_count == 1
+
+
+class TestClientUserIdValidation:
+    """The client-supplied user id is validated before it becomes an owner.
+
+    Regression tests for #9621: a corrupted ~/.sky/user_hash used to be stored
+    verbatim as a cluster's owner, producing an identity that matches no user.
+    """
+
+    def _body(self, user_id: str) -> payloads.RequestBody:
+        body = payloads.RequestBody()
+        body.env_vars[constants.USER_ID_ENV_VAR] = user_id
+        body.env_vars[constants.USER_ENV_VAR] = 'someone'
+        return body
+
+    async def _prepare(self, user_id: str, auth_user=None):
+        # Everything after the identity check needs the requests DB, which is
+        # not what these tests are about.
+        with mock.patch.object(executor.api_requests,
+                               'create_if_not_exists_async',
+                               new=mock.AsyncMock(return_value=True)), \
+             mock.patch.object(executor.workspace_access,
+                               'for_current_request',
+                               return_value=None), \
+             mock.patch.object(pathlib.Path, 'touch'):
+            return await executor.prepare_request_async(
+                request_id='req-9621',
+                request_name='test.identity',
+                request_body=self._body(user_id),
+                func=lambda: None,
+                schedule_type=requests_lib.ScheduleType.SHORT,
+                auth_user=auth_user)
+
+    @pytest.mark.parametrize(
+        'user_id',
+        [
+            'abc%123',  # the shape reported in #9621
+            '',
+            '-leading-hyphen',
+            '../x',  # path traversal characters
+            '/abs',
+            'abcdef12\n',  # trailing newline: a distinct identity
+        ])
+    @pytest.mark.asyncio
+    async def test_malformed_user_id_is_rejected(self, user_id):
+        with pytest.raises(exceptions.InvalidUserIdError):
+            await self._prepare(user_id)
+
+    @pytest.mark.asyncio
+    async def test_valid_user_id_passes_through(self):
+        request = await self._prepare('abcdef12')
+        assert request.user_id == 'abcdef12'
+
+    @pytest.mark.asyncio
+    async def test_service_account_id_still_accepted(self):
+        """Service-account ids use hyphens and must keep working."""
+        request = await self._prepare('sa-abc123-token-xyz')
+        assert request.user_id == 'sa-abc123-token-xyz'
+
+    @pytest.mark.asyncio
+    async def test_authenticated_identity_bypasses_client_value(self):
+        """With auth on, the server's identity wins and the bad client value
+        is overwritten rather than rejected."""
+        auth_user = models.User(id='authuser1', name='auth-user')
+        request = await self._prepare('bad%id', auth_user=auth_user)
+        assert request.user_id == 'authuser1'

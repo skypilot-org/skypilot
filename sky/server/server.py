@@ -1407,6 +1407,15 @@ soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
 
 
+@app.exception_handler(exceptions.InvalidUserIdError)
+def handle_invalid_user_id_error(request: fastapi.Request,
+                                 e: exceptions.InvalidUserIdError):
+    del request  # request is not used
+    # The request never reached the queue, so this is a client-side mistake.
+    return fastapi.responses.JSONResponse(status_code=400,
+                                          content={'detail': str(e)})
+
+
 @app.exception_handler(exceptions.ConcurrentWorkerExhaustedError)
 def handle_concurrent_worker_exhausted_error(
         request: fastapi.Request, e: exceptions.ConcurrentWorkerExhaustedError):
