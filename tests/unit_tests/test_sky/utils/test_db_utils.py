@@ -11,6 +11,10 @@ from sqlalchemy.ext import asyncio as sqlalchemy_async
 from sky.utils.db import db_utils
 
 
+def _rendered(url: sqlalchemy.engine.URL) -> str:
+    return url.render_as_string(hide_password=False)
+
+
 class TestSkyRuntimeDirEnvVar:
     """Test that db_utils correctly uses SKY_RUNTIME_DIR for database paths."""
 
@@ -206,7 +210,8 @@ class TestGetEngine:
 
             mock_create.assert_called_once()
             call_args = mock_create.call_args
-            assert call_args[0][0] == 'postgresql://user:pass@localhost/db'
+            assert _rendered(call_args[0][0]) == (
+                'postgresql+psycopg2://user:pass@localhost/db')
             assert call_args[1]['poolclass'] == sqlalchemy.NullPool
             assert engine == mock_engine
 
@@ -225,7 +230,8 @@ class TestGetEngine:
 
             mock_create.assert_called_once()
             call_args = mock_create.call_args
-            assert call_args[0][0] == 'postgresql://user:pass@localhost/db'
+            assert _rendered(call_args[0][0]) == (
+                'postgresql+psycopg2://user:pass@localhost/db')
             assert call_args[1]['poolclass'] == sqlalchemy.pool.QueuePool
             assert call_args[1]['pool_size'] == 10
             assert call_args[1]['max_overflow'] == 0  # max(0, 5-10)
@@ -493,8 +499,9 @@ class TestGetEngine:
             mock_create.return_value = mock.MagicMock()
             db_utils.get_engine(db_name='ignored')
 
-            assert mock_create.call_args[0][0] == (
-                'postgresql://user:pass@127.0.0.1:6432/db?sslmode=disable')
+            assert _rendered(mock_create.call_args[0][0]) == (
+                'postgresql+psycopg2://user:pass@127.0.0.1:6432/db'
+                '?sslmode=disable')
 
     def test_direct_bypasses_pooler(self, monkeypatch):
         """direct=True keeps the raw URI even when a pooler is configured."""
@@ -508,8 +515,8 @@ class TestGetEngine:
             mock_create.return_value = mock.MagicMock()
             db_utils.get_engine(db_name='ignored', direct=True)
 
-            assert mock_create.call_args[0][0] == (
-                'postgresql://user:pass@10.0.0.5:5432/db')
+            assert _rendered(mock_create.call_args[0][0]) == (
+                'postgresql+psycopg2://user:pass@10.0.0.5:5432/db')
 
     def test_pooled_and_direct_engines_cached_separately(self, monkeypatch):
         """Pooled and direct engines are distinct entries in the cache."""
@@ -556,17 +563,16 @@ class TestGetEngine:
         pools = {}
 
         def rec(conn, **kw):
-            pools[conn] = kw.get('poolclass')
+            pools[_rendered(conn)] = kw.get('poolclass')
             return mock.MagicMock()
 
         with mock.patch('sqlalchemy.create_engine', side_effect=rec):
             db_utils.get_engine(db_name='ignored')  # pooled
             db_utils.get_engine(db_name='ignored', direct=True)  # direct
 
-        assert pools[
-            'postgresql://user:pass@127.0.0.1:6432/db?sslmode=disable'] == (
-                sqlalchemy.pool.QueuePool)
-        assert pools['postgresql://user:pass@10.0.0.5:5432/db'] == (
+        assert pools['postgresql+psycopg2://user:pass@127.0.0.1:6432/db'
+                     '?sslmode=disable'] == sqlalchemy.pool.QueuePool
+        assert pools['postgresql+psycopg2://user:pass@10.0.0.5:5432/db'] == (
             sqlalchemy.NullPool)
 
     def test_direct_engine_uses_queuepool_when_no_pooler(self, monkeypatch):
@@ -720,16 +726,16 @@ class TestDbConnectionPoolSizeOverride:
         pools = {}
 
         def rec(conn, **kwargs):
-            pools[conn] = kwargs.get('poolclass')
+            pools[_rendered(conn)] = kwargs.get('poolclass')
             return mock.MagicMock()
 
         with mock.patch('sqlalchemy.create_engine', side_effect=rec):
             db_utils.get_engine(db_name='ignored')
             db_utils.get_engine(db_name='ignored', direct=True)
 
-        assert pools['postgresql://user:pass@127.0.0.1:6432/db?'
+        assert pools['postgresql+psycopg2://user:pass@127.0.0.1:6432/db?'
                      'sslmode=disable'] == sqlalchemy.pool.QueuePool
-        assert pools['postgresql://user:pass@localhost/db'] == (
+        assert pools['postgresql+psycopg2://user:pass@localhost/db'] == (
             sqlalchemy.NullPool)
 
 
@@ -742,6 +748,15 @@ class TestConnStringResolution:
         monkeypatch.delenv('SKYPILOT_DB_CONNECTION_URI', raising=False)
         monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
         monkeypatch.delenv('SKYPILOT_DB_POOL_CONNECTION_URI', raising=False)
+
+    @pytest.mark.parametrize('conn_string,expected', [
+        ('postgresql://u:p%40ss@h:5432/db?sslmode=require',
+         'postgresql+psycopg2://u:p%40ss@h:5432/db?sslmode=require'),
+        ('postgresql+psycopg2://u:p@h/db', 'postgresql+psycopg2://u:p@h/db'),
+        ('postgresql+psycopg://u:p@h/db', 'postgresql+psycopg://u:p@h/db'),
+    ])
+    def test_psycopg2_url(self, conn_string, expected):
+        assert _rendered(db_utils.psycopg2_url(conn_string)) == expected
 
     def test_rewrite_preserves_userinfo_and_dbname(self):
         out = db_utils._rewrite_hostport(

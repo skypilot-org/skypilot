@@ -489,6 +489,21 @@ class InvalidWorkspaceNameError(Exception):
     pass
 
 
+class InvalidUserIdError(Exception):
+    """Raised when a user id does not have the expected form."""
+    pass
+
+
+class WorkspaceConfigConflictError(Exception):
+    """Raised when a workspace update was based on an outdated config.
+
+    The caller sent the config it started from (``expected_config``) and the
+    workspace no longer holds it, i.e. someone else changed the workspace in
+    the meantime.
+    """
+    pass
+
+
 class WorkspaceAmbiguousError(SkyPilotExcludeArgsBaseException):
     """Raised when a user belongs to multiple workspaces and none is chosen.
 

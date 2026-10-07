@@ -632,6 +632,8 @@ class JobsLaunchBody(RequestBody):
     # False when it came from the in-job-group default. Decides whether a
     # server that cannot record attachments errors or launches top-level.
     job_group_explicit: bool = False
+    # Managed jobs this job waits for.
+    depends_on: Optional[List[int]] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
@@ -969,6 +971,10 @@ class UpdateWorkspaceBody(RequestBody):
     """The request body for updating a specific workspace configuration."""
     workspace_name: str = ''  # Will be set from path parameter
     config: Dict[str, Any]
+    # The workspace config the update was based on. When set, the update is
+    # rejected with WorkspaceConfigConflictError if the workspace no longer
+    # holds it (compared under the config lock).
+    expected_config: Optional[Dict[str, Any]] = None
 
 
 class CreateWorkspaceBody(RequestBody):

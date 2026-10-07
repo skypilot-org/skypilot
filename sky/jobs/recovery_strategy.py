@@ -29,6 +29,7 @@ from sky.jobs import scheduler
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
 from sky.metrics import utils as metrics_utils
+from sky.provision import observation as provision_observation
 from sky.serve import serve_utils
 from sky.server import common as server_common
 from sky.server.requests import requests as requests_lib
@@ -293,6 +294,7 @@ class StrategyExecutor:
         self.task_id = task_id
         self.pool = pool
         self.restart_cnt_on_failure = 0
+        self.runtime_restart_cnt_on_failure = 0
         self.job_id_on_pool_cluster: Optional[int] = None
         self.starting = starting
         self.starting_lock = starting_lock
@@ -323,6 +325,12 @@ class StrategyExecutor:
         """
         return {}
 
+    def _observation_context(self) -> Dict[str, Any]:
+        """Route provisioning-time runtime observations to this task."""
+        target = state.provisioning_observation_target(self.job_id,
+                                                       self.task_id)
+        return {provision_observation.LAUNCH_CONTEXT_KEY: target}
+
     def task_specs(self) -> Dict[str, Any]:
         """Return strategy-specific keys for the persisted task specs.
 
@@ -336,7 +344,9 @@ class StrategyExecutor:
 
         Subclasses use this to rehydrate state from persisted handles.
         """
-        return None
+        self.runtime_restart_cnt_on_failure = (
+            await state.get_runtime_user_restarts_async(self.job_id,
+                                                        self.task_id))
 
     async def monitor_task(  # pylint: disable=unused-argument
         self,
@@ -548,38 +558,61 @@ class StrategyExecutor:
         while job_checking_retry_cnt < MAX_JOB_CHECKING_RETRY:
             # Avoid the infinite loop, if any bug happens.
             job_checking_retry_cnt += 1
+            runtime_status = None
+            handle = None
             try:
-                cluster_status, _ = (await asyncio.to_thread(
-                    backend_utils.refresh_cluster_status_handle,
-                    self.cluster_name,
-                    force_refresh_statuses=set(status_lib.ClusterStatus)))
+                if managed_job_runtime.is_registered():
+                    handle = await asyncio.to_thread(
+                        global_user_state.get_handle_from_cluster_name,
+                        self.cluster_name)
+                    runtime_status = await asyncio.to_thread(
+                        managed_job_runtime.get_job_status, handle,
+                        self.cluster_name)
             except Exception as e:  # pylint: disable=broad-except
-                # If any unexpected error happens, retry the job checking
-                # loop.
-                # TODO(zhwu): log the unexpected error to usage collection
-                # for future debugging.
                 reason = f':{_error_kind(e)}'
-                logger.info(f'Unexpected exception: {e}\nFailed to get the '
-                            'refresh the cluster status. Retrying.')
+                logger.info('Unexpected exception during fetching job status: '
+                            f'{common_utils.format_exception(e)}')
                 continue
-            if cluster_status not in (status_lib.ClusterStatus.UP,
-                                      status_lib.ClusterStatus.AUTOSTOPPING):
-                # The cluster can be preempted before the job is
-                # launched.
-                # Break to let the retry launch kick in.
-                logger.info('The cluster is preempted before the job '
-                            'is submitted.')
-                # TODO(zhwu): we should recover the preemption with the
-                # recovery strategy instead of the current while loop.
-                reason = _SUBMIT_CLUSTER_PREEMPTED
-                break
-
-            try:
-                status, transient_error_reason = (
-                    await managed_job_utils.get_job_status(
-                        self.backend,
+            # A submitted runtime job can requeue or finish before launch
+            # returns. Its owner determines whether submission succeeded.
+            if runtime_status is None:
+                try:
+                    cluster_status, _ = (await asyncio.to_thread(
+                        backend_utils.refresh_cluster_status_handle,
                         self.cluster_name,
-                        job_id=self.job_id_on_pool_cluster))
+                        force_refresh_statuses=set(status_lib.ClusterStatus)))
+                except Exception as e:  # pylint: disable=broad-except
+                    # If any unexpected error happens, retry the job checking
+                    # loop.
+                    # TODO(zhwu): log the unexpected error to usage collection
+                    # for future debugging.
+                    reason = f':{_error_kind(e)}'
+                    logger.info(f'Unexpected exception: {e}\nFailed to get the '
+                                'refresh the cluster status. Retrying.')
+                    continue
+                if cluster_status not in (
+                        status_lib.ClusterStatus.UP,
+                        status_lib.ClusterStatus.AUTOSTOPPING):
+                    # The cluster can be preempted before the job is
+                    # launched.
+                    # Break to let the retry launch kick in.
+                    logger.info('The cluster is preempted before the job '
+                                'is submitted.')
+                    # TODO(zhwu): we should recover the preemption with the
+                    # recovery strategy instead of the current while loop.
+                    reason = _SUBMIT_CLUSTER_PREEMPTED
+                    break
+            try:
+                if runtime_status is not None:
+                    status, transient_error_reason = runtime_status
+                else:
+                    status, transient_error_reason = (
+                        await managed_job_utils.get_job_status(
+                            self.backend,
+                            self.cluster_name,
+                            job_id=self.job_id_on_pool_cluster,
+                            handle=handle,
+                            runtime_checked=True))
             except Exception as e:  # pylint: disable=broad-except
                 transient_error_reason = common_utils.format_exception(e)
                 # If any unexpected error happens, retry the job checking
@@ -606,9 +639,6 @@ class StrategyExecutor:
             # Check the job status until it is not in initialized status
             if status is not None and status > job_lib.JobStatus.INIT:
                 if managed_job_runtime.is_registered():
-                    handle = await asyncio.to_thread(
-                        global_user_state.get_handle_from_cluster_name,
-                        self.cluster_name)
                     runtime_submitted_at = await asyncio.to_thread(
                         managed_job_runtime.get_job_submitted_at, handle,
                         self.cluster_name)
@@ -1055,6 +1085,21 @@ class StrategyExecutor:
                             try:
                                 if reattach_request_id is None:
                                     extra_ctx = self.extra_launch_context()
+                                    runtime_restarts = await (
+                                        state.get_runtime_user_restarts_async(
+                                            self.job_id, self.task_id))
+                                    self.runtime_restart_cnt_on_failure = (
+                                        runtime_restarts)
+                                    extra_ctx.update(
+                                        self._observation_context())
+                                    extra_ctx['managed_job_recovery'] = {
+                                        'max_restarts_on_errors': max(
+                                            0, self.max_restarts_on_errors -
+                                            self.restart_cnt_on_failure -
+                                            runtime_restarts),
+                                        'recover_on_exit_codes':
+                                            self.recover_on_exit_codes,
+                                    }
                                     request_id = await asyncio.to_thread(
                                         sdk.launch,
                                         self.dag,
@@ -1481,9 +1526,11 @@ class StrategyExecutor:
 
         # Otherwise, check the max_restarts_on_errors counter
         self.restart_cnt_on_failure += 1
-        if self.restart_cnt_on_failure > self.max_restarts_on_errors:
+        restart_count = (self.restart_cnt_on_failure +
+                         self.runtime_restart_cnt_on_failure)
+        if restart_count > self.max_restarts_on_errors:
             return False
-        logger.info(f'Restart count {self.restart_cnt_on_failure} '
+        logger.info(f'Restart count {restart_count} '
                     'is less than max_restarts_on_errors, '
                     'restarting job')
         return True
