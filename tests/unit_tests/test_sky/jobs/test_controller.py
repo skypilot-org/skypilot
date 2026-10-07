@@ -2339,6 +2339,9 @@ class TestStatusCheckGapJitter:
         instance._pool = None
         instance._update_live_log_links = AsyncMock(return_value=True)
         sleep = AsyncMock(return_value=None)
+        # No time passes between the mocked sleeps, so without the
+        # _network_check_is_fresh patch below every network check after the
+        # first would reuse the first.
         with patch.object(controller_module, 'random', random.Random(0)), \
              patch.object(controller_module, '_status_check_gap_seconds',
                           wraps=controller_module._status_check_gap_seconds
@@ -2349,6 +2352,8 @@ class TestStatusCheckGapJitter:
                           'async_check_network_connection',
                           new=AsyncMock(
                               side_effect=fake_check_network_connection)), \
+             patch.object(controller_module, '_network_check_is_fresh',
+                          return_value=False), \
              patch.object(controller_module.managed_job_runtime,
                           'is_registered', return_value=False), \
              patch.object(controller_module.asyncio, 'sleep', new=sleep):
@@ -2375,6 +2380,159 @@ class TestStatusCheckGapJitter:
         assert all(self._LOW <= s <= self._HIGH for s in sleeps[1:]), sleeps
         assert abs(statistics.mean(sleeps[1:]) - self._GAP) < 0.3
         assert len(set(sleeps[1:])) == len(sleeps) - 1
+
+
+@pytest.fixture(autouse=True)
+def _fresh_network_check_cache(monkeypatch):
+    """Isolate the process-wide network-check cache between tests.
+
+    The monitor loop reuses one successful network check across every loop in
+    the process. A check recorded by one test must not skip the check in the
+    next, and a lock bound to one test's event loop must not reach another.
+    """
+    monkeypatch.setattr(controller_module, '_network_check_ok_at', None)
+    monkeypatch.setattr(controller_module, '_network_check_lock',
+                        asyncio.Lock())
+
+
+class TestNetworkCheckOncePerGap:
+    """Tests for sharing one network check across the monitor loops of a
+    process.
+
+    Every monitor loop checks the network before polling its job. A process
+    monitoring thousands of jobs would make thousands of HTTPS requests per
+    status-check gap, all to the same destination, so one check that succeeded
+    within the gap answers for every loop. Only successes are reused; a loop
+    that sees the network down retries as before.
+    """
+
+    _GAP = 10
+
+    @pytest.fixture(autouse=True)
+    def _gap(self, monkeypatch):
+        monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_CHECK_GAP_SECONDS',
+                            self._GAP)
+
+    def _shortest_sleep(self):
+        """The least a loop sleeps between two polls (see
+        ``_status_check_gap_seconds``)."""
+        return self._GAP * (1 - controller_module._STATUS_CHECK_GAP_JITTER)
+
+    @pytest.mark.asyncio
+    async def test_recent_success_is_reused(self):
+        check = AsyncMock()
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=check):
+            await controller_module._check_network_connection()
+            await controller_module._check_network_connection()
+        assert check.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_check_runs_again_after_the_shortest_sleep(self):
+        """A lone loop sleeps at least gap * (1 - jitter) between polls, so
+        its own last check is never reused: it checks before every poll just
+        as it did before the cache."""
+        check = AsyncMock()
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=check):
+            await controller_module._check_network_connection()
+            controller_module._network_check_ok_at = (time.monotonic() -
+                                                      self._shortest_sleep() +
+                                                      1)
+            await controller_module._check_network_connection()
+            assert check.await_count == 1
+            controller_module._network_check_ok_at = (time.monotonic() -
+                                                      self._shortest_sleep())
+            await controller_module._check_network_connection()
+        assert check.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_gap_is_read_at_call_time(self, monkeypatch):
+        """The reuse window follows JOB_STATUS_CHECK_GAP_SECONDS as it is at
+        the time of the check, not as it was when the module loaded."""
+        check = AsyncMock()
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=check):
+            await controller_module._check_network_connection()
+            monkeypatch.setattr(managed_job_utils,
+                                'JOB_STATUS_CHECK_GAP_SECONDS', 0)
+            await controller_module._check_network_connection()
+        assert check.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_failure_is_not_reused(self):
+        check = AsyncMock(side_effect=exceptions.NetworkError('down'))
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=check):
+            for _ in range(2):
+                with pytest.raises(exceptions.NetworkError):
+                    await controller_module._check_network_connection()
+        assert check.await_count == 2
+        assert controller_module._network_check_ok_at is None
+
+    @pytest.mark.asyncio
+    async def test_concurrent_loops_share_one_check(self):
+        """Loops that all find the cache stale wait for one check rather than
+        each starting their own."""
+        started = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def slow_check():
+            started.set()
+            await finish.wait()
+
+        check = AsyncMock(side_effect=slow_check)
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=check):
+            loops = [
+                asyncio.create_task(
+                    controller_module._check_network_connection())
+                for _ in range(5)
+            ]
+            await started.wait()
+            # Let every other loop reach the lock before the check finishes.
+            for _ in range(5):
+                await asyncio.sleep(0)
+            finish.set()
+            await asyncio.gather(*loops)
+        assert check.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_waiting_loops_retry_after_a_failed_check(self):
+        """A failure reaches only the loop that ran the check. The loops
+        waiting on it run their own check instead of inheriting the error,
+        and once one succeeds the rest reuse it."""
+        finish = asyncio.Event()
+        calls = 0
+
+        async def gated_check():
+            nonlocal calls
+            calls += 1
+            await finish.wait()
+            if calls == 1:
+                raise exceptions.NetworkError('down')
+
+        check = AsyncMock(side_effect=gated_check)
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=check):
+            loops = [
+                asyncio.create_task(
+                    controller_module._check_network_connection())
+                for _ in range(3)
+            ]
+            for _ in range(5):
+                await asyncio.sleep(0)
+            finish.set()
+            results = await asyncio.gather(*loops, return_exceptions=True)
+        assert isinstance(results[0], exceptions.NetworkError)
+        assert results[1:] == [None, None]
+        assert check.await_count == 2
 
 
 class TestAddK8sAnnotations:

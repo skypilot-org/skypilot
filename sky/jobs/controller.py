@@ -104,6 +104,50 @@ def _status_check_gap_seconds(first_check: bool) -> float:
                                 1 + _STATUS_CHECK_GAP_JITTER)
 
 
+# One network check per controller process per status-check gap. Every
+# monitor loop checks the network before it polls its job, so a process that
+# monitors thousands of jobs makes thousands of HTTPS requests per gap, all to
+# the same destination, where one answer serves every loop.
+# _network_check_ok_at is the time.monotonic() of the last check that
+# succeeded. A failure is never recorded, so a loop that finds the network
+# down retries exactly as before.
+_network_check_lock: asyncio.Lock = asyncio.Lock()
+_network_check_ok_at: Optional[float] = None
+
+
+def _network_check_is_fresh() -> bool:
+    """Whether the last successful network check can stand in for a new one.
+
+    A check is reused for the shortest gap a loop sleeps between two polls,
+    JOB_STATUS_CHECK_GAP_SECONDS minus its jitter, so a process with a single
+    loop still checks the network before every poll, exactly as before. The
+    gap is read on every call, as _status_check_gap_seconds reads it.
+    """
+    if _network_check_ok_at is None:
+        return False
+    max_age = (managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS *
+               (1 - _STATUS_CHECK_GAP_JITTER))
+    return time.monotonic() - _network_check_ok_at < max_age
+
+
+async def _check_network_connection() -> None:
+    """Checks the network connection, reusing a recent successful check.
+
+    Raises exceptions.NetworkError when the check fails. Loops that find no
+    fresh check wait for one check instead of each starting its own: when it
+    succeeds they all return; when it fails, the loop that ran it gets the
+    error and the next loop in line runs its own check.
+    """
+    global _network_check_ok_at
+    if _network_check_is_fresh():
+        return
+    async with _network_check_lock:
+        if _network_check_is_fresh():
+            return
+        await backend_utils.async_check_network_connection()
+        _network_check_ok_at = time.monotonic()
+
+
 async def create_background_task(coro: typing.Coroutine) -> None:
     """Create a background task and add it to the set of background tasks.
 
@@ -1164,7 +1208,7 @@ class JobController:
                 # Check the network connection to avoid false alarm for job
                 # failure. Network glitch was observed even in the VM.
                 try:
-                    await backend_utils.async_check_network_connection()
+                    await _check_network_connection()
                 except exceptions.NetworkError:
                     logger.info(
                         'Network is not available. Retrying again in about '
