@@ -11,7 +11,9 @@ and file mount cleanup in task_cleanup().
 import asyncio
 import contextlib
 import copy
+import random
 import runpy
+import statistics
 import sys
 import threading
 import time
@@ -28,6 +30,7 @@ import sqlalchemy.exc
 from sqlalchemy.ext.asyncio import create_async_engine
 
 import sky
+from sky import exceptions
 from sky import task as task_lib
 from sky.jobs import constants as jobs_constants
 from sky.jobs import controller as controller_module
@@ -2260,6 +2263,118 @@ class TestTransientJobStatusRecoveryWindow:
                 executor=MagicMock())
 
         status_logger.flush.assert_called_once()
+
+
+class TestStatusCheckGapJitter:
+    """Tests for the random spread of the monitor loop's status-check gap.
+
+    Monitor loops that start together (e.g. every job resumed after a
+    controller restart) must not check their jobs at the same moment in every
+    cycle. The first gap of a loop is spread over a whole gap; later gaps vary
+    around JOB_STATUS_CHECK_GAP_SECONDS without changing the mean.
+    """
+
+    _GAP = managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS
+    _LOW = _GAP * (1 - controller_module._STATUS_CHECK_GAP_JITTER)
+    _HIGH = _GAP * (1 + controller_module._STATUS_CHECK_GAP_JITTER)
+
+    class _StopLoop(Exception):
+        pass
+
+    def test_later_gaps_bounded_and_mean_preserved(self):
+        with patch.object(controller_module, 'random', random.Random(0)):
+            gaps = [
+                controller_module._status_check_gap_seconds(first_check=False)
+                for _ in range(10000)
+            ]
+        assert all(self._LOW <= g <= self._HIGH for g in gaps)
+        assert abs(statistics.mean(gaps) - self._GAP) < 0.1
+        # The gaps must actually vary, or loops that start together stay
+        # together.
+        assert max(gaps) - min(gaps) > self._GAP * 0.3
+
+    def test_first_gaps_spread_loops_that_start_together(self):
+        """Loops started at the same moment have their first checks spread
+        evenly over one gap, rather than bunched together."""
+        num_loops = 1000
+        num_bins = 5
+        with patch.object(controller_module, 'random', random.Random(0)):
+            first_gaps = [
+                controller_module._status_check_gap_seconds(first_check=True)
+                for _ in range(num_loops)
+            ]
+        assert all(0 <= g <= self._GAP for g in first_gaps)
+        bins = [0] * num_bins
+        for g in first_gaps:
+            bins[min(int(g / self._GAP * num_bins), num_bins - 1)] += 1
+        # An even spread puts 20% of the loops in each fifth of the gap.
+        assert max(bins) < num_loops * 0.25, bins
+        assert min(bins) > num_loops * 0.15, bins
+
+    @pytest.mark.asyncio
+    async def test_monitor_loop_sleeps_are_jittered(self):
+        """Drives the monitor loop through healthy status checks, including
+        one failed network check, and checks every sleep it takes."""
+        num_checks = 500
+        checks = 0
+        network_checks = 0
+
+        async def fake_get_job_status(*args, **kwargs):
+            nonlocal checks
+            if checks >= num_checks:
+                raise self._StopLoop()
+            checks += 1
+            return job_lib.JobStatus.RUNNING, None
+
+        async def fake_check_network_connection():
+            nonlocal network_checks
+            network_checks += 1
+            if network_checks == 3:
+                raise exceptions.NetworkError('network is down')
+
+        task = MagicMock()
+        task.num_nodes = 1
+        instance = MagicMock()
+        instance._job_id = 1
+        instance._pool = None
+        instance._update_live_log_links = AsyncMock(return_value=True)
+        sleep = AsyncMock(return_value=None)
+        with patch.object(controller_module, 'random', random.Random(0)), \
+             patch.object(controller_module, '_status_check_gap_seconds',
+                          wraps=controller_module._status_check_gap_seconds
+                         ) as gap_seconds, \
+             patch.object(managed_job_utils, 'get_job_status',
+                          new=AsyncMock(side_effect=fake_get_job_status)), \
+             patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=AsyncMock(
+                              side_effect=fake_check_network_connection)), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=False), \
+             patch.object(controller_module.asyncio, 'sleep', new=sleep):
+            with pytest.raises(self._StopLoop):
+                await JobController._monitor_one_task_impl(
+                    instance,
+                    task_id=0,
+                    task=task,
+                    cluster_name='cluster',
+                    executor=MagicMock(),
+                    status_logger=managed_job_utils.JobStatusLogger(),
+                    callback_func=AsyncMock())
+
+        sleeps = [call.args[0] for call in sleep.call_args_list]
+        # One sleep per status check, one for the retry after the failed
+        # network check, and one before the check that stopped the loop.
+        assert len(sleeps) == num_checks + 2
+        # Only the first gap is widened. The failed network check retries
+        # after a normal jittered gap, not a second widened first gap.
+        assert [
+            call.kwargs['first_check'] for call in gap_seconds.call_args_list
+        ] == [True] + [False] * (len(sleeps) - 1)
+        assert 0 <= sleeps[0] <= self._GAP
+        assert all(self._LOW <= s <= self._HIGH for s in sleeps[1:]), sleeps
+        assert abs(statistics.mean(sleeps[1:]) - self._GAP) < 0.3
+        assert len(set(sleeps[1:])) == len(sleeps) - 1
 
 
 class TestAddK8sAnnotations:
