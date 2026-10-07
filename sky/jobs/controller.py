@@ -441,6 +441,7 @@ class JobController:
         task_id: Optional[int],
         handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
         job_id_on_pool_cluster: Optional[int],
+        force_download: bool = False,
     ) -> None:
         """Downloads and streams the logs of the current job with given task ID.
 
@@ -462,8 +463,11 @@ class JobController:
         ``LogDeliverySource`` (the component that deploys the agent) can report
         that, and we then keep the local copy instead of leaving the job with no
         readable logs anywhere.
+
+        If this job's config could not be loaded, force_download keeps a local
+        copy: inherited logging settings cannot prove durable delivery for it.
         """
-        if (logs.is_logging_agent_configured() and
+        if (not force_download and logs.is_logging_agent_configured() and
                 logs.get_log_reader() is not None):
             undelivered_reason = None
             if handle is not None:
@@ -3459,7 +3463,8 @@ class ControllerManager:
             job_id: int,
             task_id: int,
             cluster_name: str,
-            job_id_on_cluster: Optional[int] = None) -> None:
+            job_id_on_cluster: Optional[int] = None,
+            force_download: bool = False) -> None:
         """Download logs for a single task from its cluster.
 
         Looks up the cluster by name and downloads logs via the controller's
@@ -3480,14 +3485,21 @@ class ControllerManager:
 
         assert len(clusters) == 1, (clusters, cluster_name)
         handle = clusters[0].get('handle')
-        await asyncio.to_thread(controller.download_log_and_stream, task_id,
-                                handle, job_id_on_cluster)
+        await asyncio.to_thread(controller.download_log_and_stream,
+                                task_id,
+                                handle,
+                                job_id_on_cluster,
+                                force_download=force_download)
 
-    async def _download_logs_for_cancelled_job(self, controller: JobController,
-                                               job_id: int, task_ids: List[int],
-                                               dag: 'sky.Dag',
-                                               pool: Optional[str]) -> None:
-        """Download logs for a cancelled job before cleanup.
+    async def _download_logs_for_cancelled_job(
+            self,
+            controller: JobController,
+            job_id: int,
+            task_ids: List[int],
+            dag: 'sky.Dag',
+            pool: Optional[str],
+            force_download: bool = False) -> None:
+        """Save active task logs before cancellation or config-failure cleanup.
 
         This ensures that logs remain accessible after job cancellation,
         using the same code path as successful/failed jobs by calling the
@@ -3507,8 +3519,10 @@ class ControllerManager:
             dag: The DAG for the job (used to get task names for cluster
                 name generation).
             pool: Optional pool name if using a pool.
+            force_download: Keep a local copy when the job's config could not
+                be loaded, even if inherited settings suggest external logs.
         """
-        logger.info(f'Downloading logs for cancelled job {job_id}, '
+        logger.info(f'Downloading logs for job {job_id}, '
                     f'task_ids {task_ids}')
 
         if pool is not None:
@@ -3521,9 +3535,12 @@ class ControllerManager:
                             'Skipping log download.')
                 return
 
-            await self._download_log_from_cluster(controller, job_id,
-                                                  task_ids[0], cluster_name,
-                                                  job_id_on_pool_cluster)
+            await self._download_log_from_cluster(controller,
+                                                  job_id,
+                                                  task_ids[0],
+                                                  cluster_name,
+                                                  job_id_on_pool_cluster,
+                                                  force_download=force_download)
             return
 
         # Non-pool path: download logs for each active task.
@@ -3534,8 +3551,12 @@ class ControllerManager:
                 cluster_name = (
                     managed_job_utils.generate_managed_job_cluster_name(
                         task.name, job_id))
-                await self._download_log_from_cluster(controller, job_id,
-                                                      task_id, cluster_name)
+                await self._download_log_from_cluster(
+                    controller,
+                    job_id,
+                    task_id,
+                    cluster_name,
+                    force_download=force_download)
             except Exception as e:  # pylint: disable=broad-except
                 logger.warning(
                     f'Failed to download logs for job {job_id}, '
@@ -3560,6 +3581,7 @@ class ControllerManager:
         logger.info(f'  pid={self._pid}')
 
         job_rank = None
+        reload_job_config = False
         env_content = await asyncio.to_thread(
             file_content_utils.get_job_env_content, job_id)
         if env_content:
@@ -3574,11 +3596,7 @@ class ControllerManager:
                             logger.debug('Set environment variable: %s=%s', key,
                                          value)
 
-                    # Restore config file if needed
-                    await asyncio.to_thread(
-                        file_content_utils.restore_job_config_file, job_id)
-
-                    await asyncio.to_thread(skypilot_config.reload_config)
+                    reload_job_config = True
 
                     # Set SKYPILOT_JOB_RANK from job_id_to_rank mapping if
                     # available
@@ -3622,10 +3640,20 @@ class ControllerManager:
         cancelling = False
         graceful, graceful_timeout = False, None
         controller: Optional[JobController] = None
+        job_config_loaded = False
         try:
+            # Construction does not load the DAG or launch a job, but makes
+            # the log downloader available if a recovered job's config fails.
             controller = JobController(job_id, self.starting,
                                        self._job_tasks_lock,
                                        self._starting_signal, pool, job_rank)
+            # Config restore/reload failures must prevent launch. Keep them
+            # inside the job lifecycle so cleanup and finalization still run.
+            if reload_job_config:
+                await asyncio.to_thread(
+                    file_content_utils.restore_job_config_file, job_id)
+                await asyncio.to_thread(skypilot_config.reload_config)
+            job_config_loaded = True
             await controller.load_dag()
 
             async with self._job_tasks_lock:
@@ -3686,13 +3714,15 @@ class ControllerManager:
             # Download logs before cleanup so they remain accessible after
             # cancellation. This is best-effort - if the cluster is already
             # down, we skip gracefully.
-            if active_task_ids:
+            if active_task_ids and controller is not None:
                 try:
-                    # A cancel can only land at an await point, all of which
-                    # are after the controller is constructed.
-                    assert controller is not None
                     await self._download_logs_for_cancelled_job(
-                        controller, job_id, active_task_ids, dag, pool)
+                        controller,
+                        job_id,
+                        active_task_ids,
+                        dag,
+                        pool,
+                        force_download=not job_config_loaded)
                 except Exception as e:  # pylint: disable=broad-except
                     logger.warning(
                         f'Failed to download logs for cancelled job '
@@ -3703,6 +3733,33 @@ class ControllerManager:
         except Exception as e:
             logger.error(f'Unexpected error in job loop for {job_id}: '
                          f'{common_utils.format_exception(e)}')
+            if not job_config_loaded and controller is not None:
+                # Recovery leaves existing tasks RUNNING. Preserve their logs
+                # before cleanup terminates the clusters, without starting any
+                # new tasks or relying on inherited external-log settings.
+                try:
+                    id_statuses = await (
+                        managed_job_state.get_all_task_ids_statuses_async(
+                            job_id))
+                    active_task_ids = [
+                        tid for tid, status in id_statuses
+                        if not status.is_terminal() and
+                        status != managed_job_state.ManagedJobStatus.PENDING
+                    ]
+                    if active_task_ids:
+                        dag = await asyncio.to_thread(_get_dag, job_id)
+                        await self._download_logs_for_cancelled_job(
+                            controller,
+                            job_id,
+                            active_task_ids,
+                            dag,
+                            pool,
+                            force_download=True)
+                except Exception as log_error:  # pylint: disable=broad-except
+                    logger.warning(
+                        f'Failed to preserve logs for job {job_id} after '
+                        f'config loading failed: '
+                        f'{common_utils.format_exception(log_error)}')
             raise
         finally:
             deadline = (time.monotonic() +
