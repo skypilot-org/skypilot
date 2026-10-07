@@ -3228,7 +3228,7 @@ def get_cluster_info(
     # own entry. (The assignment side only ever needs the head's block, which
     # is the only full block the ConfigMap holds.)
     pod_sshd_ports: Dict[str, int] = {}
-    # Only pods that declare a skylet slot; the rest run skylet on the default.
+    # Only pods that declare a block; the rest run skylet on the default.
     pod_skylet_ports: Dict[str, int] = {}
     legacy_pods = []
     for name, pod in running_pods.items():
@@ -3237,8 +3237,7 @@ def get_cluster_info(
         declared = host_network_ports.ports_from_pod(pod, context)
         if declared is not None:
             pod_sshd_ports[name] = declared['sshd']
-            if 'skylet' in declared:
-                pod_skylet_ports[name] = declared['skylet']
+            pod_skylet_ports[name] = declared['skylet']
         else:
             legacy_pods.append(name)
     if legacy_pods:

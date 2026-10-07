@@ -10,9 +10,8 @@ rather than a runtime failure.
 The port *names* live in ``host_network_probe`` -- the in-pod script binds
 them, this module assigns them, and one list serves both.
 """
-import os
 import random
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import skypilot_config
 from sky.provision.kubernetes import constants as k8s_constants
@@ -101,21 +100,11 @@ BLOCK_SIZE = len(host_network_probe.HEAD_PORT_NAMES)
 # The client's SSH proxy command finds the pod's sshd port by this name.
 SSHD_PORT_NAME = 'ssh'
 
-# Test-only: pin the block start so two clusters are handed the same one.
-# The collision this design exists to arbitrate has a ~0.19% chance of
-# occurring naturally over the range, so an e2e case that waits for it tests
-# nothing. Unset in every normal run.
-_PINNED_START_ENV = 'SKYPILOT_HOST_NETWORK_PORT_START'
-
 
 def allocate_block(context: Optional[str]) -> Dict[str, int]:
     """Assign a fresh contiguous block, keyed by port name."""
-    pinned = os.environ.get(_PINNED_START_ENV)
-    if pinned:
-        start = int(pinned)
-    else:
-        lo, hi = resolve_range(context)
-        start = random.randint(lo, hi - BLOCK_SIZE + 1)
+    lo, hi = resolve_range(context)
+    start = random.randint(lo, hi - BLOCK_SIZE + 1)
     return {
         name: start + offset
         for offset, name in enumerate(host_network_probe.HEAD_PORT_NAMES)
@@ -137,26 +126,20 @@ def ports_from_pod(pod: Any,
     * no ports at all -> ``None``. A pod created before this change declares
       none (the template rendered ``ports:`` only for non-hostNetwork pods),
       so the caller falls back and then allocates.
-    * exactly one contiguous in-range block -> that block. A block one short,
-      on a pod never handed a skylet port, was made before the trailing
-      ``skylet`` slot existed: every name but ``skylet``, whose skylet is on
-      the default port.
+    * exactly one contiguous in-range block -> that block.
     * anything else -> raise. Treating a partial read as "legacy" would
       allocate a fresh block for a pod that is running and listening on the
-      old one. ``BLOCK_SIZE`` is ``len(HEAD_PORT_NAMES)``, so a new slot makes
-      every existing pod's block look partial unless it is taught here.
+      old one. That is not hypothetical: ``BLOCK_SIZE`` is
+      ``len(HEAD_PORT_NAMES)``, so adding a port name after a release would
+      make every existing pod's block look partial, cluster-wide, on upgrade.
     """
     lo, hi = resolve_range(context)
     spec = getattr(pod, 'spec', None)
     declared: List[int] = []
-    env_names: Set[str] = set()
     for container in (getattr(spec, 'containers', None) or []):
         if getattr(container, 'name',
                    None) != k8s_constants.RAY_NODE_CONTAINER_NAME:
             continue
-        env = getattr(container, 'env', None)
-        if isinstance(env, list):
-            env_names.update(str(getattr(e, 'name', '') or '') for e in env)
         for port in (getattr(container, 'ports', None) or []):
             host_port = getattr(port, 'host_port', None)
             # In-range only. The container also carries the user's pod_config
@@ -169,14 +152,7 @@ def ports_from_pod(pod: Any,
     if not declared:
         return None
     start = min(declared)
-    names = host_network_probe.HEAD_PORT_NAMES
-    # One short is a block made before the trailing skylet slot existed, but
-    # only if the pod was also never handed that port: otherwise a range
-    # narrowed by one would silently read as "skylet on the default port".
-    if (len(declared) == BLOCK_SIZE - 1 and
-            host_network_probe.env_var_for_port('skylet') not in env_names):
-        names = names[:-1]
-    expected = list(range(start, start + len(names)))
+    expected = list(range(start, start + BLOCK_SIZE))
     if sorted(declared) != expected or start < lo or expected[-1] > hi:
         pod_name = getattr(getattr(pod, 'metadata', None), 'name', '<unknown>')
         raise RuntimeError(
@@ -185,7 +161,10 @@ def ports_from_pod(pod: Any,
             f'{lo}-{hi}. Refusing to guess: '
             'allocating a new block would point the cluster at ports nothing '
             'is listening on.')
-    return {name: start + offset for offset, name in enumerate(names)}
+    return {
+        name: start + offset
+        for offset, name in enumerate(host_network_probe.HEAD_PORT_NAMES)
+    }
 
 
 def resolve_block(

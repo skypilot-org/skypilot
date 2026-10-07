@@ -44,8 +44,7 @@ _ENV_VAR_FOR_PORT: Dict[str, str] = {
     # skylet's gRPC port, head only. Every skylet otherwise tries 46590 and
     # falls back to the next free port, while the API server always dials
     # 46590: two hostNetwork heads on one node then share one skylet, and one
-    # cluster's jobs run on the other. Last, so a block made before this slot
-    # existed still reconstructs (ports_from_pod).
+    # cluster's jobs run on the other.
     'skylet': 'SKYPILOT_SKYLET_PORT',
 }
 
@@ -56,8 +55,8 @@ _ENV_VAR_FOR_PORT: Dict[str, str] = {
 # THE ORDER IS THE ON-CLUSTER FORMAT. A pod's ports are reconstructed
 # positionally -- block start plus index -- so reordering silently re-maps
 # every running pod's ports while every check still passes: the block is
-# still BLOCK_SIZE contiguous ports in range. Append to add one, and teach
-# ports_from_pod what a block from before it looks like.
+# still BLOCK_SIZE contiguous ports in range. Append to add one; a longer
+# list fails loudly against existing pods, which is what you want.
 HEAD_PORT_NAMES: List[str] = list(_ENV_VAR_FOR_PORT)
 
 # A worker runs neither GCS, dashboard nor ray-client-server, so those three

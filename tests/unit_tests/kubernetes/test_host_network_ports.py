@@ -22,28 +22,18 @@ _EPHEMERAL_FLOOR = 32768
 _NODEPORT_FLOOR = 30000
 
 
-def _container(name, host_ports, env_names=()):
+def _container(name, host_ports):
     c = mock.Mock()
     c.name = name
     c.ports = [mock.Mock(host_port=p) for p in host_ports]
-    env = []
-    for env_name in env_names:
-        e = mock.Mock()
-        e.name = env_name
-        env.append(e)
-    c.env = env
     return c
 
 
-def _pod(host_ports=None,
-         phase='Running',
-         conditions=(),
-         sidecar_ports=(),
-         env_names=()):
+def _pod(host_ports=None, phase='Running', conditions=(), sidecar_ports=()):
     containers = []
     if sidecar_ports:
         containers.append(_container('my-sidecar', sidecar_ports))
-    containers.append(_container('ray-node', host_ports or [], env_names))
+    containers.append(_container('ray-node', host_ports or []))
     pod = mock.Mock()
     pod.spec.containers = containers
     pod.metadata.name = 'c-head'
@@ -391,30 +381,12 @@ class TestPartialDeclarationIsNotLegacy:
     """
 
     def test_a_short_block_raises_rather_than_reallocating(self):
+        """One short: the shape a newly appended port name gives every
+        existing pod."""
         block = ports.allocate_block(None)
-        short = sorted(block.values())[:-2]
+        short = sorted(block.values())[:-1]
         with pytest.raises(RuntimeError, match='contiguous'):
             ports.ports_from_pod(_pod(host_ports=short), None)
-
-    def test_a_block_from_before_the_skylet_slot_reads_without_it(self):
-        """Its skylet is on the default port; sshd keeps its offset."""
-        block = ports.allocate_block(None)
-        pre_slot = sorted(block.values())[:-1]
-        read = ports.ports_from_pod(_pod(host_ports=pre_slot), None)
-        assert 'skylet' not in read
-        assert read['sshd'] == block['sshd']
-        assert read['gcs'] == block['gcs']
-
-    def test_one_short_with_a_skylet_port_assigned_raises(self):
-        """The pod was handed a skylet port, so a missing tenth port is a
-        mis-read (say a range narrowed by one), not a pod from before."""
-        block = ports.allocate_block(None)
-        pre_slot = sorted(block.values())[:-1]
-        with pytest.raises(RuntimeError, match='contiguous'):
-            ports.ports_from_pod(
-                _pod(host_ports=pre_slot,
-                     env_names=[host_network_probe.env_var_for_port('skylet')]),
-                None)
 
     def test_a_gap_in_the_block_raises(self):
         start = ports.PORT_RANGE_START
@@ -660,8 +632,8 @@ class TestRangeIsPerContext:
 class TestClusterInfoCarriesTheHeadsSkyletPort:
     """get_cluster_info is where the server learns which port to dial."""
 
-    def _pod(self, name, host_ports, env_names=(), kind='head'):
-        pod = _pod(host_ports=host_ports, env_names=env_names)
+    def _pod(self, name, host_ports, kind='head'):
+        pod = _pod(host_ports=host_ports)
         pod.metadata.name = name
         pod.metadata.labels = {'ray-node-type': kind}
         pod.spec.host_network = True
@@ -692,10 +664,3 @@ class TestClusterInfoCarriesTheHeadsSkyletPort:
         head = self._pod('c-head', sorted(block.values()))
         info = self._cluster_info(monkeypatch, {'c-head': head})
         assert info.get_head_instance().skylet_port == block['skylet']
-
-    def test_a_block_from_before_the_slot_leaves_it_unset(self, monkeypatch):
-        """Its skylet floated from the default; the dialer uses the default."""
-        block = ports.allocate_block(None)
-        head = self._pod('c-head', sorted(block.values())[:-1])
-        info = self._cluster_info(monkeypatch, {'c-head': head})
-        assert info.get_head_instance().skylet_port is None
