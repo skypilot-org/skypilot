@@ -2388,11 +2388,12 @@ def _fresh_network_check_cache(monkeypatch):
 
     The monitor loop reuses one successful network check across every loop in
     the process. A check recorded by one test must not skip the check in the
-    next, and a lock bound to one test's event loop must not reach another.
+    next, and a lock created in one test's event loop must not reach another:
+    each test starts as the controller does, with no lock until the first
+    check creates one.
     """
     monkeypatch.setattr(controller_module, '_network_check_ok_at', None)
-    monkeypatch.setattr(controller_module, '_network_check_lock',
-                        asyncio.Lock())
+    monkeypatch.setattr(controller_module, '_network_check_lock', None)
 
 
 class TestNetworkCheckOncePerGap:
@@ -2533,6 +2534,30 @@ class TestNetworkCheckOncePerGap:
         assert isinstance(results[0], exceptions.NetworkError)
         assert results[1:] == [None, None]
         assert check.await_count == 2
+
+    def test_concurrent_loops_in_the_loop_asyncio_run_creates(self):
+        """The controller imports this module and only then starts its event
+        loop with asyncio.run(). Loops that wait on the check in that loop
+        must share it, not fail. On Python 3.9 a lock created at import is
+        bound to a different loop, and every waiting loop raised
+        RuntimeError."""
+
+        async def slow_check():
+            await asyncio.sleep(0.01)
+
+        async def run_loops():
+            return await asyncio.gather(*[
+                controller_module._check_network_connection() for _ in range(3)
+            ],
+                                        return_exceptions=True)
+
+        check = AsyncMock(side_effect=slow_check)
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=check):
+            results = asyncio.run(run_loops())
+        assert results == [None, None, None]
+        assert check.await_count == 1
 
 
 class TestAddK8sAnnotations:

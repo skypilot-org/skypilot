@@ -111,7 +111,12 @@ def _status_check_gap_seconds(first_check: bool) -> float:
 # _network_check_ok_at is the time.monotonic() of the last check that
 # succeeded. A failure is never recorded, so a loop that finds the network
 # down retries exactly as before.
-_network_check_lock: asyncio.Lock = asyncio.Lock()
+# _network_check_lock is created by the first check, inside the event loop.
+# This module is imported before asyncio.run() creates the controller's loop,
+# and on Python 3.9 an asyncio.Lock binds to the current loop when it is
+# constructed, so a lock created at import fails as soon as two loops wait on
+# it.
+_network_check_lock: Optional[asyncio.Lock] = None
 _network_check_ok_at: Optional[float] = None
 
 
@@ -138,9 +143,11 @@ async def _check_network_connection() -> None:
     succeeds they all return; when it fails, the loop that ran it gets the
     error and the next loop in line runs its own check.
     """
-    global _network_check_ok_at
+    global _network_check_lock, _network_check_ok_at
     if _network_check_is_fresh():
         return
+    if _network_check_lock is None:
+        _network_check_lock = asyncio.Lock()
     async with _network_check_lock:
         if _network_check_is_fresh():
             return
