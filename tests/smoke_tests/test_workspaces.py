@@ -553,3 +553,153 @@ def test_workspace_k8s_remote_identity():
         smoke_tests_utils.run_one_test(test)
     finally:
         os.unlink(server_config_path)
+
+
+# ---------- Test per-workspace prefix in a shared jobs bucket ----------
+@pytest.mark.aws
+@pytest.mark.managed_jobs
+@pytest.mark.no_remote_server
+# We can't restart the api server in the dependency test.
+@pytest.mark.no_dependency
+def test_workspace_jobs_bucket_prefix(generic_cloud: str):
+    """Do two workspaces sharing `jobs.bucket` upload under separate prefixes?
+
+    One server, one shared bucket, two workspaces:
+      team-a -> s3://<bucket>/<root>/workspaces/team-a/job-<run_id>/...
+      team-b -> s3://<bucket>/<root>/workspaces/team-b/job-<run_id>/...
+
+    Bucket IAM can only enforce per-workspace RBAC if every object a job
+    uploads (workdir, folder mounts, single-file mounts) sits under its
+    workspace prefix. We list the bucket directly instead of trusting
+    SkyPilot's logs, then check the job sub-paths are cleaned up afterwards
+    while the user-owned bucket survives.
+    """
+    if not smoke_tests_utils.is_in_buildkite_env():
+        pytest.skip('Skipping workspace jobs bucket test when not in Buildkite '
+                    'environment')
+
+    ws1_name = 'team-a'
+    ws2_name = 'team-b'
+    name = smoke_tests_utils.get_cluster_name()
+    bucket_name = f'sky-ws-bucket-{int(time.time())}-{uuid.uuid4().hex[:6]}'
+    # A sub-path on jobs.bucket covers joining it with the workspace prefix.
+    bucket_root = 'smoke-root'
+
+    server_config_content = textwrap.dedent(f"""\
+        workspaces:
+            {ws1_name}: {{}}
+            {ws2_name}: {{}}
+        jobs:
+            bucket: s3://{bucket_name}/{bucket_root}
+            controller:
+                resources:
+                    cpus: 4+
+                    memory: 16+
+    """)
+    with tempfile.NamedTemporaryFile(prefix='server_config_ws_bucket_',
+                                     delete=False,
+                                     mode='w') as f:
+        f.write(server_config_content)
+        server_config_path = f.name
+
+    # Every kind of local upload: workdir, a folder mount, a single file.
+    local_dir = tempfile.mkdtemp(prefix='sky_ws_bucket_')
+    workdir = os.path.join(local_dir, 'workdir')
+    folder = os.path.join(local_dir, 'folder')
+    os.makedirs(workdir)
+    os.makedirs(folder)
+    with open(os.path.join(workdir, 'marker.txt'), 'w') as f:
+        f.write('workdir\n')
+    with open(os.path.join(folder, 'data.txt'), 'w') as f:
+        f.write('folder\n')
+    single_file = os.path.join(local_dir, 'one.txt')
+    with open(single_file, 'w') as f:
+        f.write('file\n')
+    task_yaml = os.path.join(local_dir, 'task.yaml')
+    with open(task_yaml, 'w') as f:
+        f.write(
+            textwrap.dedent(f"""\
+            workdir: {workdir}
+            file_mounts:
+              /folder: {folder}
+              /one.txt: {single_file}
+            run: |
+              set -ex
+              cat marker.txt
+              cat /folder/data.txt
+              cat /one.txt
+            """))
+
+    list_keys = f'aws s3 ls --recursive s3://{bucket_name}/'
+
+    def _check_workspace_layout_cmd(ws: str) -> str:
+        prefix = f'{bucket_root}/workspaces/{ws}/job-[^/]+'
+        return (
+            f'keys=$({list_keys}); echo "$keys"; '
+            f'echo "$keys" | grep -E " {prefix}/workdir/marker.txt$" && '
+            f'echo "$keys" | grep -E " {prefix}/local-file-mounts/[0-9]+/'
+            'data.txt$" && '
+            f'echo "$keys" | grep -E " {prefix}/tmp-files/file-0$" && '
+            # Exactly one job run lands under this workspace.
+            f'[ "$(echo "$keys" | grep -oE " {prefix}/" | sort -u | wc -l)" '
+            '-eq 1 ]')
+
+    def _launch_cmd(job_name: str, ws: str) -> str:
+        return (f'sky jobs launch -y -d -n {job_name} --infra {generic_cloud} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+                f'--config active_workspace={ws} {task_yaml}')
+
+    test = smoke_tests_utils.Test(
+        'test_workspace_jobs_bucket_prefix',
+        [
+            # The admin owns the shared bucket; SkyPilot must not delete it.
+            f'aws s3api create-bucket --bucket {bucket_name}',
+            # Restart the API server with the two-workspace, shared-bucket
+            # config loaded.
+            f'{smoke_tests_utils.SKY_API_RESTART}',
+            # Uploads finish before `jobs launch -d` returns, and the job
+            # sub-path is only deleted after the job ends, so the objects are
+            # listable right after each launch.
+            _launch_cmd(f'{name}-a', ws1_name),
+            _check_workspace_layout_cmd(ws1_name),
+            _launch_cmd(f'{name}-b', ws2_name),
+            _check_workspace_layout_cmd(ws2_name),
+            # Nothing is written outside a workspace prefix.
+            f'keys=$({list_keys}); echo "$keys"; '
+            f'! echo "$keys" | grep -vE " {bucket_root}/workspaces/'
+            f'({ws1_name}|{ws2_name})/job-"',
+            # The uploads were usable by the jobs.
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-a',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=600),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-b',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=600),
+            # Cleanup finds the job sub-paths under the workspace prefix.
+            'for i in $(seq 1 36); do '
+            f'  keys=$({list_keys}); '
+            f'  echo "$keys" | grep -q " {bucket_root}/workspaces/" || exit 0; '
+            '  sleep 5; '
+            'done; echo "$keys"; echo "job sub-paths not cleaned up"; exit 1',
+            # The user-owned bucket itself survives.
+            f'aws s3api head-bucket --bucket {bucket_name}',
+        ],
+        teardown=(f'sky jobs cancel -y -n {name}-a '
+                  f'--config active_workspace={ws1_name} || true; '
+                  f'sky jobs cancel -y -n {name}-b '
+                  f'--config active_workspace={ws2_name} || true; '
+                  f'aws s3 rb s3://{bucket_name} --force || true; '
+                  f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+                  f'{smoke_tests_utils.SKY_API_RESTART}'),
+        env={skypilot_config.ENV_VAR_GLOBAL_CONFIG: server_config_path},
+        timeout=30 * 60,
+    )
+
+    try:
+        smoke_tests_utils.run_one_test(test)
+    finally:
+        os.unlink(server_config_path)
