@@ -184,6 +184,13 @@ def _build_task_specs(
     return base_specs
 
 
+# How many times to retry the emergency-recovery bookkeeping itself (each
+# individual DB call inside it additionally retries transient errors via
+# sky.utils.db.retries). Only when both layers are exhausted do we fall
+# back to failing the job.
+_EMERGENCY_BOOKKEEPING_ROUNDS = 5
+
+
 def _runtime_infra(
     handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle']
 ) -> Dict[str, Optional[str]]:
@@ -2977,10 +2984,9 @@ class JobController:
         """Decide how to handle an unexpected error in the job loop.
 
         Runs the emergency-recovery bookkeeping with an outer retry layer
-        (each DB call inside additionally retries transient errors) for up
-        to EMERGENCY_BOOKKEEPING_DEADLINE_SECONDS. Only when the deadline
-        passes do we give up and fail the job — we never trade a known-bad
-        state for an unknown one.
+        (each DB call inside additionally retries transient errors). Only
+        when every round fails do we give up and fail the job — we never
+        trade a known-bad state for an unknown one.
 
         Returns None to retry managing the job in place (emergency
         recovery). Returns a failure note (appended to the failure_reason)
@@ -2996,39 +3002,17 @@ class JobController:
         self._emergency_attempt: Optional[int] = None
         self._emergency_event_emitted = False
         backoff = common_utils.Backoff(initial_backoff=10, max_backoff_factor=5)
-        # The bookkeeping needs the database. A database outage is the
-        # most likely reason to land here in the first place, so keep
-        # retrying it for a long time: while it retries, the job keeps
-        # running on its cluster. Only once the deadline passes is the job
-        # failed, since nothing can be recorded without the database.
-        deadline = (time.monotonic() +
-                    jobs_constants.EMERGENCY_BOOKKEEPING_DEADLINE_SECONDS)
-        round_idx = 0
-        while True:
-            round_idx += 1
+        for round_idx in range(_EMERGENCY_BOOKKEEPING_ROUNDS):
             try:
                 return await self._attempt_emergency_recovery(error)
             except asyncio.CancelledError:  # pylint: disable=try-except-raise
                 raise
             except Exception as bookkeeping_error:  # pylint: disable=broad-except
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    deadline_minutes = (
-                        jobs_constants.EMERGENCY_BOOKKEEPING_DEADLINE_SECONDS /
-                        60)
-                    logger.error(
-                        'Emergency recovery bookkeeping failed for '
-                        f'{round_idx} rounds over {deadline_minutes:.0f} '
-                        'minutes; giving up: '
-                        f'{common_utils.format_exception(bookkeeping_error)}')
-                    break
-                delay = min(backoff.current_backoff(), remaining)
                 logger.warning(
                     'Emergency recovery bookkeeping failed (round '
-                    f'{round_idx}; retrying in {delay:.0f}s, giving up in '
-                    f'{remaining / 60:.0f} minutes): '
+                    f'{round_idx + 1}/{_EMERGENCY_BOOKKEEPING_ROUNDS}): '
                     f'{common_utils.format_exception(bookkeeping_error)}')
-                await asyncio.sleep(delay)
+                await asyncio.sleep(backoff.current_backoff())
         return ('(Also, emergency recovery was attempted but its '
                 'bookkeeping failed repeatedly.)')
 

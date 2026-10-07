@@ -969,10 +969,6 @@ class TestEmergencyRetryLoop:
     @pytest.mark.asyncio
     async def test_bookkeeping_exhausted_falls_back_to_failing(
             self, monkeypatch):
-        # The bookkeeping retries until a wall-clock deadline; shrink it so
-        # the test observes the give-up path without waiting.
-        monkeypatch.setattr(jobs_constants,
-                            'EMERGENCY_BOOKKEEPING_DEADLINE_SECONDS', 0.05)
         h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom')])
         h.get_budget.side_effect = ConnectionError('db down')
 
@@ -1193,21 +1189,6 @@ class TestEmergencyRetryLoop:
 
         assert order == []
         assert h.jc._run_one_task.call_count == 2
-
-    @pytest.mark.asyncio
-    async def test_bookkeeping_retries_past_five_rounds(self, monkeypatch):
-        """The bookkeeping is bounded by a deadline, not a round count: a
-        database outage that outlasts a handful of rounds still ends in an
-        in-place retry once the database is back."""
-        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
-        h.get_budget.side_effect = [ConnectionError('db down')] * 8 + [(0, None)
-                                                                      ]
-
-        await h.jc.run()
-
-        h.jc._update_failed_task_state.assert_not_called()
-        assert h.jc._run_one_task.call_count == 2
-        assert h.get_budget.await_count == 9
 
 
 class TestBatchCoordinatorEmergencyResume:
