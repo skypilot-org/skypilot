@@ -456,6 +456,7 @@ Supported bucket types:
     # bucket: https://<azure_storage_account>.blob.core.windows.net/<container>
     # bucket: r2://my-bucket/
     # bucket: vastdata://my-bucket/
+    # bucket: akave://my-bucket/
     # bucket: cos://<region>/<bucket>
 
 .. _config-yaml-jobs-force-disable-cloud-bucket:

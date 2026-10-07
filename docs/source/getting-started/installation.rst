@@ -237,6 +237,7 @@ This will produce a summary like:
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
     VastData: enabled
+    Akave: enabled
     Kubernetes: enabled
     Slurm: enabled
 
@@ -1735,6 +1736,83 @@ You can verify your credentials are set up correctly by running:
 .. code-block:: shell
 
   sky check vastdata
+
+.. _akave-installation:
+
+Akave object storage
+~~~~~~~~~~~~~~~~~~~~
+
+Akave offers S3-compatible object storage. SkyPilot can download/upload data to Akave buckets and mount them as a local filesystem on clusters launched by SkyPilot. To set up Akave support:
+
+Install the necessary dependencies for Akave:
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[akave]"
+      # From nightly build
+      uv pip install "skypilot-nightly[akave]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[akave]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[akave]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[akave]"
+      # From nightly build
+      pip install "skypilot-nightly[akave]"
+      # From source
+      pip install -e ".[akave]"
+
+SkyPilot uses separate configuration files for Akave to avoid conflicts with your AWS credentials. Run the following command to configure your Akave access credentials:
+
+.. code-block:: shell
+
+  AWS_SHARED_CREDENTIALS_FILE=~/.akave/akave.credentials aws configure --profile akave
+
+When prompted, enter your Akave credentials:
+
+.. code-block:: text
+
+  AWS Access Key ID [None]: <your_access_key_id>
+  AWS Secret Access Key [None]: <your_secret_access_key>
+  Default region name [None]: auto
+  Default output format [None]: json
+
+Next, configure the endpoint URL for Akave Object Storage. Replace ``<your_akave_endpoint>`` with the Akave S3 endpoint for your account:
+
+.. code-block:: shell
+
+  AWS_CONFIG_FILE=~/.akave/akave.config aws configure set endpoint_url <your_akave_endpoint> --profile akave
+
+You can verify your credentials are set up correctly by running:
+
+.. code-block:: shell
+
+  sky check akave
+
+.. code-block:: text
+
+  Checking credentials to enable infra for SkyPilot.
+    Akave: enabled [storage]
 
 .. _huggingface-installation:
 

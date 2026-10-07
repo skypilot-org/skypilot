@@ -3,7 +3,7 @@
 Cloud Buckets
 ==============
 
-SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2, CoreWeave Object Storage, VastData Object Storage, OCI Object Storage, IBM COS, or the :ref:`Hugging Face Hub <huggingface-hub-storage>` (repos, datasets, and Buckets).
+SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2, CoreWeave Object Storage, VastData Object Storage, Akave Object Storage, OCI Object Storage, IBM COS, or the :ref:`Hugging Face Hub <huggingface-hub-storage>` (repos, datasets, and Buckets).
 
 Buckets are made available to each task at a local path on the remote VM, so
 the task can access bucket objects as if they were local files.
@@ -28,7 +28,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
           # Mount an existing S3 bucket
           file_mounts:
             /my_data:
-              source: s3://my-bucket/  # or gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cw://, vastdata://, cos://<region>/<bucket>, oci://<bucket_name>, hf://
+              source: s3://my-bucket/  # or gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cw://, vastdata://, akave://, cos://<region>/<bucket>, oci://<bucket_name>, hf://
               mode: MOUNT  # MOUNT or COPY or MOUNT_CACHED. Defaults to MOUNT. Optional.
 
         This will `mount <storage-mounting-modes_>`__ the contents of the bucket at ``s3://my-bucket/`` to the remote VM at ``/my_data``.
@@ -58,7 +58,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
           file_mounts:
             /my_data:
               name: my-sky-bucket
-              store: gcs  # Optional: either of s3, gcs, azure, r2, coreweave, vastdata, ibm, oci, hf
+              store: gcs  # Optional: either of s3, gcs, azure, r2, coreweave, vastdata, akave, ibm, oci, hf
 
         SkyPilot will create an empty GCS bucket called ``my-sky-bucket`` and mount it at ``/my_data``.
         This bucket can be used to write checkpoints, logs or other outputs directly to the cloud.
@@ -81,7 +81,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
             /my_data:
               name: my-sky-bucket
               source: ~/dataset  # Optional: path to local data to upload to the bucket
-              store: s3  # Optional: either of s3, gcs, azure, r2, coreweave, vastdata, ibm, oci, hf
+              store: s3  # Optional: either of s3, gcs, azure, r2, coreweave, vastdata, akave, ibm, oci, hf
               mode: MOUNT  # Optional: either MOUNT or COPY. Defaults to MOUNT.
 
         SkyPilot will create a S3 bucket called ``my-sky-bucket`` and upload the
@@ -466,7 +466,7 @@ FAQ
 * **Which architectures are supported?**
 
   S3 storage mounting (including S3-compatible services like Cloudflare R2,
-  CoreWeave Object Storage, VastData Object Storage, and Nebius) works on all architectures including
+  CoreWeave Object Storage, VastData Object Storage, Akave Object Storage, and Nebius) works on all architectures including
   ARM64 (e.g., Apple Silicon, AWS Graviton). SkyPilot automatically uses the
   optimal mounting tool for each architecture: goofys for x86_64 and rclone for
   ARM64.
@@ -533,15 +533,16 @@ Storage YAML reference
             - r2://<bucket_name>
             - cw://<bucket_name>
             - vastdata://<bucket_name>
+            - akave://<bucket_name>
             - cos://<region_name>/<bucket_name>
             - oci://<bucket_name>@<region>
             - hf://buckets/<namespace>/<bucket_name>  (see the Hugging Face CLI for the full URL syntax of repos, datasets, and spaces)
 
           If the source is local, data is uploaded to the cloud to an appropriate
-          bucket (s3, gcs, azure, r2, coreweave, vastdata, oci, ibm, or hf). If source is bucket URI,
+          bucket (s3, gcs, azure, r2, coreweave, vastdata, akave, oci, ibm, or hf). If source is bucket URI,
           the data is copied or mounted directly (see mode flag below).
 
-        store: str; either of 's3', 'gcs', 'azure', 'r2', 'coreweave', 'vastdata', 'ibm', 'oci', 'hf'
+        store: str; either of 's3', 'gcs', 'azure', 'r2', 'coreweave', 'vastdata', 'akave', 'ibm', 'oci', 'hf'
           If you wish to force sky.Storage to be backed by a specific cloud object
           storage, you can specify it here. If not specified, SkyPilot chooses the
           appropriate object storage based on the source path and task's cloud provider.
