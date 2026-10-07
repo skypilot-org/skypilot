@@ -1065,4 +1065,6 @@ SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR = (
 MAX_NODE_NAME_LINEAGE = 10
 
 # Clouds that provide storage only (no compute).
-STORAGE_ONLY_CLOUDS = ['cloudflare', 'coreweave', 'vastdata', 'huggingface']
+STORAGE_ONLY_CLOUDS = [
+    'cloudflare', 'coreweave', 'vastdata', 'akave', 'huggingface'
+]
