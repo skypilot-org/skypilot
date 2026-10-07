@@ -3,6 +3,7 @@
 import multiprocessing
 import socket
 import time
+import types
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
@@ -16,6 +17,8 @@ from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
 from sky.backends.cloud_vm_ray_backend import SSHTunnelInfo
+from sky.provision import common as provision_common
+from sky.skylet import constants as skylet_constants
 from sky.utils import locks
 from sky.utils import status_lib
 
@@ -910,3 +913,67 @@ class TestSlurmContainerImageBackfill:
             handle._maybe_backfill_slurm_container_image()
         mock_get.assert_not_called()
         mock_set.assert_not_called()
+
+
+def _head(skylet_port=None):
+    return provision_common.InstanceInfo(instance_id='h',
+                                         internal_ip='10.0.0.1',
+                                         external_ip=None,
+                                         tags={},
+                                         skylet_port=skylet_port)
+
+
+class TestSkyletPort:
+    """The skylet tunnel dials the head's skylet, not a constant.
+
+    Two hostNetwork heads on one node used to share the default: the second
+    skylet listened on the next free port while the server dialed the
+    default, so one cluster's jobs ran on the other.
+    """
+
+    def _handle(self, head, with_info=True):
+        handle = CloudVmRayResourceHandle(
+            **TestCloudVmRayBackendGetGrpcChannel.MOCK_HANDLE_KWARGS)
+        if with_info:
+            info = MagicMock()
+            info.get_head_instance.return_value = head
+            handle.cached_cluster_info = info
+        else:
+            handle.cached_cluster_info = None
+        return handle
+
+    def test_an_assigned_port_is_dialed(self):
+        assert self._handle(_head(29070)).skylet_port == 29070
+
+    def test_no_assignment_is_the_default(self):
+        assert (self._handle(
+            _head()).skylet_port == skylet_constants.SKYLET_GRPC_PORT)
+
+    def test_a_head_pickled_before_the_field_is_the_default(self):
+        old = types.SimpleNamespace(instance_id='h', ssh_port=22)
+        assert (
+            self._handle(old).skylet_port == skylet_constants.SKYLET_GRPC_PORT)
+
+    def test_no_cluster_info_is_the_default(self):
+        assert (self._handle(
+            None,
+            with_info=False).skylet_port == skylet_constants.SKYLET_GRPC_PORT)
+
+    def test_the_tunnel_dials_the_heads_port(self, monkeypatch):
+        handle = self._handle(_head(29070))
+        monkeypatch.setattr(handle, 'get_command_runners',
+                            lambda: [MagicMock()])
+        dialed = []
+
+        class _Stop(Exception):
+            pass
+
+        def fake_tunnel(runner, port_pair):
+            del runner
+            dialed.append(port_pair)
+            raise _Stop()
+
+        monkeypatch.setattr(backend_utils, 'open_ssh_tunnel', fake_tunnel)
+        with pytest.raises(_Stop):
+            handle._open_and_update_skylet_tunnel()  # pylint: disable=protected-access
+        assert dialed[0][1] == 29070

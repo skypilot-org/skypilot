@@ -1,5 +1,6 @@
 """Unit tests for attempt_skylet module."""
 import signal
+import socket
 from unittest import mock
 
 import psutil
@@ -131,6 +132,51 @@ class TestRestartSkylet:
 
         self.restart_skylet()
         assert mock_run.called
+
+    def _no_running_skylet(self, monkeypatch):
+        monkeypatch.setattr(attempt_skylet, '_find_running_skylet_pids',
+                            lambda: [])
+
+    def test_an_assigned_port_is_used_not_the_next_free_one(self, monkeypatch):
+        """Under hostNetwork the server dials exactly the port it assigned;
+        another cluster's skylet may hold the default on the same node."""
+        self._no_running_skylet(monkeypatch)
+        monkeypatch.setenv(constants.SKYLET_PORT_ENV_VAR, '29070')
+        monkeypatch.setattr(attempt_skylet, '_port_is_free', lambda port: True)
+        calls = []
+        monkeypatch.setattr(
+            'subprocess.run',
+            lambda cmd, **kwargs: calls.append(cmd) or mock.Mock(returncode=0))
+        self.restart_skylet()
+        assert '--port=29070' in calls[0]
+        assert self.env['port_file'].read_text() == '29070'
+
+    def test_a_busy_assigned_port_fails_and_starts_nothing(self, monkeypatch):
+        """Drifting to the next free port would hand this cluster's requests
+        to whatever holds the assigned one."""
+        self._no_running_skylet(monkeypatch)
+        monkeypatch.setenv(constants.SKYLET_PORT_ENV_VAR, '29070')
+        monkeypatch.setattr(attempt_skylet, '_port_is_free', lambda port: False)
+        run = mock.Mock()
+        monkeypatch.setattr('subprocess.run', run)
+        with pytest.raises(RuntimeError, match='29070'):
+            self.restart_skylet()
+        run.assert_not_called()
+
+    def test_without_an_assignment_the_default_port_still_floats(
+            self, monkeypatch):
+        self._no_running_skylet(monkeypatch)
+        monkeypatch.delenv(constants.SKYLET_PORT_ENV_VAR, raising=False)
+        asked = []
+        monkeypatch.setattr('sky.utils.common_utils.find_free_port',
+                            lambda port: asked.append(port) or port + 1)
+        calls = []
+        monkeypatch.setattr(
+            'subprocess.run',
+            lambda cmd, **kwargs: calls.append(cmd) or mock.Mock(returncode=0))
+        self.restart_skylet()
+        assert asked == [constants.SKYLET_GRPC_PORT]
+        assert f'--port={constants.SKYLET_GRPC_PORT + 1}' in calls[0]
 
     def test_complete_flow_with_pid_file(self, monkeypatch):
         """Complete flow: kill by PID, start new skylet, write all files."""
@@ -440,3 +486,31 @@ class TestSlurmDetection:
 
         (home / attempt_skylet._SLURM_MARKER_FILE).touch()
         assert not attempt_skylet._is_inside_slurm_cluster()
+
+
+class TestPortIsFree:
+    """Real sockets: the check must agree with skylet's own gRPC bind."""
+
+    def test_a_restarted_skylets_old_connections_do_not_hold_the_port(self):
+        """The previous skylet closed with a client still connected, leaving
+        TIME_WAIT on its port; gRPC (SO_REUSEADDR) binds, so must the check."""
+        listener = socket.socket()
+        # As skylet's gRPC server does; its accepted connections inherit it,
+        # and Linux reuses a TIME_WAIT port only when both sides set it.
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(('127.0.0.1', 0))
+        listener.listen(1)
+        port = listener.getsockname()[1]
+        client = socket.create_connection(('127.0.0.1', port))
+        accepted, _ = listener.accept()
+        accepted.close()  # the server side closes first: TIME_WAIT is its
+        listener.close()
+        client.close()
+        assert attempt_skylet._port_is_free(port)
+
+    def test_a_live_listener_holds_the_port(self):
+        with socket.socket() as listener:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind(('', 0))
+            listener.listen(1)
+            assert not attempt_skylet._port_is_free(listener.getsockname()[1])

@@ -1059,14 +1059,17 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.assertFalse(deploy_vars['k8s_enable_gpudirect_rdma'])
 
         k8s_env_vars = deploy_vars['k8s_env_vars']
-        # The probe is runtime-gated on these env vars (see
-        # instance_setup._host_network_probe_cmd); they must be wired for
-        # OCI RoCE so the probe actually runs.
+        # The port check is runtime-gated on this one env var (see
+        # instance_setup._host_network_probe_cmd); it must be wired for OCI
+        # RoCE so the check actually runs.
         self.assertEqual(k8s_env_vars['SKYPILOT_HOST_NETWORK'], '1')
-        self.assertEqual(k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAME'],
-                         'test-oci-cluster-ray-ports')
-        self.assertEqual(k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE'],
-                         'default')
+        # And on nothing else. The gate used to also require a ConfigMap name,
+        # with the sshd_config rewrite inside the same shell branch, so a
+        # lingering export would keep a dead requirement alive and a lingering
+        # requirement would silently skip moving sshd off port 22.
+        for stale in ('SKYPILOT_RAY_PORTS_CONFIGMAP_NAME',
+                      'SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE'):
+            self.assertNotIn(stale, k8s_env_vars)
         self.assertEqual(k8s_env_vars['NCCL_IB_HCA'], 'mlx5')
         self.assertEqual(k8s_env_vars['NCCL_IB_GID_INDEX'], '3')
         self.assertEqual(k8s_env_vars['NCCL_IB_TC'], '41')
