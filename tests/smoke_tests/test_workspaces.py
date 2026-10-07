@@ -632,23 +632,38 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
             """))
 
     list_keys = f'aws s3 ls --recursive s3://{bucket_name}/'
-
-    def _check_workspace_layout_cmd(ws: str) -> str:
-        prefix = f'{bucket_root}/workspaces/{ws}/job-[^/]+'
-        return (
-            f'keys=$({list_keys}); echo "$keys"; '
-            f'echo "$keys" | grep -E " {prefix}/workdir/marker.txt$" && '
-            f'echo "$keys" | grep -E " {prefix}/local-file-mounts/[0-9]+/'
-            'data.txt$" && '
-            f'echo "$keys" | grep -E " {prefix}/tmp-files/file-0$" && '
-            # Exactly one job run lands under this workspace.
-            f'[ "$(echo "$keys" | grep -oE " {prefix}/" | sort -u | wc -l)" '
-            '-eq 1 ]')
+    # Each launch's output, and the bucket sub-path its job uploaded to.
+    run_dir = os.path.join(local_dir, 'runs')
+    os.makedirs(run_dir)
 
     def _launch_cmd(job_name: str, ws: str) -> str:
-        return (f'sky jobs launch -y -d -n {job_name} --infra {generic_cloud} '
-                f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
-                f'--config active_workspace={ws} {task_yaml}')
+        return (f'set -o pipefail; sky jobs launch -y -d -n {job_name} '
+                f'--infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+                f'--config active_workspace={ws} {task_yaml} 2>&1 | '
+                f'tee {run_dir}/{job_name}.log')
+
+    def _check_job_upload_cmd(job_name: str, ws: str) -> str:
+        # Find the sub-path of the upload that belongs to this job: the last
+        # one synced before `Managed Job ID` is printed. If the server retries
+        # the launch request, earlier attempts sync to other sub-paths that no
+        # job refers to; those are not this job's upload.
+        return (
+            'out=$(sed "s/\\x1b\\[[0-9;?]*[A-Za-z]//g" '
+            f'{run_dir}/{job_name}.log | '
+            "awk '{print} /Managed Job ID:/{exit}'); "
+            'job_id=$(echo "$out" | grep -oE "Managed Job ID: [0-9]+" | '
+            'grep -oE "[0-9]+$"); '
+            'run=$(echo "$out" | grep "Storage synced" | '
+            f'grep -oE "{bucket_root}/workspaces/{ws}/job-[a-z0-9]+" | '
+            'tail -n 1); '
+            f'echo "{job_name}: job $job_id uploaded to $run"; '
+            '[ -n "$job_id" ] && [ -n "$run" ] || exit 1; '
+            f'echo "$run" > {run_dir}/{job_name}.run; '
+            f'keys=$(aws s3 ls --recursive s3://{bucket_name}/$run/); '
+            'echo "$keys"; '
+            'echo "$keys" | grep -E " $run/workdir/marker.txt$" && '
+            'echo "$keys" | grep -E " $run/local-file-mounts/[0-9]+/data.txt$" '
+            '&& echo "$keys" | grep -E " $run/tmp-files/file-0$"')
 
     def _cancel_cmd(job_name: str, ws: str) -> str:
         # Cancel is workspace-scoped.
@@ -667,11 +682,11 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
             # sub-path is only deleted after the job ends, so the objects are
             # listable right after each launch.
             _launch_cmd(f'{name}-a', ws1_name),
-            _check_workspace_layout_cmd(ws1_name),
+            _check_job_upload_cmd(f'{name}-a', ws1_name),
             _launch_cmd(f'{name}-b', ws2_name),
-            _check_workspace_layout_cmd(ws2_name),
+            _check_job_upload_cmd(f'{name}-b', ws2_name),
             _launch_cmd(f'{name}-d', ws_default),
-            _check_workspace_layout_cmd(ws_default),
+            _check_job_upload_cmd(f'{name}-d', ws_default),
             # Nothing is written outside a workspace prefix.
             f'keys=$({list_keys}); echo "$keys"; '
             f'! echo "$keys" | grep -vE " {bucket_root}/workspaces/'
@@ -695,12 +710,16 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
                 job_name=f'{name}-b',
                 job_status=[sky.ManagedJobStatus.CANCELLED],
                 timeout=300),
-            # Cleanup finds the job sub-paths under the workspace prefix.
+            # Cleanup finds each job's sub-path under its workspace prefix.
             'for i in $(seq 1 36); do '
-            f'  keys=$({list_keys}); '
-            f'  echo "$keys" | grep -q " {bucket_root}/workspaces/" || exit 0; '
+            '  left=""; '
+            f'  for run in $(cat {run_dir}/*.run); do '
+            f'    aws s3 ls --recursive s3://{bucket_name}/$run/ | grep -q . '
+            '&& left="$left $run"; '
+            '  done; '
+            '  [ -z "$left" ] && exit 0; '
             '  sleep 5; '
-            'done; echo "$keys"; echo "job sub-paths not cleaned up"; exit 1',
+            'done; echo "job sub-paths not cleaned up:$left"; exit 1',
             # The user-owned bucket itself survives.
             f'aws s3api head-bucket --bucket {bucket_name}',
         ],
