@@ -201,7 +201,7 @@ Configuration options:
 - ``headers``: Additional HTTP headers to send, e.g., a tenant ID. The values are written to the logging agent's configuration file on the cluster, so use ``headers_file`` for secrets.
 - ``headers_file``: The path to a file with one ``Name: value`` header per line, for credentials such as ``Authorization: Bearer <token>``. Blank lines and lines starting with ``#`` are ignored. Refer to :ref:`Authenticating to an OTLP endpoint <external-logging-storage-otlp-authentication>` for more details.
 - ``compression``: ``none`` (default) or ``gzip``.
-- ``tls_verify``: Whether to verify the endpoint's TLS certificate for ``https`` endpoints (default: ``true``).
+- ``tls.insecure_skip_verify``: Skip verifying the endpoint's TLS certificate for ``https`` endpoints, e.g., for a collector with a self-signed certificate (default: ``false``).
 - ``resource_attributes``: Additional OTLP resource attributes to attach to the logs.
 
 Example:

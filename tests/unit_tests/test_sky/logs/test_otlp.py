@@ -54,13 +54,15 @@ def test_defaults():
     assert cfg['logs_body_key'] == '$log'
 
 
-def test_protocol_compression_and_tls_verify():
+def test_protocol_compression_and_tls():
     cfg = _output(
         OtlpLoggingAgent({
             'endpoint': 'https://collector:4317',
             'protocol': 'GRPC',
             'compression': 'gzip',
-            'tls_verify': False,
+            'tls': {
+                'insecure_skip_verify': True
+            },
         }))
     assert cfg['grpc'] == 'on'
     assert cfg['compress'] == 'gzip'
@@ -219,7 +221,9 @@ def test_config_schema():
                 },
                 'headers_file': '~/otlp_headers',
                 'compression': 'gzip',
-                'tls_verify': False,
+                'tls': {
+                    'insecure_skip_verify': True
+                },
                 'resource_attributes': {
                     'env': 'prod'
                 },

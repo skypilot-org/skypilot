@@ -34,6 +34,11 @@ _PROTOCOL_HTTP = 'http/protobuf'
 _PROTOCOL_GRPC = 'grpc'
 
 
+class _TlsConfig(pydantic.BaseModel):
+    """Client TLS settings, named after the OpenTelemetry Collector's."""
+    insecure_skip_verify: bool = False
+
+
 class _OtlpLoggingConfig(pydantic.BaseModel):
     """Configuration for the OTLP logging agent."""
     endpoint: str
@@ -41,7 +46,7 @@ class _OtlpLoggingConfig(pydantic.BaseModel):
     headers: Optional[Dict[str, str]] = None
     headers_file: Optional[str] = None
     compression: str = 'none'
-    tls_verify: bool = True
+    tls: _TlsConfig = _TlsConfig()
     resource_attributes: Optional[Dict[str, str]] = None
 
 
@@ -173,7 +178,8 @@ class OtlpLoggingAgent(FluentbitAgent):
             'logs_body_key_attributes': 'true',
         }
         if tls:
-            config['tls.verify'] = 'on' if self.config.tls_verify else 'off'
+            config['tls.verify'] = (
+                'off' if self.config.tls.insecure_skip_verify else 'on')
         if self.config.protocol == _PROTOCOL_GRPC:
             config['grpc'] = 'on'
         if self.config.compression != 'none':

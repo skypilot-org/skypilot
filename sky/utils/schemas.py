@@ -3013,8 +3013,14 @@ def get_config_schema():
                         'type': 'string',
                         'case_insensitive_enum': ['none', 'gzip'],
                     },
-                    'tls_verify': {
-                        'type': 'boolean',
+                    'tls': {
+                        'type': 'object',
+                        'additionalProperties': False,
+                        'properties': {
+                            'insecure_skip_verify': {
+                                'type': 'boolean',
+                            },
+                        },
                     },
                     'resource_attributes': {
                         'type': 'object',
