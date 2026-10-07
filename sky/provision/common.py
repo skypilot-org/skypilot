@@ -70,6 +70,8 @@ class ProvisionConfig:
     resume_stopped_nodes: bool
     # Optional ports to open on launch of the cluster.
     ports_to_open_on_launch: Optional[List[int]]
+    # Whether this cluster has previously reached UP (and may have saved state).
+    prev_cluster_ever_up: bool = False
 
     def get_redacted_config(self) -> Dict[str, Any]:
         """Get the redacted config."""

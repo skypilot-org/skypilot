@@ -8,7 +8,9 @@ import io
 import multiprocessing.pool
 import os
 import queue as queue_lib
+import select
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -35,6 +37,7 @@ SKY_LOG_TAILING_GAP_SECONDS = 0.2
 # Peek the head of the lines to check if we need to start
 # streaming when tail > 0.
 PEEK_HEAD_LINES_FOR_START_STREAM = 20
+_ORPHAN_WATCHDOG_INTERVAL_SECONDS = 5
 
 logger = sky_logging.init_logger(__name__)
 
@@ -451,6 +454,49 @@ def run_bash_command_with_log_and_return_pid(
                                             with_ray,
                                             streaming_prefix=streaming_prefix)
     return {'return_code': return_code, 'pid': os.getpid()}
+
+
+def start_orphan_watchdog() -> None:
+    """Terminates this process soon after the caller that runs it is gone.
+
+    For commands run on a cluster through `kubectl exec -i` with a live stdin
+    pipe, or through `ssh -tt`. When `kubectl exec` disconnects, the remote
+    process gets no signal and its writes to stdout keep succeeding; the only
+    sign is that its stdin reaches EOF. The watchdog also exits when the parent
+    process changes. A stdin that is already at EOF at startup (e.g.
+    /dev/null) is not watched.
+
+    Only call this in a process dedicated to the command: the watchdog sends
+    SIGTERM to the whole process.
+    """
+    watch_stdin = False
+    try:
+        readable, _, _ = select.select([0], [], [], 0)
+        # Not readable: a live pipe or TTY. Readable: EOF, unless it has data.
+        watch_stdin = not readable or bool(os.read(0, 1))
+    except (ValueError, OSError):
+        pass
+
+    def _stdin_closed() -> bool:
+        try:
+            readable, _, _ = select.select([0], [], [], 0)
+            return bool(readable) and not os.read(0, 1)
+        except (ValueError, OSError):
+            return True
+
+    def _watch() -> None:
+        initial_parent_pid = os.getppid()
+        while True:
+            time.sleep(_ORPHAN_WATCHDOG_INTERVAL_SECONDS)
+            if os.getppid() != initial_parent_pid:
+                logger.info('Parent process died, terminating.')
+                break
+            if watch_stdin and _stdin_closed():
+                logger.info('stdin closed (caller disconnected), terminating.')
+                break
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    threading.Thread(target=_watch, daemon=True).start()
 
 
 def _follow_job_logs(file,

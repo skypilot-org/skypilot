@@ -3,6 +3,7 @@ import concurrent.futures
 import contextlib
 import datetime
 import json
+import logging
 import os
 import posixpath
 import subprocess
@@ -4493,3 +4494,32 @@ class TestOverallDeadlineDump:
         assert result.exists()
         for fn, m in section_mocks.items():
             assert m.call_count == 1, f'{fn} should have run exactly once'
+
+
+def test_debug_dump_log_writes_provision_records_once(tmp_path):
+    """The dump's handler sits on both `sky` and `sky.provision`.
+
+    Outside a provision `sky.provision` propagates, so without dedupe a
+    sky.provision.* record would land in debug_dump.log twice. Only the
+    handler wiring runs: the dump body is replaced, so nothing is collected.
+    """
+
+    def build(*args, **kwargs):
+        del args, kwargs
+        logging.getLogger('sky.provision.test').warning('dump-marker-6414')
+
+    provision_logger = logging.getLogger('sky.provision')
+    original = provision_logger.propagate
+    provision_logger.propagate = True
+    try:
+        with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
+                        str(tmp_path / 'debug_dumps')), \
+             mock.patch('sky.utils.debug_utils._build_debug_dump',
+                        side_effect=build):
+            result = debug_utils.create_debug_dump()
+    finally:
+        provision_logger.propagate = original
+    with zipfile.ZipFile(result, 'r') as zf:
+        log_name = next(
+            n for n in zf.namelist() if n.endswith('debug_dump.log'))
+        assert zf.read(log_name).decode().count('dump-marker-6414') == 1

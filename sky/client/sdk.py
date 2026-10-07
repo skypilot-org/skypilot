@@ -2685,7 +2685,9 @@ def api_status(
         all_status: Whether to list all finished requests as well. This argument
             is ignored if request_ids is not None.
         limit: The number of requests to show. If None, show all requests.
-        fields: The fields to get. If None, get all fields.
+        fields: The fields to get. If None, get all fields except
+            return_value and error. This argument is ignored if request_ids
+            is not None.
         cluster_name: Filter requests by cluster name.
             If None, show all requests.
 

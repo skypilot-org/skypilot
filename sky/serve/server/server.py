@@ -130,7 +130,8 @@ async def download_logs(
     request: fastapi.Request,
     download_logs_body: payloads.ServeDownloadLogsBody,
 ) -> None:
-    user_hash = download_utils.download_user_id(request, download_logs_body)
+    user_hash = download_utils.owner_user_id(request,
+                                             download_logs_body.user_hash)
     timestamp = sky_logging.get_run_timestamp()
     logs_dir_on_api_server = (
         pathlib.Path(bs.get_blob_storage().download_tmp_dir(user_hash)) /

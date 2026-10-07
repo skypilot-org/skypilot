@@ -604,6 +604,19 @@ def _make_asyncpg_creator(dsn: str) -> Callable[[], Any]:
     return _connect
 
 
+def psycopg2_url(conn_string: str) -> sqlalchemy.engine.URL:
+    """Return *conn_string* as a URL that selects the psycopg2 driver.
+
+    SQLAlchemy 2.1 resolves a bare ``postgresql://`` URL to psycopg 3, which
+    is not a SkyPilot dependency; psycopg2 is. A driver named explicitly in
+    the URL is kept.
+    """
+    url = sqlalchemy.engine.make_url(conn_string)
+    if url.drivername == 'postgresql':
+        url = url.set(drivername='postgresql+psycopg2')
+    return url
+
+
 def _rewrite_hostport(uri: str, hostport: str) -> str:
     """Return *uri* with its netloc host:port replaced by *hostport*.
 
@@ -901,7 +914,7 @@ def get_engine(
                     # Isolated per-operation engine: never shares (or starves
                     # on) the default engine's pool. See the docstring.
                     engine_no_pool = sqlalchemy.create_engine(
-                        conn_string,
+                        psycopg2_url(conn_string),
                         poolclass=sqlalchemy.NullPool,
                         connect_args={
                             'connect_timeout': _NO_POOL_CONNECT_TIMEOUT_SECONDS
@@ -937,13 +950,13 @@ def get_engine(
                     # NullPool the direct path opens a connection only while a
                     # lock or migration actively needs it and closes it after.
                     _postgres_engine_cache[cache_key] = (
-                        sqlalchemy.create_engine(conn_string,
+                        sqlalchemy.create_engine(psycopg2_url(conn_string),
                                                  poolclass=sqlalchemy.NullPool))
                 else:
                     # Sync engines can safely use QueuePool for connection reuse
                     _postgres_engine_cache[cache_key] = (
                         sqlalchemy.create_engine(
-                            conn_string,
+                            psycopg2_url(conn_string),
                             poolclass=sqlalchemy.pool.QueuePool,
                             pool_size=pool_size,
                             max_overflow=get_db_connection_pool_max_overflow(

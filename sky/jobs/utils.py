@@ -15,12 +15,8 @@ import json
 import os
 import pathlib
 import re
-import select
 import shlex
-import signal
-import sys
 import textwrap
-import threading
 import time
 import traceback
 import typing
@@ -186,6 +182,8 @@ _NON_DB_FIELDS = _CLUSTER_HANDLE_FIELDS + [
     'details',
     # is_job_group is derived from execution column (execution == 'parallel')
     'is_job_group',
+    # From the job_dependencies table.
+    'depends_on',
 ]
 
 
@@ -416,9 +414,7 @@ def ha_recovery_for_consolidation_mode() -> None:
         # reading the whole jobs history and filtering in Python.
         candidates = managed_job_state.get_jobs_needing_recovery_check()
         orphaned = [
-            job['job_id']
-            for job in candidates
-            if not _controller_still_running(job, f)
+            job for job in candidates if not _controller_still_running(job, f)
         ]
         f.write(f'{len(candidates)} job(s) to check, '
                 f'{len(orphaned)} without a live controller\n')
@@ -433,8 +429,26 @@ def ha_recovery_for_consolidation_mode() -> None:
                 # added latency with no batch left to protect.
                 _throttle_recovery_sweep(batch_seconds, f)
             batch_start = time.time()
-            recovered += managed_job_state.reset_jobs_for_recovery_batch(batch)
-            f.write(f'Reset job(s) {batch} for recovery\n')
+            # Each reset is a compare-and-swap against the row read above: if
+            # a controller claimed the job since then (or the job moved on to
+            # another state), the reset must not apply, or it would orphan the
+            # job right after the claim and leave two controllers running it.
+            # Whoever changed the row owns the job now, so a lost race is not
+            # retried.
+            reset_ids = managed_job_state.reset_jobs_for_recovery_batch(batch)
+            recovered += len(reset_ids)
+            if reset_ids:
+                f.write(f'Reset job(s) {reset_ids} for recovery\n')
+            reset_id_set = set(reset_ids)
+            changed_ids = sorted(job['job_id']
+                                 for job in batch
+                                 if job['job_id'] not in reset_id_set)
+            if changed_ids:
+                message = (f'Skipped recovery of job(s) {changed_ids}: their '
+                           'controller ownership or schedule state changed '
+                           'since they were read.')
+                logger.info(message)
+                f.write(f'{message}\n')
             # Flush per batch: this file is how an operator watches a sweep
             # that is still in progress, and a sweep that pauses between
             # batches can be in progress for a while.
@@ -511,7 +525,8 @@ def _throttle_recovery_sweep(batch_seconds: float, log_file: TextIO) -> None:
     time.sleep(pause)
 
 
-def _batched(items: List[int], size: int) -> Iterator[List[int]]:
+def _batched(items: List[Dict[str, Any]],
+             size: int) -> Iterator[List[Dict[str, Any]]]:
     for i in range(0, len(items), size):
         yield items[i:i + size]
 
@@ -699,6 +714,9 @@ async def get_job_status(
     cluster_name: str,
     job_id: Optional[int],
     status_logger: Optional[JobStatusLogger] = None,
+    *,
+    handle: Optional['backends.CloudVmRayResourceHandle'] = None,
+    runtime_checked: bool = False,
 ) -> Tuple[Optional['job_lib.JobStatus'], Optional[str]]:
     """Check the status of the job running on a managed job cluster.
 
@@ -709,6 +727,8 @@ async def get_job_status(
         status_logger: If provided, the result is logged through it, so that
             consecutive identical results are collapsed into one logline. If
             None, every result is logged.
+        handle: Reuse the caller's cluster handle when available.
+        runtime_checked: The caller already asked the runtime for job status.
 
     Returns:
         job_status: The status of the job.
@@ -718,8 +738,9 @@ async def get_job_status(
     # TODO(zhwu, cooperc): Make this get job status aware of cluster status, so
     # that it can exit retry early if the cluster is down.
     # TODO(luca) make this async
-    handle = await asyncio.to_thread(
-        global_user_state.get_handle_from_cluster_name, cluster_name)
+    if handle is None:
+        handle = await asyncio.to_thread(
+            global_user_state.get_handle_from_cluster_name, cluster_name)
 
     def _log(message: str) -> None:
         if status_logger is not None:
@@ -730,7 +751,7 @@ async def get_job_status(
     def _log_job_status(status: Optional['job_lib.JobStatus']) -> None:
         _log('No job found.' if status is None else f'Job status: {status}')
 
-    if managed_job_runtime.is_registered():
+    if not runtime_checked and managed_job_runtime.is_registered():
         result = await asyncio.to_thread(managed_job_runtime.get_job_status,
                                          handle, cluster_name)
         if result is not None:
@@ -2258,83 +2279,13 @@ def stream_logs_by_id(
         See exceptions.JobExitCode for possible exit codes.
     """
 
-    # Start a background watchdog thread that detects when the kubectl
-    # exec connection has been dropped (client disconnect). On Kubernetes,
-    # kubectl exec -i does not allocate a PTY, so no SIGHUP is sent when
-    # the connection drops. The only signal is that stdin reaches EOF
-    # (the kubelet closes the stdin pipe). This thread monitors stdin and
-    # terminates the process when disconnection is detected, preventing
-    # leaked stream_logs processes on the controller. Changing the exec call to
-    # also include -t does not result in the kubelet sending a SIGHUP to the
-    # remote end of the connection.
-    #
-    # The API server now passes stdin=subprocess.PIPE (instead of
-    # DEVNULL) to kubectl exec -i, so stdin on the controller is a live
-    # pipe that only reaches EOF when the connection actually drops.
-    #
-    # For SSH controllers, stdin is a PTY (from ssh -tt), so SIGHUP
-    # handles cleanup natively. For consolidation mode or other local
-    # invocations, stdin may be /dev/null or already closed (EOF). We
-    # check at startup: if stdin is already at EOF, we skip stdin
-    # monitoring entirely to avoid false positives. Only a live stdin
-    # (not yet at EOF) is worth monitoring this is the case for
-    # kubectl exec -i with stdin=subprocess.PIPE.
-    check_stdin_eof = False
-    try:
-        readable, _, _ = select.select([sys.stdin], [], [], 0)
-        if readable:
-            # stdin is immediately readable check if it's already EOF
-            data = os.read(sys.stdin.fileno(), 1)
-            if data:
-                # Got actual data (unexpected but harmless); stdin is live
-                check_stdin_eof = True
-            # else: EOF at startup, don't monitor
-        else:
-            # stdin is not immediately readable it's a live pipe/TTY
-            # waiting for input, meaning we have a real connection
-            check_stdin_eof = True
-    except (ValueError, OSError):
-        # stdin is already closed or invalid — not useful for monitoring
-        pass
-
-    def _orphan_watchdog() -> None:
-        """Background thread that monitors for connection drop."""
-        initial_parent_pid = os.getppid()
-        while True:
-            time.sleep(5)
-            # Check 1: Parent PID changed (reparented to init/subreaper)
-            if os.getppid() != initial_parent_pid:
-                logger.info('Parent process died, terminating.')
-                os.kill(os.getpid(), signal.SIGTERM)
-                return
-            # Check 2: stdin EOF (kubectl exec -i connection dropped).
-            # Only checked when stdin is a pipe (Kubernetes), not a TTY
-            # (SSH). With SSH -tt, the PTY delivers SIGHUP on disconnect,
-            # so this check is unnecessary and could cause false positives.
-            if not check_stdin_eof:
-                continue
-            try:
-                readable, _, _ = select.select([sys.stdin], [], [], 0)
-                if readable:
-                    data = os.read(sys.stdin.fileno(), 1)
-                    if not data:
-                        logger.info('stdin EOF detected (connection dropped), '
-                                    'terminating.')
-                        os.kill(os.getpid(), signal.SIGTERM)
-                        return
-            except (ValueError, OSError):
-                logger.info('stdin closed, terminating.')
-                os.kill(os.getpid(), signal.SIGTERM)
-                return
-
     # The watchdog detects a dropped `kubectl exec` connection, which only
     # happens when this runs as a subprocess on the controller. Inside a
     # context we are in the API server, where a client disconnect arrives as
     # ctx.cancel() instead, and this thread's own loop has no exit condition:
     # it would outlive the request and accumulate one thread per tail call.
     if context_lib.get() is None:
-        watchdog = threading.Thread(target=_orphan_watchdog, daemon=True)
-        watchdog.start()
+        log_lib.start_orphan_watchdog()
 
     def should_keep_logging(status: managed_job_state.ManagedJobStatus) -> bool:
         # If we see CANCELLING, just exit - we could miss some job logs but the
@@ -2381,6 +2332,15 @@ def stream_logs_by_id(
             return (f'No task found matching {task!r} in job {job_id}. '
                     f'Valid task IDs are {valid_range}.',
                     exceptions.JobExitCode.NOT_FOUND)
+
+    runtime_log_result = managed_job_runtime.tail_managed_job_logs(
+        job_id=job_id,
+        task_id=filtered_task_id,
+        follow=follow,
+        tail=tail,
+        tail_offset=tail_offset)
+    if runtime_log_result is not None:
+        return '', runtime_log_result
 
     # Follow the jobs controller log during provisioning so the user sees the
     # same spinner messages that `sky launch` shows. The controller relays the
@@ -3254,15 +3214,18 @@ def _get_launch_reasons_by_task(
     return reasons
 
 
-def _format_job_details(*,
-                        job: Dict[str, Any],
-                        highest_blocking_priority: int,
-                        recovery_reason: Optional[str] = None,
-                        pending_reason: Optional[str] = None,
-                        cancel_reason: Optional[str] = None,
-                        launch_reason: Optional[str] = None) -> None:
+def _format_job_details(
+        *,
+        job: Dict[str, Any],
+        highest_blocking_priority: int,
+        recovery_reason: Optional[str] = None,
+        pending_reason: Optional[str] = None,
+        cancel_reason: Optional[str] = None,
+        launch_reason: Optional[str] = None,
+        unfinished_dependencies: Optional[List[int]] = None) -> None:
     """Add details about schedule state / backoff / recovery / pending /
-    who requested a cancellation / what a launch is waiting on."""
+    who requested a cancellation / what a launch is waiting on / which jobs it
+    depends on are still running."""
     if cancel_reason:
         # Surface who asked for the cancellation, and under which API
         # request, e.g. 'Cancellation requested by user alice (request ID:
@@ -3279,6 +3242,11 @@ def _format_job_details(*,
     state_details = None
     if job['schedule_state'] == 'ALIVE_BACKOFF':
         state_details = 'In backoff, waiting for resources'
+    elif job['schedule_state'] == 'WAITING' and unfinished_dependencies:
+        label = ('Dependency'
+                 if len(unfinished_dependencies) == 1 else 'Dependencies')
+        state_details = (
+            f'{label}: {", ".join(str(d) for d in unfinished_dependencies)}')
     elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
         priority = job.get('priority')
         if (priority is not None and priority < highest_blocking_priority):
@@ -3634,6 +3602,11 @@ def get_managed_job_queue(
     pending_reasons: Dict[int, str] = {}
     cancel_reasons: Dict[int, str] = {}
     launch_reasons: Dict[Tuple[int, Optional[int]], str] = {}
+    unfinished_dependencies: Dict[int, List[int]] = {}
+    dependencies: Dict[int, List[int]] = {}
+    if not fields or 'depends_on' in fields:
+        dependencies = managed_job_state.get_jobs_dependencies(
+            list({job['job_id'] for job in jobs}))
     if not fields or 'details' in fields:
         recovering_job_ids = [
             job['job_id'] for job in jobs if job['status'] ==
@@ -3670,6 +3643,13 @@ def get_managed_job_queue(
         # provisioned (e.g. 'Launching (pending: QOSGrpGRES)' on Slurm), so
         # `details` answers why the job has not started yet.
         launch_reasons = _get_launch_reasons_by_task(jobs)
+        unfinished_dependencies = (
+            managed_job_state.get_unfinished_dependencies(
+                list({
+                    job['job_id']
+                    for job in jobs
+                    if job['schedule_state'] == 'WAITING'
+                })))
 
     for job in jobs:
         if not fields or 'details' in fields:
@@ -3680,11 +3660,15 @@ def get_managed_job_queue(
                 pending_reason=pending_reasons.get(job['job_id']),
                 cancel_reason=cancel_reasons.get(job['job_id']),
                 launch_reason=launch_reasons.get(
-                    (job['job_id'], job.get('task_id'))))
+                    (job['job_id'], job.get('task_id'))),
+                unfinished_dependencies=unfinished_dependencies.get(
+                    job['job_id']))
 
         # Derive is_job_group from execution column
         job['is_job_group'] = (
             job.get('execution') == DagExecution.PARALLEL.value)
+        if not fields or 'depends_on' in fields:
+            job['depends_on'] = dependencies.get(job['job_id'])
 
     return {
         'jobs': jobs,

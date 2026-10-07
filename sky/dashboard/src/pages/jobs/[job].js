@@ -1303,6 +1303,13 @@ function JobDetailsContent({
     return jobData.status;
   }, [allTasks, jobData.status]);
 
+  // The connector only sets statusTooltip when it is meaningful (PENDING
+  // reason, FAILED* attribution), but only show it when the aggregated
+  // status matches the row's own status so a tooltip computed for another
+  // state is not shown.
+  const statusTooltip =
+    computedStatus === jobData.status ? jobData.statusTooltip : null;
+
   const toggleYamlExpanded = () => {
     setIsYamlExpanded(!isYamlExpanded);
   };
@@ -1713,20 +1720,18 @@ function JobDetailsContent({
             return (
               <PluginSlot
                 name="jobs.detail.status.badge"
-                context={jobData}
+                // The slot must see the status the fallback renders:
+                // jobData is the first task's row, not the group's
+                // aggregate.
+                context={{
+                  ...jobData,
+                  status: computedStatus,
+                  statusTooltip,
+                }}
                 fallback={
                   <StatusBadge
                     status={computedStatus}
-                    statusTooltip={
-                      // The connector only sets statusTooltip when it is
-                      // meaningful (PENDING reason, FAILED* attribution),
-                      // but only pass it through when the aggregated
-                      // status matches the connector's row status so a
-                      // tooltip computed for another state is not shown.
-                      computedStatus === jobData.status
-                        ? jobData.statusTooltip
-                        : null
-                    }
+                    statusTooltip={statusTooltip}
                   />
                 }
               />
@@ -1937,6 +1942,25 @@ function JobDetailsContent({
           {renderPoolLink(jobData.pool, jobData.pool_hash, poolsData)}
         </div>
       </div>
+
+      {jobData.depends_on?.length > 0 && (
+        <div>
+          <div className="text-gray-600 font-medium text-base">Depends On</div>
+          <div className="text-base mt-1">
+            {jobData.depends_on.map((dependency, index) => (
+              <span key={dependency}>
+                {index > 0 && ', '}
+                <Link
+                  href={`/jobs/${dependency}`}
+                  className="text-blue-600 hover:underline"
+                >
+                  {dependency}
+                </Link>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Batch Progress section - only for batch jobs */}
       {jobData.batch_total_batches != null && (

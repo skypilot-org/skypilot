@@ -1952,6 +1952,18 @@ class TestWorkspaceReadOnlyAccess:
     check never does. The casbin enforce only ever checks the member '*' grant.
     """
 
+    @pytest.fixture(autouse=True)
+    def _server_mode(self, monkeypatch):
+        """These checks are server-side, so the variable has to be set.
+
+        Set here rather than per-test because assigning to os.environ
+        directly leaks it for the life of the process: a later test that
+        expects the client's permissive schema then gets the server's
+        strict one, and which test that is depends on how the suite
+        shards.
+        """
+        monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, 'true')
+
     def _service(self, member=False, roles=('user',)):
         service = permission.PermissionService()
         mock_enforcer = mock.Mock()
@@ -1966,7 +1978,6 @@ class TestWorkspaceReadOnlyAccess:
     @mock.patch('sky.users.permission.kv_cache')
     def test_read_allows_live_readonly_workspace(self, mock_kv_cache,
                                                  mock_is_ro):
-        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         mock_kv_cache.get_cache_entry.return_value = None
         mock_is_ro.return_value = True  # config says ws is read-only
         service, _ = self._service(member=False)  # non-member
@@ -1977,7 +1988,6 @@ class TestWorkspaceReadOnlyAccess:
     @mock.patch('sky.users.permission.kv_cache')
     def test_read_denies_non_readonly_workspace(self, mock_kv_cache,
                                                 mock_is_ro):
-        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         mock_kv_cache.get_cache_entry.return_value = None
         mock_is_ro.return_value = False  # config says not read-only
         service, _ = self._service(member=False)
@@ -1987,7 +1997,6 @@ class TestWorkspaceReadOnlyAccess:
     @mock.patch('sky.workspaces.utils.is_read_only_workspace')
     @mock.patch('sky.users.permission.kv_cache')
     def test_write_ignores_readonly(self, mock_kv_cache, mock_is_ro):
-        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         mock_kv_cache.get_cache_entry.return_value = None
         mock_is_ro.return_value = True  # even though ws is read-only
         service, _ = self._service(member=False)
@@ -2001,7 +2010,6 @@ class TestWorkspaceReadOnlyAccess:
     @mock.patch('sky.users.permission.kv_cache')
     def test_member_allowed_without_consulting_readonly(self, mock_kv_cache,
                                                         mock_is_ro):
-        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         mock_kv_cache.get_cache_entry.return_value = None
         service, _ = self._service(member=True)  # member
         assert service.check_workspace_permission('u1', 'ws', 'read') is True
@@ -2013,7 +2021,6 @@ class TestWorkspaceReadOnlyAccess:
     @mock.patch('sky.users.permission.kv_cache')
     def test_member_cache_key_is_action_agnostic(self, mock_kv_cache,
                                                  mock_is_ro):
-        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         mock_kv_cache.get_cache_entry.return_value = None
         mock_is_ro.return_value = True
         service, _ = self._service(member=False)
@@ -2031,7 +2038,6 @@ class TestWorkspaceReadOnlyAccess:
     @mock.patch('sky.workspaces.utils.get_read_only_workspace_names')
     def test_get_accessible_read_includes_live_readonly_write_excludes(
             self, mock_ro_names):
-        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         service, enf = self._service()
         enf.get_policy.return_value = [
             ('u1', 'ws-mine', '*'),
@@ -2051,7 +2057,6 @@ class TestWorkspaceReadOnlyAccess:
         # get_workspace_access_sets returns (readable, writable) in one policy
         # scan: readable = member/open + read-only-visible, writable = member/
         # open only. Used by the hot GET /workspaces path.
-        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         service, enf = self._service()
         enf.get_policy.return_value = [
             ('u1', 'ws-mine', '*'),

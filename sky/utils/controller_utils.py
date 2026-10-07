@@ -1552,6 +1552,22 @@ def _effective_jobs_consolidation_with_warnings(
     return effective, arg
 
 
+def effective_jobs_consolidation_mode() -> bool:
+    """Whether jobs run consolidated, without emitting operator guidance.
+
+    Same answer as `is_jobs_consolidation_mode`, minus the warning path: that
+    one queries the cluster table, scans the managed-jobs tables when
+    consolidation is off, and resolves through a `scope='request'` cache --
+    which is process-global, so a background thread that asks before the API
+    server has written the signal file pins the wrong answer for the whole
+    process. Readers on a polling path want the fact, not the guidance.
+    """
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        # Inside the controller process, which is consolidated by definition.
+        return True
+    return _read_jobs_consolidation_signal()
+
+
 def is_jobs_consolidation_mode(
         extra_validator: Optional[Callable[[bool], None]] = None) -> bool:
     """Return effective jobs-controller consolidation state.
@@ -1627,7 +1643,22 @@ def _get_parallelism(pool: bool, raw_resource_per_unit: float) -> int:
     return max(int(total_memory_mb / resource_per_unit), 1)
 
 
+def explicit_jobs_controllers() -> Optional[int]:
+    """The controller pool size set in the environment, None when unset.
+
+    Raises:
+        ValueError: if set but not an integer in [1, MAX_CONTROLLERS].
+    """
+    return server_config.explicit_process_count(
+        constants.ENV_VAR_SERVER_JOBS_CONTROLLERS,
+        minimum=1,
+        maximum=MAX_CONTROLLERS)
+
+
 def get_number_of_jobs_controllers() -> int:
+    explicit = explicit_jobs_controllers()
+    if explicit is not None:
+        return explicit
     return min(
         MAX_CONTROLLERS,
         _get_parallelism(pool=True, raw_resource_per_unit=JOB_WORKER_MEMORY_MB))

@@ -1578,6 +1578,43 @@ def test_api_status_scopes_to_caller(_request_authz_env, monkeypatch):
     assert {'alice-req-1', 'bob-req-1'} <= ids
 
 
+def test_api_status_does_not_read_stored_results(_request_authz_env,
+                                                 monkeypatch):
+    from fastapi.testclient import TestClient
+    client = TestClient(server.app)
+    _scope_as(monkeypatch, None)
+
+    requested_fields = []
+    list_tasks = server.requests_lib.get_request_tasks_async
+    prefix_tasks = server.requests_lib.get_requests_async_with_prefix
+
+    async def _list_tasks(req_filter):
+        requested_fields.append(req_filter.fields)
+        return await list_tasks(req_filter)
+
+    async def _prefix_tasks(request_id_prefix, fields=None):
+        requested_fields.append(fields)
+        return await prefix_tasks(request_id_prefix, fields)
+
+    monkeypatch.setattr(server.requests_lib, 'get_request_tasks_async',
+                        _list_tasks)
+    monkeypatch.setattr(server.requests_lib, 'get_requests_async_with_prefix',
+                        _prefix_tasks)
+
+    listed = client.get('/api/status', params={'all_status': True})
+    by_id = client.get('/api/status', params={'request_ids': ['alice-req-1']})
+
+    assert listed.status_code == 200
+    listed_ids = {r['request_id'] for r in listed.json()}
+    assert {'alice-req-1', 'bob-req-1'} <= listed_ids
+    assert [r['request_id'] for r in by_id.json()] == ['alice-req-1']
+    assert len(requested_fields) == 2
+    for fields in requested_fields:
+        assert 'return_value' not in fields
+        assert 'error' not in fields
+        assert 'request_body' in fields
+
+
 def test_api_completion_scopes_to_caller(_request_authz_env, monkeypatch):
     from fastapi.testclient import TestClient
     client = TestClient(server.app)

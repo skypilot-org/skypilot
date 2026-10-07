@@ -1872,7 +1872,7 @@ _SLURM_USERNAME_MAP_SCHEMA = {
     },
     'additionalProperties': {
         'type': 'string',
-        'pattern': '^[a-z_][a-z0-9_.-]*$'
+        'pattern': '^[a-z_][a-z0-9_.+-]*$'
     }
 }
 

@@ -141,6 +141,13 @@ REJECT_REASON_UNHANDLED_EXCEPTION = 'unhandled_exception'
 # Key in `scope['state']` (i.e. `request.state`) the reason is stored under.
 REJECT_REASON_STATE_KEY = 'reject_reason'
 
+# Keys in `scope['state']` describing a presented credential that an auth
+# middleware rejected, for an audit trail to read back: the human-readable
+# reason, and the verified identity it belonged to. Free text, so kept apart
+# from `reject_reason`, which is a metric label.
+AUTH_REJECT_DETAIL_STATE_KEY = 'auth_reject_detail'
+AUTH_REJECT_SUBJECT_STATE_KEY = 'auth_reject_subject'
+
 # `kind` label values of the rejection counter.
 REJECTION_KIND_HTTP = 'http'
 REJECTION_KIND_WEBSOCKET = 'websocket'
@@ -189,6 +196,20 @@ def mark_rejection(request: fastapi.Request, reason: str) -> None:
     value. Explicit parameter on purpose: no contextvars.
     """
     setattr(request.state, REJECT_REASON_STATE_KEY, reason)
+
+
+def mark_auth_rejection(request: fastapi.Request,
+                        detail: str,
+                        subject: Optional[str] = None) -> None:
+    """Record why a presented credential was rejected, and whose it was.
+
+    Pass `subject` only once the credential itself has been verified (e.g. a
+    JWT whose signature checked out but whose row was revoked), so the value
+    is never something the client chose.
+    """
+    setattr(request.state, AUTH_REJECT_DETAIL_STATE_KEY, detail)
+    if subject is not None:
+        setattr(request.state, AUTH_REJECT_SUBJECT_STATE_KEY, subject)
 
 
 def get_rejection_reason(scope: starlette.types.Scope) -> Optional[str]:

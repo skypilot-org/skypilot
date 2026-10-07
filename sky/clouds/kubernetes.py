@@ -24,12 +24,14 @@ from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import fuse as kubernetes_fuse
 from sky.provision.kubernetes import host_network_probe
 from sky.provision.kubernetes import network_utils
+from sky.provision.kubernetes import oci_nccl
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.utils import is_tpu_on_gke
 from sky.provision.kubernetes.utils import KubernetesHighPerformanceNetworkType
 from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.skylet import constants
 from sky.utils import annotations
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
@@ -861,6 +863,18 @@ class Kubernetes(clouds.Cloud):
         sa = schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value
         no_upload = schemas.RemoteIdentityOptions.NO_UPLOAD.value
 
+        # A controller cluster provisions other clusters, so its pod needs
+        # cluster-scoped permissions no pod running user code should hold.
+        # Match on the *display* name: name_on_cloud is transformed and never
+        # carries the controller prefixes.
+        #
+        # This makes check_cluster_name_not_controller() (controller_utils)
+        # load-bearing for a permission boundary: it is what stops a user
+        # launching `sky-jobs-controller-mine` to be handed this identity.
+        # Relaxing that guard would turn into privilege escalation -- see the
+        # test in tests/unit_tests/kubernetes/.
+        is_controller = common.is_controller_name(cluster_name.display_name)
+
         if k8s_service_account_name in (lc, sa, no_upload):
             # Use the default service account if remote identity is not set.
             # For LOCAL_CREDENTIALS, this is for in-cluster authentication
@@ -870,7 +884,13 @@ class Kubernetes(clouds.Cloud):
             # For NO_UPLOAD, we don't upload credentials but still need a
             # service account for pod creation.
             k8s_service_account_name = (
+                kubernetes_utils.CONTROLLER_SERVICE_ACCOUNT_NAME
+                if is_controller else
                 kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME)
+        else:
+            # An operator-supplied account owns its own permissions; SkyPilot
+            # creates and reconciles nothing for it, controller or not.
+            is_controller = False
 
         fuse_device_required = bool(resources.requires_fuse)
 
@@ -889,10 +909,9 @@ class Kubernetes(clouds.Cloud):
             k8s_resource_key, acc_count, acc_type)
         oci_roce_enabled = (
             network_type == KubernetesHighPerformanceNetworkType.OCI_ROCE)
-        # Resolved here rather than next to the rest of the RDMA handling
-        # below, because the NCCL profile picked a few lines down depends on
-        # it: a pod holding SR-IOV VFs cannot see the host's physical
-        # functions, so the HCA list has to change with the delivery model.
+        # The NCCL profile picked below depends on it: a pod holding SR-IOV
+        # VFs cannot see the host's physical functions, so the HCA list has
+        # to change with the delivery model.
         rdma_mode = self._resolve_rdma_mode(context, oci_roce_enabled)
         sriov_mode = (rdma_mode == kubernetes_enums.KubernetesRdmaMode.SRIOV)
 
@@ -917,22 +936,6 @@ class Kubernetes(clouds.Cloud):
         # BEST, so this stays off for every other tier and cloud.
         k8s_efa_same_az = (num_nodes > 1 and network_type
                            == KubernetesHighPerformanceNetworkType.AWS_EFA)
-
-        # Check if this cluster supports high performance networking and
-        # configure appropriate settings for different cluster types
-        if (resources.network_tier is not None and
-                resources.network_tier == resources_utils.NetworkTier.BEST):
-            # Only proceed if CUSTOM_NETWORK_TIER is supported by this cluster
-            unsupported_features = self._unsupported_features_for_resources(
-                resources)
-            if clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER \
-                    not in unsupported_features:
-                # Add high-performance networking environment variables for
-                # clusters with high performance networking. Pass acc_type so
-                # OCI can pick a shape-specific NCCL profile (e.g. GB200).
-                network_env_vars = network_type.get_network_env_vars(
-                    acc_type, pod_local_rdma=sriov_mode)
-                k8s_env_vars.update(network_env_vars)
 
         # We specify object-store-memory to be 500MB to avoid taking up too
         # much memory on the head node. 'num-cpus' should be set to limit
@@ -1042,6 +1045,29 @@ class Kubernetes(clouds.Cloud):
         # and the probe can no longer disagree about which mode it is in.
         merged_pod_config = kubernetes_utils.resolve_effective_pod_config(
             resources.cluster_config_overrides, self, context)
+
+        # Check if this cluster supports high performance networking and
+        # configure appropriate settings for different cluster types
+        if (resources.network_tier is not None and
+                resources.network_tier == resources_utils.NetworkTier.BEST):
+            # Only proceed if CUSTOM_NETWORK_TIER is supported by this cluster
+            unsupported_features = self._unsupported_features_for_resources(
+                resources)
+            if clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER \
+                    not in unsupported_features:
+                # Add high-performance networking environment variables for
+                # clusters with high performance networking.
+                if oci_roce_enabled:
+                    # OCI tunes NCCL per instance shape, so read it off the
+                    # nodes this pod can land on.
+                    shapes = oci_nccl.candidate_shapes(
+                        context, k8s_acc_label_key, k8s_acc_label_values,
+                        merged_pod_config.get('spec', {}).get('nodeSelector'))
+                    network_env_vars = oci_nccl.get_env_vars(
+                        context, namespace, shapes, pod_local_rdma=sriov_mode)
+                else:
+                    network_env_vars = network_type.get_network_env_vars()
+                k8s_env_vars.update(network_env_vars)
 
         # Precedence: a task's pod_config is more specific than an admin's
         # per-context mode, which in turn is more specific than what the
@@ -1175,6 +1201,11 @@ class Kubernetes(clouds.Cloud):
             'k8s_node_affinity': kubernetes_utils.get_node_affinity(
                 k8s_acc_label_key, k8s_acc_label_values, avoid_label_keys),
             'k8s_service_account_name': k8s_service_account_name,
+            # Gates the provisioner-only roles: only a controller pod
+            # provisions, and only in non-consolidation deployments --
+            # under consolidation the controllers are API-server
+            # processes and no pod needs them at all.
+            'k8s_is_controller': is_controller,
             'k8s_automount_sa_token': 'true',
             'k8s_fuse_device_required': fuse_device_required,
             'k8s_kueue_local_queue_name': k8s_kueue_local_queue_name,
