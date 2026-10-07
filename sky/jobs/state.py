@@ -505,8 +505,8 @@ def _unfinished_dependency_exists() -> sqlalchemy.sql.elements.ColumnElement:
             job_info_table.c.spot_job_id,
             dependency_info.c.spot_job_id ==
             job_dependencies_table.c.depends_on_job_id,
-            dependency_info.c.schedule_state
-            != ManagedJobScheduleState.DONE.value,
+            dependency_info.c.schedule_state !=
+            ManagedJobScheduleState.DONE.value,
         ))
 
 
@@ -1677,8 +1677,8 @@ def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
         # non-legacy jobs that are not DONE
         condition1 = sqlalchemy.and_(
             job_info_table.c.schedule_state.is_not(None),
-            job_info_table.c.schedule_state
-            != ManagedJobScheduleState.DONE.value)
+            job_info_table.c.schedule_state !=
+            ManagedJobScheduleState.DONE.value)
         # legacy or that are in non-terminal status or
         # DONE jobs that are in non-terminal status
         condition2 = sqlalchemy.and_(
@@ -3355,8 +3355,8 @@ def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
         updated_count = session.query(job_info_table).filter(
             sqlalchemy.and_(
                 job_info_table.c.spot_job_id == job_id,
-                job_info_table.c.schedule_state
-                != ManagedJobScheduleState.DONE.value,
+                job_info_table.c.schedule_state !=
+                ManagedJobScheduleState.DONE.value,
             )).update({
                 job_info_table.c.schedule_state:
                     ManagedJobScheduleState.DONE.value
@@ -5146,8 +5146,8 @@ async def finalize_job_done_async(
                     job_info_table.c.spot_job_id == job_id,
                     sqlalchemy.or_(
                         job_info_table.c.schedule_state.is_(None),
-                        job_info_table.c.schedule_state
-                        != ManagedJobScheduleState.DONE.value,
+                        job_info_table.c.schedule_state !=
+                        ManagedJobScheduleState.DONE.value,
                     ))).values({
                         job_info_table.c.schedule_state:
                             ManagedJobScheduleState.DONE.value
@@ -5203,8 +5203,8 @@ async def scheduler_set_done_async(job_id: int,
             sqlalchemy.update(job_info_table).where(
                 sqlalchemy.and_(
                     job_info_table.c.spot_job_id == job_id,
-                    job_info_table.c.schedule_state
-                    != ManagedJobScheduleState.DONE.value,
+                    job_info_table.c.schedule_state !=
+                    ManagedJobScheduleState.DONE.value,
                 )).values({
                     job_info_table.c.schedule_state:
                         ManagedJobScheduleState.DONE.value
@@ -5348,8 +5348,8 @@ def get_unfinished_dependencies(job_ids: List[int]) -> Dict[int, List[int]]:
             where(
                 sqlalchemy.and_(
                     job_dependencies_table.c.spot_job_id.in_(job_ids),
-                    dependency_info.c.schedule_state
-                    != ManagedJobScheduleState.DONE.value,
+                    dependency_info.c.schedule_state !=
+                    ManagedJobScheduleState.DONE.value,
                 )).order_by(
                     job_dependencies_table.c.spot_job_id,
                     job_dependencies_table.c.depends_on_job_id)).fetchall()
@@ -5520,10 +5520,10 @@ def reset_jobs_for_recovery() -> None:
             job_info_table.c.controller_pid.isnot(None),
             # Schedule state should be alive.
             job_info_table.c.schedule_state.isnot(None),
-            (job_info_table.c.schedule_state
-             != ManagedJobScheduleState.WAITING.value),
-            (job_info_table.c.schedule_state
-             != ManagedJobScheduleState.DONE.value),
+            (job_info_table.c.schedule_state !=
+             ManagedJobScheduleState.WAITING.value),
+            (job_info_table.c.schedule_state !=
+             ManagedJobScheduleState.DONE.value),
         ).update({
             job_info_table.c.controller_pid: None,
             job_info_table.c.controller_pid_started_at: None,
@@ -5661,8 +5661,8 @@ def get_controller_logs_to_clean(retention_seconds: int,
                 # cycle.
                 sqlalchemy.or_(
                     sqlalchemy.func.max(spot_table.c.end_at).is_(None),
-                    sqlalchemy.func.max(spot_table.c.end_at)
-                    < (now - retention_seconds))).limit(batch_size))
+                    sqlalchemy.func.max(spot_table.c.end_at) <
+                    (now - retention_seconds))).limit(batch_size))
         rows = result.fetchall()
         return [{'job_id': row[0]} for row in rows]
 
@@ -5866,9 +5866,8 @@ def _get_latest_event_reasons(
     reason covers any recovery cause (preemption/failure, emergency, or
     restart resume), surfaced in the `details` column.
     """
-    result: Dict['ManagedJobStatus', Dict[int, str]] = {
-        status: {} for status in job_ids_by_status
-    }
+    result: Dict['ManagedJobStatus',
+                 Dict[int, str]] = {status: {} for status in job_ids_by_status}
     conditions = [
         sqlalchemy.and_(
             job_events_table.c.new_status == status.value,
