@@ -777,6 +777,75 @@ class TestVastDataStorage:
         assert 'VastData' in storage_lib.STORE_ENABLED_CLOUDS
 
 
+class TestAkaveStorage:
+    """Tests for Akave storage integration."""
+
+    def test_store_type_akave_exists(self):
+        """Verify AKAVE is a valid StoreType."""
+        assert storage_lib.StoreType.AKAVE.value == 'AKAVE'
+
+    def test_store_prefix(self):
+        """Verify Akave store prefix is akave://."""
+        assert storage_lib.StoreType.AKAVE.store_prefix() == 'akave://'
+
+    def test_split_akave_path(self):
+        """Test splitting Akave URIs."""
+        from sky.data import data_utils
+        bucket, key = data_utils.split_akave_path(
+            'akave://my-bucket/path/to/data')
+        assert bucket == 'my-bucket'
+        assert key == 'path/to/data'
+
+    def test_split_akave_path_no_key(self):
+        """Test splitting Akave URIs with no key."""
+        from sky.data import data_utils
+        bucket, key = data_utils.split_akave_path('akave://my-bucket/')
+        assert bucket == 'my-bucket'
+        assert key == ''
+
+    def test_split_akave_path_bucket_only(self):
+        """Test splitting Akave URIs with bucket only."""
+        from sky.data import data_utils
+        bucket, key = data_utils.split_akave_path('akave://my-bucket')
+        assert bucket == 'my-bucket'
+        assert key == ''
+
+    def test_from_yaml_config_akave_source(self):
+        """Test Storage.from_yaml_config with Akave source."""
+        yaml_config = {
+            'source': 'akave://my-bucket',
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert storage_obj.source == 'akave://my-bucket'
+
+    def test_from_yaml_config_akave_store_type(self):
+        """Test Storage.from_yaml_config with store set to akave."""
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 'akave',
+            'mode': 'COPY',
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert storage_obj.name == 'test-bucket'
+
+    def test_akave_mount_cmd(self):
+        """Test Akave mount command generation."""
+        cmd = mounting_utils.get_akave_mount_cmd(
+            akave_credentials_path='~/.akave/akave.credentials',
+            akave_profile_name='akave',
+            bucket_name='test-bucket',
+            endpoint_url='https://s3.example.com',
+            mount_path='/mnt/data')
+        assert 'test-bucket' in cmd
+        assert 'https://s3.example.com' in cmd
+        assert '/mnt/data' in cmd
+        assert 'AWS_SHARED_CREDENTIALS_FILE=' in cmd
+
+    def test_akave_in_store_enabled_clouds(self):
+        """Verify Akave is in STORE_ENABLED_CLOUDS."""
+        assert 'Akave' in storage_lib.STORE_ENABLED_CLOUDS
+
+
 class TestMountConfig:
     """Tests for MountConfig dataclass."""
 
