@@ -562,20 +562,25 @@ def test_workspace_k8s_remote_identity():
 # We can't restart the api server in the dependency test.
 @pytest.mark.no_dependency
 def test_workspace_jobs_bucket_prefix(generic_cloud: str):
-    """Do two workspaces sharing `jobs.bucket` upload under separate prefixes?
+    """Do workspaces sharing `jobs.bucket` upload under separate prefixes?
 
-    One server, one shared bucket, two workspaces:
-      team-a -> s3://<bucket>/<root>/workspaces/team-a/job-<run_id>/...
-      team-b -> s3://<bucket>/<root>/workspaces/team-b/job-<run_id>/...
+    One server, one shared bucket, three workspaces:
+      team-a  -> s3://<bucket>/<root>/workspaces/team-a/job-<run_id>/...
+      team-b  -> s3://<bucket>/<root>/workspaces/team-b/job-<run_id>/...
+      default -> s3://<bucket>/<root>/workspaces/default/job-<run_id>/...
 
     Bucket IAM can only enforce per-workspace RBAC if every object a job
     uploads (workdir, folder mounts, single-file mounts) sits under its
     workspace prefix. We list the bucket directly instead of trusting
-    SkyPilot's logs, then check the job sub-paths are cleaned up afterwards
-    while the user-owned bucket survives.
+    SkyPilot's logs. The default-workspace job runs to completion to show
+    the uploads are usable; the team jobs are cancelled once their uploads
+    are checked, because a jobs controller VM only knows the workspaces in
+    its own config and cannot launch their clusters. Afterwards every job
+    sub-path must be cleaned up while the user-owned bucket survives.
     """
     ws1_name = 'team-a'
     ws2_name = 'team-b'
+    ws_default = constants.SKYPILOT_DEFAULT_WORKSPACE
     name = smoke_tests_utils.get_cluster_name()
     bucket_name = f'sky-ws-bucket-{int(time.time())}-{uuid.uuid4().hex[:6]}'
     # A sub-path on jobs.bucket covers joining it with the workspace prefix.
@@ -645,13 +650,18 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
                 f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
                 f'--config active_workspace={ws} {task_yaml}')
 
+    def _cancel_cmd(job_name: str, ws: str) -> str:
+        # Cancel is workspace-scoped.
+        return (f'sky jobs cancel -y -n {job_name} '
+                f'--config active_workspace={ws}')
+
     test = smoke_tests_utils.Test(
         'test_workspace_jobs_bucket_prefix',
         [
             # The admin owns the shared bucket; SkyPilot must not delete it.
             f'aws s3api create-bucket --bucket {bucket_name}',
             # Restart so the server picks up the merged config (existing
-            # server config + two workspaces + shared bucket).
+            # server config + two team workspaces + shared bucket).
             f'{smoke_tests_utils.SKY_API_RESTART}',
             # Uploads finish before `jobs launch -d` returns, and the job
             # sub-path is only deleted after the job ends, so the objects are
@@ -660,21 +670,31 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
             _check_workspace_layout_cmd(ws1_name),
             _launch_cmd(f'{name}-b', ws2_name),
             _check_workspace_layout_cmd(ws2_name),
+            _launch_cmd(f'{name}-d', ws_default),
+            _check_workspace_layout_cmd(ws_default),
             # Nothing is written outside a workspace prefix.
             f'keys=$({list_keys}); echo "$keys"; '
             f'! echo "$keys" | grep -vE " {bucket_root}/workspaces/'
-            f'({ws1_name}|{ws2_name})/job-"',
-            # The uploads were usable by the jobs.
+            f'({ws1_name}|{ws2_name}|{ws_default})/job-"',
+            # The team uploads are checked; end those jobs.
+            _cancel_cmd(f'{name}-a', ws1_name),
+            _cancel_cmd(f'{name}-b', ws2_name),
+            # The uploads were usable by the default-workspace job.
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-d',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=900),
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-a',
-                job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                timeout=600),
+                job_status=[sky.ManagedJobStatus.CANCELLED],
+                timeout=300),
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-b',
-                job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                timeout=600),
+                job_status=[sky.ManagedJobStatus.CANCELLED],
+                timeout=300),
             # Cleanup finds the job sub-paths under the workspace prefix.
             'for i in $(seq 1 36); do '
             f'  keys=$({list_keys}); '
@@ -684,15 +704,14 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
             # The user-owned bucket itself survives.
             f'aws s3api head-bucket --bucket {bucket_name}',
         ],
-        teardown=(f'sky jobs cancel -y -n {name}-a '
-                  f'--config active_workspace={ws1_name} || true; '
-                  f'sky jobs cancel -y -n {name}-b '
-                  f'--config active_workspace={ws2_name} || true; '
+        teardown=(f'{_cancel_cmd(f"{name}-a", ws1_name)} || true; '
+                  f'{_cancel_cmd(f"{name}-b", ws2_name)} || true; '
+                  f'{_cancel_cmd(f"{name}-d", ws_default)} || true; '
                   f'aws s3 rb s3://{bucket_name} --force || true; '
                   f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
                   f'{smoke_tests_utils.SKY_API_RESTART}'),
         config_dict=config_dict,
-        timeout=30 * 60,
+        timeout=40 * 60,
     )
 
     try:
