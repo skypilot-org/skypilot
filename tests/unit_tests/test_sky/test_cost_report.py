@@ -1,6 +1,8 @@
 """Unit tests for sky cost-report functionality."""
+import gc
 import unittest
 from unittest import mock
+import weakref
 
 from sky import core
 from sky import resources as resources_lib
@@ -9,6 +11,20 @@ from sky.server.requests.serializers import encoders
 from sky.skylet import constants
 from sky.utils import status_lib
 from sky.utils.cli_utils import status_utils
+
+
+def _history_record(index, launched):
+    return {
+        'name': f'c{index}',
+        'status': None,
+        'num_nodes': 1,
+        'resources': launched,
+        'duration': 60,
+        'launched_at': 1640995200,
+        'cluster_hash': f'h{index}',
+        'usage_intervals': [(1640995200, 1640995260)],
+        'user_hash': 'u1',
+    }
 
 
 class TestCostReportCore(unittest.TestCase):
@@ -127,19 +143,8 @@ class TestCostReportCore(unittest.TestCase):
     def test_cost_report_encodes_resources_for_the_response(self):
         """Full reports carry each row's resources already encoded."""
         launched = resources_lib.Resources(cpus='2')
-        record = {
-            'name': 'c1',
-            'status': None,
-            'num_nodes': 1,
-            'resources': launched,
-            'duration': 60,
-            'launched_at': 1640995200,
-            'cluster_hash': 'h1',
-            'usage_intervals': [(1640995200, 1640995260)],
-            'user_hash': 'u1',
-        }
         with mock.patch('sky.global_user_state.iter_clusters_from_history',
-                        return_value=iter([record])):
+                        return_value=iter([_history_record(0, launched)])):
             result = core.cost_report(days=30)
 
         expected = encoders.encode_resources(launched)
@@ -147,6 +152,43 @@ class TestCostReportCore(unittest.TestCase):
         # The response encoder leaves already-encoded resources as they are.
         self.assertEqual(
             encoders.encode_cost_report(result)[0]['resources'], expected)
+
+    def test_cost_report_encodes_resources_once_with_custom_encoder(self):
+        """A plugin's non-string encode_resources result is sent as is."""
+        launched = resources_lib.Resources(cpus='2')
+        encoded = {'cpus': '2'}
+        with mock.patch('sky.global_user_state.iter_clusters_from_history',
+                        return_value=iter([_history_record(0, launched)])), \
+                mock.patch.object(encoders, 'encode_resources',
+                                  return_value=encoded) as mock_encode:
+            result = encoders.encode_cost_report(core.cost_report(days=30))
+
+        mock_encode.assert_called_once_with(launched)
+        self.assertEqual(result[0]['resources'], encoded)
+
+    def test_cost_report_releases_resources_between_chunks(self):
+        """A chunk's resources are released before the next chunk is read."""
+        chunk_size = core._COST_REPORT_CHUNK_SIZE
+        first_resources = []
+        first_alive_at_next_chunk = []
+
+        def history():
+            for i in range(2 * chunk_size):
+                if i == chunk_size:
+                    gc.collect()
+                    first_alive_at_next_chunk.append(
+                        first_resources[0]() is not None)
+                launched = resources_lib.Resources(cpus='2')
+                if i == 0:
+                    first_resources.append(weakref.ref(launched))
+                yield _history_record(i, launched)
+
+        with mock.patch('sky.global_user_state.iter_clusters_from_history',
+                        return_value=history()):
+            result = core.cost_report(days=30)
+
+        self.assertEqual(len(result), 2 * chunk_size)
+        self.assertEqual(first_alive_at_next_chunk, [False])
 
 
 class TestCostReportStatusUtils(unittest.TestCase):

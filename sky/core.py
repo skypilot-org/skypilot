@@ -475,7 +475,8 @@ def cost_report(days: Optional[int] = None,
 
     Returns:
         A list of dicts, with each dict containing the cost information of a
-        cluster.
+        cluster. 'resources' is already encoded for the API response, and
+        sky.cost_report decodes it back to a resources.Resources.
     """
     if days is None:
         days = constants.COST_REPORT_DEFAULT_DAYS

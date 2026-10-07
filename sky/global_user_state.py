@@ -2871,9 +2871,10 @@ def iter_clusters_from_history(
         exclude_managed_clusters: bool = False) -> Iterator[Dict[str, Any]]:
     """Yield cluster reports from history, most recently launched first.
 
-    A row's launched resources are unpickled when its record is yielded, so a
-    caller that consumes the records as they come holds one row's objects at a
-    time instead of the whole history's.
+    All matching rows are fetched, and their usage intervals unpickled, before
+    the first record is yielded. Only a row's launched resources are unpickled
+    when its record is yielded, so a caller that consumes the records as they
+    come never holds the whole history's Resources objects at once.
 
     Args:
         days: If specified, only include historical clusters (those not
