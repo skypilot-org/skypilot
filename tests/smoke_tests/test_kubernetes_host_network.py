@@ -346,7 +346,7 @@ def test_kubernetes_host_network_block_shape():
             f'SK=$({_head_env("SKYPILOT_SKYLET_PORT")}) && '
             f'LAST=$({_HEAD_PORTS} | tr -s " " "\\n" | tail -1) && '
             f'RUN=$(ssh -o StrictHostKeyChecking=no {name} '
-            '"cat ~/.sky/skylet_port") && '
+            '"cat ~/.sky/skylet_port" | tail -1) && '
             'echo "skylet_env=$SK last_port=$LAST skylet_port_file=$RUN" && '
             '[ -n "$SK" ] && [ "$SK" = "$LAST" ] && [ "$RUN" = "$SK" ]',
         ],
