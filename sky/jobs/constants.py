@@ -127,14 +127,6 @@ EMERGENCY_RECOVERY_BACKOFF_CAP_SECONDS = 30 * 60
 # relaunches a job that already completed; managed jobs are idempotent, and
 # that is accepted so that the ladder above stays long enough for a
 # persistent error to be remediated by hand before the budget runs out.
-# The emergency bookkeeping (budget, event, launching slot, schedule state)
-# needs the database, and a database outage is the most likely reason to be
-# there in the first place. Keep retrying it for this long before failing
-# the job: while it retries, the job keeps running on its cluster, so a
-# database outage shorter than this costs the job one attempt and nothing
-# else. A longer outage ends the job FAILED_CONTROLLER with full cleanup,
-# since nothing can be recorded without the database.
-EMERGENCY_BOOKKEEPING_DEADLINE_SECONDS = 30 * 60
 # If the previous emergency recovery attempt is older than this window, the
 # attempt counter restarts at 1: a long-running job that hits a rare
 # incident every few days should recover every time, while a tight crash
