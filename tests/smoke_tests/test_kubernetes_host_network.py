@@ -305,7 +305,7 @@ def test_kubernetes_host_network_block_shape():
     name's index), the second is what makes the scheduler account for
     them at all. A block that is neither still runs -- until a second
     cluster lands on the node, or the SSH client reconstructs a port
-    nothing is listening on.
+    nothing is listening on. skylet must run on its slot of the block.
     """
     name = smoke_tests_utils.get_cluster_name()
     cfg, write_cfg = _hostnet_cfg('shape')
@@ -340,6 +340,15 @@ def test_kubernetes_host_network_block_shape():
             f'FIRST=$({_HEAD_PORTS} | cut -d" " -f1) && '
             'echo "gcs_env=$GCS first_port=$FIRST" && '
             '[ -n "$GCS" ] && [ "$GCS" = "$FIRST" ]',
+            # skylet holds the block's last port, and listens where the API
+            # server will dial it rather than on the first free port.
+            _RESOLVE_PODC.format(name=name) + ' && ' +
+            f'SK=$({_head_env("SKYPILOT_SKYLET_PORT")}) && '
+            f'LAST=$({_HEAD_PORTS} | tr -s " " "\\n" | tail -1) && '
+            f'RUN=$(ssh -o StrictHostKeyChecking=no {name} '
+            '"cat ~/.sky/skylet_port") && '
+            'echo "skylet_env=$SK last_port=$LAST skylet_port_file=$RUN" && '
+            '[ -n "$SK" ] && [ "$SK" = "$LAST" ] && [ "$RUN" = "$SK" ]',
         ],
         teardown=f'sky down -y {name}; rm -f {cfg}',
         timeout=smoke_tests_utils.get_timeout('kubernetes'),
