@@ -655,8 +655,14 @@ class TestClusterInfoCarriesTheHeadsSkyletPort:
         runner.run.return_value = (0, 'SKYPILOT_SSH_USER: sky', '')
         monkeypatch.setattr(k8s_instance.command_runner,
                             'KubernetesCommandRunner', lambda *a, **k: runner)
-        return k8s_instance.get_cluster_info(
-            'ctx', 'c', provider_config={'use_internal_ips': True})
+        # A real provider_config always names its context, and code that
+        # wraps get_cluster_info reads it from there.
+        return k8s_instance.get_cluster_info('ctx',
+                                             'c',
+                                             provider_config={
+                                                 'context': 'ctx',
+                                                 'use_internal_ips': True
+                                             })
 
     def test_a_declared_skylet_port_reaches_the_head_instance(
             self, monkeypatch):
