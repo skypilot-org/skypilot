@@ -10,9 +10,6 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 _OTELCOL_VERSION = '0.161.0'
-# The clusters only echo a few lines and run fluent-bit or the collector, so
-# they need less than smoke_tests_utils.LOW_RESOURCE_ARG.
-_RESOURCE_ARG = '--cpus 2+ --memory 2+'
 # Where the collector's file exporter writes received logs, as OTLP JSON lines.
 _COLLECTOR_OUTPUT = '~/otel.jsonl'
 
@@ -23,7 +20,7 @@ _COLLECTOR_TASK = textwrap.dedent(f"""\
     resources:
       infra: aws
       cpus: 2+
-      memory: 2+
+      memory: 4+
       ports: 4318
     setup: |
       set -e
@@ -169,7 +166,7 @@ def test_log_collection_to_otlp(generic_cloud: str):
         def launch(cluster: str, config_path: str, mark: str) -> str:
             return smoke_tests_utils.with_config(
                 f'sky launch -y -c {cluster} --infra {generic_cloud} '
-                f'{_RESOURCE_ARG} --env MARK={mark} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} --env MARK={mark} '
                 f'{log_task.name}', config_path)
 
         test = smoke_tests_utils.Test(
@@ -207,7 +204,7 @@ def test_log_collection_to_otlp(generic_cloud: str):
                 # controller, which must pick up the delivered headers file.
                 smoke_tests_utils.with_config(
                     f'sky jobs launch -y -n {job} --infra {generic_cloud} '
-                    f'{_RESOURCE_ARG} --env MARK=job '
+                    f'{smoke_tests_utils.LOW_RESOURCE_ARG} --env MARK=job '
                     f'{log_task.name}', good_config.name),
                 _wait_in_collector_cmd(collector, _expected_markers('job')),
                 # A rejected credential: the job still succeeds (sky launch
