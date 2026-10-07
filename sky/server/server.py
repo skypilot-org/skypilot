@@ -165,6 +165,7 @@ def _basic_auth_401_response(request: fastapi.Request, content: str):
     """Return a 401 response with basic auth realm."""
     middleware_utils.mark_rejection(request,
                                     middleware_utils.REJECT_REASON_UNAUTHORIZED)
+    middleware_utils.mark_auth_rejection(request, content)
     return fastapi.responses.JSONResponse(
         status_code=401,
         headers={
@@ -177,10 +178,21 @@ def _basic_auth_401_response(request: fastapi.Request, content: str):
         content=content)
 
 
-def _bearer_auth_401_response(request: fastapi.Request, content):
-    """Return a 401 response for bearer token authentication failures."""
+def _bearer_auth_401_response(request: fastapi.Request,
+                              content: Dict[str, str],
+                              subject: Optional[str] = None,
+                              audit_detail: Optional[str] = None):
+    """Return a 401 response for bearer token authentication failures.
+
+    `subject` is the service account the token was verified to belong to,
+    when it was rejected after verification (revoked, expired, user gone).
+    `audit_detail` replaces the response detail in the audit stamp when the
+    detail carries variable text (an exception message).
+    """
     middleware_utils.mark_rejection(request,
                                     middleware_utils.REJECT_REASON_UNAUTHORIZED)
+    middleware_utils.mark_auth_rejection(request, audit_detail or
+                                         content['detail'], subject)
     return fastapi.responses.JSONResponse(
         status_code=401,
         headers={
@@ -615,13 +627,15 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     '(revoked or rotated)')
                 return _bearer_auth_401_response(
                     request,
-                    {'detail': 'Service account token revoked or rotated'})
+                    {'detail': 'Service account token revoked or rotated'},
+                    subject=user_id)
 
             if (token_row['expires_at'] is not None and
                     token_row['expires_at'] < int(time.time())):
                 logger.warning(f'Service account token {token_id} has expired')
                 return _bearer_auth_401_response(
-                    request, {'detail': 'Service account token has expired'})
+                    request, {'detail': 'Service account token has expired'},
+                    subject=user_id)
 
             # Verify user still exists in database
             user_info = await db_lookup.call_with_deadline(
@@ -631,7 +645,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     f'Service account user {user_id} no longer exists')
                 return _bearer_auth_401_response(
                     request,
-                    {'detail': 'Service account user no longer exists'})
+                    {'detail': 'Service account user no longer exists'},
+                    subject=user_id)
 
             # Update last used timestamp for token tracking, skipped while
             # the row's last_used_at is fresher than
@@ -688,7 +703,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                          exc_info=True)
             return _bearer_auth_401_response(
                 request,
-                {'detail': f'Service account authentication failed: {str(e)}'})
+                {'detail': f'Service account authentication failed: {str(e)}'},
+                audit_detail='Service account authentication failed')
 
         return await call_next(request)
 
