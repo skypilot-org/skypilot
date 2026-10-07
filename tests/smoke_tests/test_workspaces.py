@@ -574,10 +574,6 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
     SkyPilot's logs, then check the job sub-paths are cleaned up afterwards
     while the user-owned bucket survives.
     """
-    if not smoke_tests_utils.is_in_buildkite_env():
-        pytest.skip('Skipping workspace jobs bucket test when not in Buildkite '
-                    'environment')
-
     ws1_name = 'team-a'
     ws2_name = 'team-b'
     name = smoke_tests_utils.get_cluster_name()
@@ -585,25 +581,25 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
     # A sub-path on jobs.bucket covers joining it with the workspace prefix.
     bucket_root = 'smoke-root'
 
-    server_config_content = textwrap.dedent(f"""\
-        workspaces:
-            {ws1_name}: {{}}
-            {ws2_name}: {{}}
-        jobs:
-            bucket: s3://{bucket_name}/{bucket_root}
-            controller:
-                resources:
-                    cpus: 4+
-                    memory: 16+
-    """)
-    with tempfile.NamedTemporaryFile(prefix='server_config_ws_bucket_',
-                                     delete=False,
-                                     mode='w') as f:
-        f.write(server_config_content)
-        server_config_path = f.name
+    # Overlaid onto the existing server config by override_sky_config, so
+    # settings the test env relies on are kept. Config.update is shallow, so
+    # `jobs` must carry the low controller resources alongside the bucket.
+    low_resource = smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG
+    config_dict = {
+        **low_resource,
+        'jobs': {
+            **low_resource['jobs'],
+            'bucket': f's3://{bucket_name}/{bucket_root}',
+        },
+        'workspaces': {
+            ws1_name: {},
+            ws2_name: {},
+        },
+    }
 
     # Every kind of local upload: workdir, a folder mount, a single file.
-    local_dir = tempfile.mkdtemp(prefix='sky_ws_bucket_')
+    local_dir_obj = tempfile.TemporaryDirectory(prefix='sky_ws_bucket_')
+    local_dir = local_dir_obj.name
     workdir = os.path.join(local_dir, 'workdir')
     folder = os.path.join(local_dir, 'folder')
     os.makedirs(workdir)
@@ -654,8 +650,8 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
         [
             # The admin owns the shared bucket; SkyPilot must not delete it.
             f'aws s3api create-bucket --bucket {bucket_name}',
-            # Restart the API server with the two-workspace, shared-bucket
-            # config loaded.
+            # Restart so the server picks up the merged config (existing
+            # server config + two workspaces + shared bucket).
             f'{smoke_tests_utils.SKY_API_RESTART}',
             # Uploads finish before `jobs launch -d` returns, and the job
             # sub-path is only deleted after the job ends, so the objects are
@@ -695,11 +691,11 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
                   f'aws s3 rb s3://{bucket_name} --force || true; '
                   f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
                   f'{smoke_tests_utils.SKY_API_RESTART}'),
-        env={skypilot_config.ENV_VAR_GLOBAL_CONFIG: server_config_path},
+        config_dict=config_dict,
         timeout=30 * 60,
     )
 
     try:
         smoke_tests_utils.run_one_test(test)
     finally:
-        os.unlink(server_config_path)
+        local_dir_obj.cleanup()
