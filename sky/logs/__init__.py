@@ -52,6 +52,8 @@ def get_logging_agent() -> Optional[LoggingAgent]:
     store = skypilot_config.get_nested(('logs', 'store'), None)
     if store is None:
         return None
+    # The config schema accepts the store name case-insensitively.
+    store = store.lower()
     if store == 'gcp':
         return GCPLoggingAgent(skypilot_config.get_nested(('logs', 'gcp'), {}))
     elif store == 'aws':

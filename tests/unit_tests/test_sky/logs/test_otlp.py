@@ -191,11 +191,12 @@ def test_headers_file_falls_back_to_delivered_copy(tmp_path):
         ]
 
 
-def test_get_logging_agent_selects_otlp():
+@pytest.mark.parametrize('store', ['otlp', 'OTLP'])
+def test_get_logging_agent_selects_otlp(store):
 
     def fake_get_nested(keys, default=None):
         if keys == ('logs', 'store'):
-            return 'otlp'
+            return store
         if keys == ('logs', 'otlp'):
             return {'endpoint': 'http://collector:4318'}
         return default
@@ -227,6 +228,10 @@ def test_config_schema():
     }
     common_utils.validate_schema(valid, schema, 'Invalid config: ')
     for bad in [{
+            'store': 'otlp'
+    }, {
+            'store': 'OTLP'
+    }, {
             'store': 'otlp',
             'otlp': {}
     }, {
@@ -239,3 +244,7 @@ def test_config_schema():
         with pytest.raises((ValueError, jsonschema.ValidationError)):
             common_utils.validate_schema({'logs': bad}, schema,
                                          'Invalid config: ')
+    # Other stores do not need a block of their own.
+    common_utils.validate_schema({'logs': {
+        'store': 'gcp'
+    }}, schema, 'Invalid config: ')

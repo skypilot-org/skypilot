@@ -137,15 +137,14 @@ def _write_config_cmd(collector: str, config_path: str, headers_path: str,
 @pytest.mark.no_fluidstack  # Requires AWS to be enabled
 @pytest.mark.no_nebius  # Requires AWS to be enabled
 @pytest.mark.no_seeweb  # Requires AWS to be enabled
+# logs.otlp.headers_file is a path on the API server.
+@pytest.mark.no_remote_server
 def test_log_collection_to_otlp(generic_cloud: str):
     """Forwards cluster and managed job logs to a real OTLP collector.
 
     Also checks that a rejected credential neither delivers logs nor fails the
     user's job.
     """
-    if smoke_tests_utils.is_non_docker_remote_api_server():
-        pytest.skip('Skipping test in shared remote api server environment as '
-                    'logs.otlp.headers_file must be a path on the API server')
     name = smoke_tests_utils.get_cluster_name()
     collector = f'{name}-otel'
     bad = f'{name}-bad'
