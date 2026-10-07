@@ -564,10 +564,14 @@ def test_workspace_k8s_remote_identity():
 def test_workspace_jobs_bucket_prefix(generic_cloud: str):
     """Do workspaces sharing `jobs.bucket` upload under separate prefixes?
 
-    One server, one shared bucket, three workspaces:
-      team-a  -> s3://<bucket>/<root>/workspaces/team-a/job-<run_id>/...
-      team-b  -> s3://<bucket>/<root>/workspaces/team-b/job-<run_id>/...
-      default -> s3://<bucket>/<root>/workspaces/default/job-<run_id>/...
+    One server, one shared bucket, five workspaces:
+      team-a   -> s3://<bucket>/<root>/workspaces/team-a/job-<run_id>/...
+      team-b   -> s3://<bucket>/<root>/workspaces/team-b/job-<run_id>/...
+      Research -> s3://<bucket>/<root>/workspaces/research.979d6300/...
+      ml/prod  -> s3://<bucket>/<root>/workspaces/ml-prod.c0f7bb6f/...
+      default  -> s3://<bucket>/<root>/workspaces/default/job-<run_id>/...
+    `Research` and `ml/prod` stand for workspaces created before names were
+    validated; they map to a slug plus a hash of the exact name.
 
     Bucket IAM can only enforce per-workspace RBAC if every object a job
     uploads (workdir, folder mounts, single-file mounts) sits under its
@@ -578,9 +582,15 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
     its own config and cannot launch their clusters. Afterwards every job
     sub-path must be cleaned up while the user-owned bucket survives.
     """
-    ws1_name = 'team-a'
-    ws2_name = 'team-b'
     ws_default = constants.SKYPILOT_DEFAULT_WORKSPACE
+    # (job name suffix, workspace, expected bucket key segment)
+    team_workspaces = [
+        ('a', 'team-a', 'team-a'),
+        ('b', 'team-b', 'team-b'),
+        ('r', 'Research', 'research.979d6300'),
+        ('m', 'ml/prod', 'ml-prod.c0f7bb6f'),
+    ]
+    all_workspaces = team_workspaces + [('d', ws_default, ws_default)]
     name = smoke_tests_utils.get_cluster_name()
     bucket_name = f'sky-ws-bucket-{int(time.time())}-{uuid.uuid4().hex[:6]}'
     # A sub-path on jobs.bucket covers joining it with the workspace prefix.
@@ -596,10 +606,7 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
             **low_resource['jobs'],
             'bucket': f's3://{bucket_name}/{bucket_root}',
         },
-        'workspaces': {
-            ws1_name: {},
-            ws2_name: {},
-        },
+        'workspaces': {ws: {} for _, ws, _ in team_workspaces},
     }
 
     # Every kind of local upload: workdir, a folder mount, a single file.
@@ -642,7 +649,7 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
                 f'--config active_workspace={ws} {task_yaml} 2>&1 | '
                 f'tee {run_dir}/{job_name}.log')
 
-    def _check_job_upload_cmd(job_name: str, ws: str) -> str:
+    def _check_job_upload_cmd(job_name: str, segment: str) -> str:
         # Find the sub-path of the upload that belongs to this job: the last
         # one synced before `Managed Job ID` is printed. If the server retries
         # the launch request, earlier attempts sync to other sub-paths that no
@@ -650,11 +657,12 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
         return (
             'out=$(sed "s/\\x1b\\[[0-9;?]*[A-Za-z]//g" '
             f'{run_dir}/{job_name}.log | '
-            "awk '{print} /Managed Job ID:/{exit}'); "
+            'awk "{print} /Managed Job ID:/{exit}"); '
             'job_id=$(echo "$out" | grep -oE "Managed Job ID: [0-9]+" | '
             'grep -oE "[0-9]+$"); '
             'run=$(echo "$out" | grep "Storage synced" | '
-            f'grep -oE "{bucket_root}/workspaces/{ws}/job-[a-z0-9]+" | '
+            f'grep -oE "{bucket_root}/workspaces/{_ere(segment)}/'
+            'job-[a-z0-9]+" | '
             'tail -n 1); '
             f'echo "{job_name}: job $job_id uploaded to $run"; '
             '[ -n "$job_id" ] && [ -n "$run" ] || exit 1; '
@@ -665,10 +673,18 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
             'echo "$keys" | grep -E " $run/local-file-mounts/[0-9]+/data.txt$" '
             '&& echo "$keys" | grep -E " $run/tmp-files/file-0$"')
 
+    def _ere(text: str) -> str:
+        # The only regex metacharacter a bucket key segment can contain.
+        return text.replace('.', '\\.')
+
     def _cancel_cmd(job_name: str, ws: str) -> str:
         # Cancel is workspace-scoped.
         return (f'sky jobs cancel -y -n {job_name} '
                 f'--config active_workspace={ws}')
+
+    wait_for_job = (
+        smoke_tests_utils.
+        get_cmd_wait_until_managed_job_status_contains_matching_job_name)
 
     test = smoke_tests_utils.Test(
         'test_workspace_jobs_bucket_prefix',
@@ -681,35 +697,31 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
             # Uploads finish before `jobs launch -d` returns, and the job
             # sub-path is only deleted after the job ends, so the objects are
             # listable right after each launch.
-            _launch_cmd(f'{name}-a', ws1_name),
-            _check_job_upload_cmd(f'{name}-a', ws1_name),
-            _launch_cmd(f'{name}-b', ws2_name),
-            _check_job_upload_cmd(f'{name}-b', ws2_name),
-            _launch_cmd(f'{name}-d', ws_default),
-            _check_job_upload_cmd(f'{name}-d', ws_default),
+            *[
+                cmd for suffix, ws, segment in all_workspaces
+                for cmd in (_launch_cmd(f'{name}-{suffix}', ws),
+                            _check_job_upload_cmd(f'{name}-{suffix}', segment))
+            ],
             # Nothing is written outside a workspace prefix.
             f'keys=$({list_keys}); echo "$keys"; '
             f'! echo "$keys" | grep -vE " {bucket_root}/workspaces/'
-            f'({ws1_name}|{ws2_name}|{ws_default})/job-"',
+            f'({"|".join(_ere(seg) for _, _, seg in all_workspaces)})/job-"',
             # The team uploads are checked; end those jobs.
-            _cancel_cmd(f'{name}-a', ws1_name),
-            _cancel_cmd(f'{name}-b', ws2_name),
+            *[
+                _cancel_cmd(f'{name}-{suffix}', ws)
+                for suffix, ws, _ in team_workspaces
+            ],
             # The uploads were usable by the default-workspace job.
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-d',
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=900),
-            smoke_tests_utils.
-            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                job_name=f'{name}-a',
-                job_status=[sky.ManagedJobStatus.CANCELLED],
-                timeout=300),
-            smoke_tests_utils.
-            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                job_name=f'{name}-b',
-                job_status=[sky.ManagedJobStatus.CANCELLED],
-                timeout=300),
+            *[
+                wait_for_job(job_name=f'{name}-{suffix}',
+                             job_status=[sky.ManagedJobStatus.CANCELLED],
+                             timeout=300) for suffix, _, _ in team_workspaces
+            ],
             # Cleanup finds each job's sub-path under its workspace prefix.
             'for i in $(seq 1 36); do '
             '  left=""; '
@@ -723,9 +735,8 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
             # The user-owned bucket itself survives.
             f'aws s3api head-bucket --bucket {bucket_name}',
         ],
-        teardown=(f'{_cancel_cmd(f"{name}-a", ws1_name)} || true; '
-                  f'{_cancel_cmd(f"{name}-b", ws2_name)} || true; '
-                  f'{_cancel_cmd(f"{name}-d", ws_default)} || true; '
+        teardown=(''.join(f'{_cancel_cmd(f"{name}-{suffix}", ws)} || true; '
+                          for suffix, ws, _ in all_workspaces) +
                   f'aws s3 rb s3://{bucket_name} --force || true; '
                   f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
                   f'{smoke_tests_utils.SKY_API_RESTART}'),
