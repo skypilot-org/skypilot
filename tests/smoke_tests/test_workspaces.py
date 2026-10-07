@@ -789,7 +789,8 @@ def test_managed_jobs_in_non_default_workspace(generic_cloud: str):
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
             f'--config active_workspace={workspace} echo hi',
             # On failure, show why the controller could not launch the job.
-            f'{{ {wait_succeeded}; }} || {{ sky jobs logs --controller '
+            # The waiter runs in a subshell: it ends with `exit 1` on timeout.
+            f'( {wait_succeeded} ) || {{ sky jobs logs --controller '
             f'-n {name} --no-follow --config active_workspace={workspace} | '
             'tail -n 40; exit 1; }',
         ],
