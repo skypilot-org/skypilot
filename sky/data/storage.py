@@ -23,6 +23,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import akave
 from sky.adaptors import aws
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
@@ -71,6 +72,7 @@ STORE_ENABLED_CLOUDS: List[str] = [
     cloudflare.NAME,
     coreweave.NAME,
     vastdata.NAME,
+    akave.NAME,
     huggingface.NAME,
 ]
 
@@ -113,6 +115,10 @@ def get_cached_enabled_storage_cloud_names_or_refresh(
     if vastdata_is_enabled:
         enabled_clouds.append(vastdata.NAME)
 
+    akave_is_enabled, _ = akave.check_storage_credentials()
+    if akave_is_enabled:
+        enabled_clouds.append(akave.NAME)
+
     hf_is_enabled, _ = huggingface.check_storage_credentials()
     if hf_is_enabled:
         enabled_clouds.append(huggingface.NAME)
@@ -152,6 +158,7 @@ class StoreType(enum.Enum):
     NEBIUS = 'NEBIUS'
     COREWEAVE = 'COREWEAVE'
     VASTDATA = 'VASTDATA'
+    AKAVE = 'AKAVE'
     HF = 'HF'
     VOLUME = 'VOLUME'
 
@@ -1211,7 +1218,7 @@ class Storage(object):
                 is_local_source = True
             elif split_path.scheme in [
                     's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'cw',
-                    'vastdata', 'hf'
+                    'vastdata', 'akave', 'hf'
             ]:
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
@@ -1240,7 +1247,7 @@ class Storage(object):
                     raise exceptions.StorageSourceError(
                         f'Supported paths: local, s3://, gs://, https://, '
                         f'r2://, cos://, oci://, nebius://, cw://, '
-                        f'vastdata://, hf://. Got: {source}')
+                        f'vastdata://, akave://, hf://. Got: {source}')
         return source, is_local_source
 
     def _validate_storage_spec(self, name: Optional[str]) -> None:
@@ -1265,6 +1272,7 @@ class Storage(object):
                     'nebius',
                     'cw',
                     'vastdata',
+                    'akave',
                     'hf',
             ]:
                 with ux_utils.print_exception_no_traceback():
@@ -5262,6 +5270,66 @@ class VastDataStore(S3CompatibleStore):
         rclone_profile_name = (
             data_utils.Rclone.RcloneStores.VASTDATA.get_profile_name(self.name))
         rclone_config = data_utils.Rclone.RcloneStores.VASTDATA.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path,
+            config)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)
+
+
+@register_s3_compatible_store
+class AkaveStore(S3CompatibleStore):
+    """AkaveStore inherits from S3CompatibleStore and represents the backend
+    for Akave S3-compatible object storage buckets.
+
+    Akave does not implement STS, so it uses its own credential files and
+    profile instead of reusing the AWS cloud.
+    """
+
+    @classmethod
+    def get_config(cls) -> S3CompatibleConfig:
+        """Return the configuration for Akave Object Storage."""
+        return S3CompatibleConfig(
+            store_type='AKAVE',
+            url_prefix='akave://',
+            client_factory=lambda region: data_utils.create_akave_client(),
+            resource_factory=lambda name: akave.resource('s3').Bucket(name),
+            split_path=data_utils.split_akave_path,
+            verify_bucket=data_utils.verify_akave_bucket,
+            aws_profile=akave.AKAVE_PROFILE_NAME,
+            get_endpoint_url=akave.get_endpoint,
+            credentials_file=akave.AKAVE_CREDENTIALS_PATH,
+            config_file=akave.AKAVE_CONFIG_PATH,
+            cloud_name=akave.NAME,
+            default_region=akave.DEFAULT_REGION,
+            mount_cmd_factory=cls._get_akave_mount_cmd,
+        )
+
+    @classmethod
+    def _get_akave_mount_cmd(cls,
+                             bucket_name: str,
+                             mount_path: str,
+                             bucket_sub_path: Optional[str],
+                             read_only: bool = False) -> str:
+        """Factory method for Akave mount command."""
+        endpoint_url = akave.get_endpoint()
+        return mounting_utils.get_akave_mount_cmd(akave.AKAVE_CREDENTIALS_PATH,
+                                                  akave.AKAVE_PROFILE_NAME,
+                                                  bucket_name,
+                                                  endpoint_url,
+                                                  mount_path,
+                                                  bucket_sub_path,
+                                                  read_only=read_only)
+
+    def mount_cached_command(self,
+                             mount_path: str,
+                             config: Optional[MountCachedConfig] = None) -> str:
+        """Akave-specific cached mount implementation using rclone."""
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.AKAVE.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.AKAVE.get_config(
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
             rclone_config, rclone_profile_name, self.bucket.name, mount_path,
