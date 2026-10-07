@@ -4632,6 +4632,77 @@ async def record_emergency_kept_running_async(job_id: int, task_id: int,
     return recorded
 
 
+EMERGENCY_REATTACHED_REASON = ('Emergency recovery succeeded: the controller '
+                               're-attached to the job, which kept running on '
+                               'its cluster')
+
+
+async def record_emergency_reattached_async(job_id: int, task_id: int) -> bool:
+    """Record that the controller re-attached to a task it kept running.
+
+    Closes the episode record_emergency_kept_running_async opened: written
+    once the job answers its first status poll after the emergency backoff.
+    The event carries the task's current status (RUNNING or WINDING_DOWN)
+    and no recovery_source, so consumers keyed on recovery_source do not
+    read it as another attempt. No status transition, no callback: nothing
+    about the job changed.
+
+    Returns True if the event was recorded; False if the task is no longer
+    running, in which case the resume logic owns it.
+    """
+
+    async def _op(session: sql_async.AsyncSession) -> bool:
+        status = await session.scalar(
+            sqlalchemy.select(spot_table.c.status).where(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.end_at.is_(None),
+            ))
+        if status not in (ManagedJobStatus.RUNNING.value,
+                          ManagedJobStatus.WINDING_DOWN.value):
+            return False
+        await _insert_job_event(session, job_id, task_id,
+                                ManagedJobStatus(status),
+                                EMERGENCY_REATTACHED_REASON)
+        await session.commit()
+        return True
+
+    recorded = await _retry_session(_op)
+    if recorded:
+        logger.info('=== Emergency recovery: re-attached to the running job '
+                    '===')
+    return recorded
+
+
+@db_retries.retry_async
+async def get_latest_event_recovery_source_async(
+        job_id: int, task_id: int) -> Optional[RecoverySource]:
+    """Return the recovery_source of the task's most recent job event.
+
+    Job-level events (task_id None) count as the task's own: a job group's
+    emergency is recorded once on the job, and each member closes it for
+    itself with a task-level event. EMERGENCY on a task that is still
+    RUNNING means an emergency kept its cluster and the controller has not
+    re-attached since: the kept-running event is the task's latest, and
+    the re-attached event that closes it (or any later status event)
+    carries no source. Read from the events rather than from controller
+    memory so that a controller restart during the backoff still closes
+    the episode. None when the task has no event or its latest one has no
+    source.
+    """
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        value = await session.scalar(
+            sqlalchemy.select(job_events_table.c.recovery_source).where(
+                job_events_table.c.spot_job_id == job_id,
+                sqlalchemy.or_(job_events_table.c.task_id == task_id,
+                               job_events_table.c.task_id.is_(None)),
+            ).order_by(job_events_table.c.id.desc()).limit(1))
+    if value is None:
+        return None
+    return RecoverySource(value)
+
+
 @db_retries.retry_async
 async def get_emergency_recovery_budget_async(
         job_id: int) -> Tuple[int, Optional[float]]:

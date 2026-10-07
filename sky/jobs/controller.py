@@ -865,6 +865,7 @@ class JobController:
         # If resuming from a controller failure, check the previous state
         # and determine if we need to force recovery.
         force_transit_to_recovering = False
+        emergency_reattach = False
         if is_resume:
             prev_status = await (
                 managed_job_state.get_job_status_with_task_id_async(
@@ -893,6 +894,21 @@ class JobController:
                 # relaunch is needed, so neither a restart nor a
                 # controller-side error restarts a healthy workload.
                 force_transit_to_recovering = True
+            else:
+                # An emergency that kept this task's cluster recorded itself
+                # as the task's latest job event (recovery_source=EMERGENCY,
+                # status unchanged). The monitor loop closes that episode
+                # with a re-attached event once the job answers. Read from
+                # the events, not controller memory, so a controller restart
+                # during the backoff closes it too.
+                latest_source = await (
+                    managed_job_state.get_latest_event_recovery_source_async(
+                        self._job_id, task_id))
+                emergency_reattach = (
+                    latest_source == managed_job_state.RecoverySource.EMERGENCY)
+                if emergency_reattach:
+                    logger.info(f'Task {task_id} kept its cluster through an '
+                                'emergency; re-attaching to the job.')
 
             await self._strategy_executor.on_resume(cluster_name)
 
@@ -909,6 +925,7 @@ class JobController:
             callback_func=callback_func,
             cleanup_cluster_on_success=True,
             force_transit_to_recovering=force_transit_to_recovering,
+            emergency_reattach=emergency_reattach,
         )
         if result is not None:
             return result
@@ -921,6 +938,7 @@ class JobController:
             callback_func=callback_func,
             cleanup_cluster_on_success=True,
             force_transit_to_recovering=force_transit_to_recovering,
+            emergency_reattach=emergency_reattach,
         )
 
     async def _run_batch_coordinator_task(
@@ -975,6 +993,19 @@ class JobController:
                     recovered_time=time.time(),
                     callback_func=callback_func,
                     count_recovery=False)
+            elif prev_status in (
+                    managed_job_state.ManagedJobStatus.RUNNING,
+                    managed_job_state.ManagedJobStatus.WINDING_DOWN):
+                # An emergency on a running coordinator keeps it as is and
+                # records itself as the task's latest event. The coordinator
+                # runs inline, so re-running it is the re-attach: close the
+                # episode now.
+                latest_source = await (
+                    managed_job_state.get_latest_event_recovery_source_async(
+                        self._job_id, task_id))
+                if latest_source == managed_job_state.RecoverySource.EMERGENCY:
+                    await managed_job_state.record_emergency_reattached_async(
+                        self._job_id, task_id)
 
         metadata = task.metadata
 
@@ -1044,6 +1075,7 @@ class JobController:
         cleanup_cluster_on_success: bool = True,
         force_transit_to_recovering: bool = False,
         on_recovery: Optional[typing.Callable[[], typing.Coroutine]] = None,
+        emergency_reattach: bool = False,
     ) -> bool:
         """Monitor a single task until completion with recovery support.
 
@@ -1066,6 +1098,9 @@ class JobController:
                 iteration (used when resuming from controller failure).
             on_recovery: Optional async callback called after recovery.
                 Used by JobGroups to re-setup networking.
+            emergency_reattach: The task kept its cluster through an
+                emergency (its latest job event is EMERGENCY-sourced); the
+                loop records the re-attach once the job answers.
 
         Returns:
             True if the task succeeded, False otherwise.
@@ -1088,6 +1123,7 @@ class JobController:
                 cleanup_cluster_on_success=cleanup_cluster_on_success,
                 force_transit_to_recovering=force_transit_to_recovering,
                 on_recovery=on_recovery,
+                emergency_reattach=emergency_reattach,
                 status_logger=status_logger,
             )
         finally:
@@ -1105,6 +1141,7 @@ class JobController:
         cleanup_cluster_on_success: bool = True,
         force_transit_to_recovering: bool = False,
         on_recovery: Optional[typing.Callable[[], typing.Coroutine]] = None,
+        emergency_reattach: bool = False,
     ) -> bool:
         """Body of the monitoring loop; see _monitor_one_task for the contract.
 
@@ -1205,6 +1242,21 @@ class JobController:
                         f'Exception: {common_utils.format_exception(fetch_e)}\n'
                         f'Traceback: {traceback.format_exc()}')
                     # Fall through to recovery logic below
+
+            if (emergency_reattach and job_status is not None and
+                    not job_status.is_terminal() and
+                    not (runtime_recovery is not None and
+                         runtime_recovery.should_relaunch)):
+                # The job answered after an emergency that kept its cluster:
+                # record the re-attach, which closes the episode the
+                # kept-running event opened. A job that does not answer
+                # goes to the recovery path below, which records its own
+                # events; one that already finished, or that its runtime
+                # wants replaced, is closed by the terminal or RECOVERING
+                # event the loop writes for it below.
+                await managed_job_state.record_emergency_reattached_async(
+                    self._job_id, task_id)
+                emergency_reattach = False
 
             if not force_transit_to_recovering:
                 # While the job is running, surface external links harvested
@@ -1719,6 +1771,9 @@ class JobController:
             # failed or the job status is failed to be fetched.
             logger.info(f'Starting recovery for task {task_id}, '
                         f'it is currently {job_status}')
+            # A re-attach that never saw the job answer ends here: the
+            # recovery below records its own events.
+            emergency_reattach = False
             # How to announce this recovery. The forced first post-resume
             # iteration derives it from the task's current status:
             # - RECOVERING: a recovery episode is already open (an
@@ -1987,11 +2042,14 @@ class JobController:
         job_group_name: str,
         all_tasks_handles: List[Tuple['sky.Task', typing.Any]],
         force_transit_to_recovering: bool = False,
+        emergency_reattach: bool = False,
     ) -> bool:
         """Monitor a single task in a JobGroup until completion.
 
         Wraps _monitor_one_task with JobGroup-specific recovery callback
-        for re-setting up networking after recovery.
+        for re-setting up networking after recovery. ``emergency_reattach``
+        is passed through: the member closes the group's emergency episode
+        for itself once it answers.
 
         Args:
             task_id: Task ID.
@@ -2090,6 +2148,7 @@ class JobController:
             cleanup_cluster_on_success=False,  # JobGroup cleans up all at end
             force_transit_to_recovering=force_transit_to_recovering,
             on_recovery=on_recovery,
+            emergency_reattach=emergency_reattach,
         )
         if result is not None:
             return result
@@ -2102,6 +2161,7 @@ class JobController:
             cleanup_cluster_on_success=False,  # JobGroup cleans up all at end
             force_transit_to_recovering=force_transit_to_recovering,
             on_recovery=on_recovery,
+            emergency_reattach=emergency_reattach,
         )
 
     async def _run_job_group(self) -> bool:
@@ -2147,6 +2207,10 @@ class JobController:
         # Key: task_id, Value: (task_status, force_transit_to_recovering)
         task_resume_info: Dict[int, Tuple[
             Optional[managed_job_state.ManagedJobStatus], bool]] = {}
+        # RUNNING members whose latest job event is the group's emergency
+        # (job-level, EMERGENCY-sourced): their monitor loop closes it for
+        # them once they answer.
+        emergency_reattach_info: Dict[int, bool] = {}
 
         for task_id, task in enumerate(tasks):
             task_status = await (
@@ -2170,8 +2234,15 @@ class JobController:
             elif task_status == managed_job_state.ManagedJobStatus.RUNNING:
                 # Task was running - resume monitoring without forced recovery
                 task_resume_info[task_id] = (task_status, False)
+                latest_source = await (
+                    managed_job_state.get_latest_event_recovery_source_async(
+                        self._job_id, task_id))
+                emergency_reattach_info[task_id] = (
+                    latest_source == managed_job_state.RecoverySource.EMERGENCY)
+                note = (' (re-attaching after an emergency)'
+                        if emergency_reattach_info[task_id] else '')
                 logger.info(f'Task {task_id} ({task.name}) was RUNNING, '
-                            'resuming monitoring')
+                            f'resuming monitoring{note}')
             else:
                 # Task was in non-RUNNING, non-terminal state - force recovery
                 task_resume_info[task_id] = (task_status, True)
@@ -2437,9 +2508,15 @@ class JobController:
             cluster_name = cluster_names[task_id]
             assert cluster_name is not None
             assert executor is not None
-            coro = self._monitor_job_group_task(task_id, task, cluster_name,
-                                                executor, job_group_name,
-                                                tasks_handles, force_recovery)
+            coro = self._monitor_job_group_task(
+                task_id,
+                task,
+                cluster_name,
+                executor,
+                job_group_name,
+                tasks_handles,
+                force_recovery,
+                emergency_reattach=emergency_reattach_info.get(task_id, False))
             monitor_async_tasks[task_id] = asyncio.create_task(
                 coro, name=f'monitor_{task.name}')
 
@@ -3012,7 +3089,10 @@ class JobController:
                            'emergency teardown (continuing recovery): '
                            f'{common_utils.format_exception(e)}')
 
-    async def _emergency_bookkeeping_job_group(self) -> bool:
+    async def _emergency_bookkeeping_job_group(self, error: Union[Exception,
+                                                                  SystemExit],
+                                               attempt: int,
+                                               max_attempts: int) -> bool:
         """Group-shape pre-retry bookkeeping.
 
         Returns True to retry the job loop immediately (no backoff): the
@@ -3033,9 +3113,11 @@ class JobController:
         # the group; an internal error should not be more destructive than
         # infrastructure failure. The symmetric reset is a two-line policy
         # flip here if experience disagrees.
-        # Known gap: no per-task RECOVERING event is emitted here, so
-        # events-based recovery metrics do not count group emergencies
-        # (the job-level budget columns still do).
+        # The attempt is recorded as one job-level event (task_id None):
+        # no member changes status, so there is no member transition to
+        # hang it on, and one row per attempt is what alerting expects.
+        # Each member's resume closes it from its own first answer
+        # (_run_job_group reads it as the member's latest event).
         # TODO(ishan): once gang admission for job groups lands, a group
         # whose admission barrier is still open should take the symmetric
         # reset (tear down all, reset to PENDING): mid-startup there is no
@@ -3059,6 +3141,29 @@ class JobController:
             logger.info(f'Job Group {self._job_id} is cancelling or terminal; '
                         'retrying the job loop to let it complete.')
             return True
+        if not self._emergency_event_emitted:
+            # Emit once per escaped error, so an outer-retry re-run does not
+            # append a duplicate. The status is the group's: RUNNING if any
+            # member runs, else the first member still in flight.
+            group_status = next(
+                (s for s in statuses
+                 if s == managed_job_state.ManagedJobStatus.RUNNING),
+                next((s for s in statuses if not s.is_terminal()),
+                     managed_job_state.ManagedJobStatus.RUNNING))
+            reason = (f'Unexpected controller error (emergency recovery '
+                      f'attempt {attempt}/{max_attempts}); the job group\'s '
+                      'members keep their status and their clusters and the '
+                      'controller re-attaches to each after the backoff: ' +
+                      common_utils.format_exception(error, use_bracket=True))
+            await managed_job_state.add_job_event_async(
+                self._job_id,
+                None,
+                group_status,
+                reason,
+                recovery_source=managed_job_state.RecoverySource.EMERGENCY)
+            self._emergency_event_emitted = True
+        logger.info(f'=== Emergency recovery: keeping job group {self._job_id} '
+                    'as is ===')
         return False
 
     async def _emergency_bookkeeping_latest_task(self, error: Union[Exception,
@@ -3264,7 +3369,8 @@ class JobController:
 
         # 2./3. Shape-specific bookkeeping (see each helper's docstring).
         if self._dag.is_job_group():
-            fast_retry = await self._emergency_bookkeeping_job_group()
+            fast_retry = await self._emergency_bookkeeping_job_group(
+                error, attempt, max_attempts)
         else:
             fast_retry = await self._emergency_bookkeeping_latest_task(
                 error, attempt, max_attempts)
