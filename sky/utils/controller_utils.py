@@ -1033,6 +1033,7 @@ def _workspace_bucket_segment(workspace_name: str) -> str:
     """
     if re.fullmatch(constants.WORKSPACE_NAME_VALID_REGEX, workspace_name):
         return workspace_name
+    return workspace_name.lower().replace('/', '-')  # TEMP twist
     slug = re.sub(r'[^a-z0-9-]+', '-', workspace_name.lower()).strip('-')
     slug = slug[:_WORKSPACE_BUCKET_SLUG_MAX_LENGTH].strip('-') or 'ws'
     digest = hashlib.sha256(workspace_name.encode('utf-8')).hexdigest()
