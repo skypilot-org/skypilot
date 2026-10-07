@@ -2070,3 +2070,23 @@ class TestClientUserIdValidation:
         auth_user = models.User(id='authuser1', name='auth-user')
         request = await self._prepare('bad%id', auth_user=auth_user)
         assert request.user_id == 'authuser1'
+
+
+@pytest.mark.parametrize('missing', [True, False])
+def test_seed_role_if_missing(missing):
+    """A request's user without a role gets one; a user with one is untouched.
+
+    An unauthenticated request (e.g. to the API server on a jobs controller)
+    creates the user in the executor, where no auth middleware seeds a role.
+    """
+    with mock.patch.object(executor.permission.permission_service,
+                           'role_seed_missing',
+                           return_value=missing) as role_seed_missing, \
+            mock.patch.object(executor.permission,
+                              'seed_new_user_role') as seed_new_user_role:
+        executor._seed_role_if_missing('user1')
+    role_seed_missing.assert_called_once_with('user1')
+    if missing:
+        seed_new_user_role.assert_called_once_with('user1')
+    else:
+        seed_new_user_role.assert_not_called()

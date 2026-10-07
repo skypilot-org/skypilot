@@ -60,6 +60,7 @@ from sky.server.requests import threads
 from sky.server.requests import workspace_access
 from sky.server.requests.queues import base as queue_base
 from sky.skylet import constants
+from sky.users import permission
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -749,6 +750,7 @@ def override_request_env_and_config(
                 name=request_body.env_vars[constants.USER_ENV_VAR])
             _, user = global_user_state.add_or_update_user(user,
                                                            return_user=True)
+            _seed_role_if_missing(user.id)
             using_remote_api_server = request_body.using_remote_api_server
 
         # Force color to be enabled.
@@ -900,6 +902,20 @@ def _maybe_observe_request_pending(request: api_requests.Request) -> None:
     metrics_utils.observe_request_pending(request.name,
                                           request.schedule_type.value,
                                           time.time() - request.created_at)
+
+
+def _seed_role_if_missing(user_id: str) -> None:
+    """Give the request's user a role if they do not have one yet.
+
+    The auth middlewares seed a role when they first see a user, but a request
+    that reaches the server without authentication creates the user here. One
+    such server is the API server on a jobs controller, which sees the job's
+    user first on the request that launches the job's cluster. Without a role
+    the user fails every workspace check except `default`, so the job retries
+    forever.
+    """
+    if permission.permission_service.role_seed_missing(user_id):
+        permission.seed_new_user_role(user_id)
 
 
 def _request_execution_wrapper(request_id: str,
