@@ -58,6 +58,8 @@ function getJobsPaginationFetch() {
 
 // Configuration
 const DEFAULT_TAIL_LINES = 5000;
+// The job page requests all fields: the task YAML, entrypoint and links are
+// shown only there, so the lists leave them out.
 const DEFAULT_FIELDS = [
   'job_id',
   '_job_id',
@@ -79,12 +81,9 @@ const DEFAULT_FIELDS = [
   'pool_hash',
   'details',
   'failure_reason',
-  'user_yaml',
-  'entrypoint',
   'is_job_group',
   'execution',
   'is_primary_in_job_group',
-  'links',
   'is_batch',
   'batch_total_batches',
   'batch_completed_batches',
@@ -95,6 +94,7 @@ const DEFAULT_FIELDS = [
   'parent_job_id',
   'parent_task_id',
   'dynamic_task_index',
+  'depends_on',
 ];
 
 /**
@@ -397,6 +397,8 @@ export async function getManagedJobs(options = {}) {
         // A dynamic task's ordinal within its root's tree (declared tasks are
         // 0..n-1, dynamic tasks number on); `<root>-<index>` names it.
         dynamic_task_index: job.dynamic_task_index ?? null,
+        // Managed job IDs this job waits for; null without dependencies.
+        depends_on: job.depends_on ?? null,
         // Batch progress
         batch_total_batches: job.batch_total_batches,
         batch_completed_batches: job.batch_completed_batches,

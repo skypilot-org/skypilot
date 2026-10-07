@@ -1191,6 +1191,7 @@ Install the necessary dependencies for Vast.
     .. code-block:: shell
 
       # SkyPilot requires 3.7 <= python <= 3.13.
+      # Vast is not part of "skypilot[all]"; install the vast extra explicitly.
       # From stable release
       pip install "skypilot[vast]"
       # From nightly build

@@ -91,7 +91,10 @@ _SBATCH_PROTECTED_OPTIONS = frozenset({
     'error',
     'nodes',
     'wait-all-nodes',
+    # A user `requeue` directive is emitted after `no-requeue` and would
+    # override it.
     'no-requeue',
+    'requeue',
     'cpus-per-task',
     'mem',
     'gres',

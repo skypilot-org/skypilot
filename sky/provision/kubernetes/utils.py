@@ -118,18 +118,11 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     OCI_ROCE = 'oci_roce'
     NONE = 'none'
 
-    def get_network_env_vars(self,
-                             acc_type: Optional[str] = None,
-                             pod_local_rdma: bool = False) -> Dict[str, str]:
+    def get_network_env_vars(self) -> Dict[str, str]:
         """Get network environment variables for this cluster type.
 
-        Args:
-            acc_type: The canonical accelerator type requested (e.g. 'GB200').
-                Used by OCI to pick a shape-specific NCCL profile.
-            pod_local_rdma: The pod receives its own RDMA devices (SR-IOV
-                virtual functions) instead of sharing the node's. Profiles that
-                name the host's physical functions have to widen their HCA
-                list, since those names do not exist in such a pod.
+        For OCI this is the generic RoCE profile; `oci_nccl.get_env_vars`
+        replaces its NCCL keys with the node shape's own set when it knows one.
         """
         if self == KubernetesHighPerformanceNetworkType.NEBIUS:
             # Nebius cluster with InfiniBand - use InfiniBand optimizations
@@ -158,87 +151,10 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
                 'FI_PROVIDER': 'efa',
             }
         elif self == KubernetesHighPerformanceNetworkType.OCI_ROCE:
-            # OCI bare-metal GPU shapes use RDMA for multi-node NCCL. Values
-            # mirror the oracle-quickstart/oci-hpc-oke NCCL reference params
-            # (the same recommended values OCI's stack bakes into its
-            # `oci-nccl-parameters-<shape>` configmaps). Users can override
-            # any of these via task `envs:`.
-            # Refer to the examples https://github.com/oracle-quickstart/oci-hpc-oke/tree/main/manifests/nccl-tests/kueue for more details. # pylint: disable=line-too-long
-            acc = (acc_type or '').upper()
-            # The Grace profiles below name the host's physical functions
-            # exactly. A pod holding SR-IOV virtual functions never sees those
-            # names, so the list has to widen to the family prefix. This is the
-            # only NCCL difference between Oracle's two reference manifests for
-            # the same shape, and it fails silently: NCCL finds no matching
-            # device and falls back to TCP rather than erroring.
-            #
-            # Widening hands NIC selection to the device plugin: the pod holds
-            # only the VFs its SriovNetworkNodePolicy chose to create, so the
-            # prefix cannot reach a PF the exact list was excluding. A policy
-            # that also exposes non-fabric NICs would need `NCCL_IB_HCA`
-            # narrowed again through task `envs:`.
-            pf_names_visible = not pod_local_rdma
-            if acc == 'GB200':
-                # GB200 NVL72 runs Quantum-2 InfiniBand plus rack-scale
-                # multi-node NVLink (MNNVL) and NVLink SHARP (NVLS) -- a
-                # distinct profile from the RoCEv2 shapes below. It drops the
-                # RoCE-only DSCP/GID/UCX knobs and turns on MNNVL/NVLS/cumem.
-                # The HCA list is the exact set OCI validated for BM.GPU.GB200.4.
-                logger.info('OCI network_tier=best: using GB200 NCCL profile '
-                            '(MNNVL/NVLS).')
-                return {
-                    'NCCL_DEBUG': 'WARN',
-                    # Multi-node NVLink across the NVL72 rack.
-                    'NCCL_MNNVL_ENABLE': '1',
-                    # Required for MNNVL to work.
-                    'NCCL_CUMEM_ENABLE': '1',
-                    'NCCL_NET_PLUGIN': 'sys',
-                    'NCCL_IB_HCA': ('mlx5_0,mlx5_1,mlx5_3,mlx5_4'
-                                    if pf_names_visible else 'mlx5'),
-                    # NVLink SHARP in-network reductions.
-                    'NCCL_NVLS_ENABLE': '1',
-                    'NCCL_SOCKET_IFNAME': 'eth0',
-                }
-            if acc == 'GB300':
-                # GB300 NVL72 is MNNVL/NVLS like GB200 but keeps the RoCE IB
-                # tuning knobs and disables the net plugin (NET_PLUGIN=none).
-                # Values per OCI's BM.GPU.GB300.4 reference set. The leading
-                # '=' in NCCL_IB_HCA is NCCL's exact-name-match prefix, not a
-                # typo -- keep it.
-                logger.info('OCI network_tier=best: using GB300 NCCL profile '
-                            '(MNNVL/NVLS).')
-                return {
-                    'NCCL_DEBUG': 'WARN',
-                    'NCCL_MNNVL_ENABLE': '1',
-                    'NCCL_CUMEM_ENABLE': '1',
-                    'NCCL_NET_PLUGIN': 'none',
-                    'NCCL_IB_HCA': ('=mlx5_0,mlx5_1,mlx5_2,mlx5_3,'
-                                    'mlx5_5,mlx5_6,mlx5_7,mlx5_8'
-                                    if pf_names_visible else 'mlx5'),
-                    'NCCL_NVLS_ENABLE': '1',
-                    'NCCL_SOCKET_IFNAME': 'eth0',
-                    # GPU-to-CPU (C2C) GPUDirect over the Grace link.
-                    'NCCL_NET_GDR_C2C': '1',
-                    # With NET_GDR_C2C on, NCCL's GDR cutoff is PATH_P2C, and
-                    # a GPU whose NIC sits one PCIe host bridge away falls
-                    # outside it -- GDR silently off. PHB widens the cutoff by
-                    # exactly that one level; nothing else changes.
-                    'NCCL_NET_GDR_LEVEL': 'PHB',
-                    'NCCL_IB_GID_INDEX': '3',
-                    'NCCL_IB_TC': '41',
-                    'NCCL_IB_SL': '0',
-                    'NCCL_IB_TIMEOUT': '22',
-                    'NCCL_BUFFSIZE': '16777216',
-                    'NCCL_IB_QPS_PER_CONNECTION': '4',
-                    'NCCL_IB_SPLIT_DATA_ON_QPS': '0',
-                    'NCCL_DMABUF_ENABLE': '1',
-                }
-            # RoCEv2 shapes (H100/H200/B200). The broad 'mlx5' prefix match
-            # works across shapes; per-shape exact HCA lists give marginally
-            # better perf (tracked as a follow-up).
-            logger.info('OCI network_tier=best: using default RoCE NCCL '
-                        f'profile (acc_type={acc_type!r}).')
+            # Generic RoCEv2 profile for OCI bare-metal GPU shapes, used when
+            # the node shape is unknown or has no Oracle parameter set.
             return {
+                # Prefix match: every mlx5 device on the node.
                 'NCCL_IB_HCA': 'mlx5',
                 # RoCEv2 GID index. Fixed on OCI's bare-metal GPU images.
                 'NCCL_IB_GID_INDEX': '3',
@@ -247,6 +163,10 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
                 # OCI BM.GPU shapes use legacy eth* naming; primary NIC
                 # is eth0 even under hostNetwork: true.
                 'NCCL_SOCKET_IFNAME': 'eth0',
+                # UCX only, not NCCL: keeps an mpirun launcher's MPI traffic
+                # (`-mca pml ucx`) on TCP over the primary NIC, as Oracle's
+                # NCCL-test manifests do. UCX data paths such as NIXL should
+                # override these through task `envs:`.
                 'UCX_TLS': 'tcp',
                 'UCX_NET_DEVICES': 'eth0',
             }

@@ -2481,20 +2481,23 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                                                     cluster_config_file)
         self.docker_user = docker_user
 
+    # A skylet tunnel is a process on the host that opened it, so each host
+    # (see backend_utils.skylet_tunnel_owner_id) reads, writes and closes
+    # only its own entry in the cluster row.
     def _get_skylet_ssh_tunnel(self) -> Optional[SSHTunnelInfo]:
-        metadata = global_user_state.get_cluster_skylet_ssh_tunnel_metadata(
-            self.cluster_name)
+        metadata = global_user_state.get_cluster_skylet_ssh_tunnel(
+            self.cluster_name, backend_utils.skylet_tunnel_owner_id())
         if metadata is None:
             return None
         return SSHTunnelInfo(port=metadata[0], pid=metadata[1])
 
     def _set_skylet_ssh_tunnel(self, tunnel: Optional[SSHTunnelInfo]) -> None:
-        global_user_state.set_cluster_skylet_ssh_tunnel_metadata(
-            self.cluster_name,
+        global_user_state.set_cluster_skylet_ssh_tunnel(
+            self.cluster_name, backend_utils.skylet_tunnel_owner_id(),
             (tunnel.port, tunnel.pid) if tunnel is not None else None)
 
     def close_skylet_ssh_tunnel(self) -> None:
-        """Terminate the SSH tunnel process and clear its metadata."""
+        """Terminate this host's SSH tunnel process and clear its metadata."""
         tunnel = self._get_skylet_ssh_tunnel()
         if tunnel is None:
             return
