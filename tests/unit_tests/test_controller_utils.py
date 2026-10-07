@@ -1201,10 +1201,30 @@ def test_shared_bucket_prefix_scopes_workspace():
     assert trimmed == 'custom/root/workspaces/default'
 
 
-def test_shared_bucket_prefix_rejects_unsafe_workspace_name():
-    """A workspace name with a path separator cannot widen the IAM prefix."""
-    with pytest.raises(ValueError, match='cannot scope a shared bucket'):
-        controller_utils._shared_bucket_workspace_prefix(None, 'team/other')
+def test_shared_bucket_prefix_maps_legacy_workspace_names():
+    """Workspaces that predate the name rule still get their own prefix.
+
+    The segment is a slug plus a hash of the exact name, joined by '.', which
+    no valid name contains, so it is one path segment that collides neither
+    with a valid name nor with another legacy name.
+    """
+    segment = controller_utils._workspace_bucket_segment
+    assert segment('Research') == 'research.979d6300'
+    assert segment('RESEARCH') == 'research.dd7c11fb'
+    # A path separator cannot widen the IAM prefix.
+    assert segment('ml/prod') == 'ml-prod.c0f7bb6f'
+    assert segment('ml.prod') == 'ml-prod.b348490e'
+    assert segment('///') == 'ws.732c4e97'
+    assert segment('A' * 60) == 'a' * 32 + '.' + segment('A' * 60)[-8:]
+
+    assert controller_utils._shared_bucket_workspace_prefix(
+        'custom/root', 'ml/prod') == 'custom/root/workspaces/ml-prod.c0f7bb6f'
+
+
+def test_shared_bucket_prefix_keeps_valid_workspace_names():
+    """Valid names are used as-is, so the layout for them never changes."""
+    for name in ('default', 'team-a', 'team_b1', 'a', 'x' * 60):
+        assert controller_utils._workspace_bucket_segment(name) == name
 
 
 def test_shared_bucket_upload_paths_are_scoped_per_workspace(

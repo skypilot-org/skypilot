@@ -2,6 +2,7 @@
 import copy
 import dataclasses
 import enum
+import hashlib
 import os
 import pathlib
 import re
@@ -73,6 +74,11 @@ CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
 # cloud as controller.
 _LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX = (
     '__skypilot:local_skypilot_config_path.yaml')
+
+# Bucket key segment for a workspace name that is not a valid name: up to
+# this many slug characters, then '.' and this many hex digits of its hash.
+_WORKSPACE_BUCKET_SLUG_MAX_LENGTH = 32
+_WORKSPACE_BUCKET_HASH_LENGTH = 8
 
 
 @dataclasses.dataclass
@@ -1012,26 +1018,38 @@ def translate_local_file_mounts_to_two_hop(
     return first_hop_file_mounts
 
 
+def _workspace_bucket_segment(workspace_name: str) -> str:
+    """Map a workspace name to a single, collision-free bucket key segment.
+
+    Names that match ``WORKSPACE_NAME_VALID_REGEX`` are used as-is. Older
+    workspaces may predate that rule (e.g. ``Research`` or ``ml/prod``) and
+    must keep working, so their names map to ``<slug>.<hash>``: a readable
+    slug plus a hash of the exact name. ``.`` never appears in a valid name,
+    so a mapped name cannot collide with a valid one, and the hash keeps
+    names that share a slug (``Research`` / ``RESEARCH``) apart.
+
+    The mapping is part of the bucket layout that IAM policies refer to, so
+    it must not change.
+    """
+    if re.fullmatch(constants.WORKSPACE_NAME_VALID_REGEX, workspace_name):
+        return workspace_name
+    slug = re.sub(r'[^a-z0-9-]+', '-', workspace_name.lower()).strip('-')
+    slug = slug[:_WORKSPACE_BUCKET_SLUG_MAX_LENGTH].strip('-') or 'ws'
+    digest = hashlib.sha256(workspace_name.encode('utf-8')).hexdigest()
+    return f'{slug}.{digest[:_WORKSPACE_BUCKET_HASH_LENGTH]}'
+
+
 def _shared_bucket_workspace_prefix(config_sub_path: Optional[str],
                                     workspace_name: str) -> str:
     """Prefix a shared-bucket object key with the active workspace.
 
-    Keys land under ``workspaces/<workspace>/`` so bucket IAM can enforce
-    RBAC. ``config_sub_path`` is the path already present on ``jobs.bucket``
-    or ``serve.bucket``.
-
-    Raises:
-        ValueError: ``workspace_name`` is not a single safe path segment.
+    Keys land under ``workspaces/<segment>/`` so bucket IAM can enforce
+    RBAC; see ``_workspace_bucket_segment`` for how the workspace name maps
+    to ``<segment>``. ``config_sub_path`` is the path already present on
+    ``jobs.bucket`` or ``serve.bucket``.
     """
-    if re.fullmatch(constants.WORKSPACE_NAME_VALID_REGEX,
-                    workspace_name) is None:
-        raise ValueError(
-            f'Workspace {workspace_name!r} cannot scope a shared bucket '
-            'upload. Names must match '
-            f'{constants.WORKSPACE_NAME_VALID_REGEX!r} so bucket IAM can '
-            'enforce RBAC on one prefix.')
     workspace_prefix = constants.FILE_MOUNTS_WORKSPACE_SUBPATH.format(
-        workspace=workspace_name)
+        workspace=_workspace_bucket_segment(workspace_name))
     if not config_sub_path:
         return workspace_prefix
     return os.path.join(config_sub_path, workspace_prefix).strip('/')
