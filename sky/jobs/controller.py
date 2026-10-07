@@ -3206,6 +3206,9 @@ class JobController:
                             'complete.')
                 return True
             if keep_cluster:
+                # keep_cluster implies a RUNNING/WINDING_DOWN status; mypy
+                # cannot see that through the bool.
+                assert cur_status is not None
                 logger.info(f'Job {self._job_id} task {task_id} was '
                             f'{cur_status.value}; keeping its cluster. The '
                             'retry re-attaches and restores RUNNING once the '
