@@ -397,6 +397,57 @@ class TestPermissionService:
             mock_kv_cache.delete_cache_entries_by_prefix_suffix.call_args[1])
         assert 'user1' in call_kwargs['suffix']
 
+    @mock.patch('sky.users.permission.kv_cache')
+    @mock.patch('sky.users.permission._policy_lock')
+    def test_add_user_if_not_exists_invalidates_cache_after_the_write(
+            self, mock_policy_lock, mock_kv_cache):
+        """Seeding a role-less user clears their cached workspace denials.
+
+        A user checked while role-less may have a cached '0' for a workspace
+        that their new role grants; it must not outlive the seed.
+        """
+        mock_policy_lock.return_value.__enter__ = mock.Mock()
+        mock_policy_lock.return_value.__exit__ = mock.Mock()
+
+        call_order = []
+        mock_enforcer = mock.Mock()
+        mock_enforcer.get_roles_for_user.return_value = []
+        mock_enforcer.add_grouping_policy.side_effect = (
+            lambda *a: call_order.append('add_grouping_policy'))
+        mock_kv_cache.delete_cache_entries_by_prefix_suffix.side_effect = (
+            lambda *a, **kw: call_order.append('invalidate'))
+
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._load_policy_no_lock = mock.Mock()
+
+        service.add_user_if_not_exists('user1')
+
+        call_kwargs = (
+            mock_kv_cache.delete_cache_entries_by_prefix_suffix.call_args[1])
+        assert 'user1' in call_kwargs['suffix']
+        assert call_order == ['add_grouping_policy', 'invalidate']
+
+    @mock.patch('sky.users.permission.kv_cache')
+    @mock.patch('sky.users.permission._policy_lock')
+    def test_add_user_if_not_exists_keeps_cache_for_existing_role(
+            self, mock_policy_lock, mock_kv_cache):
+        """No role written, nothing to invalidate."""
+        mock_policy_lock.return_value.__enter__ = mock.Mock()
+        mock_policy_lock.return_value.__exit__ = mock.Mock()
+
+        mock_enforcer = mock.Mock()
+        mock_enforcer.get_roles_for_user.return_value = ['user']
+
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._load_policy_no_lock = mock.Mock()
+
+        service.add_user_if_not_exists('user1')
+
+        mock_enforcer.add_grouping_policy.assert_not_called()
+        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
+
     def test_get_user_roles(self):
         """Test getting user roles."""
         mock_enforcer = mock.Mock()
