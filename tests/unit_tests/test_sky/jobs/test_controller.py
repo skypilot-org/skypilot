@@ -2350,9 +2350,8 @@ class TestRuntimeCursorReads:
 
     @pytest.mark.asyncio
     async def test_cursor_read_once_and_kept_in_step_with_own_writes(self):
-        """The cursor is read once when the loop starts. After that, each
-        observation the loop persists replaces it, and one that changes
-        nothing leaves it as it is."""
+        """The cursor is read once when the loop starts. After that, it is
+        the cursor each observation reports as persisted."""
         runtime = controller_module.managed_job_runtime
         cursor_a = runtime.RuntimeCursor('allocation', 1)
         cursor_b = runtime.RuntimeCursor('allocation', 2)
@@ -2373,7 +2372,7 @@ class TestRuntimeCursorReads:
                           side_effect=[observation, observation, observation,
                                        self._StopLoop()]) as dispatch, \
              patch.object(managed_job_state, 'observe_runtime_async',
-                          new=AsyncMock(side_effect=[cursor_b, None, None])), \
+                          new=AsyncMock(return_value=cursor_b)), \
              patch.object(managed_job_utils, 'get_job_status',
                           new=AsyncMock()) as ordinary_probe, \
              patch.object(controller_module.asyncio, 'sleep', new=AsyncMock()):
@@ -2382,6 +2381,42 @@ class TestRuntimeCursorReads:
         assert [call.kwargs['previous'] for call in dispatch.call_args_list
                ] == [cursor_a, cursor_b, cursor_b, cursor_b]
         ordinary_probe.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_cursor_read_again_when_no_cursor_comes_back(self):
+        """An observation that reports no cursor (a wrapper around
+        observe_runtime_async that drops its return value) leaves the loop
+        without one it can trust, so the next poll reads it from the
+        database, as before this cache existed."""
+        runtime = controller_module.managed_job_runtime
+        cursor_a = runtime.RuntimeCursor('allocation', 1)
+        cursor_b = runtime.RuntimeCursor('allocation', 2)
+        observation = runtime.RuntimeObservation(
+            runtime_id='allocation',
+            restart_count=2,
+            job_status=job_lib.JobStatus.RUNNING)
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection', new=AsyncMock()), \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name',
+                          return_value=MagicMock()), \
+             patch.object(runtime, 'is_registered', return_value=True), \
+             patch.object(runtime, 'observes_recovery', return_value=True), \
+             patch.object(managed_job_state, 'get_runtime_cursor_async',
+                          new=AsyncMock(side_effect=[cursor_a, cursor_b])
+                         ) as read_cursor, \
+             patch.object(runtime, 'get_recovery_status',
+                          side_effect=[observation, observation,
+                                       self._StopLoop()]) as dispatch, \
+             patch.object(managed_job_state, 'observe_runtime_async',
+                          new=AsyncMock(side_effect=[None, cursor_b])), \
+             patch.object(managed_job_utils, 'get_job_status',
+                          new=AsyncMock()), \
+             patch.object(controller_module.asyncio, 'sleep', new=AsyncMock()):
+            await self._run(self._instance())
+        assert read_cursor.await_count == 2
+        assert [call.kwargs['previous'] for call in dispatch.call_args_list
+               ] == [cursor_a, cursor_b, cursor_b]
 
     @pytest.mark.asyncio
     async def test_cursor_read_again_after_recovery(self):
@@ -2418,7 +2453,7 @@ class TestRuntimeCursorReads:
              patch.object(runtime, 'get_recovery_status',
                           side_effect=[relaunch, self._StopLoop()]) as dispatch, \
              patch.object(managed_job_state, 'observe_runtime_async',
-                          new=AsyncMock(return_value=None)), \
+                          new=AsyncMock(return_value=cursor_a)), \
              patch.object(managed_job_state, 'set_recovering_async',
                           new=AsyncMock()), \
              patch.object(managed_job_state, 'set_recovered_async',

@@ -598,9 +598,12 @@ async def test_observation_returns_the_cursor_it_persisted(database):
     persisted = await observe(1, running=True, nodes=['node-a'])
     assert persisted == runtime.RuntimeCursor('allocation-a', 1, 0, ['node-a'])
     assert persisted == await state.get_runtime_cursor_async(42, 0)
-    # A repeated observation changes nothing and reports no new cursor.
-    assert await observe(1, running=True, nodes=['node-a']) is None
+    # A repeated observation changes nothing, and still reports the persisted
+    # cursor. A retry that finds its own write committed takes this path.
+    assert await observe(1, running=True, nodes=['node-a']) == persisted
     assert await state.get_runtime_cursor_async(42, 0) == persisted
+    # So does an observation older than the cursor, which is skipped.
+    assert await observe(0, running=True, nodes=['node-a']) == persisted
 
 
 @pytest.mark.asyncio
