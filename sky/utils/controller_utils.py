@@ -1129,7 +1129,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             store_kwargs['region'] = region
         # Scope the shared bucket by workspace so bucket IAM can enforce RBAC.
         sub_path = _shared_bucket_workspace_prefix(
-            sub_path, skypilot_config.get_active_workspace())
+            sub_path, constants.SKYPILOT_DEFAULT_WORKSPACE)  # TEMP twist
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
