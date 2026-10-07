@@ -78,6 +78,9 @@ const openAt = async (search) => {
 
 const search = () => window.location.search;
 
+const storedHistoryWindow = () =>
+  window.localStorage.getItem('skypilot-dashboard-clusters-history-days');
+
 // Scoped to the table: a chip renders its value too, so an unscoped query would
 // match the filter bar as well as the row it selected.
 const clusterNames = () => {
@@ -102,6 +105,7 @@ const addChipOnDefaultProperty = async (value) => {
 describe('clusters filters in the URL', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    window.localStorage.clear();
     window.history.replaceState({}, '', '/clusters');
   });
 
@@ -156,8 +160,18 @@ describe('clusters filters in the URL', () => {
     await waitFor(() => expect(search()).toContain('history=10d'));
   });
 
+  it('opens an old history link on all time', async () => {
+    await openAt('?owner=all&history=true');
+    await waitFor(() => expect(search()).toContain('history=all'));
+  });
+
   it('reads an all-time history window from the URL', async () => {
     await openAt('?owner=all&history=all');
     await waitFor(() => expect(search()).toContain('history=all'));
+  });
+
+  it('remembers a day window from the URL', async () => {
+    await openAt('?owner=all&history=10d');
+    await waitFor(() => expect(storedHistoryWindow()).toBe('10d'));
   });
 });

@@ -108,6 +108,8 @@ export const CLUSTER_FILTER_SCHEMA = [
 
 const HISTORY_DAY_OPTIONS = [1, 5, 10, 30];
 const HISTORY_ALL_TIME = 'all';
+// The All tab means all clusters, so it opens with no time limit.
+const HISTORY_DEFAULT_WINDOW = HISTORY_ALL_TIME;
 
 // Non-filter state that also belongs in a shared link. Anything left at its
 // default stays out of the URL.
@@ -121,7 +123,9 @@ const CLUSTER_VIEW_SCHEMA = [
     fromLegacy: (query) => {
       if (query.history === 'true') {
         const days = parseInt(query.historyDays, 10);
-        return HISTORY_DAY_OPTIONS.includes(days) ? `${days}d` : '1d';
+        return HISTORY_DAY_OPTIONS.includes(days)
+          ? `${days}d`
+          : HISTORY_DEFAULT_WINDOW;
       }
       if (query.history === 'false') {
         return 'off';
@@ -304,7 +308,9 @@ export function Clusters() {
 
   const historyWindow = parseHistory(view.history);
   const showHistory = historyWindow !== null;
-  const historyDays = historyWindowDays(historyWindow ?? '1d');
+  const historyDays = historyWindowDays(
+    historyWindow ?? HISTORY_DEFAULT_WINDOW
+  );
   const userScope = isOwnerScope(view.owner) ? view.owner : OWNER_SCOPE_MINE;
   const setUserScope = useCallback(
     (scope) => setView('owner', scope),
@@ -461,9 +467,9 @@ export function Clusters() {
 
   // Remember the chosen window across an Active/All round trip: `history=off`
   // carries no day count, so without this the toggle would silently reset a
-  // 30-day view to 1 day.
+  // 10-day view to the default.
   const lastHistoryWindow = useRef(
-    historyWindow ?? readStoredHistoryWindow() ?? '1d'
+    historyWindow ?? readStoredHistoryWindow() ?? HISTORY_DEFAULT_WINDOW
   );
   useEffect(() => {
     if (historyWindow !== null) {
@@ -632,14 +638,11 @@ export function Clusters() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {/* Only reachable through the URL, e.g. a shared link. */}
-                {historyWindow === HISTORY_ALL_TIME && (
-                  <SelectItem value={HISTORY_ALL_TIME}>All time</SelectItem>
-                )}
                 <SelectItem value="1d">1 day</SelectItem>
                 <SelectItem value="5d">5 days</SelectItem>
                 <SelectItem value="10d">10 days</SelectItem>
                 <SelectItem value="30d">30 days</SelectItem>
+                <SelectItem value={HISTORY_ALL_TIME}>All time</SelectItem>
               </SelectContent>
             </Select>
           )}
