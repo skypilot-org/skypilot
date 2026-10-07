@@ -1022,6 +1022,7 @@ class UserPreferredWorkspaceBody(RequestBody):
 
 class CostReportBody(RequestBody):
     """The request body for the cost report endpoint."""
+    # An explicit null means no time limit.
     days: Optional[int] = 30
     # we use hashes instead of names to avoid the case where
     # the name is not unique

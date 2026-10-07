@@ -415,7 +415,7 @@ def endpoints(cluster: str,
 
 
 @usage_lib.entrypoint
-def cost_report(days: Optional[int] = None,
+def cost_report(days: Optional[int] = constants.COST_REPORT_DEFAULT_DAYS,
                 dashboard_summary_response: bool = False,
                 cluster_hashes: Optional[List[str]] = None,
                 cluster_names: Optional[List[str]] = None,
@@ -456,7 +456,8 @@ def cost_report(days: Optional[int] = None,
     Args:
         days: Number of days to look back from now. Active clusters are always
             included. Historical clusters are only included if they were last
-            used within the past 'days' days. Defaults to 30 days.
+            used within the past 'days' days. Defaults to 30 days; None means
+            no time limit.
         dashboard_summary_response: If True, return an abbreviated payload
             suitable for dashboard list views. Has no effect when
             cluster_hashes or cluster_names is provided (filtered queries
@@ -478,9 +479,6 @@ def cost_report(days: Optional[int] = None,
         cluster. 'resources' is already encoded for the API response, and
         sky.cost_report decodes it back to a resources.Resources.
     """
-    if days is None:
-        days = constants.COST_REPORT_DEFAULT_DAYS
-
     abbreviate_response = (dashboard_summary_response and
                            cluster_hashes is None and cluster_names is None)
 
