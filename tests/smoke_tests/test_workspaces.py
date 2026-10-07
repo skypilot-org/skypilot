@@ -748,3 +748,56 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
     finally:
         local_dir_obj.cleanup()
+
+
+# ---------- Test managed jobs in a non-default workspace ----------
+@pytest.mark.managed_jobs
+@pytest.mark.no_remote_server
+# We can't restart the api server in the dependency test.
+@pytest.mark.no_dependency
+def test_managed_jobs_in_non_default_workspace(generic_cloud: str):
+    """Does a managed job in a non-default workspace run to completion?
+
+    The jobs controller launches the job's cluster through an API server of
+    its own, which has none of the main API server's config (no `workspaces`)
+    and has only just seen the job's user. The workspace check there must
+    still let the job launch, or the job retries on PermissionDeniedError and
+    stays PENDING forever.
+    """
+    workspace = 'team-a'
+    name = smoke_tests_utils.get_cluster_name()
+    config_dict = {
+        **smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG,
+        'workspaces': {
+            workspace: {},
+        },
+    }
+    wait_succeeded = (
+        smoke_tests_utils.
+        get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+            job_name=name,
+            job_status=[sky.ManagedJobStatus.SUCCEEDED],
+            timeout=900))
+
+    test = smoke_tests_utils.Test(
+        'test_managed_jobs_in_non_default_workspace',
+        [
+            # Restart so the server picks up the merged config (existing
+            # server config + the workspace).
+            smoke_tests_utils.SKY_API_RESTART,
+            f'sky jobs launch -y -d -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--config active_workspace={workspace} echo hi',
+            # On failure, show why the controller could not launch the job.
+            f'{{ {wait_succeeded}; }} || {{ sky jobs logs --controller '
+            f'-n {name} --no-follow --config active_workspace={workspace} | '
+            'tail -n 40; exit 1; }',
+        ],
+        teardown=(f'sky jobs cancel -y -n {name} '
+                  f'--config active_workspace={workspace} || true; '
+                  f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+                  f'{smoke_tests_utils.SKY_API_RESTART}'),
+        config_dict=config_dict,
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
