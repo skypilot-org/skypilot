@@ -325,6 +325,24 @@ class TestIsRegistered:
         assert runtime_chain.is_registered() is True
 
 
+class TestObservesRecovery:
+    """observes_recovery() is True only while a registered runtime implements
+    get_recovery_status."""
+
+    def test_empty(self):
+        assert runtime_chain.observes_recovery() is False
+
+    def test_runtime_without_the_hook(self):
+        runtime_chain.register(types.SimpleNamespace(owns=lambda handle: True))
+        assert runtime_chain.is_registered() is True
+        assert runtime_chain.observes_recovery() is False
+
+    def test_runtime_with_the_hook(self):
+        runtime_chain.register(types.SimpleNamespace(owns=lambda handle: True))
+        runtime_chain.register(_make_runtime('observer'))
+        assert runtime_chain.observes_recovery() is True
+
+
 def test_recovery_hooks_include_non_owners():
     runtime = _make_runtime('observer', owns_return=False)
     runtime_chain.register(runtime)
