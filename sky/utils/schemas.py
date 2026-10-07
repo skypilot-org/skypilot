@@ -2922,6 +2922,23 @@ def get_config_schema():
             'install_conda': {
                 'type': 'boolean',
             },
+            # Retries of the cluster health probe run during a status
+            # refresh; see backend_utils._update_cluster_status.
+            'health_check': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'attempts': {
+                        'type': 'integer',
+                        'minimum': 1,
+                    },
+                    'interval_seconds': {
+                        'type': 'number',
+                        'minimum': 0,
+                    },
+                },
+            },
         }
     }
 

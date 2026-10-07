@@ -381,10 +381,14 @@ class TestUpdateClusterStatusBareHandle:
             'ssh: connect to host 1.2.3.4 port 22: Connection timed out')
         handle.get_command_runners.return_value = [head_runner]
 
-        with mock.patch.object(backend_utils.logger, 'warning') as warning:
+        with mock.patch.object(backend_utils.logger, 'warning') as warning, \
+             mock.patch.object(backend_utils.time, 'sleep'):
             add_or_update, events = self._refresh(handle)
 
-        head_runner.run.assert_called_once()
+        # The probe is retried in case the timeout was transient; the hint is
+        # printed once the retries are exhausted.
+        assert (head_runner.run.call_count ==
+                backend_utils.DEFAULT_HEALTH_CHECK_ATTEMPTS)
         assert any('to recover from INIT status' in str(c)
                    for c in warning.call_args_list), warning.call_args_list
         assert add_or_update.call_args.kwargs['ready'] is False

@@ -69,6 +69,9 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`provision <config-yaml-provision>`:
     :ref:`ssh_timeout <config-yaml-provision-ssh-timeout>`: 10
     :ref:`install_conda <config-yaml-provision-install-conda>`: false
+    :ref:`health_check <config-yaml-provision-health-check>`:
+      attempts: 5
+      interval_seconds: 1
 
   :ref:`kubernetes <config-yaml-kubernetes>`:
     :ref:`ports <config-yaml-kubernetes-ports>`: loadbalancer
@@ -789,6 +792,46 @@ Example:
   The default SkyPilot Kubernetes images no longer bundle conda. If your tasks
   rely on a conda environment, either set ``install_conda: true`` or use a
   custom image that ships conda.
+
+.. _config-yaml-provision-health-check:
+
+``provision.health_check``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Retries of the cluster health probe (optional).
+
+When refreshing the status of a cluster whose nodes are all up on the cloud
+side, SkyPilot probes the SkyPilot runtime on the head node (over SSH, or
+``kubectl exec`` on Kubernetes). If the probe keeps failing, the cluster is
+marked ``INIT``; for a
+:ref:`managed job <managed-jobs>`, the jobs controller treats this like a
+preemption and relaunches the cluster. The probe can fail transiently on a
+healthy cluster, for example on an SSH banner-exchange timeout or while the
+agent behind an SSH proxy restarts (such as the AWS SSM agent used with
+:ref:`aws.use_ssm <config-yaml-aws-use-ssm>`), so a failed probe is retried:
+
+- ``attempts``: maximum number of probes, including the first one. Set to
+  ``1`` to mark the cluster ``INIT`` on the first failure.
+- ``interval_seconds``: wait between probes. The same interval is used while
+  waiting for all nodes to show up in the Ray cluster.
+
+Outside Kubernetes, a probe that reaches the head node but finds the SkyPilot
+runtime not running is not retried.
+
+Raise these if your clusters are reached over a link with outages of tens of
+seconds, e.g. ``attempts: 7`` and ``interval_seconds: 10`` to tolerate about
+a minute.
+
+Default: ``attempts: 5``, ``interval_seconds: 1``.
+
+Example:
+
+.. code-block:: yaml
+
+  provision:
+    health_check:
+      attempts: 7
+      interval_seconds: 10
 
 .. _config-yaml-aws:
 
