@@ -3588,6 +3588,29 @@ def test_use_spot(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+# Reads the head VM's spec through SkyPilot's nebius adaptor, the same
+# GetInstance read the provisioner's start() check uses, and asserts the
+# spot pricing opt-in. The nebius CLI's JSON output does not include the
+# pricing field, so the SDK is used here.
+_NEBIUS_PRICING_MODEL_CHECK = textwrap.dedent("""\
+    import os
+    from sky.adaptors import nebius
+    service = nebius.compute().InstanceServiceClient(nebius.sdk())
+    instance = nebius.sync_call(
+        service.get_by_name(nebius.nebius_common().GetByNameRequest(
+            parent_id=os.environ['PROJECT_ID'],
+            name=os.environ['INSTANCE_NAME'])))
+    instance = nebius.sync_call(
+        service.get(nebius.compute().GetInstanceRequest(
+            id=instance.metadata.id)))
+    mode = instance.spec.which_field_in_oneof('pricing_model')
+    print(f'{instance.metadata.id}: preemptible='
+          f'{instance.spec.check_presence("preemptible")}, '
+          f'pricing_model={mode}')
+    assert mode == 'follows_spot_price', f'unexpected pricing_model: {mode}'
+    """)
+
+
 @pytest.mark.nebius
 def test_use_spot_nebius_gpu():
     """Test Nebius GPU spot launch with explicit pricing opt-in verification.
@@ -3595,38 +3618,31 @@ def test_use_spot_nebius_gpu():
     Spot on Nebius is GPU-only, so unlike test_use_spot (CPU, excluded for
     Nebius) this launches an L40S spot cluster. Verifies that:
     1. The cluster launches and the job succeeds with --use-spot
-    2. The head VM's Nebius spec actually contains the price-taking spot
-       pricing opt-in (follows_spot_price), checked via the nebius CLI
+    2. The head VM's Nebius spec selects the price-taking spot pricing
+       model (follows_spot_price)
     3. sky stop + sky start round-trips on the spot cluster (a restarted
        spot VM keeps its pricing opt-in, so start does not require manual
        migration)
     """
     name = smoke_tests_utils.get_cluster_name()
     # The provision log records the head VM's instance name and Nebius
-    # project ("Creating instance <name> in project <id>."); use them with
-    # the nebius CLI's get-by-name to dump the head VM's spec for
-    # diagnostics. The stop/start round-trip below is the functional
-    # verification of the pricing opt-in: the start() path only restarts
-    # VMs whose spec carries a pricing model, so a restarted spot VM
-    # proves the opt-in was applied.
-    dump_instance_spec_cmd = (
+    # project ("Creating instance <name> in project <id>.").
+    check_pricing_model_cmd = (
         f'PROVISION_LINE=$(sky logs --provision {name} | '
         f'grep -oE \'Creating instance [^ .]+ in project [^ .]+\' | '
         f'head -1) && '
         f'INSTANCE_NAME=$(echo "$PROVISION_LINE" | awk \'{{print $3}}\') && '
         f'PROJECT_ID=$(echo "$PROVISION_LINE" | awk \'{{print $NF}}\') && '
         f'echo "Head instance: $INSTANCE_NAME in project $PROJECT_ID" && '
-        f'nebius compute instance get-by-name --name "$INSTANCE_NAME" '
-        f'--parent-id "$PROJECT_ID" --format json > /tmp/nebius-head.json '
-        f'&& echo "=== head VM spec dump (diagnostics) ===" && '
-        f'head -c 4000 /tmp/nebius-head.json; true')
+        f'INSTANCE_NAME="$INSTANCE_NAME" PROJECT_ID="$PROJECT_ID" '
+        f'python -c {shlex.quote(_NEBIUS_PRICING_MODEL_CHECK)}')
     test = smoke_tests_utils.Test(
         'use-spot-nebius-gpu',
         [
             f'sky launch -y -c {name} --infra nebius --gpus L40S:1 '
             f'--use-spot \'echo hello from nebius spot\'',
             f'sky logs {name} 1 --status',
-            dump_instance_spec_cmd,
+            check_pricing_model_cmd,
             f'sky stop -y {name}',
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 name, [sky.ClusterStatus.STOPPED], timeout=10 * 60),
