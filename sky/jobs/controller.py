@@ -135,13 +135,17 @@ def _network_check_is_fresh() -> bool:
     return time.monotonic() - _network_check_ok_at < max_age
 
 
-async def _check_network_connection() -> None:
+async def check_network_connection() -> None:
     """Checks the network connection, reusing a recent successful check.
 
     Raises exceptions.NetworkError when the check fails. Loops that find no
     fresh check wait for one check instead of each starting its own: when it
     succeeds they all return; when it fails, the loop that ran it gets the
     error and the next loop in line runs its own check.
+
+    A recovery strategy that owns its monitor loop
+    (StrategyExecutor.monitor_task) should check the network through this
+    function as well, so that its loops share the process's check.
     """
     global _network_check_lock, _network_check_ok_at
     if _network_check_is_fresh():
@@ -1215,7 +1219,7 @@ class JobController:
                 # Check the network connection to avoid false alarm for job
                 # failure. Network glitch was observed even in the VM.
                 try:
-                    await _check_network_connection()
+                    await check_network_connection()
                 except exceptions.NetworkError:
                     logger.info(
                         'Network is not available. Retrying again in about '
