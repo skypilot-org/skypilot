@@ -3064,8 +3064,8 @@ class TestJobGroupResumeWithFinishedPrimaries:
                 side_effect=status_of)
             # The RUNNING watcher's resume checks for an open emergency
             # episode; none here.
-            state.get_latest_event_recovery_source_async = AsyncMock(
-                return_value=None)
+            state.has_open_emergency_episode_async = AsyncMock(
+                return_value=False)
             networking.dns_addresses_for_task.return_value = None
             ctx.contextual_async = lambda f: f
 

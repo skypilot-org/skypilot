@@ -98,19 +98,27 @@ class TestRecoveryEventCounts:
             ('EMERGENCY', 'ws-b', 2),
         }
 
-    def test_excludes_null_source_and_unsourced_statuses(
+    def test_counts_every_sourced_row_and_nothing_else(
             self, _mock_managed_jobs_db_conn):
         engine = _mock_managed_jobs_db_conn
         _seed_job(engine, 1)
         # Pre-migration RECOVERING row: NULL source — excluded.
         _seed_event(engine, 1, 'RECOVERING', None)
-        # An ordinary RUNNING event ('Job has started') carries no source.
+        # Ordinary status events ('Job has started', 'Job succeeded', the
+        # re-attached event) carry no source — excluded.
         _seed_event(engine, 1, 'RUNNING', None)
-        # Other statuses never count, sourced or not.
         _seed_event(engine, 1, 'SUCCEEDED', None)
-        _seed_event(engine, 1, 'SUCCEEDED', 'EMERGENCY')
 
         assert state.get_recovery_event_counts_by_source_workspace() == []
+
+        # A sourced row counts whatever status it carries: a job group's
+        # emergency is recorded with the group's status, STARTING when no
+        # member runs yet.
+        _seed_event(engine, 1, 'STARTING', 'EMERGENCY')
+
+        assert state.get_recovery_event_counts_by_source_workspace() == [
+            ('EMERGENCY', 'default', 1)
+        ]
 
     def test_null_workspace_passthrough(self, _mock_managed_jobs_db_conn):
         engine = _mock_managed_jobs_db_conn

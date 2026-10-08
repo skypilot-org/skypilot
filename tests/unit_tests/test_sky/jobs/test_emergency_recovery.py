@@ -295,17 +295,16 @@ class TestEmergencyRecoveryState:
         RUNNING, and the source-keyed metric still counts one attempt."""
         engine = _mock_managed_jobs_db_conn
         _seed_job(engine, status='RUNNING')
-        assert await state.get_latest_event_recovery_source_async(1, 0) is None
+        assert await state.has_open_emergency_episode_async(1, 0) is False
 
         await state.record_emergency_kept_running_async(1,
                                                         0,
                                                         reason='kept running')
-        assert (await state.get_latest_event_recovery_source_async(
-            1, 0) == state.RecoverySource.EMERGENCY)
+        assert await state.has_open_emergency_episode_async(1, 0) is True
 
         assert await state.record_emergency_reattached_async(1, 0) is True
 
-        assert await state.get_latest_event_recovery_source_async(1, 0) is None
+        assert await state.has_open_emergency_episode_async(1, 0) is False
         assert _get_task_row(engine)['status'] == 'RUNNING'
         events = {
             (e['new_status'], e['reason']) for e in state.get_job_events(1)
@@ -333,17 +332,45 @@ class TestEmergencyRecoveryState:
             state.ManagedJobStatus.RUNNING,
             'group emergency',
             recovery_source=state.RecoverySource.EMERGENCY)
-        assert (await state.get_latest_event_recovery_source_async(
-            1, 0) == state.RecoverySource.EMERGENCY)
-        assert (await state.get_latest_event_recovery_source_async(
-            1, 1) == state.RecoverySource.EMERGENCY)
+        assert await state.has_open_emergency_episode_async(1, 0) is True
+        assert await state.has_open_emergency_episode_async(1, 1) is True
 
         assert await state.record_emergency_reattached_async(1, 0) is True
 
         # Closed for member 0 only; member 1 still has it as its latest.
-        assert await state.get_latest_event_recovery_source_async(1, 0) is None
-        assert (await state.get_latest_event_recovery_source_async(
-            1, 1) == state.RecoverySource.EMERGENCY)
+        assert await state.has_open_emergency_episode_async(1, 0) is False
+        assert await state.has_open_emergency_episode_async(1, 1) is True
+
+    @pytest.mark.asyncio
+    async def test_open_episode_survives_informational_events(
+            self, _mock_managed_jobs_db_conn):
+        """An episode is closed by the re-attached event or by a status
+        change away from RUNNING/WINDING_DOWN, not by any later event: an
+        informational RUNNING event in between leaves it open, and a
+        later emergency reopens a closed one."""
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine, status='RUNNING')
+        await state.record_emergency_kept_running_async(1,
+                                                        0,
+                                                        reason='attempt 1')
+        await state.add_job_event_async(1, 0, state.ManagedJobStatus.RUNNING,
+                                        'links harvested from the job log')
+        assert await state.has_open_emergency_episode_async(1, 0) is True
+
+        # A cancel request (job-level CANCELLING event) closes it: the
+        # cancellation path owns the task from here.
+        await state.add_job_event_async(1, None,
+                                        state.ManagedJobStatus.CANCELLING,
+                                        'cancel requested')
+        assert await state.has_open_emergency_episode_async(1, 0) is False
+
+        # A new emergency reopens it; the re-attached event closes it.
+        await state.record_emergency_kept_running_async(1,
+                                                        0,
+                                                        reason='attempt 2')
+        assert await state.has_open_emergency_episode_async(1, 0) is True
+        assert await state.record_emergency_reattached_async(1, 0) is True
+        assert await state.has_open_emergency_episode_async(1, 0) is False
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('status', ['STARTING', 'RECOVERING', 'SUCCEEDED'])
@@ -1373,7 +1400,7 @@ class TestEmergencyReattachResume:
     RUNNING resume with any other latest event (a plain restart) does not.
     Neither is forced into recovery."""
 
-    async def _resume(self, monkeypatch, latest_source):
+    async def _resume(self, monkeypatch, open_episode):
         jc = controller.JobController.__new__(controller.JobController)
         jc._job_id = 1
         jc._dag = MagicMock()
@@ -1399,8 +1426,8 @@ class TestEmergencyReattachResume:
         monkeypatch.setattr(
             f'{mjs}.get_job_status_with_task_id_async',
             AsyncMock(return_value=state.ManagedJobStatus.RUNNING))
-        monkeypatch.setattr(f'{mjs}.get_latest_event_recovery_source_async',
-                            AsyncMock(return_value=latest_source))
+        monkeypatch.setattr(f'{mjs}.has_open_emergency_episode_async',
+                            AsyncMock(return_value=open_episode))
         monkeypatch.setattr(f'{mjs}.get_file_mounts_blob_id',
                             lambda job_id: None)
         monkeypatch.setattr('sky.jobs.controller._add_k8s_annotations',
@@ -1421,18 +1448,13 @@ class TestEmergencyReattachResume:
 
     @pytest.mark.asyncio
     async def test_open_emergency_episode_sets_reattach(self, monkeypatch):
-        kwargs = await self._resume(monkeypatch, state.RecoverySource.EMERGENCY)
+        kwargs = await self._resume(monkeypatch, open_episode=True)
         assert kwargs['force_transit_to_recovering'] is False
         assert kwargs['emergency_reattach'] is True
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize('latest_source', [
-        state.RecoverySource.FAILURE,
-        state.RecoverySource.RESTART,
-        None,
-    ])
-    async def test_plain_restart_does_not(self, monkeypatch, latest_source):
-        kwargs = await self._resume(monkeypatch, latest_source)
+    async def test_plain_restart_does_not(self, monkeypatch):
+        kwargs = await self._resume(monkeypatch, open_episode=False)
         assert kwargs['force_transit_to_recovering'] is False
         assert kwargs['emergency_reattach'] is False
 

@@ -896,16 +896,16 @@ class JobController:
                 force_transit_to_recovering = True
             else:
                 # An emergency that kept this task's cluster recorded itself
-                # as the task's latest job event (recovery_source=EMERGENCY,
-                # status unchanged). The monitor loop closes that episode
-                # with a re-attached event once the job answers. Read from
-                # the events, not controller memory, so a controller restart
-                # during the backoff closes it too.
-                latest_source = await (
-                    managed_job_state.get_latest_event_recovery_source_async(
+                # as an EMERGENCY-sourced job event (status unchanged). The
+                # monitor loop closes that episode with a re-attached event
+                # once the job answers. Read from the events, not controller
+                # memory, so a controller restart during the backoff closes
+                # it too. One DB read on a path that already needs the DB
+                # (the status read above): a failure here escapes like any
+                # other and is retried by emergency recovery.
+                emergency_reattach = await (
+                    managed_job_state.has_open_emergency_episode_async(
                         self._job_id, task_id))
-                emergency_reattach = (
-                    latest_source == managed_job_state.RecoverySource.EMERGENCY)
                 if emergency_reattach:
                     logger.info(f'Task {task_id} kept its cluster through an '
                                 'emergency; re-attaching to the job.')
@@ -997,13 +997,11 @@ class JobController:
                     managed_job_state.ManagedJobStatus.RUNNING,
                     managed_job_state.ManagedJobStatus.WINDING_DOWN):
                 # An emergency on a running coordinator keeps it as is and
-                # records itself as the task's latest event. The coordinator
-                # runs inline, so re-running it is the re-attach: close the
-                # episode now.
-                latest_source = await (
-                    managed_job_state.get_latest_event_recovery_source_async(
-                        self._job_id, task_id))
-                if latest_source == managed_job_state.RecoverySource.EMERGENCY:
+                # records itself as an EMERGENCY-sourced event. The
+                # coordinator runs inline, so re-running it is the
+                # re-attach: close the episode now.
+                if await managed_job_state.has_open_emergency_episode_async(
+                        self._job_id, task_id):
                     await managed_job_state.record_emergency_reattached_async(
                         self._job_id, task_id)
 
@@ -1161,6 +1159,21 @@ class JobController:
         live_link_attempts = 0
         live_link_poll_counter = 0
 
+        async def _record_reattach_if_pending() -> None:
+            """Close the kept-cluster emergency episode, once.
+
+            Called wherever the loop decides the job is alive and keeps
+            polling, so the decision is the loop's own; a job that finishes
+            or needs recovery instead is closed by the terminal or
+            RECOVERING event the loop writes for it.
+            """
+            nonlocal emergency_reattach
+            if not emergency_reattach:
+                return
+            await managed_job_state.record_emergency_reattached_async(
+                self._job_id, task_id)
+            emergency_reattach = False
+
         while True:
             # Get job status (skip on first iteration if forcing recovery)
             job_status = None
@@ -1243,21 +1256,6 @@ class JobController:
                         f'Traceback: {traceback.format_exc()}')
                     # Fall through to recovery logic below
 
-            if (emergency_reattach and job_status is not None and
-                    not job_status.is_terminal() and
-                    not (runtime_recovery is not None and
-                         runtime_recovery.should_relaunch)):
-                # The job answered after an emergency that kept its cluster:
-                # record the re-attach, which closes the episode the
-                # kept-running event opened. A job that does not answer
-                # goes to the recovery path below, which records its own
-                # events; one that already finished, or that its runtime
-                # wants replaced, is closed by the terminal or RECOVERING
-                # event the loop writes for it below.
-                await managed_job_state.record_emergency_reattached_async(
-                    self._job_id, task_id)
-                emergency_reattach = False
-
             if not force_transit_to_recovering:
                 # While the job is running, surface external links harvested
                 # from its logs (best-effort; the terminal-state scan is the
@@ -1326,6 +1324,9 @@ class JobController:
                             'Runtime job status unavailable. Retrying in '
                             f'{backoff_time:.1f} seconds...')
                         await asyncio.sleep(backoff_time)
+                    else:
+                        # The runtime answered with a live job.
+                        await _record_reattach_if_pending()
                     force_transit_to_recovering = False
                     continue
 
@@ -1385,6 +1386,7 @@ class JobController:
             # status.
             if (job_status is not None and not job_status.is_terminal() and
                     task.num_nodes == 1):
+                await _record_reattach_if_pending()
                 continue
 
             if job_status in job_lib.JobStatus.user_code_failure_states():
@@ -1530,6 +1532,7 @@ class JobController:
                 # Cluster is UP
                 if job_status is not None and not job_status.is_terminal():
                     # The multi-node job is still running, continue monitoring.
+                    await _record_reattach_if_pending()
                     continue
                 elif (job_status
                       in job_lib.JobStatus.user_code_failure_states() or
@@ -2234,11 +2237,9 @@ class JobController:
             elif task_status == managed_job_state.ManagedJobStatus.RUNNING:
                 # Task was running - resume monitoring without forced recovery
                 task_resume_info[task_id] = (task_status, False)
-                latest_source = await (
-                    managed_job_state.get_latest_event_recovery_source_async(
+                emergency_reattach_info[task_id] = await (
+                    managed_job_state.has_open_emergency_episode_async(
                         self._job_id, task_id))
-                emergency_reattach_info[task_id] = (
-                    latest_source == managed_job_state.RecoverySource.EMERGENCY)
                 note = (' (re-attaching after an emergency)'
                         if emergency_reattach_info[task_id] else '')
                 logger.info(f'Task {task_id} ({task.name}) was RUNNING, '

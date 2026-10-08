@@ -2581,19 +2581,12 @@ def get_recovery_event_counts_by_source_workspace(
             job_events_table.c.spot_job_id == job_info_table.c.spot_job_id,
         )
     ).where(
-        # Keep the (new_status, recovery_source) index usable: list the
-        # statuses that can carry a source instead of dropping the
-        # status predicate.
-        job_events_table.c.new_status.in_([
-            ManagedJobStatus.RECOVERING.value,
-            ManagedJobStatus.RUNNING.value,
-            ManagedJobStatus.WINDING_DOWN.value,
-        ]),
-        job_events_table.c.recovery_source.isnot(None),
-    ).group_by(
-        job_events_table.c.recovery_source,
-        job_info_table.c.workspace,
-    )
+        # Every sourced row is a recovery or emergency attempt, whatever
+        # status it carries (migration 030 indexes exactly these rows).
+        job_events_table.c.recovery_source.isnot(None),).group_by(
+            job_events_table.c.recovery_source,
+            job_info_table.c.workspace,
+        )
 
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
@@ -4675,32 +4668,46 @@ async def record_emergency_reattached_async(job_id: int, task_id: int) -> bool:
 
 
 @db_retries.retry_async
-async def get_latest_event_recovery_source_async(
-        job_id: int, task_id: int) -> Optional[RecoverySource]:
-    """Return the recovery_source of the task's most recent job event.
+async def has_open_emergency_episode_async(job_id: int, task_id: int) -> bool:
+    """Whether an emergency that kept the task's cluster is still open.
 
-    Job-level events (task_id None) count as the task's own: a job group's
-    emergency is recorded once on the job, and each member closes it for
-    itself with a task-level event. EMERGENCY on a task that is still
-    RUNNING means an emergency kept its cluster and the controller has not
-    re-attached since: the kept-running event is the task's latest, and
-    the re-attached event that closes it (or any later status event)
-    carries no source. Read from the events rather than from controller
-    memory so that a controller restart during the backoff still closes
-    the episode. None when the task has no event or its latest one has no
-    source.
+    An episode opens with an EMERGENCY-sourced event (the task's own
+    kept-running event, or a job-level one for a job group) and closes with
+    the first later event that is either the re-attached event or a status
+    change away from RUNNING/WINDING_DOWN (RECOVERING, CANCELLING, a
+    terminal status), written for the task or for the whole job. Any other
+    event in between, such as an informational one that keeps the task's
+    status, leaves it open. Read from the events rather than from
+    controller memory so that a controller restart during the backoff
+    still closes the episode.
     """
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
-        value = await session.scalar(
-            sqlalchemy.select(job_events_table.c.recovery_source).where(
+        for_task = sqlalchemy.or_(job_events_table.c.task_id == task_id,
+                                  job_events_table.c.task_id.is_(None))
+        opener_id = await session.scalar(
+            sqlalchemy.select(sqlalchemy.func.max(job_events_table.c.id)).where(
                 job_events_table.c.spot_job_id == job_id,
-                sqlalchemy.or_(job_events_table.c.task_id == task_id,
-                               job_events_table.c.task_id.is_(None)),
-            ).order_by(job_events_table.c.id.desc()).limit(1))
-    if value is None:
-        return None
-    return RecoverySource(value)
+                for_task,
+                job_events_table.c.recovery_source ==
+                RecoverySource.EMERGENCY.value,
+            ))
+        if opener_id is None:
+            return False
+        closer_id = await session.scalar(
+            sqlalchemy.select(job_events_table.c.id).where(
+                job_events_table.c.spot_job_id == job_id,
+                for_task,
+                job_events_table.c.id > opener_id,
+                sqlalchemy.or_(
+                    job_events_table.c.reason == EMERGENCY_REATTACHED_REASON,
+                    job_events_table.c.new_status.notin_([
+                        ManagedJobStatus.RUNNING.value,
+                        ManagedJobStatus.WINDING_DOWN.value,
+                    ]),
+                ),
+            ).limit(1))
+    return closer_id is None
 
 
 @db_retries.retry_async
