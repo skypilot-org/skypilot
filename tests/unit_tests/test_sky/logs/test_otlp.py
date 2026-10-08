@@ -1,6 +1,7 @@
 """Unit tests for sky.logs.otlp module."""
 
 import os
+import stat
 import subprocess
 from unittest import mock
 
@@ -11,7 +12,6 @@ from sky import exceptions
 from sky import logs
 from sky.logs import otlp
 from sky.logs.otlp import _AWK_HEADER_VALUE
-from sky.logs.otlp import _parse_headers_file
 from sky.logs.otlp import _REMOTE_HEADERS_PATH
 from sky.logs.otlp import OtlpLoggingAgent
 from sky.utils import common_utils
@@ -20,6 +20,13 @@ from sky.utils import schemas
 
 _CLUSTER_NAME = resources_utils.ClusterName('test-cluster',
                                             'test-cluster-unique-id')
+
+
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path, monkeypatch):
+    # Headers files are staged under ~/.sky/logging; keep that out of the
+    # real home directory.
+    monkeypatch.setenv('HOME', str(tmp_path / 'home'))
 
 
 def _write_headers_file(tmp_path, content: str) -> str:
@@ -78,6 +85,12 @@ def test_protocol_compression_and_tls():
         'endpoint': 'ftp://collector'
     },
     {
+        'endpoint': 'http://collector:abc'
+    },
+    {
+        'endpoint': 'http://collector:99999'
+    },
+    {
         'endpoint': 'http://collector',
         'protocol': 'http/json'
     },
@@ -126,14 +139,30 @@ def test_plain_headers_are_inlined():
     assert cfg['header'] == ['X-Scope-OrgID tenant-1']
 
 
-def test_headers_file_values_never_leave_the_file(tmp_path):
-    path = _write_headers_file(
-        tmp_path, '# comment\n\nAuthorization: Bearer s3cret\n'
-        'X-Api-Key:k3y\n')
-    agent = OtlpLoggingAgent({
+def _agent_with_headers_file(path: str) -> OtlpLoggingAgent:
+    return OtlpLoggingAgent({
         'endpoint': 'http://collector:4318',
         'headers_file': path,
     })
+
+
+def _staged_path(agent: OtlpLoggingAgent) -> str:
+    return agent.get_credential_file_mounts()[_REMOTE_HEADERS_PATH]
+
+
+def _node_value(path: str, n: int) -> str:
+    """Runs the node-side extraction of header n against a delivered file."""
+    return subprocess.run(['awk', '-v', f'n={n}', _AWK_HEADER_VALUE, path],
+                          check=True,
+                          capture_output=True,
+                          text=True).stdout
+
+
+def test_headers_file_values_never_leave_the_file(tmp_path):
+    agent = _agent_with_headers_file(
+        _write_headers_file(
+            tmp_path, '# comment\n\nAuthorization: Bearer s3cret\n'
+            'X-Api-Key:k3y\n'))
     cfg = _output(agent)
     assert cfg['header'] == [
         'Authorization ${SKYPILOT_OTLP_HEADER_0}',
@@ -147,47 +176,74 @@ def test_headers_file_values_never_leave_the_file(tmp_path):
     for text in (setup, agent.fluentbit_config(_CLUSTER_NAME)):
         assert 's3cret' not in text
         assert 'k3y' not in text
-    assert agent.get_credential_file_mounts() == {
-        _REMOTE_HEADERS_PATH: os.path.realpath(path)
-    }
 
 
-def test_headers_file_awk_extracts_values(tmp_path):
-    """The shell extraction on the node matches the server-side parsing."""
-    content = ('# comment\n\n'
-               'Authorization:   Bearer a b  \r\n'
-               '  # indented comment\n'
-               'X-Api-Key:k3y:with:colons\n')
-    path = _write_headers_file(tmp_path, content)
-    for n, expected in [(1, 'Bearer a b'), (2, 'k3y:with:colons')]:
-        out = subprocess.run(['awk', '-v', f'n={n}', _AWK_HEADER_VALUE, path],
-                             check=True,
-                             capture_output=True,
-                             text=True).stdout
-        assert out == expected + '\n'
-    assert _parse_headers_file(path) == ['Authorization', 'X-Api-Key']
+def test_headers_file_crlf_and_blank_lines(tmp_path):
+    """Header N on the node is header N on the API server, whatever the
+    source file's line endings, blank lines, comments or spacing."""
+    path = tmp_path / 'otlp_headers'
+    path.write_bytes(b'# comment\r\n\r\n'
+                     b'Authorization:   Bearer a b  \r\n'
+                     b'\r\n  # indented comment\r\n'
+                     b'X-Api-Key:k3y:with:colons\r\n')
+    agent = _agent_with_headers_file(str(path))
+    assert _output(agent)['header'] == [
+        'Authorization ${SKYPILOT_OTLP_HEADER_0}',
+        'X-Api-Key ${SKYPILOT_OTLP_HEADER_1}',
+    ]
+    staged = _staged_path(agent)
+    with open(staged, 'rb') as f:
+        assert f.read() == (b'Authorization: Bearer a b\n'
+                            b'X-Api-Key: k3y:with:colons\n')
+    assert _node_value(staged, 1) == 'Bearer a b\n'
+    assert _node_value(staged, 2) == 'k3y:with:colons\n'
+
+
+def test_staged_headers_file_is_owner_only(tmp_path):
+    """The upload (rsync -a) keeps the source mode, so the uploaded copy must
+    be 0600 even when the user's file is world-readable."""
+    path = _write_headers_file(tmp_path, 'Authorization: Bearer x\n')
+    os.chmod(path, 0o644)
+    staged = _staged_path(_agent_with_headers_file(path))
+    assert stat.S_IMODE(os.stat(staged).st_mode) == 0o600
+    assert stat.S_IMODE(os.stat(os.path.dirname(staged)).st_mode) == 0o700
+
+
+def test_staged_headers_file_is_content_addressed(tmp_path):
+    """Different files never share a staged copy, so concurrent launches with
+    different headers do not overwrite each other's."""
+    a = _write_headers_file(tmp_path, 'Authorization: Bearer a\n')
+    b = tmp_path / 'other'
+    b.write_text('Authorization: Bearer b\n', encoding='utf-8')
+    staged_a = _staged_path(_agent_with_headers_file(a))
+    staged_b = _staged_path(_agent_with_headers_file(str(b)))
+    assert staged_a != staged_b
+    assert _staged_path(_agent_with_headers_file(a)) == staged_a
 
 
 @pytest.mark.parametrize('content', ['no-colon-here\n', 'Bad Name: v\n'])
 def test_headers_file_malformed(tmp_path, content):
-    agent = OtlpLoggingAgent({
-        'endpoint': 'http://collector:4318',
-        'headers_file': _write_headers_file(tmp_path, content),
-    })
+    agent = _agent_with_headers_file(_write_headers_file(tmp_path, content))
     with pytest.raises(exceptions.InvalidSkyPilotConfigError):
-        _output(agent)
+        agent.get_credential_file_mounts()
+
+
+def test_headers_file_missing():
+    """Fails before provisioning with a config error, not at setup."""
+    agent = _agent_with_headers_file('/nonexistent/otlp_headers')
+    with pytest.raises(exceptions.InvalidSkyPilotConfigError,
+                       match='/nonexistent/otlp_headers'):
+        agent.get_credential_file_mounts()
 
 
 def test_headers_file_falls_back_to_delivered_copy(tmp_path):
     """A node launching clusters with the server's config (e.g. a jobs
     controller) uses the headers file delivered to it."""
     delivered = _write_headers_file(tmp_path, 'Authorization: Bearer x\n')
-    agent = OtlpLoggingAgent({
-        'endpoint': 'http://collector:4318',
-        'headers_file': '/path/only/on/api/server',
-    })
+    agent = _agent_with_headers_file('/path/only/on/api/server')
     with mock.patch.object(otlp, '_REMOTE_HEADERS_PATH', delivered):
-        assert agent.get_credential_file_mounts() == {delivered: delivered}
+        staged = agent.get_credential_file_mounts()[delivered]
+        assert _node_value(staged, 1) == 'Bearer x\n'
         assert _output(agent)['header'] == [
             'Authorization ${SKYPILOT_OTLP_HEADER_0}'
         ]

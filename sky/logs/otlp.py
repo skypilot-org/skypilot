@@ -1,8 +1,10 @@
 """OpenTelemetry (OTLP) logging agent."""
 
+import hashlib
 import os
 import re
 import shlex
+import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 import urllib.parse
 
@@ -24,11 +26,9 @@ _REMOTE_HEADERS_PATH = os.path.join(constants.LOGGING_CONFIG_DIR,
 _HEADER_ENV_PREFIX = 'SKYPILOT_OTLP_HEADER_'
 # RFC 9110 field-name token characters.
 _HEADER_NAME_RE = re.compile(r'^[A-Za-z0-9!#$%&\'*+.^_`|~-]+$')
-# Mirrors _parse_headers_file on the cluster: prints the value of the N-th
-# header line (1-based, skipping blank and comment lines) of the headers file.
-_AWK_HEADER_VALUE = (
-    'NF && $0 !~ /^[[:space:]]*#/ {c++; if (c == n) '
-    '{sub(/^[^:]*:[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); print; exit}}')
+# Prints the value of header N (1-based) of a canonical headers file, which has
+# exactly one `Name: value` line per header (see _stage_headers_file).
+_AWK_HEADER_VALUE = 'NR == n {sub(/^[^:]*: /, ""); print; exit}'
 
 _PROTOCOL_HTTP = 'http/protobuf'
 _PROTOCOL_GRPC = 'grpc'
@@ -50,26 +50,64 @@ class _OtlpLoggingConfig(pydantic.BaseModel):
     resource_attributes: Optional[Dict[str, str]] = None
 
 
-def _parse_headers_file(path: str) -> List[str]:
-    """Returns the header names in a headers file, in file order.
+def _parse_headers_file(path: str) -> List[Tuple[str, str]]:
+    """Returns the (name, value) headers in a headers file, in file order.
 
     The file holds one ``Name: value`` header per line; blank lines and lines
-    starting with ``#`` are ignored.
+    starting with ``#`` are ignored, as is surrounding whitespace (including
+    the ``\\r`` of CRLF line endings).
     """
-    names = []
-    with open(path, 'r', encoding='utf-8') as f:
-        for lineno, line in enumerate(f, start=1):
-            stripped = line.strip()
-            if not stripped or stripped.startswith('#'):
-                continue
-            name, sep, _ = stripped.partition(':')
-            name = name.strip()
-            if not sep or not _HEADER_NAME_RE.match(name):
-                raise exceptions.InvalidSkyPilotConfigError(
-                    f'Invalid header on line {lineno} of logs.otlp.headers_file'
-                    f' {path!r}: expected `Name: value`.')
-            names.append(name)
-    return names
+    headers = []
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            lines = f.read().splitlines()
+    except (OSError, UnicodeDecodeError) as e:
+        raise exceptions.InvalidSkyPilotConfigError(
+            f'Failed to read logs.otlp.headers_file {path!r}: {e}') from e
+    for lineno, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+        name, sep, value = stripped.partition(':')
+        name = name.strip()
+        if not sep or not _HEADER_NAME_RE.match(name):
+            raise exceptions.InvalidSkyPilotConfigError(
+                f'Invalid header on line {lineno} of logs.otlp.headers_file'
+                f' {path!r}: expected `Name: value`.')
+        headers.append((name, value.strip()))
+    return headers
+
+
+def _stage_headers_file(path: str) -> Tuple[str, List[str]]:
+    """Writes a canonical, owner-only copy of a headers file.
+
+    The copy has exactly one `Name: value` line per header, so the cluster can
+    read header N as line N without re-parsing the user's file, and mode 0600,
+    which the upload (rsync -a) carries over to the cluster. It is named after
+    its content, so concurrent launches with different files do not collide.
+
+    Returns:
+        The path of the copy, and the header names in order.
+    """
+    headers = _parse_headers_file(path)
+    content = ''.join(f'{name}: {value}\n' for name, value in headers)
+    digest = hashlib.sha256(content.encode('utf-8')).hexdigest()[:16]
+    staging_dir = os.path.expanduser(constants.LOGGING_CONFIG_DIR)
+    staged_path = os.path.join(staging_dir, f'otlp_headers-{digest}')
+    if not os.path.exists(staged_path):
+        os.makedirs(staging_dir, mode=0o700, exist_ok=True)
+        # mkstemp creates the file with mode 0600; rename it into place
+        # atomically so a concurrent reader never sees a partial file.
+        fd, tmp_path = tempfile.mkstemp(dir=staging_dir)
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                f.write(content)
+            os.replace(tmp_path, staged_path)
+        except BaseException:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise
+    return staged_path, [name for name, _ in headers]
 
 
 class OtlpLoggingAgent(FluentbitAgent):
@@ -108,17 +146,32 @@ class OtlpLoggingAgent(FluentbitAgent):
             raise exceptions.InvalidSkyPilotConfigError(
                 f'Invalid logs.otlp.compression {self.config.compression!r}: '
                 'expected \'none\' or \'gzip\'.')
+        invalid_endpoint = exceptions.InvalidSkyPilotConfigError(
+            f'Invalid logs.otlp.endpoint {self.config.endpoint!r}: '
+            'expected a URL like https://otel-collector.example.com:4318.')
         parsed = urllib.parse.urlparse(self.config.endpoint)
         if parsed.scheme not in ('http', 'https') or not parsed.hostname:
-            raise exceptions.InvalidSkyPilotConfigError(
-                f'Invalid logs.otlp.endpoint {self.config.endpoint!r}: '
-                'expected a URL like https://otel-collector.example.com:4318.')
+            raise invalid_endpoint
+        try:
+            # urllib only validates the port when it is read.
+            _ = parsed.port
+        except ValueError as e:
+            raise invalid_endpoint from e
         self._parsed_endpoint = parsed
+        self._staged_headers: Optional[Tuple[str, List[str]]] = None
         super().__init__()
 
-    def _headers_file_local_path(self) -> Optional[str]:
+    def _headers(self) -> Optional[Tuple[str, List[str]]]:
+        """Returns the staged headers file and its header names, if any."""
         if not self.config.headers_file:
             return None
+        if self._staged_headers is None:
+            self._staged_headers = _stage_headers_file(
+                self._headers_file_local_path())
+        return self._staged_headers
+
+    def _headers_file_local_path(self) -> str:
+        assert self.config.headers_file is not None
         # expanduser handles '~', and realpath resolves symlinks (e.g. a
         # Kubernetes Secret mounted as a volume) and relative paths.
         local_path = os.path.realpath(
@@ -146,19 +199,20 @@ class OtlpLoggingAgent(FluentbitAgent):
     def get_setup_command(self,
                           cluster_name: resources_utils.ClusterName) -> str:
         setup = super().get_setup_command(cluster_name)
-        local_path = self._headers_file_local_path()
-        if local_path is None:
+        headers = self._headers()
+        if headers is None:
             return setup
         # Export each header value from the delivered headers file so that
         # fluent-bit expands it from the environment at startup.
         exports = []
-        for i in range(len(_parse_headers_file(local_path))):
+        for i in range(len(headers[1])):
             awk = (f'awk -v n={i + 1} {shlex.quote(_AWK_HEADER_VALUE)} '
                    f'{_REMOTE_HEADERS_PATH}')
             exports.append(f'export {_HEADER_ENV_PREFIX}{i}="$({awk})"')
         if not exports:
             return setup
-        # The file holds secrets; keep it readable by the runtime user only.
+        # The upload keeps the staged copy's 0600 mode; enforce it regardless,
+        # since the file holds secrets.
         return (f'chmod 600 {_REMOTE_HEADERS_PATH}; ' + '; '.join(exports) +
                 '; ' + setup)
 
@@ -185,9 +239,9 @@ class OtlpLoggingAgent(FluentbitAgent):
         if self.config.compression != 'none':
             config['compress'] = self.config.compression
         headers = [f'{k} {v}' for k, v in (self.config.headers or {}).items()]
-        local_path = self._headers_file_local_path()
-        if local_path is not None:
-            for i, name in enumerate(_parse_headers_file(local_path)):
+        staged = self._headers()
+        if staged is not None:
+            for i, name in enumerate(staged[1]):
                 headers.append(f'{name} ${{{_HEADER_ENV_PREFIX}{i}}}')
         if headers:
             config['header'] = headers
@@ -215,7 +269,9 @@ class OtlpLoggingAgent(FluentbitAgent):
         return config
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        local_path = self._headers_file_local_path()
-        if local_path is None:
+        # Called before provisioning, so a missing or malformed headers file
+        # fails the launch before any instance is created.
+        staged = self._headers()
+        if staged is None:
             return {}
-        return {_REMOTE_HEADERS_PATH: local_path}
+        return {_REMOTE_HEADERS_PATH: staged[0]}
