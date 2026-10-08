@@ -113,8 +113,10 @@ def _status_check_gap_seconds(first_check: bool) -> float:
 # _network_check_in_flight is the check running now, if any. Loops that find
 # no recent success wait for it instead of starting their own and get its
 # result, success or failure, so during an outage each loop retries on its own
-# jittered timer rather than queueing behind one failing check after another,
-# and when the network returns the loops do not all poll at the same moment.
+# jittered timer rather than queueing behind one failing check after another.
+# A success releases every waiting loop at once, and after an outage that is
+# every loop in the process, so a loop that waited spreads itself out before
+# it polls (see check_network_connection).
 # The check task is created inside the event loop: this module is imported
 # before asyncio.run() creates the controller's loop, and on Python 3.9 an
 # asyncio primitive binds to the current loop when it is constructed.
@@ -162,6 +164,12 @@ async def check_network_connection() -> None:
     fails each of them raises NetworkError and retries on its own timer. A
     failure is not reused by loops that check after it finished.
 
+    A loop that waited on a check another loop started returns after a random
+    delay of up to as long as it waited (at most the reuse window). Without
+    it, the loops released by one success would all poll their jobs at the
+    same moment: after an outage, every loop of the process. A loop that waited
+    for a healthy check is delayed by at most that check's duration.
+
     A recovery strategy that owns its monitor loop
     (StrategyExecutor.monitor_task) should check the network through this
     function as well, so that its loops share the process's check.
@@ -169,13 +177,21 @@ async def check_network_connection() -> None:
     global _network_check_in_flight
     if _network_check_is_fresh():
         return
-    if _network_check_in_flight is None:
-        _network_check_in_flight = asyncio.create_task(_run_network_check())
-        _network_check_in_flight.add_done_callback(
-            _retrieve_network_check_result)
+    check = _network_check_in_flight
+    started_here = check is None
+    if check is None:
+        check = asyncio.create_task(_run_network_check())
+        check.add_done_callback(_retrieve_network_check_result)
+        _network_check_in_flight = check
+    waiting_since = time.monotonic()
     # Shielded: a loop cancelled while it waits (its job was cancelled) must
     # not cancel the check that other loops are waiting on.
-    await asyncio.shield(_network_check_in_flight)
+    await asyncio.shield(check)
+    if not started_here:
+        reuse_window = (managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS *
+                        (1 - _STATUS_CHECK_GAP_JITTER))
+        waited = time.monotonic() - waiting_since
+        await asyncio.sleep(random.uniform(0, min(waited, reuse_window)))
 
 
 async def create_background_task(coro: typing.Coroutine) -> None:

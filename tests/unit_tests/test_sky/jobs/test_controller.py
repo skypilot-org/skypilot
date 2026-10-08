@@ -2767,6 +2767,73 @@ class TestNetworkCheckOncePerGap:
         assert check.await_count == 1
         assert controller_module._network_check_is_fresh()
 
+    class _RecordingRandom:
+        """Stands in for the module's random: records each uniform() range
+        and returns its low end, so the release delays cost nothing."""
+
+        def __init__(self):
+            self.ranges = []
+
+        def uniform(self, low, high):
+            self.ranges.append((low, high))
+            return low
+
+    async def _release_waiters_after(self, wait_seconds):
+        """Starts a check, lets two more loops wait on it for about
+        wait_seconds, then lets it succeed. Returns the delay ranges drawn."""
+        started = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def gated_check():
+            started.set()
+            await finish.wait()
+
+        recorder = self._RecordingRandom()
+        check = AsyncMock(side_effect=gated_check)
+        with patch.object(controller_module, 'random', recorder), \
+             patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=check):
+            starter = asyncio.create_task(
+                controller_module.check_network_connection())
+            await started.wait()
+            waiters = [
+                asyncio.create_task(
+                    controller_module.check_network_connection())
+                for _ in range(2)
+            ]
+            await asyncio.sleep(wait_seconds)
+            finish.set()
+            await asyncio.gather(starter, *waiters)
+        assert check.await_count == 1
+        return recorder.ranges
+
+    @pytest.mark.asyncio
+    async def test_loops_released_by_a_success_spread_out(self):
+        """A success releases every loop waiting on it at once; after an
+        outage that is every loop in the process. Each loop that waited on
+        another loop's check returns after a random delay of up to as long as
+        it waited, so they do not all poll at the same moment. The loop that
+        ran the check returns at once."""
+        ranges = await self._release_waiters_after(0.05)
+        # One delay per waiting loop, none for the loop that ran the check.
+        assert len(ranges) == 2
+        for low, high in ranges:
+            assert low == 0
+            assert 0.03 <= high < self._shortest_sleep()
+
+    @pytest.mark.asyncio
+    async def test_release_delay_is_capped_at_the_reuse_window(
+            self, monkeypatch):
+        monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_CHECK_GAP_SECONDS',
+                            0.05)
+        ranges = await self._release_waiters_after(0.2)
+        assert len(ranges) == 2
+        for low, high in ranges:
+            assert low == 0
+            assert high == pytest.approx(
+                0.05 * (1 - controller_module._STATUS_CHECK_GAP_JITTER))
+
     def test_concurrent_loops_in_the_loop_asyncio_run_creates(self):
         """The controller imports this module and only then starts its event
         loop with asyncio.run(). Loops that wait on the check in that loop
