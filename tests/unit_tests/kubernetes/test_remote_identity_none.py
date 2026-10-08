@@ -14,6 +14,7 @@ from sky import backends
 from sky import clouds
 from sky import core
 from sky import exceptions
+from sky import execution
 from sky import resources as resources_lib
 from sky import skypilot_config
 from sky.clouds import kubernetes as kubernetes_cloud
@@ -156,6 +157,16 @@ class TestResolution:
         assert _identity(client_config=_k8s(
             remote_identity=_NONE)) == _NONE_IDENTITY
 
+    @pytest.mark.parametrize('spelling', ['none', 'None'])
+    def test_none_is_case_insensitive(self, server_config, spelling):
+        # Not a service account literally named `none`, with a token.
+        server_config(_k8s(remote_identity=spelling))
+        assert _identity() == _NONE_IDENTITY
+
+    def test_workspace_none(self, server_config):
+        server_config({'workspaces': {'default': _k8s(remote_identity=_NONE)}})
+        assert _identity() == _NONE_IDENTITY
+
 
 class TestNoneIsSticky:
     """A requester layer cannot loosen a NONE the server set."""
@@ -185,11 +196,20 @@ class TestNoneIsSticky:
                     'remote_identity': 'SERVICE_ACCOUNT'
                 }}))
 
+    def test_overriding_a_workspace_none_is_refused(self, server_config):
+        server_config({'workspaces': {'default': _k8s(remote_identity=_NONE)}})
+        with pytest.raises(exceptions.InvalidCloudConfigs,
+                           match='cannot override it'):
+            _identity(task_config=_k8s(remote_identity='SERVICE_ACCOUNT'))
+
 
 @pytest.mark.parametrize('spec,key', [
     ({
         'serviceAccountName': 'other-sa'
     }, 'serviceAccountName'),
+    ({
+        'serviceAccount': 'other-sa'
+    }, 'serviceAccount'),
     ({
         'automountServiceAccountToken': True
     }, 'automountServiceAccountToken'),
@@ -233,6 +253,14 @@ class TestExemptions:
         server_config(_k8s(remote_identity=_NONE))
         assert _identity(kubernetes_identity='skypilot-proxy-agent') == (
             'skypilot-proxy-agent', 'true', False)
+
+    def test_only_a_string_identity_exempts(self, server_config):
+        # A MagicMock attribute is not None; it must not read as an exemption.
+        server_config(_k8s(remote_identity=_NONE))
+        resources = _resources()
+        resources.kubernetes_identity = mock.MagicMock()
+        assert kubernetes_cloud.Kubernetes.remote_identity_is_none(
+            _CTX, resources)
 
 
 class TestAutodownUnsupportedUnderNone:
@@ -304,6 +332,24 @@ class TestAutodownUnsupportedUnderNone:
         backend.set_autostop.assert_called_once()
 
 
+class TestLeakGuard:
+    """The jobs controller skips its autodown guard only for NONE clusters."""
+
+    def _handle(self):
+        handle = mock.MagicMock(spec=backends.CloudVmRayResourceHandle)
+        handle.launched_resources = _resources()
+        handle.launched_resources.cloud = kubernetes_cloud.Kubernetes()
+        return handle
+
+    def test_skipped_for_a_none_cluster(self, server_config):
+        server_config(_k8s(remote_identity=_NONE))
+        assert execution._autodown_needs_identity_it_lacks(self._handle())
+
+    def test_kept_for_a_cluster_with_an_identity(self, server_config):
+        server_config({})
+        assert not execution._autodown_needs_identity_it_lacks(self._handle())
+
+
 class TestBootstrap:
     """Keyed on the identity, not the account name NONE keeps."""
 
@@ -371,7 +417,7 @@ class TestResourcesCarryTheIdentity:
         r.set_kubernetes_identity('skypilot-proxy-agent')
         config = r.to_yaml_config()
         assert not any('kubernetes_identity' in k for k in config)
-        with pytest.raises(Exception):
+        with pytest.raises(exceptions.InvalidSkyPilotConfigError):
             resources_lib.Resources.from_yaml_config({
                 'cpus': '1',
                 '_kubernetes_identity': 'skypilot-proxy-agent'

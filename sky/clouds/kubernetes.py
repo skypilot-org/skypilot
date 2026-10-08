@@ -195,12 +195,16 @@ def cap_preemption_hook_timeouts(
 def _match_remote_identity(remote_identity: Any,
                            context: Optional[str]) -> Optional[str]:
     """The identity for `context`; a dict maps context patterns (fnmatch)."""
-    if not isinstance(remote_identity, dict):
-        return remote_identity
-    for pattern, sa_name in remote_identity.items():
-        if fnmatch.fnmatchcase(context or '', str(pattern)):
-            return sa_name
-    return None
+    if isinstance(remote_identity, dict):
+        remote_identity = next(
+            (sa_name for pattern, sa_name in remote_identity.items()
+             if fnmatch.fnmatchcase(context or '', str(pattern))), None)
+    # Like the other clouds' enum, NONE is case-insensitive: a security
+    # setting must not silently become a service account named `none`.
+    none = schemas.RemoteIdentityOptions.NONE.value
+    if isinstance(remote_identity, str) and remote_identity.upper() == none:
+        return none
+    return remote_identity
 
 
 @registry.CLOUD_REGISTRY.register(aliases=['k8s'])
@@ -286,7 +290,7 @@ class Kubernetes(clouds.Cloud):
     def remote_identity_is_none(cls, context: Optional[str],
                                 resources: 'resources_lib.Resources') -> bool:
         """Whether pods launched for `resources` in `context` get no token."""
-        if resources.kubernetes_identity is not None:
+        if isinstance(resources.kubernetes_identity, str):
             return False
         none = schemas.RemoteIdentityOptions.NONE.value
         if cls._server_remote_identity(context) == none:
@@ -948,7 +952,7 @@ class Kubernetes(clouds.Cloud):
         # otherwise; the check below refuses that rather than obeying it.
         identity_none = (k8s_service_account_name == none or
                          self._server_remote_identity(context) == none)
-        if resources.kubernetes_identity is not None:
+        if isinstance(resources.kubernetes_identity, str):
             # A cluster SkyPilot launches for itself with a fixed account
             # (execution.launch's _kubernetes_identity), never user code.
             k8s_service_account_name = resources.kubernetes_identity

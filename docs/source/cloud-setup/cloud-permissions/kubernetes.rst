@@ -331,10 +331,12 @@ task sets another ``remote_identity`` is refused. Users can still choose
 
 .. note::
 
-    ``NONE`` covers the pods SkyPilot creates. To also keep tokens out of pods
-    that other tools create in the namespace, use an admission policy, such as
-    a ValidatingAdmissionPolicy that rejects pods that do not set
-    ``automountServiceAccountToken: false``.
+    ``NONE`` covers the token Kubernetes mounts for the pod's service account.
+    It does not detect a ``pod_config`` that mounts a service account token
+    Secret as an ordinary ``secret`` volume, and it does not cover pods that
+    other tools create in the namespace. For those, use an admission policy,
+    such as a ValidatingAdmissionPolicy that rejects pods that do not set
+    ``automountServiceAccountToken: false`` or that mount token Secrets.
 
 
 Controller clusters use a separate service account

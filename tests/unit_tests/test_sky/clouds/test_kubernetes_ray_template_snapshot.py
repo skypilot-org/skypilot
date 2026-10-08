@@ -286,6 +286,10 @@ CASES: Dict[str, Dict[str, Any]] = {
         'k8s_service_account_name': 'skypilot-controller-service-account',
         'k8s_is_controller': True,
     },
+    'remote_identity_none': {
+        'k8s_automount_sa_token': 'false',
+        'k8s_remote_identity_none': True,
+    },
     'user_labels': {
         'labels': {
             'team': 'research',
