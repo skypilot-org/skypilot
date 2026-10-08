@@ -834,3 +834,91 @@ class TestGetCurrentRequestActor:
                             lambda: False)
 
         assert common_utils.get_current_request_actor() is None
+
+
+class TestReleaseMemory:
+    """``release_memory`` returns freed heap memory via the active allocator."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_cache(self, monkeypatch):
+        monkeypatch.setattr(common_utils.sys, 'platform', 'linux')
+        common_utils._get_free_memory_returner.cache_clear()
+        yield
+        common_utils._get_free_memory_returner.cache_clear()
+
+    def test_purges_all_jemalloc_arenas(self):
+        process = mock.MagicMock()
+        with mock.patch.object(common_utils.ctypes,
+                               'CDLL',
+                               return_value=process):
+            common_utils.release_memory()
+
+        process.mallctl.assert_called_once_with(b'arena.4096.purge', None, None,
+                                                None, 0)
+        process.malloc_trim.assert_not_called()
+
+    def test_trims_glibc_without_jemalloc(self):
+        process = mock.MagicMock()
+        del process.mallctl
+        with mock.patch.object(common_utils.ctypes,
+                               'CDLL',
+                               return_value=process):
+            common_utils.release_memory()
+
+        process.malloc_trim.assert_called_once_with(0)
+
+    def test_no_op_without_either(self):
+        process = mock.MagicMock()
+        del process.mallctl
+        del process.malloc_trim
+        with mock.patch.object(common_utils.ctypes,
+                               'CDLL',
+                               return_value=process):
+            common_utils.release_memory()
+
+    def test_resolves_the_allocator_once(self):
+        process = mock.MagicMock()
+        with mock.patch.object(common_utils.ctypes,
+                               'CDLL',
+                               return_value=process) as cdll:
+            common_utils.release_memory()
+            common_utils.release_memory()
+
+        cdll.assert_called_once_with(None)
+        assert process.mallctl.call_count == 2
+
+
+class TestIsValidUserHash:
+    """is_valid_user_hash must accept only a complete, clean id."""
+
+    @pytest.mark.parametrize('user_hash', [
+        'ab12cd34',
+        'sa-abc123-token-xyz',
+        'A',
+        '0',
+    ])
+    def test_accepts_valid_ids(self, user_hash):
+        assert common_utils.is_valid_user_hash(user_hash)
+
+    @pytest.mark.parametrize('user_hash', [
+        None,
+        '',
+        'abc%123',
+        '-leading-hyphen',
+        '../x',
+        '/abs',
+        'has space',
+        'ab12cd34\n',
+    ])
+    def test_rejects_invalid_ids(self, user_hash):
+        assert not common_utils.is_valid_user_hash(user_hash)
+
+    def test_rejects_trailing_newline(self):
+        """A trailing newline must not sneak through.
+
+        re.match with a trailing '$' accepted this, because '$' also
+        matches just before a final newline, so the value was stored as an
+        identity distinct from the same id without the newline.
+        """
+        assert common_utils.is_valid_user_hash('ab12cd34')
+        assert not common_utils.is_valid_user_hash('ab12cd34\n')

@@ -235,7 +235,7 @@ def test_gcp_zone():
     smoke_tests_utils.run_one_test(test)
 
 
-# TODO (SKY-1119): These tests may fail as it can require access cloud
+# TODO: These tests may fail as it can require access cloud
 # credentials for getting azure storage commands, even though the API server
 # is running remotely. We should fix this.
 @pytest.mark.no_vast  # Requires AWS

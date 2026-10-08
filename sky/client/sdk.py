@@ -940,7 +940,7 @@ def _launch(
     confirm_shown = False
     if _need_confirmation:
         cluster_status = None
-        # TODO(SKY-998): we should reduce RTTs before launching the cluster.
+        # TODO: we should reduce RTTs before launching the cluster.
         status_request_id = status([cluster_name], all_users=True)
         clusters = get(status_request_id)
         cluster_user_hash = common_utils.get_user_hash()
@@ -2685,7 +2685,9 @@ def api_status(
         all_status: Whether to list all finished requests as well. This argument
             is ignored if request_ids is not None.
         limit: The number of requests to show. If None, show all requests.
-        fields: The fields to get. If None, get all fields.
+        fields: The fields to get. If None, get all fields except
+            return_value and error. This argument is ignored if request_ids
+            is not None.
         cluster_name: Filter requests by cluster name.
             If None, show all requests.
 
@@ -3744,11 +3746,11 @@ def _build_client_info() -> Dict[str, Any]:
         'python_version': platform.python_version(),
         'platform': platform.platform(),
         'user_hash': common_utils.get_user_hash(),
-        'environment': {
+        'environment': debug_dump_helpers.redact_env_vars({
             k: v
             for k, v in sorted(os.environ.items())
             if k.startswith(('SKYPILOT_', 'SKY_'))
-        },
+        }),
         'user_config': user_config,
         'merged_config': merged_config,
     }

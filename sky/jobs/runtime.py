@@ -475,10 +475,9 @@ def on_before_recovery(
     exit_codes: Optional[List[int]] = None,
     job_id_on_pool_cluster: Optional[int] = None,
 ) -> None:
-    # This hook fires for Ray-backed handles too — runtimes may
-    # capture VM logs before recovery — and ``handle`` may be None when
-    # the cluster is already unreachable. Runtimes self-filter inside
-    # the hook.
+    # This hook fires for Ray-backed handles too, and ``handle`` may be
+    # None when the cluster is already unreachable. Runtimes self-filter
+    # inside the hook.
     for r in _runtimes:
         # Defensive: a runtime registered by an older plugin build may not
         # implement this hook. Skip rather than crash on version skew.

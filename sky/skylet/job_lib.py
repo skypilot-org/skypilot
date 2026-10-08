@@ -90,7 +90,7 @@ def create_table(cursor, conn):
     #    INIT state, the pid will be set to 0.
     # >=0: The job has been started. The pid is the driver process's pid.
     #      The driver can be actually running or finished.
-    # TODO(SKY-1213): username is actually user hash, should rename.
+    # TODO: username is actually user hash, should rename.
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS jobs (
         job_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1348,7 +1348,7 @@ class JobLibCodeGen:
 
     @classmethod
     def get_job_queue(cls, user_hash: Optional[str], all_jobs: bool) -> str:
-        # TODO(SKY-1214): combine get_job_queue with get_job_statuses.
+        # TODO: combine get_job_queue with get_job_statuses.
         code = [
             'job_queue = job_lib.dump_job_queue('
             f'{user_hash!r}, {all_jobs})',
@@ -1407,7 +1407,12 @@ class JobLibCodeGen:
                 f'\nelse:'
                 f'\n  log_lib.tail_logs(job_id=job_id, log_dir=log_dir, managed_job_id={managed_job_id!r}, follow={follow}, tail={tail}, tail_offset={tail_offset})'
             )
-        code = [
+        code = []
+        if follow:
+            # getattr: clusters whose runtime predates the watchdog lack it.
+            code.append(
+                'getattr(log_lib, "start_orphan_watchdog", lambda: None)()')
+        code += [
             # We use != instead of is not because 1 is not None will print a warning:
             # <stdin>:1: SyntaxWarning: "is not" with a literal. Did you mean "!="?
             f'job_id = {job_id} if {job_id} != None else job_lib.get_latest_job_id()',

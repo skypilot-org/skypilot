@@ -165,6 +165,7 @@ def _basic_auth_401_response(request: fastapi.Request, content: str):
     """Return a 401 response with basic auth realm."""
     middleware_utils.mark_rejection(request,
                                     middleware_utils.REJECT_REASON_UNAUTHORIZED)
+    middleware_utils.mark_auth_rejection(request, content)
     return fastapi.responses.JSONResponse(
         status_code=401,
         headers={
@@ -177,10 +178,21 @@ def _basic_auth_401_response(request: fastapi.Request, content: str):
         content=content)
 
 
-def _bearer_auth_401_response(request: fastapi.Request, content):
-    """Return a 401 response for bearer token authentication failures."""
+def _bearer_auth_401_response(request: fastapi.Request,
+                              content: Dict[str, str],
+                              subject: Optional[str] = None,
+                              audit_detail: Optional[str] = None):
+    """Return a 401 response for bearer token authentication failures.
+
+    `subject` is the service account the token was verified to belong to,
+    when it was rejected after verification (revoked, expired, user gone).
+    `audit_detail` replaces the response detail in the audit stamp when the
+    detail carries variable text (an exception message).
+    """
     middleware_utils.mark_rejection(request,
                                     middleware_utils.REJECT_REASON_UNAUTHORIZED)
+    middleware_utils.mark_auth_rejection(request, audit_detail or
+                                         content['detail'], subject)
     return fastapi.responses.JSONResponse(
         status_code=401,
         headers={
@@ -615,13 +627,15 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     '(revoked or rotated)')
                 return _bearer_auth_401_response(
                     request,
-                    {'detail': 'Service account token revoked or rotated'})
+                    {'detail': 'Service account token revoked or rotated'},
+                    subject=user_id)
 
             if (token_row['expires_at'] is not None and
                     token_row['expires_at'] < int(time.time())):
                 logger.warning(f'Service account token {token_id} has expired')
                 return _bearer_auth_401_response(
-                    request, {'detail': 'Service account token has expired'})
+                    request, {'detail': 'Service account token has expired'},
+                    subject=user_id)
 
             # Verify user still exists in database
             user_info = await db_lookup.call_with_deadline(
@@ -631,7 +645,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     f'Service account user {user_id} no longer exists')
                 return _bearer_auth_401_response(
                     request,
-                    {'detail': 'Service account user no longer exists'})
+                    {'detail': 'Service account user no longer exists'},
+                    subject=user_id)
 
             # Update last used timestamp for token tracking, skipped while
             # the row's last_used_at is fresher than
@@ -688,7 +703,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                          exc_info=True)
             return _bearer_auth_401_response(
                 request,
-                {'detail': f'Service account authentication failed: {str(e)}'})
+                {'detail': f'Service account authentication failed: {str(e)}'},
+                audit_detail='Service account authentication failed')
 
         return await call_next(request)
 
@@ -818,7 +834,7 @@ async def cleanup_unreferenced_file_mounts():
 
         with storage.gc_lock() as should_run:
             if not should_run:
-                logger.debug('Another replica is running blob GC, skipping')
+                logger.debug('Another server is running blob GC, skipping')
                 return
 
             # A blob is kept alive by either an active API request (e.g. the
@@ -1391,6 +1407,15 @@ soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
 
 
+@app.exception_handler(exceptions.InvalidUserIdError)
+def handle_invalid_user_id_error(request: fastapi.Request,
+                                 e: exceptions.InvalidUserIdError):
+    del request  # request is not used
+    # The request never reached the queue, so this is a client-side mistake.
+    return fastapi.responses.JSONResponse(status_code=400,
+                                          content={'detail': str(e)})
+
+
 @app.exception_handler(exceptions.ConcurrentWorkerExhaustedError)
 def handle_concurrent_worker_exhausted_error(
         request: fastapi.Request, e: exceptions.ConcurrentWorkerExhaustedError):
@@ -1751,7 +1776,7 @@ async def list_accelerator_counts(
 @app.post('/validate')
 async def validate(validate_body: payloads.ValidateBody) -> None:
     """Validates the user's DAG."""
-    # TODO(SKY-1035): validate if existing cluster satisfies the requested
+    # TODO: validate if existing cluster satisfies the requested
     # resources, e.g. sky exec --gpus V100:8 existing-cluster-with-no-gpus
 
     # TODO: Our current launch process is split into three calls:
@@ -2002,7 +2027,7 @@ async def _receive_and_assemble_chunks(
             status_code=500,
             detail='Upload request body should not be received before streaming'
         )
-    # TODO(SKY-1271): We need to double check security of uploading zip file.
+    # TODO: We need to double check security of uploading zip file.
     # Check chunk_index to be a valid integer
     if chunk_index < 0 or chunk_index >= total_chunks:
         raise ValueError(
@@ -3212,7 +3237,9 @@ async def api_status(
     limit: Optional[int] = fastapi.Query(
         None, description='Number of requests to show.'),
     fields: Optional[List[str]] = fastapi.Query(
-        None, description='Fields to get. If None, get all fields.'),
+        None,
+        description=('Fields to get. If None, get all fields except '
+                     'return_value and error. Ignored if request_ids is set.')),
     cluster_name: Optional[str] = fastapi.Query(
         None, description='Filter requests by cluster name.'),
 ) -> List[payloads.RequestPayload]:
@@ -3245,7 +3272,7 @@ async def api_status(
                     for d in daemons.HIDDEN_REQUEST_NAMES
                 ],
                 limit=limit,
-                fields=fields,
+                fields=fields or requests_lib.DISPLAY_COLUMNS,
                 sort=True,
             ))
         return requests_lib.encode_requests(request_tasks,
@@ -3254,7 +3281,7 @@ async def api_status(
         encoded_request_tasks = []
         for request_id in request_ids:
             request_tasks = await requests_lib.get_requests_async_with_prefix(
-                request_id)
+                request_id, requests_lib.DISPLAY_COLUMNS)
             if request_tasks is None:
                 continue
             for request_task in request_tasks:
@@ -4295,7 +4322,7 @@ def _init_or_restore_server_user_hash():
     """Restores the server user hash from the global user state db.
 
     The API server must have a stable user hash across restarts and potential
-    multiple replicas. Thus we persist the user hash in db and restore it on
+    multiple instances. Thus we persist the user hash in db and restore it on
     startup. When upgrading from old version, the user hash will be read from
     the local file (if any) to keep the user hash consistent.
     """
@@ -4315,7 +4342,7 @@ def _init_or_restore_server_user_hash():
         return
 
     # Initial deployment. Insert-if-absent and apply whatever is live
-    # afterwards: replicas starting together would otherwise each generate a
+    # afterwards: servers starting together would otherwise each generate a
     # hash and the last write would win, leaving them disagreeing on the
     # server id they have already applied locally.
     user_hash = global_user_state.get_or_set_system_config(
@@ -4350,7 +4377,7 @@ def _bootstrap_jwt_secret() -> None:
 if __name__ == '__main__':
     # Raise the websockets library header limits before importing uvicorn.
     # The env vars are read by websockets.http11 and websockets.legacy.http
-    # at import time. Enterprise SSO cookies from oauth2proxy can exceed the
+    # at import time. Large auth cookies from an auth proxy can exceed the
     # default 8KB limit, causing WebSocket upgrade to fail with HTTP 400.
     os.environ.setdefault('WEBSOCKETS_MAX_LINE_LENGTH',
                           server_constants.WEBSOCKETS_MAX_HEADER_LINE_LENGTH)
@@ -4515,8 +4542,8 @@ if __name__ == '__main__':
         # supervisor process so the leader role and the controller
         # subprocesses it spawns share a single OS lifecycle.  Routing
         # this daemon through the executor task queue (as other daemons
-        # do) lets it drift between replicas while the controllers stay
-        # behind, which causes cross-replica controller orphans.  See
+        # do) lets it drift between servers while the controllers stay
+        # behind, which orphans controllers on the server it left.  See
         # sky/jobs/managed_job_refresh_thread.py for details.
         # pylint: disable=import-outside-toplevel
         from sky.jobs import managed_job_refresh_thread

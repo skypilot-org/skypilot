@@ -104,6 +104,14 @@ _MANAGED_JOB_FIELDS_FOR_QUEUE_KUBERNETES = [
     'user_hash',
 ]
 
+_MANAGED_JOB_FIELDS_FOR_WAIT = [
+    'job_id',
+    'job_name',
+    'task_id',
+    'task_name',
+    'status',
+]
+
 
 def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
     """Warn if local file mounts or workdir may be lost during rolling update.
@@ -1684,7 +1692,7 @@ def queue_v2(
     if include_tree:
         # The tree lookup takes job ids and nothing else. Whether a filter
         # should test the named jobs, their roots, or every row of the tree
-        # is undecided (SKY-7163), so the combination is refused rather than
+        # is undecided, so the combination is refused rather than
         # answered one way. Visibility (workspace access, all_users) still
         # applies; it is not a filter the caller chose.
         if job_ids is None:
@@ -2143,7 +2151,9 @@ def wait(name: Optional[str],
 
     # Resolve name to job_id on the first call.
     if name is not None:
-        records, _, _, _, _ = queue_v2_api(refresh=False, name_match=name)
+        records, _, _, _, _ = queue_v2_api(refresh=False,
+                                           name_match=name,
+                                           fields=_MANAGED_JOB_FIELDS_FOR_WAIT)
         matching = [r for r in records if r.job_name == name]
         if not matching:
             with ux_utils.print_exception_no_traceback():
@@ -2156,7 +2166,9 @@ def wait(name: Optional[str],
     start_time = time.time()
 
     while True:
-        records, _, _, _, _ = queue_v2_api(refresh=False, job_ids=[job_id])
+        records, _, _, _, _ = queue_v2_api(refresh=False,
+                                           job_ids=[job_id],
+                                           fields=_MANAGED_JOB_FIELDS_FOR_WAIT)
         if not records:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Managed job {job_id} not found.')
@@ -2455,11 +2467,9 @@ def get_job_events(
 ) -> List[Dict[str, Any]]:
     """Get task events for a managed job.
 
-    Routed through the registered ``ManagedJobRunner`` so a runner can add
-    what the infrastructure knows about the same job -- on Slurm, what the
-    allocation waited on and for how long. The default implementation
-    answers from the jobs database and the cluster's own events; see
-    ``_job_events`` for the arguments and the row shape.
+    Routed through the registered ``ManagedJobRunner``. The default
+    implementation answers from the jobs database and the cluster's own
+    events; see ``_job_events`` for the arguments and the row shape.
     """
     runner = managed_job_runner.current()
     # A runner that predates this method: the plugins that register one are
@@ -2528,9 +2538,7 @@ def _job_events(
         global_user_state.ClusterEventType.STATUS_CHANGE,
         global_user_state.ClusterEventType.LAUNCH_PROGRESS,
         # Boundaries that have been passed, with how long the phase they close
-        # took. Today that is the end of an admission wait, which is the one
-        # moment of a gated launch the rest of this list never marks -- and
-        # routinely most of the job's start-up.
+        # took.
         global_user_state.ClusterEventType.LAUNCH_MILESTONE,
     ]
     # (event, task_id) so each merged row keeps the task it belongs to.

@@ -160,8 +160,8 @@ T = TypeVar('T')
 def _get_ws_proxy_command() -> str:
     """Returns the ws-proxy command string.
 
-    Defaults to the Python websocket_proxy.py script. Plugins can
-    replace this function to prefer a native binary.
+    Defaults to the Python websocket_proxy.py script. Plugins may
+    replace this function.
     """
     escaped_executable_path = shlex.quote(sys.executable)
     escaped_websocket_proxy_path = shlex.quote(
@@ -256,6 +256,7 @@ def _get_cluster_records_and_set_ssh_config(
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
     verbose: bool = False,
+    output_stream: Optional[io.TextIOBase] = None,
 ) -> List[responses.StatusResponse]:
     """Returns a list of clusters that match the glob pattern.
 
@@ -265,6 +266,9 @@ def _get_cluster_records_and_set_ssh_config(
         all_users: Whether to query clusters from all users.
             If clusters is not None, this field is ignored because cluster list
             can include other users' clusters.
+        output_stream: Where to write the request's streamed server-side logs.
+            If None, they go to the console. Callers printing machine-readable
+            output pass a sink to keep stdout parseable.
     """
     # TODO(zhwu): we should move this function into SDK.
     # TODO(zhwu): this additional RTT makes CLIs slow. We should optimize this.
@@ -275,7 +279,8 @@ def _get_cluster_records_and_set_ssh_config(
                             all_users=all_users,
                             _include_credentials=True,
                             _summary_response=not verbose)
-    cluster_records = sdk.stream_and_get(request_id)
+    cluster_records = sdk.stream_and_get(request_id,
+                                         output_stream=output_stream)
     # Cache the ws-proxy command (constant across clusters).
     ws_proxy_cmd = _get_ws_proxy_command()
     # Update the SSH config for all clusters
@@ -1787,7 +1792,7 @@ def _handle_jobs_queue_request(
         msg contains the error message. Otherwise, msg contains the formatted
         managed job table.
     """
-    # TODO(SKY-980): remove unnecessary fallbacks on the client side.
+    # TODO: remove unnecessary fallbacks on the client side.
     num_in_progress_jobs = None
     msg = ''
     status_counts: Optional[Dict[str, int]] = None
@@ -2350,10 +2355,20 @@ def status(verbose: bool,
                               pool_status_request_id)
 
     # Phase 3: Get cluster records and handle special cases
+    json_output = output_format == flags.OUTPUT_FORMAT_JSON
     cluster_records = _get_cluster_records_and_set_ssh_config(
-        query_clusters, refresh_mode, all_users, verbose)
+        query_clusters,
+        refresh_mode,
+        all_users,
+        verbose,
+        # Keep stdout parseable. The status request's server-side logs are
+        # streamed back here, and a cluster name matching nothing logs a line
+        # exactly when a caller is most likely to be scripting against a name
+        # it is unsure of. Ahead of the JSON that is a line a parser cannot
+        # read, so send the stream to a sink, as `sky check -o json` does.
+        output_stream=io.StringIO() if json_output else None)
 
-    if output_format == flags.OUTPUT_FORMAT_JSON:
+    if json_output:
         click.echo(
             json.dumps([
                 r.model_dump(mode='json', exclude={'handle', 'credentials'})

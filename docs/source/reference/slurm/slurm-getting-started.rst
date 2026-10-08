@@ -5,8 +5,8 @@ Getting Started on Slurm
 
 .. note::
 
-    Slurm support is under active development. We'd love to hear from you —
-    please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
+    Have questions or feedback on running SkyPilot with Slurm? We'd love to
+    hear from you — please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
 
 Quickstart
 ----------
@@ -649,7 +649,7 @@ any additional setup.
 Current limitations
 -------------------
 
-Slurm support in SkyPilot is under active development. The following features are not yet supported:
+The following features are not yet supported on Slurm:
 
 * **SkyServe**: Serving deployments on Slurm is not yet supported.
 

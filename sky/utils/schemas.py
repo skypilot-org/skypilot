@@ -1511,8 +1511,8 @@ _SBATCH_OPTIONS_SCHEMA = {
 
 # `quota.queue` names the QOS a job is submitted with (`sbatch --qos`) and
 # `quota.account` the account it is charged to (`sbatch --account`), mirroring
-# `kubernetes.quota.queue`. Permissive so external schedulers (registered via
-# plugins) can layer their own sub-fields under `quota`.
+# `kubernetes.quota.queue`. Permissive so plugins can layer their own
+# sub-fields under `quota`.
 _SLURM_QUOTA_SCHEMA = {
     'type': 'object',
     'required': [],
@@ -1632,6 +1632,15 @@ _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
 }
 
 _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
+    # Per context because the constraint it satisfies is per cluster: the
+    # range has to sit outside the node's ephemeral port pool, and that
+    # pool's floor is a per-node sysctl. Measured 32768 on GKE and OCI,
+    # 10240 on CoreWeave -- so one value cannot serve a deployment that
+    # spans them.
+    'host_network_port_range': {
+        'type': 'string',
+        'pattern': r'^\d+-\d+$',
+    },
     'allowed_nodes': {
         'type': 'object',
         'required': [],
@@ -1736,10 +1745,9 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         },
     },
     # Alias of `kueue.local_queue_name`; `quota.queue` takes precedence
-    # when both are set. Permissive so external schedulers (registered
-    # via plugins) can layer their own sub-fields under `quota` without
-    # requiring per-key OSS schema updates; sub-field validation is the
-    # consumer's responsibility.
+    # when both are set. Permissive so plugins can layer their own
+    # sub-fields under `quota` without requiring per-key OSS schema
+    # updates; sub-field validation is the consumer's responsibility.
     'quota': {
         'type': 'object',
         'required': [],
@@ -2929,10 +2937,21 @@ def get_config_schema():
         'type': 'object',
         'required': ['store'],
         'additionalProperties': False,
+        # The OTLP store has no default endpoint, so its block is required.
+        'if': {
+            'properties': {
+                'store': {
+                    'case_insensitive_enum': ['otlp'],
+                },
+            },
+        },
+        'then': {
+            'required': ['otlp'],
+        },
         'properties': {
             'store': {
                 'type': 'string',
-                'case_insensitive_enum': ['gcp', 'aws'],
+                'case_insensitive_enum': ['gcp', 'aws', 'otlp'],
             },
             'gcp': {
                 'type': 'object',
@@ -2970,6 +2989,48 @@ def get_config_schema():
                         'type': 'boolean',
                     },
                     'additional_tags': {
+                        'type': 'object',
+                        'additionalProperties': {
+                            'type': 'string',
+                        },
+                    },
+                },
+            },
+            'otlp': {
+                'type': 'object',
+                'required': ['endpoint'],
+                'additionalProperties': False,
+                'properties': {
+                    'endpoint': {
+                        'type': 'string',
+                    },
+                    'protocol': {
+                        'type': 'string',
+                        'case_insensitive_enum': ['http/protobuf', 'grpc'],
+                    },
+                    'headers': {
+                        'type': 'object',
+                        'additionalProperties': {
+                            'type': 'string',
+                        },
+                    },
+                    'headers_file': {
+                        'type': 'string',
+                    },
+                    'compression': {
+                        'type': 'string',
+                        'case_insensitive_enum': ['none', 'gzip'],
+                    },
+                    'tls': {
+                        'type': 'object',
+                        'additionalProperties': False,
+                        'properties': {
+                            'insecure_skip_verify': {
+                                'type': 'boolean',
+                            },
+                        },
+                    },
+                    'resource_attributes': {
                         'type': 'object',
                         'additionalProperties': {
                             'type': 'string',

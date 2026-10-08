@@ -2034,9 +2034,8 @@ def test_volume_env_mount_kubernetes():
                 # Cancel by name, never -a: on a shared remote API server all
                 # concurrently running smoke tests submit jobs as the same
                 # service-account user, so `-a` cancels *their* in-flight jobs
-                # too (observed in enterprise CI: one such teardown killed an
-                # unrelated job-group test's job and another lane's kueue
-                # blocker mid-run).
+                # too (observed in CI: one such teardown killed an unrelated
+                # job-group test's job mid-run).
                 f'sky jobs cancel -y -n {name}-job || true',
                 # The managed job's worker cluster is torn down in the
                 # controller's `finally` block, and the controller only sets
@@ -3584,6 +3583,76 @@ def test_use_spot(generic_cloud: str):
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# Reads the head VM's spec through SkyPilot's nebius adaptor, the same
+# GetInstance read the provisioner's start() check uses, and asserts the
+# spot pricing opt-in. The nebius CLI's JSON output does not include the
+# pricing field, so the SDK is used here.
+_NEBIUS_PRICING_MODEL_CHECK = textwrap.dedent("""\
+    import os
+    from sky.adaptors import nebius
+    service = nebius.compute().InstanceServiceClient(nebius.sdk())
+    instance = nebius.sync_call(
+        service.get_by_name(nebius.nebius_common().GetByNameRequest(
+            parent_id=os.environ['PROJECT_ID'],
+            name=os.environ['INSTANCE_NAME'])))
+    instance = nebius.sync_call(
+        service.get(nebius.compute().GetInstanceRequest(
+            id=instance.metadata.id)))
+    mode = instance.spec.which_field_in_oneof('pricing_model')
+    print(f'{instance.metadata.id}: preemptible='
+          f'{instance.spec.check_presence("preemptible")}, '
+          f'pricing_model={mode}')
+    assert mode == 'follows_spot_price', f'unexpected pricing_model: {mode}'
+    """)
+
+
+@pytest.mark.nebius
+def test_use_spot_nebius_gpu():
+    """Test Nebius GPU spot launch with explicit pricing opt-in verification.
+
+    Spot on Nebius is GPU-only, so unlike test_use_spot (CPU, excluded for
+    Nebius) this launches an L40S spot cluster. Verifies that:
+    1. The cluster launches and the job succeeds with --use-spot
+    2. The head VM's Nebius spec selects the price-taking spot pricing
+       model (follows_spot_price)
+    3. sky stop + sky start round-trips on the spot cluster (a restarted
+       spot VM keeps its pricing opt-in, so start does not require manual
+       migration)
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    # The provision log records the head VM's instance name and Nebius
+    # project ("Creating instance <name> in project <id>.").
+    check_pricing_model_cmd = (
+        f'PROVISION_LINE=$(sky logs --provision {name} | '
+        f'grep -oE \'Creating instance [^ .]+ in project [^ .]+\' | '
+        f'head -1) && '
+        f'INSTANCE_NAME=$(echo "$PROVISION_LINE" | awk \'{{print $3}}\') && '
+        f'PROJECT_ID=$(echo "$PROVISION_LINE" | awk \'{{print $NF}}\') && '
+        f'echo "Head instance: $INSTANCE_NAME in project $PROJECT_ID" && '
+        f'INSTANCE_NAME="$INSTANCE_NAME" PROJECT_ID="$PROJECT_ID" '
+        f'python -c {shlex.quote(_NEBIUS_PRICING_MODEL_CHECK)}')
+    test = smoke_tests_utils.Test(
+        'use-spot-nebius-gpu',
+        [
+            f'sky launch -y -c {name} --infra nebius --gpus L40S:1 '
+            f'--use-spot \'echo hello from nebius spot\'',
+            f'sky logs {name} 1 --status',
+            check_pricing_model_cmd,
+            f'sky stop -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                name, [sky.ClusterStatus.STOPPED], timeout=10 * 60),
+            f'sky start -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                name, [sky.ClusterStatus.UP], timeout=15 * 60),
+            f'sky exec {name} \'echo hello after spot restart\'',
+            f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=40 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
