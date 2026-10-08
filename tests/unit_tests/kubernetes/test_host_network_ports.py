@@ -7,6 +7,7 @@ and that the resolution order falls back rather than inventing a block for a
 pod that already has one.
 """
 import os
+import socket
 from unittest import mock
 
 import pytest
@@ -307,20 +308,22 @@ class TestLegacyConfigMapFallback:
                                return_value=api):
             return instance._head_block_from_configmap('c', 'ns', None, head)
 
+    # Exactly what the pre-change probe wrote. Built from today's
+    # HEAD_PORT_NAMES, the fixture gained skylet with it and hid that no real
+    # ConfigMap has that key.
+    _LEGACY_KEYS = ('gcs', 'dashboard', 'node_manager', 'object_manager',
+                    'ray_client_server', 'dashboard_agent_listen',
+                    'runtime_env_agent', 'metrics_export', 'sshd_c-head')
+
     def _full_data(self):
-        data = {
-            name: str(40000 + i)
-            for i, name in enumerate(host_network_probe.HEAD_PORT_NAMES)
-            if name != 'sshd'
-        }
-        data[f'{host_network_probe.SSHD_KEY_PREFIX}c-head'] = '40099'
-        return data
+        return {key: str(40000 + i) for i, key in enumerate(self._LEGACY_KEYS)}
 
     def test_reads_the_heads_block_including_its_pod_keyed_sshd(self):
         block = self._call(self._cm(self._full_data()))
         assert block is not None
-        assert set(block) == set(host_network_probe.HEAD_PORT_NAMES)
-        assert block['sshd'] == 40099
+        assert block['sshd'] == 40008
+        assert block['gcs'] == 40000
+        assert 'skylet' not in block
 
     def test_absent_configmap_is_not_an_error(self):
         """A cluster created *after* this change has none, which is normal."""
@@ -489,6 +492,61 @@ def test_the_reserved_range_is_part_of_the_on_cluster_format():
     assert ports._DEFAULT_RANGE == (20000, 29999)
 
 
+class TestVerifyOncePerContainer:
+    """The start command re-runs on a live pod -- after Ray died, or when the
+    provisioner starts Ray itself because the pod's own start was slow. By
+    then this pod's sshd and skylet hold their ports."""
+
+    def _env(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(host_network_probe, '_VERIFIED_MARKER',
+                            str(tmp_path / 'verified'))
+        block = ports.allocate_block(None)
+        for name, port in block.items():
+            monkeypatch.setenv(host_network_probe.env_var_for_port(name),
+                               str(port))
+        return block
+
+    def _hold(self, port):
+        sock = socket.socket()
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(('0.0.0.0', port))
+        sock.listen(1)
+        return sock
+
+    def test_a_rerun_does_not_fail_against_its_own_sshd(self, monkeypatch,
+                                                        tmp_path):
+        block = self._env(monkeypatch, tmp_path)
+        host_network_probe._run_head()
+        with self._hold(block['sshd']):
+            host_network_probe._run_head()
+
+    def test_the_first_run_still_refuses_a_held_port(self, monkeypatch,
+                                                     tmp_path):
+        """The control: without the marker, the same holder fails."""
+        block = self._env(monkeypatch, tmp_path)
+        with self._hold(block['sshd']):
+            with pytest.raises(RuntimeError, match='already in use'):
+                host_network_probe._run_head()
+        assert not os.path.exists(host_network_probe._VERIFIED_MARKER)
+
+    def test_a_restarted_containers_old_connections_do_not_hold_a_port(self):
+        """A container restart leaves TIME_WAIT on its ports; sshd and Ray
+        rebind them (SO_REUSEADDR), so the check must not refuse them."""
+        listener = socket.socket()
+        # Linux reuses a TIME_WAIT port only when both sides set it.
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(('127.0.0.1', 0))
+        listener.listen(1)
+        port = listener.getsockname()[1]
+        client = socket.create_connection(('127.0.0.1', port))
+        accepted, _ = listener.accept()
+        accepted.close()  # the server side closes first: TIME_WAIT is its
+        listener.close()
+        client.close()
+        for sock in host_network_probe._verify_free({'gcs': port}):
+            sock.close()
+
+
 def test_a_port_clash_tells_the_user_to_retry_before_telling_them_to_debug():
     """The recovery action comes first, because it is what almost always works.
 
@@ -499,10 +557,6 @@ def test_a_port_clash_tells_the_user_to_retry_before_telling_them_to_debug():
     NodePort range" sends them to inspect a node for something that one more
     launch would have stepped over.
     """
-    import socket
-
-    from sky.provision.kubernetes import host_network_probe
-
     held = socket.socket()
     held.bind(('0.0.0.0', 0))
     try:
