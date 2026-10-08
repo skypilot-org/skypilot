@@ -63,7 +63,6 @@ from sky.utils.plugin_extensions import LogDeliverySource
 if typing.TYPE_CHECKING:
     import psutil
 
-    from sky import backends
     from sky import task as task_lib
     from sky.schemas.generated import jobsv1_pb2
 else:
@@ -140,7 +139,8 @@ _network_check_ok_at: Optional[float] = None
 
 def _read_runtime_handle(
     cluster_name: str
-) -> Tuple[Optional['backends.ResourceHandle'], Optional[float]]:
+) -> Tuple[Optional[cloud_vm_ray_backend.CloudVmRayResourceHandle],
+           Optional[float]]:
     """Reads a cluster's handle and the status-check gap its runtime asks for.
 
     Both run in one worker thread: the runtime's ownership check may read the
