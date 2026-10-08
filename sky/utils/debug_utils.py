@@ -185,19 +185,6 @@ def _log_timed_out_stragglers(orphans: List[Dict[str, Any]]) -> None:
 # Persistent location for debug dumps
 DEBUG_DUMP_DIR = '~/.sky/debug_dumps'
 
-# Env var names whose values should be redacted (show bool presence only).
-# Used for both server_info environment and request body sanitization.
-_SENSITIVE_ENV_VARS = {
-    'SKYPILOT_DB_CONNECTION_URI',
-    'SKYPILOT_INITIAL_BASIC_AUTH',
-    'SKYPILOT_SERVICE_ACCOUNT_TOKEN',
-    'SKYPILOT_DOCKER_PASSWORD',
-    'AWS_SECRET_ACCESS_KEY',
-    'AWS_SESSION_TOKEN',
-    'AWS_ACCESS_KEY_ID',
-    'AZURE_CLIENT_SECRET',
-}
-
 # Maps request name → field names containing task/dag YAML to redact.
 # Empty tuple means include body verbatim (no YAML fields).
 # Requests not in this dict have their body excluded entirely.
@@ -963,7 +950,8 @@ def _dump_server_info(dump_dir: str,
     env = {}
     for k, v in sorted(os.environ.items()):
         if k.startswith(('SKYPILOT_', 'SKY_')):
-            env[k] = bool(v) if k in _SENSITIVE_ENV_VARS else v
+            env[k] = (bool(v)
+                      if k in debug_dump_helpers.SENSITIVE_ENV_VARS else v)
     server_info['environment'] = env
 
     # Add cloud status (keyed by workspace name, each mapping cloud names
@@ -1026,17 +1014,28 @@ def _sanitize_request_body(request) -> Optional[Dict[str, Any]]:
         data = body.model_dump()
     except Exception:  # pylint: disable=broad-except
         return None
-    # Redact sensitive env var values
     env_vars = data.get('env_vars')
     if isinstance(env_vars, dict):
-        for k in env_vars:
-            if k in _SENSITIVE_ENV_VARS:
-                env_vars[k] = '<redacted>'
+        data['env_vars'] = debug_dump_helpers.redact_env_vars(env_vars)
+    client_info = data.get('client_info')
+    if isinstance(client_info, dict):
+        data['client_info'] = _redact_client_info(client_info)
     # Redact task/dag YAML fields
     for field in task_fields:
         if field in data and isinstance(data[field], str):
             data[field] = debug_dump_helpers.redact_task_yaml(data[field])
     return data
+
+
+def _redact_client_info(client_info: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a copy of client_info with credentials in its env redacted."""
+    environment = client_info.get('environment')
+    if not isinstance(environment, dict):
+        return client_info
+    return {
+        **client_info,
+        'environment': debug_dump_helpers.redact_env_vars(environment),
+    }
 
 
 def _copy_request_log_file(request_id: str, request_dir: str,
@@ -2035,6 +2034,7 @@ def _dump_managed_job_queue_info(
                                               list, dict)) else v)
                 for k, v in job.items()
             }
+            debug_dump_helpers.redact_managed_job_record(job_info)
             suffix = f'_task{task_idx}' if len(tasks) > 1 else ''
             job_info_path = os.path.join(job_dir, f'job_info{suffix}.json')
             with open(job_info_path, 'w', encoding='utf-8') as f:
@@ -2377,7 +2377,10 @@ def _build_debug_dump(
         logger.debug('Writing client info')
         client_info_path = os.path.join(dump_dir, 'client_info.json')
         with open(client_info_path, 'w', encoding='utf-8') as f:
-            json.dump(client_info, f, indent=2, default=str)
+            json.dump(_redact_client_info(client_info),
+                      f,
+                      indent=2,
+                      default=str)
     else:
         logger.debug('No client info provided')
 

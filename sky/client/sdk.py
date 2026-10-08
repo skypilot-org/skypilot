@@ -3746,11 +3746,11 @@ def _build_client_info() -> Dict[str, Any]:
         'python_version': platform.python_version(),
         'platform': platform.platform(),
         'user_hash': common_utils.get_user_hash(),
-        'environment': {
+        'environment': debug_dump_helpers.redact_env_vars({
             k: v
             for k, v in sorted(os.environ.items())
             if k.startswith(('SKYPILOT_', 'SKY_'))
-        },
+        }),
         'user_config': user_config,
         'merged_config': merged_config,
     }

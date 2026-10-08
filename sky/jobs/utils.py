@@ -1293,10 +1293,7 @@ def _collect_job_debug_manifest(
         tasks = managed_job_state.get_managed_job_tasks(job_id)
         if tasks:
             for t in tasks:
-                user_yaml = t.get('user_yaml')
-                if isinstance(user_yaml, str):
-                    t['user_yaml'] = debug_dump_helpers.redact_task_yaml(
-                        user_yaml)
+                debug_dump_helpers.redact_managed_job_record(t)
             inline_data.append({
                 'relative_path': f'{job_prefix}/job_info.json',
                 'content': json.dumps(tasks, indent=2, default=str),
