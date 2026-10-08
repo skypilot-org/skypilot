@@ -2994,10 +2994,80 @@ def get_node_affinity(
     return node_affinity or None
 
 
+def get_node_selector(
+    topology_label_key: Optional[str],
+    topology_label_value: Optional[str],
+    spot_label_key: Optional[str],
+    spot_label_value: Optional[str],
+    enable_flex_start: bool,
+) -> Optional[Dict[str, str]]:
+    """Builds the pod ``nodeSelector``.
+
+    Three independent entries, any of which may be absent:
+
+    * An accelerator topology label, pinning the pod to nodes of the requested
+      slice shape (e.g. ``cloud.google.com/gke-tpu-topology: 2x2``).
+    * The spot label, pinning the pod to preemptible nodes. The pod also
+      tolerates the matching taint; see get_spot_toleration().
+    * ``cloud.google.com/gke-flex-start``, selecting GKE nodes provisioned
+      through flex-start.
+
+    Args:
+        topology_label_key: Node label key of the accelerator slice topology,
+            or None.
+        topology_label_value: Requested value for ``topology_label_key``, or
+            None.
+        spot_label_key: Node label key of preemptible nodes, or None.
+        spot_label_value: Value ``spot_label_key`` carries on preemptible
+            nodes, or None.
+        enable_flex_start: Whether the pod schedules onto flex-start nodes.
+
+    Returns:
+        A ``nodeSelector`` dict, or None when no entry applies.
+    """
+    node_selector: Dict[str, str] = {}
+    if topology_label_key is not None and topology_label_value is not None:
+        node_selector[topology_label_key] = topology_label_value
+    if spot_label_key is not None and spot_label_value is not None:
+        node_selector[spot_label_key] = spot_label_value
+    if enable_flex_start:
+        node_selector['cloud.google.com/gke-flex-start'] = 'true'
+    return node_selector or None
+
+
+def get_spot_toleration(
+    spot_label_key: Optional[str],
+    spot_label_value: Optional[str],
+) -> Optional[Dict[str, str]]:
+    """Builds the toleration for the taint preemptible nodes carry.
+
+    Args:
+        spot_label_key: See get_node_selector().
+        spot_label_value: See get_node_selector().
+
+    Returns:
+        A toleration dict, or None when the cluster has no spot label.
+    """
+    if spot_label_key is None or spot_label_value is None:
+        return None
+    return {
+        'key': spot_label_key,
+        'operator': 'Equal',
+        'value': spot_label_value,
+        'effect': 'NoSchedule',
+    }
+
+
 def get_pod_fields(
+    *,
     acc_label_key: Optional[str],
     acc_label_values: Optional[List[str]],
     avoid_label_keys: Optional[List[str]],
+    topology_label_key: Optional[str],
+    topology_label_value: Optional[str],
+    spot_label_key: Optional[str],
+    spot_label_value: Optional[str],
+    enable_flex_start: bool,
 ) -> Dict[str, Any]:
     """Builds the pod fields that SkyPilot computes in Python.
 
@@ -3008,16 +3078,29 @@ def get_pod_fields(
         acc_label_key: See get_node_affinity().
         acc_label_values: See get_node_affinity().
         avoid_label_keys: See get_node_affinity().
+        topology_label_key: See get_node_selector().
+        topology_label_value: See get_node_selector().
+        spot_label_key: See get_node_selector() and get_spot_toleration().
+        spot_label_value: See get_node_selector() and get_spot_toleration().
+        enable_flex_start: See get_node_selector().
 
     Returns:
         A partial pod manifest, empty when no field applies.
     """
-    pod_fields: Dict[str, Any] = {}
+    spec: Dict[str, Any] = {}
+    node_selector = get_node_selector(topology_label_key, topology_label_value,
+                                      spot_label_key, spot_label_value,
+                                      enable_flex_start)
+    if node_selector is not None:
+        spec['nodeSelector'] = node_selector
     node_affinity = get_node_affinity(acc_label_key, acc_label_values,
                                       avoid_label_keys)
     if node_affinity is not None:
-        pod_fields['spec'] = {'affinity': {'nodeAffinity': node_affinity}}
-    return pod_fields
+        spec['affinity'] = {'nodeAffinity': node_affinity}
+    spot_toleration = get_spot_toleration(spot_label_key, spot_label_value)
+    if spot_toleration is not None:
+        spec['tolerations'] = [spot_toleration]
+    return {'spec': spec} if spec else {}
 
 
 def get_accelerator_label_keys(context: Optional[str],) -> List[str]:
