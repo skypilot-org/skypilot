@@ -70,6 +70,8 @@ class ProvisionConfig:
     resume_stopped_nodes: bool
     # Optional ports to open on launch of the cluster.
     ports_to_open_on_launch: Optional[List[int]]
+    # Whether this cluster has previously reached UP (and may have saved state).
+    prev_cluster_ever_up: bool = False
 
     def get_redacted_config(self) -> Dict[str, Any]:
         """Get the redacted config."""
@@ -168,6 +170,9 @@ class InstanceInfo:
     # For Kubernetes: the k8s node name the pod runs on.
     # For clouds: the instance name (e.g., from AWS Name tag, GCP name).
     node_name: Optional[str] = None
+    # skylet's gRPC port when it is not the default: a Kubernetes hostNetwork
+    # pod shares its node's ports, so the server assigns skylet one.
+    skylet_port: Optional[int] = None
 
     def get_feasible_ip(self) -> str:
         """Get the most feasible IPs of the instance. This function returns

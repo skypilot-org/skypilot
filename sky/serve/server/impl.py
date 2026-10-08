@@ -16,6 +16,7 @@ import filelock
 from sky import backends
 from sky import exceptions
 from sky import execution
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
@@ -186,10 +187,10 @@ def up(
             storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
         force_disable_cloud_bucket = skypilot_config.get_nested(
             ('serve', 'force_disable_cloud_bucket'), False)
+        local_to_controller_file_mounts: Dict[str, str] = {}
         if storage_clouds and not force_disable_cloud_bucket:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
                 task, task_type='serve')
-            local_to_controller_file_mounts = {}
         else:
             # Fall back to two-hop file_mount uploading when no cloud storage
             if task.storage_mounts:
@@ -197,8 +198,19 @@ def up(
                     'Cloud-based file_mounts are specified, but no cloud '
                     'storage is available. Please specify local '
                     'file_mounts only.')
-            local_to_controller_file_mounts = (
-                controller_utils.translate_local_file_mounts_to_two_hop(task))
+            if serve_utils.is_consolidation_mode(pool):
+                # The controller and replicas share the API server host, so
+                # there is no cluster hop and the file mounts are already
+                # resolved on this host (the client uploaded them under the
+                # owner's dir). Skip the two-hop, which would otherwise stage
+                # the sources under ~/.sky/tmp/controller -- outside the
+                # caller's roots, so the server would reject them. Mirrors the
+                # managed jobs path in jobs/server/core.py.
+                local_to_controller_file_mounts = {}
+            else:
+                local_to_controller_file_mounts = (
+                    controller_utils.translate_local_file_mounts_to_two_hop(
+                        task))
 
     tls_template_vars = _rewrite_tls_credential_paths_and_get_tls_env_vars(
         service_name, task)
@@ -242,6 +254,10 @@ def up(
                 service_catalog_common.get_modified_catalog_file_mounts(),
             'consolidation_mode_job_id': controller_job_id,
             'entrypoint': shlex.quote(common_utils.get_current_command()),
+            # The controller may be shared among users, so the creator's user
+            # hash has to be passed in explicitly rather than read from the
+            # controller's own environment.
+            'user_hash': shlex.quote(common_utils.get_current_user().id),
             **tls_template_vars,
             **controller_utils.shared_controller_vars_to_fill(
                 controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
@@ -869,6 +885,28 @@ class _DefaultServiceStatusRunner:
         return service_records
 
 
+def _resolve_user_names(service_records: List[Dict[str, Any]]) -> None:
+    """Fills in the ``user_name`` of each record from its ``user_hash``.
+
+    The user table lives on the API server, while the records come from the
+    controller, so the display name is resolved here in one batched query.
+    Records created before the creator was recorded have no ``user_hash``; they
+    are left with ``user_name`` unset.
+    """
+    user_hashes = {
+        record['user_hash']
+        for record in service_records
+        if record.get('user_hash') is not None
+    }
+    if not user_hashes:
+        return
+    users = global_user_state.get_users(user_hashes)
+    for record in service_records:
+        user = users.get(record.get('user_hash'))
+        if user is not None:
+            record['user_name'] = user.name
+
+
 def status(
     service_names: Optional[Union[str, List[str]]] = None,
     pool: bool = False,
@@ -921,6 +959,8 @@ def status(
                     endpoint = endpoint.replace('https://',
                                                 '').replace('http://', '')
                 service_record['endpoint'] = f'{protocol}://{endpoint}'
+
+    _resolve_user_names(service_records)
 
     return service_records
 

@@ -377,8 +377,8 @@ Slurm
 
 .. note::
 
-    Slurm support is under active development. We'd love to hear from you —
-    please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
+    Have questions or feedback on running SkyPilot with Slurm? We'd love to
+    hear from you — please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
 
 SkyPilot can run workloads on Slurm clusters. The only requirement is SSH access to a Slurm login node.
 
@@ -1191,6 +1191,7 @@ Install the necessary dependencies for Vast.
     .. code-block:: shell
 
       # SkyPilot requires 3.9 <= python <= 3.13.
+      # Vast is not part of "skypilot[all]"; install the vast extra explicitly.
       # From stable release
       pip install "skypilot[vast]"
       # From nightly build

@@ -262,6 +262,24 @@ class ResourcesMismatchError(Exception):
     pass
 
 
+class ProvisionUnsupportedError(Exception):
+    """Raised when a provisioner cannot ever satisfy a request.
+
+    Distinct from ResourcesUnavailableError, which means "not enough room
+    right now" and is worth retrying or failing over for. This means the
+    request itself cannot be served by this target no matter how long we
+    wait: an input shape the provisioner does not implement, a feature the
+    target lacks, a combination it has no way to render.
+
+    Provisioners raise it from their own launch path once they can tell,
+    which is often only after the config has been resolved. Failover treats
+    the candidate as permanently unusable rather than capacity-starved, and
+    a caller that retries until resources appear stops instead of waiting
+    for a condition that will never change.
+    """
+    pass
+
+
 class SkyPilotExcludeArgsBaseException(Exception):
     """Base class for exceptions that don't need args while serialization.
 
@@ -468,6 +486,21 @@ class InvalidRecipeNameError(Exception):
 
 class InvalidWorkspaceNameError(Exception):
     """Raised when the workspace name is invalid."""
+    pass
+
+
+class InvalidUserIdError(Exception):
+    """Raised when a user id does not have the expected form."""
+    pass
+
+
+class WorkspaceConfigConflictError(Exception):
+    """Raised when a workspace update was based on an outdated config.
+
+    The caller sent the config it started from (``expected_config``) and the
+    workspace no longer holds it, i.e. someone else changed the workspace in
+    the meantime.
+    """
     pass
 
 

@@ -1,9 +1,15 @@
 """Unit tests for sky.jobs.utils functions."""
+import asyncio
+import contextlib
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 from unittest.mock import MagicMock
 
+import filelock
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from sky import exceptions
 from sky.jobs import constants as managed_job_constants
@@ -86,12 +92,18 @@ class TestUpdateFields:
         assert 'task_name' in updated_fields
 
     def test_adds_dependencies_for_details(self):
-        """Test that schedule_state, priority, and failure_reason are added when details is present."""
+        """Test the columns `details` is assembled from are selected.
+
+        task_name/task_id/pool and the attempt-start columns are what the
+        launch-progress lookup keys on, so a caller that asks only for
+        `details` (e.g. the dashboard) must still get them.
+        """
         fields = ['details']
         updated_fields, _ = jobs_utils._update_fields(fields)
-        assert 'schedule_state' in updated_fields
-        assert 'priority' in updated_fields
-        assert 'failure_reason' in updated_fields
+        for field in ('schedule_state', 'priority', 'failure_reason',
+                      'task_name', 'task_id', 'pool', 'last_recovered_at',
+                      'submitted_at'):
+            assert field in updated_fields, field
 
     def test_adds_original_user_yaml_path_for_user_yaml(self):
         """Test that original_user_yaml_path is added when user_yaml is present."""
@@ -222,8 +234,12 @@ class TestGetManagedJobQueue:
         defaults.update(kwargs)
         return defaults
 
-    def _patch_managed_job_state(self, monkeypatch: pytest.MonkeyPatch,
-                                 jobs: List[Dict[str, Any]]):
+    def _patch_managed_job_state(
+            self,
+            monkeypatch: pytest.MonkeyPatch,
+            jobs: List[Dict[str, Any]],
+            unfinished_dependencies: Optional[Dict[int, List[int]]] = None,
+            dependencies: Optional[Dict[int, List[int]]] = None):
         """Patch managed_job_state functions for testing."""
 
         def fake_get_managed_jobs_total():
@@ -259,6 +275,20 @@ class TestGetManagedJobQueue:
         monkeypatch.setattr(jobs_utils.managed_job_state,
                             'get_managed_jobs_highest_priority',
                             fake_get_managed_jobs_highest_priority)
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state, 'get_unfinished_dependencies',
+            lambda job_ids: {
+                job_id: deps
+                for job_id, deps in (unfinished_dependencies or {}).items()
+                if job_id in job_ids
+            })
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state, 'get_jobs_dependencies',
+            lambda job_ids: {
+                job_id: deps
+                for job_id, deps in (dependencies or {}).items()
+                if job_id in job_ids
+            })
 
     def _patch_global_user_state(self, monkeypatch: pytest.MonkeyPatch):
         """Patch global_user_state for testing."""
@@ -474,6 +504,45 @@ class TestGetManagedJobQueue:
         job1 = next(j for j in result['jobs'] if j['job_id'] == 1)
         assert 'Waiting for higher priority jobs to launch' in job1['details']
 
+    @pytest.mark.parametrize(('dependencies', 'expected'), [
+        ([7], 'Dependency: 7'),
+        ([7, 8], 'Dependencies: 7, 8'),
+    ])
+    def test_details_for_job_waiting_on_dependencies(self, monkeypatch,
+                                                     dependencies, expected):
+        jobs = [self._make_test_job(1, priority=10)]
+        self._patch_managed_job_state(monkeypatch,
+                                      jobs,
+                                      unfinished_dependencies={1: dependencies})
+        self._patch_global_user_state(monkeypatch)
+
+        result = jobs_utils.get_managed_job_queue()
+
+        assert result['jobs'][0]['details'] == expected
+
+    def test_depends_on_field(self, monkeypatch):
+        jobs = [self._make_test_job(1), self._make_test_job(2)]
+        self._patch_managed_job_state(monkeypatch,
+                                      jobs,
+                                      dependencies={1: [7, 8]})
+        self._patch_global_user_state(monkeypatch)
+
+        by_id = {
+            job['job_id']: job
+            for job in jobs_utils.get_managed_job_queue()['jobs']
+        }
+        assert by_id[1]['depends_on'] == [7, 8]
+        assert by_id[2]['depends_on'] is None
+
+        # get_managed_job_queue rewrites the job records in place.
+        self._patch_managed_job_state(
+            monkeypatch, [self._make_test_job(1),
+                          self._make_test_job(2)],
+            dependencies={1: [7, 8]})
+        only_status = jobs_utils.get_managed_job_queue(
+            fields=['job_id', 'status'])['jobs']
+        assert all('depends_on' not in job for job in only_status)
+
     def test_details_for_waiting_state_with_same_priority(self, monkeypatch):
         """Test details generation for WAITING state with same priority."""
         jobs = [
@@ -658,15 +727,13 @@ class TestGetManagedJobQueue:
         monkeypatch.setattr(jobs_utils.backends, 'CloudVmRayResourceHandle',
                             type(mock_handle))
 
-        # Mock InfraInfo
-        class MockInfraInfo:
+        # Mock InfraInfo. Subclass the real one: the patch replaces the
+        # shared infra_utils attribute, so the state layer's
+        # InfraInfo(...).to_str() (infra filter options) sees it too and
+        # must keep working; only the display string is pinned here.
+        class MockInfraInfo(jobs_utils.infra_utils.InfraInfo):
 
-            def __init__(self, cloud, region, zone):
-                self.cloud = cloud
-                self.region = region
-                self.zone = zone
-
-            def formatted_str(self):
+            def formatted_str(self, truncate: bool = True):
                 return f'{self.cloud}/{self.region}/{self.zone}'
 
         monkeypatch.setattr(jobs_utils.infra_utils, 'InfraInfo', MockInfraInfo)
@@ -1099,6 +1166,7 @@ class TestFormatJobDetails:
                  status='RECOVERING',
                  recovery_reason=None,
                  pending_reason=None,
+                 cancel_reason=None,
                  cloud=None):
         job = {
             'schedule_state': schedule_state,
@@ -1109,8 +1177,54 @@ class TestFormatJobDetails:
         jobs_utils._format_job_details(job=job,
                                        highest_blocking_priority=0,
                                        recovery_reason=recovery_reason,
-                                       pending_reason=pending_reason)
+                                       pending_reason=pending_reason,
+                                       cancel_reason=cancel_reason)
         return job['details']
+
+    def test_cancel_reason_surfaced(self):
+        # Who asked for the cancellation shows in the details column verbatim.
+        reason = ('Cancellation requested by user alice '
+                  '(request ID: 9b6e6396-0000-4000-8000-000000000000)')
+        assert self._details(status='CANCELLED',
+                             schedule_state='DONE',
+                             cancel_reason=reason) == reason
+
+    def test_cancel_reason_takes_precedence_over_stale_failure(self):
+        # A job cancelled while recovering keeps the preemption in
+        # failure_reason; the cancel is why it ended, so it wins.
+        assert self._details(
+            status='CANCELLED',
+            schedule_state='DONE',
+            failure_reason='preempted',
+            cancel_reason='Cancellation requested by user alice'
+        ) == 'Cancellation requested by user alice'
+
+    def test_cancel_reason_beats_stale_schedule_state(self):
+        # A job cancelled while in launch backoff or waiting to launch keeps
+        # that schedule state until cleanup marks it DONE; the requester must
+        # show through, not the stale scheduling message.
+        reason = 'Cancellation requested by user alice'
+        for schedule_state in ('ALIVE_BACKOFF', 'ALIVE_WAITING', 'WAITING'):
+            assert self._details(status='CANCELLING',
+                                 schedule_state=schedule_state,
+                                 cancel_reason=reason) == reason
+            assert self._details(status='CANCELLING',
+                                 schedule_state=schedule_state,
+                                 failure_reason='no capacity',
+                                 cancel_reason=reason) == reason
+
+    def test_schedule_state_still_shown_without_cancel_reason(self):
+        # Unchanged for jobs that are not being cancelled.
+        assert self._details(status='PENDING', schedule_state='ALIVE_BACKOFF'
+                            ) == 'In backoff, waiting for resources'
+
+    def test_no_cancel_reason_falls_through(self):
+        # An unattributed cancel (old controller, internal cancel) keeps the
+        # existing behaviour.
+        assert self._details(status='CANCELLED',
+                             schedule_state='DONE',
+                             failure_reason='boom') == 'Failure: boom'
+        assert self._details(status='CANCELLED', schedule_state='DONE') is None
 
     def test_recovery_reason_surfaced(self):
         assert self._details(
@@ -1796,3 +1910,663 @@ class TestWaitingLineFallback:
     def test_nothing_to_show(self):
         """Neither available renders the plain waiting line."""
         assert jobs_utils._waiting_line_detail(None, None) is None
+
+
+class TestFieldsForController:
+    """Queue fields are trimmed to what a remote controller's skylet knows."""
+
+    _NEW = ['root_job_id', 'parent_job_id', 'parent_task_id']
+
+    def test_new_controller_keeps_everything(self):
+        fields = ['job_id', 'status'] + self._NEW
+        assert jobs_utils.fields_for_controller(fields, '41') == fields
+        assert jobs_utils.fields_for_controller(fields, '57') == fields
+
+    def test_old_controller_loses_the_parent_link_fields(self):
+        fields = ['job_id', 'status'] + self._NEW
+        assert jobs_utils.fields_for_controller(fields,
+                                                '40') == ['job_id', 'status']
+
+    def test_none_fields_and_unknown_versions_pass_through(self):
+        assert jobs_utils.fields_for_controller(None, '40') is None
+        fields = ['job_id'] + self._NEW
+        assert jobs_utils.fields_for_controller(fields, None) == fields
+        assert jobs_utils.fields_for_controller(fields, 'dev') == fields
+
+    def test_dynamic_task_index_needs_controller_42(self):
+        fields = ['job_id'] + self._NEW + ['dynamic_task_index']
+        assert jobs_utils.fields_for_controller(fields, '42') == fields
+        assert jobs_utils.fields_for_controller(fields,
+                                                '41') == ['job_id'] + self._NEW
+        assert jobs_utils.fields_for_controller(fields, '40') == ['job_id']
+
+    def test_version_is_only_asked_for_when_a_gated_field_is_requested(self):
+        # The gRPC queue path pays the version round trip only when it must.
+        assert not jobs_utils.queue_fields_need_controller_version(None)
+        assert not jobs_utils.queue_fields_need_controller_version(
+            ['job_id', 'status'])
+        assert jobs_utils.queue_fields_need_controller_version(
+            ['job_id', 'root_job_id'])
+
+
+class TestFormatJobTableDynamicMembers:
+    """`sky jobs queue` shows jobs launched from a group under that group."""
+
+    @staticmethod
+    def _row(job_id,
+             task_id=0,
+             task_name=None,
+             root_job_id=None,
+             status='RUNNING',
+             is_primary=None,
+             job_name=None,
+             dynamic_task_index=None):
+        return {
+            'job_id': job_id,
+            'task_id': task_id,
+            'task_name': task_name or f'task-{job_id}-{task_id}',
+            'job_name': job_name or f'job-{job_id}',
+            'workspace': 'default',
+            'resources': '1x[CPU:1]',
+            'submitted_at': 1_700_000_000.0,
+            'end_at': None,
+            'job_duration': 10,
+            'recovery_count': 0,
+            'status': managed_job_state.ManagedJobStatus(status),
+            'schedule_state': 'ALIVE',
+            'failure_reason': None,
+            'details': None,
+            'pool': None,
+            'is_primary_in_job_group': is_primary,
+            'root_job_id': root_job_id,
+            'parent_job_id': root_job_id,
+            'parent_task_id': None if root_job_id is None else 1,
+            'dynamic_task_index': dynamic_task_index,
+        }
+
+    @staticmethod
+    def _id_task_status(rows):
+        # Columns (show_all=False, no user column): ID, TASK, NAME, RESOURCES,
+        # SUBMITTED, TOT. DURATION, JOB DURATION, #RECOVERIES, STATUS, ...
+        ansi = re.compile(r'\x1b\[[0-9;]*m')
+        return [(str(r[0]), str(r[1]), ansi.sub('', str(r[8])).split(' ')[0])
+                for r in rows]
+
+    def test_members_render_under_their_group(self):
+        rows = [
+            # Newest first, as the queue returns them: the members precede
+            # their group.
+            self._row(58, task_id=1, root_job_id=42),
+            self._row(58, task_id=0, root_job_id=42),
+            self._row(57, root_job_id=42),
+            self._row(42,
+                      task_id=1,
+                      task_name='watcher',
+                      is_primary=False,
+                      job_name='rl'),
+            self._row(42,
+                      task_id=0,
+                      task_name='trainer',
+                      is_primary=True,
+                      job_name='rl'),
+            self._row(60),
+        ]
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True)
+        cells = self._id_task_status(table)
+        # Group row, its declared tasks, then the members with their own ids
+        # (a multi-task member shows task ids, a single-task one '-'), then
+        # the unrelated job on its own.
+        assert cells == [
+            ('42', '', 'RUNNING'),
+            (' ↳', '1', 'RUNNING'),
+            (' ↳', '0', 'RUNNING'),
+            (' ↳ 58', '1', 'RUNNING'),
+            (' ↳ 58', '0', 'RUNNING'),
+            (' ↳ 57', '-', 'RUNNING'),
+            # The table separates a multi-row job from the next with a blank
+            # row.
+            ('', '', ''),
+            ('60', '-', 'RUNNING'),
+        ]
+
+    def test_max_jobs_keeps_whole_trees(self):
+        # `sky status` asks for a handful of jobs and `sky jobs queue` for
+        # 50, by job; the server page is N trees with every row of each.
+        # Group 42 has two tasks and six evals (43-48), all newer than the
+        # group so listed first, and 49 is an unrelated newer job. A cut by
+        # rows would keep five evals and drop the group's declared-task rows, so
+        # the
+        # group would render under an eval's name with an eval's status.
+        rows = [self._row(49, status='SUCCEEDED')]
+        rows += [
+            self._row(eval_id, root_job_id=42, job_name=f'eval-{eval_id}')
+            for eval_id in range(48, 42, -1)
+        ]
+        rows += [
+            self._row(42,
+                      task_id=0,
+                      task_name='trainer',
+                      is_primary=True,
+                      job_name='rl',
+                      status='FAILED'),
+            self._row(42,
+                      task_id=1,
+                      task_name='watcher',
+                      is_primary=True,
+                      job_name='rl'),
+        ]
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True,
+                                            max_jobs=2)
+        # Blank separator rows aside: two jobs, 49, then the whole tree of
+        # 42 (declared tasks first, then the members), with the group's status
+        # the trainer's.
+        cells = [c for c in self._id_task_status(table) if c != ('', '', '')]
+        assert cells == [
+            ('49', '-', 'SUCCEEDED'),
+            ('42', '', 'FAILED'),
+            (' ↳', '0', 'FAILED'),
+            (' ↳', '1', 'RUNNING'),
+        ] + [(f' ↳ {eval_id}', '-', 'RUNNING') for eval_id in range(48, 42, -1)]
+        # A budget of one job is just 49; the group is not partially shown.
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True,
+                                            max_jobs=1)
+        assert self._id_task_status(table) == [('49', '-', 'SUCCEEDED')]
+
+    def test_members_do_not_change_group_status(self):
+        rows = [
+            self._row(57, root_job_id=42, status='FAILED'),
+            self._row(42, task_id=1, task_name='watcher', is_primary=False),
+            self._row(42,
+                      task_id=0,
+                      task_name='trainer',
+                      is_primary=True,
+                      status='SUCCEEDED'),
+        ]
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True)
+        group_row = self._id_task_status(table)[0]
+        # Primary-driven: the failed member leaves the group SUCCEEDED.
+        assert group_row == ('42', '', 'SUCCEEDED')
+
+    def test_single_task_root_keeps_its_row_and_lists_members(self):
+        rows = [
+            self._row(57, root_job_id=42),
+            self._row(42),
+        ]
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True)
+        # A plain job with a member: its own row as usual, member indented.
+        cells = [c for c in self._id_task_status(table) if c != ('', '', '')]
+        assert cells == [
+            ('42', '-', 'RUNNING'),
+            (' ↳ 57', '-', 'RUNNING'),
+        ]
+
+    def test_members_with_an_index_read_like_tasks(self):
+        # Rows as the query returns them: declared tasks first, then the members
+        # by dynamic task index; the table keeps that order.
+        rows = [
+            self._row(42, task_id=0, task_name='trainer', job_name='rl'),
+            self._row(42, task_id=1, task_name='watcher', job_name='rl'),
+            self._row(57, root_job_id=42, dynamic_task_index=2),
+            self._row(58, task_id=0, root_job_id=42, dynamic_task_index=3),
+            self._row(58, task_id=1, root_job_id=42, dynamic_task_index=3),
+        ]
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True)
+        cells = [c for c in self._id_task_status(table) if c != ('', '', '')]
+        # The group's declared tasks are 0 and 1; the dynamic tasks number on as
+        # 2 and 3, the multi-task one as <index>.<task id>. No job id shown
+        # by default: `sky jobs logs 42 2` / `sky jobs cancel 42 --task 2`
+        # address them like the declared tasks.
+        assert cells == [
+            ('42', '', 'RUNNING'),
+            (' ↳', '0', 'RUNNING'),
+            (' ↳', '1', 'RUNNING'),
+            (' ↳', '2', 'RUNNING'),
+            (' ↳', '3.0', 'RUNNING'),
+            (' ↳', '3.1', 'RUNNING'),
+        ]
+
+    def test_verbose_shows_the_member_s_job_id(self):
+        # -v keeps the index in TASK and puts the member's own job id in the
+        # ID cell: the SDK, cluster names and controller logs still use it.
+        rows = [
+            self._row(42, task_id=0, task_name='trainer', job_name='rl'),
+            self._row(57, root_job_id=42, dynamic_task_index=1),
+        ]
+        for row in rows:
+            # Columns shown only with -v.
+            row.update(start_at=None,
+                       cluster_resources='1x[CPU:1]',
+                       region='-',
+                       zone=None,
+                       cloud=None,
+                       infra=None)
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=True,
+                                            show_user=False,
+                                            return_rows=True)
+        id_task = [(str(r[0]), str(r[1])) for r in table if str(r[0]).strip()]
+        assert id_task[0][0] == '42'
+        assert (' ↳ 57', '1') in id_task
+
+    def test_member_with_unlisted_root_is_its_own_job(self):
+        # Root 99 filtered out of this listing (or gone): no dangling group.
+        rows = [self._row(70, root_job_id=99)]
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True)
+        assert self._id_task_status(table) == [('70', '-', 'RUNNING')]
+
+
+def _claim_waiting_job(pid: int, pid_started_at: float) -> Optional[int]:
+    """Claim a job the way a controller does, via the production claim path.
+
+    get_waiting_job_async is the real WAITING -> LAUNCHING compare-and-swap
+    that stamps the claiming controller's pid; it is async, so run it to
+    completion on a throwaway event loop. Returns the claimed job id, or None
+    if nothing was claimable.
+    """
+
+    async def _claim():
+        return await managed_job_state.get_waiting_job_async(
+            pid=pid, pid_started_at=pid_started_at)
+
+    loop = asyncio.new_event_loop()
+    try:
+        claimed = loop.run_until_complete(_claim())
+    finally:
+        loop.close()
+    return None if claimed is None else claimed['job_id']
+
+
+@pytest.fixture
+def _mock_managed_jobs_db_conn(tmp_path, monkeypatch):
+    """Create a temporary SQLite DB for managed jobs state.
+
+    Same pattern as tests/unit_tests/test_sky/jobs/test_jobs_state.py.
+    """
+    db_path = tmp_path / 'managed_jobs_testing.db'
+    engine = create_engine(f'sqlite:///{db_path}')
+    async_engine = create_async_engine(f'sqlite+aiosqlite:///{db_path}',
+                                       connect_args={'timeout': 30})
+
+    @contextlib.contextmanager
+    def _tmp_db_lock(_section: str):
+        lock_path = tmp_path / f'.{_section}.lock'
+        with filelock.FileLock(str(lock_path), timeout=10):
+            yield
+
+    monkeypatch.setattr(managed_job_state.migration_utils, 'db_lock',
+                        _tmp_db_lock)
+    monkeypatch.setattr(managed_job_state._db_manager, '_engine', engine)
+    monkeypatch.setattr(managed_job_state._db_manager, '_engine_async',
+                        async_engine)
+    managed_job_state.create_table(engine)
+    yield engine
+
+
+class TestHaRecoveryForConsolidationMode:
+    """ha_recovery_for_consolidation_mode: one CAS-guarded reset per job."""
+
+    def _patch_common(self, monkeypatch, tmp_path, jobs=None):
+        """Stub the pieces of the recovery pass we're not exercising.
+
+        jobs, if given, replaces the state query with canned rows (following
+        TestGetManagedJobQueue's convention) instead of reading a real DB.
+        """
+        monkeypatch.setattr(jobs_utils.scheduler, 'maybe_start_controllers',
+                            lambda: None)
+        # Redirect the recovery log off of the real, possibly shared
+        # /tmp/jobs_ha_recovery.log path.
+        monkeypatch.setattr(jobs_utils.constants,
+                            'HA_PERSISTENT_RECOVERY_LOG_PATH',
+                            str(tmp_path / '{}ha_recovery.log'))
+        if jobs is not None:
+            monkeypatch.setattr(jobs_utils.managed_job_state,
+                                'get_managed_jobs_with_filters',
+                                lambda fields=None: (jobs, len(jobs)))
+
+    def _job_row(self, **overrides):
+        job = {
+            'job_id': 1,
+            'controller_pid': 100,
+            'controller_pid_started_at': 1.0,
+            'schedule_state': managed_job_state.ManagedJobScheduleState.ALIVE,
+            'status': managed_job_state.ManagedJobStatus.RUNNING,
+        }
+        job.update(overrides)
+        return job
+
+    def _patch_liveness(self, monkeypatch, alive):
+        """Make controller_process_alive return `alive`, or raise if it is an
+        exception instance."""
+
+        def _check(record, legacy_job_id):
+            del record, legacy_job_id  # Unused.
+            if isinstance(alive, BaseException):
+                raise alive
+            return alive
+
+        monkeypatch.setattr(jobs_utils, 'controller_process_alive', _check)
+
+    def _spy_reset(self, monkeypatch, return_value=None):
+        """Count reset_job_for_recovery calls, delegating to the real one
+        unless return_value is given."""
+        calls = []
+        real = managed_job_state.reset_job_for_recovery
+
+        def _reset(job_id, **kwargs):
+            calls.append((job_id, kwargs))
+            if return_value is not None:
+                return return_value
+            return real(job_id, **kwargs)
+
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'reset_job_for_recovery', _reset)
+        return calls
+
+    def _seed_multi_task_alive_job(self,
+                                   engine,
+                                   num_tasks: int,
+                                   *,
+                                   pid,
+                                   pid_started_at,
+                                   name: str = 'multi-task-job'):
+        """Seed one job with num_tasks tasks, owned by (pid, pid_started_at)
+        and in the ALIVE schedule state."""
+        job_id = managed_job_state.set_job_info_without_job_id(
+            name=name,
+            workspace='ws1',
+            entrypoint='ep',
+            pool=None,
+            pool_hash=None,
+            user_hash='user1')
+        for task_id in range(num_tasks):
+            managed_job_state.set_pending(job_id,
+                                          task_id=task_id,
+                                          task_name=f'task{task_id}',
+                                          resources_str='{}',
+                                          metadata='{}')
+        managed_job_state.scheduler_set_waiting([job_id], '/tmp/dag.yaml',
+                                                '/tmp/user.yaml', '/tmp/env',
+                                                None, 100)
+        with managed_job_state.orm.Session(engine) as session:
+            session.query(managed_job_state.job_info_table).filter(
+                managed_job_state.job_info_table.c.spot_job_id == job_id
+            ).update({
+                managed_job_state.job_info_table.c.controller_pid: pid,
+                managed_job_state.job_info_table.c.controller_pid_started_at: pid_started_at,
+                managed_job_state.job_info_table.c.schedule_state:
+                    managed_job_state.ManagedJobScheduleState.ALIVE.value,
+            })
+            session.commit()
+        return job_id
+
+    def _read_job_info(self, engine, job_id):
+        with managed_job_state.orm.Session(engine) as session:
+            return session.execute(
+                managed_job_state.sqlalchemy.select(
+                    managed_job_state.job_info_table.c.controller_pid,
+                    managed_job_state.job_info_table.c.
+                    controller_pid_started_at,
+                    managed_job_state.job_info_table.c.schedule_state,
+                ).where(managed_job_state.job_info_table.c.spot_job_id ==
+                        job_id)).fetchone()
+
+    def test_multi_task_job_is_reset_exactly_once(self, monkeypatch, tmp_path,
+                                                  _mock_managed_jobs_db_conn):
+        """The state query returns one row per task. A multi-task job whose
+        controller is dead must still be reset exactly once: each extra reset
+        can re-orphan the job right after a controller claims it, which is how
+        one recovery pass ends up with several controllers for one job."""
+        engine = _mock_managed_jobs_db_conn
+        job_id = self._seed_multi_task_alive_job(engine,
+                                                 4,
+                                                 pid=100,
+                                                 pid_started_at=1.0)
+        self._patch_common(monkeypatch, tmp_path)
+        self._patch_liveness(monkeypatch, alive=False)
+        calls = self._spy_reset(monkeypatch)
+
+        jobs_utils.ha_recovery_for_consolidation_mode()
+
+        assert calls == [(job_id, {
+            'expected_pid': 100,
+            'expected_pid_started_at': 1.0,
+            'expected_schedule_state':
+                managed_job_state.ManagedJobScheduleState.ALIVE,
+        })]
+        row = self._read_job_info(engine, job_id)
+        assert row.controller_pid is None
+        assert (row.schedule_state ==
+                managed_job_state.ManagedJobScheduleState.WAITING.value)
+
+    def test_concurrent_real_claim_survives_the_rest_of_the_pass(
+            self, monkeypatch, tmp_path, _mock_managed_jobs_db_conn):
+        """End-to-end interleaving of a recovery pass and real controller
+        claims, using the production claim path (get_waiting_job_async) rather
+        than hand-written row updates.
+
+        Three jobs are eligible for recovery, and a controller claims two of
+        them in the middle of the pass:
+
+        - job_a (4 tasks) is claimed right after the pass resets it. The
+          remaining 3 task rows must not reset it again (dedupe), so the fresh
+          claim keeps the job.
+        - job_b is recovered by someone else and then claimed before the pass
+          reaches its row, so the pass's own reset must lose the
+          compare-and-swap and leave the claim alone.
+        - job_c is untouched by the claims and must still be recovered, i.e.
+          neither of the above stops the pass.
+        """
+        engine = _mock_managed_jobs_db_conn
+        alive = managed_job_state.ManagedJobScheduleState.ALIVE
+        # get_managed_jobs_with_filters orders by spot_job_id descending, so
+        # seed in reverse: the last job seeded is the first one processed.
+        job_c = self._seed_multi_task_alive_job(engine,
+                                                1,
+                                                name='job-c',
+                                                pid=300,
+                                                pid_started_at=3.0)
+        job_b = self._seed_multi_task_alive_job(engine,
+                                                1,
+                                                name='job-b',
+                                                pid=200,
+                                                pid_started_at=2.0)
+        job_a = self._seed_multi_task_alive_job(engine,
+                                                4,
+                                                name='job-a',
+                                                pid=100,
+                                                pid_started_at=1.0)
+        self._patch_common(monkeypatch, tmp_path)
+        self._patch_liveness(monkeypatch, alive=False)
+
+        real_reset = managed_job_state.reset_job_for_recovery
+        calls = []
+        claimed = []
+
+        def _reset_and_let_controllers_claim(job_id, **kwargs):
+            calls.append(job_id)
+            applied = real_reset(job_id, **kwargs)
+            if job_id != job_a or not applied or claimed:
+                return applied
+            claimed.append(job_id)
+            # A controller polls for work and claims the job the pass just
+            # released -- the interleaving that used to be undone by the
+            # job's remaining task rows.
+            assert _claim_waiting_job(pid=999, pid_started_at=9.0) == job_a
+            # Meanwhile job_b is recovered by another actor and claimed too,
+            # before this pass reaches job_b's row.
+            assert real_reset(job_b,
+                              expected_pid=200,
+                              expected_pid_started_at=2.0,
+                              expected_schedule_state=alive) is True
+            assert _claim_waiting_job(pid=888, pid_started_at=8.0) == job_b
+            return applied
+
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'reset_job_for_recovery',
+                            _reset_and_let_controllers_claim)
+
+        jobs_utils.ha_recovery_for_consolidation_mode()
+
+        # Each job is visited once, in row order, despite job_a's 4 task rows.
+        assert calls == [job_a, job_b, job_c]
+
+        launching = managed_job_state.ManagedJobScheduleState.LAUNCHING.value
+        # job_a: the claim that landed mid-pass still owns the job.
+        row_a = self._read_job_info(engine, job_a)
+        assert row_a.controller_pid == 999
+        assert row_a.controller_pid_started_at == 9.0
+        assert row_a.schedule_state == launching
+        # job_b: the pass's reset lost the compare-and-swap to the claim.
+        row_b = self._read_job_info(engine, job_b)
+        assert row_b.controller_pid == 888
+        assert row_b.controller_pid_started_at == 8.0
+        assert row_b.schedule_state == launching
+        # job_c: recovered as usual.
+        row_c = self._read_job_info(engine, job_c)
+        assert row_c.controller_pid is None
+        assert (row_c.schedule_state ==
+                managed_job_state.ManagedJobScheduleState.WAITING.value)
+
+        log = (tmp_path / 'jobs_ha_recovery.log').read_text(encoding='utf-8')
+        assert log.count(f'Job {job_a} completed recovery') == 1
+        assert log.count(f'Job {job_c} completed recovery') == 1
+        assert f'Job {job_b} completed recovery' not in log
+        assert f'Skipping recovery of job {job_b}' in log
+
+    def test_dead_controller_reset_passes_observed_values(
+            self, monkeypatch, tmp_path):
+        self._patch_common(monkeypatch, tmp_path, [self._job_row()])
+        self._patch_liveness(monkeypatch, alive=False)
+        calls = self._spy_reset(monkeypatch, return_value=True)
+
+        jobs_utils.ha_recovery_for_consolidation_mode()
+
+        assert calls == [(1, {
+            'expected_pid': 100,
+            'expected_pid_started_at': 1.0,
+            'expected_schedule_state':
+                managed_job_state.ManagedJobScheduleState.ALIVE,
+        })]
+
+    def test_live_controller_is_not_reset(self, monkeypatch, tmp_path):
+        self._patch_common(monkeypatch, tmp_path, [self._job_row()])
+        self._patch_liveness(monkeypatch, alive=True)
+        calls = self._spy_reset(monkeypatch, return_value=True)
+
+        jobs_utils.ha_recovery_for_consolidation_mode()
+
+        assert not calls
+
+    def test_lost_cas_race_does_not_retry_and_continues(self, monkeypatch,
+                                                        tmp_path):
+        """A lost CAS is not retried, and does not stop the pass."""
+        self._patch_common(monkeypatch, tmp_path,
+                           [self._job_row(job_id=1),
+                            self._job_row(job_id=2)])
+        self._patch_liveness(monkeypatch, alive=False)
+        calls = self._spy_reset(monkeypatch, return_value=False)
+
+        jobs_utils.ha_recovery_for_consolidation_mode()
+
+        assert [job_id for job_id, _ in calls] == [1, 2]
+
+    def test_liveness_check_exception_falls_through_to_reset(
+            self, monkeypatch, tmp_path):
+        """A liveness check that raises is logged and then falls through to
+        the reset, and the pass continues to the next job.
+
+        Falling through is deliberate: the check can raise deterministically
+        for a pid that really is gone (e.g. the pid was recycled by another
+        user's process, so reading its cmdline raises every time), and this
+        pass only runs once per leadership acquisition -- skipping such a job
+        would leave it unrecovered until the next one. Distinguishing
+        indeterminate liveness from confirmed death needs a real verdict from
+        the liveness check, which is future work; until then the
+        compare-and-swap is what keeps a wrongly-reset live job from being
+        stolen, since a controller that is actually alive still owns the row.
+        """
+        raising_row = self._job_row(job_id=1)
+        ok_row = self._job_row(job_id=2)
+        self._patch_common(monkeypatch, tmp_path, [raising_row, ok_row])
+        calls = self._spy_reset(monkeypatch, return_value=True)
+
+        def _check(record, legacy_job_id):
+            del record  # Unused.
+            if legacy_job_id == 1:
+                raise RuntimeError('psutil blew up')
+            return False
+
+        monkeypatch.setattr(jobs_utils, 'controller_process_alive', _check)
+
+        jobs_utils.ha_recovery_for_consolidation_mode()
+
+        # Both jobs are reset, with the ownership values observed for each.
+        expected_kwargs = {
+            'expected_pid': 100,
+            'expected_pid_started_at': 1.0,
+            'expected_schedule_state':
+                managed_job_state.ManagedJobScheduleState.ALIVE,
+        }
+        assert calls == [(1, expected_kwargs), (2, expected_kwargs)]
+
+    def test_dedupe_checks_liveness_once_per_job(self, monkeypatch, tmp_path):
+        """The dedupe happens before the liveness check, so a multi-task job
+        costs one process check, not one per task."""
+        self._patch_common(
+            monkeypatch, tmp_path,
+            [self._job_row(), self._job_row(),
+             self._job_row()])
+        checked = []
+
+        def _check(record, legacy_job_id):
+            del record  # Unused.
+            checked.append(legacy_job_id)
+            return False
+
+        monkeypatch.setattr(jobs_utils, 'controller_process_alive', _check)
+        calls = self._spy_reset(monkeypatch, return_value=True)
+
+        jobs_utils.ha_recovery_for_consolidation_mode()
+
+        assert checked == [1]
+        assert len(calls) == 1
+
+    @pytest.mark.parametrize('schedule_state', [
+        managed_job_state.ManagedJobScheduleState.DONE,
+        managed_job_state.ManagedJobScheduleState.WAITING,
+        managed_job_state.ManagedJobScheduleState.INACTIVE,
+    ])
+    def test_not_eligible_schedule_states_are_not_reset(self, monkeypatch,
+                                                        tmp_path,
+                                                        schedule_state):
+        self._patch_common(monkeypatch, tmp_path, [
+            self._job_row(controller_pid=None,
+                          controller_pid_started_at=None,
+                          schedule_state=schedule_state)
+        ])
+        calls = self._spy_reset(monkeypatch, return_value=True)
+
+        jobs_utils.ha_recovery_for_consolidation_mode()
+
+        assert not calls

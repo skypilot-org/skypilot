@@ -5,8 +5,8 @@ Getting Started on Slurm
 
 .. note::
 
-    Slurm support is under active development. We'd love to hear from you —
-    please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
+    Have questions or feedback on running SkyPilot with Slurm? We'd love to
+    hear from you — please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
 
 Quickstart
 ----------
@@ -278,8 +278,8 @@ Enable this behavior in the API server's configuration:
       submit_as_user: true
 
 Configure each Slurm host entry with the shared SSH user and private key. The
-SSH user must be ``root`` or have passwordless ``sudo`` permission to run
-``/bin/bash`` as the accounts SkyPilot submits for:
+SSH user must be ``root`` (using ``runuser``) or have passwordless ``sudo``
+permission for the submission and file operations described below:
 
 .. code-block:: text
 
@@ -288,32 +288,85 @@ SSH user must be ``root`` or have passwordless ``sudo`` permission to run
         User slurm-admin
         IdentityFile ~/.ssh/slurm_admin
 
-For a non-root SSH user, add a sudoers rule on each login node that scopes the
-grant to a group holding those accounts:
+For a non-root SSH user, SkyPilot invokes individual executables as the
+submitting account, for example ``sudo -n -H -u alice -- sbatch ...``.
+Shell orchestration runs as the SSH account; setup scripts and interactive
+sessions run inside allocations through ``srun``.
 
-.. code-block:: text
+Allow the following executables as the workload accounts:
 
-    Runas_Alias SLURM_USERS = %slurm-users
-    Defaults>SLURM_USERS !requiretty
-    slurm-admin ALL=(SLURM_USERS) NOPASSWD: /bin/bash
+* ``sbatch``, ``srun``, ``scancel``, and ``squeue`` for allocation operations.
+* ``scontrol -o show step`` for inspecting steps before container snapshots.
+* ``id -un`` for identity validation and ``stat -f -c %T`` for shared-directory
+  checks.
+* ``mkdir``, ``test``, ``cat``, ``tail``, ``mv``, ``rm``, ``find``, and
+  ``rsync --server`` for shared files. Restrict their arguments to the
+  required operations and paths.
 
-This limits impersonation to members of ``slurm-users`` and records each
-invocation according to the host's sudo logging configuration. It is not a
-per-command allowlist: SkyPilot runs job setup and run scripts, ``rsync``, and
-an interactive SSH helper as the submitting user.
+The shared files live under ``<workdir>/.sky_provision`` (submission scripts
+and batch logs), ``<workdir>/.sky_clusters/<cluster>`` (workdir, logs, and
+readiness), and ``<workdir>/.sky_snapshots/<cluster>`` (container snapshots).
+``workdir`` defaults to the target account's home directory. The node-local
+runtime directory is accessed inside the allocation using ``srun``.
 
-Treat membership in ``slurm-users`` as privileged access. Every member must be
-a workload account without ``sudo``, Slurm administrative privileges, or
-another escalation path. Any privileges available to a member are transitively
-available to the shared SSH user. Avoid ``(ALL, !root)``: it still allows
-impersonating the ``slurm`` account (Slurm's ``SlurmUser``), which is equivalent
-to controlling the scheduler.
+:download:`Download an example sudoers policy <slurm-sudoers.example>` for SSH
+account ``skypilot`` and workload accounts in group ``skyusers``, using each
+account's home directory as the shared base. It requires sudo 1.9.10 or later
+for argument regexes; Ubuntu 25.10 and later install sudo-rs as ``sudo``, which
+rejects these rules, so select the classic build with
+``update-alternatives --set sudo /usr/bin/sudo.ws``. Adjust the executable
+locations, group name, and paths,
+install the file with root ownership and mode ``0440``, and check it
+with ``visudo -cf``. The rsync rule lists explicit server arguments; different
+rsync versions may require an adjusted rule based on sudo's log. The ``rm`` rule
+also permits ``--one-file-system`` so recursive cleanup can skip nested
+filesystems, such as bucket mounts that could not be unmounted.
 
-The ``Defaults>`` line disables ``requiretty`` for commands run as members of
-``SLURM_USERS`` while leaving it in force elsewhere. SkyPilot invokes sudo over
-SSH without allocating a terminal, so a global ``requiretty`` setting makes
-sudo refuse the command with ``sorry, you must have a tty to run sudo``. This
-also prevents file transfers and other job lifecycle operations from running.
+:download:`Download a smaller policy <slurm-sudoers-minimal.example>` if you
+only need fresh launches, ``sky exec``, ``sky logs``, managed jobs, and
+``sky down``. It omits ``scontrol``, ``mv``, ``find``, ``rm``, and access to
+``.sky_snapshots``. ``sky down`` needs no ``rm``: the batch script's cleanup
+trap removes ``<workdir>/.sky_clusters/<cluster>`` from inside the allocation,
+as the job owner. The login node removes that directory only as a fallback,
+when the allocation ended without running the trap (for example a lost node);
+the smaller policy denies that fallback and leaves the directory for manual
+cleanup. Use the full policy for container ``sky stop``, snapshot restore with
+``sky start`` or ``sky launch``, and autostop. Autodown, which tears down the
+allocation without saving a snapshot, uses the smaller policy.
+
+Fresh clusters skip snapshot reads and use a unique snapshot directory, so
+leftover snapshots from a deleted cluster cannot be restored by a same-name
+launch. Snapshot cleanup failures after cancellation produce a warning
+without failing ``sky down``; snapshot files may remain and require manual
+cleanup. Snapshot reads for previously running clusters and container
+stop/start operations remain strict to protect saved state.
+
+The file-operation rules reject additional arguments and ``.``/``..`` path
+components.
+Argument matching does not resolve symlinks or constrain file names carried
+inside the rsync protocol. These rules are executable and argument controls,
+not a filesystem sandbox. Keep the rsync installation patched and use workload
+accounts whose accessible data matches the intended trust boundary.
+The path regexes accept any account's base, so the SSH account can invoke a
+file operation as one group member against another member's path; the target
+account's filesystem permissions still apply.
+
+Restrict run-as identities to workload accounts without administrative
+privileges. Any privileges available to those accounts are transitively
+available to the shared SSH account. Avoid ``(ALL, !root)``: it permits
+impersonating Slurm's administrative account. Use an explicit account or a
+dedicated group. ``Defaults:skypilot !requiretty`` permits noninteractive sudo
+operations by the SSH account ``skypilot``.
+
+Slurm executables must be available in sudo's ``secure_path`` (or the SSH
+account's ``PATH`` for a root transport). Configure site-specific binary paths
+there. Target-user login profiles are not sourced. Configure a shared
+``workdir``/``tmpdir`` explicitly when needed; ``$HOME``, ``$USER``, and
+``$LOGNAME`` resolve to the target account, while other expansion variables
+come from the SSH account's environment. For example, set
+``workdir: /training/$USER/sky-workdir`` and follow the policy's comment to swap
+the matching path prefix. Load workload modules in the task's ``setup`` or
+``run`` commands.
 
 SkyPilot maps the authenticated username to the portion before ``@``. For
 example, ``alice@example.com`` maps to the Unix account ``alice``. The account
@@ -457,6 +510,16 @@ deletes the snapshot.
 Stopping is available only when the cluster uses a container image and Pyxis
 is installed. Slurm clusters that run directly on the host cannot be stopped.
 
+Autostop on container clusters
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Container clusters support autostop: ``sky launch -i N``,
+``sky start -i N``, or ``sky autostop -i N`` schedules the cluster to stop
+after N idle minutes, and adding ``--down`` schedules it to terminate
+instead. Skylet, running on the allocation's head node, performs the same
+snapshot-and-release procedure as ``sky stop`` (or the full cleanup of
+``sky down``).
+
 Private registries
 ^^^^^^^^^^^^^^^^^^
 
@@ -586,9 +649,8 @@ any additional setup.
 Current limitations
 -------------------
 
-Slurm support in SkyPilot is under active development. The following features are not yet supported:
+The following features are not yet supported on Slurm:
 
-* **Autostop**: Slurm clusters cannot be automatically terminated after idle time.
 * **SkyServe**: Serving deployments on Slurm is not yet supported.
 
 FAQs

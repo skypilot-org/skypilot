@@ -149,6 +149,71 @@ class TestStatusJsonOutput:
         assert 'Clusters' not in result.output
         assert 'Managed jobs' not in result.output
 
+    def _install_streaming_stubs(self, monkeypatch, records):
+        """Let the real `_get_cluster_records_and_set_ssh_config` run.
+
+        The other tests here stub that helper out, which is why none of them
+        can see what it streams to the console. These two stub one level
+        lower instead: `sdk.stream_and_get` stands in for the wire, and
+        writes the line the server logs for an unmatched cluster name
+        (`backend_utils`' 'Cluster(s) not found'). Writing it to
+        `output_stream` is what makes the double faithful -- a stub that
+        ignored the argument would pass whether or not the sink is wired up.
+        """
+
+        def fake_stream_and_get(request_id, output_stream=None, **kwargs):
+            # `print` with file=None goes to stdout, exactly as
+            # sdk.stream_and_get does when it is given no sink.
+            print('Cluster(s) not found: nonexistent.',
+                  file=output_stream,
+                  flush=True)
+            return records
+
+        monkeypatch.setattr('sky.client.sdk.status',
+                            lambda *a, **kw: 'mock_req')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            fake_stream_and_get)
+        # The real helper rewrites the SSH config for every record, which
+        # takes a file lock under ~/.sky; keep the unit test off the
+        # developer's home directory.
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.remove_cluster',
+            lambda *a, **kw: None)
+
+    def test_json_output_survives_streamed_server_logs(self, monkeypatch):
+        """Streamed server-side logs must not make the JSON unparseable.
+
+        Naming a cluster that matches nothing makes the server log a line,
+        which arrived on stdout ahead of the JSON -- exactly the case a
+        script passing a name it is unsure of hits.
+        """
+        records = [self._make_cluster_record()]
+        self._install_streaming_stubs(monkeypatch, records)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.status, ['nonexistent', '-o', 'json'])
+
+        assert result.exit_code == 0, result.output
+        parsed = json.loads(result.output)
+        assert [r['name'] for r in parsed] == ['mycluster']
+
+    def test_console_still_gets_streamed_logs_without_a_sink(
+            self, monkeypatch, capsys):
+        """The JSON path's sink must not silence every other caller.
+
+        'Cluster(s) not found' is what tells a human they typo'd a cluster
+        name, and the nine callers that print for humans pass no sink. This
+        asserts on the helper rather than on `sky status` itself: the table
+        view's own rendering is not what is under test here, and going
+        through it would drag in the side fetches that follow the JSON
+        branch.
+        """
+        self._install_streaming_stubs(monkeypatch, records=[])
+
+        command._get_cluster_records_and_set_ssh_config(['nonexistent'])
+
+        assert 'Cluster(s) not found: nonexistent.' in capsys.readouterr().out
+
 
 class TestJobsQueueJsonOutput:
     """Tests for `sky jobs queue -o json` output format."""
@@ -301,6 +366,52 @@ class TestJobsQueueJsonOutput:
         assert captured['skip_finished'] is True
         assert captured['statuses'] is None
         assert 'deprecated' not in result.output.lower()
+
+
+class TestJobsQueueInfraFilter:
+    """`--infra` on `sky jobs queue`: the spec reaches the server verbatim.
+
+    The CLI does not parse it -- the server does, with the same
+    ``InfraInfo.from_str`` a launch uses -- so what matters here is that the
+    flag arrives as typed and that its absence sends nothing.
+    """
+
+    def _install(self, monkeypatch):
+        """Mock the queue call and capture the kwargs it receives."""
+        captured = {}
+
+        def fake_queue(**kw):
+            captured.update(kw)
+            return ('req-1', mock.MagicMock(v2=lambda: True))
+
+        monkeypatch.setattr('sky.client.cli.utils.get_managed_job_queue',
+                            fake_queue)
+        monkeypatch.setattr('sky.jobs.pool_status', lambda **kw: None)
+        monkeypatch.setattr('sky.client.sdk.stream_and_get', lambda *a, **kw:
+                            ([], 0, {}, 0))
+        return captured
+
+    def test_spec_reaches_the_server_verbatim(self, monkeypatch):
+        captured = self._install(monkeypatch)
+        result = cli_testing.CliRunner().invoke(command.jobs_queue,
+                                                ['--infra', 'slurm/prod-gpu'])
+        assert result.exit_code == 0, result.output
+        assert captured['infra_match'] == 'slurm/prod-gpu'
+
+    def test_kubernetes_context_keeps_its_slashes(self, monkeypatch):
+        # A k8s context is the whole string after `k8s/` and may contain `/`,
+        # so the CLI must not split or normalise it.
+        captured = self._install(monkeypatch)
+        result = cli_testing.CliRunner().invoke(command.jobs_queue,
+                                                ['--infra', 'k8s/team/ctx'])
+        assert result.exit_code == 0, result.output
+        assert captured['infra_match'] == 'k8s/team/ctx'
+
+    def test_no_infra_sends_nothing(self, monkeypatch):
+        captured = self._install(monkeypatch)
+        result = cli_testing.CliRunner().invoke(command.jobs_queue, [])
+        assert result.exit_code == 0, result.output
+        assert captured['infra_match'] is None
 
 
 class TestJobsQueueTimeRangeFilter:

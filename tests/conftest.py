@@ -521,24 +521,40 @@ def pytest_collection_modifyitems(config, items):
             for key, value in common_tags.items():
                 item.add_marker(pytest.mark.execution_tag(key, value))
 
-    if config.option.collectonly:
-        for item in items:
-            full_name = item.nodeid
-            marks = []
-            for mark in item.iter_markers():
-                # Surface the argument of a concurrency_group(name) marker so
-                # the pipeline generator can read the group name (all other
-                # markers are matched by name only, so keep them name-only).
-                # Accept both positional (concurrency_group('x')) and keyword
-                # (concurrency_group(name='x')) forms.
-                if mark.name == 'concurrency_group':
-                    group_name = (mark.args[0]
-                                  if mark.args else mark.kwargs.get('name'))
-                    marks.append(f'{mark.name}({group_name})'
-                                 if group_name else mark.name)
-                else:
-                    marks.append(mark.name)
-            print(f"Collected {full_name} with marks: {marks}")
+
+def pytest_collection_finish(session):
+    """Print the collected tests, one per line, under ``--collect-only``.
+
+    This is what the Buildkite pipeline generator parses to turn a test file
+    into one step per test function.
+
+    It runs in ``pytest_collection_finish`` rather than alongside the
+    deselection above in ``pytest_collection_modifyitems``, because
+    ``session.items`` is only final once every ``modifyitems`` hook has run --
+    including pytest's own, which is what applies ``-k`` and ``-m``. Printing
+    from ``modifyitems`` would list tests that ``-k`` goes on to deselect, and
+    leave the generator to re-implement the expression grammar to compensate.
+    """
+    config = session.config
+    if not config.option.collectonly:
+        return
+    for item in session.items:
+        full_name = item.nodeid
+        marks = []
+        for mark in item.iter_markers():
+            # Surface the argument of a concurrency_group(name) marker so
+            # the pipeline generator can read the group name (all other
+            # markers are matched by name only, so keep them name-only).
+            # Accept both positional (concurrency_group('x')) and keyword
+            # (concurrency_group(name='x')) forms.
+            if mark.name == 'concurrency_group':
+                group_name = (mark.args[0]
+                              if mark.args else mark.kwargs.get('name'))
+                marks.append(
+                    f'{mark.name}({group_name})' if group_name else mark.name)
+            else:
+                marks.append(mark.name)
+        print(f"Collected {full_name} with marks: {marks}")
 
 
 def _is_generic_test(item) -> bool:
@@ -902,10 +918,8 @@ def setup_docker_container(request):
         # Use create_and_setup_new_container to create and start the container
         docker_utils.create_and_setup_new_container(
             target_container_name=docker_utils.get_container_name(),
-            api_server_host_port=docker_utils.get_api_server_host_port(),
-            api_server_container_port=46580,
-            metrics_host_port=docker_utils.get_metrics_host_port(),
-            metrics_container_port=9090,
+            api_server_container_port=docker_utils.API_SERVER_CONTAINER_PORT,
+            metrics_container_port=docker_utils.METRICS_CONTAINER_PORT,
             username=default_user)
 
         logger.info(f'Container {docker_utils.get_container_name()} started')

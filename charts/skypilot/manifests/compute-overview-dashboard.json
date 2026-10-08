@@ -99,7 +99,7 @@
       "datasource": {
         "uid": "$datasource"
       },
-      "description": "Percentage of total GPU capacity currently requested by running pods, averaged over the selected time range.",
+      "description": "Percentage of schedulable GPU capacity allocated to workloads (Kubernetes pod requests and Slurm allocations), averaged over the selected time range.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -159,7 +159,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum((sum by (cluster, node) (max by (cluster, namespace, pod, container, node)(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\", namespace!=\"cw-hpc-verification\", node!=\"\"}))) - clamp_min((sum by (cluster, node) (max by (cluster, namespace, pod, container, node)(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\", namespace!=\"cw-hpc-verification\", node!=\"\"}))) - (max by (cluster, node)(kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})), 0)) / sum(max by (cluster, node) (kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})) * 100",
+          "expr": "((sum((sum by (cluster, node) (max by (cluster, namespace, pod, container, node)(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\", namespace!=\"cw-hpc-verification\", node!=\"\"}))) - clamp_min((sum by (cluster, node) (max by (cluster, namespace, pod, container, node)(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\", namespace!=\"cw-hpc-verification\", node!=\"\"}))) - (max by (cluster, node)(kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})), 0)) or vector(0)) + (sum(max by (cluster) (sky_slurm_gpus_allocated{cluster=~\"$cluster\"})) or vector(0))) / ((sum(max by (cluster, node) (kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})) or vector(0)) + (sum(max by (cluster) (sky_slurm_gpus_schedulable{cluster=~\"$cluster\"})) or vector(0)) > 0) * 100",
           "instant": false,
           "legendFormat": "",
           "range": true,
@@ -363,7 +363,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum((sum by (cluster, node) (max by (cluster, namespace, pod, container, node)(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\", namespace!=\"cw-hpc-verification\", node!=\"\"}))) - clamp_min((sum by (cluster, node) (max by (cluster, namespace, pod, container, node)(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\", namespace!=\"cw-hpc-verification\", node!=\"\"}))) - (max by (cluster, node)(kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})), 0)) / sum(max by (cluster, node) (kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})) * 100",
+          "expr": "((sum((sum by (cluster, node) (max by (cluster, namespace, pod, container, node)(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\", namespace!=\"cw-hpc-verification\", node!=\"\"}))) - clamp_min((sum by (cluster, node) (max by (cluster, namespace, pod, container, node)(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\", namespace!=\"cw-hpc-verification\", node!=\"\"}))) - (max by (cluster, node)(kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})), 0)) or vector(0)) + (sum(max by (cluster) (sky_slurm_gpus_allocated{cluster=~\"$cluster\"})) or vector(0))) / ((sum(max by (cluster, node) (kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})) or vector(0)) + (sum(max by (cluster) (sky_slurm_gpus_schedulable{cluster=~\"$cluster\"})) or vector(0)) > 0) * 100",
           "instant": false,
           "legendFormat": "GPU Allocation",
           "range": true,
@@ -387,7 +387,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "avg_over_time((sum((sum by (cluster, node) (max by (cluster, namespace, pod, container, node)(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\", namespace!=\"cw-hpc-verification\", node!=\"\"}))) - clamp_min((sum by (cluster, node) (max by (cluster, namespace, pod, container, node)(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\", namespace!=\"cw-hpc-verification\", node!=\"\"}))) - (max by (cluster, node)(kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})), 0)) / sum(max by (cluster, node) (kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})) * 100)[$__range:$__interval] @ end())",
+          "expr": "avg_over_time((((sum((sum by (cluster, node) (max by (cluster, namespace, pod, container, node)(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\", namespace!=\"cw-hpc-verification\", node!=\"\"}))) - clamp_min((sum by (cluster, node) (max by (cluster, namespace, pod, container, node)(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\", namespace!=\"cw-hpc-verification\", node!=\"\"}))) - (max by (cluster, node)(kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})), 0)) or vector(0)) + (sum(max by (cluster) (sky_slurm_gpus_allocated{cluster=~\"$cluster\"})) or vector(0))) / ((sum(max by (cluster, node) (kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})) or vector(0)) + (sum(max by (cluster) (sky_slurm_gpus_schedulable{cluster=~\"$cluster\"})) or vector(0)) > 0) * 100)[$__range:$__interval] @ end())",
           "instant": false,
           "legendFormat": "Avg GPU Allocation",
           "range": true,

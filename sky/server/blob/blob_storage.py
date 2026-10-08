@@ -6,7 +6,7 @@ import abc
 import contextlib
 import os
 import pathlib
-from typing import Generator, List, Optional, Tuple
+from typing import Dict, Generator, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -107,6 +107,21 @@ class BlobStorage(abc.ABC):
         """Return the base blobs directory for a user."""
         raise NotImplementedError
 
+    @abc.abstractmethod
+    def user_roots(self, user_id: str) -> List[pathlib.Path]:
+        """Return every directory a user's file mounts may resolve under.
+
+        The server contains client-supplied file-mount/workdir sources to
+        these roots (plus the plain ``clients/<user>/file_mounts`` dir) so a
+        caller cannot point a mount at an arbitrary server file. A backend
+        must list wherever it actually resolves a blob: the local backend
+        keeps blobs under the clients dir, a shared-filesystem backend also
+        resolves them from its shared tree and a local cache. No default is
+        provided on purpose: a wrong inherited root would silently reject
+        every launch on that backend.
+        """
+        raise NotImplementedError
+
     def file_mounts_tmp_dir(self) -> str:
         """Return a base directory for temporary file-mount staging.
 
@@ -118,6 +133,15 @@ class BlobStorage(abc.ABC):
     def download_tmp_dir(self, user_hash: str) -> str:
         """Return a staging directory for log downloads for a user."""
         raise NotImplementedError
+
+    def local_disk_roots(self) -> Dict[str, str]:
+        """Returns {name: path} for directories this backend writes locally.
+
+        Consumed by the server's local-disk accounting, which needs to know
+        which trees on the node's own disk grow with file-mount traffic.
+        Backends that keep everything on shared storage return nothing.
+        """
+        return {}
 
     def download_tmp_base_dir(self) -> Optional[str]:
         """Return the base directory for download tmp cleanup.

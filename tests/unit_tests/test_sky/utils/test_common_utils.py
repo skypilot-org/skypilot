@@ -834,3 +834,39 @@ class TestGetCurrentRequestActor:
                             lambda: False)
 
         assert common_utils.get_current_request_actor() is None
+
+
+class TestIsValidUserHash:
+    """is_valid_user_hash must accept only a complete, clean id."""
+
+    @pytest.mark.parametrize('user_hash', [
+        'ab12cd34',
+        'sa-abc123-token-xyz',
+        'A',
+        '0',
+    ])
+    def test_accepts_valid_ids(self, user_hash):
+        assert common_utils.is_valid_user_hash(user_hash)
+
+    @pytest.mark.parametrize('user_hash', [
+        None,
+        '',
+        'abc%123',
+        '-leading-hyphen',
+        '../x',
+        '/abs',
+        'has space',
+        'ab12cd34\n',
+    ])
+    def test_rejects_invalid_ids(self, user_hash):
+        assert not common_utils.is_valid_user_hash(user_hash)
+
+    def test_rejects_trailing_newline(self):
+        """A trailing newline must not sneak through.
+
+        re.match with a trailing '$' accepted this, because '$' also
+        matches just before a final newline, so the value was stored as an
+        identity distinct from the same id without the newline.
+        """
+        assert common_utils.is_valid_user_hash('ab12cd34')
+        assert not common_utils.is_valid_user_hash('ab12cd34\n')

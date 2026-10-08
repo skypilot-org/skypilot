@@ -48,6 +48,7 @@ class JobsCacheManager {
       userMatch,
       workspaceMatch,
       poolMatch,
+      infraMatch,
       pluginFilters,
       statuses,
     } = options;
@@ -64,6 +65,7 @@ class JobsCacheManager {
       userMatch: userMatch || null,
       workspaceMatch: workspaceMatch || null,
       poolMatch: poolMatch || null,
+      infraMatch: infraMatch || null,
       pluginFilters: this._normalizePluginFilters(pluginFilters),
       statuses: statuses && statuses.length > 0 ? [...statuses].sort() : null,
     };
@@ -83,6 +85,7 @@ class JobsCacheManager {
       userMatch,
       workspaceMatch,
       poolMatch,
+      infraMatch,
       pluginFilters,
       statuses,
     } = options;
@@ -94,6 +97,7 @@ class JobsCacheManager {
       userMatch: userMatch || null,
       workspaceMatch: workspaceMatch || null,
       poolMatch: poolMatch || null,
+      infraMatch: infraMatch || null,
       pluginFilters: this._normalizePluginFilters(pluginFilters),
       statuses: statuses && statuses.length > 0 ? [...statuses].sort() : null,
     };
@@ -111,19 +115,35 @@ class JobsCacheManager {
   }
 
   /**
-   * Group tasks by job_id and return unique job IDs in order
+   * Group rows by job tree and return the tree keys in order.
+   *
+   * Same rule as groupJobRowsByTree in components/jobs.jsx, so the pages
+   * this rebuilds in the background match the root-aware pages the server
+   * returns: a job launched from inside another job (root_job_id set) rides
+   * with its root when the root is listed and takes no slot of its own;
+   * otherwise it stands as its own job. Roots and their declared tasks are
+   * placed first, so a group starts with the job it is named after and the
+   * order is the roots' order.
    */
   _groupTasksByJob(tasks) {
     const jobMap = new Map();
     const jobOrder = [];
-
-    for (const task of tasks) {
-      const jobId = task.id;
-      if (!jobMap.has(jobId)) {
-        jobMap.set(jobId, []);
-        jobOrder.push(jobId);
+    const isMember = (task) =>
+      task.root_job_id != null && task.root_job_id !== task.id;
+    const add = (key, task) => {
+      if (!jobMap.has(key)) {
+        jobMap.set(key, []);
+        jobOrder.push(key);
       }
-      jobMap.get(jobId).push(task);
+      jobMap.get(key).push(task);
+    };
+    for (const task of tasks) {
+      if (!isMember(task)) add(task.id, task);
+    }
+    for (const task of tasks) {
+      if (isMember(task)) {
+        add(jobMap.has(task.root_job_id) ? task.root_job_id : task.id, task);
+      }
     }
 
     return { jobMap, jobOrder };
@@ -168,6 +188,7 @@ class JobsCacheManager {
         hasPrev: false,
         controllerStopped: true,
         statusCounts: {},
+        infraOptions: [],
       };
     }
 
@@ -179,6 +200,7 @@ class JobsCacheManager {
     const hasNext = page < totalPages;
     const hasPrev = page > 1;
     const statusCounts = pageResponse.statusCounts || {};
+    const infraOptions = pageResponse.infraOptions || [];
 
     // Cache this single page
     this.pageCache.set(cacheKey, {
@@ -190,6 +212,7 @@ class JobsCacheManager {
       hasPrev,
       controllerStopped: false,
       statusCounts,
+      infraOptions,
       timestamp: Date.now(),
     });
 
@@ -202,6 +225,7 @@ class JobsCacheManager {
       hasPrev,
       controllerStopped: false,
       statusCounts,
+      infraOptions,
       fromCache: false,
       cacheStatus: 'default_path_single_page',
     };
@@ -244,6 +268,7 @@ class JobsCacheManager {
       totalJobs,
       totalNoFilter: fullDataResponse.totalNoFilter || totalJobs,
       statusCounts: fullDataResponse.statusCounts || {},
+      infraOptions: fullDataResponse.infraOptions || [],
       timestamp: Date.now(),
     });
 
@@ -275,6 +300,7 @@ class JobsCacheManager {
         hasPrev: p > 1,
         controllerStopped: false,
         statusCounts: fullDataResponse.statusCounts || {},
+        infraOptions: fullDataResponse.infraOptions || [],
         timestamp: Date.now(),
       });
     }
@@ -325,6 +351,7 @@ class JobsCacheManager {
         hasPrev: false,
         controllerStopped: true,
         statusCounts: {},
+        infraOptions: [],
         fromCache: false,
         cacheStatus: 'plugin_path_controller_stopped',
       };
@@ -338,6 +365,7 @@ class JobsCacheManager {
     const hasNext = result.hasNext || result.has_next || page < totalPages;
     const hasPrev = result.hasPrev || result.has_prev || page > 1;
     const statusCounts = result.statusCounts || {};
+    const infraOptions = result.infraOptions || [];
     const externalFetchErrors = result.externalFetchErrors || [];
 
     // Cache this specific page
@@ -350,6 +378,7 @@ class JobsCacheManager {
       hasPrev,
       controllerStopped: false,
       statusCounts,
+      infraOptions,
       externalFetchErrors,
       timestamp: Date.now(),
     });
@@ -363,6 +392,7 @@ class JobsCacheManager {
       hasPrev,
       controllerStopped: false,
       statusCounts,
+      infraOptions,
       externalFetchErrors,
       fromCache: false,
       cacheStatus: 'plugin_path_fetched',
@@ -392,6 +422,9 @@ class JobsCacheManager {
     }
     if (filterOptions.poolMatch) {
       filters.push({ property: 'pool', value: filterOptions.poolMatch });
+    }
+    if (filterOptions.infraMatch) {
+      filters.push({ property: 'infra', value: filterOptions.infraMatch });
     }
     // Plugin-registered filter properties pass through verbatim — the
     // plugin's fetch function is the one that interprets them.
@@ -452,6 +485,7 @@ class JobsCacheManager {
           hasPrev: cachedPage.hasPrev,
           controllerStopped: cachedPage.controllerStopped,
           statusCounts: cachedPage.statusCounts,
+          infraOptions: cachedPage.infraOptions,
           externalFetchErrors: cachedPage.externalFetchErrors || [],
           fromCache: true,
           cacheStatus: 'cache_hit',
@@ -626,6 +660,7 @@ class JobsCacheManager {
           userMatch: keyObj.userMatch,
           workspaceMatch: keyObj.workspaceMatch,
           poolMatch: keyObj.poolMatch,
+          infraMatch: keyObj.infraMatch,
           statuses: keyObj.statuses,
         };
         if (JSON.stringify(keyFilterObj) === filterKey) {

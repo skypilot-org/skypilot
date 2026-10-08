@@ -1,5 +1,6 @@
 """Constants for SkyPilot."""
 import enum
+import os
 from typing import List, Tuple
 
 from packaging import version
@@ -95,12 +96,32 @@ SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
 SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
                f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || command -v ray)')
 
-# Use $(which env) to find env, falling back to /usr/bin/env if which is
-# unavailable. This works around a Slurm quirk where srun's execvp() doesn't
-# check execute permissions, failing when $HOME/.local/bin/env (non-executable,
-# from uv installation) shadows /usr/bin/env.
-SKY_SLURM_UNSET_PYTHONPATH = ('$(which env 2>/dev/null || echo /usr/bin/env) '
-                              '-u PYTHONPATH')
+# Resolve `env` by preferring the absolute path /usr/bin/env when it is an
+# executable file, then falling back to bash's `type -P env` (a PATH search
+# returning only an on-disk executable, ignoring functions/aliases/builtins),
+# then to a literal /usr/bin/env. `type -P` is a bashism, but it is safe here:
+# both consumers run this command under bash (task_codegen.py's
+# `build_task_runner_cmd` and slurm/instance.py's `_srun_on_node`, each
+# `bash -c ...`), and on standard layouts the `[ -x /usr/bin/env ]` branch
+# short-circuits before `type -P` is ever evaluated, so a non-bash shell never
+# reaches it. This avoids three failure modes:
+#   1. A non-executable $HOME/.local/bin/env (left by a uv installation)
+#      shadowing /usr/bin/env on PATH: `[ -x /usr/bin/env ]` selects the real
+#      binary first, and `type -P` only reports executables anyway, whereas a
+#      Slurm srun execvp() would pick the shadow without an exec check.
+#   2. A `which` bash function re-imported into a container by
+#      `srun --export=ALL` (Debian/Ubuntu export one calling `/usr/bin/which`
+#      with GNU-only flags); a minimal image's `/usr/bin/which` rejects them
+#      and prints "Usage: ..." to stdout, which would poison `$(which env ...)`
+#      -> the run command begins with `Usage:` -> exit 127. This never calls
+#      `which`.
+#   3. An exported `env` *function*: the common branch expands to the literal
+#      path /usr/bin/env; and if that is absent, `type -P` returns only the
+#      on-disk executable, never the function (whereas `command -v env` would
+#      return the bare name `env` and invoke the function).
+SKY_SLURM_UNSET_PYTHONPATH = (
+    '$([ -x /usr/bin/env ] && echo /usr/bin/env || type -P env 2>/dev/null || '
+    'echo /usr/bin/env) -u PYTHONPATH')
 SKY_SLURM_PYTHON_CMD = (f'{SKY_SLURM_UNSET_PYTHONPATH} '
                         f'$({SKY_GET_PYTHON_PATH_CMD})')
 
@@ -109,7 +130,8 @@ SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
 SKY_REMOTE_PYTHON_ENV: str = f'{SKY_RUNTIME_DIR}/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # Default user-facing Python environment, baked into the container image (see
-# Dockerfile_k8s{,_gpu}). It replaces the role conda's base env used to play:
+# Dockerfile_k8s{,_gpu}) and created on VMs by SKY_USER_ENV_CREATION_COMMANDS.
+# It replaces the role conda's base env used to play:
 # user setup/run commands activate it so `pip`/`uv` install into a writable
 # location instead of a non-writable system site-packages. Kept separate from
 # the SkyPilot runtime env above. Only activated when conda is not active (an
@@ -164,6 +186,10 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 
 # The integer managed job ID assigned by the jobs controller.
 MANAGED_JOB_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}MANAGED_JOB_ID'
+# Set only on tasks that are part of a job tree: a job group's tasks (the
+# group's own id) and a dynamic member's tasks (the member's root). A job
+# launched from such a task joins that tree. Absent on plain top-level jobs.
+ROOT_JOB_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}ROOT_JOB_ID'
 
 # The version of skylet. MUST bump this version whenever we need the skylet to
 # be restarted on existing clusters updated with the new version of SkyPilot,
@@ -172,7 +198,7 @@ MANAGED_JOB_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}MANAGED_JOB_ID'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '39'  # add external-link log-scan skylet event.
+SKYLET_VERSION = '43'  # managed job table query takes include_tree.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -184,6 +210,9 @@ SKYLET_PORT_FILE = '.sky/skylet_port'
 # The Slurm skylet keeper consumes this start spec.
 SKYLET_START_FILE = '.sky/skylet_start'
 SKYLET_GRPC_PORT = 46590
+# Set on a Kubernetes hostNetwork pod: the port the server assigned to skylet
+# (host_network_probe's 'skylet' slot) and will dial.
+SKYLET_PORT_ENV_VAR = 'SKYPILOT_SKYLET_PORT'
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
 # TODO(zpoint): legacy autostop-hook log path, kept so the new
 # tail_hook_logs(event='stop') can fall back to it on clusters
@@ -322,6 +351,45 @@ UV_INSTALLATION_COMMANDS = (
     f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV} --python 3.10;'
     f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'  # pylint: disable=line-too-long
 )
+
+# Create the default user environment (SKY_USER_ENV_PATH) on VM images that do
+# not ship one. Since conda is no longer installed by default, bare images
+# (e.g. plain Ubuntu 24.04) otherwise leave user tasks with no `python`/`pip`
+# and an externally managed (PEP 668), non-writable system Python. Must run
+# after uv is installed. Best effort and idempotent: skipped if a usable env
+# (with both `python` and `pip`) already exists, or if there is no python3. It
+# is created even when conda is installed: ACTIVATE_SKY_USER_ENV only activates
+# it when no conda env is active in the task shell.
+# --system-site-packages keeps packages preinstalled in the image's system
+# Python importable, while new installs go into the writable venv.
+# Safe to run concurrently against a shared $HOME (e.g. all nodes of a Slurm
+# cluster): each run builds a --relocatable env in its own temporary
+# directory and only installs it with an atomic rename, so the env path only
+# ever holds a complete env and no run deletes a directory another run is
+# building. An incomplete env left at the path (e.g. by a failed `--seed` of
+# an older version) is renamed aside before the install instead of being
+# deleted in place.
+_SKY_USER_ENV_USABLE = (f'{{ [ -x {SKY_USER_ENV_PATH}/bin/python ] && '
+                        f'[ -x {SKY_USER_ENV_PATH}/bin/pip ]; }}')
+SKY_USER_ENV_CREATION_COMMANDS = (
+    f'{_SKY_USER_ENV_USABLE} || '
+    '! command -v python3 > /dev/null 2>&1 || '
+    '{ '
+    '_sky_env_sfx="$(hostname 2>/dev/null).$$.$RANDOM"; '
+    f'_sky_env_tmp={SKY_USER_ENV_PATH}.tmp.$_sky_env_sfx; '
+    f'if {SKY_UV_CMD} venv --seed --relocatable --system-site-packages '
+    '--python "$(command -v python3)" "$_sky_env_tmp" > /dev/null 2>&1 && '
+    '[ -x "$_sky_env_tmp/bin/pip" ]; then '
+    f'if ! {_SKY_USER_ENV_USABLE} && [ -e {SKY_USER_ENV_PATH} ]; then '
+    f'mv -T {SKY_USER_ENV_PATH} {SKY_USER_ENV_PATH}.stale.$_sky_env_sfx '
+    f'2> /dev/null; rm -rf {SKY_USER_ENV_PATH}.stale.$_sky_env_sfx; '
+    'fi; '
+    f'mv -T "$_sky_env_tmp" {SKY_USER_ENV_PATH} 2> /dev/null; '
+    'fi; '
+    'rm -rf "$_sky_env_tmp"; '
+    f'{_SKY_USER_ENV_USABLE} || '
+    'echo "Failed to create the default user Python environment; skipping."; '
+    '};')
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
@@ -539,6 +607,9 @@ CONTROLLER_K8S_MEMORY_FILE = '~/.sky/_internal_k8s_pod_memory'
 
 # Used when an managed jobs are created and
 # files are synced up to the cloud.
+# Shared jobs.bucket / serve.bucket uploads. Lets bucket IAM enforce RBAC
+# per workspace. Per-job buckets (config bucket unset) do not use this.
+FILE_MOUNTS_WORKSPACE_SUBPATH = 'workspaces/{workspace}'
 FILE_MOUNTS_WORKDIR_SUBPATH = 'job-{run_id}/workdir'
 FILE_MOUNTS_SUBPATH = 'job-{run_id}/local-file-mounts/{i}'
 FILE_MOUNTS_TMP_SUBPATH = 'job-{run_id}/tmp-files'
@@ -591,6 +662,12 @@ RCLONE_MOUNT_CACHED_LOG_DIR = '~/.sky/rclone_log'
 RCLONE_CACHE_DIR = '~/.cache/rclone'
 RCLONE_CACHE_REFRESH_INTERVAL = 10
 
+# Heads the container output that a terminated-pod diagnosis appends. What
+# follows is the workload's own free text, so classifiers that grep a failure
+# message for its cause (e.g. OOM detection in managed-job recovery) must stop
+# here, or a program that merely prints "out of memory" reads as OOM-killed.
+CONTAINER_OUTPUT_MARKER = 'Last output from container'
+
 # The keys that can be overridden in the `~/.sky/config.yaml` file. The
 # overrides are specified in task YAMLs.
 OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
@@ -619,6 +696,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('vast', 'datacenter_only'),
     ('vast', 'create_instance_kwargs'),
     ('slurm', 'sbatch_options'),
+    ('slurm', 'quota'),
     ('slurm', 'cpu_partition'),
     ('active_workspace',),
 ]
@@ -648,6 +726,7 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     # Slurm submit identity and cluster settings are managed server-side.
     ('slurm', 'cluster_configs'),
     ('slurm', 'submit_as_user'),
+    ('slurm', 'username_map'),
 ]
 
 # Constants for Azure blob storage
@@ -699,12 +778,37 @@ SERVE_OVERRIDE_CONCURRENT_LAUNCHES = (
 # Environment variable that is set to 'true' if metrics are enabled.
 ENV_VAR_SERVER_METRICS_ENABLED = 'SKY_API_SERVER_METRICS_ENABLED'
 
+
+def server_metrics_enabled() -> bool:
+    """Whether the API server's metrics machinery should run.
+
+    One predicate for every consumer, because there used to be four over the
+    same variable: two `== 'true'` comparisons and two bare truthiness
+    checks. `=1` therefore installed the metrics middleware and served
+    /metrics while every instrument behind it stayed off, and `=false`
+    installed them too. Spelled the way the rest of the repo spells a boolean
+    environment variable (`sky/utils/env_options.py`).
+    """
+    return os.environ.get(ENV_VAR_SERVER_METRICS_ENABLED,
+                          'false').lower() in ('true', '1')
+
+
 # If set, overrides the header that we can use to get the user name.
 ENV_VAR_SERVER_AUTH_USER_HEADER = f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_USER_HEADER'
 
 # Environment variable that is used as the DB connection string for the
 # skypilot server.
 ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
+
+# Server-set flag (never from a client request) telling request workers whether
+# to contain task file-mount sources to the caller's staging roots. Set at
+# server startup and inherited by workers via os.environ. It uses the
+# SKYPILOT_SERVER_ prefix, so the client never forwards it and the server strips
+# every SKYPILOT_SERVER_-prefixed key from request env vars before overlaying
+# them -- a client cannot forge it. See
+# sky.server.common.should_enforce_mount_containment.
+ENV_VAR_ENFORCE_MOUNT_CONTAINMENT = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}ENFORCE_MOUNT_CONTAINMENT')
 
 # Optional: route the state DB through a transaction-mode connection pooler
 # (e.g. PgBouncer). When set, regular state-DB engines connect through the
@@ -727,6 +831,115 @@ ENV_VAR_DB_POOL_CONNECTION_URI = (
     f'{SKYPILOT_ENV_VAR_PREFIX}DB_POOL_CONNECTION_URI')
 ENV_VAR_DB_POOL_HOSTPORT = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_POOL_HOSTPORT')
 
+# Number of persistent Postgres connections each server process keeps in its
+# state-DB connection pool (SQLAlchemy `QueuePool`), overriding the budget the
+# server derives at runtime (`sky.server.config.compute_server_config`).
+# Unset by default, in which case nothing changes: the derived budget decides,
+# and it asks for a pool only when the database reports more connections than
+# the server can occupy.
+#
+# Why an override exists: the derived budget compares the server's worker count
+# against the database's own `max_connections`, which is a property of the
+# database, not of this server's share of it -- the same database may serve
+# other replicas, other tenants and ad-hoc clients, so that number is neither
+# an upper bound this server may take nor, behind a connection pooler, the
+# number of backends a pool would actually hold. A deployment that knows its
+# own share states it here instead.
+#
+# Also unlike the derived budget, this value needs no coordination with server
+# startup: it is read whenever an engine is built
+# (`sky.utils.db.db_utils.get_db_connection_pool_size`), so it applies to
+# engines built before a process sets its budget -- e.g. the one
+# `skypilot_config` builds while it is being imported -- as well as after.
+#
+# Set it to N > 0 to keep N connections open per process, on top of which the
+# process may burst (see ENV_VAR_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW). Size
+# N from what the deployment may hold open when idle:
+# N x (uvicorn workers + executor workers + 1). 0 disables pooling explicitly
+# (every state query opens its own connection, `NullPool`).
+#
+# Server-side only: the SKYPILOT_SERVER_ prefix keeps clients from forwarding
+# it (`sky.server.requests.payloads.request_body_env_vars`).
+ENV_VAR_SERVER_DB_CONNECTION_POOL_SIZE = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}DB_CONNECTION_POOL_SIZE')
+
+# Burst connections a server process may open beyond the pooled ones
+# (SQLAlchemy's `max_overflow`), each closed when it is returned rather than
+# kept. A process therefore holds `pool_size` connections open when idle and
+# uses at most `pool_size + max_overflow` at once; a query that arrives when
+# all of them are busy waits for one instead of opening its own.
+#
+# Unset by default, in which case a process bursts up to
+# DEFAULT_DB_CONNECTION_POOL_MAX_CONCURRENCY concurrent connections, so a
+# process that pools only a couple of connections does not serialize its
+# queries behind them. That default reaches 0 once the pool alone is that
+# wide, which is why a deployment that pools more than a handful of
+# connections and still wants burst room states the value here.
+ENV_VAR_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}DB_CONNECTION_POOL_MAX_OVERFLOW')
+
+# Explicit sizes for the API server's long and short executor pools and, in
+# consolidation mode, its jobs-controller pool, in place of the counts the
+# server derives from CPU and memory (`sky.server.config.compute_server_config`,
+# `sky.utils.controller_utils.get_number_of_jobs_controllers`). Unset by
+# default, in which case the derived sizing decides.
+#
+# The derived counts budget a fixed footprint per process; a deployment whose
+# processes outgrow it can pin the counts to what its pods hold instead. A
+# value outside the server's bounds (long: at least 1; short: at least one
+# idle worker plus one per internal request daemon, enabled or not;
+# controllers: 1 to `controller_utils.MAX_CONTROLLERS`) is refused at startup,
+# not clamped.
+#
+# With SKYPILOT_MEMORY_AWARE_WORKER_SIZING on, the memory the pools leave for
+# consolidation-mode controllers is sized from system memory and is shared with
+# the serve and pool controllers, so pinning the jobs-controller count alone
+# does not grow the pools. Pin both pools along with it.
+#
+# Server-side only: the SKYPILOT_SERVER_ prefix keeps clients from forwarding
+# them (`sky.server.requests.payloads.request_body_env_vars`).
+ENV_VAR_SERVER_LONG_WORKERS = f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}LONG_WORKERS'
+ENV_VAR_SERVER_SHORT_WORKERS = f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}SHORT_WORKERS'
+ENV_VAR_SERVER_JOBS_CONTROLLERS = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}JOBS_CONTROLLERS')
+
+# Concurrent state-DB connections a server process uses before it starts
+# queueing queries, when the burst size is left to the default.
+DEFAULT_DB_CONNECTION_POOL_MAX_CONCURRENCY = 5
+
+# Total deadline, in seconds, on each DB lookup the API server's
+# authentication middlewares make (`sky.server.auth.db_lookup`). The users
+# upsert derives the server-side timeouts it sets on its own transaction
+# from the same value (`sky.global_user_state.add_or_update_user`), so read
+# it through `sky.utils.db.db_utils.get_auth_db_timeout_seconds()` rather
+# than from the environment directly: that keeps the two from drifting
+# apart. Server-side only: it is stripped from client request payloads and
+# from the per-request environment overlay on the server.
+ENV_VAR_AUTH_DB_TIMEOUT_SECONDS = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_DB_TIMEOUT_SECONDS')
+DEFAULT_AUTH_DB_TIMEOUT_SECONDS = 5.0
+
+# How long a managed-job task may sit in each of the two stall phases before
+# `sky.jobs.stall` reports it. Overridable so a deployment that disagrees with
+# the defaults can say so through its helm values instead of waiting for a
+# release; read through `sky.jobs.stall`, which validates them, rather than
+# from the environment directly.
+#
+# Under SKYPILOT_SERVER_ so a client cannot supply them: `request_body_env_vars`
+# forwards SKYPILOT_ variables except those carrying this prefix.
+ENV_VAR_MANAGED_JOBS_NEVER_CLAIMED_SECONDS = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}MANAGED_JOBS_NEVER_CLAIMED_SECONDS')
+# A fully drained controller pool is only topped up on the managed-job daemon
+# tick (~300s), and the replacement then has to start and claim on its own
+# ~10s poll, so anything much shorter fires on routine pool churn.
+DEFAULT_MANAGED_JOBS_NEVER_CLAIMED_SECONDS = 10 * 60
+
+ENV_VAR_MANAGED_JOBS_UNATTENDED_SECONDS = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}MANAGED_JOBS_UNATTENDED_SECONDS')
+# Above the launch retry backoff, which caps at five times its 60s base plus
+# jitter.
+DEFAULT_MANAGED_JOBS_UNATTENDED_SECONDS = 15 * 60
+
 # Environment variable that is set to 'true' if basic
 # authentication is enabled in the API server.
 ENV_VAR_ENABLE_BASIC_AUTH = 'ENABLE_BASIC_AUTH'
@@ -739,6 +952,12 @@ ENV_VAR_ENABLE_SERVICE_ACCOUNTS = 'ENABLE_SERVICE_ACCOUNTS'
 # Enable debug logging for requests.
 ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING = (
     f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}ENABLE_REQUEST_DEBUG_LOGGING')
+
+# When set to a truthy value, each API server worker binds its own listening
+# socket with SO_REUSEPORT so the kernel load-balances new connections across
+# workers, instead of all workers sharing a single inherited socket. Only takes
+# effect on Linux and with more than one worker.
+ENV_VAR_SERVER_REUSE_PORT = (f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}REUSE_PORT')
 
 SKYPILOT_DEFAULT_WORKSPACE = 'default'
 

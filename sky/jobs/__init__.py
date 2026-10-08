@@ -1,6 +1,7 @@
 """Managed jobs."""
 import pathlib
 
+from sky.jobs.client.sdk import AUTO_JOB_GROUP
 from sky.jobs.client.sdk import cancel
 from sky.jobs.client.sdk import dashboard
 from sky.jobs.client.sdk import download_logs
@@ -40,6 +41,7 @@ __all__ = [
     # Core
     'cancel',
     'launch',
+    'AUTO_JOB_GROUP',
     'queue',
     'queue_v2',
     'tail_logs',

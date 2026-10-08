@@ -131,8 +131,14 @@ def get_or_generate_keys() -> Tuple[str, str]:
                 global_user_state.get_ssh_keys(user_hash))
             if not exists:
                 ssh_public_key, ssh_private_key = _generate_rsa_key_pair()
-                global_user_state.set_ssh_keys(user_hash, ssh_public_key,
-                                               ssh_private_key)
+                # Insert only if absent, then adopt whatever the database
+                # actually stored: processes sharing the database but not
+                # the local key directory can race to bootstrap the same
+                # user's key pair, and a loser that writes its own pair
+                # would permanently diverge from the row the winner stored.
+                ssh_public_key, ssh_private_key = (
+                    global_user_state.get_or_set_ssh_keys(
+                        user_hash, ssh_public_key, ssh_private_key))
             _save_key_pair(private_key_path, public_key_path, ssh_private_key,
                            ssh_public_key)
     assert os.path.exists(public_key_path), (

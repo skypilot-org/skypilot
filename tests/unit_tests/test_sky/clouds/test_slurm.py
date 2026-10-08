@@ -3,23 +3,33 @@
 import os
 from pathlib import Path
 import re
+import shlex
+import sqlite3
+import subprocess
+from unittest.mock import call
 from unittest.mock import patch
 import unittest.mock as mock
 
+import jsonschema
 import pytest
 
 from sky import clouds
+from sky import exceptions
+from sky import models
 from sky import resources as resources_lib
 from sky import skypilot_config
 from sky.adaptors import slurm
+from sky.backends import backend_utils
 from sky.clouds import slurm as slurm_cloud
 from sky.provision.slurm import instance as slurm_instance
 from sky.provision.slurm import utils as slurm_utils
 from sky.skylet import constants
+from sky.utils import schemas
+from sky.utils import yaml_utils
 
 
 class TestStopFeatureSupport:
-    """Tests dynamic stop support for Slurm resources."""
+    """Tests dynamic stop/autostop support for Slurm resources."""
 
     @pytest.mark.parametrize(
         'image_id,pyxis_enabled,stop_supported',
@@ -44,9 +54,44 @@ class TestStopFeatureSupport:
 
         assert ((clouds.CloudImplementationFeatures.STOP
                  not in unsupported) == stop_supported)
+        # Autostop gates on the same container + Pyxis conditions as stop.
+        assert ((clouds.CloudImplementationFeatures.AUTOSTOP
+                 not in unsupported) == stop_supported)
+
+    def test_autostop_is_dynamic_not_statically_unsupported(self):
+        assert (clouds.CloudImplementationFeatures.AUTOSTOP
+                in slurm_cloud.Slurm._DYNAMICALLY_CHECKED_FEATURES)
 
 
 class TestGetSubmitUser:
+
+    @pytest.mark.parametrize('cluster_scoped', [False, True])
+    def test_mapped_user_with_plus(self, cluster_scoped):
+        mapping = {'alice@example.com': 'alice+lab'}
+        cluster_config = {'username_map': mapping} if cluster_scoped else {}
+        global_mapping = {} if cluster_scoped else mapping
+        config = {
+            'slurm': {
+                'submit_as_user': True,
+                'username_map': global_mapping,
+                'cluster_configs': {
+                    'my-cluster': cluster_config
+                },
+            }
+        }
+        jsonschema.validate(config, schemas.get_config_schema())
+        nested = {
+            ('slurm', 'username_map'): global_mapping,
+            ('slurm', 'cluster_configs', 'my-cluster'): cluster_config,
+        }
+        with patch.object(skypilot_config, 'get_nested',
+                          side_effect=lambda keys, **_: nested[keys]), \
+             patch.object(skypilot_config, 'get_effective_region_config',
+                          return_value=True), \
+             patch('sky.provision.slurm.utils.common_utils.get_current_user',
+                   return_value=models.User(id='human',
+                                            name='alice@example.com')):
+            assert slurm_utils.get_submit_user('my-cluster') == 'alice+lab'
 
     def test_config_is_server_managed(self):
         key = ('slurm', 'submit_as_user')
@@ -56,14 +101,14 @@ class TestGetSubmitUser:
         ('alice@example.com', 'alice'),
         ('alice', 'alice'),
         ('alice.ml@example.com', 'alice.ml'),
+        ('alice+ml@example.com', 'alice+ml'),
     ])
-    @patch('sky.provision.slurm.utils.common_utils.get_current_user_name')
+    @patch('sky.provision.slurm.utils.common_utils.get_current_user')
     @patch('sky.provision.slurm.utils.skypilot_config.'
            'get_effective_region_config')
-    def test_enabled(self, mock_get_config, mock_get_user_name, user_name,
-                     expected):
+    def test_enabled(self, mock_get_config, mock_get_user, user_name, expected):
         mock_get_config.return_value = True
-        mock_get_user_name.return_value = user_name
+        mock_get_user.return_value = models.User(id='human', name=user_name)
 
         assert slurm_utils.get_submit_user('my-cluster') == expected
         mock_get_config.assert_called_once_with(cloud='slurm',
@@ -71,28 +116,28 @@ class TestGetSubmitUser:
                                                 keys=('submit_as_user',),
                                                 default_value=False)
 
-    @patch('sky.provision.slurm.utils.common_utils.get_current_user_name')
+    @patch('sky.provision.slurm.utils.common_utils.get_current_user')
     @patch('sky.provision.slurm.utils.skypilot_config.'
            'get_effective_region_config')
-    def test_disabled(self, mock_get_config, mock_get_user_name):
+    def test_disabled(self, mock_get_config, mock_get_user):
         mock_get_config.return_value = False
 
         assert slurm_utils.get_submit_user('my-cluster') is None
-        mock_get_user_name.assert_not_called()
+        mock_get_user.assert_not_called()
 
     @pytest.mark.parametrize('user_name', [
         '@example.com',
         'Alice@example.com',
-        'alice+ml@example.com',
+        'alice;ml@example.com',
         '-alice@example.com',
     ])
-    @patch('sky.provision.slurm.utils.common_utils.get_current_user_name')
+    @patch('sky.provision.slurm.utils.common_utils.get_current_user')
     @patch('sky.provision.slurm.utils.skypilot_config.'
            'get_effective_region_config',
            return_value=True)
-    def test_invalid_unix_user_rejected(self, _mock_get_config,
-                                        mock_get_user_name, user_name):
-        mock_get_user_name.return_value = user_name
+    def test_invalid_unix_user_rejected(self, _mock_get_config, mock_get_user,
+                                        user_name):
+        mock_get_user.return_value = models.User(id='human', name=user_name)
 
         with pytest.raises(ValueError, match='valid Unix user'):
             slurm_utils.get_submit_user('my-cluster')
@@ -230,6 +275,26 @@ class TestSubmitUserDeployVariables:
                 zones=[zone],
                 num_nodes=1,
                 volume_mounts=volume_mounts)
+
+    def test_new_clusters_get_distinct_snapshot_ids(self):
+        first = self._make_deploy_variables('alice')['snapshot_id']
+        second = self._make_deploy_variables('alice')['snapshot_id']
+        assert re.fullmatch(r'[0-9a-f]{32}', first)
+        assert re.fullmatch(r'[0-9a-f]{32}', second)
+        assert first != second
+
+    @pytest.mark.parametrize('snapshot_id', [None, 'a' * 32])
+    def test_restart_preserves_snapshot_location(self, snapshot_id):
+        provider = {'sky_base_dir': '/home/alice'}
+        if snapshot_id is not None:
+            provider['snapshot_id'] = snapshot_id
+        new_provider = dict(provider, snapshot_id='b' * 32)
+        restored = backend_utils._replace_yaml_dicts(
+            yaml_utils.dump_yaml_str({'provider': new_provider}),
+            yaml_utils.dump_yaml_str({'provider': provider}),
+            backend_utils._RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
+            backend_utils._RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
+        assert yaml_utils.safe_load(restored)['provider'] == provider
 
     def test_submit_user_persisted(self):
         deploy_vars = self._make_deploy_variables('alice')
@@ -378,6 +443,7 @@ class TestSubmitUserTemplate:
                 'slurm_partition': 'gpu',
                 'provision_timeout': 120,
                 'sky_base_dir': '/fsx/alice',
+                'snapshot_id': 'a' * 32,
                 'ssh_hostname': 'login.example.com',
                 'ssh_port': 22,
                 'slurm_private_key': '/root/.ssh/key',
@@ -426,6 +492,11 @@ class TestSubmitUserTemplate:
             assert config['provider']['slurm_user'] == slurm_user
         assert config['provider']['ssh']['user'] == transport_user
         assert config['provider']['sky_base_dir'] == '/fsx/alice'
+        assert config['provider']['snapshot_id'] == 'a' * 32
+        if image_id is None:
+            assert 'container_image' not in config['provider']
+        else:
+            assert config['provider']['container_image'] == image_id
         assert config['auth']['ssh_user'] == expected_ssh_user
         assert config['available_node_types']['ray_head_default'][
             'node_config']['volume_mounts'][0]['path'] == '/data'
@@ -1363,6 +1434,7 @@ class TestProvisionTimeoutPassthrough:
         mock_slurm_client.return_value = mock_client
 
         mock_runner = mock.MagicMock()
+        mock_runner.command_as_user.side_effect = shlex.join
         mock_runner.run.side_effect = lambda cmd, **kwargs: (
             (44, '', '')
             if slurm_instance.SNAPSHOT_MANIFEST_FILENAME in cmd else
@@ -1437,6 +1509,7 @@ class TestProvisionTimeoutPassthrough:
         mock_slurm_client.return_value = mock_client
 
         mock_runner = mock.MagicMock()
+        mock_runner.command_as_user.side_effect = shlex.join
         mock_runner.run.side_effect = lambda cmd, **kwargs: (
             (44, '', '')
             if slurm_instance.SNAPSHOT_MANIFEST_FILENAME in cmd else
@@ -1505,12 +1578,175 @@ class TestCreateVirtualInstance:
         mock_slurm_client.return_value = mock_client
 
         mock_runner = mock.MagicMock()
+        mock_runner.command_as_user.side_effect = shlex.join
         mock_runner.run.side_effect = lambda cmd, **kwargs: (
             (44, '', '')
             if slurm_instance.SNAPSHOT_MANIFEST_FILENAME in cmd else
             (0, '', ''))
         mock_runner.get_remote_home_dir.return_value = '/home/testuser'
         mock_ssh_runner.return_value = mock_runner
+
+    @pytest.mark.parametrize('container', [False, True])
+    @pytest.mark.parametrize('previously_up', [False, True])
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_snapshot_permission_denied_on_launch(self, mock_ssh_runner,
+                                                  mock_slurm_client,
+                                                  mock_get_partition_info,
+                                                  mock_get_proctrack_type,
+                                                  mock_wait_for_job_nodes,
+                                                  previously_up, container):
+        del mock_wait_for_job_nodes
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'cpus')
+        mock_get_proctrack_type.return_value = 'cgroup'
+        config = self._make_non_container_config(2)
+        config.prev_cluster_ever_up = previously_up
+        if container:
+            config.node_config['image_id'] = 'ubuntu:24.04'
+        runner = mock_ssh_runner.return_value
+        runner.run.side_effect = lambda cmd, **kwargs: (
+            (2, '', 'sudo: a password is required')
+            if isinstance(cmd, str) and '.sky_snapshots/' in cmd else
+            (0, '', ''))
+
+        if previously_up:
+            with pytest.raises(exceptions.CommandError):
+                self._run_and_capture_script('test-cluster', config)
+            mock_slurm_client.return_value.submit_job.assert_not_called()
+        else:
+            script = self._run_and_capture_script('test-cluster', config)
+            mock_slurm_client.return_value.submit_job.assert_called_once()
+            if container:
+                assert '--container-image=ubuntu:24.04' in script
+            assert 'rank0.sqsh' not in script
+            assert not any('.sky_snapshots/' in str(call.args[0])
+                           for call in runner.run.call_args_list)
+
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_corrupt_snapshot_blocks_restart(self, mock_ssh_runner,
+                                             mock_slurm_client,
+                                             mock_get_partition_info,
+                                             mock_get_proctrack_type,
+                                             mock_wait_for_job_nodes):
+        del mock_wait_for_job_nodes
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'cpus')
+        mock_get_proctrack_type.return_value = 'cgroup'
+        mock_ssh_runner.return_value.run.return_value = (0, '{', '')
+        mock_ssh_runner.return_value.run.side_effect = None
+        config = self._make_non_container_config(2)
+        config.prev_cluster_ever_up = True
+        with pytest.raises(RuntimeError, match='not valid JSON'):
+            self._run_and_capture_script('test-cluster', config)
+        mock_slurm_client.return_value.submit_job.assert_not_called()
+
+    @pytest.mark.parametrize('old_image', ['ubuntu:24.04', 'debian:12'])
+    @patch('sky.provision.slurm.instance._read_snapshot_manifest')
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_fresh_launch_ignores_readable_orphan(
+            self, mock_ssh_runner, mock_slurm_client, mock_get_partition_info,
+            mock_get_proctrack_type, mock_wait_for_job_nodes,
+            mock_read_manifest, old_image):
+        del mock_wait_for_job_nodes
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'cpus')
+        mock_get_proctrack_type.return_value = 'cgroup'
+        mock_read_manifest.return_value = {
+            'version': slurm_instance.SNAPSHOT_MANIFEST_VERSION,
+            'generation': 'a' * 32,
+            'image_id': old_image,
+            'has_job_db': True,
+            'nodes': ['old-node'],
+        }
+        config = self._make_non_container_config(2)
+        config.node_config['image_id'] = 'ubuntu:24.04'
+        config.provider_config['snapshot_id'] = 'b' * 32
+
+        script = self._run_and_capture_script('test-cluster', config)
+
+        mock_read_manifest.assert_not_called()
+        mock_slurm_client.return_value.submit_job.assert_called_once()
+        assert '--container-image=ubuntu:24.04' in script
+        assert 'rank0.sqsh' not in script
+        assert 'cp -f ' not in script
+        assert f'/test-cluster/{"b" * 32}/manifest.json' in script
+
+    @pytest.mark.parametrize('cached', [False, True])
+    def test_generated_term_handler_preserves_exit_code(self, tmp_path, cached):
+        script = (SBATCH_TESTDATA_DIR / 'basic.sh').read_text()
+        start = script.index('terminate() {')
+        end = script.index('trap terminate TERM', start)
+        handler = script[start:end]
+        # Substitute only the runtime path; execute the generated shell body.
+        runtime = re.search(r'export SKY_RUNTIME_DIR=(\S+)', handler).group(1)
+        handler = handler.replace(runtime, str(tmp_path))
+        state = tmp_path / '.sky'
+        state.mkdir()
+        with sqlite3.connect(state / 'jobs.db') as conn:
+            conn.execute('CREATE TABLE jobs (job_id INTEGER PRIMARY KEY, '
+                         'status TEXT, exit_codes TEXT)')
+            conn.execute("INSERT INTO jobs VALUES (1, 'FAILED', '143')")
+        cache = Path(str(tmp_path) + '.exitcode.123')
+        stale_cache = Path(str(tmp_path) + '.exitcode.122')
+        stale_cache.write_text('0\n')
+        if cached:
+            cache.write_text('143\n')
+            (state / 'jobs.db').unlink()
+        try:
+            result = subprocess.run(['bash', '-c', handler + '\nterminate'],
+                                    env={
+                                        **os.environ, 'SLURM_JOB_ID': '123'
+                                    },
+                                    capture_output=True,
+                                    text=True,
+                                    check=False)
+            assert result.returncode == 143
+            assert result.stderr == ''
+        finally:
+            cache.unlink(missing_ok=True)
+            stale_cache.unlink()
+
+    @pytest.mark.parametrize('exit_code', [0, 7])
+    def test_container_exit_cleanup_preserves_result_during_term(
+            self, tmp_path, exit_code):
+        script = (SBATCH_TESTDATA_DIR / 'containers.sh').read_text()
+        start = script.index('cleanup() {')
+        end = script.index('# Create sky home directory', start)
+        handlers = script[start:end]
+        handlers = handlers.replace('/tmp/test-cluster', str(tmp_path / 'run'))
+        handlers = handlers.replace('/home/testuser', str(tmp_path / 'home'))
+        cache = tmp_path / 'run.exitcode.123'
+        cache.write_text(f'{exit_code}\n')
+        # Deliver the batch TERM after cleanup has removed the task state.
+        stub = f"""
+srun() {{
+    command rm -f {cache}
+    kill -TERM $$
+}}
+"""
+        result = subprocess.run(['bash', '-c', stub + handlers + '\nexit 143'],
+                                env={
+                                    **os.environ, 'SLURM_JOB_ID': '123'
+                                },
+                                capture_output=True,
+                                text=True,
+                                check=False)
+        assert result.returncode == exit_code, result.stderr
 
     def _run_and_capture_script(self, cluster_name, config) -> str:
         """Run _create_virtual_instance and capture the generated script."""
@@ -1615,6 +1851,158 @@ class TestCreateVirtualInstance:
         written_script = self._run_and_capture_script('test-cluster', config)
         assert_sbatch_matches_snapshot('containers', written_script)
 
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_restore_cleans_leftover_shared_state(self, mock_ssh_runner,
+                                                  mock_slurm_client,
+                                                  mock_get_partition_info,
+                                                  mock_get_proctrack_type,
+                                                  mock_wait_for_job_nodes):
+        """A restore empties the shared home before runtime setup runs."""
+        from sky.provision import common
+
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'gpu')
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        config = common.ProvisionConfig(
+            provider_config={
+                'ssh': {
+                    'hostname': 'login.example.com',
+                    'port': '22',
+                    'user': 'testuser',
+                    'private_key': '/path/to/key',
+                },
+                'cluster': 'test-slurm',
+                'partition': 'gpu',
+                'provision_timeout': 300,
+                'sky_base_dir': '/home/testuser',
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'cpus': 4,
+                'memory': 16,
+                'image_id': 'nvcr.io/nvidia/pytorch:24.01-py3',
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=True,
+            ports_to_open_on_launch=None,
+        )
+        config.prev_cluster_ever_up = True
+        manifest = {
+            'version': slurm_instance.SNAPSHOT_MANIFEST_VERSION,
+            'generation': '0123456789abcdef0123456789abcdef',
+            'image_id': 'nvcr.io/nvidia/pytorch:24.01-py3',
+            'created_at': 1234.5,
+            'has_job_db': False,
+            'nodes': ['node1'],
+        }
+        cleanup_script = slurm_instance._remove_shared_state_script(
+            '/home/testuser/.sky_clusters/test-cluster', preserve_logs=True)
+        submitted = {}
+
+        def check_submit(partition, cluster_name, tgt_path):
+            del partition, cluster_name, tgt_path
+            submitted['cleanup_seen'] = any(
+                call.args[0] == cleanup_script
+                for call in mock_ssh_runner.return_value.run.call_args_list)
+            return '5576'
+
+        mock_slurm_client.return_value.submit_job.side_effect = check_submit
+
+        with patch('tempfile.NamedTemporaryFile') as mock_tempfile:
+            mock_file = mock.MagicMock()
+            mock_file.__enter__.return_value = mock_file
+            mock_tempfile.return_value = mock_file
+            with patch.object(slurm_instance,
+                              '_read_snapshot_manifest',
+                              return_value=manifest):
+                slurm_instance._create_virtual_instance(
+                    region='us-west-2',
+                    cluster_name='test-cluster',
+                    cluster_name_on_cloud='test-cluster',
+                    config=config,
+                )
+
+        run_commands = [
+            call.args[0]
+            for call in mock_ssh_runner.return_value.run.call_args_list
+        ]
+        assert cleanup_script in run_commands
+        # The cleanup must precede the sbatch submission: afterwards the
+        # sbatch writes control files into the home, which the cleanup
+        # must not delete.
+        assert submitted['cleanup_seen'] is True
+
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_fresh_launch_keeps_shared_state(self, mock_ssh_runner,
+                                             mock_slurm_client,
+                                             mock_get_partition_info,
+                                             mock_get_proctrack_type,
+                                             mock_wait_for_job_nodes):
+        """Without a snapshot, the shared home is not cleaned at provision."""
+        from sky.provision import common
+
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'gpu')
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        config = common.ProvisionConfig(
+            provider_config={
+                'ssh': {
+                    'hostname': 'login.example.com',
+                    'port': '22',
+                    'user': 'testuser',
+                    'private_key': '/path/to/key',
+                },
+                'cluster': 'test-slurm',
+                'partition': 'gpu',
+                'provision_timeout': 300,
+                'sky_base_dir': '/home/testuser',
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'cpus': 4,
+                'memory': 16,
+                'image_id': 'nvcr.io/nvidia/pytorch:24.01-py3',
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+
+        with patch('tempfile.NamedTemporaryFile') as mock_tempfile:
+            mock_file = mock.MagicMock()
+            mock_file.__enter__.return_value = mock_file
+            mock_tempfile.return_value = mock_file
+            slurm_instance._create_virtual_instance(
+                region='us-west-2',
+                cluster_name='test-cluster',
+                cluster_name_on_cloud='test-cluster',
+                config=config,
+            )
+
+        cleanup_script = slurm_instance._remove_shared_state_script(
+            '/home/testuser/.sky_clusters/test-cluster', preserve_logs=True)
+        run_commands = [
+            call.args[0]
+            for call in mock_ssh_runner.return_value.run.call_args_list
+        ]
+        assert cleanup_script not in run_commands
+
         config.node_config['volume_mounts'] = [
             {
                 'path': '/data',
@@ -1658,6 +2046,7 @@ class TestCreateVirtualInstance:
                 '/host/data:/data:ro,/nvme/$SLURM_JOB_ID:/scratch,'
                 '/host/models:/models:ro"' in mounted_script)
 
+    @pytest.mark.parametrize('snapshot_id', [None, 'b' * 32])
     @patch('sky.provision.slurm.instance._validate_snapshot_files')
     @patch('sky.provision.slurm.instance._read_snapshot_manifest')
     @patch('sky.provision.slurm.instance._wait_for_job_nodes')
@@ -1669,7 +2058,7 @@ class TestCreateVirtualInstance:
     def test_multi_node_snapshot_restore_script(
             self, mock_ssh_runner, mock_slurm_client, mock_get_partition_info,
             mock_get_proctrack_type, mock_wait_for_job_nodes,
-            mock_read_manifest, mock_validate_files):
+            mock_read_manifest, mock_validate_files, snapshot_id):
         from sky.provision import common
 
         del mock_wait_for_job_nodes
@@ -1680,6 +2069,8 @@ class TestCreateVirtualInstance:
         snapshot_dir = (
             f'/home/testuser/{slurm_instance.SNAPSHOT_DIRECTORY_NAME}'
             f'/{cluster_name}')
+        if snapshot_id is not None:
+            snapshot_dir += f'/{snapshot_id}'
         generation = '0123456789abcdef0123456789abcdef'
         generation_dir = slurm_instance._snapshot_generation_dir(
             snapshot_dir, generation)
@@ -1717,6 +2108,9 @@ class TestCreateVirtualInstance:
             ports_to_open_on_launch=None,
         )
 
+        config.prev_cluster_ever_up = True
+        if snapshot_id is not None:
+            config.provider_config['snapshot_id'] = snapshot_id
         script = self._run_and_capture_script(cluster_name, config)
 
         mock_validate_files.assert_called_once()
@@ -1746,8 +2140,7 @@ class TestCreateVirtualInstance:
         assert script.index(readiness_check) < script.index(
             'touch /home/testuser/.sky_clusters/'
             'test-cluster-restore/.sky_sbatch_ready')
-        consume_snapshot = ('rm -rf -- /home/testuser/.sky_snapshots/'
-                            'test-cluster-restore')
+        consume_snapshot = f'rm -rf -- {snapshot_dir}'
         ready_signal = ('touch /home/testuser/.sky_clusters/'
                         'test-cluster-restore/.sky_sbatch_ready')
         assert script.index(readiness_check) < script.index(consume_snapshot)
@@ -2085,8 +2478,77 @@ class TestHelperPathFunctions:
 class TestGetEnv:
     """Test SlurmClient.get_env() parsing."""
 
+    def test_submit_user_path_variables(self):
+        client = slurm.SlurmClient('host', 22, 'login', slurm_user='alice')
+        with mock.patch.object(
+                client,
+                '_run_slurm_cmd',
+                return_value=
+            (0, 'HOME=/home/login\nUSER=login\nLOGNAME=login\nSCRATCH=/fsx\n',
+             '')), mock.patch.object(client,
+                                     'get_remote_home_dir',
+                                     return_value='/home/alice'):
+            assert client.get_env() == {
+                'HOME': '/home/alice',
+                'USER': 'alice',
+                'LOGNAME': 'alice',
+                'SCRATCH': '/fsx',
+            }
+
+    @pytest.mark.parametrize('env_failure', [None, 'returncode', 'exception'])
+    @pytest.mark.parametrize('home_failure', [False, True])
+    def test_best_effort_submit_user_env(self, env_failure, home_failure,
+                                         caplog, monkeypatch):
+        monkeypatch.setattr(slurm.logger, 'handlers', [caplog.handler])
+        client = slurm.SlurmClient('host', 22, 'login', slurm_user='alice')
+        with mock.patch.object(client, '_run_slurm_cmd') as run, \
+                mock.patch.object(client, 'get_remote_home_dir') as home:
+            run.return_value = (0,
+                                'HOME=/home/login\nUSER=login\nSCRATCH=/fsx\n',
+                                '')
+            if env_failure == 'returncode':
+                run.return_value = (1, 'HOME=/home/login\n', 'env denied')
+            elif env_failure == 'exception':
+                run.side_effect = OSError('env connection failed')
+            home.return_value = '/home/alice'
+            if home_failure:
+                home.side_effect = ValueError('home lookup failed')
+
+            env = client.get_env()
+
+        expected = {'USER': 'alice', 'LOGNAME': 'alice'}
+        if env_failure is None:
+            expected['SCRATCH'] = '/fsx'
+        if not home_failure:
+            expected['HOME'] = '/home/alice'
+        assert env == expected
+        home.assert_called_once_with()
+        assert ('Failed to fetch remote env from host'
+                in caplog.text) == (env_failure is not None)
+        if env_failure == 'returncode':
+            assert 'exit code 1' in caplog.text
+            assert 'env denied' in caplog.text
+        elif env_failure == 'exception':
+            assert 'env connection failed' in caplog.text
+        assert ('omitting HOME from path expansion'
+                in caplog.text) == home_failure
+        if home_failure:
+            assert "Slurm user 'alice'" in caplog.text
+            assert 'home lookup failed' in caplog.text
+
+    def test_command_exception_without_submit_user(self, caplog, monkeypatch):
+        monkeypatch.setattr(slurm.logger, 'handlers', [caplog.handler])
+        client = slurm.SlurmClient('host', 22, 'login')
+        with mock.patch.object(client, '_run_slurm_cmd',
+                               side_effect=OSError('connection failed')), \
+                mock.patch.object(client, 'get_remote_home_dir') as home:
+            assert client.get_env() == {}
+        home.assert_not_called()
+        assert 'Failed to fetch remote env from host' in caplog.text
+
     def test_parses_env_output(self):
         client = mock.MagicMock(spec=slurm.SlurmClient)
+        client.slurm_user = None
         client._run_slurm_cmd.return_value = (
             0, 'HOME=/home/ubuntu\nUSER=ubuntu\n', '')
         # Call the real method with the mocked client
@@ -2095,6 +2557,7 @@ class TestGetEnv:
 
     def test_handles_values_with_equals(self):
         client = mock.MagicMock(spec=slurm.SlurmClient)
+        client.slurm_user = None
         client._run_slurm_cmd.return_value = (0,
                                               'PATH=/usr/bin:/bin\nFOO=a=b\n',
                                               '')
@@ -2104,6 +2567,8 @@ class TestGetEnv:
 
     def test_command_failure_returns_empty(self):
         client = mock.MagicMock(spec=slurm.SlurmClient)
+        client.slurm_user = None
+        client.ssh_host = 'host'
         client._run_slurm_cmd.return_value = (1, '', 'Connection refused')
         env = slurm.SlurmClient.get_env(client)
         assert env == {}
@@ -2173,3 +2638,172 @@ class TestResolveSkyBaseDir:
         assert result == '/home/alice'
         mock_get_config.assert_called_once()
         client.get_env.assert_not_called()
+
+
+class TestSlurmQuotaConfig:
+    """`slurm.quota.{queue,account}` land in sbatch_options as qos/account."""
+
+    def _sbatch_options(self, tmp_path, config, overrides=None):
+        # pylint: disable=protected-access
+        return TestSbatchOptionsPrecedence(
+        )._load_config_and_get_sbatch_options(
+            tmp_path, config, cluster_config_overrides=overrides)
+
+    def test_queue_sets_qos(self, tmp_path):
+        result = self._sbatch_options(tmp_path, {
+            'slurm': {
+                'quota': {
+                    'queue': 'normal'
+                },
+            },
+        })
+        assert result == {'qos': 'normal'}
+
+    def test_account_sets_account(self, tmp_path):
+        result = self._sbatch_options(tmp_path, {
+            'slurm': {
+                'quota': {
+                    'queue': 'high',
+                    'account': 'pre-training'
+                },
+            },
+        })
+        assert result == {'qos': 'high', 'account': 'pre-training'}
+
+    def test_quota_wins_over_sbatch_options_at_any_scope(self, tmp_path):
+        """A cloud-level `quota.queue` beats a partition-level sbatch qos.
+
+        Short-form spellings are dropped so the job never carries two
+        directives for the same option.
+        """
+        result = self._sbatch_options(
+            tmp_path, {
+                'slurm': {
+                    'quota': {
+                        'queue': 'quota-qos',
+                        'account': 'quota-account',
+                    },
+                    'sbatch_options': {
+                        'A': 'short-account',
+                        'constraint': 'skylake',
+                    },
+                    'cluster_configs': {
+                        'mycluster': {
+                            'partition_configs': {
+                                'gpu': {
+                                    'sbatch_options': {
+                                        'qos': 'partition-qos',
+                                        'q': 'short-qos',
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            })
+        assert result == {
+            'qos': 'quota-qos',
+            'account': 'quota-account',
+            'constraint': 'skylake',
+        }
+
+    def test_sbatch_options_kept_without_quota(self, tmp_path):
+        result = self._sbatch_options(
+            tmp_path, {
+                'slurm': {
+                    'sbatch_options': {
+                        'qos': 'sbatch-qos',
+                        'account': 'sbatch-account',
+                    },
+                },
+            })
+        assert result == {'qos': 'sbatch-qos', 'account': 'sbatch-account'}
+
+    def test_workspace_routes_to_its_queue(self, tmp_path):
+        """A workspace pin outranks every global scope, partition included."""
+        config = {
+            'slurm': {
+                'quota': {
+                    'queue': 'global-qos'
+                },
+                'cluster_configs': {
+                    'mycluster': {
+                        'partition_configs': {
+                            'gpu': {
+                                'quota': {
+                                    'queue': 'global-partition-qos',
+                                    'account': 'global-partition-account',
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            'workspaces': {
+                'pre-training': {
+                    'slurm': {
+                        'quota': {
+                            'queue': 'pretraining-qos',
+                            'account': 'pre-training',
+                        },
+                    },
+                },
+                'other': {},
+            },
+        }
+        with skypilot_config.local_active_workspace_ctx('pre-training'):
+            result = self._sbatch_options(tmp_path, config)
+        assert result == {'qos': 'pretraining-qos', 'account': 'pre-training'}
+
+        with skypilot_config.local_active_workspace_ctx('other'):
+            result = self._sbatch_options(tmp_path, config)
+        assert result == {
+            'qos': 'global-partition-qos',
+            'account': 'global-partition-account',
+        }
+
+    def test_task_override_at_partition_scope(self, tmp_path):
+        result = self._sbatch_options(
+            tmp_path, {
+                'slurm': {
+                    'cluster_configs': {
+                        'mycluster': {
+                            'partition_configs': {
+                                'gpu': {
+                                    'quota': {
+                                        'queue': 'server-qos'
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            overrides={
+                'slurm': {
+                    'cluster_configs': {
+                        'mycluster': {
+                            'partition_configs': {
+                                'gpu': {
+                                    'quota': {
+                                        'queue': 'task-qos'
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            })
+        assert result == {'qos': 'task-qos'}
+
+    def test_task_override_at_cloud_scope(self, tmp_path):
+        result = self._sbatch_options(tmp_path, {'slurm': {}},
+                                      overrides={
+                                          'slurm': {
+                                              'quota': {
+                                                  'queue': 'task-qos',
+                                                  'account': 'task-account',
+                                              },
+                                          },
+                                      })
+        assert result == {'qos': 'task-qos', 'account': 'task-account'}

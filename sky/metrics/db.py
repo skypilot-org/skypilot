@@ -64,8 +64,7 @@ logger = logging.getLogger(__name__)
 # runtime. When false, ``sky.utils.db.sql_metrics.install`` attaches no
 # event listeners, so the cost is not merely "skip the observe" but the
 # whole SQLAlchemy has-events code path staying off.
-ENABLED = os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED,
-                         'false').lower() == 'true'
+ENABLED = constants.server_metrics_enabled()
 
 # Label value used when a statement's primary table cannot be determined
 # from a compiled construct (``sqlalchemy.text()`` and driver-level

@@ -210,12 +210,13 @@ def executor_initializer(proc_group: str,
                          clean_env: Optional[Dict[str, str]] = None):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
+    # Same rationale as in sky.server.uvicorn.Server.run: reap this
+    # executor's prometheus multiproc files when it exits. Must run before
+    # anything (plugins included) writes a live gauge in this process.
+    metrics_lib.register_multiproc_cleanup_atexit()
     # Load plugins for executor process.
     plugins.load_plugins(
         plugins.ExtensionContext(context=plugins.PluginContext.EXECUTOR))
-    # Same rationale as in sky.server.uvicorn.Server.run: reap this
-    # executor's prometheus multiproc files when it exits.
-    metrics_lib.register_multiproc_cleanup_atexit()
     # The main API server process captures its env at startup and forwards
     # it via initargs (see RequestWorker.run). Adopt that snapshot directly
     # so the worker doesn't depend on its own spawn-time os.environ, which
@@ -712,6 +713,12 @@ def override_request_env_and_config(
             # Remove the db connection uri from client supplied env vars, as
             # the client should not set the db string on server side.
             request_body.env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
+            # Likewise the auth DB deadline: `add_or_update_user` below derives
+            # the server-side timeouts on its own transaction from it, and a
+            # client (in particular an older one that still forwards the
+            # variable) must not be able to loosen or break them.
+            request_body.env_vars.pop(constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS,
+                                      None)
             # Remove the in-cluster context name from client supplied env
             # vars. When a client runs inside a Kubernetes pod (e.g., a
             # managed job with api_server_access), its env has
@@ -722,6 +729,16 @@ def override_request_env_and_config(
             # running in a Kubernetes pod.
             request_body.env_vars.pop(
                 kubernetes_adaptor.IN_CLUSTER_CONTEXT_NAME_ENV_VAR, None)
+            # SKYPILOT_SERVER_-prefixed vars are server-only (e.g. the
+            # file-mount containment flag). A client must not be able to overlay
+            # them via its request env vars, so strip them before the overlay.
+            # The client already omits them, but a crafted request could include
+            # them, so enforce it here too.
+            for env_var in [
+                    k for k in request_body.env_vars
+                    if k.startswith(constants.SKYPILOT_SERVER_ENV_VAR_PREFIX)
+            ]:
+                request_body.env_vars.pop(env_var, None)
             os.environ.update(request_body.env_vars)
             # Note: may be overridden by AuthProxyMiddleware.
             # TODO(zhwu): we need to make the entire request a context
@@ -866,6 +883,25 @@ def _gated_sigterm_handler(signum: int,
         pass
 
 
+def _maybe_observe_request_pending(request: api_requests.Request) -> None:
+    """Observe creation -> first-execution-start time, once per request.
+
+    Must be called before the caller flips the request to RUNNING. PENDING
+    means the request never started executing before: the retry/pause
+    requeue path is the only writer of WAITING, so a WAITING request here
+    is a re-execution (e.g. retry_until_up), not the first start. pid
+    cannot discriminate this, since the ExecutionRetryableError handler
+    clears it before requeueing. Observing only the first start also means
+    retry backoff after that start can never re-inflate the histogram
+    (see #9988).
+    """
+    if request.status != api_requests.RequestStatus.PENDING:
+        return
+    metrics_utils.observe_request_pending(request.name,
+                                          request.schedule_type.value,
+                                          time.time() - request.created_at)
+
+
 def _request_execution_wrapper(request_id: str,
                                ignore_return_value: bool,
                                num_db_connections_per_worker: int = 0) -> None:
@@ -938,6 +974,7 @@ def _request_execution_wrapper(request_id: str,
                     f'skipping execution')
                 return
             log_path = request_task.log_path
+            _maybe_observe_request_pending(request_task)
             request_task.pid = pid
             request_task.status = api_requests.RequestStatus.RUNNING
             # Clear any leftover retry-backoff message now that we are running.
@@ -1009,8 +1046,22 @@ def _request_execution_wrapper(request_id: str,
                      f'{common_utils.format_exception(e)}')
         return
     else:
-        api_requests.set_request_succeeded(
-            request_id, return_value if not ignore_return_value else None)
+        try:
+            api_requests.set_request_succeeded(
+                request_id, return_value if not ignore_return_value else None)
+        except Exception as e:  # pylint: disable=broad-except
+            # A database error can hold the whole result as a statement
+            # parameter, so only the driver's message is recorded.
+            reason = str(getattr(e, 'orig', None) or e)[:1000]
+            api_requests.set_request_failed(
+                request_id,
+                RuntimeError(
+                    f'Failed to store the result of request {request_id}: '
+                    f'{reason}'))
+            _restore_output()
+            logger.error(f'Request {request_id} failed to store its result: '
+                         f'{reason}')
+            return
         # Manually reset the original stdout and stderr file descriptors early
         # so that the "Request xxxx failed due to ..." log message will be
         # written to the original stdout and stderr file descriptors.
@@ -1126,6 +1177,7 @@ async def _execute_request_coroutine(request: api_requests.Request):
     logger.info(f'Executing request {request.request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body
+    _maybe_observe_request_pending(request)
     await api_requests.update_status_async(request.request_id,
                                            api_requests.RequestStatus.RUNNING)
     # Redirect stdout and stderr to the request log path.
@@ -1216,6 +1268,19 @@ async def prepare_request_async(
         # Fallback to legacy environment variable based identity if no
         # authentication is set.
         user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
+        # This identity comes straight from the client and is stored as the
+        # owner of any cluster the request creates, so reject a malformed one
+        # here. A well-formed id is an invariant elsewhere in the codebase
+        # (controller_utils asserts it), and an id that does not round-trip to
+        # a real user leaves clusters that the owner filter in get_clusters()
+        # can never associate back with anyone. See #9621. The SDK's
+        # get_user_hash() only ever returns a valid id, so this guards
+        # non-SDK callers of the API.
+        # Skipped for system requests, whose id is replaced below anyway.
+        if (not is_skypilot_system and
+                not common_utils.is_valid_user_hash(user_id)):
+            raise exceptions.InvalidUserIdError(
+                f'Invalid user id: {user_id!r}.')
     if is_skypilot_system:
         user_id = constants.SKYPILOT_SYSTEM_USER_ID
         global_user_state.add_or_update_user(

@@ -1,4 +1,5 @@
 """Tests for schemas.py"""
+import os
 import unittest
 from unittest import mock
 
@@ -615,15 +616,26 @@ class TestWorkspaceSchema(unittest.TestCase):
                     'sbatch_options': {
                         'account': 'workspace-account',
                     },
+                    'quota': {
+                        'queue': 'workspace-qos',
+                        'account': 'workspace-account',
+                    },
                     'cluster_configs': {
                         'my-cluster': {
                             'sbatch_options': {
                                 'qos': 'workspace-qos',
                             },
+                            'quota': {
+                                'queue': 'cluster-qos',
+                            },
                             'partition_configs': {
                                 'gpu': {
                                     'sbatch_options': {
                                         'constraint': 'h100',
+                                    },
+                                    'quota': {
+                                        'queue': 'partition-qos',
+                                        'account': 'partition-account',
                                     },
                                 },
                             },
@@ -633,6 +645,45 @@ class TestWorkspaceSchema(unittest.TestCase):
             },
         }
         jsonschema.validate(instance=config, schema=self.workspaces_schema)
+
+    def test_slurm_quota_rejects_empty_values(self):
+        """An empty queue/account would become a bare `--qos=` / `--account=`."""
+        for cloud_config in (
+            {
+                'quota': {
+                    'queue': ''
+                }
+            },
+            {
+                'quota': {
+                    'account': ''
+                }
+            },
+            {
+                'cluster_configs': {
+                    'c': {
+                        'partition_configs': {
+                            'p': {
+                                'quota': {
+                                    'queue': ''
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        ):
+            with self.assertRaises(jsonschema.exceptions.ValidationError,
+                                   msg=f'{cloud_config!r} should be rejected'):
+                jsonschema.validate(instance={'slurm': cloud_config},
+                                    schema=schemas.get_config_schema())
+            with self.assertRaises(jsonschema.exceptions.ValidationError,
+                                   msg=f'{cloud_config!r} should be rejected'):
+                jsonschema.validate(
+                    instance={'my-workspace': {
+                        'slurm': cloud_config
+                    }},
+                    schema=self.workspaces_schema)
 
     def test_workspace_slurm_rejects_global_only_properties(self):
         invalid_configs = [
@@ -1208,24 +1259,64 @@ class TestRegisterKubernetesProperty(unittest.TestCase):
 
     def test_client_allows_unknown_k8s_root_property(self):
         """On the client, unknown kubernetes fields pass validation."""
+        # These cases are *defined* by the variable being unset, so
+        # establish that rather than assume it. Another test in the
+        # same worker can leave it set, and then the server's strict
+        # schema is what gets validated against -- a failure that
+        # depends on how the suite happens to shard, in a test whose
+        # name says "client".
+        monkeypatch = mock.patch.dict(os.environ)
+        monkeypatch.start()
+        self.addCleanup(monkeypatch.stop)
+        os.environ.pop(constants.ENV_VAR_IS_SKYPILOT_SERVER, None)
         k8s_schema = self._get_k8s_schema()
         config = {'unknown_plugin_field': 'value'}
         jsonschema.validate(instance=config, schema=k8s_schema)
 
     def test_client_allows_unknown_k8s_context_config_property(self):
         """On the client, unknown fields in context_configs pass."""
+        # These cases are *defined* by the variable being unset, so
+        # establish that rather than assume it. Another test in the
+        # same worker can leave it set, and then the server's strict
+        # schema is what gets validated against -- a failure that
+        # depends on how the suite happens to shard, in a test whose
+        # name says "client".
+        monkeypatch = mock.patch.dict(os.environ)
+        monkeypatch.start()
+        self.addCleanup(monkeypatch.stop)
+        os.environ.pop(constants.ENV_VAR_IS_SKYPILOT_SERVER, None)
         ctx_schema = self._get_k8s_context_config_item_schema()
         config = {'unknown_plugin_field': 'value'}
         jsonschema.validate(instance=config, schema=ctx_schema)
 
     def test_client_allows_unknown_workspace_k8s_property(self):
         """On the client, unknown workspace kubernetes fields pass."""
+        # These cases are *defined* by the variable being unset, so
+        # establish that rather than assume it. Another test in the
+        # same worker can leave it set, and then the server's strict
+        # schema is what gets validated against -- a failure that
+        # depends on how the suite happens to shard, in a test whose
+        # name says "client".
+        monkeypatch = mock.patch.dict(os.environ)
+        monkeypatch.start()
+        self.addCleanup(monkeypatch.stop)
+        os.environ.pop(constants.ENV_VAR_IS_SKYPILOT_SERVER, None)
         ws_k8s_schema = self._get_workspace_k8s_schema()
         config = {'unknown_plugin_field': 'value'}
         jsonschema.validate(instance=config, schema=ws_k8s_schema)
 
     def test_client_allows_unknown_workspace_k8s_context_config_property(self):
         """On the client, unknown fields in workspace context_configs pass."""
+        # These cases are *defined* by the variable being unset, so
+        # establish that rather than assume it. Another test in the
+        # same worker can leave it set, and then the server's strict
+        # schema is what gets validated against -- a failure that
+        # depends on how the suite happens to shard, in a test whose
+        # name says "client".
+        monkeypatch = mock.patch.dict(os.environ)
+        monkeypatch.start()
+        self.addCleanup(monkeypatch.stop)
+        os.environ.pop(constants.ENV_VAR_IS_SKYPILOT_SERVER, None)
         ws_ctx_schema = self._get_workspace_k8s_context_config_item_schema()
         config = {'unknown_plugin_field': 'value'}
         jsonschema.validate(instance=config, schema=ws_ctx_schema)

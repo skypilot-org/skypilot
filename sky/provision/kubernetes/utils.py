@@ -118,18 +118,11 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     OCI_ROCE = 'oci_roce'
     NONE = 'none'
 
-    def get_network_env_vars(self,
-                             acc_type: Optional[str] = None,
-                             pod_local_rdma: bool = False) -> Dict[str, str]:
+    def get_network_env_vars(self) -> Dict[str, str]:
         """Get network environment variables for this cluster type.
 
-        Args:
-            acc_type: The canonical accelerator type requested (e.g. 'GB200').
-                Used by OCI to pick a shape-specific NCCL profile.
-            pod_local_rdma: The pod receives its own RDMA devices (SR-IOV
-                virtual functions) instead of sharing the node's. Profiles that
-                name the host's physical functions have to widen their HCA
-                list, since those names do not exist in such a pod.
+        For OCI this is the generic RoCE profile; `oci_nccl.get_env_vars`
+        replaces its NCCL keys with the node shape's own set when it knows one.
         """
         if self == KubernetesHighPerformanceNetworkType.NEBIUS:
             # Nebius cluster with InfiniBand - use InfiniBand optimizations
@@ -158,87 +151,10 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
                 'FI_PROVIDER': 'efa',
             }
         elif self == KubernetesHighPerformanceNetworkType.OCI_ROCE:
-            # OCI bare-metal GPU shapes use RDMA for multi-node NCCL. Values
-            # mirror the oracle-quickstart/oci-hpc-oke NCCL reference params
-            # (the same recommended values OCI's stack bakes into its
-            # `oci-nccl-parameters-<shape>` configmaps). Users can override
-            # any of these via task `envs:`.
-            # Refer to the examples https://github.com/oracle-quickstart/oci-hpc-oke/tree/main/manifests/nccl-tests/kueue for more details. # pylint: disable=line-too-long
-            acc = (acc_type or '').upper()
-            # The Grace profiles below name the host's physical functions
-            # exactly. A pod holding SR-IOV virtual functions never sees those
-            # names, so the list has to widen to the family prefix. This is the
-            # only NCCL difference between Oracle's two reference manifests for
-            # the same shape, and it fails silently: NCCL finds no matching
-            # device and falls back to TCP rather than erroring.
-            #
-            # Widening hands NIC selection to the device plugin: the pod holds
-            # only the VFs its SriovNetworkNodePolicy chose to create, so the
-            # prefix cannot reach a PF the exact list was excluding. A policy
-            # that also exposes non-fabric NICs would need `NCCL_IB_HCA`
-            # narrowed again through task `envs:`.
-            pf_names_visible = not pod_local_rdma
-            if acc == 'GB200':
-                # GB200 NVL72 runs Quantum-2 InfiniBand plus rack-scale
-                # multi-node NVLink (MNNVL) and NVLink SHARP (NVLS) -- a
-                # distinct profile from the RoCEv2 shapes below. It drops the
-                # RoCE-only DSCP/GID/UCX knobs and turns on MNNVL/NVLS/cumem.
-                # The HCA list is the exact set OCI validated for BM.GPU.GB200.4.
-                logger.info('OCI network_tier=best: using GB200 NCCL profile '
-                            '(MNNVL/NVLS).')
-                return {
-                    'NCCL_DEBUG': 'WARN',
-                    # Multi-node NVLink across the NVL72 rack.
-                    'NCCL_MNNVL_ENABLE': '1',
-                    # Required for MNNVL to work.
-                    'NCCL_CUMEM_ENABLE': '1',
-                    'NCCL_NET_PLUGIN': 'sys',
-                    'NCCL_IB_HCA': ('mlx5_0,mlx5_1,mlx5_3,mlx5_4'
-                                    if pf_names_visible else 'mlx5'),
-                    # NVLink SHARP in-network reductions.
-                    'NCCL_NVLS_ENABLE': '1',
-                    'NCCL_SOCKET_IFNAME': 'eth0',
-                }
-            if acc == 'GB300':
-                # GB300 NVL72 is MNNVL/NVLS like GB200 but keeps the RoCE IB
-                # tuning knobs and disables the net plugin (NET_PLUGIN=none).
-                # Values per OCI's BM.GPU.GB300.4 reference set. The leading
-                # '=' in NCCL_IB_HCA is NCCL's exact-name-match prefix, not a
-                # typo -- keep it.
-                logger.info('OCI network_tier=best: using GB300 NCCL profile '
-                            '(MNNVL/NVLS).')
-                return {
-                    'NCCL_DEBUG': 'WARN',
-                    'NCCL_MNNVL_ENABLE': '1',
-                    'NCCL_CUMEM_ENABLE': '1',
-                    'NCCL_NET_PLUGIN': 'none',
-                    'NCCL_IB_HCA': ('=mlx5_0,mlx5_1,mlx5_2,mlx5_3,'
-                                    'mlx5_5,mlx5_6,mlx5_7,mlx5_8'
-                                    if pf_names_visible else 'mlx5'),
-                    'NCCL_NVLS_ENABLE': '1',
-                    'NCCL_SOCKET_IFNAME': 'eth0',
-                    # GPU-to-CPU (C2C) GPUDirect over the Grace link.
-                    'NCCL_NET_GDR_C2C': '1',
-                    # With NET_GDR_C2C on, NCCL's GDR cutoff is PATH_P2C, and
-                    # a GPU whose NIC sits one PCIe host bridge away falls
-                    # outside it -- GDR silently off. PHB widens the cutoff by
-                    # exactly that one level; nothing else changes.
-                    'NCCL_NET_GDR_LEVEL': 'PHB',
-                    'NCCL_IB_GID_INDEX': '3',
-                    'NCCL_IB_TC': '41',
-                    'NCCL_IB_SL': '0',
-                    'NCCL_IB_TIMEOUT': '22',
-                    'NCCL_BUFFSIZE': '16777216',
-                    'NCCL_IB_QPS_PER_CONNECTION': '4',
-                    'NCCL_IB_SPLIT_DATA_ON_QPS': '0',
-                    'NCCL_DMABUF_ENABLE': '1',
-                }
-            # RoCEv2 shapes (H100/H200/B200). The broad 'mlx5' prefix match
-            # works across shapes; per-shape exact HCA lists give marginally
-            # better perf (tracked as a follow-up).
-            logger.info('OCI network_tier=best: using default RoCE NCCL '
-                        f'profile (acc_type={acc_type!r}).')
+            # Generic RoCEv2 profile for OCI bare-metal GPU shapes, used when
+            # the node shape is unknown or has no Oracle parameter set.
             return {
+                # Prefix match: every mlx5 device on the node.
                 'NCCL_IB_HCA': 'mlx5',
                 # RoCEv2 GID index. Fixed on OCI's bare-metal GPU images.
                 'NCCL_IB_GID_INDEX': '3',
@@ -247,6 +163,10 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
                 # OCI BM.GPU shapes use legacy eth* naming; primary NIC
                 # is eth0 even under hostNetwork: true.
                 'NCCL_SOCKET_IFNAME': 'eth0',
+                # UCX only, not NCCL: keeps an mpirun launcher's MPI traffic
+                # (`-mca pml ucx`) on TCP over the primary NIC, as Oracle's
+                # NCCL-test manifests do. UCX data paths such as NIXL should
+                # override these through task `envs:`.
                 'UCX_TLS': 'tcp',
                 'UCX_NET_DEVICES': 'eth0',
             }
@@ -278,6 +198,14 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
 DEFAULT_NAMESPACE = 'default'
 
 DEFAULT_SERVICE_ACCOUNT_NAME = 'skypilot-service-account'
+# Controller clusters provision other clusters, so they need permissions no
+# pod running user code should hold. They get their own account; the name
+# above stays with workload pods, because operator-written policy (quotas,
+# admission rules, their own RoleBindings) references it by string.
+CONTROLLER_SERVICE_ACCOUNT_NAME = 'skypilot-controller-service-account'
+# Service accounts SkyPilot creates and reconciles itself.
+MANAGED_SERVICE_ACCOUNT_NAMES = (DEFAULT_SERVICE_ACCOUNT_NAME,
+                                 CONTROLLER_SERVICE_ACCOUNT_NAME)
 
 MEMORY_SIZE_UNITS = {
     'm': 0.001,
@@ -326,7 +254,25 @@ KIND_CONTEXT_NAME = 'kind-skypilot'  # Context name used by sky local up
 PORT_FORWARD_PROXY_CMD_TEMPLATE = 'kubernetes-port-forward-proxy-command.sh'
 # We add a version suffix to the port-forward proxy command to ensure backward
 # compatibility and avoid overwriting the older version.
-PORT_FORWARD_PROXY_CMD_VERSION = 3
+#
+# v4 reads a hostNetwork pod's sshd port off the pod spec instead of the
+# cluster's ray-ports ConfigMap. The bump is load-bearing, not cosmetic: this
+# script lives at ONE path per user and is re-copied on every auth setup, so
+# without it, upgrading and launching any Kubernetes cluster would replace the
+# script that every *pre-existing* hostNetwork cluster's stored
+# ssh_proxy_command points at. Those clusters' pods declare no ports, so the
+# new lookup finds nothing and SSH would fall back to 22 -- the node's own
+# sshd. Keeping v3 on disk leaves them on the script that still reads the
+# ConfigMap they did publish to.
+#
+# INVARIANT, new as of v4: versions may now read *different sources* for the
+# same value. Earlier bumps changed the script while every version still read
+# the same place, so re-deriving an existing cluster's proxy command with
+# current code was harmless. It is not any more -- handing an existing
+# cluster a v4 script points it at a pod spec that declares no ports. A
+# stored ssh_proxy_command must never be re-derived for a cluster that
+# already exists; it is written once, at provisioning.
+PORT_FORWARD_PROXY_CMD_VERSION = 4
 PORT_FORWARD_PROXY_CMD_PATH = ('~/.sky/kubernetes-port-forward-proxy-command-'
                                f'v{PORT_FORWARD_PROXY_CMD_VERSION}.sh')
 
@@ -2224,10 +2170,11 @@ def pod_terminated_abnormally(pod: 'kubernetes_models.V1Pod') -> bool:
 # Canonical Kubernetes failure-reason -> remediation hint table, shared by the
 # provision-failure formatter (sky/backends/cloud_vm_ray_backend.py, via
 # match_kubernetes_failure_hint) and the pod-OOM diagnosis path
-# (diagnose_terminated_pod). Each entry maps a list of case-sensitive
-# substrings (matched against a failure reason) to a hint. A hint may contain a
-# literal `{dashboard_url}` token; callers that can resolve the dashboard URL
-# substitute the real URL, others fall back to a generic phrase.
+# (diagnose_terminated_pod). Each entry maps a list of case-sensitive tokens to
+# a hint; a token matches a failure reason that names it, not one that merely
+# contains it inside a longer word (see reason_matches_failure_token). A hint
+# may contain a literal `{dashboard_url}` token; callers that can resolve the
+# dashboard URL substitute the real URL, others fall back to a generic phrase.
 KUBERNETES_FAILURE_HINTS: List[Tuple[List[str], str]] = [
     (['ImagePullBackOff', 'ErrImagePull'],
      'To fix: Verify the image tag exists and registry credentials are configured.'
@@ -2262,14 +2209,44 @@ KUBERNETES_FAILURE_HINTS: List[Tuple[List[str], str]] = [
 ]
 
 
-def match_kubernetes_failure_hint(reason: str) -> Optional[str]:
-    """Return the remediation hint whose substrings match `reason`, or None.
+def reason_matches_failure_token(reason: str, token: str) -> bool:
+    """Whether `reason` names `token`, rather than merely containing it.
 
-    The returned hint may contain a literal `{dashboard_url}` token for the
-    caller to substitute.
+    Kubernetes reasons are camelCase identifiers, so a plain substring test
+    also fires on any longer word a token happens to sit inside. A queue
+    controller evicting an admitted workload leaves
+    `WorkloadEvictedDueToPodsReadyTimeout`, which contains 'Evicted': matching
+    it hands that user the node-pressure remediation ("increase
+    `resources.memory` or `resources.disk_size`"), which cannot fix a queue
+    eviction. So a match may not run on into the surrounding word: the
+    characters adjoining it may not extend the token's alphanumeric edges.
+    'Evicted:' and 'Pod Evicted' still match; 'WorkloadEvictedDueTo...' and
+    'PodEvicted' no longer do.
+
+    Only edges that are alphanumeric are anchored, so a token wrapped in
+    punctuation still matches -- notably the multi-word
+    NO_MEMORY_LIMIT_MARKER inside 'OOMKilled (exit code 137, no memory limit
+    set)'.
     """
-    for substrings, hint in KUBERNETES_FAILURE_HINTS:
-        if any(s in reason for s in substrings):
+    if not token:
+        return False
+    pattern = re.escape(token)
+    if token[0].isalnum():
+        pattern = r'(?<![0-9A-Za-z])' + pattern
+    if token[-1].isalnum():
+        pattern = pattern + r'(?![0-9A-Za-z])'
+    return re.search(pattern, reason) is not None
+
+
+def match_kubernetes_failure_hint(reason: str) -> Optional[str]:
+    """Return the remediation hint whose tokens match `reason`, or None.
+
+    A token matches when `reason` names it as a word of its own; see
+    reason_matches_failure_token. The returned hint may contain a literal
+    `{dashboard_url}` token for the caller to substitute.
+    """
+    for tokens, hint in KUBERNETES_FAILURE_HINTS:
+        if any(reason_matches_failure_token(reason, token) for token in tokens):
             return hint
     return None
 
@@ -2287,13 +2264,249 @@ def match_kubernetes_failure_hint_text(reason: str) -> Optional[str]:
 
 
 def get_failure_hint_reasons() -> List[str]:
-    """The reason substrings KUBERNETES_FAILURE_HINTS recognizes, flattened.
+    """The reason tokens KUBERNETES_FAILURE_HINTS recognizes, flattened.
 
-    A reason matching one of these names a specific failure cause (since we
+    A reason naming one of these names a specific failure cause (since we
     carry a remediation hint for it). Callers that gate work on "is the cause
-    already specific" can derive from this instead of duplicating the list.
+    already specific" can derive from this instead of duplicating the list;
+    they should test them with reason_matches_failure_token, so that a token
+    buried in a longer word does not count for them either.
     """
-    return [s for substrings, _ in KUBERNETES_FAILURE_HINTS for s in substrings]
+    return [token for tokens, _ in KUBERNETES_FAILURE_HINTS for token in tokens]
+
+
+def event_last_observed(event: Any) -> Optional[float]:
+    """When ``event`` was last observed, in unix seconds; None if unknown.
+
+    Prefers the last-observed time over the creation time. Kubernetes folds a
+    repeated event back into the original object -- bumping ``count`` and
+    ``last_timestamp`` (``series.last_observed_time`` on the events.k8s.io
+    path) while ``metadata.creation_timestamp`` stays pinned to the first
+    occurrence -- so the creation time says when a condition started, and only
+    the last-observed time says whether it is still happening.
+    """
+    series = getattr(event, 'series', None)
+    ts = (getattr(series, 'last_observed_time', None) or
+          getattr(event, 'last_timestamp', None) or
+          getattr(event, 'event_time', None) or
+          getattr(getattr(event, 'metadata', None), 'creation_timestamp', None))
+    if not isinstance(ts, datetime.datetime):
+        # Absent, or a field the API server did not populate.
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=datetime.timezone.utc)
+    return ts.timestamp()
+
+
+# How far before a pod was created an event may have been observed and still
+# be treated as evidence about that pod. Kubernetes keeps Events for an hour
+# by default and SkyPilot's pod names are a function of the cluster name, so a
+# relaunch inherits the events of the pod it replaces: with no lower bound, a
+# pod deleted by a user could be reported as the queue eviction that removed
+# the *previous* incarnation. The allowance absorbs the skew between the
+# component that stamps an event (a kubelet, a controller) and the API server
+# that stamped the pod the bound comes from -- and this process's clock, on
+# the paths where when the launch started is the only bound available. It is
+# deliberately small, because anything larger reaches back into the previous
+# pod.
+_POD_EVENT_CLOCK_SKEW_SECONDS = 60
+
+# Pod-event reasons that name *why* a pod was deleted, mapped to
+# (decisiveness, how the reason is reported). The events are ranked by
+# decisiveness rather than by recency because the informative event is
+# usually not the last one: the kubelet's generic 'Killing' follows whatever
+# actually caused the deletion, and would otherwise shadow it. The reported
+# form matches the '<Reason>: <message>' shape get_condensed_pod_reason
+# produces from a pod status, so a caller reads the same sentence whether the
+# pod is still there or only its events are.
+#
+# The Kueue entries were verified against Kueue v0.19.3. On eviction the pod
+# integration writes a TerminationTarget condition and deletes the pod
+# (pkg/controller/jobs/pod/pod_controller.go, (*Pod).Stop), and the job
+# framework emits a Normal 'Stopped' event on every pod it stopped, whose
+# message is the eviction message -- 'Exceeded the PodsReady timeout
+# <namespace>/<workload>' for a waitForPodsReady timeout, 'Preempted to
+# accommodate a workload (UID: ...) due to <reason>; ...' for preemption
+# (pkg/controller/jobframework/reconciler.go, stopJob).
+_POD_DELETION_EVENT_REASONS: Dict[str, Tuple[int, str]] = {
+    'NodeNotReady': (1, 'NodeNotReady'),
+    'TaintManagerEviction': (2, 'TaintManagerEviction'),
+    'DeletingNode': (3, 'DeletingNode'),
+    # The kubelet's eviction manager emits this as a Warning ('The node was
+    # low on resource: ...'), but drain controllers reuse the reason -- a node
+    # autoscaler consolidating a node emits a Normal 'Evicted' for every pod
+    # it drains -- so the event's own message is left to name whoever did it.
+    'Evicted': (4, 'Evicted'),
+    'ExcessPodDeleted': (5, 'ExcessPodDeleted'),
+    'Preempted': (6, 'Preempted'),
+    # Kueue's eviction event. Reported with its actor, because 'Stopped' on
+    # its own reads like the user stopped something.
+    'Stopped': (7, 'Stopped by Kueue'),
+}
+
+# Reasons that say a pod was on its way out without saying who deleted it, or
+# why. These are reported as context -- the last thing said about the pod --
+# and never as the cause: the kubelet emits 'Killing' for every deletion,
+# including the ones nothing explains, so treating it as an answer would
+# replace "no cause could be derived", which is what sends a user looking at
+# their own controllers, with a restatement of the deletion.
+_POD_DELETION_CONTEXT_EVENT_REASONS = frozenset({'Killing'})
+
+
+def _events_since(events: List[Any],
+                  since: Optional[datetime.datetime]) -> List[Any]:
+    """The events that can be evidence about the pod that exists now.
+
+    Events the API server left without a usable timestamp are kept: not
+    knowing when something happened is not evidence that it happened before
+    the pod did.
+    """
+    if since is None:
+        return events
+    cutoff = since.timestamp() - _POD_EVENT_CLOCK_SKEW_SECONDS
+    kept = []
+    for event in events:
+        observed_at = event_last_observed(event)
+        if observed_at is None or observed_at >= cutoff:
+            kept.append(event)
+    return kept
+
+
+def reason_from_pod_events(
+        events: List[Any],
+        since: Optional[datetime.datetime] = None) -> Optional[str]:
+    """Why a pod was deleted, from its own events; None if not derivable.
+
+    Only events that name a deletion cause count, because what comes back is
+    reported as the cause; everything else a deleted pod's events hold -- the
+    scheduler's complaint that it could not place the pod, the kubelet's note
+    that it is stopping the containers -- describes the state the pod was in
+    when somebody deleted it, not the deletion.
+
+    Kubernetes Events are separate objects with their own TTL (an hour by
+    default), so they outlive the pod they describe. That is what makes this
+    usable at all where it matters most: by the time we look, the pod object
+    itself is exactly the thing that no longer exists. ``since`` is when the
+    pod that is being explained was created, and drops the events of whatever
+    held the same pod name before it. ``events`` are expected newest-first,
+    which is what decides between two events of equal rank.
+    """
+    best_rank = 0
+    best_reason: Optional[str] = None
+    for event in _events_since(events, since):
+        ranked = _POD_DELETION_EVENT_REASONS.get(event.reason)
+        if ranked is None:
+            continue
+        rank, reported_as = ranked
+        if rank > best_rank:
+            best_rank = rank
+            message = (event.message or '').strip()
+            best_reason = f'{reported_as}: {message}' if message else reported_as
+    return best_reason
+
+
+def last_pod_event_context(
+        events: List[Any],
+        since: Optional[datetime.datetime] = None) -> Optional[str]:
+    """The last thing said about a pod, when nothing said why it was deleted.
+
+    A pod still waiting to be scheduled always carries the scheduler's
+    FailedScheduling complaint, and a deleted one carries the kubelet's
+    'Killing'. Neither says why anybody deleted the pod, so they are offered
+    for what they are -- the last thing said about it -- and the caller still
+    says plainly that no cause could be derived.
+    """
+    for event in _events_since(events, since):
+        # Events arrive newest-first.
+        if (event.type == 'Warning' or
+                event.reason in _POD_DELETION_CONTEXT_EVENT_REASONS):
+            message = (event.message or '').strip()
+            reason = event.reason or 'Unknown'
+            return f'{reason}: {message}' if message else reason
+    return None
+
+
+def _with_failure_hint(message: str, reason: str) -> str:
+    """Append the remediation hint `reason` earns, when it earns one."""
+    hint = match_kubernetes_failure_hint_text(reason)
+    if hint is not None:
+        message += f'\nHint: {hint}'
+    return message
+
+
+def _diagnose_deleted_pod(context: Optional[str], namespace: str,
+                          pod_name: str) -> Optional[str]:
+    """Why a pod that no longer exists was deleted; None when nothing says.
+
+    The pod's events outlive the pod, and for one that something else deleted
+    -- a queue controller evicting the workload, the taint manager, a node
+    going away -- they are the only record left of who did it.
+    """
+    try:
+        events = kubernetes.core_api(context).list_namespaced_event(
+            namespace,
+            field_selector=(f'involvedObject.kind=Pod,'
+                            f'involvedObject.name={pod_name}'),
+            _request_timeout=kubernetes.API_TIMEOUT).items
+        events = sorted(events,
+                        key=lambda event: event.metadata.creation_timestamp,
+                        reverse=True)
+    except Exception:  # pylint: disable=broad-except
+        return None
+    reason = reason_from_pod_events(events)
+    if reason is None:
+        # A pod that is merely absent is not news: every `sky down` leaves
+        # one, and the caller asks about all of them.
+        return None
+    return _with_failure_hint(f'Pod {pod_name} was deleted: {reason}.', reason)
+
+
+# A container's own output explains a failure only when the process exited by
+# itself. OOMKilled and evictions are decided outside it, so its log would be
+# noise there.
+_SELF_EXIT_REASON = 'Error'
+_ERROR_LOG_TAIL_LINES = 50
+# The last line of a Python traceback, where its message starts.
+_EXCEPTION_LINE = re.compile(r'^[A-Za-z_][\w.]*(Error|Exception): ')
+
+
+def _self_exit_output(context: Optional[str], namespace: str, pod_name: str,
+                      pod: 'kubernetes_models.V1Pod') -> Optional[str]:
+    """What a container that exited with an error last printed, or None.
+
+    A failure raised in a container's own command -- not an exec -- leaves
+    its explanation only in the container log; the caller would otherwise
+    report just "Error (exit code 1)".
+    """
+    for cs in (pod.status.container_statuses or []):
+        for state, previous in ((cs.state, False), (cs.last_state, True)):
+            term = state.terminated if state else None
+            if (term is None or term.exit_code == 0 or
+                    term.reason != _SELF_EXIT_REASON):
+                continue
+            try:
+                log = kubernetes.core_api(context).read_namespaced_pod_log(
+                    pod_name,
+                    namespace,
+                    container=cs.name,
+                    previous=previous,
+                    tail_lines=_ERROR_LOG_TAIL_LINES,
+                    _request_timeout=kubernetes.API_TIMEOUT)
+            except Exception:  # pylint: disable=broad-except
+                return None
+            if not isinstance(log, str):
+                return None
+            lines = log.rstrip().splitlines()
+            first = max(0, len(lines) - 10)
+            for i in range(len(lines) - 1, -1, -1):
+                if _EXCEPTION_LINE.match(lines[i]):
+                    first = i
+                    break
+            tail = '\n'.join(lines[first:]).strip()
+            if not tail:
+                return None
+            return f'{constants.CONTAINER_OUTPUT_MARKER} {cs.name}:\n{tail}'
+    return None
 
 
 def diagnose_terminated_pod(context: Optional[str], namespace: str,
@@ -2302,22 +2515,28 @@ def diagnose_terminated_pod(context: Optional[str], namespace: str,
 
     Reads the pod and, if it terminated abnormally, returns a user-facing
     message including the condensed reason (e.g. OOMKilled) and a remediation
-    hint when one applies. Returns None if the pod is healthy, finished
-    cleanly, missing, or cannot be read -- this is purely additive context, so
-    it must never raise.
+    hint when one applies. When the pod no longer exists, falls back to its
+    events, which outlive it and are the only place a deletion by something
+    else is recorded. Returns None if the pod is healthy, finished cleanly, or
+    cannot be explained -- this is purely additive context, so it must never
+    raise.
     """
     try:
         pod = kubernetes.core_api(context).read_namespaced_pod(
             pod_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
+    except kubernetes.api_exception() as e:
+        if getattr(e, 'status', None) != 404:
+            return None
+        return _diagnose_deleted_pod(context, namespace, pod_name)
     except Exception:  # pylint: disable=broad-except
         return None
     if not pod_terminated_abnormally(pod):
         return None
     reason = get_condensed_pod_reason(pod)
-    msg = f'Pod {pod_name} terminated: {reason}.'
-    hint = match_kubernetes_failure_hint_text(reason)
-    if hint is not None:
-        msg += f'\nHint: {hint}'
+    msg = _with_failure_hint(f'Pod {pod_name} terminated: {reason}.', reason)
+    output = _self_exit_output(context, namespace, pod_name, pod)
+    if output is not None:
+        msg += f'\n{output}'
     return msg
 
 
@@ -2752,6 +2971,32 @@ def get_node_affinity(
             },
         }]
     return node_affinity or None
+
+
+def get_pod_fields(
+    acc_label_key: Optional[str],
+    acc_label_values: Optional[List[str]],
+    avoid_label_keys: Optional[List[str]],
+) -> Dict[str, Any]:
+    """Builds the pod fields that SkyPilot computes in Python.
+
+    combine_pod_fields() merges the result, a partial pod manifest, into the
+    pod the cluster template renders.
+
+    Args:
+        acc_label_key: See get_node_affinity().
+        acc_label_values: See get_node_affinity().
+        avoid_label_keys: See get_node_affinity().
+
+    Returns:
+        A partial pod manifest, empty when no field applies.
+    """
+    pod_fields: Dict[str, Any] = {}
+    node_affinity = get_node_affinity(acc_label_key, acc_label_values,
+                                      avoid_label_keys)
+    if node_affinity is not None:
+        pod_fields['spec'] = {'affinity': {'nodeAffinity': node_affinity}}
+    return pod_fields
 
 
 def get_accelerator_label_keys(context: Optional[str],) -> List[str]:
@@ -3789,11 +4034,12 @@ def get_ssh_proxy_command(
             This key must be authorized to access the SSH jump pod.
         namespace: Kubernetes namespace to use.
         host_network: bool; Whether the target pod runs with
-            ``hostNetwork: true``. When True the proxy script discovers
-            the pod's probed sshd port from the cluster's ConfigMap;
-            when False it skips that lookup and uses port 22. Passed as
-            a flag so the script needs no per-connection `kubectl get
-            pod` probe to determine this.
+            ``hostNetwork: true``. When True the proxy script reads the
+            pod's assigned sshd port off the pod spec; when False it
+            skips that lookup and uses port 22. Passed as a flag so the
+            common path makes no kubectl call at all -- the port itself
+            cannot be passed, since this command is built during auth
+            setup, before the pod exists.
     """
     ssh_jump_ip = '127.0.0.1'  # Local end of the port-forward tunnel
     assert private_key_path is not None, 'Private key path must be provided'
@@ -4148,6 +4394,19 @@ def resolve_effective_pod_config(
         default_value={})
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
     return kubernetes_config
+
+
+def combine_pod_fields(cluster_yaml_obj: Dict[str, Any],
+                       pod_fields: Dict[str, Any]) -> Dict[str, Any]:
+    """Adds the pod fields from get_pod_fields() to the rendered pod.
+
+    Obeys the same add or update semantics as combine_pod_config_fields().
+    """
+    merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
+    config_utils.merge_k8s_configs(
+        merged_cluster_yaml_obj['available_node_types']['ray_head_default']
+        ['node_config'], copy.deepcopy(pod_fields))
+    return merged_cluster_yaml_obj
 
 
 def combine_pod_config_fields(
@@ -4533,6 +4792,31 @@ _ROLE_TAINT_KEY_PREFIXES = [
 
 
 def get_kubernetes_node_info(
+        context: Optional[str] = None) -> models.KubernetesNodesInfo:
+    """Gets the resource information for all the nodes in the cluster.
+
+    Results are also recorded as fleet GPU capacity for the usage heartbeat
+    (see usage_lib.record_node_info), so that daemon can reuse inventory any
+    caller already fetched instead of querying again. Recording is one
+    indexed DB read when a fresh row exists, one write when it does not, and
+    never affects what this function returns.
+    """
+    nodes_info = _get_kubernetes_node_info(context)
+    try:
+        # usage_lib's capacity collector calls this module; defer the import
+        # until both modules have finished initializing.
+        # pylint: disable=import-outside-toplevel
+        from sky.usage import usage_lib
+        resolved_context = (context if context is not None else
+                            get_current_kube_config_context_name())
+        usage_lib.record_node_info(resolved_context, nodes_info)
+    except Exception as e:  # pylint: disable=broad-except
+        # Telemetry bookkeeping must never break a node info query.
+        logger.debug(f'Failed to record node info for telemetry: {e}')
+    return nodes_info
+
+
+def _get_kubernetes_node_info(
         context: Optional[str] = None) -> models.KubernetesNodesInfo:
     """Gets the resource information for all the nodes in the cluster.
 
@@ -4982,6 +5266,14 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
 
 
 def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
+    """The context recorded for this cluster at provision time.
+
+    This is the cluster's *control* context. Prefer the explicit
+    get_control_context_from_config / get_execution_context_from_config at
+    new call sites, so that a reader of the code (and of a future
+    multi-cluster placement change) can tell which of the two a call site
+    meant; they are the same string for every cluster today.
+    """
     context = provider_config.get('context')
     assert isinstance(context, str)
     if context == kubernetes.in_cluster_context_name():
@@ -4989,6 +5281,83 @@ def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
         # to use in-cluster auth by setting the context to None.
         context = None
     return context
+
+
+def get_control_context_from_config(
+        provider_config: Dict[str, Any]) -> Optional[str]:
+    """The context holding the objects SkyPilot created for this cluster.
+
+    Identical to get_context_from_config; a distinct name so a call site can
+    say that the submitting cluster is what it means, rather than leaving that
+    to be inferred. See get_execution_context_from_config for why the two can
+    differ.
+    """
+    return get_context_from_config(provider_config)
+
+
+def get_execution_context_from_config(
+        provider_config: Dict[str, Any]) -> Optional[str]:
+    """The context this cluster's pods actually run on.
+
+    SkyPilot has a single notion of "the context" for a cluster: the one
+    written to `provider.context` at provision time and read back through
+    get_context_from_config. That works because the cluster SkyPilot submits
+    to is the cluster the pods run on.
+
+    A multi-cluster admission layer breaks that identity: the pods can be
+    admitted somewhere other than where they were submitted. The submitting
+    cluster keeps the objects SkyPilot created (and the API server it talks
+    to), while the pods run wherever there was room. Two questions then have
+    two answers:
+
+    - the *control* context -- where SkyPilot submitted, and so where
+      everything it writes on the cluster's behalf goes;
+    - the *execution* context -- where the pods run, and so what to exec
+      into, and read logs and events from.
+
+    Unless a provisioner records the placement under
+    `constants.PROVIDER_EXECUTION_CONTEXT_KEY`, this falls back to the
+    control context, which is the right answer whenever a cluster runs where
+    it was submitted -- that is, for every cluster today.
+
+    This resolves the context and nothing else. The namespace still comes
+    from get_namespace_from_config, and any object a caller addresses by name
+    is still named as the submitting cluster named it -- the head Deployment
+    get_command_runners targets, for one. Whoever first resolves a real
+    placement owns those too: a context alone is not enough to reach a pod in
+    a cluster that holds different objects.
+    """
+    recorded = provider_config.get(
+        kubernetes_constants.PROVIDER_EXECUTION_CONTEXT_KEY)
+    if recorded is None:
+        return get_control_context_from_config(provider_config)
+    if recorded == kubernetes.in_cluster_context_name():
+        # Mirrors get_context_from_config: the in-cluster context name is not
+        # a kubeconfig entry, and passing it on would defeat in-cluster auth.
+        return None
+    return recorded
+
+
+def set_execution_context_in_config(provider_config: Dict[str, Any],
+                                    context: Optional[str]) -> None:
+    """Record the context a cluster's pods run on in its provider config.
+
+    A no-op for a cluster with no context, so that the fallback in
+    get_execution_context_from_config stays in charge rather than a null
+    placement being pinned.
+
+    Note the value is recorded raw, exactly as `provider.context` holds it:
+    the in-cluster context name is mapped to None on read, by the same
+    accessor that maps `provider.context`.
+
+    Mutating the provider config is all this does. Whether a later reader
+    sees the placement depends on the caller persisting that config -- into
+    the cluster record, for a provisioner writing it at launch.
+    """
+    if context is None:
+        return
+    provider_config[
+        kubernetes_constants.PROVIDER_EXECUTION_CONTEXT_KEY] = context
 
 
 def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:

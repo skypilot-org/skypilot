@@ -659,6 +659,20 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs logs --no-follow -n {job_name})"; echo "$result"; echo "$result" | grep "hello world"',
             f'{self.ACTIVATE_CURRENT} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.SUCCEEDED])}',
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep SUCCEEDED',
+            # `--infra` against a server that predates it. The client refuses
+            # before sending, because a dropped infra filter would answer with
+            # jobs on *other* infra -- right-looking and wrong. Once the base
+            # release carries the filter, the same call has to work instead,
+            # so the assertion follows the base's API version rather than
+            # expiring the day this ships.
+            (f'{self.ACTIVATE_CURRENT} && '
+             f's="$(sky jobs queue --infra {generic_cloud} 2>&1)" || true; '
+             'echo "$s" && echo "$s" | grep -i "not supported by your API '
+             'server"' if
+             self.BASE_API_VERSION < constants.MIN_JOBS_INFRA_FILTER_API_VERSION
+             else f'{self.ACTIVATE_CURRENT} && '
+             f's="$(sky jobs queue --infra {generic_cloud})" && '
+             f'echo "$s" && echo "$s" | grep {job_name}'),
             # sync-down: new client, old server. Verifies the server still
             # writes downloaded logs under the path the client expects to
             # rewrite (api_server_user_logs_dir_prefix); regression check

@@ -636,25 +636,28 @@ If you want to use a pre-provisioned bucket for storing intermediate files, set 
 
 If you choose to specify a bucket, ensure that the bucket already exists and that you have the necessary permissions.
 
-When using a pre-provisioned intermediate bucket with :code:`jobs.bucket`, SkyPilot creates job-specific directories under the bucket root to store files. They are organized in the following structure:
+When using a pre-provisioned intermediate bucket with :code:`jobs.bucket`, SkyPilot creates job-specific directories under a per-workspace directory, :code:`workspaces/<workspace>/`, to store files. If :code:`jobs.bucket` includes a sub-path (e.g., :code:`s3://my-bucket/skypilot`), the directories are created under that sub-path. They are organized in the following structure:
 
 .. code-block:: text
 
   # cloud bucket, s3://my-bucket/ for example
   my-bucket/
-  ├── job-15891b25/            # Job-specific directory
-  │   ├── local-file-mounts/   # Files from local file mounts
-  │   ├── tmp-files/           # Temporary files
-  │   └── workdir/             # Files from workdir
-  └── job-cae228be/            # Another job's directory
-      ├── local-file-mounts/
-      ├── tmp-files/
-      └── workdir/
+  └── workspaces/
+      ├── default/                 # Jobs in the `default` workspace
+      │   ├── job-15891b25/        # Job-specific directory
+      │   │   ├── local-file-mounts/   # Files from local file mounts
+      │   │   ├── tmp-files/           # Temporary files
+      │   │   └── workdir/             # Files from workdir
+      │   └── job-cae228be/        # Another job's directory
+      └── team-a/                  # Jobs in the `team-a` workspace
+          └── job-4uqylqhd/
 
 When using a custom bucket (:code:`jobs.bucket`), the job-specific directories (e.g., :code:`job-15891b25/`) created by SkyPilot are removed when the job completes.
 
 .. tip::
-  Multiple users can share the same intermediate bucket. Each user's jobs will have their own unique job-specific directories, ensuring that files are kept separate and organized.
+  Multiple users and workspaces can share the same intermediate bucket. Each job has its own job-specific directory, and each :ref:`workspace <workspaces>` has its own :code:`workspaces/<workspace>/` prefix, so bucket IAM policies can grant access per workspace.
+
+  A workspace whose name contains characters other than lowercase letters, digits, :code:`-` and :code:`_` (e.g., a workspace named :code:`Research` or :code:`ml/prod`) uses the prefix :code:`<slug>.<hash>` instead, where :code:`<slug>` is the lowercased name with other characters replaced by :code:`-` and :code:`<hash>` is the first 8 hex digits of the SHA-256 of the name: :code:`Research` uses :code:`workspaces/research.979d6300/`.
 
 .. _nested-skypilot-managed-jobs:
 
@@ -674,6 +677,8 @@ means managed jobs can call the SkyPilot CLI/SDK to launch new workloads:
     sky jobs launch -y -n nested --cpus 2 "echo hello from nested job"
 
 The credentials are automatically injected and revoked when the job finishes. To disable this, set :code:`api_server_access: false`.
+
+When the launching job is a task of a :ref:`job group <job-groups>`, the new job attaches to that group: it is listed under the group and cancelled with it. See :ref:`job-groups-dynamic-members`. Pass :code:`--no-job-group` to launch a top-level job instead.
 
 .. note::
 

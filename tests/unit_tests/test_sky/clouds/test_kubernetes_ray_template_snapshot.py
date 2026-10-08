@@ -17,7 +17,9 @@ How it renders
 Each case is rendered through the same helper production uses,
 ``common_utils.fill_template``, so the tests exercise the real Jinja
 environment (undefined-variable and whitespace semantics), not a hand-rolled
-one.
+one. The pod fields computed in Python (``kubernetes_utils.get_pod_fields``)
+are then merged into the rendered pod with
+``kubernetes_utils.combine_pod_fields``, as ``write_cluster_config`` does.
 
 The fixture
 -----------
@@ -113,6 +115,7 @@ def base_variables() -> Dict[str, Any]:
         'k8s_acc_label_key': None,
         'k8s_acc_label_values': None,
         'k8s_service_account_name': 'skypilot-service-account',
+        'k8s_is_controller': False,
         'k8s_automount_sa_token': 'true',
         'k8s_fuse_device_required': False,
         'k8s_kueue_local_queue_name': None,
@@ -278,6 +281,10 @@ CASES: Dict[str, Dict[str, Any]] = {
     'custom_service_account': {
         'k8s_service_account_name': 'my-custom-sa',
         'k8s_automount_sa_token': 'false',
+    },
+    'controller': {
+        'k8s_service_account_name': 'skypilot-controller-service-account',
+        'k8s_is_controller': True,
     },
     'user_labels': {
         'labels': {
@@ -459,17 +466,17 @@ CASES: Dict[str, Dict[str, Any]] = {
 
 
 def _build_variables(case_name: str) -> Dict[str, Any]:
-    """Merges a case onto the base and derives the computed template vars.
+    """Merges a case onto the base and derives the computed pod fields.
 
-    ``k8s_node_affinity`` is built by calling the same production helper
-    (``kubernetes_utils.get_node_affinity``) that
+    ``pod_fields`` is built by calling the same production helper
+    (``kubernetes_utils.get_pod_fields``) that
     ``make_deploy_resources_variables`` uses, from the raw accelerator-label
     vars the case carries. Deriving it here rather than hard-coding it is what
     makes the goldens a semantic-identity proof for the Python lift.
     """
     variables = base_variables()
     variables.update(CASES[case_name])
-    variables['k8s_node_affinity'] = kubernetes_utils.get_node_affinity(
+    variables['pod_fields'] = kubernetes_utils.get_pod_fields(
         variables['k8s_acc_label_key'],
         variables['k8s_acc_label_values'],
         variables['avoid_label_keys'],
@@ -478,12 +485,21 @@ def _build_variables(case_name: str) -> Dict[str, Any]:
 
 
 def _render(variables: Dict[str, Any]) -> str:
-    """Render the template through the production fill_template helper."""
+    """Render the manifest the way write_cluster_config builds it.
+
+    The pod fields computed in Python are taken out of the variables, the
+    template goes through the production fill_template helper, and the
+    production combine_pod_fields helper merges the pod fields in.
+    """
+    variables = dict(variables)
+    pod_fields = variables.pop('pod_fields')
     with tempfile.TemporaryDirectory() as tmpdir:
         output_path = os.path.join(tmpdir, 'rendered.yml')
         common_utils.fill_template(TEMPLATE_NAME, variables, output_path)
         with open(output_path, 'r', encoding='utf-8') as f:
-            return f.read()
+            rendered = yaml.safe_load(f.read())
+    return yaml.safe_dump(
+        kubernetes_utils.combine_pod_fields(rendered, pod_fields))
 
 
 # Fields whose values are large generated shell blobs, not structural or
@@ -584,6 +600,107 @@ def test_sriov_pod_is_coherent() -> None:
     assert 'IPC_LOCK' in container['securityContext']['capabilities']['add']
     mounts = [m['mountPath'] for m in container.get('volumeMounts', [])]
     assert '/dev/infiniband' not in mounts
+
+
+# Verbs Kubernetes' privilege-escalation prevention does NOT gate on RBAC
+# objects. `create` and `update` are checked against what the requester
+# already holds; deletion is not checked at all, so granting it to a workload
+# pod lets that pod remove bindings the control plane depends on.
+_UNGATED_RBAC_VERBS = {'delete', 'deletecollection', '*'}
+
+_RBAC_RESOURCES = {'clusterroles', 'clusterrolebindings', '*'}
+
+
+@pytest.mark.parametrize('case_name', list(CASES.keys()))
+def test_cluster_role_grants_no_ungated_rbac_verb(case_name: str) -> None:
+    """The workload ClusterRole never grants a deletion verb on RBAC objects.
+
+    A golden pins the verb list too, but would accept whatever a careless
+    UPDATE_SNAPSHOT=1 produces. This is the property that matters: every pod
+    SkyPilot launches holds this ClusterRole, and deletion of RBAC objects is
+    the one verb no admission check stands in front of.
+    """
+    rendered = yaml.safe_load(_render(_build_variables(case_name)))
+    cluster_role = rendered['provider'].get('autoscaler_cluster_role')
+    if cluster_role is None:
+        # Not rendered at all for a workload cluster, which is stronger than
+        # rendering it without the verb.
+        return
+    rules = cluster_role['rules']
+
+    offenders = [
+        rule for rule in rules if _RBAC_RESOURCES &
+        set(rule.get('resources') or []) and _UNGATED_RBAC_VERBS &
+        set(rule.get('verbs') or [])
+    ]
+    assert not offenders, (
+        f'ClusterRole grants an ungated deletion verb on RBAC objects: '
+        f'{offenders}')
+
+
+_PROVISIONER_ONLY_ROLES = (
+    'autoscaler_cluster_role',
+    'autoscaler_cluster_role_binding',
+    'autoscaler_skypilot_system_role',
+    'autoscaler_skypilot_system_role_binding',
+    'autoscaler_ingress_role',
+    'autoscaler_ingress_role_binding',
+)
+
+
+def test_workload_cluster_gets_no_provisioner_roles() -> None:
+    """A workload cluster requests none of the provisioner-only roles.
+
+    Conditional rendering is only a boundary because the two kinds of cluster
+    also resolve to different service accounts — bindings naming one shared
+    account would re-grant every pod in the namespace regardless of which
+    cluster created them. So both halves are asserted together.
+    """
+    workload = yaml.safe_load(_render(_build_variables('base_cpu')))['provider']
+    controller = yaml.safe_load(_render(
+        _build_variables('controller')))['provider']
+
+    assert (workload['autoscaler_service_account']['metadata']['name'] !=
+            controller['autoscaler_service_account']['metadata']['name'])
+
+    for field in _PROVISIONER_ONLY_ROLES:
+        assert field not in workload, (
+            f'workload cluster should not request {field}')
+        assert field in controller, (f'controller cluster still needs {field}')
+
+    # The namespaced role is autodown's, so both keep it -- each bound to its
+    # own account rather than to one shared subject.
+    for spec in (workload, controller):
+        assert spec['autoscaler_role_binding']['subjects'][0]['name'] == (
+            spec['autoscaler_service_account']['metadata']['name'])
+
+
+def test_controller_prefix_resolves_to_the_controller_identity() -> None:
+    """What the identity branch keys on: the display name's prefix."""
+    from sky.utils import common
+
+    assert common.is_controller_name('sky-jobs-controller-abc123')
+    assert common.is_controller_name('sky-serve-controller-abc123')
+    # name_on_cloud is transformed and never carries the prefix; reading it
+    # instead of display_name would make the check silently always False.
+    assert not common.is_controller_name('my-cluster')
+    assert not common.is_controller_name('jobs-controller')
+
+
+def test_a_user_cannot_claim_the_controller_identity_by_naming() -> None:
+    """Launching under a controller prefix is refused, so naming can't escalate.
+
+    Because the identity branch keys on that prefix, this guard is now
+    load-bearing for a permission boundary rather than a naming convention --
+    and nothing at the guard itself says so. Relaxing it would silently turn
+    into privilege escalation, and this test is what fails on that day.
+    """
+    from sky import exceptions
+    from sky.utils import controller_utils
+
+    for name in ('sky-jobs-controller-mine', 'sky-serve-controller-mine'):
+        with pytest.raises(exceptions.NotSupportedError):
+            controller_utils.check_cluster_name_not_controller(name)
 
 
 @pytest.mark.parametrize('case_name', list(CASES.keys()))
