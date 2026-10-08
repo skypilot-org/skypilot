@@ -1023,7 +1023,7 @@ class TestSetRecoveringEventReason:
     """Reason/code selection for the RECOVERING event in set_recovering_async.
 
     Priority: external failures (plugin-reported), then a user-job failure
-    reason (non-zero exit on a healthy cluster, SKY-6411), then the last
+    reason (non-zero exit on a healthy cluster), then the last
     cluster event, then the generic preemption fallback.
     """
 

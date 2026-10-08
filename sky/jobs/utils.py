@@ -505,9 +505,9 @@ def _throttle_recovery_sweep(batch_seconds: float, log_file: TextIO) -> None:
     """Pause between recovery batches, in proportion to the last batch's cost.
 
     The sweep shares its DB with the heartbeats and lease renewals that decide
-    whether this replica keeps the leader role. Pushing a large sweep through
+    whether this process keeps the leader role. Pushing a large sweep through
     at full speed can starve those, cost the lease, and hand the sweep to
-    another replica that starts it over -- so the sweep must leave headroom.
+    another process that starts it over -- so the sweep must leave headroom.
 
     How much headroom is needed depends on how loaded the DB already is, and
     the time a batch just took is the cheapest available measure of that: it
@@ -2187,8 +2187,8 @@ def _provision_status_headline(provision_msg: str) -> Optional[str]:
 def _parked_launch_reason(job_id: int, task_id: Optional[int]) -> Optional[str]:
     """The status message of a parked cluster launch for this job, if any.
 
-    A launch that parks (``exceptions.ExecutionPausedError`` -- waiting on a
-    cluster lock, on queue admission, ...) ends its rich status, so the
+    A launch that parks (``exceptions.ExecutionPausedError``, e.g. waiting on
+    a cluster lock) ends its rich status, so the
     provisioning headline relayed into the controller log goes away and the
     waiting line loses the one explanation it had. The parked request keeps
     carrying that explanation in its status message, so read it from there.
@@ -2381,7 +2381,7 @@ def stream_logs_by_id(
             # read source per task by the presence of a local file, NOT by the
             # current global logging-agent config -- this keeps read-back
             # working after the agent is disconnected or when serving from a
-            # replica whose config view differs. When there is no local copy we
+            # server whose config view differs. When there is no local copy we
             # stream from the registered log reader, mirroring core.tail_logs.
             log_reader = logs.get_log_reader()
             task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
@@ -2488,13 +2488,10 @@ def stream_logs_by_id(
                             follow=False,
                             tail=tail if tail is not None else 0)
                         if returncode is None:
-                            # Not cluster-addressed: runtimes whose forwarded
-                            # records carry the managed-job identity instead of
-                            # an on-cluster job id (e.g. bare-pod runtimes with
-                            # no per-job log files) are read back directly by
-                            # (job_id, task_id). Readers without managed-job
-                            # addressing return None again and we fall through
-                            # to the terminal-state message.
+                            # Not cluster-addressed: retry by managed-job
+                            # identity (job_id, task_id). Readers without
+                            # managed-job addressing return None again and we
+                            # fall through to the terminal-state message.
                             returncode = log_reader.read_managed_job_logs(
                                 job_id,
                                 task_id,
@@ -3346,7 +3343,7 @@ def _reject_tree_lookup_extras(job_ids, workspace_match, name_match, pool_match,
     """The tree lookup takes job ids and nothing else.
 
     Whether a filter should test the named jobs, their roots, or every row
-    of the tree is undecided (SKY-7163), so a request that combines them is
+    of the tree is undecided, so a request that combines them is
     refused instead of answered one way. Pagination is refused for the same
     reason. Visibility (accessible_workspaces, user_hashes) is not a filter
     the caller chose and still applies. ``core.queue_v2`` runs the same check

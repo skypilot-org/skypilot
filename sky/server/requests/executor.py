@@ -1404,7 +1404,7 @@ async def schedule_internal_daemon_async(
     """Submit an internal daemon's request to the executor.
 
     Idempotent under concurrent callers (multiple uvicorn workers in the
-    same process; multiple replicas sharing a PG-backed request store):
+    same process; multiple API server instances sharing a request store):
 
     - First caller inserts a fresh PENDING row + enqueues onto the task
       queue.

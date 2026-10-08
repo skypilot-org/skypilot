@@ -703,10 +703,10 @@ def safe_reload_config() -> None:
     Best-effort refresh with a bounded lock wait: a reload is a *read*, so on a
     lock timeout we log and proceed with the currently loaded config rather than
     block the caller indefinitely behind a wedged lock holder (the historical
-    ``timeout=None`` could hang every reloader across replicas forever).
+    ``timeout=None`` could hang every reloader across processes forever).
 
     Uses a *shared* lock so concurrent reloads (this is a hot path: every
-    sync-handler config refresh, login-time role seed, per-replica reconcile)
+    sync-handler config refresh, login-time role seed, periodic reconcile)
     don't serialize against each other; a writer's exclusive lock still blocks
     reloads mid-write for torn-read safety. Safe against concurrent reloads
     within a single process because `reload_config` swaps the new config in
@@ -919,7 +919,7 @@ def override_skypilot_config(
         override_config_path_serialized: Optional[str] = None
 ) -> Iterator[None]:
     """Overrides the user configurations."""
-    # TODO(SKY-1215): allow admin user to extend the disallowed keys or specify
+    # TODO: allow admin user to extend the disallowed keys or specify
     # allowed keys.
     if not override_configs:
         # If no override configs (None or empty dict), do nothing.
@@ -1094,10 +1094,9 @@ _QUEUE_ADMISSION_TIMEOUT_KEYS: List[Tuple[str, ...]] = [
 ]
 
 # Hooks invoked at the end of `update_api_server_config_no_lock`, after the
-# new config has been persisted and reloaded in-process. Plugins use this to
-# invalidate caches that were derived from the config (e.g. a request that
-# memoized the result of `get_nested(...)` for a TTL). Registered at server
-# startup during single-threaded plugin loading, so no lock is needed.
+# new config has been persisted and reloaded in-process, e.g. to invalidate
+# state derived from the config. Registered at server startup during
+# single-threaded plugin loading, so no lock is needed.
 _CONFIG_UPDATE_HOOKS: List[Callable[[], None]] = []
 
 

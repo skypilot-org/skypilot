@@ -298,7 +298,7 @@ spec:
           # also write server stdout/stderr to a per-pod, per-boot file under
           # <dir>/<HOSTNAME>/server-<UTC_ISO>.log. Survives local logrotate
           # (copytruncate) and pod restarts; placing $HOSTNAME in the path
-          # keeps replicas from clobbering each other when the dir is shared
+          # keeps pods from clobbering each other when the dir is shared
           # (RWX) storage. Mirroring is opportunistic — if directory creation
           # fails (RO mount, permissions, NFS blip) we log a warning and
           # carry on rather than crash-loop the API server pod.
@@ -355,7 +355,7 @@ spec:
           successThreshold: 3
           {{- else }}
           # For fast startup, just serve when healthz check passes. There is no
-          # other replica to serve requests anyway.
+          # other pod to serve requests anyway.
           successThreshold: 1
           {{- end }}
           {{- end }}

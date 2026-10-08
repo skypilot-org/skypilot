@@ -1511,8 +1511,8 @@ _SBATCH_OPTIONS_SCHEMA = {
 
 # `quota.queue` names the QOS a job is submitted with (`sbatch --qos`) and
 # `quota.account` the account it is charged to (`sbatch --account`), mirroring
-# `kubernetes.quota.queue`. Permissive so external schedulers (registered via
-# plugins) can layer their own sub-fields under `quota`.
+# `kubernetes.quota.queue`. Permissive so plugins can layer their own
+# sub-fields under `quota`.
 _SLURM_QUOTA_SCHEMA = {
     'type': 'object',
     'required': [],
@@ -1745,10 +1745,9 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         },
     },
     # Alias of `kueue.local_queue_name`; `quota.queue` takes precedence
-    # when both are set. Permissive so external schedulers (registered
-    # via plugins) can layer their own sub-fields under `quota` without
-    # requiring per-key OSS schema updates; sub-field validation is the
-    # consumer's responsibility.
+    # when both are set. Permissive so plugins can layer their own
+    # sub-fields under `quota` without requiring per-key OSS schema
+    # updates; sub-field validation is the consumer's responsibility.
     'quota': {
         'type': 'object',
         'required': [],

@@ -1273,8 +1273,8 @@ def _resolve_remote_skylet_log_path(runner: Any,
     SKY_RUNTIME_DIR defaults to ``$HOME`` (see
     runtime_utils.get_runtime_dir_path, used by skylet/attempt_skylet.py to
     place the log). The runtime dir can be
-    relocated off ``$HOME`` -- Slurm moves it off the NFS home, and devspaces
-    override it via the pod env -- and not every command runner exposes that
+    relocated off ``$HOME`` -- Slurm moves it off the NFS home, and a pod env
+    can override it -- and not every command runner exposes that
     location as a Python attribute. Rather than special-casing each provider, we
     resolve the path on the remote node using the same env var, in the same
     ``source_bashrc`` environment that instance_setup uses to start skylet (see

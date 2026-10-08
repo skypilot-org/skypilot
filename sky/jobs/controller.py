@@ -457,11 +457,9 @@ class JobController:
         write-only logging store), we still keep the local copy so ``sky jobs
         logs`` can serve a finished job's logs.
 
-        Being configured is not the same as having worked: the agent may never
-        have run on the cluster this job landed on. A registered
-        ``LogDeliverySource`` (the component that deploys the agent) can report
-        that, and we then keep the local copy instead of leaving the job with no
-        readable logs anywhere.
+        A registered ``LogDeliverySource`` may report that this cluster's logs
+        were not delivered; we then keep the local copy instead of skipping
+        it.
         """
         if (logs.is_logging_agent_configured() and
                 logs.get_log_reader() is not None):
