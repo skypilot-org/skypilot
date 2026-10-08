@@ -531,6 +531,24 @@ class TestVerifyOncePerContainer:
             with pytest.raises(RuntimeError, match='already in use'):
                 host_network_probe._run_head()
 
+    def test_a_config_only_root_can_read_still_counts(self, monkeypatch,
+                                                      tmp_path):
+        """sshd_config is 0600 on RHEL-family images; sudo wrote it."""
+        block, config = self._env(monkeypatch, tmp_path, 22)
+        text = f'UsePAM yes\nPort {block["sshd"]}\n'
+        config.write_text(text)
+        config.chmod(0)
+        if os.access(config, os.R_OK):
+            pytest.skip('root reads a mode-000 file')
+
+        def sudo_cat(args, **_):
+            assert args == ['sudo', '-n', 'cat', str(config)], args
+            return mock.Mock(stdout=text)
+
+        monkeypatch.setattr(host_network_probe.subprocess, 'run', sudo_cat)
+        with self._hold(block['sshd']):
+            host_network_probe._run_head()
+
     def test_a_restarted_containers_old_connections_do_not_hold_a_port(self):
         """A container restart leaves TIME_WAIT on its ports; sshd and Ray
         rebind them (SO_REUSEADDR), so the check must not refuse them."""

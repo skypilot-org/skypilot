@@ -23,6 +23,7 @@ in flux.
 import argparse
 import os
 import socket
+import subprocess
 import sys
 import time
 from typing import Dict, List, Optional, Tuple
@@ -167,13 +168,25 @@ def _clash_hint(port: int) -> str:
 _SSHD_CONFIG = '/etc/ssh/sshd_config'
 
 
-def _already_verified() -> bool:
-    port = os.environ.get(_ENV_VAR_FOR_PORT['sshd'])
+def _sshd_config_lines() -> List[str]:
     try:
         with open(_SSHD_CONFIG, encoding='utf-8') as f:
-            return any(line.split() == ['Port', port] for line in f)
+            return f.read().splitlines()
+    except PermissionError:
+        # RHEL-family images ship it 0600; the bootstrap writes it via sudo,
+        # so read it the same way.
+        result = subprocess.run(['sudo', '-n', 'cat', _SSHD_CONFIG],
+                                capture_output=True,
+                                text=True,
+                                check=False)
+        return result.stdout.splitlines()
     except OSError:
-        return False
+        return []
+
+
+def _already_verified() -> bool:
+    port = os.environ.get(_ENV_VAR_FOR_PORT['sshd'])
+    return any(line.split() == ['Port', port] for line in _sshd_config_lines())
 
 
 def _verify_free(ports: Dict[str, int]) -> List[socket.socket]:
