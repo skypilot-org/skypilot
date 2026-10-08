@@ -10,6 +10,7 @@ import pathlib
 import subprocess
 import sys
 import threading
+import time
 from typing import List, Optional
 
 import pytest
@@ -35,6 +36,9 @@ class _Servers:
     def __init__(self, target_mode: str) -> None:
         self.target_mode = target_mode
         self.fallback_received: List[bytes] = []
+        # Counted on arrival: a client can open the fallback and die before
+        # sending anything, which fallback_received would not show.
+        self.fallback_connections = 0
         self.target_received: List[bytes] = []
         self.api_port = 0
         self.target_port = 0
@@ -72,6 +76,7 @@ class _Servers:
 
     async def _api(self, ws) -> None:
         if 'no_redirect=1' in ws.request.path:
+            self.fallback_connections += 1
             # Serving the session itself: the client's banner must arrive
             # intact, even though a failed target already consumed it.
             self.fallback_received.append((await ws.recv())[1:])
@@ -174,3 +179,42 @@ def test_a_redirect_target_that_serves_is_used(tmp_path, monkeypatch):
     assert out == _TARGET_BANNER
     assert servers.target_received == [_CLIENT_BANNER]
     assert not servers.fallback_received
+
+
+def test_a_client_gone_before_the_target_speaks_does_not_fall_back(
+        tmp_path, monkeypatch):
+    """ssh closed stdin (Ctrl-C, or it gave up) while the target was still
+    silent. Nobody is left to serve: the proxy must neither open a session on
+    the API server nor crash on the stdin asyncio has already closed."""
+    monkeypatch.setenv('HOME', str(tmp_path))
+    env = dict(os.environ, PYTHONPATH=str(_REPO))
+    env.pop('SKYPILOT_CONFIG', None)
+    env.pop('SKYPILOT_DEBUG', None)
+    with _Servers('silent') as servers:
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                str(_SCRIPT), f'http://127.0.0.1:{servers.api_port}', 'c',
+                'kubernetes-pod-ssh-proxy'
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+        try:
+            proc.stdin.write(_CLIENT_BANNER)
+            proc.stdin.flush()
+            # Well inside FIRST_DATA_TIMEOUT_SECONDS: the target is still
+            # silent, so only the client leaving can end this session.
+            time.sleep(1.5)
+            proc.stdin.close()
+            proc.wait(30)
+            stderr = proc.stderr.read().decode(errors='replace')
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+        connections = servers.fallback_connections
+    assert proc.returncode == 0, stderr
+    assert connections == 0
+    assert 'Traceback' not in stderr

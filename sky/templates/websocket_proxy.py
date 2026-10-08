@@ -56,12 +56,14 @@ class _RedirectTargetFailed(Exception):
 
 
 class _Session:
-    """What one connection saw: whether the backend sent anything, and the
-    stdin bytes sent to it before that (kept only until it does)."""
+    """What one connection saw: whether the backend sent anything, the stdin
+    bytes sent to it before that (kept only until it does), and whether stdin
+    reached EOF -- ssh is gone, so there is nobody left to fall back for."""
 
     def __init__(self) -> None:
         self.got_data = False
         self.sent_before_data = bytearray()
+        self.stdin_eof = False
 
 
 class _Stdio:
@@ -129,7 +131,10 @@ async def main(
         else:
             print(f'Error ssh into cluster: {e}', file=sys.stderr)
         sys.exit(1)
-    if redirect_target and not session.got_data:
+    # Serving nothing is a failure only while ssh is still there. After stdin
+    # EOF the client has left: a fallback would open an API-server session for
+    # nobody, then crash on the stdin that asyncio closed at EOF.
+    if redirect_target and not session.got_data and not session.stdin_eof:
         raise _RedirectTargetFailed('served nothing',
                                     bytes(session.sent_before_data))
 
@@ -257,6 +262,8 @@ async def stdin_to_websocket(reader: asyncio.StreamReader,
             data = await reader.read(BUFFER_SIZE)
 
             if not data:
+                if session is not None:
+                    session.stdin_eof = True
                 break
             if session is not None and not session.got_data:
                 # Kept, before the send, for a fallback to replay.
