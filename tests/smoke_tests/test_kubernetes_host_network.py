@@ -442,6 +442,62 @@ def test_kubernetes_host_network_relaunch_after_all_pods_gone():
 
 @pytest.mark.kubernetes
 @pytest.mark.no_dependency
+def test_kubernetes_host_network_relaunch_after_ray_stopped():
+    """Ray dies on live pods; a relaunch brings it back on the same ports.
+
+    The provisioner then re-runs the start command on pods whose own sshd
+    and skylet still hold their assigned ports, so the port check must not
+    fail against them. A restarted head comes back on its assigned port,
+    and its workers must be told that port rather than the default.
+    """
+    if _schedulable_nodes() < 2:
+        pytest.skip('needs two schedulable nodes: a hostNetwork cluster puts '
+                    'each pod on its own node')
+    name = smoke_tests_utils.get_cluster_name()
+    cfg, write_cfg = _hostnet_cfg('raystop')
+    launch = (f'sky launch -y -c {name} --infra kubernetes '
+              f'--config {cfg} --num-nodes 2 --cpus 1 --memory 2')
+    ray_stop = '"skypilot-runtime/bin/ray stop"'
+    # Ray is down when the refresh reports INIT; otherwise the relaunch
+    # below would not re-run the start command at all.
+    ray_down = (f's=$(sky status {name} --refresh); echo "$s"; '
+                f'echo "$s" | grep {name} | grep INIT')
+    same_ports = (_RESOLVE_PODC.format(name=name) + ' && ' +
+                  f'AFTER=$({_HEAD_PORTS}) && echo "head_after=$AFTER" && '
+                  f'[ "$(cat {cfg}.before)" = "$AFTER" ] && '
+                  f'GCS=$({_head_env("SKYPILOT_RAY_PORT")}) && '
+                  f'ssh {name} "cat ~/.sky/ray_port.json" | '
+                  'grep -qE "\\"ray_port\\": $GCS[,}]"')
+    test = smoke_tests_utils.Test(
+        'kubernetes_host_network_relaunch_after_ray_stopped',
+        [
+            write_cfg,
+            launch,
+            _RESOLVE_PODC.format(name=name) + ' && ' +
+            f'BEFORE=$({_HEAD_PORTS}) && echo "head_before=$BEFORE" && '
+            f'[ -n "$BEFORE" ] && echo "$BEFORE" > {cfg}.before',
+            # Ray dies on every pod of a live cluster.
+            f'ssh {name} {ray_stop} && ssh {name}-worker1 {ray_stop}',
+            ray_down,
+            launch,
+            same_ports,
+            f'sky exec {name} --num-nodes 2 "echo all_restarted_ok" && '
+            f'sky logs {name} --status',
+            # Only a worker's Ray dies; the head keeps running.
+            f'ssh {name}-worker1 {ray_stop}',
+            launch,
+            same_ports,
+            f'sky exec {name} --num-nodes 2 "echo worker_restarted_ok" && '
+            f'sky logs {name} --status',
+        ],
+        teardown=f'sky down -y {name}; rm -f {cfg} {cfg}.before',
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.no_dependency
 def test_kubernetes_host_network_ssh_port_needs_no_configmap():
     """The sshd port is discoverable from the pod alone.
 
