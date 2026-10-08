@@ -161,11 +161,19 @@ def _clash_hint(port: int) -> str:
             'rather than the kernel having handed it out.')
 
 
-# Written once this container's ports are verified. Every later run here -- a
-# re-run of the start command after Ray died, or the provisioner's own start
-# when Ray is slow -- finds our sshd and skylet on their ports, so it would
-# only fail against itself. A container restart starts a fresh /tmp.
-_VERIFIED_MARKER = '/tmp/sky_host_network_ports_verified'
+# The bootstrap writes the assigned sshd port here only after a verify passed,
+# so finding it means this container already verified; a re-run would fail on
+# our own sshd and skylet. Older pods have it too; a restart resets the file.
+_SSHD_CONFIG = '/etc/ssh/sshd_config'
+
+
+def _already_verified() -> bool:
+    port = os.environ.get(_ENV_VAR_FOR_PORT['sshd'])
+    try:
+        with open(_SSHD_CONFIG, encoding='utf-8') as f:
+            return any(line.split() == ['Port', port] for line in f)
+    except OSError:
+        return False
 
 
 def _verify_free(ports: Dict[str, int]) -> List[socket.socket]:
@@ -221,11 +229,9 @@ def _wait_head_gcs_tcp(host: str, port: int) -> None:
 
 
 def _verify_once(ports: Dict[str, int]) -> None:
-    if os.path.exists(_VERIFIED_MARKER):
+    if _already_verified():
         return
     held = _verify_free(ports)
-    with open(_VERIFIED_MARKER, 'w', encoding='utf-8'):
-        pass
     del held  # release just before ray start takes them
 
 

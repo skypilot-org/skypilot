@@ -497,14 +497,15 @@ class TestVerifyOncePerContainer:
     provisioner starts Ray itself because the pod's own start was slow. By
     then this pod's sshd and skylet hold their ports."""
 
-    def _env(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(host_network_probe, '_VERIFIED_MARKER',
-                            str(tmp_path / 'verified'))
+    def _env(self, monkeypatch, tmp_path, sshd_config_port):
+        config = tmp_path / 'sshd_config'
+        config.write_text(f'UsePAM yes\nPort {sshd_config_port}\n')
+        monkeypatch.setattr(host_network_probe, '_SSHD_CONFIG', str(config))
         block = ports.allocate_block(None)
         for name, port in block.items():
             monkeypatch.setenv(host_network_probe.env_var_for_port(name),
                                str(port))
-        return block
+        return block, config
 
     def _hold(self, port):
         sock = socket.socket()
@@ -515,19 +516,20 @@ class TestVerifyOncePerContainer:
 
     def test_a_rerun_does_not_fail_against_its_own_sshd(self, monkeypatch,
                                                         tmp_path):
-        block = self._env(monkeypatch, tmp_path)
+        block, config = self._env(monkeypatch, tmp_path, 22)
         host_network_probe._run_head()
-        with self._hold(block['sshd']):
+        # What the bootstrap does once the probe passed.
+        config.write_text(f'UsePAM yes\nPort {block["sshd"]}\n')
+        with self._hold(block['sshd']), self._hold(block['skylet']):
             host_network_probe._run_head()
 
-    def test_the_first_run_still_refuses_a_held_port(self, monkeypatch,
-                                                     tmp_path):
-        """The control: without the marker, the same holder fails."""
-        block = self._env(monkeypatch, tmp_path)
+    def test_a_container_not_yet_verified_refuses_a_held_port(
+            self, monkeypatch, tmp_path):
+        """The control: sshd_config still on 22, so the same holder fails."""
+        block, _ = self._env(monkeypatch, tmp_path, 22)
         with self._hold(block['sshd']):
             with pytest.raises(RuntimeError, match='already in use'):
                 host_network_probe._run_head()
-        assert not os.path.exists(host_network_probe._VERIFIED_MARKER)
 
     def test_a_restarted_containers_old_connections_do_not_hold_a_port(self):
         """A container restart leaves TIME_WAIT on its ports; sshd and Ray
