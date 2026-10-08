@@ -5,6 +5,7 @@ used in the Recipes feature. The database stores recipes that can be
 pinned globally, filtered by category/tags, and deployed as clusters, jobs,
 pools, or volumes.
 """
+import json
 import os
 import time
 from typing import Any, Dict, List, Optional, Union
@@ -47,6 +48,10 @@ recipes_table = sqlalchemy.Table(
     sqlalchemy.Column('updated_by_name', sqlalchemy.Text),
     sqlalchemy.Column('is_editable', sqlalchemy.Integer, default=1),
     sqlalchemy.Column('is_pinnable', sqlalchemy.Integer, default=1),
+    # JSON describing where an externally managed recipe comes from (e.g.
+    # {"kind": "git", "url": ..., "ref": ..., "sha": ..., "path": ...}).
+    # NULL for recipes created through the API.
+    sqlalchemy.Column('source', sqlalchemy.Text),
     sqlalchemy.Index('idx_recipe_user_id', 'user_id'),
     sqlalchemy.Index('idx_recipe_pinned', 'pinned'),
     sqlalchemy.Index('idx_recipe_type', 'recipe_type'),
@@ -186,6 +191,7 @@ class Recipe:
         updated_by_name: Optional[str] = None,
         is_editable: bool = True,
         is_pinnable: bool = True,
+        source: Optional[Dict[str, Any]] = None,
     ):
         self.name = name
         self.description = description
@@ -200,6 +206,7 @@ class Recipe:
         self.updated_by_name = updated_by_name
         self.is_editable = is_editable
         self.is_pinnable = is_pinnable
+        self.source = source
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API responses."""
@@ -217,6 +224,7 @@ class Recipe:
             'updated_by_name': self.updated_by_name,
             'is_editable': self.is_editable,
             'is_pinnable': self.is_pinnable,
+            'source': self.source,
         }
 
     @classmethod
@@ -236,7 +244,20 @@ class Recipe:
             updated_by_name=row.updated_by_name,
             is_editable=bool(row.is_editable),
             is_pinnable=bool(row.is_pinnable),
+            source=_load_source(row.source),
         )
+
+
+def _load_source(raw: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Parse the stored source JSON, tolerating malformed values."""
+    if not raw:
+        return None
+    try:
+        source = json.loads(raw)
+    except (TypeError, ValueError):
+        logger.warning(f'Ignoring malformed recipe source: {raw!r}')
+        return None
+    return source if isinstance(source, dict) else None
 
 
 # =============================================================================
@@ -514,3 +535,131 @@ def toggle_pin(recipe_name: str, pinned: bool) -> Optional[Recipe]:
             return None
         # Recipe exists but wasn't updated -> not pinnable
         raise ValueError('This recipe cannot be pinned or unpinned')
+
+
+# =============================================================================
+# Externally managed recipes
+# =============================================================================
+#
+# Recipes whose content is owned by a system outside the API (for example a
+# repository kept in sync by an integration). They are read-only through the regular
+# update/delete APIs, but pinnable like any other recipe. Every managed recipe
+# carries an ``owner_id`` (stored as ``user_id``) identifying the system that
+# manages it, and the functions below only ever touch rows with that owner, so
+# they cannot clobber a recipe created by a user.
+
+
+def upsert_managed_recipe(
+    name: str,
+    content: str,
+    recipe_type: Union[RecipeType, str],
+    owner_id: str,
+    owner_name: str,
+    source: Dict[str, Any],
+    description: Optional[str] = None,
+    updated_by_name: Optional[str] = None,
+) -> Recipe:
+    """Create or update an externally managed recipe.
+
+    A new recipe starts pinned. Updates never change the pinned status, so an
+    unpinned managed recipe stays unpinned. ``updated_at`` and
+    ``updated_by_name`` only change when the content, type or description
+    changes; ``source`` is always replaced.
+
+    Args:
+        name: Unique recipe name.
+        content: The YAML content (the caller is responsible for validating
+            it, e.g. with ``sky.recipes.core.validate_recipe_content``).
+        recipe_type: Type of recipe.
+        owner_id: Identifier of the managing system, stored as ``user_id``.
+        owner_name: Display name of the managing system.
+        source: JSON-serializable description of where the recipe comes from.
+        description: Optional description.
+        updated_by_name: Optional name to record as the last updater when the
+            content changes.
+
+    Returns:
+        The stored Recipe.
+
+    Raises:
+        exceptions.InvalidRecipeNameError: If the name format is invalid.
+        exceptions.RecipeAlreadyExistsError: If a recipe with this name exists
+            and is not managed by ``owner_id``.
+    """
+    engine = _db_manager.get_engine()
+    common_utils.check_recipe_name_is_valid(name)
+    type_str = recipe_type_to_str(recipe_type)
+    source_json = json.dumps(source)
+    now = time.time()
+
+    try:
+        with orm.Session(engine) as session:
+            session.execute(recipes_table.insert().values(
+                name=name,
+                description=description,
+                content=content,
+                recipe_type=type_str,
+                pinned=1,
+                user_id=owner_id,
+                user_name=owner_name,
+                created_at=now,
+                updated_at=now,
+                updated_by_name=updated_by_name,
+                is_editable=0,
+                is_pinnable=1,
+                source=source_json,
+            ))
+            session.commit()
+    except sqlalchemy.exc.IntegrityError:
+        pass
+    else:
+        recipe = get_recipe(name)
+        assert recipe is not None
+        return recipe
+
+    with orm.Session(engine) as session:
+        row = session.execute(
+            sqlalchemy.select(recipes_table).where(
+                recipes_table.c.name == name).where(
+                    recipes_table.c.user_id == owner_id)).fetchone()
+        if row is None:
+            raise exceptions.RecipeAlreadyExistsError(
+                f'A recipe with name "{name}" already exists')
+        updates: Dict[str, Any] = {
+            'source': source_json,
+            'user_name': owner_name,
+        }
+        if (row.content != content or row.recipe_type != type_str or
+                row.description != description):
+            updates.update(content=content,
+                           recipe_type=type_str,
+                           description=description,
+                           updated_at=now,
+                           updated_by_name=updated_by_name)
+        session.execute(
+            recipes_table.update().where(recipes_table.c.name == name).where(
+                recipes_table.c.user_id == owner_id).values(**updates))
+        session.commit()
+
+    recipe = get_recipe(name)
+    assert recipe is not None
+    return recipe
+
+
+def delete_managed_recipe(name: str, owner_id: str) -> bool:
+    """Delete an externally managed recipe.
+
+    Args:
+        name: The recipe's unique name.
+        owner_id: Identifier of the managing system.
+
+    Returns:
+        True if a recipe managed by ``owner_id`` was deleted.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(
+            recipes_table.delete().where(recipes_table.c.name == name).where(
+                recipes_table.c.user_id == owner_id))
+        session.commit()
+        return result.rowcount > 0

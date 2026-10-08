@@ -15,6 +15,7 @@ import {
   EditIcon,
   ShareIcon,
   CheckIcon,
+  ExternalLinkIcon,
 } from 'lucide-react';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -54,6 +55,15 @@ import {
 import { usePluginRecipeTypes } from '@/plugins/PluginProvider';
 import { TimestampWithTooltip } from '@/components/utils';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import {
+  GitAuthor,
+  GitBadge,
+  getSourceCommitUrl,
+  getSourceFileUrl,
+  getSourceRepoName,
+  isGitSourced,
+  shortSha,
+} from '@/components/elements/RecipeSource';
 
 // Parse recipe name from URL slug
 // Names are the unique identifiers for recipes (no UUID parsing needed)
@@ -450,6 +460,25 @@ export function RecipeDetail() {
                 {template.pinned && (
                   <PinIcon className="w-4 h-4 text-amber-500" />
                 )}
+                {isGitSourced(template) && (
+                  <GitBadge
+                    href={getSourceFileUrl(
+                      template.source,
+                      template.source.sha || template.source.ref
+                    )}
+                  >
+                    Git · {template.source.ref}
+                    {template.source.sha && (
+                      <>
+                        {' '}
+                        @{' '}
+                        <span className="font-mono">
+                          {shortSha(template.source.sha)}
+                        </span>
+                      </>
+                    )}
+                  </GitBadge>
+                )}
               </div>
               <div className="flex items-center gap-2 text-sm text-gray-500">
                 <span>{typeInfo.fullLabel}</span>
@@ -510,27 +539,40 @@ export function RecipeDetail() {
             <CopyIcon className="h-4 w-4 mr-1.5" />
             <span>Copy to New</span>
           </button>
-          <button
-            onClick={
-              template.is_editable !== false
-                ? () => setIsEditModalOpen(true)
-                : undefined
-            }
-            className={`flex items-center ${
-              template.is_editable === false
-                ? 'text-gray-400 cursor-not-allowed'
-                : 'text-sky-blue hover:text-sky-blue-bright'
-            }`}
-            title={
-              template.is_editable === false
-                ? 'Default recipes cannot be edited'
-                : ''
-            }
-            disabled={template.is_editable === false}
-          >
-            <EditIcon className="h-4 w-4 mr-1.5" />
-            <span>Edit</span>
-          </button>
+          {isGitSourced(template) ? (
+            <a
+              href={getSourceFileUrl(template.source, template.source.ref)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            >
+              <EditIcon className="h-4 w-4 mr-1.5" />
+              <span>Edit</span>
+              <ExternalLinkIcon className="h-3 w-3 ml-1" />
+            </a>
+          ) : (
+            <button
+              onClick={
+                template.is_editable !== false
+                  ? () => setIsEditModalOpen(true)
+                  : undefined
+              }
+              className={`flex items-center ${
+                template.is_editable === false
+                  ? 'text-gray-400 cursor-not-allowed'
+                  : 'text-sky-blue hover:text-sky-blue-bright'
+              }`}
+              title={
+                template.is_editable === false
+                  ? 'Default recipes cannot be edited'
+                  : ''
+              }
+              disabled={template.is_editable === false}
+            >
+              <EditIcon className="h-4 w-4 mr-1.5" />
+              <span>Edit</span>
+            </button>
+          )}
           <button
             onClick={
               template.is_editable !== false
@@ -543,7 +585,7 @@ export function RecipeDetail() {
                 : 'text-red-600 hover:text-red-700'
             }`}
             title={
-              template.is_editable === false
+              template.is_editable === false && !isGitSourced(template)
                 ? 'Default recipes cannot be deleted'
                 : ''
             }
@@ -554,6 +596,30 @@ export function RecipeDetail() {
           </button>
         </div>
       </div>
+
+      {isGitSourced(template) && template.source.error && (
+        <div className="flex items-start gap-2 mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <AlertTriangleIcon className="h-4 w-4 mt-0.5 flex-shrink-0" />
+          <div>
+            <div className="font-medium">
+              The latest change in git is invalid, so this recipe still uses the
+              last valid version
+            </div>
+            <div className="mt-1">
+              {template.source.error_sha && (
+                <>
+                  Commit{' '}
+                  <span className="font-mono">
+                    {shortSha(template.source.error_sha)}
+                  </span>
+                  :{' '}
+                </>
+              )}
+              {template.source.error}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Template Details Card */}
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
@@ -576,7 +642,11 @@ export function RecipeDetail() {
                 Authored by
               </div>
               <div className="text-base mt-1">
-                {template.user_name || template.user_id || 'Unknown'}
+                {isGitSourced(template) ? (
+                  <GitAuthor />
+                ) : (
+                  template.user_name || template.user_id || 'Unknown'
+                )}
               </div>
             </div>
             <div>
@@ -592,6 +662,70 @@ export function RecipeDetail() {
                 by {template.updated_by_name || template.user_name || 'Unknown'}
               </div>
             </div>
+            {isGitSourced(template) && (
+              <>
+                <div>
+                  <div className="text-gray-600 font-medium text-base">
+                    Source
+                  </div>
+                  <div className="text-base mt-1 break-all">
+                    <a
+                      href={template.source.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sky-blue hover:text-sky-blue-bright"
+                    >
+                      {getSourceRepoName(template.source)}
+                    </a>
+                    {template.source.path && (
+                      <>
+                        {' › '}
+                        <span className="font-mono text-sm">
+                          {template.source.path}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-gray-600 font-medium text-base">
+                    Commit
+                  </div>
+                  <div className="text-base mt-1">
+                    {template.source.sha ? (
+                      <a
+                        href={getSourceCommitUrl(template.source)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-mono text-sm text-sky-blue hover:text-sky-blue-bright"
+                      >
+                        {shortSha(template.source.sha)}
+                      </a>
+                    ) : (
+                      '-'
+                    )}{' '}
+                    on{' '}
+                    <span className="font-mono text-sm">
+                      {template.source.ref}
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-gray-600 font-medium text-base">
+                    Last checked
+                  </div>
+                  <div className="text-base mt-1">
+                    <TimestampWithTooltip
+                      date={
+                        template.source.synced_at
+                          ? new Date(template.source.synced_at * 1000)
+                          : null
+                      }
+                    />
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Description */}

@@ -33,6 +33,11 @@ import {
   EmptyTableState,
 } from '@/components/ui/table';
 import { EmptyState } from '@/components/elements/EmptyState';
+import {
+  GitAuthor,
+  GitBadge,
+  isGitSourced,
+} from '@/components/elements/RecipeSource';
 import { isForceEmpty } from '@/lib/utils';
 import { sortData } from '@/data/utils';
 import {
@@ -162,9 +167,12 @@ function RecipeCard({ recipe, onPin }) {
                 }`}
               />
               <div className="flex-1 min-w-0">
-                <h3 className="text-base font-medium text-blue-600 truncate group-hover:text-blue-800 transition-colors">
-                  {recipe.name}
-                </h3>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <h3 className="text-base font-medium text-blue-600 truncate group-hover:text-blue-800 transition-colors">
+                    {recipe.name}
+                  </h3>
+                  {isGitSourced(recipe) && <GitBadge />}
+                </div>
               </div>
             </div>
 
@@ -184,12 +192,16 @@ function RecipeCard({ recipe, onPin }) {
               {/* Authored by */}
               <div className="text-sm text-gray-500 truncate">
                 Authored by{' '}
-                <UserName name={recipe.user_name || recipe.user_id} />
+                {isGitSourced(recipe) ? (
+                  <GitAuthor />
+                ) : (
+                  <UserName name={recipe.user_name || recipe.user_id} />
+                )}
               </div>
 
               {/* Last updated info - always render line for consistent height */}
               <div
-                className={`text-sm text-gray-500 truncate ${!(recipe.is_editable && recipe.user_name !== 'local') ? 'invisible' : ''}`}
+                className={`text-sm text-gray-500 truncate ${!((recipe.is_editable || isGitSourced(recipe)) && recipe.user_name !== 'local') ? 'invisible' : ''}`}
               >
                 Updated by{' '}
                 <UserName name={recipe.updated_by_name || recipe.user_name} />{' '}
@@ -456,12 +468,15 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Link
-                          href={`/recipes/${slug}`}
-                          className="text-blue-600 hover:text-blue-800 hover:underline"
-                        >
-                          {recipe.name}
-                        </Link>
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/recipes/${slug}`}
+                            className="text-blue-600 hover:text-blue-800 hover:underline"
+                          >
+                            {recipe.name}
+                          </Link>
+                          {isGitSourced(recipe) && <GitBadge />}
+                        </div>
                       </TableCell>
                       <TableCell
                         className="text-gray-600 max-w-[400px]"
@@ -470,7 +485,11 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
                         <span className="cursor-default">{truncatedDesc}</span>
                       </TableCell>
                       <TableCell className="text-gray-600">
-                        <UserName name={recipe.user_name || recipe.user_id} />
+                        {isGitSourced(recipe) ? (
+                          <GitAuthor />
+                        ) : (
+                          <UserName name={recipe.user_name || recipe.user_id} />
+                        )}
                       </TableCell>
                       <TableCell className="text-gray-600">
                         {recipe.updated_by_name || recipe.user_name ? (
@@ -536,7 +555,9 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
                             }`}
                             title={
                               recipe.is_editable === false
-                                ? 'Default recipes cannot be deleted'
+                                ? isGitSourced(recipe)
+                                  ? undefined
+                                  : 'Default recipes cannot be deleted'
                                 : 'Delete recipe'
                             }
                           >
