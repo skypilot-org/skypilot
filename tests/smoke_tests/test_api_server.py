@@ -4,20 +4,25 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import textwrap
 import threading
 import time
 from typing import Dict, Generator, List, Optional, Tuple, TypeVar
+import uuid
 
 import pytest
 import requests
 from smoke_tests import metrics_utils
 from smoke_tests import smoke_tests_utils
+from smoke_tests.docker import docker_utils
 import websockets
 
 import sky
 from sky import jobs
 from sky import skypilot_config
+from sky.adaptors import aws
 from sky.client import common as client_common
+from sky.jobs import utils as managed_job_utils
 from sky.server import common as server_common
 from sky.skylet import constants
 from sky.utils import context
@@ -424,6 +429,191 @@ def test_managed_jobs_force_disable_cloud_bucket(generic_cloud: str):
                 timeout=300),
         ],
         f'sky jobs cancel -y -n {name} || true',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+def test_managed_jobs_bucket_blob_loss():
+    """Recover bucket-backed inputs after losing the server upload blob."""
+    if not smoke_tests_utils.is_docker_remote_api_server():
+        pytest.skip('Requires the dedicated --remote-server Docker fixture.')
+
+    name = smoke_tests_utils.get_cluster_name()
+    bucket_name = f'sky-jobs-blob-{uuid.uuid4().hex}'
+    bucket_url = f's3://{bucket_name}'
+    container_name = docker_utils.get_container_name()
+    finish_file = f'/tmp/{name}-finish'
+
+    def on_server(code, *args):
+        result = subprocess.run([
+            'docker', 'exec', '-e', 'SKYPILOT_DEBUG=0', '-w', '/skypilot',
+            container_name, 'python', '-c',
+            textwrap.dedent(code), *args
+        ],
+                                check=False,
+                                capture_output=True,
+                                text=True,
+                                timeout=60)
+        assert result.returncode == 0, (result.returncode, result.stdout,
+                                        result.stderr)
+        return result.stdout.strip()
+
+    def exercise():
+        s3 = aws.resource('s3', region_name='us-east-1')
+        bucket = s3.Bucket(bucket_name)
+        bucket.create()
+        job_id = None
+        try:
+            kube_context = on_server("""
+                from sky.provision.kubernetes import utils
+                context = utils.get_current_kube_config_context_name()
+                assert context is not None
+                print(context)
+            """)
+            with tempfile.TemporaryDirectory() as source_dir:
+                source = pathlib.Path(source_dir)
+                workdir = source / 'workdir'
+                workdir.mkdir()
+                (workdir / 'workdir.txt').write_text(name)
+                mount_dir = source / 'mount-dir'
+                mount_dir.mkdir()
+                (mount_dir / 'directory.txt').write_text(name)
+                mount_file = source / 'file.txt'
+                mount_file.write_text(name)
+                task = sky.Task(name=name,
+                                workdir=str(workdir),
+                                file_mounts={
+                                    '/tmp/blob-file.txt': str(mount_file),
+                                    '/tmp/blob-dir': str(mount_dir),
+                                },
+                                resources=sky.Resources(
+                                    infra=f'kubernetes/{kube_context}',
+                                    **smoke_tests_utils.LOW_RESOURCE_PARAM),
+                                run=f"""set -eu
+                        test "$(cat workdir.txt)" = "{name}"
+                        test "$(cat /tmp/blob-file.txt)" = "{name}"
+                        test "$(cat /tmp/blob-dir/directory.txt)" = "{name}"
+                        echo 'BUCKET_INPUTS_OK'
+                        deadline=$((SECONDS + 900))
+                        while [ ! -f {finish_file} ]; do
+                            if [ "$SECONDS" -ge "$deadline" ]; then
+                                echo 'Timed out waiting for test to release job'
+                                exit 1
+                            fi
+                            sleep 1
+                        done
+                    """)
+                job_ids, _ = sky.get(jobs.launch(task, name=name))
+                assert job_ids is not None and len(job_ids) == 1, job_ids
+                job_id = job_ids[0]
+                cluster_name = (
+                    managed_job_utils.generate_managed_job_cluster_name(
+                        name, job_id))
+
+                def wait_for_job(target, min_recoveries=0):
+                    deadline = time.monotonic() + 600
+                    while time.monotonic() < deadline:
+                        records, _, _, _ = sky.get(
+                            jobs.queue_v2(refresh=False,
+                                          job_ids=[job_id],
+                                          fields=[
+                                              'job_id', 'status',
+                                              'recovery_count', 'failure_reason'
+                                          ]))
+                        assert len(records) == 1, records
+                        record = records[0]
+                        status = record['status']
+                        yield (f'Job {job_id}: {status}, recoveries='
+                               f'{record["recovery_count"]}')
+                        if (status == target and
+                                record['recovery_count'] >= min_recoveries):
+                            return
+                        assert not status.is_terminal(), record
+                        time.sleep(5)
+                    raise TimeoutError(
+                        f'Job {job_id} did not reach {target} with '
+                        f'{min_recoveries} recoveries: {record}')
+
+                yield from wait_for_job(sky.ManagedJobStatus.RUNNING)
+                # Check the persisted task before deleting only this job's blob.
+                blob_path = on_server(
+                    """
+                    import pathlib
+                    import shutil
+                    import sys
+                    from sky.jobs import file_content_utils, state
+                    from sky.server import common
+                    from sky.utils import dag_utils
+                    job_id = int(sys.argv[1])
+                    bucket_url = sys.argv[2]
+                    blob_id = state.get_file_mounts_blob_id(job_id)
+                    assert blob_id is not None, 'Client upload was not exercised'
+                    info = state.get_job_info_row(job_id)
+                    assert info is not None
+                    assert info.user_hash is not None
+                    content = file_content_utils.get_job_dag_content(job_id)
+                    assert content is not None
+                    task = dag_utils.load_dag_from_yaml_str(content).tasks[0]
+                    assert task.workdir is None, task.workdir
+                    assert task.file_mounts is not None
+                    sources = list(task.file_mounts.values())
+                    sources.extend(
+                        s.source for s in task.storage_mounts.values())
+                    assert sources and all(
+                        isinstance(s, str) and
+                        (s == bucket_url or s.startswith(bucket_url + '/'))
+                        for s in sources), sources
+                    path = pathlib.Path(
+                        common.resolve_blob_dir(blob_id, info.user_hash))
+                    assert path.is_dir(), path
+                    shutil.rmtree(path)
+                    assert not path.exists(), path
+                    print(path)
+                """, str(job_id), bucket_url)
+                yield f'Removed original upload blob: {blob_path}'
+                assert list(
+                    bucket.objects.limit(1)), 'jobs.bucket was not populated'
+                # Remove the client inputs too, so recovery must use the bucket.
+                for path in (workdir / 'workdir.txt',
+                             mount_dir / 'directory.txt', mount_file):
+                    path.unlink()
+                sky.get(sky.down(cluster_name))
+                yield (f'Removed worker cluster {cluster_name}; '
+                       'waiting for recovery')
+                yield from wait_for_job(sky.ManagedJobStatus.RUNNING,
+                                        min_recoveries=1)
+                sky.get(
+                    sky.exec(cluster_name=cluster_name,
+                             task=sky.Task(run=f'touch {finish_file}')))
+                yield from wait_for_job(sky.ManagedJobStatus.SUCCEEDED,
+                                        min_recoveries=1)
+                yield ('Replacement worker verified all three '
+                       'original input contents')
+                on_server(
+                    """
+                    import pathlib
+                    import sys
+                    path = pathlib.Path(sys.argv[1])
+                    assert not path.exists(), path
+                """, blob_path)
+        finally:
+            try:
+                if job_id is not None:
+                    sky.get(jobs.cancel(job_ids=[job_id]))
+            finally:
+                bucket.objects.all().delete()
+                bucket.delete()
+
+    test = smoke_tests_utils.Test(
+        'managed-jobs-bucket-blob-loss',
+        [exercise],
+        teardown=None,
+        config_dict={'jobs': {
+            'bucket': bucket_url
+        }},
+        timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
