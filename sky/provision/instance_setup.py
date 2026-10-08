@@ -105,6 +105,13 @@ DUMP_RAY_PORTS = (f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
                   'encoding="utf-8"))\';')
 
 _HOST_NETWORK_PROBE_TARGET = '/tmp/sky_host_network_probe.py'
+# A pod created before the server assigned ports has none in its env; its
+# own probe wrote them here at boot, so a re-run on it reads them back.
+_LEGACY_HOST_NETWORK_PORTS_ENV = '/tmp/sky_host_network_ports.env'
+_SOURCE_LEGACY_HOST_NETWORK_PORTS = (
+    'if [ -z "${SKYPILOT_SSHD_PORT:-}" ] && '
+    f'[ -f {_LEGACY_HOST_NETWORK_PORTS_ENV} ]; then '
+    f'. {_LEGACY_HOST_NETWORK_PORTS_ENV}; fi; ')
 
 _RAY_PATCHES_TARGET_DIR = '/tmp/sky_ray_patches'
 
@@ -228,7 +235,7 @@ def _host_network_probe_cmd(mode: str) -> str:
         # sshd on 22, where the K8s node's own sshd listens.
         'if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ]; then '
         f'echo \'{_host_network_probe_b64()}\' | base64 -d | gunzip > '
-        f'{_HOST_NETWORK_PROBE_TARGET}; '
+        f'{_HOST_NETWORK_PROBE_TARGET}; ' + _SOURCE_LEGACY_HOST_NETWORK_PORTS +
         f'{constants.SKY_PYTHON_CMD} {_HOST_NETWORK_PROBE_TARGET} '
         f'--mode {mode} || exit 1; '
         # Delete-then-append rather than sed-in-place: sshd_config files

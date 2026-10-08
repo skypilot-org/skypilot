@@ -8,10 +8,12 @@ pod that already has one.
 """
 import os
 import socket
+import subprocess
 from unittest import mock
 
 import pytest
 
+from sky.provision import instance_setup
 from sky.provision.kubernetes import host_network_ports as ports
 from sky.provision.kubernetes import host_network_probe
 from sky.provision.kubernetes import instance as k8s_instance
@@ -564,6 +566,15 @@ class TestVerifyOncePerContainer:
             with pytest.raises(RuntimeError, match='already in use'):
                 host_network_probe._run_head()
 
+    def test_a_pre_assignment_pod_rerun_skips_on_its_legacy_ports(
+            self, monkeypatch, tmp_path):
+        """Its ports come from the legacy env file, which has no skylet."""
+        block, config = self._env(monkeypatch, tmp_path, 22)
+        monkeypatch.delenv(host_network_probe.env_var_for_port('skylet'))
+        config.write_text(f'Port {block["sshd"]}\n')
+        with self._hold(block['sshd']), self._hold(block['gcs']):
+            host_network_probe._run_head()
+
     def test_a_restarted_containers_old_connections_do_not_hold_a_port(self):
         """A container restart leaves TIME_WAIT on its ports; sshd and Ray
         rebind them (SO_REUSEADDR), so the check must not refuse them."""
@@ -759,3 +770,35 @@ class TestClusterInfoCarriesTheHeadsSkyletPort:
         head = self._pod('c-head', sorted(block.values()))
         info = self._cluster_info(monkeypatch, {'c-head': head})
         assert info.get_head_instance().skylet_port == block['skylet']
+
+
+class TestLegacyPortsEnv:
+    """A pod from before server-assigned ports re-runs on the ports its own
+    probe wrote at boot; a newer pod never reads that file."""
+
+    @pytest.mark.parametrize('assigned_sshd, want_gcs', [(None, '58623'),
+                                                         ('20609', '20601')])
+    def test_only_a_pod_without_assigned_ports_reads_it(self, tmp_path,
+                                                        assigned_sshd,
+                                                        want_gcs):
+        env_file = tmp_path / 'ports.env'
+        env_file.write_text('export SKYPILOT_SSHD_PORT=56989\n'
+                            'export SKYPILOT_RAY_PORT=58623\n')
+        clause = instance_setup._SOURCE_LEGACY_HOST_NETWORK_PORTS.replace(
+            instance_setup._LEGACY_HOST_NETWORK_PORTS_ENV, str(env_file))
+        env = {'PATH': os.environ['PATH']}
+        if assigned_sshd:
+            env.update(SKYPILOT_SSHD_PORT=assigned_sshd,
+                       SKYPILOT_RAY_PORT='20601')
+        out = subprocess.run(['bash', '-c', clause + 'echo $SKYPILOT_RAY_PORT'],
+                             env=env,
+                             capture_output=True,
+                             text=True,
+                             check=True).stdout.strip()
+        assert out == want_gcs
+
+    @pytest.mark.parametrize('mode', ['head', 'worker'])
+    def test_it_is_read_before_the_probe_runs(self, mode):
+        cmd = instance_setup._host_network_probe_cmd(mode)
+        assert (cmd.index(instance_setup._SOURCE_LEGACY_HOST_NETWORK_PORTS) <
+                cmd.index(f'--mode {mode}'))

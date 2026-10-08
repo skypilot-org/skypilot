@@ -245,19 +245,21 @@ def _wait_head_gcs_tcp(host: str, port: int) -> None:
         f'{_HEAD_GCS_TCP_WAIT_TIMEOUT_S}s (last error: {last_err}).')
 
 
-def _verify_once(ports: Dict[str, int]) -> None:
+def _verify_once(names: List[str]) -> None:
+    # Checked before the ports are read: a pre-assignment pod re-running has
+    # only its legacy ports, without the newer names.
     if _already_verified():
         return
-    held = _verify_free(ports)
+    held = _verify_free(_assigned_ports(names))
     del held  # release just before ray start takes them
 
 
 def _run_head() -> None:
-    _verify_once(_assigned_ports(HEAD_PORT_NAMES))
+    _verify_once(HEAD_PORT_NAMES)
 
 
 def _run_worker() -> None:
-    _verify_once(_assigned_ports(WORKER_PORT_NAMES))
+    _verify_once(WORKER_PORT_NAMES)
     # The head's GCS port, assigned by the server: head and workers are
     # created concurrently, so a worker cannot read it off the head pod.
     head_gcs = int(os.environ[_ENV_VAR_FOR_PORT['gcs']])
