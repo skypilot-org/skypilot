@@ -1016,6 +1016,62 @@ class TestTaskCleanup:
         cleanup_patches['terminate'].assert_not_called()
 
 
+class TestPoolSubmissionKeptInMemory:
+    """A resumed pool task's executor carries the persisted submission, so
+    cleanup can still cancel it if the job's record goes away."""
+
+    @pytest.mark.asyncio
+    async def test_resume_copies_the_submission_into_the_executor(
+            self, monkeypatch):
+        jc = JobController.__new__(JobController)
+        jc._job_id = 1
+        jc._dag = MagicMock()
+        jc._pool = 'p'
+        jc._backend = MagicMock()
+        jc._backend.run_timestamp = 'sky-2026-01-01-00-00-00-000000'
+        jc.starting = set()
+        jc.starting_lock = asyncio.Lock()
+        jc.starting_signal = MagicMock()
+        task = MagicMock()
+        task.name = 'task0'
+        task.metadata = {}
+        task.run = 'echo hi'
+        task.envs = {constants.TASK_ID_ENV_VAR: 'tid'}
+        task.resources = None
+        executor = MagicMock()
+        executor.cluster_name = None
+        executor.job_id_on_pool_cluster = None
+        executor.on_resume = AsyncMock()
+        executor.monitor_task = AsyncMock(return_value=None)
+        jc._monitor_one_task = AsyncMock(return_value=True)
+
+        mjs = 'sky.jobs.controller.managed_job_state'
+        monkeypatch.setattr(
+            f'{mjs}.get_job_status_with_task_id_async',
+            AsyncMock(return_value=managed_job_state.ManagedJobStatus.RUNNING))
+        monkeypatch.setattr(f'{mjs}.get_pool_submit_info_async',
+                            AsyncMock(return_value=('worker-1', 7)))
+        monkeypatch.setattr(f'{mjs}.get_file_mounts_blob_id',
+                            lambda job_id: None)
+        monkeypatch.setattr('sky.jobs.controller._add_k8s_annotations',
+                            lambda task, job_id: None)
+        monkeypatch.setattr(
+            'sky.jobs.controller.recovery_strategy.StrategyExecutor.make',
+            MagicMock(return_value=executor))
+        monkeypatch.setattr(
+            'sky.jobs.controller.managed_job_utils.event_callback_func',
+            MagicMock(return_value=AsyncMock()))
+        monkeypatch.setattr(
+            'sky.jobs.controller.usage_lib.messages.usage.update_task_id',
+            lambda *args, **kwargs: None)
+
+        assert await jc._run_one_task(0, task) is True
+
+        assert executor.cluster_name == 'worker-1'
+        assert executor.job_id_on_pool_cluster == 7
+        assert jc.pool_submission == ('worker-1', 7)
+
+
 class TestDownloadLogsForCancelledJob:
     """Tests for ControllerManager._download_logs_for_cancelled_job.
 

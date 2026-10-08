@@ -845,6 +845,14 @@ class JobController:
             cluster_name, job_id_on_pool_cluster = (
                 await
                 managed_job_state.get_pool_submit_info_async(self._job_id))
+            # A resumed task's executor is fresh and holds no submission;
+            # keep its copy in step with the record, which cleanup falls
+            # back to if the record goes away (pool_submission).
+            if cluster_name is not None:
+                self._strategy_executor.cluster_name = cluster_name
+            if job_id_on_pool_cluster is not None:
+                self._strategy_executor.job_id_on_pool_cluster = (
+                    job_id_on_pool_cluster)
         if cluster_name is None:
             # Check if we have been cancelled here, in the case where a user
             # quickly cancels the job we want to gracefully handle it here,
