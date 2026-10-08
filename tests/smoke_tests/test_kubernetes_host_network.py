@@ -356,8 +356,10 @@ def test_kubernetes_host_network_block_shape():
     smoke_tests_utils.run_one_test(test)
 
 
+# resource_heavy: needs two nodes; one-node kind would only skip it.
 @pytest.mark.kubernetes
 @pytest.mark.no_dependency
+@pytest.mark.resource_heavy
 def test_kubernetes_host_network_worker_recovery_keeps_head_ports():
     """A worker lost to node failure is recreated without moving the head.
 
@@ -440,9 +442,8 @@ def test_kubernetes_host_network_relaunch_after_all_pods_gone():
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.kubernetes
-@pytest.mark.no_dependency
-def test_kubernetes_host_network_relaunch_after_ray_stopped():
+def _relaunch_after_ray_stopped(test_name: str, name: str,
+                                num_nodes: int) -> None:
     """Ray dies on live pods; a relaunch brings it back on the same ports.
 
     The provisioner then re-runs the start command on pods whose own sshd
@@ -450,50 +451,74 @@ def test_kubernetes_host_network_relaunch_after_ray_stopped():
     fail against them. A restarted head comes back on its assigned port,
     and its workers must be told that port rather than the default.
     """
-    if _schedulable_nodes() < 2:
-        pytest.skip('needs two schedulable nodes: a hostNetwork cluster puts '
-                    'each pod on its own node')
-    name = smoke_tests_utils.get_cluster_name()
     cfg, write_cfg = _hostnet_cfg('raystop')
     launch = (f'sky launch -y -c {name} --infra kubernetes '
-              f'--config {cfg} --num-nodes 2 --cpus 1 --memory 2')
+              f'--config {cfg} --num-nodes {num_nodes} --cpus 1 --memory 2')
     ray_stop = '"skypilot-runtime/bin/ray stop"'
-    # Ray is down when the refresh reports INIT; otherwise the relaunch
-    # below would not re-run the start command at all.
-    ray_down = (f's=$(sky status {name} --refresh); echo "$s"; '
-                f'echo "$s" | grep {name} | grep INIT')
+    # Wait for the refresh to report INIT: until Ray is seen down, a
+    # relaunch would not re-run the start command at all.
+    ray_down = (f'for i in $(seq 24); do s=$(sky status {name} --refresh); '
+                f'echo "$s" | grep {name} | grep -q INIT && exit 0; '
+                'sleep 5; done; echo "$s"; exit 1')
     same_ports = (_RESOLVE_PODC.format(name=name) + ' && ' +
                   f'AFTER=$({_HEAD_PORTS}) && echo "head_after=$AFTER" && '
                   f'[ "$(cat {cfg}.before)" = "$AFTER" ] && '
                   f'GCS=$({_head_env("SKYPILOT_RAY_PORT")}) && '
                   f'ssh {name} "cat ~/.sky/ray_port.json" | '
                   'grep -qE "\\"ray_port\\": $GCS[,}]"')
+    ran = (f'sky exec {name} --num-nodes {num_nodes} "echo restarted_ok" && '
+           f'sky logs {name} --status')
+    steps = [
+        write_cfg,
+        launch,
+        _RESOLVE_PODC.format(name=name) + ' && ' +
+        f'BEFORE=$({_HEAD_PORTS}) && echo "head_before=$BEFORE" && '
+        f'[ -n "$BEFORE" ] && echo "$BEFORE" > {cfg}.before',
+        # Ray dies on every pod of a live cluster.
+        ' && '.join(
+            [f'ssh {name} {ray_stop}'] +
+            [f'ssh {name}-worker{i} {ray_stop}' for i in range(1, num_nodes)]),
+        ray_down,
+        launch,
+        same_ports,
+        ran,
+    ]
+    if num_nodes > 1:
+        # Only a worker's Ray dies; the head keeps running.
+        steps += [
+            f'ssh {name}-worker1 {ray_stop}', ray_down, launch, same_ports, ran
+        ]
     test = smoke_tests_utils.Test(
-        'kubernetes_host_network_relaunch_after_ray_stopped',
-        [
-            write_cfg,
-            launch,
-            _RESOLVE_PODC.format(name=name) + ' && ' +
-            f'BEFORE=$({_HEAD_PORTS}) && echo "head_before=$BEFORE" && '
-            f'[ -n "$BEFORE" ] && echo "$BEFORE" > {cfg}.before',
-            # Ray dies on every pod of a live cluster.
-            f'ssh {name} {ray_stop} && ssh {name}-worker1 {ray_stop}',
-            ray_down,
-            launch,
-            same_ports,
-            f'sky exec {name} --num-nodes 2 "echo all_restarted_ok" && '
-            f'sky logs {name} --status',
-            # Only a worker's Ray dies; the head keeps running.
-            f'ssh {name}-worker1 {ray_stop}',
-            launch,
-            same_ports,
-            f'sky exec {name} --num-nodes 2 "echo worker_restarted_ok" && '
-            f'sky logs {name} --status',
-        ],
+        test_name,
+        steps,
         teardown=f'sky down -y {name}; rm -f {cfg} {cfg}.before',
         timeout=smoke_tests_utils.get_timeout('kubernetes'),
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.no_dependency
+def test_kubernetes_host_network_relaunch_after_head_ray_stopped():
+    """Single node, so it also runs on a one-node kind cluster."""
+    _relaunch_after_ray_stopped(
+        'kubernetes_host_network_relaunch_after_head_ray_stopped',
+        smoke_tests_utils.get_cluster_name(), 1)
+
+
+# resource_heavy: routes to the multi-node EKS/GKE queue. A hostNetwork
+# cluster puts each pod on its own node, so on one-node kind it would skip.
+@pytest.mark.kubernetes
+@pytest.mark.no_dependency
+@pytest.mark.resource_heavy
+def test_kubernetes_host_network_relaunch_after_ray_stopped():
+    """The workers also learn the port the restarted head took."""
+    if _schedulable_nodes() < 2:
+        pytest.skip('needs two schedulable nodes: a hostNetwork cluster puts '
+                    'each pod on its own node')
+    _relaunch_after_ray_stopped(
+        'kubernetes_host_network_relaunch_after_ray_stopped',
+        smoke_tests_utils.get_cluster_name(), 2)
 
 
 @pytest.mark.kubernetes
