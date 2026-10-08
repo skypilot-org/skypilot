@@ -2131,23 +2131,24 @@ function JobDetailsContent({
           />
         </div>
       )}
-      {field(
-        'Entrypoint',
-        jobData.entrypoint ? (
-          <span>
-            <code className="font-mono text-sm break-all">
-              {jobData.entrypoint}
-            </code>
+      {jobData.entrypoint ? (
+        <div key="Entrypoint" className="col-span-full min-w-0">
+          <div className="text-sm text-gray-500">
+            Entrypoint
             {copyButton(
               isCommandCopied,
               copyCommandToClipboard,
               'Copy command'
             )}
-          </span>
-        ) : (
-          dash
-        ),
-        { wide: true }
+          </div>
+          <div className="mt-1 bg-gray-50 border border-gray-200 rounded-md p-3">
+            <code className="text-sm text-gray-800 font-mono break-all">
+              {jobData.entrypoint}
+            </code>
+          </div>
+        </div>
+      ) : (
+        field('Entrypoint', dash, { wide: true })
       )}
       {yamlBlock && <div className="col-span-full min-w-0">{yamlBlock}</div>}
     </div>
