@@ -542,8 +542,8 @@ def toggle_pin(recipe_name: str, pinned: bool) -> Optional[Recipe]:
 # =============================================================================
 #
 # Recipes whose content is owned by a system outside the API (for example a
-# repository kept in sync by an integration). They are read-only through the regular
-# update/delete APIs, but pinnable like any other recipe. Every managed recipe
+# repository kept in sync by an integration). They are read-only through the
+# regular update/delete APIs, but pinnable like any other recipe. Every managed recipe
 # carries an ``owner_id`` (stored as ``user_id``) identifying the system that
 # manages it, and the functions below only ever touch rows with that owner, so
 # they cannot clobber a recipe created by a user.
