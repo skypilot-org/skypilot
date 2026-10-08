@@ -218,3 +218,30 @@ def test_a_client_gone_before_the_target_speaks_does_not_fall_back(
     assert proc.returncode == 0, stderr
     assert connections == 0
     assert 'Traceback' not in stderr
+
+
+def test_stdin_stays_usable_after_eof(tmp_path):
+    """asyncio's read pipe closes the file it was given at EOF. That must not
+    be sys.stdin: a fallback started as ssh leaves reads sys.stdin.fileno()."""
+    code = (
+        'import asyncio, importlib.util, os, sys\n'
+        f'spec = importlib.util.spec_from_file_location("p", {str(_SCRIPT)!r})\n'
+        'p = importlib.util.module_from_spec(spec)\n'
+        'spec.loader.exec_module(p)\n'
+        'async def go():\n'
+        '    stdio = await p._Stdio.get()\n'
+        '    while await stdio.reader.read(1024):\n'
+        '        pass\n'
+        '    await asyncio.sleep(0.2)  # let the transport close its pipe\n'
+        '    os.isatty(sys.stdin.fileno())\n'
+        'asyncio.run(go())\n')
+    env = dict(os.environ, PYTHONPATH=str(_REPO), HOME=str(tmp_path))
+    env.pop('SKYPILOT_CONFIG', None)
+    env.pop('SKYPILOT_DEBUG', None)
+    proc = subprocess.run([sys.executable, '-c', code],
+                          input=_CLIENT_BANNER,
+                          capture_output=True,
+                          env=env,
+                          timeout=60,
+                          check=False)
+    assert proc.returncode == 0, proc.stderr.decode(errors='replace')

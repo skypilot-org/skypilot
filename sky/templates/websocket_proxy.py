@@ -89,7 +89,11 @@ class _Stdio:
             # excessively.
             reader = asyncio.StreamReader()
             protocol = asyncio.StreamReaderProtocol(reader)
-            await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+            # A duplicate, because the transport closes its pipe at EOF: given
+            # sys.stdin itself, a fallback started as ssh leaves would crash
+            # reading sys.stdin.fileno().
+            stdin_dup = os.fdopen(os.dup(sys.stdin.fileno()), 'rb', buffering=0)
+            await loop.connect_read_pipe(lambda: protocol, stdin_dup)
             transport, write_protocol = await loop.connect_write_pipe(
                 asyncio.streams.FlowControlMixin, sys.stdout)  # type: ignore
             writer = asyncio.StreamWriter(transport, write_protocol, None, loop)
