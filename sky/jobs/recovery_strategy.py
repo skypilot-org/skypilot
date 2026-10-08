@@ -381,6 +381,12 @@ class StrategyExecutor:
         it escape gets swallowed into the group's monitor results with no
         terminal state set for the task.
 
+        A strategy that checks the network before each poll should call
+        ``sky.jobs.controller.check_network_connection()`` rather than
+        ``backend_utils.async_check_network_connection()``: it shares one
+        check across every monitor loop in the controller process, where the
+        latter sends one request per job per poll.
+
         Returns:
             None: fall back to OSS default monitor.
             True: task succeeded (strategy handled monitoring).
