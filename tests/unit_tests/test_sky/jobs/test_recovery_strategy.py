@@ -10,6 +10,7 @@ import pytest
 from sky import exceptions
 from sky.jobs import recovery_strategy
 from sky.jobs import scheduler as scheduler_module
+from sky.skylet import constants
 
 
 def test_is_oom_failure_detects_oomkilled():
@@ -32,6 +33,26 @@ def test_is_oom_failure_is_case_insensitive():
 def test_is_oom_failure_false_for_unrelated():
     assert recovery_strategy._is_oom_failure(
         RuntimeError('/bin/bash: line 1: conda: command not found')) is False
+
+
+def test_is_oom_failure_ignores_the_containers_own_output():
+    """A workload that prints "out of memory" was not OOM-killed.
+
+    The terminated-pod diagnosis appends the container's last output, which
+    is free text. Classifying it as OOM makes recovery fail the job
+    terminally instead of retrying it.
+    """
+    exc = RuntimeError('Pod p terminated: Error (exit code 1).\n'
+                       f'{constants.CONTAINER_OUTPUT_MARKER} ray-node:\n'
+                       'RuntimeError: CUDA out of memory. Tried to allocate')
+    assert recovery_strategy._is_oom_failure(exc) is False
+
+
+def test_is_oom_failure_still_reads_the_reason_before_the_output():
+    exc = RuntimeError('Pod p terminated: OOMKilled (exit code 137).\n'
+                       f'{constants.CONTAINER_OUTPUT_MARKER} ray-node:\n'
+                       'Killed')
+    assert recovery_strategy._is_oom_failure(exc) is True
 
 
 # ---------------------------------------------------------------------------

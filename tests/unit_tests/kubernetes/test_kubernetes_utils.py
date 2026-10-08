@@ -24,6 +24,7 @@ from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.catalog import kubernetes_catalog
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils
+from sky.skylet import constants
 
 
 # Test for exception on permanent errors like 401 (Unauthorized)
@@ -626,6 +627,56 @@ def test_detect_gpu_label_formatter_invalid_label_skip():
         assert lf is not None
         assert isinstance(lf, utils.CoreWeaveLabelFormatter)
         utils.detect_gpu_label_formatter.cache_clear()
+
+
+@pytest.mark.parametrize('accelerator', ['RTX-PRO-6000', 'RTXPRO6000'])
+def test_gke_label_formatter_rtx_pro_6000(accelerator):
+    """RTX PRO 6000 is labeled nvidia-rtx-pro-6000 in GKE, not
+    nvidia-tesla-rtx-pro-6000."""
+    assert utils.GKELabelFormatter.get_label_values(accelerator) == [
+        'nvidia-rtx-pro-6000'
+    ]
+    assert utils.GKELabelFormatter.get_accelerator_from_label_value(
+        'nvidia-rtx-pro-6000') == 'RTX-PRO-6000'
+
+
+@pytest.mark.parametrize('accelerator', ['RTX-PRO-6000', 'RTXPRO6000'])
+def test_get_accelerator_label_key_values_gke_rtx_pro_6000(accelerator):
+    """Without an autoscaler, both RTX PRO 6000 names find a GKE node
+    labeled nvidia-rtx-pro-6000."""
+    label_key = utils.GKELabelFormatter.GPU_LABEL_KEY
+    node_labels = {'gpu-node': [(label_key, 'nvidia-rtx-pro-6000')]}
+    with mock.patch('sky.skypilot_config.get_effective_region_config',
+                    return_value=None), \
+         mock.patch('sky.provision.kubernetes.utils.detect_accelerator_resource',
+                    return_value=(True, set())), \
+         mock.patch('sky.provision.kubernetes.utils.detect_gpu_label_formatter',
+                    return_value=(utils.GKELabelFormatter(), node_labels)):
+        assert utils.get_accelerator_label_key_values(
+            'gke_project_us-central1_cluster', accelerator,
+            1) == (label_key, ['nvidia-rtx-pro-6000'], None, None)
+
+
+@pytest.mark.parametrize('accelerator', ['RTX-PRO-6000', 'RTXPRO6000'])
+def test_gke_autoscaler_node_pool_rtx_pro_6000(accelerator):
+    """A GKE autoscaling node pool of nvidia-rtx-pro-6000 GPUs, which may
+    have no nodes yet, can create a node for both RTX PRO 6000 names."""
+    node_pool = {
+        'name': 'g4-pool',
+        'config': {
+            'machineType': 'g4-standard-48',
+            'accelerators': [{
+                'acceleratorType': 'nvidia-rtx-pro-6000',
+                'acceleratorCount': '1'
+            }]
+        }
+    }
+    # pylint: disable=protected-access
+    fits = utils.GKEAutoscaler._check_instance_fits_gke_autoscaler_node_pool
+    with mock.patch('sky.clouds.GCP.get_vcpus_mem_from_instance_type',
+                    return_value=(48, 180.0)):
+        assert fits(f'4CPU--16GB--{accelerator}:1', node_pool)
+        assert not fits(f'4CPU--16GB--{accelerator}:2', node_pool)
 
 
 def test_detect_gpu_label_formatter_suppresses_warning_for_coreweave_format():
@@ -5316,6 +5367,90 @@ def test_diagnose_terminated_pod_non_oom_has_no_hint(monkeypatch):
     assert 'Hint:' not in msg
 
 
+# The shape a host port clash leaves in the container log: a traceback whose
+# last frame is the explanation the user needs.
+_CLASH_LOG = """+ python -m sky.provision.kubernetes.host_network_probe --mode head
+Traceback (most recent call last):
+  File "/opt/sky/host_network_probe.py", line 170, in _verify_free
+    sock.bind(('0.0.0.0', port))
+OSError: [Errno 98] Address already in use
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/sky/host_network_probe.py", line 174, in _verify_free
+    raise RuntimeError(
+RuntimeError: Assigned host port 33499 (gcs) is already in use on this node.
+Launching again assigns a different block and usually succeeds.
+This node's ephemeral port range is 32768-60999, which covers port 33499.
+"""
+
+
+def _error_pod(**status_kwargs):
+    return _make_pod(
+        phase='Failed',
+        container_statuses=[_make_container_status(**status_kwargs)])
+
+
+def test_diagnose_self_exit_surfaces_the_exception_not_the_traceback(
+        monkeypatch):
+    """The clash message was only reachable through kubectl logs."""
+    core_api = _patch_read_pod(monkeypatch,
+                               pod=_error_pod(terminated_reason='Error',
+                                              terminated_exit_code=1))
+    core_api.read_namespaced_pod_log.return_value = _CLASH_LOG
+    msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert 'Error (exit code 1)' in msg
+    assert 'Assigned host port 33499 (gcs) is already in use' in msg
+    # Recovery's OOM classifier stops at this marker; the pair must agree.
+    assert constants.CONTAINER_OUTPUT_MARKER in msg
+    assert 'which covers port 33499' in msg
+    # From the last exception on, not the chained one above it.
+    assert 'OSError' not in msg
+    assert 'Traceback' not in msg
+    assert core_api.read_namespaced_pod_log.call_args.kwargs['previous'] is False
+
+
+def test_diagnose_self_exit_without_a_traceback_keeps_the_last_lines(
+        monkeypatch):
+    core_api = _patch_read_pod(monkeypatch,
+                               pod=_error_pod(terminated_reason='Error',
+                                              terminated_exit_code=2))
+    core_api.read_namespaced_pod_log.return_value = '\n'.join(
+        f'line {i}' for i in range(30)) + '\n'
+    msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert 'line 29' in msg and 'line 20' in msg
+    assert 'line 19' not in msg
+
+
+def test_diagnose_a_restarted_container_reads_the_previous_run(monkeypatch):
+    core_api = _patch_read_pod(monkeypatch,
+                               pod=_error_pod(last_terminated_reason='Error',
+                                              last_terminated_exit_code=1))
+    core_api.read_namespaced_pod_log.return_value = _CLASH_LOG
+    utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert core_api.read_namespaced_pod_log.call_args.kwargs['previous'] is True
+
+
+def test_diagnose_oom_does_not_read_the_log(monkeypatch):
+    """Killed from outside: the container's output does not say why."""
+    core_api = _patch_read_pod(monkeypatch,
+                               pod=_error_pod(terminated_reason='OOMKilled',
+                                              terminated_exit_code=137))
+    utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    core_api.read_namespaced_pod_log.assert_not_called()
+
+
+def test_diagnose_log_read_failure_keeps_the_reason(monkeypatch):
+    """The log is extra context; losing it must not lose the reason."""
+    core_api = _patch_read_pod(monkeypatch,
+                               pod=_error_pod(terminated_reason='Error',
+                                              terminated_exit_code=1))
+    core_api.read_namespaced_pod_log.side_effect = RuntimeError('forbidden')
+    msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert msg == 'Pod mypod terminated: Error (exit code 1).'
+
+
 def test_diagnose_terminated_pod_evicted_ephemeral(monkeypatch):
     pod = _make_pod(
         phase='Failed',
@@ -5677,140 +5812,6 @@ def test_get_handled_taint_keys_includes_neuron():
     assert utils.NEURON_RESOURCE_KEY in utils.get_handled_taint_keys()
 
 
-class TestOCINetworkEnvVars:
-    """OCI network_tier: best NCCL env-var injection per GPU shape."""
-
-    _NET = utils.KubernetesHighPerformanceNetworkType.OCI_ROCE
-
-    def test_gb200_profile(self):
-        """GB200 gets the MNNVL/NVLS InfiniBand profile, not RoCEv2."""
-        env = self._NET.get_network_env_vars('GB200')
-        # The rack-scale NVLink knobs that make GB200 distinct.
-        assert env['NCCL_MNNVL_ENABLE'] == '1'
-        assert env['NCCL_NVLS_ENABLE'] == '1'
-        assert env['NCCL_NET_PLUGIN'] == 'sys'
-        assert env['NCCL_CUMEM_ENABLE'] == '1'
-        assert env['NCCL_IB_HCA'] == 'mlx5_0,mlx5_1,mlx5_3,mlx5_4'
-        assert env['NCCL_SOCKET_IFNAME'] == 'eth0'
-
-    def test_pod_local_rdma_widens_both_grace_profiles(self):
-        """A VF pod cannot see the PF names these two profiles enumerate.
-
-        The deploy-var tests cover GB300 only, so this is where the GB200
-        branch's widening is pinned. NCCL answers a list matching no device by
-        falling back to TCP, so getting this wrong costs bandwidth silently.
-        """
-        for acc in ('GB200', 'GB300'):
-            env = self._NET.get_network_env_vars(acc, pod_local_rdma=True)
-            assert env['NCCL_IB_HCA'] == 'mlx5', acc
-            # Everything else about the profile is unrelated to delivery.
-            assert env['NCCL_MNNVL_ENABLE'] == '1', acc
-
-    def test_pod_local_rdma_leaves_the_roce_profile_alone(self):
-        # The RoCEv2 shapes already match the family prefix, so the VF model
-        # changes nothing for them.
-        for acc in ('H100', 'H200', 'B200'):
-            assert self._NET.get_network_env_vars(
-                acc,
-                pod_local_rdma=True) == self._NET.get_network_env_vars(acc), acc
-
-    def test_gb200_is_replacement_not_union(self):
-        """GB200 must drop the RoCEv2-only knobs, not merge them in.
-
-        The official OCI GB200 configmap omits DSCP/GID/UCX; folding the
-        RoCE defaults in would inject values OCI does not ship for GB200.
-        """
-        env = self._NET.get_network_env_vars('GB200')
-        for absent in ('NCCL_IB_GID_INDEX', 'NCCL_IB_TC', 'UCX_TLS',
-                       'UCX_NET_DEVICES'):
-            assert absent not in env, absent
-
-    def test_gb200_case_insensitive(self):
-        env = self._NET.get_network_env_vars('gb200')
-        assert env['NCCL_MNNVL_ENABLE'] == '1'
-
-    def test_gb300_profile(self):
-        """GB300 is MNNVL/NVLS but keeps IB tuning and NET_PLUGIN=none."""
-        env = self._NET.get_network_env_vars('GB300')
-        assert env['NCCL_MNNVL_ENABLE'] == '1'
-        assert env['NCCL_NVLS_ENABLE'] == '1'
-        assert env['NCCL_NET_PLUGIN'] == 'none'
-        # Leading '=' is NCCL's exact-name-match prefix; must be preserved.
-        assert env['NCCL_IB_HCA'] == ('=mlx5_0,mlx5_1,mlx5_2,mlx5_3,'
-                                      'mlx5_5,mlx5_6,mlx5_7,mlx5_8')
-        # GB300-specific knobs absent from GB200.
-        assert env['NCCL_NET_GDR_C2C'] == '1'
-        assert env['NCCL_DMABUF_ENABLE'] == '1'
-        assert env['NCCL_IB_TIMEOUT'] == '22'
-
-    def test_gb300_widens_gdr_level(self):
-        """GB300 sets NCCL_NET_GDR_LEVEL=PHB, and only GB300.
-
-        With NET_GDR_C2C on, NCCL's GDR cutoff is PATH_P2C; a GPU whose NIC is
-        one PCIe host bridge away lands outside it and loses GDR silently. PHB
-        widens the cutoff by that one level. Scoped to GB300: the GB200 and
-        RoCEv2 profiles mirror OCI's published sets, which omit it.
-        """
-        assert self._NET.get_network_env_vars(
-            'GB300')['NCCL_NET_GDR_LEVEL'] == 'PHB'
-        assert 'NCCL_NET_GDR_LEVEL' not in self._NET.get_network_env_vars(
-            'GB200')
-        assert 'NCCL_NET_GDR_LEVEL' not in self._NET.get_network_env_vars(
-            'H100')
-
-    def test_gb300_still_mirrors_oci_published_values(self):
-        """The rest of the GB300 profile must stay OCI's published set.
-
-        Guards against widening the GDR level turning into a general licence
-        to deviate: these are the values OCI ships for BM.GPU.GB300.4, and the
-        two a customer was observed overriding (IB_SL=1, IB_TIMEOUT=19) are
-        deliberately *not* adopted -- 19 is a tightening, and defaults should
-        fail lenient.
-        """
-        env = self._NET.get_network_env_vars('GB300')
-        assert env['NCCL_IB_SL'] == '0'
-        assert env['NCCL_IB_TIMEOUT'] == '22'
-        assert env['NCCL_BUFFSIZE'] == '16777216'
-        assert env['NCCL_IB_SPLIT_DATA_ON_QPS'] == '0'
-        # Workload/framework knobs must never be injected:
-        # CUDA_DEVICE_MAX_CONNECTIONS=32 suits FSDP/expert-parallel overlap and
-        # is actively wrong for Megatron tensor-parallel overlap, which needs 1.
-        for absent in ('CUDA_DEVICE_MAX_CONNECTIONS',
-                       'TORCH_NCCL_HIGH_PRIORITY',
-                       'TORCH_NCCL_AVOID_RECORD_STREAMS', 'NCCL_SHM_DISABLE'):
-            assert absent not in env, absent
-
-    def test_gb200_and_gb300_are_distinct(self):
-        """The two GB profiles must not be identical (NET_PLUGIN differs)."""
-        gb200 = self._NET.get_network_env_vars('GB200')
-        gb300 = self._NET.get_network_env_vars('GB300')
-        assert gb200 != gb300
-        assert gb200['NCCL_NET_PLUGIN'] == 'sys'
-        assert gb300['NCCL_NET_PLUGIN'] == 'none'
-
-    def test_default_roce_profile_for_other_shapes(self):
-        """H100/None fall back to the existing RoCEv2 profile unchanged."""
-        expected = {
-            'NCCL_IB_HCA': 'mlx5',
-            'NCCL_IB_GID_INDEX': '3',
-            'NCCL_IB_TC': '41',
-            'NCCL_SOCKET_IFNAME': 'eth0',
-            'UCX_TLS': 'tcp',
-            'UCX_NET_DEVICES': 'eth0',
-        }
-        assert self._NET.get_network_env_vars('H100') == expected
-        assert self._NET.get_network_env_vars(None) == expected
-        # GB200/GB300 must NOT return the default RoCE profile.
-        assert self._NET.get_network_env_vars('GB200') != expected
-        assert self._NET.get_network_env_vars('GB300') != expected
-
-    def test_non_oci_types_ignore_acc_type(self):
-        """acc_type only affects OCI; other types return their fixed dict."""
-        coreweave = utils.KubernetesHighPerformanceNetworkType.COREWEAVE
-        assert (coreweave.get_network_env_vars('GB200') ==
-                coreweave.get_network_env_vars(None))
-
-
 class TestGetNodeAffinity:
     """Tests for utils.get_node_affinity."""
 
@@ -5883,6 +5884,99 @@ class TestGetNodeAffinity:
             'requiredDuringSchedulingIgnoredDuringExecution',
             'preferredDuringSchedulingIgnoredDuringExecution',
         }
+
+
+class TestPodFields:
+    """Tests for utils.get_pod_fields and utils.combine_pod_fields."""
+
+    @staticmethod
+    def _cluster_yaml(pod_spec):
+        return {
+            'available_node_types': {
+                'ray_head_default': {
+                    'node_config': {
+                        'spec': pod_spec
+                    }
+                }
+            }
+        }
+
+    @staticmethod
+    def _pod_spec(cluster_yaml):
+        return cluster_yaml['available_node_types']['ray_head_default'][
+            'node_config']['spec']
+
+    def test_empty_when_no_field_applies(self):
+        assert utils.get_pod_fields(None, None, None) == {}
+
+    def test_node_affinity_is_a_pod_spec_field(self):
+        pod_fields = utils.get_pod_fields('skypilot.co/accelerator', ['H100'],
+                                          ['some-other-key'])
+        assert pod_fields == {
+            'spec': {
+                'affinity': {
+                    'nodeAffinity': utils.get_node_affinity(
+                        'skypilot.co/accelerator', ['H100'], ['some-other-key'])
+                }
+            }
+        }
+
+    def test_combine_keeps_what_the_template_rendered(self):
+        """The merge adds to an affinity the template already rendered."""
+        pod_affinity = {
+            'preferredDuringSchedulingIgnoredDuringExecution': [{
+                'weight': 1
+            }]
+        }
+        cluster_yaml = self._cluster_yaml({
+            'containers': [{
+                'name': 'ray-node'
+            }],
+            'affinity': {
+                'podAffinity': pod_affinity
+            },
+        })
+        pod_fields = utils.get_pod_fields('skypilot.co/accelerator', ['H100'],
+                                          None)
+
+        combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
+
+        assert self._pod_spec(combined) == {
+            'containers': [{
+                'name': 'ray-node'
+            }],
+            'affinity': {
+                'podAffinity': pod_affinity,
+                'nodeAffinity': pod_fields['spec']['affinity']['nodeAffinity'],
+            },
+        }
+
+    def test_combine_adds_an_affinity_the_template_did_not_render(self):
+        cluster_yaml = self._cluster_yaml(
+            {'containers': [{
+                'name': 'ray-node'
+            }]})
+        pod_fields = utils.get_pod_fields(None, None, ['some-other-key'])
+
+        combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
+
+        assert self._pod_spec(
+            combined)['affinity'] == pod_fields['spec']['affinity']
+
+    def test_combine_leaves_its_inputs_untouched(self):
+        cluster_yaml = self._cluster_yaml(
+            {'containers': [{
+                'name': 'ray-node'
+            }]})
+        pod_fields = utils.get_pod_fields('skypilot.co/accelerator', ['H100'],
+                                          None)
+        expected_pod_fields = copy.deepcopy(pod_fields)
+
+        combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
+        self._pod_spec(combined)['affinity']['nodeAffinity'].clear()
+
+        assert 'affinity' not in self._pod_spec(cluster_yaml)
+        assert pod_fields == expected_pod_fields
 
 
 def _make_pod_with_spec(*,

@@ -909,4 +909,10 @@ spec:
           labelSelector:
             matchLabels:
               app: {{ $fullName }}-api
+          {{- if semverCompare ">=1.27-0" .Capabilities.KubeVersion.Version }}
+          # Count only pods of the same ReplicaSet so outgoing pods do not skew a rollout.
+          # Enabled by default from Kubernetes 1.27; older API servers drop or reject it.
+          matchLabelKeys:
+            - pod-template-hash
+          {{- end }}
       {{- end }}

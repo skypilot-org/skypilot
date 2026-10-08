@@ -6,6 +6,7 @@ from sky import skypilot_config
 from sky.logs.agent import LoggingAgent
 from sky.logs.aws import CloudwatchLoggingAgent
 from sky.logs.gcp import GCPLoggingAgent
+from sky.logs.otlp import OtlpLoggingAgent
 from sky.logs.reader import get_log_reader
 from sky.logs.reader import LogReader
 from sky.logs.reader import register_log_reader
@@ -14,6 +15,7 @@ __all__ = [
     'LoggingAgent',
     'CloudwatchLoggingAgent',
     'GCPLoggingAgent',
+    'OtlpLoggingAgent',
     'LogReader',
     'get_log_reader',
     'register_log_reader',
@@ -50,11 +52,16 @@ def get_logging_agent() -> Optional[LoggingAgent]:
     store = skypilot_config.get_nested(('logs', 'store'), None)
     if store is None:
         return None
+    # The config schema accepts the store name case-insensitively.
+    store = store.lower()
     if store == 'gcp':
         return GCPLoggingAgent(skypilot_config.get_nested(('logs', 'gcp'), {}))
     elif store == 'aws':
         return CloudwatchLoggingAgent(
             skypilot_config.get_nested(('logs', 'aws'), {}))
+    elif store == 'otlp':
+        return OtlpLoggingAgent(skypilot_config.get_nested(('logs', 'otlp'),
+                                                           {}))
     raise exceptions.InvalidSkyPilotConfigError(
         f'Invalid logging store: {store}')
 

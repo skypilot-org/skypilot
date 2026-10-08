@@ -60,6 +60,7 @@ from sky.server.requests import threads
 from sky.server.requests import workspace_access
 from sky.server.requests.queues import base as queue_base
 from sky.skylet import constants
+from sky.users import permission
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -210,12 +211,13 @@ def executor_initializer(proc_group: str,
                          clean_env: Optional[Dict[str, str]] = None):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
+    # Same rationale as in sky.server.uvicorn.Server.run: reap this
+    # executor's prometheus multiproc files when it exits. Must run before
+    # anything (plugins included) writes a live gauge in this process.
+    metrics_lib.register_multiproc_cleanup_atexit()
     # Load plugins for executor process.
     plugins.load_plugins(
         plugins.ExtensionContext(context=plugins.PluginContext.EXECUTOR))
-    # Same rationale as in sky.server.uvicorn.Server.run: reap this
-    # executor's prometheus multiproc files when it exits.
-    metrics_lib.register_multiproc_cleanup_atexit()
     # The main API server process captures its env at startup and forwards
     # it via initargs (see RequestWorker.run). Adopt that snapshot directly
     # so the worker doesn't depend on its own spawn-time os.environ, which
@@ -728,6 +730,16 @@ def override_request_env_and_config(
             # running in a Kubernetes pod.
             request_body.env_vars.pop(
                 kubernetes_adaptor.IN_CLUSTER_CONTEXT_NAME_ENV_VAR, None)
+            # SKYPILOT_SERVER_-prefixed vars are server-only (e.g. the
+            # file-mount containment flag). A client must not be able to overlay
+            # them via its request env vars, so strip them before the overlay.
+            # The client already omits them, but a crafted request could include
+            # them, so enforce it here too.
+            for env_var in [
+                    k for k in request_body.env_vars
+                    if k.startswith(constants.SKYPILOT_SERVER_ENV_VAR_PREFIX)
+            ]:
+                request_body.env_vars.pop(env_var, None)
             os.environ.update(request_body.env_vars)
             # Note: may be overridden by AuthProxyMiddleware.
             # TODO(zhwu): we need to make the entire request a context
@@ -738,6 +750,7 @@ def override_request_env_and_config(
                 name=request_body.env_vars[constants.USER_ENV_VAR])
             _, user = global_user_state.add_or_update_user(user,
                                                            return_user=True)
+            _seed_role_if_missing(user.id)
             using_remote_api_server = request_body.using_remote_api_server
 
         # Force color to be enabled.
@@ -891,6 +904,32 @@ def _maybe_observe_request_pending(request: api_requests.Request) -> None:
                                           time.time() - request.created_at)
 
 
+def _seed_role_if_missing(user_id: str) -> None:
+    """Give the request's user a role if they do not have one yet.
+
+    The auth middlewares seed a role when they first see a user, but a request
+    that reaches the server without authentication creates the user here. One
+    such server is the API server on a jobs controller, which sees the job's
+    user first on the request that launches the job's cluster. Without a role
+    the user fails every workspace check except `default`, so the job retries
+    forever.
+
+    Best-effort: `role_seed_missing` can be wrong on a worker whose policy copy
+    is stale, and the seed takes the distributed policy lock, which can time
+    out. A skipped or failed seed must not fail a request that would succeed
+    without it; the workspace check that follows decides as before.
+    """
+    service = permission.permission_service
+    if not (service.role_seed_missing(user_id) and
+            service.claim_role_seed_attempt(user_id)):
+        return
+    try:
+        permission.seed_new_user_role(user_id)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to seed a role for user {user_id}: '
+                       f'{common_utils.format_exception(e)}')
+
+
 def _request_execution_wrapper(request_id: str,
                                ignore_return_value: bool,
                                num_db_connections_per_worker: int = 0) -> None:
@@ -1034,8 +1073,22 @@ def _request_execution_wrapper(request_id: str,
                      f'{common_utils.format_exception(e)}')
         return
     else:
-        api_requests.set_request_succeeded(
-            request_id, return_value if not ignore_return_value else None)
+        try:
+            api_requests.set_request_succeeded(
+                request_id, return_value if not ignore_return_value else None)
+        except Exception as e:  # pylint: disable=broad-except
+            # A database error can hold the whole result as a statement
+            # parameter, so only the driver's message is recorded.
+            reason = str(getattr(e, 'orig', None) or e)[:1000]
+            api_requests.set_request_failed(
+                request_id,
+                RuntimeError(
+                    f'Failed to store the result of request {request_id}: '
+                    f'{reason}'))
+            _restore_output()
+            logger.error(f'Request {request_id} failed to store its result: '
+                         f'{reason}')
+            return
         # Manually reset the original stdout and stderr file descriptors early
         # so that the "Request xxxx failed due to ..." log message will be
         # written to the original stdout and stderr file descriptors.
@@ -1246,6 +1299,19 @@ async def prepare_request_async(
         # Fallback to legacy environment variable based identity if no
         # authentication is set.
         user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
+        # This identity comes straight from the client and is stored as the
+        # owner of any cluster the request creates, so reject a malformed one
+        # here. A well-formed id is an invariant elsewhere in the codebase
+        # (controller_utils asserts it), and an id that does not round-trip to
+        # a real user leaves clusters that the owner filter in get_clusters()
+        # can never associate back with anyone. See #9621. The SDK's
+        # get_user_hash() only ever returns a valid id, so this guards
+        # non-SDK callers of the API.
+        # Skipped for system requests, whose id is replaced below anyway.
+        if (not is_skypilot_system and
+                not common_utils.is_valid_user_hash(user_id)):
+            raise exceptions.InvalidUserIdError(
+                f'Invalid user id: {user_id!r}.')
     if is_skypilot_system:
         user_id = constants.SKYPILOT_SYSTEM_USER_ID
         global_user_state.add_or_update_user(

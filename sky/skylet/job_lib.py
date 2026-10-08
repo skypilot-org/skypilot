@@ -1407,7 +1407,12 @@ class JobLibCodeGen:
                 f'\nelse:'
                 f'\n  log_lib.tail_logs(job_id=job_id, log_dir=log_dir, managed_job_id={managed_job_id!r}, follow={follow}, tail={tail}, tail_offset={tail_offset})'
             )
-        code = [
+        code = []
+        if follow:
+            # getattr: clusters whose runtime predates the watchdog lack it.
+            code.append(
+                'getattr(log_lib, "start_orphan_watchdog", lambda: None)()')
+        code += [
             # We use != instead of is not because 1 is not None will print a warning:
             # <stdin>:1: SyntaxWarning: "is not" with a literal. Did you mean "!="?
             f'job_id = {job_id} if {job_id} != None else job_lib.get_latest_job_id()',

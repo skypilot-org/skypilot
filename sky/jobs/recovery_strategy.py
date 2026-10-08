@@ -84,7 +84,10 @@ _OOM_FAILURE_SIGNATURES = ('oomkilled', 'out of memory', 'out-of-memory')
 
 def _is_oom_failure(exception: Exception) -> bool:
     """Whether `exception` indicates an out-of-memory pod termination."""
-    message = common_utils.format_exception(exception).lower()
+    message = common_utils.format_exception(exception)
+    # The container's own output follows the marker; it is the workload's
+    # text, not a termination reason.
+    message = message.split(constants.CONTAINER_OUTPUT_MARKER, 1)[0].lower()
     return any(sig in message for sig in _OOM_FAILURE_SIGNATURES)
 
 
@@ -1045,6 +1048,7 @@ class StrategyExecutor:
                         usage_lib.messages.usage.set_internal()
                         if self.pool is None:
                             assert self.cluster_name is not None
+                            blob_id = self.file_mounts_blob_id
 
                             if reattach_request_id is None:
                                 # sdk.launch will implicitly start the API
@@ -1072,13 +1076,24 @@ class StrategyExecutor:
                                                          f'{env_var}: {value}')
                                             os.environ[env_var] = value
 
+                                # The blob holds the original upload. Once
+                                # submit has rewritten the task to cloud URLs,
+                                # the retry reads the bucket and the local
+                                # directory is unused.
+                                if (blob_id is not None and not server_common.
+                                        dag_requires_local_file_mounts(
+                                            self.dag)):
+                                    logger.info(
+                                        'Skipping local file-mounts blob '
+                                        f'{blob_id}: task sources are cloud '
+                                        'URLs.')
+                                    blob_id = None
                                 # HA failover may land the controller on new
                                 # hosts, ensure blob extraction on the current
-                                # host
-                                if self.file_mounts_blob_id is not None:
+                                # host.
+                                if blob_id is not None:
                                     await asyncio.to_thread(
-                                        server_common.resolve_blob_dir,
-                                        self.file_mounts_blob_id,
+                                        server_common.resolve_blob_dir, blob_id,
                                         common_utils.get_user_hash())
 
                             request_id: Optional[str] = None
@@ -1113,8 +1128,7 @@ class StrategyExecutor:
                                             _AUTODOWN_MINUTES),
                                         down=True,
                                         _is_launched_by_jobs_controller=True,
-                                        _file_mounts_blob_id=(
-                                            self.file_mounts_blob_id),
+                                        _file_mounts_blob_id=blob_id,
                                         _extra_launch_context=(
                                             extra_ctx if extra_ctx else None),
                                     )

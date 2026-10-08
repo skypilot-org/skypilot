@@ -2162,6 +2162,13 @@ def get_tree_root_ids(job_ids: List[int]) -> List[int]:
         return [row[0] for row in session.execute(query).fetchall()]
 
 
+# The job's file contents, read by the controller through
+# get_job_file_contents. No queue response carries them, so a queue query
+# without explicit fields leaves them out.
+_QUEUE_UNSELECTED_JOB_INFO_COLUMNS = frozenset(
+    {'dag_yaml_content', 'env_file_content', 'config_file_content'})
+
+
 def build_managed_jobs_with_filters_no_status_query(
     fields: Optional[List[str]] = None,
     job_ids: Optional[List[int]] = None,
@@ -2231,7 +2238,8 @@ def build_managed_jobs_with_filters_no_status_query(
     else:
         query = sqlalchemy.select(
             spot_table,
-            job_info_table,
+            *(column for column in job_info_table.c
+              if column.name not in _QUEUE_UNSELECTED_JOB_INFO_COLUMNS),
             _batch_progress_subquery.c.batch_total_batches,
             _batch_progress_subquery.c.batch_completed_batches,
         )
@@ -5374,6 +5382,123 @@ def get_jobs_launched_from(
     return [(row[0], row[1]) for row in rows]
 
 
+# Chunk size for the recovery sweep's batched reset. Each job adds at most four
+# bound parameters to the statement, so a chunk stays under SQLite's default
+# SQLITE_MAX_VARIABLE_NUMBER (999 before 3.32). Chunking also keeps each
+# statement's share of a pooled connection short, so a sweep over many jobs
+# does not hold one connection for its whole duration.
+_RECOVERY_CHUNK_SIZE = 200
+
+
+def _chunked(jobs: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+    return [
+        jobs[i:i + _RECOVERY_CHUNK_SIZE]
+        for i in range(0, len(jobs), _RECOVERY_CHUNK_SIZE)
+    ]
+
+
+# Schedule states that need no recovery: DONE is finished, and WAITING /
+# INACTIVE have no controller to recover (INACTIVE may be mid-submission, so
+# moving it to WAITING would race the submitting request).
+_NO_RECOVERY_SCHEDULE_STATES = [
+    ManagedJobScheduleState.DONE.value,
+    ManagedJobScheduleState.WAITING.value,
+    ManagedJobScheduleState.INACTIVE.value,
+]
+
+
+def _needs_recovery_condition() -> 'sqlalchemy.ColumnElement':
+    """Rows whose schedule_state says a controller should be running.
+
+    NULL is included: jobs submitted before schedule_state existed have no
+    state to interpret, and the sweep has always treated them as candidates.
+    """
+    return sqlalchemy.or_(
+        job_info_table.c.schedule_state.is_(None),
+        sqlalchemy.not_(
+            job_info_table.c.schedule_state.in_(_NO_RECOVERY_SCHEDULE_STATES)),
+    )
+
+
+def get_jobs_needing_recovery_check() -> List[Dict[str, Any]]:
+    """Jobs the consolidation-mode recovery sweep has to look at.
+
+    Returns one row per job (not per task) with just the columns the sweep
+    needs: the job id, the recorded controller pid, and the schedule state.
+
+    This deliberately reads ``job_info`` alone and filters on the indexed
+    ``schedule_state`` column, so its cost tracks the number of jobs that
+    could still have a controller rather than the size of the whole jobs
+    history. Do not widen it into a join against ``spot``: the sweep runs on
+    every leader election, and every extra row such a join contributes is by
+    definition a job that needs no recovery.
+    """
+    engine = _db_manager.get_engine()
+    query = sqlalchemy.select(
+        job_info_table.c.spot_job_id,
+        job_info_table.c.controller_pid,
+        job_info_table.c.controller_pid_started_at,
+        job_info_table.c.schedule_state,
+    ).where(_needs_recovery_condition()).order_by(
+        job_info_table.c.spot_job_id.asc())
+    with orm.Session(engine) as session:
+        rows = session.execute(query).fetchall()
+    return [{
+        'job_id': row[0],
+        'controller_pid': row[1],
+        'controller_pid_started_at': row[2],
+        'schedule_state':
+            (ManagedJobScheduleState(row[3]) if row[3] is not None else None),
+    } for row in rows]
+
+
+def reset_jobs_for_recovery_batch(jobs: List[Dict[str, Any]]) -> List[int]:
+    """Reset a batch of jobs to WAITING, dropping their controller pids.
+
+    ``jobs`` are rows as returned by :func:`get_jobs_needing_recovery_check`.
+    Each job's reset is a compare-and-swap against the controller_pid,
+    controller_pid_started_at and schedule_state in its row, all compared
+    NULL-safely, so it only applies if the job is unchanged since it was
+    read. A job that a controller claimed in the meantime keeps the claim:
+    resetting it would orphan the claiming controller while another controller
+    picks the job up, leaving two controllers running the same job. Likewise
+    a job that moved on to another state (e.g. DONE) is not re-armed to
+    WAITING. An observed pid of None only matches a column that is still
+    NULL, so it is not an unconditional reset.
+
+    Returns the ids of the jobs that were reset, in ascending order.
+    """
+    if not jobs:
+        return []
+    engine = _db_manager.get_engine()
+    reset_ids: List[int] = []
+    with orm.Session(engine) as session:
+        for chunk in _chunked(jobs):
+            unchanged_rows = [
+                sqlalchemy.and_(
+                    job_info_table.c.spot_job_id == job['job_id'],
+                    job_info_table.c.controller_pid.is_not_distinct_from(
+                        job['controller_pid']),
+                    job_info_table.c.controller_pid_started_at.
+                    is_not_distinct_from(job['controller_pid_started_at']),
+                    job_info_table.c.schedule_state.is_not_distinct_from(
+                        None if job['schedule_state'] is None else
+                        job['schedule_state'].value),
+                ) for job in chunk
+            ]
+            result = session.execute(
+                sqlalchemy.update(job_info_table).where(
+                    sqlalchemy.or_(*unchanged_rows)).values({
+                        job_info_table.c.controller_pid: None,
+                        job_info_table.c.controller_pid_started_at: None,
+                        job_info_table.c.schedule_state:
+                            ManagedJobScheduleState.WAITING.value,
+                    }).returning(job_info_table.c.spot_job_id))
+            reset_ids.extend(row[0] for row in result)
+        session.commit()
+    return sorted(reset_ids)
+
+
 def reset_jobs_for_recovery() -> None:
     """Remove controller PIDs for live jobs, allowing them to be recovered."""
     engine = _db_manager.get_engine()
@@ -5393,20 +5518,6 @@ def reset_jobs_for_recovery() -> None:
             job_info_table.c.schedule_state:
                 (ManagedJobScheduleState.WAITING.value)
         })
-        session.commit()
-
-
-def reset_job_for_recovery(job_id: int) -> None:
-    """Set a job to WAITING and remove PID, allowing it to be recovered."""
-    engine = _db_manager.get_engine()
-    with orm.Session(engine) as session:
-        session.query(job_info_table).filter(
-            job_info_table.c.spot_job_id == job_id).update({
-                job_info_table.c.controller_pid: None,
-                job_info_table.c.controller_pid_started_at: None,
-                job_info_table.c.schedule_state:
-                    ManagedJobScheduleState.WAITING.value,
-            })
         session.commit()
 
 

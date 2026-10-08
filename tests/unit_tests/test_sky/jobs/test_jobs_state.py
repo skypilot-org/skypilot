@@ -666,6 +666,25 @@ class TestGetManagedJobsWithFilters:
         returned_job_ids = [job['job_id'] for job in jobs]
         assert set(returned_job_ids) == set(job_ids)
 
+    def test_file_contents_not_selected_without_fields(self, _seed_test_jobs):
+        """Without fields the queue returns the user YAML, not file contents."""
+        job_id = _seed_test_jobs['job_id1']
+        jobs, _ = state.get_managed_jobs_with_filters(job_ids=[job_id])
+        assert jobs[0]['user_yaml'] == '/tmp/user1.yaml'
+        assert jobs[0]['dag_yaml_content'] is None
+        assert jobs[0]['env_file_content'] is None
+        assert jobs[0]['config_file_content'] is None
+
+        # Naming a column still selects it.
+        jobs, _ = state.get_managed_jobs_with_filters(
+            job_ids=[job_id], fields=['job_id', 'dag_yaml_content'])
+        assert jobs[0]['dag_yaml_content'] == '/tmp/dag1.yaml'
+
+        # The controller reads the contents through their own query.
+        contents = state.get_job_file_contents(job_id)
+        assert contents['dag_yaml_content'] == '/tmp/dag1.yaml'
+        assert contents['env_file_content'] == '/tmp/env1'
+
     def test_with_workspace_filter(self, _seed_test_jobs):
         """Test filtering by accessible_workspaces."""
         jobs, total = state.get_managed_jobs_with_filters(
