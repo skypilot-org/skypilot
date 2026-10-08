@@ -2589,12 +2589,12 @@ def _fresh_network_check_cache(monkeypatch):
 
     The monitor loop reuses one successful network check across every loop in
     the process. A check recorded by one test must not skip the check in the
-    next, and a lock created in one test's event loop must not reach another:
-    each test starts as the controller does, with no lock until the first
-    check creates one.
+    next, and a check task created in one test's event loop must not reach
+    another: each test starts as the controller does, with no check in
+    flight.
     """
     monkeypatch.setattr(controller_module, '_network_check_ok_at', None)
-    monkeypatch.setattr(controller_module, '_network_check_lock', None)
+    monkeypatch.setattr(controller_module, '_network_check_in_flight', None)
 
 
 class TestNetworkCheckOncePerGap:
@@ -2705,10 +2705,10 @@ class TestNetworkCheckOncePerGap:
         assert check.await_count == 1
 
     @pytest.mark.asyncio
-    async def test_waiting_loops_retry_after_a_failed_check(self):
-        """A failure reaches only the loop that ran the check. The loops
-        waiting on it run their own check instead of inheriting the error,
-        and once one succeeds the rest reuse it."""
+    async def test_waiting_loops_share_a_failed_check(self):
+        """Loops waiting on a check that fails all get its NetworkError, so
+        each retries on its own timer instead of queueing behind another
+        check. A check started after the failure runs afresh."""
         finish = asyncio.Event()
         calls = 0
 
@@ -2732,9 +2732,40 @@ class TestNetworkCheckOncePerGap:
                 await asyncio.sleep(0)
             finish.set()
             results = await asyncio.gather(*loops, return_exceptions=True)
-        assert isinstance(results[0], exceptions.NetworkError)
-        assert results[1:] == [None, None]
+            assert all(isinstance(r, exceptions.NetworkError) for r in results)
+            assert check.await_count == 1
+            # The failure is not reused by a loop that checks afterwards.
+            await controller_module.check_network_connection()
         assert check.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_cancelled_waiter_leaves_the_shared_check_running(self):
+        """Cancelling one waiting loop (its job was cancelled) must not
+        cancel the check the other loops wait on."""
+        started = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def gated_check():
+            started.set()
+            await finish.wait()
+
+        check = AsyncMock(side_effect=gated_check)
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=check):
+            first = asyncio.create_task(
+                controller_module.check_network_connection())
+            await started.wait()
+            second = asyncio.create_task(
+                controller_module.check_network_connection())
+            await asyncio.sleep(0)
+            first.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await first
+            finish.set()
+            await second
+        assert check.await_count == 1
+        assert controller_module._network_check_is_fresh()
 
     def test_concurrent_loops_in_the_loop_asyncio_run_creates(self):
         """The controller imports this module and only then starts its event
