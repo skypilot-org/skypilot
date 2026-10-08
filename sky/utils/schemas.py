@@ -1444,6 +1444,8 @@ class RemoteIdentityOptions(enum.Enum):
     LOCAL_CREDENTIALS = 'LOCAL_CREDENTIALS'
     SERVICE_ACCOUNT = 'SERVICE_ACCOUNT'
     NO_UPLOAD = 'NO_UPLOAD'
+    # Kubernetes only: the pod gets no API credentials at all.
+    NONE = 'NONE'
 
 
 def get_default_remote_identity(cloud: str) -> str:
@@ -1467,7 +1469,9 @@ _REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {
         'type': 'string',
         'case_insensitive_enum': [
-            option.value for option in RemoteIdentityOptions
+            option.value
+            for option in RemoteIdentityOptions
+            if option is not RemoteIdentityOptions.NONE
         ]
     }
 }

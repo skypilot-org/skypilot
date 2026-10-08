@@ -937,6 +937,7 @@ echo ACCELERATOR_NODE_CONSTRAINT_OK
 @pytest.mark.kubernetes
 @pytest.mark.managed_jobs
 @pytest.mark.resource_heavy
+@pytest.mark.no_remote_identity_none  # kubectl in the pod.
 def test_managed_jobs_kubernetes_accelerator_node_constraint():
     """A managed job's pod must self-verify its own accelerator scheduling
     constraint.
@@ -2028,6 +2029,44 @@ def test_managed_jobs_pod_config_ray_node_container(generic_cloud: str):
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=600
                 if smoke_tests_utils.is_remote_server_test() else 120),
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60)
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+def test_managed_jobs_remote_identity_none(generic_cloud: str):
+    """A managed job whose task opts into remote_identity: NONE runs with no
+    API token, and the controller skips the autodown leak guard the pod could
+    not honor instead of refusing the job.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    task_yaml = 'tests/test_yamls/test_k8s_remote_identity_none.yaml'
+    test = smoke_tests_utils.Test(
+        'managed_jobs_remote_identity_none',
+        [
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y -d {task_yaml}',
+            # Logs by name need the job still RUNNING; the task sleeps 60.
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=600
+                if smoke_tests_utils.is_remote_server_test() else 300),
+            f's=$(sky jobs logs -n {name} --no-follow) && echo "$s" && '
+            'echo "$s" | grep "no_token_check: ok"',
+            f's=$(sky jobs logs --controller -n {name} --no-follow) && '
+            'echo "$s" && '
+            'echo "$s" | grep "Not setting the autodown leak guard"',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=300),
         ],
         f'sky jobs cancel -y -n {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,

@@ -873,6 +873,7 @@ def test_hook_k8s_prestop_pgrep_is_skylet_only():
 #     teardown shape that runs on K8s.
 # ---------------------------------------------------------------------------
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_identity_none  # Autodown.
 def test_hook_k8s_autodown_fires_down_event():
     name = smoke_tests_utils.get_cluster_name()
     marker = f'autodown-{time.time()}'
@@ -965,6 +966,7 @@ def test_hook_k8s_autodown_fires_down_event():
 # `test_hook_k8s_autodown_fires_down_event` above.
 # ---------------------------------------------------------------------------
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_identity_none  # Autodown.
 def test_hook_k8s_autodown_lifecycle_combined():
     name = smoke_tests_utils.get_cluster_name()
     legacy_marker = f'k8s-legacy-{time.time()}'

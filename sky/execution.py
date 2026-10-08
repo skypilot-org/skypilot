@@ -261,6 +261,7 @@ def _execute(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _extra_launch_context: Optional[Dict[str, Any]] = None,
+    _kubernetes_identity: Optional[str] = None,
     job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute an entrypoint.
@@ -343,6 +344,11 @@ def _execute(
                 down=down,
                 dryrun=dryrun,
             )) as dag:
+        if _kubernetes_identity is not None:
+            # After the admin policy, which may rebuild the dag.
+            for task in dag.tasks:
+                for resource in task.resources:
+                    resource.set_kubernetes_identity(_kubernetes_identity)
         dag.resolve_and_validate_volumes()
         if (not _is_launched_by_jobs_controller and
                 not _is_launched_by_sky_serve_controller):
@@ -375,6 +381,17 @@ def _execute(
             _is_launched_by_sky_serve_controller,
             _extra_launch_context=_extra_launch_context,
             job_logger=job_logger)
+
+
+def _autodown_needs_identity_it_lacks(
+        handle: Optional[backends.ResourceHandle]) -> bool:
+    """Whether the cluster's pods have no credentials to autodown with."""
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
+        return False
+    launched = handle.launched_resources
+    return (isinstance(launched.cloud, clouds.Kubernetes) and
+            clouds.Kubernetes.remote_identity_is_none(launched.region,
+                                                      launched))
 
 
 def _execute_dag(
@@ -680,6 +697,15 @@ def _execute_dag(
                     hook = entry['run']
                     hook_timeout = entry.get('timeout')
                     break
+            if (idle_minutes_to_autostop is not None and
+                    _is_launched_by_jobs_controller and down and
+                    _autodown_needs_identity_it_lacks(handle)):
+                # The controller's leak guard, on a pod that cannot delete
+                # itself: setting it would wedge the cluster, not free it.
+                job_logger.info('Not setting the autodown leak guard: '
+                                '`remote_identity: NONE` gives the cluster no '
+                                'credentials to delete itself.')
+                idle_minutes_to_autostop = None
             if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 assert isinstance(handle, backends.CloudVmRayResourceHandle)
@@ -750,6 +776,7 @@ def launch(
     _request_name: request_names.AdminPolicyRequestName = request_names.
     AdminPolicyRequestName.CLUSTER_LAUNCH,
     _include_credentials: bool = False,
+    _kubernetes_identity: Optional[str] = None,
     job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -954,6 +981,7 @@ def launch(
         _is_launched_by_sky_serve_controller,
         _extra_launch_context=_extra_launch_context,
         _request_name=_request_name,
+        _kubernetes_identity=_kubernetes_identity,
         job_logger=job_logger)
 
 

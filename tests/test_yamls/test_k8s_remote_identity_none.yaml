@@ -1,0 +1,9 @@
+config:
+  kubernetes:
+    remote_identity: NONE
+
+run: |
+  test ! -e /var/run/secrets/kubernetes.io/serviceaccount/token
+  echo "no_token_check: ok"
+  # Stay RUNNING long enough for the test to read the logs by name.
+  sleep 60

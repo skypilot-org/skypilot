@@ -287,6 +287,55 @@ above, then set the following in :ref:`~/.sky/config.yaml <config-yaml>`:
     ``sky`` commands inside the pod), the workload service account will need
     broader permissions similar to the `Minimum Permissions Required for SkyPilot`_.
 
+.. _kubernetes-remote-identity-none:
+
+Running workload pods with no Kubernetes identity
+-------------------------------------------------
+
+To give the pods SkyPilot launches no access to the Kubernetes API, set
+``remote_identity: NONE``:
+
+.. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    kubernetes:
+      remote_identity: NONE
+
+With ``NONE``, SkyPilot mounts no service account token in the pods and grants
+their service account no roles. The pods keep the account name
+``skypilot-service-account``, so ``imagePullSecrets`` set on that account keep
+working.
+
+Under ``NONE``, these do not work:
+
+- Autodown (``sky launch --down``, ``sky autostop --down``). A cluster tears
+  itself down through the Kubernetes API, so SkyPilot refuses autodown at
+  launch. Use ``sky down`` instead. Managed jobs still run: the jobs controller
+  tears their clusters down, and skips the idle autodown it would otherwise set
+  on them as a safeguard.
+- ``kubectl`` or ``sky`` run inside a pod against the cluster's own Kubernetes
+  API. Removing that access is the purpose of ``NONE``.
+
+SkyPilot also refuses a ``pod_config`` that would give the pods a token back:
+``spec.serviceAccountName``, ``spec.serviceAccount``,
+``spec.automountServiceAccountToken: true``, or a projected
+``serviceAccountToken`` volume.
+
+Jobs and serve controllers keep their identity, because they launch clusters.
+The clusters they launch for your jobs and services still get ``NONE``.
+
+When the API server's config sets ``NONE`` (globally, in a workspace, or in
+``context_configs``), users cannot loosen it: a request whose client config or
+task sets another ``remote_identity`` is refused. Users can still choose
+``NONE`` for their own tasks when the server does not set it.
+
+.. note::
+
+    ``NONE`` covers the pods SkyPilot creates. To also keep tokens out of pods
+    that other tools create in the namespace, use an admission policy, such as
+    a ValidatingAdmissionPolicy that rejects pods that do not set
+    ``automountServiceAccountToken: false``.
+
 
 Controller clusters use a separate service account
 --------------------------------------------------
