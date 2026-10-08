@@ -989,7 +989,8 @@ SKY_MANAGED_JOBS_CONTROLLER_STARTING_COUNT = prom.Gauge(
 
 SKY_MANAGED_JOBS_CONTROLLER_RUNNING_COUNT = prom.Gauge(
     'sky_managed_jobs_controller_running_count',
-    'Number of running job tasks on this controller process',
+    'Number of running job tasks on this controller process, including '
+    'jobs claimed but not started yet',
     ['pid'],
     multiprocess_mode='liveall',
 )

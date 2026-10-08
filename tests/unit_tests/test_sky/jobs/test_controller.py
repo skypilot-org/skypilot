@@ -2382,6 +2382,145 @@ class TestStatusCheckGapJitter:
         assert len(set(sleeps[1:])) == len(sleeps) - 1
 
 
+async def _yield_to_event_loop():
+    """Suspends once, letting every task that is ready run a step."""
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    loop.call_soon(future.set_result, None)
+    await future
+
+
+class TestMaxJobsCountsClaimedJobs:
+    """The per-process job cap must count a job as soon as it is claimed.
+
+    monitor_loop claims a job and hands it to a background task, which adds
+    it to job_tasks only after reading its env file and loading its DAG. A
+    cap that counts job_tasks misses the job claimed just before the check,
+    so every controller process ended up holding max_jobs + 1 jobs.
+    """
+
+    class _StopLoop(Exception):
+        pass
+
+    @pytest.mark.asyncio
+    async def test_claims_stop_at_max_jobs(self, tmp_path):
+        max_jobs = 3
+        manager = ControllerManager('test-uuid')
+        claimed_ids: List[int] = []
+        sleeps: List[float] = []
+        running_gauge = MagicMock()
+
+        async def fake_claim(pid, pid_started_at):
+            del pid, pid_started_at
+            # The real claim is a database round trip, during which the task
+            # of the previous claim gets to run and register itself.
+            await _yield_to_event_loop()
+            claimed_ids.append(len(claimed_ids) + 1)
+            return {'job_id': claimed_ids[-1], 'pool': None}
+
+        async def fake_run_job_loop(job_id, log_file, pool):
+            del log_file, pool
+            # Register the job the first time the task runs, then keep
+            # running, like a job that has started.
+            job_task = asyncio.get_running_loop().create_future()
+            async with manager._job_tasks_lock:
+                manager.job_tasks[job_id] = job_task
+            await job_task
+
+        async def fake_sleep(seconds):
+            sleeps.append(seconds)
+            raise self._StopLoop()
+
+        signal_dir = tmp_path / 'signals'
+        signal_dir.mkdir()
+        tasks_before = set(controller_module._background_tasks)
+        try:
+            with patch.object(controller_module.controller_utils,
+                              'MAX_JOBS_PER_WORKER', max_jobs), \
+                 patch.object(controller_module.controller_utils,
+                              'MAX_TOTAL_RUNNING_JOBS', 1000), \
+                 patch.object(controller_module.controller_utils,
+                              'LAUNCHES_PER_WORKER', 100), \
+                 patch.object(controller_module.controller_utils,
+                              'get_number_of_jobs_controllers',
+                              return_value=1), \
+                 patch.object(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                              str(signal_dir)), \
+                 patch.object(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                              str(tmp_path / 'logs')), \
+                 patch.object(controller_module.metrics_lib,
+                              'METRICS_ENABLED', True), \
+                 patch.object(controller_module.metrics_lib,
+                              'SKY_MANAGED_JOBS_CONTROLLER_RUNNING_COUNT',
+                              running_gauge), \
+                 patch.object(controller_module.metrics_lib,
+                              'SKY_MANAGED_JOBS_CONTROLLER_STARTING_COUNT'), \
+                 patch.object(controller_module.metrics_lib,
+                              'SKY_MANAGED_JOBS_LIMIT_LAUNCHES_PER_WORKER'), \
+                 patch.object(controller_module.metrics_lib,
+                              'SKY_MANAGED_JOBS_CONTROLLER_MAX_JOBS'), \
+                 patch.object(managed_job_state, 'get_waiting_job_async',
+                              new=fake_claim), \
+                 patch.object(manager, 'run_job_loop',
+                              new=fake_run_job_loop), \
+                 patch.object(controller_module.asyncio, 'sleep',
+                              new=fake_sleep):
+                with pytest.raises(self._StopLoop):
+                    await manager.monitor_loop()
+        finally:
+            for job_task in manager.job_tasks.values():
+                job_task.cancel()
+            for task in set(controller_module._background_tasks) - tasks_before:
+                task.cancel()
+
+        assert claimed_ids == list(range(1, max_jobs + 1))
+        # The loop stopped in the cap branch, not for lack of jobs.
+        assert sleeps == [60]
+        assert manager.claimed == set(claimed_ids)
+        assert running_gauge.labels.return_value.set.call_args.args == (
+            max_jobs,)
+
+    @pytest.mark.asyncio
+    async def test_running_count(self):
+        """Running tasks and unregistered claims count; finished tasks whose
+        loop is still cleaning up do not."""
+        manager = ControllerManager('test-uuid')
+        loop = asyncio.get_running_loop()
+        finished = loop.create_future()
+        finished.set_result(None)
+        running = loop.create_future()
+        manager.job_tasks = {1: finished, 2: running}
+        manager.claimed = {1, 2, 3}
+
+        assert manager._running_job_count() == 2
+
+        running.cancel()
+
+    @pytest.mark.asyncio
+    async def test_claim_released_when_job_loop_fails(self, tmp_path):
+        """A job loop that fails before registering must not keep its claim,
+        or the process would run below max_jobs from then on."""
+        manager = ControllerManager('test-uuid')
+
+        async def failing_run_job_loop(job_id, log_file, pool):
+            del job_id, log_file, pool
+            raise RuntimeError('failed before the job registered')
+
+        tasks_before = set(controller_module._background_tasks)
+        with patch.object(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                          str(tmp_path)), \
+             patch.object(manager, 'run_job_loop', new=failing_run_job_loop):
+            await manager.start_job(7)
+            assert manager.claimed == {7}
+            new_tasks = (set(controller_module._background_tasks) -
+                         tasks_before)
+            await asyncio.gather(*new_tasks, return_exceptions=True)
+            # Done callbacks run on the next turn of the event loop.
+            await _yield_to_event_loop()
+
+        assert not manager.claimed
+
+
 @pytest.fixture(autouse=True)
 def _fresh_network_check_cache(monkeypatch):
     """Isolate the process-wide network-check cache between tests.

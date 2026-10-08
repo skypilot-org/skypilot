@@ -194,7 +194,7 @@ async def check_network_connection() -> None:
         await asyncio.sleep(random.uniform(0, min(waited, reuse_window)))
 
 
-async def create_background_task(coro: typing.Coroutine) -> None:
+async def create_background_task(coro: typing.Coroutine) -> asyncio.Task:
     """Create a background task and add it to the set of background tasks.
 
     Main reason we do this is since tasks are only held as a weak reference in
@@ -203,12 +203,16 @@ async def create_background_task(coro: typing.Coroutine) -> None:
 
     Args:
         coro: The coroutine to create a task for.
+
+    Returns:
+        The created task.
     """
     async with _background_tasks_lock:
         task = asyncio.create_task(coro)
         _background_tasks.add(task)
         # TODO(cooperc): Discard needs a lock?
         task.add_done_callback(_background_tasks.discard)
+    return task
 
 
 def _get_dag(job_id: int) -> 'sky.Dag':
@@ -3373,6 +3377,10 @@ class ControllerManager:
         # Global state for active jobs
         self.job_tasks: Dict[int, asyncio.Task] = {}
         self.starting: Set[int] = set()
+        # Jobs claimed by this process whose job loop has not finished. Unlike
+        # job_tasks, this includes jobs claimed but not registered yet; see
+        # _running_job_count.
+        self.claimed: Set[int] = set()
 
         # Lock for synchronizing access to global state dictionary
         # Must always hold _job_tasks_lock when accessing the _starting_signal.
@@ -3881,7 +3889,12 @@ class ControllerManager:
 
         async with self._job_tasks_lock:
             self.starting.add(job_id)
-        await create_background_task(self.run_job_loop(job_id, log_file, pool))
+            self.claimed.add(job_id)
+        task = await create_background_task(
+            self.run_job_loop(job_id, log_file, pool))
+        # Release the claim however the job loop ends, including when it fails
+        # before the job is added to job_tasks.
+        task.add_done_callback(lambda _: self.claimed.discard(job_id))
 
         logger.info(f'Job {job_id} started successfully')
 
@@ -3931,6 +3944,17 @@ class ControllerManager:
                         logger.info(f'Job {job_id} cancelled successfully')
             await asyncio.sleep(15)
 
+    def _running_job_count(self) -> int:
+        """Jobs counted against max_jobs. Caller must hold _job_tasks_lock.
+
+        A claimed job is added to job_tasks only after its env file is read
+        and its DAG is loaded, so job_tasks alone misses the job claimed just
+        before the check. Count the claimed jobs not registered yet as well.
+        A job whose task is done is not counted while its loop cleans up.
+        """
+        running = sum(1 for task in self.job_tasks.values() if not task.done())
+        return running + len(self.claimed - self.job_tasks.keys())
+
     async def monitor_loop(self):
         """Monitor the job loop."""
         logger.info(f'Starting monitor loop for pid {self._pid}...')
@@ -3938,9 +3962,7 @@ class ControllerManager:
 
         while True:
             async with self._job_tasks_lock:
-                running_tasks = [
-                    task for task in self.job_tasks.values() if not task.done()
-                ]
+                running_count = self._running_job_count()
 
             async with self._job_tasks_lock:
                 starting_count = len(self.starting)
@@ -3950,7 +3972,7 @@ class ControllerManager:
                 metrics_lib.SKY_MANAGED_JOBS_CONTROLLER_STARTING_COUNT.labels(
                     pid=pid_str).set(starting_count)
                 metrics_lib.SKY_MANAGED_JOBS_CONTROLLER_RUNNING_COUNT.labels(
-                    pid=pid_str).set(len(running_tasks))
+                    pid=pid_str).set(running_count)
                 metrics_lib.SKY_MANAGED_JOBS_LIMIT_LAUNCHES_PER_WORKER.labels(
                     pid=pid_str).set(controller_utils.LAUNCHES_PER_WORKER)
 
@@ -3972,7 +3994,7 @@ class ControllerManager:
                 metrics_lib.SKY_MANAGED_JOBS_CONTROLLER_MAX_JOBS.labels(
                     pid=pid_str).set(max_jobs)
 
-            if len(running_tasks) >= max_jobs:
+            if running_count >= max_jobs:
                 logger.info('Too many jobs running, waiting for 60 seconds')
                 await asyncio.sleep(60)
                 continue
