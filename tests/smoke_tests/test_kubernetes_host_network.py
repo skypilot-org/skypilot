@@ -56,13 +56,15 @@ def _schedulable_nodes() -> int:
 def _require_two_nodes() -> None:
     """Fail, not skip: a skip would pass a test that never ran.
 
-    The callers are resource_heavy, so they run on the multi-node queue;
-    fewer than two nodes there is an infra problem to surface.
+    The callers are resource_heavy, so they are meant to run on the
+    multi-node queue; fewer than two nodes there is an infra problem.
     """
-    if _schedulable_nodes() < 2:
-        pytest.fail('needs two schedulable nodes (a hostNetwork cluster puts '
-                    'each pod on its own node); the resource_heavy queue '
-                    'should provide them')
+    n = _schedulable_nodes()
+    if n < 2:
+        # 1 can also mean the node list could not be read.
+        pytest.fail(f'needs two schedulable nodes, found {n} (a hostNetwork '
+                    'cluster puts each pod on its own node); the '
+                    'resource_heavy queue should provide them')
 
 
 @pytest.mark.kubernetes
