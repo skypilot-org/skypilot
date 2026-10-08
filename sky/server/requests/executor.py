@@ -1008,7 +1008,6 @@ def _request_execution_wrapper(request_id: str,
             # Clear any leftover retry-backoff message now that we are running.
             request_task.status_msg = None
             func = request_task.entrypoint
-            request_body = request_task.request_body
             request_name = request_task.name
 
         # Store copies of the original stdout and stderr file descriptors
@@ -1032,7 +1031,7 @@ def _request_execution_wrapper(request_id: str,
                              sky_logging.add_debug_log_handler(request_id))
             with debug_log_ctx, \
                 override_request_env_and_config(
-                    request_body, request_id, request_name), \
+                    request_task.request_body, request_id, request_name), \
                 tempstore.tempdir():
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
@@ -1042,7 +1041,7 @@ def _request_execution_wrapper(request_id: str,
                  labels(request=request_name, pid=pid).inc())
                 with metrics_utils.time_it(name=request_name,
                                            group='request_execution'):
-                    return_value = func(**request_body.to_kwargs())
+                    return_value = func(**request_task.request_body.to_kwargs())
                 f.flush()
     except KeyboardInterrupt:
         logger.info(f'Request {request_id} cancelled by user')
@@ -1099,8 +1098,12 @@ def _request_execution_wrapper(request_id: str,
         _in_request_execution = False
         _restore_output()
         try:
-            # Capture the peak RSS before GC.
+            # Capture the peak RSS while the request's result is still
+            # referenced.
             peak_rss = max(proc.memory_info().rss, metrics_lib.peak_rss_bytes)
+            # Unreference the request's payload and result before
+            # release_memory() so that their memory can be returned too.
+            return_value = request_task = None
             # Clear request level cache to release all memory used by the
             # request.
             annotations.clear_request_level_cache()
