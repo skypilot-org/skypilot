@@ -2938,10 +2938,21 @@ def get_config_schema():
         'type': 'object',
         'required': ['store'],
         'additionalProperties': False,
+        # The OTLP store has no default endpoint, so its block is required.
+        'if': {
+            'properties': {
+                'store': {
+                    'case_insensitive_enum': ['otlp'],
+                },
+            },
+        },
+        'then': {
+            'required': ['otlp'],
+        },
         'properties': {
             'store': {
                 'type': 'string',
-                'case_insensitive_enum': ['gcp', 'aws'],
+                'case_insensitive_enum': ['gcp', 'aws', 'otlp'],
             },
             'gcp': {
                 'type': 'object',
@@ -2979,6 +2990,48 @@ def get_config_schema():
                         'type': 'boolean',
                     },
                     'additional_tags': {
+                        'type': 'object',
+                        'additionalProperties': {
+                            'type': 'string',
+                        },
+                    },
+                },
+            },
+            'otlp': {
+                'type': 'object',
+                'required': ['endpoint'],
+                'additionalProperties': False,
+                'properties': {
+                    'endpoint': {
+                        'type': 'string',
+                    },
+                    'protocol': {
+                        'type': 'string',
+                        'case_insensitive_enum': ['http/protobuf', 'grpc'],
+                    },
+                    'headers': {
+                        'type': 'object',
+                        'additionalProperties': {
+                            'type': 'string',
+                        },
+                    },
+                    'headers_file': {
+                        'type': 'string',
+                    },
+                    'compression': {
+                        'type': 'string',
+                        'case_insensitive_enum': ['none', 'gzip'],
+                    },
+                    'tls': {
+                        'type': 'object',
+                        'additionalProperties': False,
+                        'properties': {
+                            'insecure_skip_verify': {
+                                'type': 'boolean',
+                            },
+                        },
+                    },
+                    'resource_attributes': {
                         'type': 'object',
                         'additionalProperties': {
                             'type': 'string',
