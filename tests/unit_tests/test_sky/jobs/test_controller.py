@@ -2271,7 +2271,9 @@ class TestStatusCheckGapJitter:
     Monitor loops that start together (e.g. every job resumed after a
     controller restart) must not check their jobs at the same moment in every
     cycle. The first gap of a loop is spread over a whole gap; later gaps vary
-    around JOB_STATUS_CHECK_GAP_SECONDS without changing the mean.
+    around the mean gap without changing it. The mean is
+    JOB_STATUS_CHECK_GAP_SECONDS unless the runtime of the job's cluster asks
+    for another gap.
     """
 
     _GAP = managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS
@@ -2381,6 +2383,132 @@ class TestStatusCheckGapJitter:
         assert abs(statistics.mean(sleeps[1:]) - self._GAP) < 0.3
         assert len(set(sleeps[1:])) == len(sleeps) - 1
 
+    @pytest.mark.parametrize('mean_gap', [5, 40])
+    def test_runtime_gap_sets_the_mean(self, mean_gap):
+        """A runtime's gap replaces JOB_STATUS_CHECK_GAP_SECONDS as the mean
+        and keeps the same spread around it."""
+        jitter = controller_module._STATUS_CHECK_GAP_JITTER
+        with patch.object(controller_module, 'random', random.Random(0)):
+            gaps = [
+                controller_module._status_check_gap_seconds(first_check=False,
+                                                            mean_gap=mean_gap)
+                for _ in range(10000)
+            ]
+            first_gaps = [
+                controller_module._status_check_gap_seconds(first_check=True,
+                                                            mean_gap=mean_gap)
+                for _ in range(1000)
+            ]
+        assert all(mean_gap * (1 - jitter) <= g <= mean_gap * (1 + jitter)
+                   for g in gaps)
+        assert abs(statistics.mean(gaps) - mean_gap) < mean_gap * 0.01
+        assert all(0 <= g <= mean_gap for g in first_gaps)
+        assert max(first_gaps) > mean_gap * 0.9
+
+    async def _run_monitor_loop(self, num_checks, runtime_registered,
+                                runtime_gaps):
+        """Runs the monitor loop through num_checks healthy status checks.
+
+        runtime_gaps[i] is the gap the runtime asks for at check i. Returns
+        the loop's sleeps, the gaps it passed to the network check, and the
+        calls to the runtime's gap hook as (handle, thread ident) pairs. The
+        loop reads one more handle, before the check that stops it.
+        """
+        checks = 0
+        handles = [MagicMock(name=f'handle{i}') for i in range(num_checks + 1)]
+        gap_calls = []
+
+        async def fake_get_job_status(*args, **kwargs):
+            nonlocal checks
+            if checks >= num_checks:
+                raise self._StopLoop()
+            checks += 1
+            return job_lib.JobStatus.RUNNING, None
+
+        def fake_get_handle(cluster_name):
+            assert cluster_name == 'cluster'
+            return handles[checks]
+
+        def fake_gap_hook(handle):
+            gap_calls.append((handle, threading.get_ident()))
+            return (runtime_gaps + [None])[handles.index(handle)]
+
+        task = MagicMock()
+        task.num_nodes = 1
+        instance = MagicMock()
+        instance._job_id = 1
+        instance._pool = None
+        instance._update_live_log_links = AsyncMock(return_value=True)
+        sleep = AsyncMock(return_value=None)
+        network_check = AsyncMock(return_value=None)
+        runtime = controller_module.managed_job_runtime
+        with patch.object(controller_module, 'random', random.Random(0)), \
+             patch.object(managed_job_utils, 'get_job_status',
+                          new=AsyncMock(side_effect=fake_get_job_status)), \
+             patch.object(controller_module, 'check_network_connection',
+                          new=network_check), \
+             patch.object(runtime, 'is_registered',
+                          return_value=runtime_registered), \
+             patch.object(runtime, 'get_status_check_gap_seconds',
+                          side_effect=fake_gap_hook), \
+             patch.object(runtime, 'get_recovery_status',
+                          return_value=None), \
+             patch.object(managed_job_state, 'get_runtime_cursor_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name',
+                          side_effect=fake_get_handle), \
+             patch.object(controller_module.asyncio, 'sleep', new=sleep):
+            with pytest.raises(self._StopLoop):
+                await JobController._monitor_one_task_impl(
+                    instance,
+                    task_id=0,
+                    task=task,
+                    cluster_name='cluster',
+                    executor=MagicMock(),
+                    status_logger=managed_job_utils.JobStatusLogger(),
+                    callback_func=AsyncMock())
+        sleeps = [call.args[0] for call in sleep.call_args_list]
+        network_gaps = [call.args[0] for call in network_check.call_args_list]
+        if runtime_registered:
+            assert [handle for handle, _ in gap_calls] == handles
+        return sleeps, network_gaps, gap_calls
+
+    @pytest.mark.asyncio
+    async def test_monitor_loop_follows_the_runtime_gap(self):
+        """Each wait uses the gap the runtime asked for at the job's last
+        check, so a job that moves to another runtime (a recovery onto
+        another cloud) follows it from the next wait on. The first wait has
+        no check behind it and spreads loops over the default gap."""
+        runtime_gaps = [5, 5, None, 30, 5]
+        sleeps, network_gaps, gap_calls = await self._run_monitor_loop(
+            num_checks=len(runtime_gaps),
+            runtime_registered=True,
+            runtime_gaps=runtime_gaps)
+        jitter = controller_module._STATUS_CHECK_GAP_JITTER
+        # The wait before check i uses the gap from check i - 1. The extra
+        # last wait is before the check that stopped the loop.
+        means = [self._GAP
+                ] + [self._GAP if gap is None else gap for gap in runtime_gaps]
+        assert len(sleeps) == len(means)
+        assert 0 <= sleeps[0] <= self._GAP
+        for got, mean in zip(sleeps[1:], means[1:]):
+            assert mean * (1 - jitter) <= got <= mean * (1 + jitter), sleeps
+        # The network check is reused only within the loop's own gap.
+        assert network_gaps == means
+        # The runtime is asked once per check, with the handle read for that
+        # check (see _run_monitor_loop), and not on the event loop's thread:
+        # its ownership check may read the database.
+        assert all(thread != threading.get_ident() for _, thread in gap_calls)
+
+    @pytest.mark.asyncio
+    async def test_monitor_loop_without_runtime_uses_the_default_gap(self):
+        sleeps, network_gaps, gap_calls = await self._run_monitor_loop(
+            num_checks=50, runtime_registered=False, runtime_gaps=[5] * 50)
+        assert gap_calls == []
+        assert all(self._LOW <= s <= self._HIGH for s in sleeps[1:]), sleeps
+        assert network_gaps == [self._GAP] * len(sleeps)
+
 
 @pytest.fixture(autouse=True)
 def _fresh_network_check_cache(monkeypatch):
@@ -2461,6 +2589,32 @@ class TestNetworkCheckOncePerGap:
             monkeypatch.setattr(managed_job_utils,
                                 'JOB_STATUS_CHECK_GAP_SECONDS', 0)
             await controller_module.check_network_connection()
+        assert check.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_each_loop_reuses_a_check_within_its_own_gap(self):
+        """Loops whose jobs are checked at different rates share one check,
+        and each reuses it only while it is younger than that loop's own
+        shortest sleep. A loop with a short gap still sees a result as fresh
+        as it would see on its own; a loop with the default or a longer gap
+        reuses the checks the short-gap loop keeps running."""
+        check = AsyncMock()
+        jitter = controller_module._STATUS_CHECK_GAP_JITTER
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=check):
+            await controller_module.check_network_connection(2)
+            assert check.await_count == 1
+            # A check 6 s old: older than a 2 s loop's shortest sleep
+            # (1.6 s), younger than the default (8 s) and a 30 s loop's
+            # (24 s).
+            age = 6
+            assert 2 * (1 - jitter) < age < self._shortest_sleep()
+            controller_module._network_check_ok_at = time.monotonic() - age
+            await controller_module.check_network_connection(30)
+            await controller_module.check_network_connection()
+            assert check.await_count == 1
+            await controller_module.check_network_connection(2)
         assert check.await_count == 2
 
     @pytest.mark.asyncio
@@ -2564,7 +2718,7 @@ class TestNetworkCheckOncePerGap:
             finish.set()
             await second
         assert check.await_count == 1
-        assert controller_module._network_check_is_fresh()
+        assert controller_module._network_check_is_fresh(self._GAP)
 
     class _RecordingRandom:
         """Stands in for the module's random: records each uniform() range
@@ -2577,9 +2731,10 @@ class TestNetworkCheckOncePerGap:
             self.ranges.append((low, high))
             return low
 
-    async def _release_waiters_after(self, wait_seconds):
+    async def _release_waiters_after(self, wait_seconds, waiter_gap=None):
         """Starts a check, lets two more loops wait on it for about
-        wait_seconds, then lets it succeed. Returns the delay ranges drawn."""
+        wait_seconds, then lets it succeed. The waiting loops pass waiter_gap
+        as their status-check gap. Returns the delay ranges drawn."""
         started = asyncio.Event()
         finish = asyncio.Event()
 
@@ -2598,7 +2753,7 @@ class TestNetworkCheckOncePerGap:
             await started.wait()
             waiters = [
                 asyncio.create_task(
-                    controller_module.check_network_connection())
+                    controller_module.check_network_connection(waiter_gap))
                 for _ in range(2)
             ]
             await asyncio.sleep(wait_seconds)
@@ -2627,6 +2782,17 @@ class TestNetworkCheckOncePerGap:
         monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_CHECK_GAP_SECONDS',
                             0.05)
         ranges = await self._release_waiters_after(0.2)
+        assert len(ranges) == 2
+        for low, high in ranges:
+            assert low == 0
+            assert high == pytest.approx(
+                0.05 * (1 - controller_module._STATUS_CHECK_GAP_JITTER))
+
+    @pytest.mark.asyncio
+    async def test_release_delay_is_capped_at_the_waiters_reuse_window(self):
+        """A loop with a short gap is not held back for longer than its own
+        reuse window, however long the default gap is."""
+        ranges = await self._release_waiters_after(0.2, waiter_gap=0.05)
         assert len(ranges) == 2
         for low, high in ranges:
             assert low == 0

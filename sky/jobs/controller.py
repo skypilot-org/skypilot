@@ -63,6 +63,7 @@ from sky.utils.plugin_extensions import LogDeliverySource
 if typing.TYPE_CHECKING:
     import psutil
 
+    from sky import backends
     from sky import task as task_lib
     from sky.schemas.generated import jobsv1_pb2
 else:
@@ -82,22 +83,35 @@ _LIVE_LINK_POLL_EVERY = 4  # ~1 attempt per 4 status polls (~60s)
 _LIVE_LINK_MAX_ATTEMPTS = 30  # give up live updates after ~30 attempts
 
 # Random spread of each status-check gap in the monitor loop, as a fraction of
-# JOB_STATUS_CHECK_GAP_SECONDS. Without it, monitor loops that start together
-# (e.g. every job resumed after a controller restart) check their jobs at the
-# same moment in every cycle. The checks then compete for the same CPU and
-# database connections and finish together, so the loops never drift apart.
+# the mean gap. Without it, monitor loops that start together (e.g. every job
+# resumed after a controller restart) check their jobs at the same moment in
+# every cycle. The checks then compete for the same CPU and database
+# connections and finish together, so the loops never drift apart.
 _STATUS_CHECK_GAP_JITTER = 0.2
 
 
-def _status_check_gap_seconds(first_check: bool) -> float:
+def _mean_status_check_gap_seconds(runtime_gap: Optional[float]) -> float:
+    """Returns the mean gap between two status checks of a job.
+
+    runtime_gap is the gap that the runtime of the job's cluster asks for
+    (see managed_job_runtime.get_status_check_gap_seconds); None means
+    JOB_STATUS_CHECK_GAP_SECONDS.
+    """
+    if runtime_gap is None:
+        return managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS
+    return runtime_gap
+
+
+def _status_check_gap_seconds(first_check: bool,
+                              mean_gap: Optional[float] = None) -> float:
     """Returns how long the monitor loop waits before a job status check.
 
     The first check of a loop waits a random part of one full gap, so loops
     that start together are spread out within one cycle. Later checks wait
-    JOB_STATUS_CHECK_GAP_SECONDS on average, +/- _STATUS_CHECK_GAP_JITTER, so
-    they stay spread out.
+    mean_gap on average, +/- _STATUS_CHECK_GAP_JITTER, so they stay spread
+    out. None means JOB_STATUS_CHECK_GAP_SECONDS.
     """
-    gap = managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS
+    gap = _mean_status_check_gap_seconds(mean_gap)
     if first_check:
         return random.uniform(0, gap)
     return gap * random.uniform(1 - _STATUS_CHECK_GAP_JITTER,
@@ -124,18 +138,39 @@ _network_check_in_flight: Optional['asyncio.Task[None]'] = None
 _network_check_ok_at: Optional[float] = None
 
 
-def _network_check_is_fresh() -> bool:
+def _read_runtime_handle(
+    cluster_name: str
+) -> Tuple[Optional['backends.ResourceHandle'], Optional[float]]:
+    """Reads a cluster's handle and the status-check gap its runtime asks for.
+
+    Both run in one worker thread: the runtime's ownership check may read the
+    database, and the monitor loop runs on the event loop.
+    """
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    return handle, managed_job_runtime.get_status_check_gap_seconds(handle)
+
+
+def _network_check_reuse_window(status_check_gap: float) -> float:
+    """How old a successful network check can be for a loop to reuse it.
+
+    The window is the shortest gap the loop sleeps between two polls, its
+    mean status-check gap minus the jitter, so a process with a single loop
+    still checks the network before every poll. Each loop passes its own
+    gap: loops whose jobs are checked at different rates share one check, and
+    each sees a result no older than it would see on its own. The shared
+    check then runs as often as the loop with the shortest gap needs.
+    """
+    return status_check_gap * (1 - _STATUS_CHECK_GAP_JITTER)
+
+
+def _network_check_is_fresh(status_check_gap: float) -> bool:
     """Whether the last successful network check can stand in for a new one.
 
-    A check is reused for the shortest gap a loop sleeps between two polls,
-    JOB_STATUS_CHECK_GAP_SECONDS minus its jitter, so a process with a single
-    loop still checks the network before every poll, exactly as before. The
-    gap is read on every call, as _status_check_gap_seconds reads it.
+    See _network_check_reuse_window.
     """
     if _network_check_ok_at is None:
         return False
-    max_age = (managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS *
-               (1 - _STATUS_CHECK_GAP_JITTER))
+    max_age = _network_check_reuse_window(status_check_gap)
     return time.monotonic() - _network_check_ok_at < max_age
 
 
@@ -155,7 +190,8 @@ def _retrieve_network_check_result(task: 'asyncio.Task[None]') -> None:
         task.exception()
 
 
-async def check_network_connection() -> None:
+async def check_network_connection(
+        status_check_gap: Optional[float] = None) -> None:
     """Checks the network connection, reusing a recent successful check.
 
     Raises exceptions.NetworkError when the check fails. Loops that find no
@@ -173,9 +209,16 @@ async def check_network_connection() -> None:
     A recovery strategy that owns its monitor loop
     (StrategyExecutor.monitor_task) should check the network through this
     function as well, so that its loops share the process's check.
+
+    Args:
+        status_check_gap: The mean gap, in seconds, between two polls of the
+            calling loop; it sets how old a reused check may be (see
+            _network_check_reuse_window). None means
+            JOB_STATUS_CHECK_GAP_SECONDS.
     """
     global _network_check_in_flight
-    if _network_check_is_fresh():
+    gap = _mean_status_check_gap_seconds(status_check_gap)
+    if _network_check_is_fresh(gap):
         return
     check = _network_check_in_flight
     started_here = check is None
@@ -188,8 +231,7 @@ async def check_network_connection() -> None:
     # not cancel the check that other loops are waiting on.
     await asyncio.shield(check)
     if not started_here:
-        reuse_window = (managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS *
-                        (1 - _STATUS_CHECK_GAP_JITTER))
+        reuse_window = _network_check_reuse_window(gap)
         waited = time.monotonic() - waiting_since
         await asyncio.sleep(random.uniform(0, min(waited, reuse_window)))
 
@@ -1233,6 +1275,13 @@ class JobController:
         live_link_attempts = 0
         live_link_poll_counter = 0
         first_status_check = True
+        # The status-check gap that the runtime of the job's cluster asks for,
+        # from the handle read at the last check. None (the default gap) until
+        # the loop has read a handle, and always None when no runtime is
+        # registered. After a recovery, the next wait still uses the gap of
+        # the cluster checked before it, and the check after that wait reads
+        # the new cluster's handle.
+        runtime_status_check_gap: Optional[float] = None
 
         while True:
             # Get job status (skip on first iteration if forcing recovery)
@@ -1245,19 +1294,21 @@ class JobController:
             exit_codes: Optional[List[int]] = None
 
             if not force_transit_to_recovering:
+                status_check_gap = _mean_status_check_gap_seconds(
+                    runtime_status_check_gap)
                 await asyncio.sleep(
-                    _status_check_gap_seconds(first_check=first_status_check))
+                    _status_check_gap_seconds(first_check=first_status_check,
+                                              mean_gap=status_check_gap))
                 first_status_check = False
 
                 # Check the network connection to avoid false alarm for job
                 # failure. Network glitch was observed even in the VM.
                 try:
-                    await check_network_connection()
+                    await check_network_connection(status_check_gap)
                 except exceptions.NetworkError:
                     logger.info(
                         'Network is not available. Retrying again in about '
-                        f'{managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS} '
-                        'seconds.')
+                        f'{status_check_gap:g} seconds.')
                     continue
 
             # A runtime observation can preserve a viable allocation even when
@@ -1268,9 +1319,8 @@ class JobController:
             runtime_handle = None
             runtime_error = None
             if managed_job_runtime.is_registered():
-                runtime_handle = await asyncio.to_thread(
-                    global_user_state.get_handle_from_cluster_name,
-                    cluster_name)
+                runtime_handle, runtime_status_check_gap = (
+                    await asyncio.to_thread(_read_runtime_handle, cluster_name))
                 try:
                     runtime_cursor = (
                         await managed_job_state.get_runtime_cursor_async(

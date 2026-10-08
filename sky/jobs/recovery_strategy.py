@@ -385,7 +385,8 @@ class StrategyExecutor:
         ``sky.jobs.controller.check_network_connection()`` rather than
         ``backend_utils.async_check_network_connection()``: it shares one
         check across every monitor loop in the controller process, where the
-        latter sends one request per job per poll.
+        latter sends one request per job per poll. Pass it the loop's mean gap
+        between polls if that differs from JOB_STATUS_CHECK_GAP_SECONDS.
 
         Returns:
             None: fall back to OSS default monitor.

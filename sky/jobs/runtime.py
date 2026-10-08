@@ -16,6 +16,7 @@ module.
 import dataclasses
 import enum
 import functools
+import math
 import typing
 from typing import Dict, List, Optional, Protocol, Tuple
 
@@ -170,6 +171,26 @@ class ManagedJobRuntime(Protocol):
         returncode: Optional[int] = None,
     ) -> Optional[Tuple[Optional['job_lib.JobStatus'], Optional[str]]]:
         """Query job status from the underlying runtime."""
+        ...
+
+    def get_status_check_gap_seconds(
+        self,
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+    ) -> Optional[float]:
+        """Return the mean gap, in seconds, between two status checks.
+
+        The jobs controller checks a running job's status in a loop and asks
+        before each wait, with the handle it read at the job's last check.
+        A job that recovery moved to another runtime follows the new runtime
+        from its next check on. Return None for the default,
+        ``sky.jobs.utils.JOB_STATUS_CHECK_GAP_SECONDS``. A runtime whose
+        checks cost much less than the default's can check more often, and
+        one whose checks cost more can check less often. The controller
+        spreads each wait around the returned value as it does around the
+        default.
+
+        Optional. Answer from the handle without contacting the cluster:
+        the controller asks once per check of every job it monitors."""
         ...
 
     def get_recovery_status(
@@ -413,6 +434,54 @@ def get_job_status(
         if result is not None:
             return result
     return None
+
+
+def get_status_check_gap_seconds(
+    handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+) -> Optional[float]:
+    """Return the status-check gap the runtime of ``handle`` asks for.
+
+    None means the default. Never raises: the controller's monitor loop calls
+    this before every wait, and a runtime whose ownership check or hook fails,
+    or whose hook returns anything but a positive, finite number of seconds,
+    must not stop that loop or make it check without pause. Such a runtime is
+    logged and the default is used.
+    """
+    if not _is_runtime_candidate(handle):
+        return None
+    try:
+        claimants = _claimants(handle)
+    except Exception:  # pylint: disable=broad-except
+        # _claimants has logged the failed ownership checks.
+        return None
+    for r in claimants:
+        # Optional hook: a runtime registered by an older plugin build may
+        # not implement it.
+        hook = getattr(r, 'get_status_check_gap_seconds', None)
+        if hook is None:
+            continue
+        runtime_name = type(r).__name__
+        try:
+            gap = hook(handle)
+        except Exception as e:  # pylint: disable=broad-except
+            _warn_status_check_gap(runtime_name,
+                                   f'raised {type(e).__name__}: {e}')
+            return None
+        if gap is None:
+            continue
+        if (isinstance(gap, bool) or not isinstance(gap, (int, float)) or
+                not math.isfinite(gap) or gap <= 0):
+            _warn_status_check_gap(runtime_name, f'returned {gap!r}')
+            return None
+        return float(gap)
+    return None
+
+
+@functools.lru_cache(maxsize=64)
+def _warn_status_check_gap(runtime_name: str, problem: str) -> None:
+    logger.warning(
+        '%s.get_status_check_gap_seconds %s. Using the default '
+        'status-check gap.', runtime_name, problem)
 
 
 def get_job_submitted_at(

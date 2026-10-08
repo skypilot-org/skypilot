@@ -86,7 +86,9 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
-# Controller checks its job's status every this many seconds.
+# Controller checks its job's status every this many seconds, unless the
+# runtime of the job's cluster asks for another gap (see
+# ManagedJobRuntime.get_status_check_gap_seconds in sky/jobs/runtime.py).
 # This is a tradeoff between the latency and the resource usage.
 JOB_STATUS_CHECK_GAP_SECONDS = 15
 
