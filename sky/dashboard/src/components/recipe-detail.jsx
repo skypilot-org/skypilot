@@ -15,7 +15,6 @@ import {
   EditIcon,
   ShareIcon,
   CheckIcon,
-  ExternalLinkIcon,
   GitCommitHorizontalIcon,
 } from 'lucide-react';
 
@@ -538,7 +537,6 @@ export function RecipeDetail() {
             >
               <EditIcon className="h-4 w-4 mr-1.5" />
               <span>Edit</span>
-              <ExternalLinkIcon className="h-3 w-3 ml-1" />
             </a>
           ) : (
             <button
