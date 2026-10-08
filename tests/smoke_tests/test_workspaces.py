@@ -576,11 +576,9 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
     Bucket IAM can only enforce per-workspace RBAC if every object a job
     uploads (workdir, folder mounts, single-file mounts) sits under its
     workspace prefix. We list the bucket directly instead of trusting
-    SkyPilot's logs. The default-workspace job runs to completion to show
-    the uploads are usable; the team jobs are cancelled once their uploads
-    are checked, because a jobs controller VM only knows the workspaces in
-    its own config and cannot launch their clusters. Afterwards every job
-    sub-path must be cleaned up while the user-owned bucket survives.
+    SkyPilot's logs. Every job runs to completion to show its uploads are
+    usable from its workspace. Afterwards every job sub-path must be cleaned
+    up while the user-owned bucket survives.
     """
     ws_default = constants.SKYPILOT_DEFAULT_WORKSPACE
     # (job name suffix, workspace, expected bucket key segment)
@@ -692,7 +690,7 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
             # The admin owns the shared bucket; SkyPilot must not delete it.
             f'aws s3api create-bucket --bucket {bucket_name}',
             # Restart so the server picks up the merged config (existing
-            # server config + two team workspaces + shared bucket).
+            # server config + team workspaces + shared bucket).
             f'{smoke_tests_utils.SKY_API_RESTART}',
             # Uploads finish before `jobs launch -d` returns, and the job
             # sub-path is only deleted after the job ends, so the objects are
@@ -706,21 +704,11 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
             f'keys=$({list_keys}); echo "$keys"; '
             f'! echo "$keys" | grep -vE " {bucket_root}/workspaces/'
             f'({"|".join(_ere(seg) for _, _, seg in all_workspaces)})/job-"',
-            # The team uploads are checked; end those jobs.
-            *[
-                _cancel_cmd(f'{name}-{suffix}', ws)
-                for suffix, ws, _ in team_workspaces
-            ],
-            # The uploads were usable by the default-workspace job.
-            smoke_tests_utils.
-            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                job_name=f'{name}-d',
-                job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                timeout=900),
+            # The uploads were usable by every job, in every workspace.
             *[
                 wait_for_job(job_name=f'{name}-{suffix}',
-                             job_status=[sky.ManagedJobStatus.CANCELLED],
-                             timeout=300) for suffix, _, _ in team_workspaces
+                             job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                             timeout=900) for suffix, _, _ in all_workspaces
             ],
             # Cleanup finds each job's sub-path under its workspace prefix.
             'for i in $(seq 1 36); do '
