@@ -576,11 +576,9 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
     Bucket IAM can only enforce per-workspace RBAC if every object a job
     uploads (workdir, folder mounts, single-file mounts) sits under its
     workspace prefix. We list the bucket directly instead of trusting
-    SkyPilot's logs. The default-workspace job runs to completion to show
-    the uploads are usable; the team jobs are cancelled once their uploads
-    are checked, because a jobs controller VM only knows the workspaces in
-    its own config and cannot launch their clusters. Afterwards every job
-    sub-path must be cleaned up while the user-owned bucket survives.
+    SkyPilot's logs. Every job runs to completion to show its uploads are
+    usable from its workspace. Afterwards every job sub-path must be cleaned
+    up while the user-owned bucket survives.
     """
     ws_default = constants.SKYPILOT_DEFAULT_WORKSPACE
     # (job name suffix, workspace, expected bucket key segment)
@@ -692,7 +690,7 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
             # The admin owns the shared bucket; SkyPilot must not delete it.
             f'aws s3api create-bucket --bucket {bucket_name}',
             # Restart so the server picks up the merged config (existing
-            # server config + two team workspaces + shared bucket).
+            # server config + team workspaces + shared bucket).
             f'{smoke_tests_utils.SKY_API_RESTART}',
             # Uploads finish before `jobs launch -d` returns, and the job
             # sub-path is only deleted after the job ends, so the objects are
@@ -706,21 +704,11 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
             f'keys=$({list_keys}); echo "$keys"; '
             f'! echo "$keys" | grep -vE " {bucket_root}/workspaces/'
             f'({"|".join(_ere(seg) for _, _, seg in all_workspaces)})/job-"',
-            # The team uploads are checked; end those jobs.
-            *[
-                _cancel_cmd(f'{name}-{suffix}', ws)
-                for suffix, ws, _ in team_workspaces
-            ],
-            # The uploads were usable by the default-workspace job.
-            smoke_tests_utils.
-            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                job_name=f'{name}-d',
-                job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                timeout=900),
+            # The uploads were usable by every job, in every workspace.
             *[
                 wait_for_job(job_name=f'{name}-{suffix}',
-                             job_status=[sky.ManagedJobStatus.CANCELLED],
-                             timeout=300) for suffix, _, _ in team_workspaces
+                             job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                             timeout=900) for suffix, _, _ in all_workspaces
             ],
             # Cleanup finds each job's sub-path under its workspace prefix.
             'for i in $(seq 1 36); do '
@@ -748,3 +736,57 @@ def test_workspace_jobs_bucket_prefix(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
     finally:
         local_dir_obj.cleanup()
+
+
+# ---------- Test managed jobs in a non-default workspace ----------
+@pytest.mark.managed_jobs
+@pytest.mark.no_remote_server
+# We can't restart the api server in the dependency test.
+@pytest.mark.no_dependency
+def test_managed_jobs_in_non_default_workspace(generic_cloud: str):
+    """Does a managed job in a non-default workspace run to completion?
+
+    The jobs controller launches the job's cluster through an API server of
+    its own, which has none of the main API server's config (no `workspaces`)
+    and has only just seen the job's user. The workspace check there must
+    still let the job launch, or the job retries on PermissionDeniedError and
+    stays PENDING forever.
+    """
+    workspace = 'team-a'
+    name = smoke_tests_utils.get_cluster_name()
+    config_dict = {
+        **smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG,
+        'workspaces': {
+            workspace: {},
+        },
+    }
+    wait_succeeded = (
+        smoke_tests_utils.
+        get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+            job_name=name,
+            job_status=[sky.ManagedJobStatus.SUCCEEDED],
+            timeout=900))
+
+    test = smoke_tests_utils.Test(
+        'test_managed_jobs_in_non_default_workspace',
+        [
+            # Restart so the server picks up the merged config (existing
+            # server config + the workspace).
+            smoke_tests_utils.SKY_API_RESTART,
+            f'sky jobs launch -y -d -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--config active_workspace={workspace} echo hi',
+            # On failure, show why the controller could not launch the job.
+            # The waiter runs in a subshell: it ends with `exit 1` on timeout.
+            f'( {wait_succeeded} ) || {{ sky jobs logs --controller '
+            f'-n {name} --no-follow --config active_workspace={workspace} | '
+            'tail -n 40; exit 1; }',
+        ],
+        teardown=(f'sky jobs cancel -y -n {name} '
+                  f'--config active_workspace={workspace} || true; '
+                  f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+                  f'{smoke_tests_utils.SKY_API_RESTART}'),
+        config_dict=config_dict,
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)

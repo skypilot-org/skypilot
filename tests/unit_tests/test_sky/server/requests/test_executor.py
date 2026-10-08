@@ -2070,3 +2070,72 @@ class TestClientUserIdValidation:
         auth_user = models.User(id='authuser1', name='auth-user')
         request = await self._prepare('bad%id', auth_user=auth_user)
         assert request.user_id == 'authuser1'
+
+
+@pytest.mark.parametrize('missing,claimed,seeded', [
+    (True, True, True),
+    (True, False, False),
+    (False, True, False),
+])
+def test_seed_role_if_missing(missing, claimed, seeded):
+    """A role-less user is seeded only when this worker claims the attempt."""
+    service = executor.permission.permission_service
+    with mock.patch.object(service, 'role_seed_missing',
+                           return_value=missing), \
+            mock.patch.object(service, 'claim_role_seed_attempt',
+                              return_value=claimed), \
+            mock.patch.object(executor.permission,
+                              'seed_new_user_role') as seed_new_user_role:
+        executor._seed_role_if_missing('user1')
+    if seeded:
+        seed_new_user_role.assert_called_once_with('user1')
+    else:
+        seed_new_user_role.assert_not_called()
+
+
+def test_seed_role_if_missing_swallows_seed_failure():
+    """A failed seed (e.g. a policy lock timeout) does not raise."""
+    service = executor.permission.permission_service
+    with mock.patch.object(service, 'role_seed_missing', return_value=True), \
+            mock.patch.object(service, 'claim_role_seed_attempt',
+                              return_value=True), \
+            mock.patch.object(executor.permission, 'seed_new_user_role',
+                              side_effect=RuntimeError('lock timeout')):
+        executor._seed_role_if_missing('user1')
+
+
+@pytest.mark.parametrize('seed_error', [None, RuntimeError('lock timeout')])
+def test_override_env_seeds_role_before_workspace_check(
+        stub_override_request_env_deps, monkeypatch, seed_error):
+    """A request's role-less user is seeded before the workspace check.
+
+    The user is created by the request itself when there is no auth (e.g. on
+    a jobs controller's API server); without a role every workspace except
+    `default` denies them. A failing seed must not fail the request.
+    """
+    calls = []
+    service = executor.permission.permission_service
+    monkeypatch.setattr(service, 'role_seed_missing', lambda user_id: True)
+    monkeypatch.setattr(service, 'claim_role_seed_attempt',
+                        lambda user_id: True)
+
+    def fake_seed(user_id):
+        calls.append(('seed', user_id))
+        if seed_error is not None:
+            raise seed_error
+
+    monkeypatch.setattr(executor.permission, 'seed_new_user_role', fake_seed)
+    monkeypatch.setattr(
+        'sky.workspaces.core.reject_request_for_unauthorized_workspace',
+        lambda *args, **kwargs: calls.append(('workspace_check',)))
+
+    body = payloads.RequestBody(
+        env_vars={
+            constants.USER_ID_ENV_VAR: 'client-user-id',
+            constants.USER_ENV_VAR: 'client-user',
+        })
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        pass
+
+    assert calls == [('seed', 'client-user-id'), ('workspace_check',)]

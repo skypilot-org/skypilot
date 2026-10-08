@@ -481,7 +481,18 @@ class PermissionService:
             # Deliberately here rather than in the callee, which
             # `_maybe_initialize_policies` calls once per user in a loop.
             self._load_policy_no_lock()
-            self._add_user_if_not_exists_no_lock(user_id, role)
+            if self._add_user_if_not_exists_no_lock(user_id, role):
+                # As in `update_role`: a first role can grant workspace access
+                # that was denied and cached while the user had none. Clear
+                # after the write so a reader cannot re-cache the old answer.
+                # The role is already saved, so a failed clear must not fail
+                # the caller; a stale entry expires with the cache TTL.
+                try:
+                    self.invalidate_user_permission_cache(user_id)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.warning(
+                        'Failed to clear cached workspace permissions for '
+                        f'user {user_id}: {common_utils.format_exception(e)}')
 
     def _add_user_if_not_exists_no_lock(self,
                                         user_id: str,
