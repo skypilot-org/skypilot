@@ -29,14 +29,16 @@ export function getSourceRepoName(source) {
   return source.url.replace(/\/+$/, '').split('/').slice(-2).join('/');
 }
 
-// Small pill marking a git-sourced recipe. Pass `href` to render it as a link.
-export function GitBadge({ href, children = 'Git' }) {
-  const className =
-    'inline-flex items-center gap-1 flex-shrink-0 px-1.5 py-0.5 text-xs font-medium leading-none text-sky-700 bg-sky-50 border border-sky-200 rounded-full';
+const GIT_BADGE_CLASS =
+  'inline-flex items-center gap-1 flex-shrink-0 px-1.5 py-0.5 text-xs font-medium leading-none text-sky-700 bg-sky-50 border border-sky-200 rounded-full';
+
+// "Git" pill marking a git-sourced recipe. Pass `href` to render it as a link.
+export function GitBadge({ href }) {
+  const className = GIT_BADGE_CLASS;
   const content = (
     <>
       <GitBranchIcon className="w-3 h-3" />
-      {children}
+      Git
     </>
   );
   if (href) {
@@ -54,12 +56,7 @@ export function GitBadge({ href, children = 'Git' }) {
   return <span className={className}>{content}</span>;
 }
 
-// Author label for a git-sourced recipe.
-export function GitAuthor({ className = '' }) {
-  return (
-    <span className={`inline-flex items-center gap-1 ${className}`}>
-      <GitBranchIcon className="w-3.5 h-3.5" />
-      Git
-    </span>
-  );
+// Author of a git-sourced recipe.
+export function GitAuthor() {
+  return <GitBadge />;
 }

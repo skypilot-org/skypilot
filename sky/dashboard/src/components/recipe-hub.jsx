@@ -33,11 +33,7 @@ import {
   EmptyTableState,
 } from '@/components/ui/table';
 import { EmptyState } from '@/components/elements/EmptyState';
-import {
-  GitAuthor,
-  GitBadge,
-  isGitSourced,
-} from '@/components/elements/RecipeSource';
+import { GitAuthor, isGitSourced } from '@/components/elements/RecipeSource';
 import { isForceEmpty } from '@/lib/utils';
 import { sortData } from '@/data/utils';
 import {
@@ -167,12 +163,9 @@ function RecipeCard({ recipe, onPin }) {
                 }`}
               />
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <h3 className="text-base font-medium text-blue-600 truncate group-hover:text-blue-800 transition-colors">
-                    {recipe.name}
-                  </h3>
-                  {isGitSourced(recipe) && <GitBadge />}
-                </div>
+                <h3 className="text-base font-medium text-blue-600 truncate group-hover:text-blue-800 transition-colors">
+                  {recipe.name}
+                </h3>
               </div>
             </div>
 
@@ -190,7 +183,7 @@ function RecipeCard({ recipe, onPin }) {
               </p>
 
               {/* Authored by */}
-              <div className="text-sm text-gray-500 truncate">
+              <div className="flex items-center gap-1 text-sm text-gray-500 truncate">
                 Authored by{' '}
                 {isGitSourced(recipe) ? (
                   <GitAuthor />
@@ -475,7 +468,6 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
                           >
                             {recipe.name}
                           </Link>
-                          {isGitSourced(recipe) && <GitBadge />}
                         </div>
                       </TableCell>
                       <TableCell

@@ -16,6 +16,7 @@ import {
   ShareIcon,
   CheckIcon,
   ExternalLinkIcon,
+  GitCommitHorizontalIcon,
 } from 'lucide-react';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -466,18 +467,7 @@ export function RecipeDetail() {
                       template.source,
                       template.source.sha || template.source.ref
                     )}
-                  >
-                    Git · {template.source.ref}
-                    {template.source.sha && (
-                      <>
-                        {' '}
-                        @{' '}
-                        <span className="font-mono">
-                          {shortSha(template.source.sha)}
-                        </span>
-                      </>
-                    )}
-                  </GitBadge>
+                  />
                 )}
               </div>
               <div className="flex items-center gap-2 text-sm text-gray-500">
@@ -697,8 +687,9 @@ export function RecipeDetail() {
                         href={getSourceCommitUrl(template.source)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="font-mono text-sm text-sky-blue hover:text-sky-blue-bright"
+                        className="inline-flex items-center gap-1 align-middle font-mono text-sm text-sky-blue hover:text-sky-blue-bright"
                       >
+                        <GitCommitHorizontalIcon className="w-4 h-4" />
                         {shortSha(template.source.sha)}
                       </a>
                     ) : (
