@@ -332,6 +332,60 @@ class TestAutodownUnsupportedUnderNone:
         backend.set_autostop.assert_called_once()
 
 
+class TestCheckedAtSubmit:
+    """jobs launch / serve up refuse what the cluster launch would refuse, so
+    the controller does not retry a refused launch forever."""
+
+    def _check(self,
+               task_config=None,
+               region=_CTX,
+               kubernetes_identity=None,
+               cloud=None):
+        resources = _resources(task_config, kubernetes_identity)
+        resources.region = region
+        resources.cloud = cloud
+        with mock.patch.object(kubernetes_cloud.Kubernetes,
+                               'existing_allowed_contexts',
+                               return_value=[_CTX]):
+            kubernetes_cloud.Kubernetes.check_resources_keep_server_none(
+                resources)
+
+    @pytest.mark.parametrize('region', [_CTX, None], ids=['pinned', 'any'])
+    def test_a_task_loosening_server_none_is_refused(self, server_config,
+                                                     region):
+        server_config(_k8s(remote_identity=_NONE))
+        with pytest.raises(exceptions.InvalidCloudConfigs,
+                           match='cannot override it'):
+            self._check(_k8s(remote_identity='SERVICE_ACCOUNT'), region=region)
+
+    def test_a_token_pod_config_is_refused(self, server_config):
+        server_config(_k8s(remote_identity=_NONE))
+        with pytest.raises(exceptions.InvalidCloudConfigs,
+                           match='would give them some'):
+            self._check(
+                _k8s(
+                    pod_config={'spec': {
+                        'automountServiceAccountToken': True
+                    }}))
+
+    def test_a_task_that_keeps_none_passes(self, server_config):
+        server_config(_k8s(remote_identity=_NONE))
+        self._check()
+
+    def test_the_same_task_without_server_none_passes(self, server_config):
+        server_config({})
+        self._check(_k8s(remote_identity='SERVICE_ACCOUNT'))
+
+    def test_another_cloud_is_not_checked(self, server_config):
+        server_config(_k8s(remote_identity=_NONE))
+        self._check(_k8s(remote_identity='SERVICE_ACCOUNT'), cloud=clouds.AWS())
+
+    def test_an_exempt_cluster_is_not_checked(self, server_config):
+        server_config(_k8s(remote_identity=_NONE))
+        self._check(_k8s(remote_identity='SERVICE_ACCOUNT'),
+                    kubernetes_identity='skypilot-proxy-agent')
+
+
 class TestLeakGuard:
     """The jobs controller skips its autodown guard only for NONE clusters."""
 

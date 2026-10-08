@@ -14,6 +14,7 @@ import colorama
 import filelock
 
 from sky import backends
+from sky import clouds
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
@@ -170,6 +171,8 @@ def up(
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, request_name=request_names.AdminPolicyRequestName.SERVE_UP)
+    for resources in dag.tasks[0].resources:
+        clouds.Kubernetes.check_resources_keep_server_none(resources)
     dag.resolve_and_validate_volumes()
     dag.pre_mount_volumes()
     task = dag.tasks[0]

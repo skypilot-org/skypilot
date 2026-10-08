@@ -304,6 +304,41 @@ class Kubernetes(clouds.Cloud):
         return _match_remote_identity(merged, context) == none
 
     @classmethod
+    def check_resources_keep_server_none(
+            cls, resources: 'resources_lib.Resources') -> None:
+        """Raises if `resources` would loosen a NONE the server's config set.
+
+        For managed jobs and services, checked when they are submitted: their
+        cluster launch would be refused anyway, and the controller would retry
+        it forever instead of failing.
+        """
+        cloud = resources.cloud
+        if cloud is not None and not isinstance(cloud, Kubernetes):
+            return
+        if isinstance(resources.kubernetes_identity, str):
+            return
+        if resources.region is not None:
+            contexts: List[Optional[str]] = [resources.region]
+        else:
+            contexts = list((type(cloud) if cloud is not None else
+                             cls).existing_allowed_contexts())
+        none = schemas.RemoteIdentityOptions.NONE.value
+        overrides = resources.cluster_config_overrides
+        for context in contexts:
+            if cls._server_remote_identity(context) != none:
+                continue
+            requested = _match_remote_identity(
+                skypilot_config.get_effective_workspace_region_config(
+                    cloud='kubernetes',
+                    region=context,
+                    keys=('remote_identity',),
+                    default_value=schemas.get_default_remote_identity(
+                        'kubernetes'),
+                    override_configs=overrides), context)
+            if requested is not None:
+                cls._refuse_undoing_none(context, requested, overrides)
+
+    @classmethod
     def _refuse_undoing_none(cls, context: Optional[str], requested: str,
                              cluster_config_overrides: Dict[str, Any]) -> None:
         """Raises if anything would hand a NONE pod an identity after all."""
