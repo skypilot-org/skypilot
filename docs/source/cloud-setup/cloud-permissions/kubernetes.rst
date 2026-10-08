@@ -327,7 +327,10 @@ The clusters they launch for your jobs and services still get ``NONE``.
 When the API server's config sets ``NONE`` (globally, in a workspace, or in
 ``context_configs``), users cannot loosen it: a request whose client config or
 task sets another ``remote_identity`` is refused. Users can still choose
-``NONE`` for their own tasks when the server does not set it.
+``NONE`` for their own tasks when the server does not set it. Set ``NONE`` in
+the API server's config for this guarantee: a ``NONE`` that an admin policy
+writes into a request's config can still be loosened by the task's own
+``config``.
 
 .. note::
 
