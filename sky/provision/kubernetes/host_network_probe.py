@@ -173,15 +173,19 @@ def _sshd_config_lines() -> List[str]:
         with open(_SSHD_CONFIG, encoding='utf-8') as f:
             return f.read().splitlines()
     except PermissionError:
-        # RHEL-family images ship it 0600; the bootstrap writes it via sudo,
-        # so read it the same way.
+        pass
+    except OSError:
+        return []
+    # RHEL-family images ship it 0600; the bootstrap writes it via sudo, so
+    # read it the same way. No sudo means not verified, never a crash.
+    try:
         result = subprocess.run(['sudo', '-n', 'cat', _SSHD_CONFIG],
                                 capture_output=True,
                                 text=True,
                                 check=False)
-        return result.stdout.splitlines()
     except OSError:
         return []
+    return result.stdout.splitlines()
 
 
 def _already_verified() -> bool:

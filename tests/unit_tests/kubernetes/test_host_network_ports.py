@@ -549,6 +549,21 @@ class TestVerifyOncePerContainer:
         with self._hold(block['sshd']):
             host_network_probe._run_head()
 
+    def test_an_unreadable_config_without_sudo_still_verifies(
+            self, monkeypatch, tmp_path):
+        """No sudo binary: fall back to verifying, as before, not crash."""
+        block, config = self._env(monkeypatch, tmp_path, 22)
+        config.write_text(f'Port {block["sshd"]}\n')
+        config.chmod(0)
+        if os.access(config, os.R_OK):
+            pytest.skip('root reads a mode-000 file')
+        monkeypatch.setattr(host_network_probe.subprocess, 'run',
+                            mock.Mock(side_effect=FileNotFoundError('sudo')))
+        host_network_probe._run_head()
+        with self._hold(block['sshd']):
+            with pytest.raises(RuntimeError, match='already in use'):
+                host_network_probe._run_head()
+
     def test_a_restarted_containers_old_connections_do_not_hold_a_port(self):
         """A container restart leaves TIME_WAIT on its ports; sshd and Ray
         rebind them (SO_REUSEADDR), so the check must not refuse them."""
