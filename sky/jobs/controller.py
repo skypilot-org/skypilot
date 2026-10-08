@@ -88,6 +88,11 @@ _LIVE_LINK_MAX_ATTEMPTS = 30  # give up live updates after ~30 attempts
 # connections and finish together, so the loops never drift apart.
 _STATUS_CHECK_GAP_JITTER = 0.2
 
+# Random delay, in seconds, before a monitor loop reads its cluster's handle
+# ahead of its first wait. Loops that start together (every job resumed after
+# a controller restart) would otherwise all read the database at once.
+_FIRST_HANDLE_READ_SPREAD_SECONDS = 1.0
+
 
 def _mean_status_check_gap_seconds(runtime_gap: Optional[float]) -> float:
     """Returns the mean gap between two status checks of a job.
@@ -1276,12 +1281,20 @@ class JobController:
         live_link_poll_counter = 0
         first_status_check = True
         # The status-check gap that the runtime of the job's cluster asks for,
-        # from the handle read at the last check. None (the default gap) until
-        # the loop has read a handle, and always None when no runtime is
-        # registered. After a recovery, the next wait still uses the gap of
-        # the cluster checked before it, and the check after that wait reads
-        # the new cluster's handle.
+        # from the handle read before the first wait and at every check.
+        # Always None (the default gap) when no runtime is registered. After a
+        # recovery, the next wait still uses the gap of the cluster checked
+        # before it, and the check after that wait reads the new cluster's
+        # handle.
         runtime_status_check_gap: Optional[float] = None
+        if (not force_transit_to_recovering and
+                managed_job_runtime.is_registered()):
+            # Read the handle before the first wait, so that the first wait
+            # spreads loops over the gap of the job's own runtime.
+            await asyncio.sleep(
+                random.uniform(0, _FIRST_HANDLE_READ_SPREAD_SECONDS))
+            _, runtime_status_check_gap = await asyncio.to_thread(
+                _read_runtime_handle, cluster_name)
 
         while True:
             # Get job status (skip on first iteration if forcing recovery)

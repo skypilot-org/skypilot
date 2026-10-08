@@ -2253,6 +2253,19 @@ def _waiting_line_detail(provision_msg: Optional[str],
     return parked_reason
 
 
+def _status_check_gap_seconds_for(
+        handle: Optional['backends.CloudVmRayResourceHandle']) -> float:
+    """The controller's mean gap between two status checks of a job.
+
+    The gap the runtime of the job's cluster asks for (see
+    ManagedJobRuntime.get_status_check_gap_seconds), else
+    JOB_STATUS_CHECK_GAP_SECONDS. Log streaming paces its waits for the
+    controller to notice a change in a running job by the same gap.
+    """
+    gap = managed_job_runtime.get_status_check_gap_seconds(handle)
+    return JOB_STATUS_CHECK_GAP_SECONDS if gap is None else gap
+
+
 def stream_logs_by_id(
         job_id: int,
         follow: bool = True,
@@ -2608,8 +2621,8 @@ def stream_logs_by_id(
                         managed_job_state.ManagedJobStatus.RUNNING):
                     status_str = f' (status: {managed_job_status.value})'
                 logger.debug(
-                    f'INFO: The log is not ready yet{status_str}. '
-                    f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+                    f'INFO: The log is not ready yet{status_str}. Waiting '
+                    f'for {JOB_STARTED_STATUS_CHECK_GAP_SECONDS} seconds.')
                 # Looked up lazily below: a normally provisioning job has a
                 # live headline and never needs it, and this runs once per
                 # status check per streaming client.
@@ -2617,7 +2630,11 @@ def stream_logs_by_id(
                 parked_reason_read = False
                 # Poll the controller log frequently for provisioning spinner
                 # updates, but only re-check the (more expensive) managed job
-                # status every JOB_STATUS_CHECK_GAP_SECONDS.
+                # status every JOB_STARTED_STATUS_CHECK_GAP_SECONDS, the gap at
+                # which the controller checks whether a job it launched has
+                # started. The re-check reads only the jobs database, and the
+                # handle that would name the job's runtime is usually not
+                # there yet (or not yet complete) while the job starts.
                 waited = 0.0
                 while True:
                     context_utils.raise_if_canceled()
@@ -2641,7 +2658,7 @@ def stream_logs_by_id(
                     if msg != prev_msg:
                         status_display.update(msg)
                         prev_msg = msg
-                    if waited >= JOB_STATUS_CHECK_GAP_SECONDS:
+                    if waited >= JOB_STARTED_STATUS_CHECK_GAP_SECONDS:
                         break
                     time.sleep(_PROVISION_LOG_POLL_GAP_SECONDS)
                     waited += _PROVISION_LOG_POLL_GAP_SECONDS
@@ -2683,6 +2700,10 @@ def stream_logs_by_id(
                                       follow=follow,
                                       tail=tail_param,
                                       tail_offset=tail_offset))
+            # The waits below are for the controller to notice a change in
+            # the job (a failure to restart, the next task, a cluster
+            # failure), which it checks for at this job's status-check gap.
+            status_check_gap = _status_check_gap_seconds_for(handle)
             if returncode in [rc.value for rc in exceptions.JobExitCode]:
                 # If the log tailing exits with a known exit code we can safely
                 # break the loop because it indicates the tailing process
@@ -2742,7 +2763,7 @@ def stream_logs_by_id(
                                 managed_job_status :=
                                 managed_job_state.get_status(job_id)):
                             context_utils.raise_if_canceled()
-                            time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
+                            time.sleep(status_check_gap)
                         assert managed_job_status is not None, (
                             job_id, managed_job_status)
                         continue
@@ -2775,7 +2796,7 @@ def stream_logs_by_id(
                             managed_job_state.get_latest_task_id_status(job_id))
                         if original_task_id != latest_task_id:
                             break
-                        time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
+                        time.sleep(status_check_gap)
                     assert managed_job_status is not None, (job_id,
                                                             latest_task_id,
                                                             managed_job_status)
@@ -2787,11 +2808,11 @@ def stream_logs_by_id(
                 # the cluster is partially preempted).
                 logger.debug(
                     'INFO: Job is cancelled. Waiting for the status update in '
-                    f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+                    f'{3 * status_check_gap:g} seconds.')
             else:
                 logger.debug(
                     f'INFO: (Log streaming) Got return code {returncode}. '
-                    f'Retrying in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+                    f'Retrying in {3 * status_check_gap:g} seconds.')
             # Finish early if the managed job status is already in terminal
             # state.
             managed_job_status = managed_job_state.get_status(job_id)
@@ -2810,7 +2831,7 @@ def stream_logs_by_id(
             # Wait a bit longer than the controller, so as to make sure the
             # managed job state is updated.
             context_utils.raise_if_canceled()
-            time.sleep(3 * JOB_STATUS_CHECK_GAP_SECONDS)
+            time.sleep(3 * status_check_gap)
             managed_job_status = managed_job_state.get_status(job_id)
             assert managed_job_status is not None, (job_id, managed_job_status)
 

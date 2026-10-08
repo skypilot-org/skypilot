@@ -2405,18 +2405,27 @@ class TestStatusCheckGapJitter:
         assert all(0 <= g <= mean_gap for g in first_gaps)
         assert max(first_gaps) > mean_gap * 0.9
 
-    async def _run_monitor_loop(self, num_checks, runtime_registered,
-                                runtime_gaps):
+    async def _run_monitor_loop(self,
+                                num_checks,
+                                runtime_registered,
+                                read_gaps,
+                                seed=0):
         """Runs the monitor loop through num_checks healthy status checks.
 
-        runtime_gaps[i] is the gap the runtime asks for at check i. Returns
-        the loop's sleeps, the gaps it passed to the network check, and the
-        calls to the runtime's gap hook as (handle, thread ident) pairs. The
-        loop reads one more handle, before the check that stops it.
+        read_gaps[i] is the gap the runtime asks for at the loop's i-th
+        handle read: with a runtime registered, read 0 comes before the first
+        wait and read i before check i. Returns the loop's sleeps and handle
+        reads in order, as ('sleep', seconds) and ('read', i) events; the
+        gaps it passed to the network check; and the threads the runtime's
+        gap hook ran on.
         """
         checks = 0
-        handles = [MagicMock(name=f'handle{i}') for i in range(num_checks + 1)]
-        gap_calls = []
+        reads = 0
+        events = []
+        hook_threads = []
+        handles = [
+            MagicMock(name=f'handle{i}') for i in range(len(read_gaps) + 2)
+        ]
 
         async def fake_get_job_status(*args, **kwargs):
             nonlocal checks
@@ -2426,12 +2435,18 @@ class TestStatusCheckGapJitter:
             return job_lib.JobStatus.RUNNING, None
 
         def fake_get_handle(cluster_name):
+            nonlocal reads
             assert cluster_name == 'cluster'
-            return handles[checks]
+            events.append(('read', reads))
+            reads += 1
+            return handles[reads - 1]
 
         def fake_gap_hook(handle):
-            gap_calls.append((handle, threading.get_ident()))
-            return (runtime_gaps + [None])[handles.index(handle)]
+            hook_threads.append(threading.get_ident())
+            return (read_gaps + [None] * 2)[handles.index(handle)]
+
+        async def fake_sleep(seconds):
+            events.append(('sleep', seconds))
 
         task = MagicMock()
         task.num_nodes = 1
@@ -2439,10 +2454,9 @@ class TestStatusCheckGapJitter:
         instance._job_id = 1
         instance._pool = None
         instance._update_live_log_links = AsyncMock(return_value=True)
-        sleep = AsyncMock(return_value=None)
         network_check = AsyncMock(return_value=None)
         runtime = controller_module.managed_job_runtime
-        with patch.object(controller_module, 'random', random.Random(0)), \
+        with patch.object(controller_module, 'random', random.Random(seed)), \
              patch.object(managed_job_utils, 'get_job_status',
                           new=AsyncMock(side_effect=fake_get_job_status)), \
              patch.object(controller_module, 'check_network_connection',
@@ -2458,7 +2472,8 @@ class TestStatusCheckGapJitter:
              patch.object(controller_module.global_user_state,
                           'get_handle_from_cluster_name',
                           side_effect=fake_get_handle), \
-             patch.object(controller_module.asyncio, 'sleep', new=sleep):
+             patch.object(controller_module.asyncio, 'sleep',
+                          new=AsyncMock(side_effect=fake_sleep)):
             with pytest.raises(self._StopLoop):
                 await JobController._monitor_one_task_impl(
                     instance,
@@ -2468,46 +2483,74 @@ class TestStatusCheckGapJitter:
                     executor=MagicMock(),
                     status_logger=managed_job_utils.JobStatusLogger(),
                     callback_func=AsyncMock())
-        sleeps = [call.args[0] for call in sleep.call_args_list]
         network_gaps = [call.args[0] for call in network_check.call_args_list]
-        if runtime_registered:
-            assert [handle for handle, _ in gap_calls] == handles
-        return sleeps, network_gaps, gap_calls
+        return events, network_gaps, hook_threads
 
     @pytest.mark.asyncio
     async def test_monitor_loop_follows_the_runtime_gap(self):
-        """Each wait uses the gap the runtime asked for at the job's last
-        check, so a job that moves to another runtime (a recovery onto
-        another cloud) follows it from the next wait on. The first wait has
-        no check behind it and spreads loops over the default gap."""
-        runtime_gaps = [5, 5, None, 30, 5]
-        sleeps, network_gaps, gap_calls = await self._run_monitor_loop(
-            num_checks=len(runtime_gaps),
+        """Each wait uses the gap the runtime asked for at the loop's last
+        handle read, so a job that moves to another runtime (a recovery onto
+        another cloud) follows it from the next wait on. The loop reads the
+        handle once before its first wait, after a short random delay, so the
+        first wait spreads loops over the job's own gap."""
+        read_gaps = [5, 5, None, 30, 5, 2]
+        events, network_gaps, hook_threads = await self._run_monitor_loop(
+            num_checks=len(read_gaps) - 1,
             runtime_registered=True,
-            runtime_gaps=runtime_gaps)
+            read_gaps=read_gaps)
         jitter = controller_module._STATUS_CHECK_GAP_JITTER
-        # The wait before check i uses the gap from check i - 1. The extra
-        # last wait is before the check that stopped the loop.
-        means = [self._GAP
-                ] + [self._GAP if gap is None else gap for gap in runtime_gaps]
-        assert len(sleeps) == len(means)
-        assert 0 <= sleeps[0] <= self._GAP
-        for got, mean in zip(sleeps[1:], means[1:]):
-            assert mean * (1 - jitter) <= got <= mean * (1 + jitter), sleeps
+        spread = controller_module._FIRST_HANDLE_READ_SPREAD_SECONDS
+        # A spread, the first read, then one wait and one read per check;
+        # the last read is before the check that stopped the loop.
+        assert [kind for kind, _ in events
+               ] == ['sleep', 'read'] + ['sleep', 'read'] * len(read_gaps)
+        assert 0 <= events[0][1] <= spread
+        waits = [seconds for kind, seconds in events[2:] if kind == 'sleep']
+        means = [self._GAP if gap is None else gap for gap in read_gaps]
+        # The wait after read i uses the gap from read i.
+        assert 0 <= waits[0] <= means[0]
+        for got, mean in zip(waits[1:], means[1:]):
+            assert mean * (1 - jitter) <= got <= mean * (1 + jitter), waits
         # The network check is reused only within the loop's own gap.
         assert network_gaps == means
-        # The runtime is asked once per check, with the handle read for that
-        # check (see _run_monitor_loop), and not on the event loop's thread:
-        # its ownership check may read the database.
-        assert all(thread != threading.get_ident() for _, thread in gap_calls)
+        # The runtime is asked once per read, and not on the event loop's
+        # thread: its ownership check may read the database.
+        assert len(hook_threads) == len(read_gaps) + 1
+        assert all(thread != threading.get_ident() for thread in hook_threads)
+
+    @pytest.mark.asyncio
+    async def test_first_handle_reads_spread_over_a_short_window(self):
+        """Loops that start together (a controller restart) read their
+        handles over up to _FIRST_HANDLE_READ_SPREAD_SECONDS, not at once,
+        and then spread their first checks over their own gap."""
+        spreads = []
+        first_waits = []
+        for seed in range(200):
+            events, _, _ = await self._run_monitor_loop(num_checks=0,
+                                                        runtime_registered=True,
+                                                        read_gaps=[5],
+                                                        seed=seed)
+            spreads.append(events[0][1])
+            first_waits.append(events[2][1])
+        spread = controller_module._FIRST_HANDLE_READ_SPREAD_SECONDS
+        assert all(0 <= s <= spread for s in spreads)
+        assert max(spreads) - min(spreads) > spread * 0.8
+        assert all(0 <= w <= 5 for w in first_waits)
+        assert max(first_waits) > 4
 
     @pytest.mark.asyncio
     async def test_monitor_loop_without_runtime_uses_the_default_gap(self):
-        sleeps, network_gaps, gap_calls = await self._run_monitor_loop(
-            num_checks=50, runtime_registered=False, runtime_gaps=[5] * 50)
-        assert gap_calls == []
-        assert all(self._LOW <= s <= self._HIGH for s in sleeps[1:]), sleeps
-        assert network_gaps == [self._GAP] * len(sleeps)
+        """No runtime registered: no early handle read, no extra delay, and
+        every wait uses the default gap, exactly as before the hook."""
+        events, network_gaps, hook_threads = await self._run_monitor_loop(
+            num_checks=50, runtime_registered=False, read_gaps=[5] * 51)
+        assert hook_threads == []
+        assert all(kind == 'sleep' for kind, _ in events)
+        waits = [seconds for _, seconds in events]
+        assert len(waits) == 51
+        assert 0 <= waits[0] <= self._GAP
+        assert all(self._LOW <= w <= self._HIGH for w in waits[1:]), waits
+        assert network_gaps == [self._GAP] * len(waits)
 
 
 @pytest.fixture(autouse=True)
