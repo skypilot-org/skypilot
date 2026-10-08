@@ -2626,8 +2626,8 @@ class TestNetworkCheckOncePerGap:
         with patch.object(controller_module.backend_utils,
                           'async_check_network_connection',
                           new=check):
-            await controller_module._check_network_connection()
-            await controller_module._check_network_connection()
+            await controller_module.check_network_connection()
+            await controller_module.check_network_connection()
         assert check.await_count == 1
 
     @pytest.mark.asyncio
@@ -2639,15 +2639,15 @@ class TestNetworkCheckOncePerGap:
         with patch.object(controller_module.backend_utils,
                           'async_check_network_connection',
                           new=check):
-            await controller_module._check_network_connection()
+            await controller_module.check_network_connection()
             controller_module._network_check_ok_at = (time.monotonic() -
                                                       self._shortest_sleep() +
                                                       1)
-            await controller_module._check_network_connection()
+            await controller_module.check_network_connection()
             assert check.await_count == 1
             controller_module._network_check_ok_at = (time.monotonic() -
                                                       self._shortest_sleep())
-            await controller_module._check_network_connection()
+            await controller_module.check_network_connection()
         assert check.await_count == 2
 
     @pytest.mark.asyncio
@@ -2658,10 +2658,10 @@ class TestNetworkCheckOncePerGap:
         with patch.object(controller_module.backend_utils,
                           'async_check_network_connection',
                           new=check):
-            await controller_module._check_network_connection()
+            await controller_module.check_network_connection()
             monkeypatch.setattr(managed_job_utils,
                                 'JOB_STATUS_CHECK_GAP_SECONDS', 0)
-            await controller_module._check_network_connection()
+            await controller_module.check_network_connection()
         assert check.await_count == 2
 
     @pytest.mark.asyncio
@@ -2672,7 +2672,7 @@ class TestNetworkCheckOncePerGap:
                           new=check):
             for _ in range(2):
                 with pytest.raises(exceptions.NetworkError):
-                    await controller_module._check_network_connection()
+                    await controller_module.check_network_connection()
         assert check.await_count == 2
         assert controller_module._network_check_ok_at is None
 
@@ -2693,7 +2693,7 @@ class TestNetworkCheckOncePerGap:
                           new=check):
             loops = [
                 asyncio.create_task(
-                    controller_module._check_network_connection())
+                    controller_module.check_network_connection())
                 for _ in range(5)
             ]
             await started.wait()
@@ -2725,7 +2725,7 @@ class TestNetworkCheckOncePerGap:
                           new=check):
             loops = [
                 asyncio.create_task(
-                    controller_module._check_network_connection())
+                    controller_module.check_network_connection())
                 for _ in range(3)
             ]
             for _ in range(5):
@@ -2748,7 +2748,7 @@ class TestNetworkCheckOncePerGap:
 
         async def run_loops():
             return await asyncio.gather(*[
-                controller_module._check_network_connection() for _ in range(3)
+                controller_module.check_network_connection() for _ in range(3)
             ],
                                         return_exceptions=True)
 
