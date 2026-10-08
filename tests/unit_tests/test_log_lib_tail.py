@@ -239,3 +239,25 @@ def test_offset_beyond_max_bytes_matches_splitlines(log_path, monkeypatch,
     expected = data.decode().splitlines(keepends=True)[:-offset]
     actual, _ = log_lib.tail_lines_from_end(log_path, 10, offset)
     assert actual == expected[-10:]
+
+
+@pytest.mark.parametrize('tail', [1, 3, 50])
+def test_offset_pages_keep_other_separators(log_path, tail):
+    """Only ``\\n``, ``\\r`` and ``\\r\\n`` end lines, in pages and offsets."""
+    rng = random.Random(5)
+    separators = [
+        '\n', '\r', '\r\n', '\x0b', '\x0c', '\x1c', '\x85', '\u2028', '\u2029'
+    ]
+    text = 'one\ntwo\x0cthree\nfour\n' + ''.join(
+        'w' * rng.randint(0, 6) + rng.choice(separators) for _ in range(3000))
+    _write_bytes(log_path, text.encode())
+    pages = []
+    offset = 0
+    while True:
+        lines, _ = log_lib.tail_lines_from_end(log_path, tail, offset)
+        if not lines:
+            break
+        assert len(lines) <= tail
+        pages.insert(0, ''.join(lines))
+        offset += len(lines)
+    assert ''.join(pages) == text

@@ -606,8 +606,9 @@ def tail_lines_from_end(path: str,
     line-length) rather than O(file-size). For multi-GB log files this
     is the difference between ~10 s and ~1 ms per call.
 
-    Lines end at ``\\n``, ``\\r`` or ``\\r\\n``, as in ``str.splitlines``,
-    so progress bars that only write ``\\r`` count as lines. The ``offset``
+    Lines end only at ``\\n``, ``\\r`` or ``\\r\\n``, as the log writer and
+    the follow reader split them (``newline=''``), so progress bars that
+    only write ``\\r`` count as lines. The ``offset``
     lines are skipped by scanning back one block at a time, and at most
     ``_TAIL_MAX_BYTES`` are read for the returned lines; when that is not
     enough to reach ``tail`` lines, the lines found in that window are
@@ -637,8 +638,11 @@ def tail_lines_from_end(path: str,
         start = _start_of_last_lines(f, window_end, tail, min_pos)
         f.seek(start)
         data = f.read(window_end - start)
-    text = data.decode('utf-8', errors='replace')
-    lines = text.splitlines(keepends=True)
+    # Split at the same breaks _start_of_last_lines counts so pages line up.
+    lines = [
+        line.decode('utf-8', errors='replace')
+        for line in data.splitlines(keepends=True)
+    ]
     # A start at the read cap can be mid-line. Drop that line so callers
     # see only complete lines.
     if start > 0 and start == min_pos and lines:
