@@ -485,7 +485,14 @@ class PermissionService:
                 # As in `update_role`: a first role can grant workspace access
                 # that was denied and cached while the user had none. Clear
                 # after the write so a reader cannot re-cache the old answer.
-                self.invalidate_user_permission_cache(user_id)
+                # The role is already saved, so a failed clear must not fail
+                # the caller; a stale entry expires with the cache TTL.
+                try:
+                    self.invalidate_user_permission_cache(user_id)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.warning(
+                        'Failed to clear cached workspace permissions for '
+                        f'user {user_id}: {common_utils.format_exception(e)}')
 
     def _add_user_if_not_exists_no_lock(self,
                                         user_id: str,

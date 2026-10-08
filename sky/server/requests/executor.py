@@ -913,9 +913,21 @@ def _seed_role_if_missing(user_id: str) -> None:
     user first on the request that launches the job's cluster. Without a role
     the user fails every workspace check except `default`, so the job retries
     forever.
+
+    Best-effort: `role_seed_missing` can be wrong on a worker whose policy copy
+    is stale, and the seed takes the distributed policy lock, which can time
+    out. A skipped or failed seed must not fail a request that would succeed
+    without it; the workspace check that follows decides as before.
     """
-    if permission.permission_service.role_seed_missing(user_id):
+    service = permission.permission_service
+    if not (service.role_seed_missing(user_id) and
+            service.claim_role_seed_attempt(user_id)):
+        return
+    try:
         permission.seed_new_user_role(user_id)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to seed a role for user {user_id}: '
+                       f'{common_utils.format_exception(e)}')
 
 
 def _request_execution_wrapper(request_id: str,

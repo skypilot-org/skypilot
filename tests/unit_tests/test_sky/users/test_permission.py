@@ -430,6 +430,27 @@ class TestPermissionService:
 
     @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
+    def test_add_user_if_not_exists_survives_cache_clear_failure(
+            self, mock_policy_lock, mock_kv_cache):
+        """The role is saved even if clearing the cache then fails."""
+        mock_policy_lock.return_value.__enter__ = mock.Mock()
+        mock_policy_lock.return_value.__exit__ = mock.Mock()
+
+        mock_enforcer = mock.Mock()
+        mock_enforcer.get_roles_for_user.return_value = []
+        mock_kv_cache.delete_cache_entries_by_prefix_suffix.side_effect = (
+            RuntimeError('cache db unavailable'))
+
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._load_policy_no_lock = mock.Mock()
+
+        service.add_user_if_not_exists('user1')
+
+        mock_enforcer.add_grouping_policy.assert_called_once()
+
+    @mock.patch('sky.users.permission.kv_cache')
+    @mock.patch('sky.users.permission._policy_lock')
     def test_add_user_if_not_exists_keeps_cache_for_existing_role(
             self, mock_policy_lock, mock_kv_cache):
         """No role written, nothing to invalidate."""
