@@ -776,22 +776,37 @@ class TestLegacyPortsEnv:
     """A pod from before server-assigned ports re-runs on the ports its own
     probe wrote at boot; a newer pod never reads that file."""
 
-    @pytest.mark.parametrize('assigned_sshd, want_gcs', [(None, '58623'),
-                                                         ('20609', '20601')])
-    def test_only_a_pod_without_assigned_ports_reads_it(self, tmp_path,
-                                                        assigned_sshd,
-                                                        want_gcs):
+    @pytest.mark.parametrize(
+        'pod_env, want_gcs',
+        [
+            # A pre-assignment head: nothing exported, its saved port wins.
+            ({}, '58623'),
+            # A pre-assignment worker: the provisioner's head port wins.
+            ({
+                'SKYPILOT_RAY_PORT': '24000'
+            }, '24000'),
+            # A newer pod never reads the file.
+            ({
+                'SKYPILOT_SSHD_PORT': '20609',
+                'SKYPILOT_RAY_PORT': '20601'
+            }, '20601'),
+        ])
+    def test_the_file_fills_only_what_is_missing(self, tmp_path, pod_env,
+                                                 want_gcs):
         env_file = tmp_path / 'ports.env'
         env_file.write_text('export SKYPILOT_SSHD_PORT=56989\n'
                             'export SKYPILOT_RAY_PORT=58623\n')
         clause = instance_setup._SOURCE_LEGACY_HOST_NETWORK_PORTS.replace(
             instance_setup._LEGACY_HOST_NETWORK_PORTS_ENV, str(env_file))
-        env = {'PATH': os.environ['PATH']}
-        if assigned_sshd:
-            env.update(SKYPILOT_SSHD_PORT=assigned_sshd,
-                       SKYPILOT_RAY_PORT='20601')
-        out = subprocess.run(['bash', '-c', clause + 'echo $SKYPILOT_RAY_PORT'],
-                             env=env,
+        # A child reads the env, as the probe and `ray start` do.
+        out = subprocess.run([
+            'bash', '-c', clause + 'python3 -c "import os; '
+            'print(os.environ[\'SKYPILOT_RAY_PORT\'])"'
+        ],
+                             env={
+                                 'PATH': os.environ['PATH'],
+                                 **pod_env
+                             },
                              capture_output=True,
                              text=True,
                              check=True).stdout.strip()

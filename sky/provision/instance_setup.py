@@ -106,12 +106,17 @@ DUMP_RAY_PORTS = (f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
 
 _HOST_NETWORK_PROBE_TARGET = '/tmp/sky_host_network_probe.py'
 # A pod created before the server assigned ports has none in its env; its
-# own probe wrote them here at boot, so a re-run on it reads them back.
+# own probe wrote them here at boot, so a re-run on it reads them back. A
+# worker keeps the head port the provisioner exported: the saved one is stale
+# once the head is replaced.
 _LEGACY_HOST_NETWORK_PORTS_ENV = '/tmp/sky_host_network_ports.env'
 _SOURCE_LEGACY_HOST_NETWORK_PORTS = (
     'if [ -z "${SKYPILOT_SSHD_PORT:-}" ] && '
     f'[ -f {_LEGACY_HOST_NETWORK_PORTS_ENV} ]; then '
-    f'. {_LEGACY_HOST_NETWORK_PORTS_ENV}; fi; ')
+    '_sky_head_gcs="${SKYPILOT_RAY_PORT:-}"; '
+    f'. {_LEGACY_HOST_NETWORK_PORTS_ENV}; '
+    '[ -z "$_sky_head_gcs" ] || export SKYPILOT_RAY_PORT="$_sky_head_gcs"; '
+    'fi; ')
 
 _RAY_PATCHES_TARGET_DIR = '/tmp/sky_ray_patches'
 
