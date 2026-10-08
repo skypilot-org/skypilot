@@ -959,6 +959,52 @@ class TestTaskCleanup:
         assert cleanup_patches['terminate'].call_args.args[0] == 'test-cluster'
 
     @pytest.mark.asyncio
+    async def test_record_gone_pool_job_cancels_the_known_submission(
+            self, cleanup_patches):
+        """A pool job's worker and pool-side job ID live in the missing
+        record too; the controller's in-memory copy stands in for them."""
+        task = self._make_task()
+        task.metadata = {}
+        dag = MagicMock()
+        dag.tasks = [task]
+
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag',
+                   side_effect=RuntimeError('DAG YAML content is unavailable')), \
+             patch('sky.jobs.state.get_pool_submit_info',
+                   return_value=(None, None)), \
+             patch('sky.core.cancel') as cancel:
+            await manager._cleanup(job_id=1,
+                                   pool='p',
+                                   fallback_dag=dag,
+                                   fallback_pool_submission=('worker-1', 7))
+
+        cancel.assert_called_once()
+        assert cancel.call_args.kwargs['cluster_name'] == 'worker-1'
+        assert cancel.call_args.kwargs['job_ids'] == [7]
+
+    @pytest.mark.asyncio
+    async def test_record_gone_pool_job_unknown_submission_is_a_failure(
+            self, cleanup_patches):
+        """With neither the record nor an in-memory submission, cleanup
+        must not report a pool-side job it could not find as cancelled."""
+        task = self._make_task()
+        task.metadata = {}
+        dag = MagicMock()
+        dag.tasks = [task]
+
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag',
+                   side_effect=RuntimeError('DAG YAML content is unavailable')), \
+             patch('sky.jobs.state.get_pool_submit_info',
+                   return_value=(None, None)), \
+             patch('sky.core.cancel') as cancel:
+            with pytest.raises(RuntimeError, match='pool submission'):
+                await manager._cleanup(job_id=1, pool='p', fallback_dag=dag)
+
+        cancel.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_record_gone_without_fallback_still_raises(
             self, cleanup_patches):
         manager = ControllerManager('test-uuid')

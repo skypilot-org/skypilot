@@ -351,6 +351,19 @@ class JobController:
         """
         return getattr(self, '_dag', None)
 
+    @property
+    def pool_submission(self) -> Tuple[Optional[str], Optional[int]]:
+        """(pool worker, job ID on it) of the current pool submission.
+
+        The in-memory copy of what get_pool_submit_info reads from the job's
+        record, for cleanup when that record is gone. (None, None) for a
+        job that is not on a pool or has not been submitted.
+        """
+        executor = getattr(self, '_strategy_executor', None)
+        if self._pool is None or executor is None:
+            return None, None
+        return executor.cluster_name, executor.job_id_on_pool_cluster
+
     def _load_dag(self) -> None:
         """(Re)load the job's DAG and set up per-task environment variables.
 
@@ -3323,7 +3336,10 @@ class ControllerManager:
                        pool: Optional[str] = None,
                        graceful: bool = False,
                        graceful_timeout: Optional[int] = None,
-                       fallback_dag: Optional['sky.Dag'] = None):
+                       fallback_dag: Optional['sky.Dag'] = None,
+                       fallback_pool_submission: Tuple[Optional[str],
+                                                       Optional[int]] = (None,
+                                                                         None)):
         """Clean up the cluster(s) and storages.
 
         (1) Clean up the succeeded task(s)' ephemeral storage. The storage has
@@ -3335,8 +3351,12 @@ class ControllerManager:
             chain DAGs, and only one task is executed at a time.
 
         fallback_dag is used when the job's stored DAG YAML cannot be read
-        (its record is gone), so the clusters it names are still torn down.
+        (its record is gone), so the clusters it names are still torn down;
+        fallback_pool_submission likewise stands in for the pool submission
+        that record held. A pool submission that is unknown either way is
+        reported as a cleanup failure rather than skipped.
         """
+        record_gone = False
         # Cleanup the HA recovery script first as it is possible that some error
         # was raised when we construct the task object (e.g.,
         # sky.exceptions.ResourcesUnavailableError).
@@ -3345,6 +3365,9 @@ class ControllerManager:
         def task_cleanup(task: 'sky.Task', job_id: int):
             assert task.name is not None, task
             error = None
+            # Named by the except handler below, which also catches errors
+            # raised before a pool job's worker is known.
+            cluster_name: Optional[str] = None
 
             try:
                 if task.metadata.get('batch_coordinator'):
@@ -3370,6 +3393,17 @@ class ControllerManager:
                 else:
                     pool_cluster_name, job_id_on_pool_cluster = (
                         managed_job_state.get_pool_submit_info(job_id))
+                    if record_gone and pool_cluster_name is None:
+                        # The record that held the submission is gone; use
+                        # the controller's copy, and never report a pool-side
+                        # job we cannot find as cancelled.
+                        pool_cluster_name, job_id_on_pool_cluster = (
+                            fallback_pool_submission)
+                        if pool_cluster_name is None:
+                            raise RuntimeError(
+                                f'The pool submission of job {job_id} is '
+                                'unknown: its record is gone. A job may still '
+                                f'be running on a worker of pool {pool!r}.')
                     if pool_cluster_name is not None:
                         cluster_name = pool_cluster_name
                         if job_id_on_pool_cluster is not None:
@@ -3459,6 +3493,7 @@ class ControllerManager:
                            f'({common_utils.format_exception(e)}); cleaning '
                            'up with the DAG loaded at controller start.')
             dag = fallback_dag
+            record_gone = True
         error = None
         for task in dag.tasks:
             # most things in this function are blocking
@@ -3753,12 +3788,16 @@ class ControllerManager:
             try:
                 fallback_dag = (controller.loaded_dag
                                 if controller is not None else None)
-                await finalize_step(
-                    lambda _: self._cleanup(job_id,
-                                            pool=pool,
-                                            graceful=graceful,
-                                            graceful_timeout=graceful_timeout,
-                                            fallback_dag=fallback_dag))
+                fallback_pool_submission = (controller.pool_submission
+                                            if controller is not None else
+                                            (None, None))
+                await finalize_step(lambda _: self._cleanup(
+                    job_id,
+                    pool=pool,
+                    graceful=graceful,
+                    graceful_timeout=graceful_timeout,
+                    fallback_dag=fallback_dag,
+                    fallback_pool_submission=fallback_pool_submission))
                 logger.info(f'Cluster of managed job {job_id} has been cleaned '
                             'up.')
             except Exception as e:  # pylint: disable=broad-except
