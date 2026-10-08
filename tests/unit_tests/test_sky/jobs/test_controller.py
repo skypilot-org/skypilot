@@ -939,6 +939,36 @@ class TestTaskCleanup:
 
         assert seen_threads and loop_thread not in seen_threads
 
+    @pytest.mark.asyncio
+    async def test_record_gone_falls_back_to_the_loaded_dag(
+            self, cleanup_patches):
+        """With the job's record gone, the stored YAML cannot be read; the
+        cluster named by the DAG loaded at controller start is still torn
+        down instead of leaked."""
+        task = self._make_task()
+        task.metadata = {}
+        dag = MagicMock()
+        dag.tasks = [task]
+
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag',
+                   side_effect=RuntimeError('DAG YAML content is unavailable')):
+            await manager._cleanup(job_id=1, fallback_dag=dag)
+
+        cleanup_patches['terminate'].assert_called_once()
+        assert cleanup_patches['terminate'].call_args.args[0] == 'test-cluster'
+
+    @pytest.mark.asyncio
+    async def test_record_gone_without_fallback_still_raises(
+            self, cleanup_patches):
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag',
+                   side_effect=RuntimeError('DAG YAML content is unavailable')):
+            with pytest.raises(RuntimeError):
+                await manager._cleanup(job_id=1)
+
+        cleanup_patches['terminate'].assert_not_called()
+
 
 class TestDownloadLogsForCancelledJob:
     """Tests for ControllerManager._download_logs_for_cancelled_job.

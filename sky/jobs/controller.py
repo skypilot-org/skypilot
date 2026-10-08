@@ -342,6 +342,15 @@ class JobController:
         """Load the job's DAG off the event loop; must run before run()."""
         await asyncio.to_thread(self._load_dag)
 
+    @property
+    def loaded_dag(self) -> Optional['sky.Dag']:
+        """The DAG load_dag last parsed, or None if it never ran.
+
+        Cleanup falls back to it when the stored YAML can no longer be read
+        (the job's record is gone): it still names the job's clusters.
+        """
+        return getattr(self, '_dag', None)
+
     def _load_dag(self) -> None:
         """(Re)load the job's DAG and set up per-task environment variables.
 
@@ -3313,7 +3322,8 @@ class ControllerManager:
                        job_id: int,
                        pool: Optional[str] = None,
                        graceful: bool = False,
-                       graceful_timeout: Optional[int] = None):
+                       graceful_timeout: Optional[int] = None,
+                       fallback_dag: Optional['sky.Dag'] = None):
         """Clean up the cluster(s) and storages.
 
         (1) Clean up the succeeded task(s)' ephemeral storage. The storage has
@@ -3323,6 +3333,9 @@ class ControllerManager:
             happen when the task failed or cancelled. At most one cluster
             should be left when reaching here, as we currently only support
             chain DAGs, and only one task is executed at a time.
+
+        fallback_dag is used when the job's stored DAG YAML cannot be read
+        (its record is gone), so the clusters it names are still torn down.
         """
         # Cleanup the HA recovery script first as it is possible that some error
         # was raised when we construct the task object (e.g.,
@@ -3432,7 +3445,20 @@ class ControllerManager:
             if error is not None:
                 raise error
 
-        dag = await asyncio.to_thread(_get_dag, job_id)
+        try:
+            dag = await asyncio.to_thread(_get_dag, job_id)
+        except RuntimeError as e:
+            # _get_dag raises RuntimeError when the stored YAML is gone,
+            # e.g. the job's record was deleted while the controller ran.
+            # The DAG the controller loaded at start still names the job's
+            # clusters: tear those down rather than leak them. A transient
+            # DB error is not a RuntimeError and is retried by the caller.
+            if fallback_dag is None:
+                raise
+            logger.warning(f'Cannot reload the DAG of job {job_id} '
+                           f'({common_utils.format_exception(e)}); cleaning '
+                           'up with the DAG loaded at controller start.')
+            dag = fallback_dag
         error = None
         for task in dag.tasks:
             # most things in this function are blocking
@@ -3725,11 +3751,14 @@ class ControllerManager:
                     deadline=deadline)
 
             try:
+                fallback_dag = (controller.loaded_dag
+                                if controller is not None else None)
                 await finalize_step(
                     lambda _: self._cleanup(job_id,
                                             pool=pool,
                                             graceful=graceful,
-                                            graceful_timeout=graceful_timeout))
+                                            graceful_timeout=graceful_timeout,
+                                            fallback_dag=fallback_dag))
                 logger.info(f'Cluster of managed job {job_id} has been cleaned '
                             'up.')
             except Exception as e:  # pylint: disable=broad-except
