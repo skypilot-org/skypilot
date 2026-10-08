@@ -10,7 +10,9 @@ from unittest import mock
 
 import pytest
 
+from sky import backends
 from sky import clouds
+from sky import core
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import skypilot_config
@@ -267,6 +269,39 @@ class TestAutodownUnsupportedUnderNone:
         server_config(_k8s(remote_identity=_NONE))
         assert clouds.CloudImplementationFeatures.AUTODOWN not in (
             self._unsupported(kubernetes_identity='skypilot-proxy-agent'))
+
+    def _autostop_down(self):
+        resources = _resources()
+        resources.cloud = kubernetes_cloud.Kubernetes()
+        handle = mock.MagicMock(launched_resources=resources)
+        backend = mock.MagicMock(spec=backends.CloudVmRayBackend)
+        with mock.patch.object(core.backend_utils, 'check_cluster_available',
+                               return_value=handle), \
+                mock.patch.object(core.backend_utils,
+                                  'get_backend_from_handle',
+                                  return_value=backend), \
+                mock.patch.object(kubernetes_utils, 'get_spot_label',
+                                  return_value=(None, None)), \
+                mock.patch.object(
+                    kubernetes_cloud.Kubernetes, '_detect_network_type',
+                    return_value=(kubernetes_utils.
+                                  KubernetesHighPerformanceNetworkType.NONE,
+                                  None)):
+            core.autostop('c1', idle_minutes=1, down=True)
+        return backend
+
+    def test_autostop_down_on_a_none_cluster_names_the_reason(
+            self, server_config):
+        # `sky autostop --down` must say why, not only that it is refused.
+        server_config(_k8s(remote_identity=_NONE))
+        with pytest.raises(exceptions.NotSupportedError) as e:
+            self._autostop_down()
+        assert 'remote_identity: NONE' in str(e.value)
+
+    def test_autostop_down_without_none_is_scheduled(self, server_config):
+        server_config({})
+        backend = self._autostop_down()
+        backend.set_autostop.assert_called_once()
 
 
 class TestBootstrap:
