@@ -919,7 +919,7 @@ def override_skypilot_config(
         override_config_path_serialized: Optional[str] = None
 ) -> Iterator[None]:
     """Overrides the user configurations."""
-    # TODO(SKY-1215): allow admin user to extend the disallowed keys or specify
+    # TODO: allow admin user to extend the disallowed keys or specify
     # allowed keys.
     if not override_configs:
         # If no override configs (None or empty dict), do nothing.

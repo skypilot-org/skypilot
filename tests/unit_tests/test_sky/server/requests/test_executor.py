@@ -1519,7 +1519,7 @@ def test_override_env_skipped_for_daemon_request(stub_override_request_env_deps,
                                                  monkeypatch):
     """Daemon request_ids must NOT have their persisted env_vars overlaid.
 
-    Reproduces SKY-5502: a daemon row in PG carrying stale downward-API
+    Regression: a daemon row in PG carrying stale downward-API
     values from a previous deployment generation must not clobber the
     current pod's os.environ.
     """

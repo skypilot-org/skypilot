@@ -1776,7 +1776,7 @@ async def list_accelerator_counts(
 @app.post('/validate')
 async def validate(validate_body: payloads.ValidateBody) -> None:
     """Validates the user's DAG."""
-    # TODO(SKY-1035): validate if existing cluster satisfies the requested
+    # TODO: validate if existing cluster satisfies the requested
     # resources, e.g. sky exec --gpus V100:8 existing-cluster-with-no-gpus
 
     # TODO: Our current launch process is split into three calls:
@@ -2027,7 +2027,7 @@ async def _receive_and_assemble_chunks(
             status_code=500,
             detail='Upload request body should not be received before streaming'
         )
-    # TODO(SKY-1271): We need to double check security of uploading zip file.
+    # TODO: We need to double check security of uploading zip file.
     # Check chunk_index to be a valid integer
     if chunk_index < 0 or chunk_index >= total_chunks:
         raise ValueError(

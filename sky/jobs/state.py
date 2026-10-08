@@ -2076,8 +2076,8 @@ def get_managed_jobs_highest_priority(
 # 2. Filters: which of those rows pass. Visibility (``accessible_workspaces``,
 #    ``user_hashes``) and the explicit filters (name, pool, workspace, infra,
 #    status, skip_finished, submitted window). Each is tested on the row's own
-#    job or task; a dynamic task is its own job here (SKY-7163 tracks moving
-#    the job-level filters to the tree root).
+#    job or task; a dynamic task is its own job here (the job-level
+#    filters may later move to the tree root).
 #
 # 3. Slice: which page. The pagination unit is the tree, so a group and its
 #    dynamic tasks always share a page. ``total`` counts trees. Paging takes

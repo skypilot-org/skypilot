@@ -3343,7 +3343,7 @@ def _reject_tree_lookup_extras(job_ids, workspace_match, name_match, pool_match,
     """The tree lookup takes job ids and nothing else.
 
     Whether a filter should test the named jobs, their roots, or every row
-    of the tree is undecided (SKY-7163), so a request that combines them is
+    of the tree is undecided, so a request that combines them is
     refused instead of answered one way. Pagination is refused for the same
     reason. Visibility (accessible_workspaces, user_hashes) is not a filter
     the caller chose and still applies. ``core.queue_v2`` runs the same check

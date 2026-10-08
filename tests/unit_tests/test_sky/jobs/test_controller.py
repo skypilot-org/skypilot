@@ -1537,7 +1537,7 @@ class TestUserJobStatusClassification:
     """Tests for how a terminal *user-job* status (on the worker cluster) is
     classified into a ManagedJobStatus by the controller monitoring loop.
 
-    Regression coverage for SKY-5941: a user job that ends in
+    Regression coverage: a user job that ends in
     JobStatus.FAILED_DRIVER (e.g. the user workload OOM'd and the Ray driver
     crashed) must be classified as ManagedJobStatus.FAILED, NOT
     FAILED_CONTROLLER -- the controller is healthy, the user workload failed.
@@ -1629,7 +1629,7 @@ class TestUserJobStatusClassification:
     async def test_terminal_failure_reason_includes_exit_code(self):
         """A non-retried user failure surfaces the exit code and user-error
         attribution in failure_reason, which feeds the dashboard details
-        and the FAILED job event (SKY-6411)."""
+        and the FAILED job event."""
 
         controller = self._make_controller()
         controller._get_cluster_job_exit_codes = AsyncMock(return_value=[7])
@@ -1658,7 +1658,7 @@ class TestUserJobStatusClassification:
 
 
 class TestUserJobFailureRecoveryEventReason:
-    """The RECOVERING job event must state the real trigger (SKY-6411).
+    """The RECOVERING job event must state the real trigger.
 
     When recovery is triggered by the user job exiting non-zero on a healthy
     cluster (max_restarts_on_errors / recover_on_exit_codes), the RECOVERING

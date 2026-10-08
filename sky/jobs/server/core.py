@@ -1692,7 +1692,7 @@ def queue_v2(
     if include_tree:
         # The tree lookup takes job ids and nothing else. Whether a filter
         # should test the named jobs, their roots, or every row of the tree
-        # is undecided (SKY-7163), so the combination is refused rather than
+        # is undecided, so the combination is refused rather than
         # answered one way. Visibility (workspace access, all_users) still
         # applies; it is not a filter the caller chose.
         if job_ids is None:

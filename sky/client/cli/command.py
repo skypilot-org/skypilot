@@ -1792,7 +1792,7 @@ def _handle_jobs_queue_request(
         msg contains the error message. Otherwise, msg contains the formatted
         managed job table.
     """
-    # TODO(SKY-980): remove unnecessary fallbacks on the client side.
+    # TODO: remove unnecessary fallbacks on the client side.
     num_in_progress_jobs = None
     msg = ''
     status_counts: Optional[Dict[str, int]] = None
