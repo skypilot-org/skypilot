@@ -26,10 +26,9 @@ __all__ = [
 
 # An optional programmatic override for the logging agent, mirroring the
 # read-side ``LogReader`` registry (``register_log_reader``). When registered,
-# it is consulted before the ``logs.store`` config selection, so a caller can
-# supply a logging agent whose destination/credentials are resolved at runtime
-# rather than from static config. Returning ``None`` falls back to the
-# config-based selection, so the override never has to reimplement it.
+# it is consulted before the ``logs.store`` config selection. Returning
+# ``None`` falls back to the config-based selection, so the override never has
+# to reimplement it.
 LoggingAgentProvider = Callable[[], Optional[LoggingAgent]]
 _logging_agent_provider: Optional[LoggingAgentProvider] = None
 

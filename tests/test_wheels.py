@@ -181,7 +181,7 @@ def test_wheel_build_reproducible():
     hashes due to non-deterministic metadata ordering and zip timestamps.
 
     We simulate this by running each build in a separate subprocess,
-    just like different API server replicas would. Each subprocess gets
+    just like different API server processes would. Each subprocess gets
     a naturally randomized PYTHONHASHSEED.
     """
     build_script = (

@@ -260,7 +260,7 @@ def test_exempt_server_allows_absolute_local_source(local_server):
 
 def test_ha_backend_roots_are_honored(local_server, tmp_path):
     # A shared-FS backend resolves blobs outside clients/<user>; the check must
-    # use the backend's own roots or it would 400 every HA launch.
+    # use the backend's own roots or it would 400 every launch using it.
     shared_blobs = tmp_path / 'skypilot' / 'shared' / 'blobs' / USER
     local_cache = tmp_path / 'blob-cache' / USER
     for d in (shared_blobs, local_cache):

@@ -3473,11 +3473,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # on a dedicated controller, it is the controller's local API
                 # server, where parking is equally safe -- the controller
                 # explicitly supports parked launch requests (see
-                # _wait_for_parked_request in recovery_strategy), since
-                # admission-wait pauses already park its launches via this
-                # same mechanism. Only callers with no request context (no
-                # scheduler to hand the pause to) keep the blocking behavior
-                # below.
+                # _wait_for_parked_request in recovery_strategy). Only callers
+                # with no request context (no scheduler to hand the pause to)
+                # keep the blocking behavior below.
                 #
                 # Note on expected impact: in a healthy system controller
                 # launches should rarely contend on their own cluster lock at

@@ -3863,7 +3863,7 @@ class TestCollectClusterSkyletLog:
         assert not errors
 
     def test_uses_relocated_runtime_dir(self, tmp_path):
-        """A relocated SKY_RUNTIME_DIR (Slurm/devspaces) is honored because the
+        """A relocated SKY_RUNTIME_DIR (e.g. on Slurm) is honored because the
         path is resolved on the remote node, not from a Python attribute."""
         runner = mock.Mock()
         runner.run.return_value = (0, '/scratch/rt/.sky/skylet.log\n', '')

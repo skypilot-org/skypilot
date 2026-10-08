@@ -1,9 +1,8 @@
 """External node info source interface for plugins.
 
-This module provides an extension point that allows plugins to provide
-cached Kubernetes node information. By default, no-op implementations
-are used. Plugins can register their own implementations to provide
-cached node info (e.g., from a node-info-service sidecar).
+This module provides an extension point for an alternative source of
+Kubernetes node information. By default, no-op implementations are used
+and callers query the Kubernetes API directly.
 
 Example usage in a plugin:
     from sky.utils.plugin_extensions import NodeInfoSource
@@ -14,7 +13,7 @@ Example usage in a plugin:
 Example usage in core SkyPilot:
     from sky.utils.plugin_extensions import NodeInfoSource
 
-    # Get cached node info (returns None if not registered or unavailable)
+    # Get node info (returns None if not registered or unavailable)
     node_info = NodeInfoSource.get(context='my-k8s-context')
 """
 from typing import Callable, Optional
@@ -32,14 +31,12 @@ NodeInfoProviderFunc = Callable[[str], Optional[models.KubernetesNodesInfo]]
 class NodeInfoSource:
     """Singleton class for external Kubernetes node info source.
 
-    This class provides an extension point for plugins to register their own
-    node info providers (e.g., a node-info-service that caches Kubernetes
-    node information). By default, no provider is registered and get()
-    returns None.
+    This class provides an extension point for registering a node info
+    provider. By default, no provider is registered and get() returns None.
 
     Plugins can register their provider during their install() phase,
     and core SkyPilot code can use the get() method to attempt to retrieve
-    cached node info before falling back to direct Kubernetes API calls.
+    node info from it before falling back to direct Kubernetes API calls.
     """
 
     _provider_func: Optional[NodeInfoProviderFunc] = None
@@ -48,7 +45,6 @@ class NodeInfoSource:
     def register(cls, provider: NodeInfoProviderFunc) -> None:
         """Register a node info provider function.
 
-        This allows plugins to provide cached Kubernetes node information.
         Only one provider can be registered at a time.
 
         Args:

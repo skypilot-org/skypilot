@@ -352,13 +352,13 @@ def launch_metrics_event():
     The observing is done here, away from provisioning, for two reasons. The
     process that provisions is disposable -- burst requests get a fresh one per
     task -- and it is not even reliably the process that finishes a phase it
-    started, since a launch waiting on quota parks and resumes elsewhere. This
+    started, since a launch that parks may resume in another process. This
     daemon is long-lived and reads the milestones back from the database
     instead.
 
-    Claiming is a conditional update, so running on several API server replicas
-    at once observes each attempt exactly once rather than multiplying every
-    rate by the replica count.
+    Claiming is a conditional update, so running on several API server
+    instances at once (e.g. old and new pods during a rolling update) observes
+    each attempt exactly once rather than once per instance.
     """
     # Imported here, like every other daemon event in this module: importing
     # sky.metrics.launch_phases at module scope would pull the metrics package
@@ -432,7 +432,8 @@ def _record_job_launch_timelines() -> int:
                         task['task_name'], task['spot_job_id']))
             total, phases = launch_phases.compute_job_timeline(task, attempts)
             # Only the writer that won the row emits the metrics; otherwise
-            # every replica running this daemon would observe the same job.
+            # every server instance running this daemon would observe the
+            # same job.
             if managed_job_state.record_launch_timeline(
                     task['spot_job_id'], task['task_id'],
                     launch_phases.timeline_columns(phases, total)):

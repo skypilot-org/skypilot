@@ -160,8 +160,8 @@ T = TypeVar('T')
 def _get_ws_proxy_command() -> str:
     """Returns the ws-proxy command string.
 
-    Defaults to the Python websocket_proxy.py script. Plugins can
-    replace this function to prefer a native binary.
+    Defaults to the Python websocket_proxy.py script. Plugins may
+    replace this function.
     """
     escaped_executable_path = shlex.quote(sys.executable)
     escaped_websocket_proxy_path = shlex.quote(

@@ -834,7 +834,7 @@ async def cleanup_unreferenced_file_mounts():
 
         with storage.gc_lock() as should_run:
             if not should_run:
-                logger.debug('Another replica is running blob GC, skipping')
+                logger.debug('Another server is running blob GC, skipping')
                 return
 
             # A blob is kept alive by either an active API request (e.g. the
@@ -4322,7 +4322,7 @@ def _init_or_restore_server_user_hash():
     """Restores the server user hash from the global user state db.
 
     The API server must have a stable user hash across restarts and potential
-    multiple replicas. Thus we persist the user hash in db and restore it on
+    multiple instances. Thus we persist the user hash in db and restore it on
     startup. When upgrading from old version, the user hash will be read from
     the local file (if any) to keep the user hash consistent.
     """
@@ -4342,7 +4342,7 @@ def _init_or_restore_server_user_hash():
         return
 
     # Initial deployment. Insert-if-absent and apply whatever is live
-    # afterwards: replicas starting together would otherwise each generate a
+    # afterwards: servers starting together would otherwise each generate a
     # hash and the last write would win, leaving them disagreeing on the
     # server id they have already applied locally.
     user_hash = global_user_state.get_or_set_system_config(
@@ -4377,7 +4377,7 @@ def _bootstrap_jwt_secret() -> None:
 if __name__ == '__main__':
     # Raise the websockets library header limits before importing uvicorn.
     # The env vars are read by websockets.http11 and websockets.legacy.http
-    # at import time. Enterprise SSO cookies from oauth2proxy can exceed the
+    # at import time. Large auth cookies from an auth proxy can exceed the
     # default 8KB limit, causing WebSocket upgrade to fail with HTTP 400.
     os.environ.setdefault('WEBSOCKETS_MAX_LINE_LENGTH',
                           server_constants.WEBSOCKETS_MAX_HEADER_LINE_LENGTH)
@@ -4542,8 +4542,8 @@ if __name__ == '__main__':
         # supervisor process so the leader role and the controller
         # subprocesses it spawns share a single OS lifecycle.  Routing
         # this daemon through the executor task queue (as other daemons
-        # do) lets it drift between replicas while the controllers stay
-        # behind, which causes cross-replica controller orphans.  See
+        # do) lets it drift between servers while the controllers stay
+        # behind, which orphans controllers on the server it left.  See
         # sky/jobs/managed_job_refresh_thread.py for details.
         # pylint: disable=import-outside-toplevel
         from sky.jobs import managed_job_refresh_thread
