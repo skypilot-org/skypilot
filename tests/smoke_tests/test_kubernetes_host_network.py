@@ -43,7 +43,7 @@ def _schedulable_nodes() -> int:
 
     A hostNetwork cluster places each of its pods on a different node, so
     this decides whether a multi-node case can run at all. 1 on error fails
-    closed: callers then take the single-node branch or skip.
+    closed: callers then take the single-node branch or fail.
     """
     try:
         nodes_info = sky.get(sky_sdk.kubernetes_node_info())
@@ -51,6 +51,18 @@ def _schedulable_nodes() -> int:
                    if n.is_ready and not n.is_cordoned)
     except Exception:  # pylint: disable=broad-except
         return 1
+
+
+def _require_two_nodes() -> None:
+    """Fail, not skip: a skip would pass a test that never ran.
+
+    The callers are resource_heavy, so they run on the multi-node queue;
+    fewer than two nodes there is an infra problem to surface.
+    """
+    if _schedulable_nodes() < 2:
+        pytest.fail('needs two schedulable nodes (a hostNetwork cluster puts '
+                    'each pod on its own node); the resource_heavy queue '
+                    'should provide them')
 
 
 @pytest.mark.kubernetes
@@ -356,7 +368,7 @@ def test_kubernetes_host_network_block_shape():
     smoke_tests_utils.run_one_test(test)
 
 
-# resource_heavy: needs two nodes; one-node kind would only skip it.
+# resource_heavy: needs two nodes, which one-node kind does not have.
 @pytest.mark.kubernetes
 @pytest.mark.no_dependency
 @pytest.mark.resource_heavy
@@ -370,9 +382,7 @@ def test_kubernetes_host_network_worker_recovery_keeps_head_ports():
     start when Ray is already up, so a retry asserted against its own
     raylet and the launch reported failure on a cluster that was fine.
     """
-    if _schedulable_nodes() < 2:
-        pytest.skip('needs two schedulable nodes: a hostNetwork cluster puts '
-                    'each pod on its own node')
+    _require_two_nodes()
     name = smoke_tests_utils.get_cluster_name()
     cfg, write_cfg = _hostnet_cfg('recover')
     test = smoke_tests_utils.Test(
@@ -507,15 +517,13 @@ def test_kubernetes_host_network_relaunch_after_head_ray_stopped():
 
 
 # resource_heavy: routes to the multi-node EKS/GKE queue. A hostNetwork
-# cluster puts each pod on its own node, so on one-node kind it would skip.
+# cluster puts each pod on its own node, so one-node kind cannot run it.
 @pytest.mark.kubernetes
 @pytest.mark.no_dependency
 @pytest.mark.resource_heavy
 def test_kubernetes_host_network_relaunch_after_ray_stopped():
     """The workers also learn the port the restarted head took."""
-    if _schedulable_nodes() < 2:
-        pytest.skip('needs two schedulable nodes: a hostNetwork cluster puts '
-                    'each pod on its own node')
+    _require_two_nodes()
     _relaunch_after_ray_stopped(
         'kubernetes_host_network_relaunch_after_ray_stopped',
         smoke_tests_utils.get_cluster_name(), 2)
