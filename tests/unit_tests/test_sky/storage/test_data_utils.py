@@ -7,6 +7,27 @@ from sky.adaptors import coreweave
 from sky.data import data_utils
 
 
+class TestIsCloudStoreUrl:
+    """Tests for is_cloud_store_url function."""
+
+    @pytest.mark.parametrize('url', [
+        's3://bucket/path',
+        'gs://bucket',
+        'https://myaccount.blob.core.windows.net/mycontainer',
+    ])
+    def test_cloud_urls(self, url):
+        assert data_utils.is_cloud_store_url(url)
+
+    @pytest.mark.parametrize('url', ['~/data', '/abs/path', 'relative/path'])
+    def test_local_paths(self, url):
+        assert not data_utils.is_cloud_store_url(url)
+
+    @pytest.mark.parametrize('url', [['~/a', '~/b'], ('~/a',), None])
+    def test_non_string_is_not_a_url(self, url):
+        """A storage source can be a list of local paths; it is not a URL."""
+        assert data_utils.is_cloud_store_url(url) is False
+
+
 class TestIsAzContainerEndpoint:
     """Tests for is_az_container_endpoint function."""
 

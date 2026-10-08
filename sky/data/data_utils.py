@@ -568,6 +568,9 @@ def get_ibm_cos_bucket_region(bucket_name: str) -> str:
 
 
 def is_cloud_store_url(url):
+    # A storage source can also be a list of local paths, which is not a URL.
+    if not isinstance(url, str):
+        return False
     result = urllib.parse.urlsplit(url)
     # '' means non-cloud URLs.
     return result.netloc
