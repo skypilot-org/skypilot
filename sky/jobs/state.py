@@ -4671,28 +4671,52 @@ async def record_emergency_reattached_async(job_id: int, task_id: int) -> bool:
 async def has_open_emergency_episode_async(job_id: int, task_id: int) -> bool:
     """Whether an emergency that kept the task's cluster is still open.
 
-    An episode opens with an EMERGENCY-sourced event (the task's own
-    kept-running event, or a job-level one for a job group) and closes with
-    the first later event that is either the re-attached event or a status
-    change away from RUNNING/WINDING_DOWN (RECOVERING, CANCELLING, a
-    terminal status), written for the task or for the whole job. Any other
-    event in between, such as an informational one that keeps the task's
-    status, leaves it open. Read from the events rather than from
-    controller memory so that a controller restart during the backoff
-    still closes the episode.
+    Only an emergency that left this task running opens an episode: its
+    newest EMERGENCY-sourced event must be either the task's own
+    kept-running event (status RUNNING or WINDING_DOWN), or a job group's
+    job-level event recorded while this member was running (its latest
+    event before it has one of those statuses). An emergency that moved
+    the task to RECOVERING relaunched it, and a group emergency that found
+    the member still starting kept nothing of it; neither leaves anything
+    to re-attach to. The episode closes with the first later event, for
+    the task or for the whole job, that is either the re-attached event or
+    a status change away from RUNNING/WINDING_DOWN (RECOVERING, CANCELLING,
+    a terminal status). Any other event in between, such as an
+    informational one that keeps the task's status, leaves it open. Read
+    from the events rather than from controller memory so that a
+    controller restart during the backoff still closes the episode.
     """
+    kept_statuses = (ManagedJobStatus.RUNNING.value,
+                     ManagedJobStatus.WINDING_DOWN.value)
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         for_task = sqlalchemy.or_(job_events_table.c.task_id == task_id,
                                   job_events_table.c.task_id.is_(None))
-        opener_id = await session.scalar(
-            sqlalchemy.select(sqlalchemy.func.max(job_events_table.c.id)).where(
-                job_events_table.c.spot_job_id == job_id,
-                for_task,
-                job_events_table.c.recovery_source ==
-                RecoverySource.EMERGENCY.value,
-            ))
-        if opener_id is None:
+        opener = (await session.execute(
+            sqlalchemy.select(job_events_table.c.id, job_events_table.c.task_id,
+                              job_events_table.c.new_status).where(
+                                  job_events_table.c.spot_job_id == job_id,
+                                  for_task,
+                                  job_events_table.c.recovery_source ==
+                                  RecoverySource.EMERGENCY.value,
+                              ).order_by(job_events_table.c.id.desc()).limit(1)
+        )).first()
+        if opener is None:
+            return False
+        opener_id, opener_task_id, opener_status = opener
+        if opener_task_id is None:
+            # A job group's emergency: it kept this member as is only if
+            # the member was running when it was recorded.
+            status_before = await session.scalar(
+                sqlalchemy.select(job_events_table.c.new_status).where(
+                    job_events_table.c.spot_job_id == job_id,
+                    job_events_table.c.task_id == task_id,
+                    job_events_table.c.id < opener_id,
+                ).order_by(job_events_table.c.id.desc()).limit(1))
+            if status_before not in kept_statuses:
+                return False
+        elif opener_status not in kept_statuses:
+            # The task was moved to RECOVERING and relaunched.
             return False
         closer_id = await session.scalar(
             sqlalchemy.select(job_events_table.c.id).where(
@@ -4701,10 +4725,7 @@ async def has_open_emergency_episode_async(job_id: int, task_id: int) -> bool:
                 job_events_table.c.id > opener_id,
                 sqlalchemy.or_(
                     job_events_table.c.reason == EMERGENCY_REATTACHED_REASON,
-                    job_events_table.c.new_status.notin_([
-                        ManagedJobStatus.RUNNING.value,
-                        ManagedJobStatus.WINDING_DOWN.value,
-                    ]),
+                    job_events_table.c.new_status.notin_(kept_statuses),
                 ),
             ).limit(1))
     return closer_id is None

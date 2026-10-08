@@ -326,6 +326,10 @@ class TestEmergencyRecoveryState:
         itself with its own re-attached event."""
         engine = _mock_managed_jobs_db_conn
         _seed_job(engine, status='RUNNING')
+        for member in (0, 1):
+            await state.add_job_event_async(1, member,
+                                            state.ManagedJobStatus.RUNNING,
+                                            'Job has started')
         await state.add_job_event_async(
             1,
             None,
@@ -340,6 +344,68 @@ class TestEmergencyRecoveryState:
         # Closed for member 0 only; member 1 still has it as its latest.
         assert await state.has_open_emergency_episode_async(1, 0) is False
         assert await state.has_open_emergency_episode_async(1, 1) is True
+
+    @pytest.mark.asyncio
+    async def test_relaunching_emergency_opens_no_episode(
+            self, _mock_managed_jobs_db_conn):
+        """An emergency that moved the task to RECOVERING relaunched it:
+        the relaunch's own RUNNING event must not leave a kept-cluster
+        episode open for a later restart to 're-attach' to."""
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine, status='RUNNING')
+        await state.add_job_event_async(1, 0, state.ManagedJobStatus.STARTING,
+                                        'Job is starting')
+        await state.add_job_event_async(
+            1,
+            0,
+            state.ManagedJobStatus.RECOVERING,
+            'Unexpected controller error (emergency recovery attempt 1/10)',
+            recovery_source=state.RecoverySource.EMERGENCY)
+        await state.add_job_event_async(1, 0, state.ManagedJobStatus.RUNNING,
+                                        'Job has recovered')
+
+        assert await state.has_open_emergency_episode_async(1, 0) is False
+
+    @pytest.mark.asyncio
+    async def test_group_emergency_opens_only_for_running_members(
+            self, _mock_managed_jobs_db_conn):
+        """A group emergency keeps only the members that were running; a
+        member still starting is not re-attached when it later starts."""
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine, status='RUNNING')
+        await state.add_job_event_async(1, 0, state.ManagedJobStatus.RUNNING,
+                                        'Job has started')
+        await state.add_job_event_async(1, 1, state.ManagedJobStatus.STARTING,
+                                        'Job is starting')
+        await state.add_job_event_async(
+            1,
+            None,
+            state.ManagedJobStatus.RUNNING,
+            'group emergency',
+            recovery_source=state.RecoverySource.EMERGENCY)
+        await state.add_job_event_async(1, 1, state.ManagedJobStatus.RUNNING,
+                                        'Job has started')
+
+        assert await state.has_open_emergency_episode_async(1, 0) is True
+        assert await state.has_open_emergency_episode_async(1, 1) is False
+
+    @pytest.mark.asyncio
+    async def test_group_emergency_while_all_starting_opens_nothing(
+            self, _mock_managed_jobs_db_conn):
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine, status='RUNNING')
+        await state.add_job_event_async(1, 0, state.ManagedJobStatus.STARTING,
+                                        'Job is starting')
+        await state.add_job_event_async(
+            1,
+            None,
+            state.ManagedJobStatus.STARTING,
+            'group emergency',
+            recovery_source=state.RecoverySource.EMERGENCY)
+        await state.add_job_event_async(1, 0, state.ManagedJobStatus.RUNNING,
+                                        'Job has started')
+
+        assert await state.has_open_emergency_episode_async(1, 0) is False
 
     @pytest.mark.asyncio
     async def test_open_episode_survives_informational_events(
