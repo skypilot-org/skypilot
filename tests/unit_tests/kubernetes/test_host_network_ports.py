@@ -7,10 +7,13 @@ and that the resolution order falls back rather than inventing a block for a
 pod that already has one.
 """
 import os
+import socket
+import subprocess
 from unittest import mock
 
 import pytest
 
+from sky.provision import instance_setup
 from sky.provision.kubernetes import host_network_ports as ports
 from sky.provision.kubernetes import host_network_probe
 from sky.provision.kubernetes import instance as k8s_instance
@@ -307,20 +310,22 @@ class TestLegacyConfigMapFallback:
                                return_value=api):
             return instance._head_block_from_configmap('c', 'ns', None, head)
 
+    # Exactly what the pre-change probe wrote. Built from today's
+    # HEAD_PORT_NAMES, the fixture gained skylet with it and hid that no real
+    # ConfigMap has that key.
+    _LEGACY_KEYS = ('gcs', 'dashboard', 'node_manager', 'object_manager',
+                    'ray_client_server', 'dashboard_agent_listen',
+                    'runtime_env_agent', 'metrics_export', 'sshd_c-head')
+
     def _full_data(self):
-        data = {
-            name: str(40000 + i)
-            for i, name in enumerate(host_network_probe.HEAD_PORT_NAMES)
-            if name != 'sshd'
-        }
-        data[f'{host_network_probe.SSHD_KEY_PREFIX}c-head'] = '40099'
-        return data
+        return {key: str(40000 + i) for i, key in enumerate(self._LEGACY_KEYS)}
 
     def test_reads_the_heads_block_including_its_pod_keyed_sshd(self):
         block = self._call(self._cm(self._full_data()))
         assert block is not None
-        assert set(block) == set(host_network_probe.HEAD_PORT_NAMES)
-        assert block['sshd'] == 40099
+        assert block['sshd'] == 40008
+        assert block['gcs'] == 40000
+        assert 'skylet' not in block
 
     def test_absent_configmap_is_not_an_error(self):
         """A cluster created *after* this change has none, which is normal."""
@@ -489,6 +494,105 @@ def test_the_reserved_range_is_part_of_the_on_cluster_format():
     assert ports._DEFAULT_RANGE == (20000, 29999)
 
 
+class TestVerifyOncePerContainer:
+    """The start command re-runs on a live pod -- after Ray died, or when the
+    provisioner starts Ray itself because the pod's own start was slow. By
+    then this pod's sshd and skylet hold their ports."""
+
+    def _env(self, monkeypatch, tmp_path, sshd_config_port):
+        config = tmp_path / 'sshd_config'
+        config.write_text(f'UsePAM yes\nPort {sshd_config_port}\n')
+        monkeypatch.setattr(host_network_probe, '_SSHD_CONFIG', str(config))
+        block = ports.allocate_block(None)
+        for name, port in block.items():
+            monkeypatch.setenv(host_network_probe.env_var_for_port(name),
+                               str(port))
+        return block, config
+
+    def _hold(self, port):
+        sock = socket.socket()
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(('0.0.0.0', port))
+        sock.listen(1)
+        return sock
+
+    def test_a_rerun_does_not_fail_against_its_own_sshd(self, monkeypatch,
+                                                        tmp_path):
+        block, config = self._env(monkeypatch, tmp_path, 22)
+        host_network_probe._run_head()
+        # What the bootstrap does once the probe passed.
+        config.write_text(f'UsePAM yes\nPort {block["sshd"]}\n')
+        with self._hold(block['sshd']), self._hold(block['skylet']):
+            host_network_probe._run_head()
+
+    def test_a_container_not_yet_verified_refuses_a_held_port(
+            self, monkeypatch, tmp_path):
+        """The control: sshd_config still on 22, so the same holder fails."""
+        block, _ = self._env(monkeypatch, tmp_path, 22)
+        with self._hold(block['sshd']):
+            with pytest.raises(RuntimeError, match='already in use'):
+                host_network_probe._run_head()
+
+    def test_a_config_only_root_can_read_still_counts(self, monkeypatch,
+                                                      tmp_path):
+        """sshd_config is 0600 on RHEL-family images; sudo wrote it."""
+        block, config = self._env(monkeypatch, tmp_path, 22)
+        text = f'UsePAM yes\nPort {block["sshd"]}\n'
+        config.write_text(text)
+        config.chmod(0)
+        if os.access(config, os.R_OK):
+            pytest.skip('root reads a mode-000 file')
+
+        def sudo_cat(args, **_):
+            assert args == ['sudo', '-n', 'cat', str(config)], args
+            return mock.Mock(stdout=text)
+
+        monkeypatch.setattr(host_network_probe.subprocess, 'run', sudo_cat)
+        with self._hold(block['sshd']):
+            host_network_probe._run_head()
+
+    def test_an_unreadable_config_without_sudo_still_verifies(
+            self, monkeypatch, tmp_path):
+        """No sudo binary: fall back to verifying, as before, not crash."""
+        block, config = self._env(monkeypatch, tmp_path, 22)
+        config.write_text(f'Port {block["sshd"]}\n')
+        config.chmod(0)
+        if os.access(config, os.R_OK):
+            pytest.skip('root reads a mode-000 file')
+        monkeypatch.setattr(host_network_probe.subprocess, 'run',
+                            mock.Mock(side_effect=FileNotFoundError('sudo')))
+        host_network_probe._run_head()
+        with self._hold(block['sshd']):
+            with pytest.raises(RuntimeError, match='already in use'):
+                host_network_probe._run_head()
+
+    def test_a_pre_assignment_pod_rerun_skips_on_its_legacy_ports(
+            self, monkeypatch, tmp_path):
+        """Its ports come from the legacy env file, which has no skylet."""
+        block, config = self._env(monkeypatch, tmp_path, 22)
+        monkeypatch.delenv(host_network_probe.env_var_for_port('skylet'))
+        config.write_text(f'Port {block["sshd"]}\n')
+        with self._hold(block['sshd']), self._hold(block['gcs']):
+            host_network_probe._run_head()
+
+    def test_a_restarted_containers_old_connections_do_not_hold_a_port(self):
+        """A container restart leaves TIME_WAIT on its ports; sshd and Ray
+        rebind them (SO_REUSEADDR), so the check must not refuse them."""
+        listener = socket.socket()
+        # Linux reuses a TIME_WAIT port only when both sides set it.
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(('127.0.0.1', 0))
+        listener.listen(1)
+        port = listener.getsockname()[1]
+        client = socket.create_connection(('127.0.0.1', port))
+        accepted, _ = listener.accept()
+        accepted.close()  # the server side closes first: TIME_WAIT is its
+        listener.close()
+        client.close()
+        for sock in host_network_probe._verify_free({'gcs': port}):
+            sock.close()
+
+
 def test_a_port_clash_tells_the_user_to_retry_before_telling_them_to_debug():
     """The recovery action comes first, because it is what almost always works.
 
@@ -499,10 +603,6 @@ def test_a_port_clash_tells_the_user_to_retry_before_telling_them_to_debug():
     NodePort range" sends them to inspect a node for something that one more
     launch would have stepped over.
     """
-    import socket
-
-    from sky.provision.kubernetes import host_network_probe
-
     held = socket.socket()
     held.bind(('0.0.0.0', 0))
     try:
@@ -670,3 +770,50 @@ class TestClusterInfoCarriesTheHeadsSkyletPort:
         head = self._pod('c-head', sorted(block.values()))
         info = self._cluster_info(monkeypatch, {'c-head': head})
         assert info.get_head_instance().skylet_port == block['skylet']
+
+
+class TestLegacyPortsEnv:
+    """A pod from before server-assigned ports re-runs on the ports its own
+    probe wrote at boot; a newer pod never reads that file."""
+
+    @pytest.mark.parametrize(
+        'pod_env, want_gcs',
+        [
+            # A pre-assignment head: nothing exported, its saved port wins.
+            ({}, '58623'),
+            # A pre-assignment worker: the provisioner's head port wins.
+            ({
+                'SKYPILOT_RAY_PORT': '24000'
+            }, '24000'),
+            # A newer pod never reads the file.
+            ({
+                'SKYPILOT_SSHD_PORT': '20609',
+                'SKYPILOT_RAY_PORT': '20601'
+            }, '20601'),
+        ])
+    def test_the_file_fills_only_what_is_missing(self, tmp_path, pod_env,
+                                                 want_gcs):
+        env_file = tmp_path / 'ports.env'
+        env_file.write_text('export SKYPILOT_SSHD_PORT=56989\n'
+                            'export SKYPILOT_RAY_PORT=58623\n')
+        clause = instance_setup._SOURCE_LEGACY_HOST_NETWORK_PORTS.replace(
+            instance_setup._LEGACY_HOST_NETWORK_PORTS_ENV, str(env_file))
+        # A child reads the env, as the probe and `ray start` do.
+        out = subprocess.run([
+            'bash', '-c', clause + 'python3 -c "import os; '
+            'print(os.environ[\'SKYPILOT_RAY_PORT\'])"'
+        ],
+                             env={
+                                 'PATH': os.environ['PATH'],
+                                 **pod_env
+                             },
+                             capture_output=True,
+                             text=True,
+                             check=True).stdout.strip()
+        assert out == want_gcs
+
+    @pytest.mark.parametrize('mode', ['head', 'worker'])
+    def test_it_is_read_before_the_probe_runs(self, mode):
+        cmd = instance_setup._host_network_probe_cmd(mode)
+        assert (cmd.index(instance_setup._SOURCE_LEGACY_HOST_NETWORK_PORTS) <
+                cmd.index(f'--mode {mode}'))
