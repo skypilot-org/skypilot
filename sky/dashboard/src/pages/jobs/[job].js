@@ -1777,11 +1777,16 @@ function JobDetailsContent({
     </div>
   );
   // 'Oct 6, 5:37:41 PM PDT': short enough to stay on one line in a cell.
+  // The year shows only when it is not the current year.
   const shortTimestamp = (date) =>
     date
       ? date.toLocaleString('en-US', {
           month: 'short',
           day: 'numeric',
+          year:
+            date.getFullYear() === new Date().getFullYear()
+              ? undefined
+              : 'numeric',
           hour: 'numeric',
           minute: '2-digit',
           second: '2-digit',
