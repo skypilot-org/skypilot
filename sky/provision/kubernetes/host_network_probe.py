@@ -23,6 +23,7 @@ in flux.
 import argparse
 import os
 import socket
+import subprocess
 import sys
 import time
 from typing import Dict, List, Optional, Tuple
@@ -161,17 +162,52 @@ def _clash_hint(port: int) -> str:
             'rather than the kernel having handed it out.')
 
 
+# The bootstrap writes the assigned sshd port here only after a verify passed,
+# so finding it means this container already verified; a re-run would fail on
+# our own sshd and skylet. Older pods have it too; a restart resets the file.
+_SSHD_CONFIG = '/etc/ssh/sshd_config'
+
+
+def _sshd_config_lines() -> List[str]:
+    try:
+        with open(_SSHD_CONFIG, encoding='utf-8') as f:
+            return f.read().splitlines()
+    except PermissionError:
+        pass
+    except OSError:
+        return []
+    # RHEL-family images ship it 0600; the bootstrap writes it via sudo, so
+    # read it the same way. No sudo means not verified, never a crash.
+    try:
+        result = subprocess.run(['sudo', '-n', 'cat', _SSHD_CONFIG],
+                                capture_output=True,
+                                text=True,
+                                check=False)
+    except OSError:
+        return []
+    return result.stdout.splitlines()
+
+
+def _already_verified() -> bool:
+    port = os.environ.get(_ENV_VAR_FOR_PORT['sshd'])
+    return any(line.split() == ['Port', port] for line in _sshd_config_lines())
+
+
 def _verify_free(ports: Dict[str, int]) -> List[socket.socket]:
     """Bind every assigned port, proving it is free.
 
-    Returns the held sockets; the caller keeps them alive until just before
-    ``ray start`` and sshd rebind the same ports.
+    Binds with SO_REUSEADDR, as the servers that take these ports do: a
+    restarted container's TIME_WAIT connections do not hold a port, a live
+    listener does. Returns the held sockets; the caller keeps them alive until
+    just before ``ray start`` and sshd rebind the same ports.
     """
     held: List[socket.socket] = []
     for name, port in sorted(ports.items(), key=lambda kv: kv[1]):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind(('0.0.0.0', port))
+            sock.listen(1)
         except OSError as e:
             for held_sock in held:
                 held_sock.close()
@@ -209,18 +245,24 @@ def _wait_head_gcs_tcp(host: str, port: int) -> None:
         f'{_HEAD_GCS_TCP_WAIT_TIMEOUT_S}s (last error: {last_err}).')
 
 
-def _run_head() -> None:
-    held = _verify_free(_assigned_ports(HEAD_PORT_NAMES))
+def _verify_once(names: List[str]) -> None:
+    # Checked before the ports are read: a pre-assignment pod re-running has
+    # only its legacy ports, without the newer names.
+    if _already_verified():
+        return
+    held = _verify_free(_assigned_ports(names))
     del held  # release just before ray start takes them
 
 
+def _run_head() -> None:
+    _verify_once(HEAD_PORT_NAMES)
+
+
 def _run_worker() -> None:
-    ports = _assigned_ports(WORKER_PORT_NAMES)
-    held = _verify_free(ports)
+    _verify_once(WORKER_PORT_NAMES)
     # The head's GCS port, assigned by the server: head and workers are
     # created concurrently, so a worker cannot read it off the head pod.
     head_gcs = int(os.environ[_ENV_VAR_FOR_PORT['gcs']])
-    del held
     # The pod template points SKYPILOT_RAY_HEAD_IP at the head's headless
     # Service DNS. Same-cluster pods never share a K8s node (per-cluster
     # podAntiAffinity), so that resolves to the head's routable host IP.

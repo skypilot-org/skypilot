@@ -3110,6 +3110,13 @@ def cleanup_cluster_resources(
 _HOST_NETWORK_SSHD_WAIT_TIMEOUT_S = 60
 _HOST_NETWORK_SSHD_WAIT_INTERVAL_S = 2
 
+# The names the pre-change probe published (v0.13.0, #9644). Fixed, not derived
+# from HEAD_PORT_NAMES: that list grows (skylet was appended after the move),
+# and a name it gains never appears in an existing ConfigMap.
+_CONFIGMAP_PORT_NAMES = ('gcs', 'dashboard', 'node_manager', 'object_manager',
+                         'ray_client_server', 'dashboard_agent_listen',
+                         'runtime_env_agent', 'metrics_export', 'sshd')
+
 
 def _head_block_from_configmap(cluster_name_on_cloud: str, namespace: str,
                                context: Optional[str],
@@ -3130,7 +3137,7 @@ def _head_block_from_configmap(cluster_name_on_cloud: str, namespace: str,
         return None
     data = cm.data or {}
     block: Dict[str, int] = {}
-    for port_name in host_network_probe.HEAD_PORT_NAMES:
+    for port_name in _CONFIGMAP_PORT_NAMES:
         key = (f'{host_network_probe.SSHD_KEY_PREFIX}{head_name}'
                if port_name == 'sshd' else port_name)
         value = data.get(key)

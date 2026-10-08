@@ -866,6 +866,10 @@ def _post_provision_setup(
                 custom_resource=custom_resource,
                 cluster_info=cluster_info,
                 ssh_credentials=ssh_credentials)
+            # ray_port was read while the head was down, so it is the default;
+            # a hostNetwork head just took its assigned port instead, and the
+            # workers must be told that one.
+            ray_port, _, _ = check_ray_port_and_cluster_healthy()
         else:
             logger.debug('Ray cluster on head is ready. Skip starting ray '
                          'cluster on head node.')
