@@ -234,7 +234,7 @@ class Recipe:
             name=row.name,
             description=row.description,
             content=row.content,
-            recipe_type=RecipeType.from_str(row.recipe_type),
+            recipe_type=_load_recipe_type(row.recipe_type),
             pinned=bool(row.pinned),
             user_id=row.user_id,
             user_name=row.user_name,
@@ -246,6 +246,19 @@ class Recipe:
             is_pinnable=bool(row.is_pinnable),
             source=_load_source(row.source),
         )
+
+
+def _load_recipe_type(raw: str) -> Union[RecipeType, str]:
+    """Parse a stored recipe type without failing on unregistered types.
+
+    A recipe whose type is provided by a plugin may be read back in a
+    process where that plugin has not registered its validator. Reading
+    must not fail there; return the stored string as-is.
+    """
+    try:
+        return RecipeType.from_str(raw)
+    except ValueError:
+        return raw
 
 
 def _load_source(raw: Optional[str]) -> Optional[Dict[str, Any]]:

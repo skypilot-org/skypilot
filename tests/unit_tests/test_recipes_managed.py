@@ -141,3 +141,21 @@ def test_validate_recipe_content_accepts_type_string():
     recipes_core.validate_recipe_content(_CONTENT, 'cluster')
     with pytest.raises(ValueError, match='Invalid recipe type'):
         recipes_core.validate_recipe_content(_CONTENT, 'not-a-type')
+
+
+def test_unregistered_plugin_type_is_readable(recipes_engine):
+    """A plugin-typed recipe stays readable where no validator is registered."""
+    with recipes_engine.begin() as conn:
+        conn.execute(recipes_db.recipes_table.insert().values(
+            name='plugin-recipe',
+            content=_CONTENT,
+            recipe_type='not-registered-here',
+            user_id=_OWNER,
+            pinned=1,
+            is_editable=0,
+            is_pinnable=1,
+        ))
+    recipe = recipes_db.get_recipe('plugin-recipe')
+    assert recipe is not None
+    assert recipe.to_dict()['recipe_type'] == 'not-registered-here'
+    assert recipes_db.delete_managed_recipe('plugin-recipe', _OWNER)
