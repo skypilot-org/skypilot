@@ -6,13 +6,15 @@ a second, lease-based backend. A *lease* is a single row
 ``UPDATE`` in its own bounded transaction. Each renewal is a self-contained
 transaction on a dedicated direct, unpooled engine — no persistent connection
 is held between renewals, and the heartbeat never contends with application
-traffic for a shared pool (see ``PgLeaseElector._execute_bounded``); the row
+traffic for a shared pool (see ``_execute_bounded``); the row
 also carries a monotonic ``epoch`` that acts as a fencing token, letting a
 caller verify leadership atomically inside its own write transaction.
 
 The backend is chosen by the ``SKYPILOT_LEADER_ELECTION_BACKEND`` environment
 variable (``advisory`` -- the default -- or ``lease``) so the lease path is
-opt-in and instantly revertible. On SQLite (single-node) there is no fleet to
+opt-in and instantly revertible. The two backends exclude each other on the
+same lock id, so replicas on different backends can run side by side while the
+variable is being switched. On SQLite (single-node) there is no fleet to
 coordinate, and both backends fall back to the local advisory/file lock path.
 """
 import abc
@@ -83,6 +85,42 @@ _LEASE_TABLE = 'leader_leases'
 _HOLDER_ID = f'{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}'
 
 
+def _execute_bounded(sql, params, fetch):
+    """Run *sql* in one short transaction bounded by ``statement_timeout``
+    so a slow/locked DB fails fast rather than hanging the renew (→ step
+    down) or the release (→ blocked re-contention) past the renew deadline.
+    ``SET LOCAL`` scopes the timeout to this transaction only. Returns the
+    fetched row when *fetch* is set, else None.
+
+    This is an explicit READ COMMITTED transaction on purpose: ``SET LOCAL``
+    only takes effect inside a transaction block, so do NOT "simplify" this
+    to ``isolation_level='AUTOCOMMIT'`` -- under autocommit ``SET LOCAL``
+    degrades to a WARNING no-op and the statement timeout silently
+    disappears.
+
+    Runs on a dedicated direct + unpooled engine, never the shared
+    application engine. These calls are the leader-election heartbeat: if
+    they queue behind application traffic on a shared pool (or behind a
+    transaction pooler's starved server pool), DB pressure fails renewals
+    and churns the leader at exactly the moment stability matters most --
+    and each new leader's catch-up work adds more pressure, a feedback
+    loop. A fresh direct connection per call cannot be starved by any
+    shared pool state; at the renew cadence (one short statement every
+    ``renew_interval_seconds`` per held lease, plus one lease check per won
+    advisory bid) the per-connection setup cost is negligible, and holding a
+    persistent connection instead would reintroduce the standing per-process
+    backend this backend exists to avoid."""
+    engine = db_utils.get_engine(None, direct=True, no_pool=True)
+    with engine.connect() as conn:
+        conn.execute(
+            sqlalchemy.text(f'SET LOCAL statement_timeout = '
+                            f'{_RENEW_STATEMENT_TIMEOUT_MS}'))
+        result = conn.execute(sql, params)
+        row = result.fetchone() if fetch else None
+        conn.commit()
+    return row
+
+
 class LeaderElector(abc.ABC):
     """A single-winner election for one ``lock_id`` across the fleet.
 
@@ -142,8 +180,8 @@ class LeaderElector(abc.ABC):
 class AdvisoryLockElector(LeaderElector):
     """Leader election backed by a Postgres session-scoped advisory lock.
 
-    Wraps ``sky.utils.locks`` with no behavior change from the historical path:
-    ``try_acquire`` is a non-blocking advisory-lock acquire, ``renew`` is the
+    Wraps ``sky.utils.locks``: ``try_acquire`` is a non-blocking advisory-lock
+    acquire that yields to a live lease for the same lock id, ``renew`` is the
     session-liveness probe, and ``release`` drops the lock. Provides no fencing
     token. On non-Postgres backends the underlying ``FileLock`` makes this a
     process-local lock, which is exactly right for single-node deployments.
@@ -165,7 +203,19 @@ class AdvisoryLockElector(LeaderElector):
             logger.warning('%s: advisory acquire failed: %s', self._lock_id, e)
             return False
         self._lock = lock
+        # Checked while holding the lock, so no lease bid can commit after it.
+        if isinstance(lock, locks.PostgresLock) and self._lease_is_live():
+            self.release()
+            return False
         return True
+
+    def _lease_is_live(self) -> bool:
+        """Whether a lease holds this lock id; True if the check fails."""
+        try:
+            return PgLeaseElector.is_held(self._lock_id)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('%s: lease check failed: %s', self._lock_id, e)
+            return True
 
     def renew(self) -> bool:
         if self._lock is None:
@@ -196,7 +246,7 @@ class PgLeaseElector(LeaderElector):
     every fresh acquisition; ``renew`` is a separate statement that only extends
     a lease we still validly hold, keeping ``epoch`` fixed for the term. Every
     call is one short bounded transaction on a dedicated direct, unpooled
-    engine (see :meth:`_execute_bounded`): no persistent connection is held
+    engine (see :func:`_execute_bounded`): no persistent connection is held
     between renewals, and the heartbeat never shares — so can never be starved
     by — the application engine's pool or a transaction pooler's server pool.
     """
@@ -212,9 +262,13 @@ class PgLeaseElector(LeaderElector):
     # term (first insert, or takeover of an expired lease -- even by the same
     # holder after a release/lapse) and bumps ``epoch``, so the fencing token is
     # strictly increasing per acquisition as documented.
+    #
+    # The bid fails while any session holds the advisory lock for the same
+    # lock id (see ``AdvisoryLockElector.try_acquire``).
     _ACQUIRE_SQL = sqlalchemy.text(f"""
         INSERT INTO {_LEASE_TABLE} (lock_id, holder, epoch, expires_at)
-        VALUES (:lock_id, :holder, 1, now() + make_interval(secs => :ttl))
+        SELECT :lock_id, :holder, 1, now() + make_interval(secs => :ttl)
+         WHERE pg_try_advisory_xact_lock(:advisory_key)
         ON CONFLICT (lock_id) DO UPDATE
           SET holder = :holder,
               epoch = CASE WHEN {_LEASE_TABLE}.holder = :holder
@@ -233,12 +287,17 @@ class PgLeaseElector(LeaderElector):
     # lease has lapsed or been taken over, gets zero rows and a ``False`` return
     # rather than silently (re)acquiring inside a renew. Re-acquisition after a
     # lapse goes through ``try_acquire`` instead, which bumps ``epoch``.
+    #
+    # Like the bid, the renew fails while any session holds the advisory lock
+    # for the lock id: ``now()`` is the transaction start, so a renew delayed
+    # past the expiry must not extend a lease an advisory leader saw expire.
     _RENEW_SQL = sqlalchemy.text(f"""
         UPDATE {_LEASE_TABLE}
            SET expires_at = now() + make_interval(secs => :ttl)
          WHERE lock_id = :lock_id
            AND holder = :holder
            AND {_LEASE_TABLE}.expires_at >= now()
+           AND pg_try_advisory_xact_lock(:advisory_key)
         RETURNING epoch
     """)
 
@@ -248,6 +307,11 @@ class PgLeaseElector(LeaderElector):
     _RELEASE_SQL = sqlalchemy.text(f"""
         UPDATE {_LEASE_TABLE} SET expires_at = now()
         WHERE lock_id = :lock_id AND holder = :holder
+    """)
+
+    _IS_HELD_SQL = sqlalchemy.text(f"""
+        SELECT 1 FROM {_LEASE_TABLE}
+         WHERE lock_id = :lock_id AND expires_at >= now()
     """)
 
     def __init__(
@@ -279,41 +343,6 @@ class PgLeaseElector(LeaderElector):
                 f'interval={renew_interval_seconds}, '
                 f'deadline={renew_deadline_seconds}, ttl={ttl_seconds}')
 
-    def _execute_bounded(self, sql, params, fetch):
-        """Run *sql* in one short transaction bounded by ``statement_timeout``
-        so a slow/locked DB fails fast rather than hanging the renew (→ step
-        down) or the release (→ blocked re-contention) past the renew deadline.
-        ``SET LOCAL`` scopes the timeout to this transaction only. Returns the
-        fetched row when *fetch* is set, else None.
-
-        This is an explicit READ COMMITTED transaction on purpose: ``SET LOCAL``
-        only takes effect inside a transaction block, so do NOT "simplify" this
-        to ``isolation_level='AUTOCOMMIT'`` -- under autocommit ``SET LOCAL``
-        degrades to a WARNING no-op and the statement timeout silently
-        disappears.
-
-        Runs on a dedicated direct + unpooled engine, never the shared
-        application engine. These calls are the leader-election heartbeat: if
-        they queue behind application traffic on a shared pool (or behind a
-        transaction pooler's starved server pool), DB pressure fails renewals
-        and churns the leader at exactly the moment stability matters most --
-        and each new leader's catch-up work adds more pressure, a feedback
-        loop. A fresh direct connection per call cannot be starved by any
-        shared pool state; at the renew cadence (one short statement every
-        ``renew_interval_seconds`` per held lease) the per-connection setup
-        cost is negligible, and holding a persistent connection instead would
-        reintroduce the standing per-process backend this backend exists to
-        avoid."""
-        engine = db_utils.get_engine(None, direct=True, no_pool=True)
-        with engine.connect() as conn:
-            conn.execute(
-                sqlalchemy.text(f'SET LOCAL statement_timeout = '
-                                f'{_RENEW_STATEMENT_TIMEOUT_MS}'))
-            result = conn.execute(sql, params)
-            row = result.fetchone() if fetch else None
-            conn.commit()
-        return row
-
     def _run_epoch_stmt(self, sql) -> bool:
         """Run an ``epoch``-returning lease statement (acquire or renew).
 
@@ -324,12 +353,13 @@ class PgLeaseElector(LeaderElector):
         transient error.
         """
         try:
-            row = self._execute_bounded(sql, {
+            row = _execute_bounded(sql, {
                 'lock_id': self._lock_id,
                 'holder': self._holder,
                 'ttl': self._ttl,
+                'advisory_key': locks.postgres_lock_key(self._lock_id),
             },
-                                        fetch=True)
+                                   fetch=True)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning('%s: lease statement failed: %s', self._lock_id, e)
             self._epoch = None
@@ -359,11 +389,11 @@ class PgLeaseElector(LeaderElector):
 
     def release(self) -> None:
         try:
-            self._execute_bounded(self._RELEASE_SQL, {
+            _execute_bounded(self._RELEASE_SQL, {
                 'lock_id': self._lock_id,
                 'holder': self._holder,
             },
-                                  fetch=False)
+                             fetch=False)
         except Exception as e:  # pylint: disable=broad-except
             # If we cannot expire the row, it will lapse on its own after the
             # TTL; a slower handoff, not a correctness problem.
@@ -375,6 +405,12 @@ class PgLeaseElector(LeaderElector):
 
     def fencing_token(self) -> Optional[int]:
         return self._epoch
+
+    @classmethod
+    def is_held(cls, lock_id: str) -> bool:
+        """Whether any holder has a valid lease on ``lock_id``."""
+        return _execute_bounded(cls._IS_HELD_SQL, {'lock_id': lock_id},
+                                fetch=True) is not None
 
 
 def get_backend() -> str:
