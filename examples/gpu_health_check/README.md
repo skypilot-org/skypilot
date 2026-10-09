@@ -11,6 +11,7 @@ Files in this example:
 ## Run it
 
 ```bash
+cd examples/gpu_health_check
 sky launch -c gpucheck gpu_health_check.yaml
 sky launch -c gpucheck gpu_health_check.yaml --gpus L4:1 --infra vast   # a specific GPU or cloud
 sky down gpucheck
@@ -70,7 +71,7 @@ ERROR: Job 2 failed with return code list: [1]
 Job finished (status: FAILED).
 ```
 
-To check a GPU before a real task, copy the `setup` and `run` lines of this example in front of your own.
+To check a GPU before a real task, launch this task first and then submit your own task to the same cluster with `sky exec gpucheck my_task.yaml`. It runs in the same CUDA image, so it does not need `apt` or `sudo` of its own.
 
 ## Notes
 
