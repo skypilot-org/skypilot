@@ -1943,13 +1943,17 @@ class RetryingVmProvisioner(object):
                 assert len(failover_history) > 0
                 resource_exceptions[to_provision] = failover_history[-1]
             else:
-                # If we reach here, it means that the existing cluster must have
-                # a previous status of INIT, because other statuses (UP,
-                # STOPPED) will not trigger the failover due to `no_failover`
-                # flag; see _yield_zones(). Also, the cluster should have been
-                # terminated by _retry_zones().
-                assert (prev_cluster_status == status_lib.ClusterStatus.INIT
-                       ), prev_cluster_status
+                if prev_cluster_status != status_lib.ClusterStatus.INIT:
+                    # An UP or STOPPED cluster is never failed over for (see
+                    # _yield_zones). Errors raised without `no_failover`, e.g.
+                    # invalid credentials or config, are reported as is.
+                    last_error = failover_history[-1]
+                    raise exceptions.ResourcesUnavailableError(
+                        common_utils.format_exception(last_error),
+                        no_failover=True,
+                        failover_history=failover_history) from last_error
+                # An INIT cluster should have been terminated by
+                # _retry_zones(), so it can be retried on other resources.
                 logger.info(
                     ux_utils.retry_message(
                         f'Retrying provisioning with requested resources: '
