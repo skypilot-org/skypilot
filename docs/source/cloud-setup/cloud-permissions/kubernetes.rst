@@ -324,6 +324,11 @@ SkyPilot also refuses a ``pod_config`` that would give the pods a token back:
 Jobs and serve controllers keep their identity, because they launch clusters.
 The clusters they launch for your jobs and services still get ``NONE``.
 
+Clusters launched before ``NONE`` was set keep their pod spec, and so their
+token. That includes a pod recreated in place when such a cluster is
+relaunched, because the spec comes from the cluster's stored config. To run one
+with no identity, take it down and launch it again.
+
 When the API server's config sets ``NONE`` (globally, in a workspace, or in
 ``context_configs``), users cannot loosen it: a request whose client config or
 task sets another ``remote_identity`` is refused. Users can still choose
