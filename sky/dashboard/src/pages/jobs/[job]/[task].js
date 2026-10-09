@@ -474,17 +474,8 @@ function TaskDetailsContent({ taskData, taskIndex, poolsData }) {
         show(taskData.requested_resources || taskData.resources_str),
         { newRow: true }
       )}
-      {field(
-        'Infra',
-        <span className="block">
-          {infraContent}
-          {partition && (
-            <span className="block">
-              <span className="text-gray-500">partition</span> {partition}
-            </span>
-          )}
-        </span>
-      )}
+      {field('Infra', infraContent)}
+      {partition && field('Partition', partition)}
       {field(
         'Pool',
         isEmpty(taskData.pool)

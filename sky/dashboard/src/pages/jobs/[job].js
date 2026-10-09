@@ -2021,41 +2021,38 @@ function JobDetailsContent({
       )}
       {field(
         'Infra',
-        <span className="block">
-          <PluginSlot
-            name="jobs.detail.infra"
-            context={{ job: jobData, defaultContent: infraContent }}
-            fallback={infraContent}
-          />
-          {/* Slurm partition: where on the cluster it ran, so it sits with Infra. */}
-          {partitions.length > 0 && (
-            <span className="block">
-              <span className="text-gray-500">partition</span>{' '}
-              {allTasks.length > 1 ? (
-                <NonCapitalizedTooltip
-                  content={allTasks
-                    .filter(
-                      (t) =>
-                        t.cloud && t.cloud.toLowerCase() === 'slurm' && t.zone
-                    )
-                    .map(
-                      (task) =>
-                        `Task ${allTasks.indexOf(task)}${task.task ? ` (${task.task})` : ''}: ${task.zone}`
-                    )
-                    .join('\n')}
-                  className="text-sm text-muted-foreground"
-                >
-                  <span className="cursor-help border-b border-dotted border-gray-400">
-                    {partitions.join(', ')}
-                  </span>
-                </NonCapitalizedTooltip>
-              ) : (
-                partitions.join(', ')
-              )}
-            </span>
-          )}
-        </span>
+        <PluginSlot
+          name="jobs.detail.infra"
+          context={{ job: jobData, defaultContent: infraContent }}
+          fallback={infraContent}
+        />
       )}
+      {/* Slurm schedules onto a partition (its zone); it is how quota and
+          priority are carved up on a Slurm cluster, so it gets its own field. */}
+      {partitions.length > 0 &&
+        field(
+          'Partition',
+          allTasks.length > 1 ? (
+            <NonCapitalizedTooltip
+              content={allTasks
+                .filter(
+                  (t) => t.cloud && t.cloud.toLowerCase() === 'slurm' && t.zone
+                )
+                .map(
+                  (task) =>
+                    `Task ${allTasks.indexOf(task)}${task.task ? ` (${task.task})` : ''}: ${task.zone}`
+                )
+                .join('\n')}
+              className="text-sm text-muted-foreground"
+            >
+              <span className="cursor-help border-b border-dotted border-gray-400">
+                {partitions.join(', ')}
+              </span>
+            </NonCapitalizedTooltip>
+          ) : (
+            partitions.join(', ')
+          )
+        )}
       {field('Pool', isEmpty(jobData.pool) ? dash : pool)}
       {field(
         'Git Commit',
@@ -2074,8 +2071,7 @@ function JobDetailsContent({
               'Copy commit'
             )}
           </span>
-        ),
-        { newRow: true }
+        )
       )}
       {field(
         'External Links',
