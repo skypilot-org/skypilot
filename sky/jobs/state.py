@@ -3804,8 +3804,9 @@ class DeadlineKind(enum.Enum):
     Each kind is measured against its own clock in the task's row; see
     _deadline_exceeded_clause.
     """
-    # From submitted_at, while the task has not started (start_at unset).
-    QUEUE_TIMEOUT = 'queue_timeout'
+    # job.wait_for_scheduling_timeout: from submitted_at, while the task has
+    # not started (start_at unset).
+    WAIT_FOR_SCHEDULING_TIMEOUT = 'wait_for_scheduling_timeout'
 
 
 def _deadline_exceeded_clause(kind: DeadlineKind, limit_seconds: float,
@@ -3815,7 +3816,7 @@ def _deadline_exceeded_clause(kind: DeadlineKind, limit_seconds: float,
     The SQL counterpart of the controller's in-memory check, so the write in
     set_deadline_exceeded_async re-decides on the row's current values.
     """
-    if kind == DeadlineKind.QUEUE_TIMEOUT:
+    if kind == DeadlineKind.WAIT_FOR_SCHEDULING_TIMEOUT:
         return sqlalchemy.and_(
             spot_table.c.start_at.is_(None),
             spot_table.c.submitted_at.is_not(None),

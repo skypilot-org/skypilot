@@ -195,9 +195,9 @@ async def check_network_connection() -> None:
         await asyncio.sleep(random.uniform(0, min(waited, reuse_window)))
 
 
-# How often each controller process checks the deadlines (queue_timeout) of
-# the jobs it runs. A deadline is enforced within one interval of being
-# reached.
+# How often each controller process checks the deadlines
+# (job.wait_for_scheduling_timeout) of the jobs it runs. A deadline is
+# enforced within one interval of being reached.
 _DEADLINE_CHECK_INTERVAL_SECONDS = 30
 
 
@@ -293,11 +293,12 @@ def _deadline_specs(task: 'sky.Task') -> Dict[str, Optional[int]]:
     Read back from the DB by ControllerManager.deadline_loop (see
     _deadline_breach), so a deadline survives controller restarts.
     """
-    queue_timeout_seconds = None
-    if task.queue_timeout is not None:
-        queue_timeout_seconds = resources_utils.parse_positive_duration_seconds(
-            task.queue_timeout, 'queue_timeout')
-    return {'queue_timeout_seconds': queue_timeout_seconds}
+    wait_seconds = None
+    wait_timeout = task.job.get('wait_for_scheduling_timeout')
+    if wait_timeout is not None:
+        wait_seconds = resources_utils.parse_positive_duration_seconds(
+            wait_timeout, 'job.wait_for_scheduling_timeout')
+    return {'wait_for_scheduling_timeout_seconds': wait_seconds}
 
 
 def _build_task_specs(
@@ -361,21 +362,23 @@ def _deadline_breach(specs: Dict[str, Any], task_row: Dict[str, Any],
     if (status.is_terminal() or
             status == managed_job_state.ManagedJobStatus.CANCELLING):
         return None
-    # queue_timeout: the task has to reach RUNNING (start_at is written once,
-    # on the first start) within queue_timeout of being submitted. Covers
-    # launch retries, backoff, and waiting for admission in an external
-    # scheduler; once the task has started it no longer applies.
-    queue_timeout = specs.get('queue_timeout_seconds')
+    # job.wait_for_scheduling_timeout: the task has to reach RUNNING
+    # (start_at is written once, on the first start) within this long of
+    # being submitted. Covers launch retries, backoff, and waiting for
+    # admission in an external scheduler; once the task has started it no
+    # longer applies.
+    wait_timeout = specs.get('wait_for_scheduling_timeout_seconds')
     submitted_at = task_row['submitted_at']
-    if (queue_timeout is not None and task_row['start_at'] is None and
+    if (wait_timeout is not None and task_row['start_at'] is None and
             submitted_at is not None):
         waited = now - submitted_at
-        if waited >= queue_timeout:
+        if waited >= wait_timeout:
             return _DeadlineBreach(
-                kind=managed_job_state.DeadlineKind.QUEUE_TIMEOUT,
-                limit_seconds=queue_timeout,
-                reason=(f'task did not start within queue_timeout='
-                        f'{_format_seconds(queue_timeout)} (waited '
+                kind=managed_job_state.DeadlineKind.WAIT_FOR_SCHEDULING_TIMEOUT,
+                limit_seconds=wait_timeout,
+                reason=('task did not start within '
+                        'job.wait_for_scheduling_timeout='
+                        f'{_format_seconds(wait_timeout)} (waited '
                         f'{_format_seconds(waited)})'))
     return None
 
@@ -4034,7 +4037,8 @@ class ControllerManager:
         a job's coroutine can block for arbitrarily long inside the strategy
         executor's launch() and recover() (both retry until capacity is
         found), so a check placed there never runs while a job waits for
-        resources, which is exactly when queue_timeout matters.
+        resources, which is exactly when job.wait_for_scheduling_timeout
+        matters.
 
         The deadlines and the clocks they are measured against are read from
         the DB (the task specs and timestamps), so a job adopted by another

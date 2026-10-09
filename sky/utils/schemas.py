@@ -1177,6 +1177,34 @@ def _task_config_schema():
     }
 
 
+def get_task_job_schema():
+    """Schema for task-YAML's `job:` block: managed-job lifecycle settings.
+
+    Only managed jobs (`sky jobs launch`) read it; `sky launch` / `sky exec`
+    ignore it.
+    """
+    return {
+        'type': 'object',
+        'required': [],
+        # Strict on the client too, like the rest of the task schema: each
+        # setting needs a client that knows it (and its API version gate).
+        'additionalProperties': False,
+        'properties': {
+            # Cancel the job if the task has not started running within this
+            # long of being submitted.
+            'wait_for_scheduling_timeout': {
+                'anyOf': [{
+                    'type': 'string',
+                    'pattern': constants.TIME_PATTERN_SECONDS,
+                }, {
+                    'type': 'integer',
+                    'minimum': 1,
+                }],
+            },
+        },
+    }
+
+
 def get_task_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -1210,15 +1238,7 @@ def get_task_schema():
             'num_nodes': {
                 'type': 'integer',
             },
-            'queue_timeout': {
-                'anyOf': [{
-                    'type': 'string',
-                    'pattern': constants.TIME_PATTERN_SECONDS,
-                }, {
-                    'type': 'integer',
-                    'minimum': 1,
-                }],
-            },
+            'job': get_task_job_schema(),
             # resources config is validated separately using RESOURCES_SCHEMA
             'resources': {
                 'type': 'object',

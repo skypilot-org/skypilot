@@ -25,6 +25,9 @@ Below is the configuration syntax and some example values.  See details under ea
 
   :ref:`num_nodes <yaml-spec-num-nodes>`: 4
 
+  :ref:`job <yaml-spec-job>`:
+    :ref:`wait_for_scheduling_timeout <yaml-spec-job-wait-for-scheduling-timeout>`: 2h
+
   :ref:`resources <yaml-spec-resources>`:
     # Infra to use. Click to see schema and example values.
     :ref:`infra <yaml-spec-resources-infra>`: aws
@@ -193,25 +196,66 @@ A task can set this to a smaller value than the size of a cluster.
   num_nodes: 4
 
 
-.. _yaml-spec-queue-timeout:
+.. _yaml-spec-job:
 
-``queue_timeout``
-~~~~~~~~~~~~~~~~~
+``job``
+~~~~~~~
 
-Cancel a managed job that has not started running within this long of being submitted (optional). By default, a managed job that cannot get resources keeps trying indefinitely.
+Lifecycle settings for :ref:`managed jobs <managed-jobs>` (optional).
 
-This field is **only supported for managed jobs** (``sky jobs launch``). It is
-ignored by ``sky launch`` and ``sky exec``.
+The ``job`` section applies only to managed jobs (``sky jobs launch``). It is
+ignored by ``sky launch`` and ``sky exec``. More lifecycle settings may be
+added here in the future.
 
-The value is a duration string with an optional unit suffix: ``s`` (seconds),
-``m`` (minutes), ``h`` (hours), ``d`` (days), ``w`` (weeks). A plain number is
-treated as seconds. Must be positive.
-
-The clock starts at the task's :code:`SUBMITTED` time in :code:`sky jobs queue`. Provisioning, launch retries, and waiting in an external scheduler's queue (e.g., Kueue) all count. Once the task has started running, :code:`queue_timeout` no longer applies, including during later recoveries. In a pipeline or job group, each task can set its own. The job ends :code:`CANCELLED`, with the reason in its details and events. See :ref:`jobs-queue-timeout`.
+The section is per task: in a :ref:`pipeline <pipeline>` or a
+:ref:`job group <job-groups>`, each task can set its own ``job`` section.
 
 .. code-block:: yaml
 
-  queue_timeout: 2h
+  job:
+    wait_for_scheduling_timeout: 2h
+
+
+.. _yaml-spec-job-wait-for-scheduling-timeout:
+
+``job.wait_for_scheduling_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Cancel the managed job if the task has not started running within this long
+of being submitted (optional). By default, a managed job that cannot get
+resources keeps trying indefinitely.
+
+Format: a duration string with an optional unit suffix: ``s`` (seconds),
+``m`` (minutes), ``h`` (hours), ``d`` (days), ``w`` (weeks), e.g. ``90s``,
+``30m``, ``2h``. A plain integer is treated as seconds. Must be positive.
+
+The clock starts at the task's :code:`SUBMITTED` time in
+:code:`sky jobs queue`, when the jobs controller starts launching it.
+Everything from then until the task first starts running counts:
+provisioning, launch retries across clouds, regions and Kubernetes clusters,
+backoff between retries, and waiting in a Kubernetes scheduler's queue (e.g.,
+Kueue).
+
+The timeout covers only the initial wait. Once the task has started running,
+it no longer applies, and a later recovery (e.g., after a preemption) does not
+re-arm it. In a pipeline or job group, each task has its own clock, which
+starts when that task is submitted. If any task exceeds its timeout, the
+whole job is cancelled.
+
+When it fires, the job ends :code:`CANCELLED`, through the same path as
+:code:`sky jobs cancel`: its clusters are torn down. The reason (e.g.,
+``task did not start within job.wait_for_scheduling_timeout=2h``) is shown in
+the details column of :code:`sky jobs queue` and in the job's events. The
+jobs controller enforces the timeout within about 30 seconds of the deadline,
+including after a controller restart.
+
+See :ref:`jobs-wait-for-scheduling-timeout` in the managed jobs guide for an
+example and how it compares to Kueue's admission timeout.
+
+.. code-block:: yaml
+
+  job:
+    wait_for_scheduling_timeout: 2h
 
 
 .. _yaml-spec-resources:

@@ -1,14 +1,18 @@
-"""Unit tests for the queue_timeout task field of managed jobs.
+"""Unit tests for job.wait_for_scheduling_timeout of managed jobs.
 
-queue_timeout is enforced by ``ControllerManager.deadline_loop``, a loop of
-its own in each controller process, rather than by the per-job monitor loop:
-a job coroutine can block for arbitrarily long inside the strategy executor's
-``launch()`` / ``recover()``. These tests cover the config path (schema,
+The task YAML's top-level ``job:`` block holds managed-job lifecycle
+settings; ``wait_for_scheduling_timeout`` cancels a job whose task has not
+started running within that long of being submitted. It is enforced by
+``ControllerManager.deadline_loop``, a loop of its own in each controller
+process, rather than by the per-job monitor loop: a job coroutine can block
+for arbitrarily long inside the strategy executor's ``launch()`` /
+``recover()``. These tests cover the config path (the ``job:`` schema,
 validation, YAML round trips for single tasks, pipelines and job groups, the
-persisted task specs), the pure breach check, and the loop itself against a
-real (temp SQLite) managed-jobs state DB, including a job whose coroutine
-never returns from ``launch()``, the races with the task starting and with a
-pending user cancel, and the client dropping the field for an older server.
+pipeline header detection, the persisted task specs), the pure breach check,
+and the loop itself against a real (temp SQLite) managed-jobs state DB,
+including a job whose coroutine never returns from ``launch()``, the races
+with the task starting and with a pending user cancel, and the client
+dropping the ``job:`` block for an older server.
 """
 import asyncio
 import contextlib
@@ -41,6 +45,15 @@ from sky.utils import schemas
 from sky.utils import yaml_utils
 
 ManagedJobStatus = managed_job_state.ManagedJobStatus
+_MIN_VERSION = (
+    server_constants.MIN_JOBS_WAIT_FOR_SCHEDULING_TIMEOUT_API_VERSION)
+_KIND = managed_job_state.DeadlineKind.WAIT_FOR_SCHEDULING_TIMEOUT
+
+_FIELD = 'wait_for_scheduling_timeout'
+# The task specs key the controller persists the timeout under, in seconds.
+_SPECS_KEY = 'wait_for_scheduling_timeout_seconds'
+# The reason recorded for a 1m timeout names the field as written in YAML.
+_REASON_1M = 'job.wait_for_scheduling_timeout=1m'
 
 
 @pytest.fixture
@@ -99,14 +112,17 @@ def _create_job(num_tasks: int = 1) -> int:
 async def _start_task(job_id: int,
                       task_id: int,
                       submitted_at: float,
-                      queue_timeout_seconds: Optional[int] = None) -> None:
-    """PENDING -> STARTING, writing the specs the controller writes."""
+                      timeout_seconds: Optional[int] = None) -> None:
+    """PENDING -> STARTING, writing the specs the controller writes.
+
+    ``timeout_seconds`` is the persisted job.wait_for_scheduling_timeout.
+    """
     specs: Dict[str, Any] = {
         'max_restarts_on_errors': 0,
         'recover_on_exit_codes': [],
     }
-    if queue_timeout_seconds is not None:
-        specs['queue_timeout_seconds'] = queue_timeout_seconds
+    if timeout_seconds is not None:
+        specs[_SPECS_KEY] = timeout_seconds
     await managed_job_state.set_starting_async(job_id, task_id,
                                                f'run_{task_id}', submitted_at,
                                                '{}', specs, _noop_callback)
@@ -141,92 +157,168 @@ def _manager() -> controller_module.ControllerManager:
     return controller_module.ControllerManager('test-uuid')
 
 
+def _timeout_of(task: task_lib.Task) -> Any:
+    return task.job.get(_FIELD)
+
+
 # ---------------------------------------------------------------------------
-# Schema and validation.
+# The job: block's schema and validation.
 # ---------------------------------------------------------------------------
 
 
-def _task_from_yaml(queue_timeout: Any) -> task_lib.Task:
+def _task_from_yaml(wait_for_scheduling_timeout: Any) -> task_lib.Task:
     return task_lib.Task.from_yaml_config({
         'run': 'echo hi',
-        'queue_timeout': queue_timeout,
+        'job': {
+            _FIELD: wait_for_scheduling_timeout
+        },
     })
 
 
+@contextlib.contextmanager
+def _strict_server_schemas(monkeypatch):
+    """As on an API server after plugins are loaded: unknown keys rejected
+    wherever the schemas allow them on the client."""
+    monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, '1')
+    monkeypatch.setattr('sky.server.plugins.plugins_loaded', lambda: True)
+    yield
+
+
 @pytest.mark.parametrize('value', ['2h', '90s', '30m', '1d', '1w', 30, '30'])
-def test_queue_timeout_accepted(value):
+def test_wait_for_scheduling_timeout_accepted(value):
     task = _task_from_yaml(value)
     task.validate()
-    assert task.queue_timeout == value
+    assert task.job == {_FIELD: value}
 
 
 @pytest.mark.parametrize('value', ['banana', '-1', -1, '2 hours', '1.5h', 1.5])
-def test_queue_timeout_rejected_by_schema(value):
+def test_wait_for_scheduling_timeout_rejected_by_schema(value):
     with pytest.raises(ValueError):
         _task_from_yaml(value)
 
 
 @pytest.mark.parametrize('value', [0, '0', '0s', '0h'])
-def test_queue_timeout_zero_rejected(value):
+def test_wait_for_scheduling_timeout_zero_rejected(value):
     # '0' and '0s' match TIME_PATTERN_SECONDS and 0 is rejected by the
     # integer minimum, but validation must reject all of them.
-    with pytest.raises(ValueError, match='queue_timeout'):
+    with pytest.raises(ValueError, match='job.wait_for_scheduling_timeout'):
         _task_from_yaml(value).validate()
 
 
-def test_queue_timeout_rejected_by_validation_without_schema():
+def test_wait_for_scheduling_timeout_rejected_by_validation_without_schema():
     # A Task built directly (e.g. through the Python SDK) skips the YAML
     # schema; validate() still rejects a bad value with a clear error.
     for value in ['banana', 0, '-1', True, '1.5h', 1.5, '2 hours']:
-        task = task_lib.Task(run='echo hi', queue_timeout=value)
-        with pytest.raises(ValueError, match='Invalid queue_timeout'):
+        task = task_lib.Task(run='echo hi', job={_FIELD: value})
+        with pytest.raises(ValueError, match='job'):
             task.validate()
 
 
-def test_queue_timeout_unset_by_default():
+@pytest.mark.parametrize('strict', [False, True])
+def test_job_block_rejects_unknown_keys(monkeypatch, strict):
+    # Strict on the client as well as on the server: a setting that this
+    # version does not know is an error, not silently ignored.
+    with contextlib.ExitStack() as stack:
+        if strict:
+            stack.enter_context(_strict_server_schemas(monkeypatch))
+        with pytest.raises(ValueError, match='wait_for_scheduling_timeout'):
+            # The error suggests the closest known key.
+            task_lib.Task.from_yaml_config({
+                'run': 'echo hi',
+                'job': {
+                    'wait_for_scheduling_timout': '2h'
+                },
+            })
+        with pytest.raises(ValueError, match='max_duration'):
+            task_lib.Task.from_yaml_config({
+                'run': 'echo hi',
+                'job': {
+                    'max_duration': '2h'
+                },
+            })
+
+
+def test_job_block_rejects_unknown_keys_set_through_the_sdk():
+    task = task_lib.Task(run='echo hi', job={'max_duration': '5h'})
+    with pytest.raises(ValueError, match='max_duration'):
+        task.validate()
+
+
+@pytest.mark.parametrize('value', ['2h', 7200, ['2h'], True])
+def test_job_block_must_be_an_object(value):
+    with pytest.raises(ValueError):
+        task_lib.Task.from_yaml_config({'run': 'echo hi', 'job': value})
+    # And through the Python SDK, at construction, so `task.job` is always a
+    # dict.
+    with pytest.raises(ValueError, match='Invalid job section'):
+        task_lib.Task(run='echo hi', job=value)
+
+
+@pytest.mark.parametrize('job', [None, {}])
+def test_empty_job_block(job):
+    # `job:` with nothing under it (YAML null) or `job: {}` sets nothing.
+    task = task_lib.Task.from_yaml_config({'run': 'echo hi', 'job': job})
+    task.validate()
+    assert task.job == {}
+    assert 'job' not in task.to_yaml_config()
+
+
+def test_job_block_unset_by_default():
     task = task_lib.Task(run='echo hi')
     task.validate()
-    assert task.queue_timeout is None
-    assert 'queue_timeout' not in task.to_yaml_config()
+    assert task.job == {}
+    assert 'job' not in task.to_yaml_config()
 
 
-def test_task_schema_still_rejects_unknown_keys():
-    # queue_timeout is a declared top-level property; a typo is not.
+def test_old_top_level_name_is_not_accepted():
+    # No alias: the field only ever lived under job:.
     with pytest.raises(ValueError):
-        task_lib.Task.from_yaml_config({'run': 'echo hi', 'queue_timout': '2h'})
-
-
-def test_queue_timeout_is_not_a_job_recovery_key(monkeypatch):
-    # It lives on the task, not in resources.job_recovery: on the server,
-    # once plugins are loaded, the job_recovery schema is strict and does not
-    # know it.
-    monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, '1')
-    monkeypatch.setattr('sky.server.plugins.plugins_loaded', lambda: True)
-    with pytest.raises(ValueError):
-        common_utils.validate_schema({'job_recovery': {
+        task_lib.Task.from_yaml_config({
+            'run': 'echo hi',
             'queue_timeout': '2h'
-        }}, schemas.get_resources_schema(), 'Invalid resources YAML: ')
+        })
+    with pytest.raises(ValueError):
+        task_lib.Task.from_yaml_config({'run': 'echo hi', _FIELD: '2h'})
+
+
+def test_wait_for_scheduling_timeout_is_not_a_job_recovery_key(monkeypatch):
+    # It lives in the task's job: block, not in resources.job_recovery: on
+    # the server, once plugins are loaded, the job_recovery schema is strict
+    # and does not know it.
+    with _strict_server_schemas(monkeypatch):
+        with pytest.raises(ValueError):
+            common_utils.validate_schema({'job_recovery': {
+                _FIELD: '2h'
+            }}, schemas.get_resources_schema(), 'Invalid resources YAML: ')
 
 
 # ---------------------------------------------------------------------------
-# YAML round trips: the field must survive client -> server -> controller.
+# YAML round trips: the block must survive client -> server -> controller.
 # ---------------------------------------------------------------------------
 
 
-def test_queue_timeout_yaml_round_trip():
+def test_job_block_yaml_round_trip():
     task = _task_from_yaml('2h')
     config = task.to_yaml_config()
-    assert config['queue_timeout'] == '2h'
-    assert task_lib.Task.from_yaml_config(config).queue_timeout == '2h'
+    assert config['job'] == {_FIELD: '2h'}
+    assert task_lib.Task.from_yaml_config(config).job == {_FIELD: '2h'}
     # Integer seconds stay integers.
-    assert task_lib.Task.from_yaml_config(
-        _task_from_yaml(30).to_yaml_config()).queue_timeout == 30
+    assert _timeout_of(
+        task_lib.Task.from_yaml_config(
+            _task_from_yaml(30).to_yaml_config())) == 30
+    # Set through the Python SDK.
+    sdk_task = task_lib.Task(run='echo hi', job={_FIELD: '90s'})
+    assert task_lib.Task.from_yaml_config(sdk_task.to_yaml_config()).job == {
+        _FIELD: '90s'
+    }
 
 
-def test_queue_timeout_survives_job_launch_defaults_and_dag_yaml():
+def test_job_block_survives_job_launch_defaults_and_dag_yaml():
     task = task_lib.Task.from_yaml_config({
         'run': 'echo hi',
-        'queue_timeout': '2h',
+        'job': {
+            _FIELD: '2h'
+        },
         'resources': {
             'cpus': 1,
             'job_recovery': {
@@ -237,17 +329,17 @@ def test_queue_timeout_survives_job_launch_defaults_and_dag_yaml():
     dag = dag_utils.convert_entrypoint_to_dag(task)
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
-    assert dag.tasks[0].queue_timeout == '2h'
+    assert _timeout_of(dag.tasks[0]) == '2h'
 
     # The DAG crosses client -> server -> controller as YAML.
     loaded = dag_utils.load_chain_dag_from_yaml_str(
         dag_utils.dump_chain_dag_to_yaml_str(dag))
-    assert loaded.tasks[0].queue_timeout == '2h'
+    assert loaded.tasks[0].job == {_FIELD: '2h'}
     (loaded_resources,) = loaded.tasks[0].resources
     assert loaded_resources.job_recovery['max_restarts_on_errors'] == 1
 
 
-def test_queue_timeout_per_task_in_a_pipeline():
+def test_job_block_per_task_in_a_pipeline():
     dag = dag_utils.load_chain_dag_from_yaml_str(
         textwrap.dedent("""\
             name: pipeline
@@ -256,36 +348,73 @@ def test_queue_timeout_per_task_in_a_pipeline():
             run: echo prep
             ---
             name: train
-            queue_timeout: 2h
+            job:
+              wait_for_scheduling_timeout: 2h
             run: echo train
             ---
             name: eval
-            queue_timeout: 600
+            job:
+              wait_for_scheduling_timeout: 600
             run: echo eval
             """))
-    assert [t.queue_timeout for t in dag.tasks] == [None, '2h', 600]
+    assert dag.name == 'pipeline'
+    assert [t.name for t in dag.tasks] == ['prep', 'train', 'eval']
+    assert [_timeout_of(t) for t in dag.tasks] == [None, '2h', 600]
     reloaded = dag_utils.load_chain_dag_from_yaml_str(
         dag_utils.dump_chain_dag_to_yaml_str(dag))
-    assert [t.queue_timeout for t in reloaded.tasks] == [None, '2h', 600]
+    assert [_timeout_of(t) for t in reloaded.tasks] == [None, '2h', 600]
 
 
-def test_queue_timeout_per_task_in_a_job_group():
+def test_pipeline_first_document_with_name_and_job_is_a_task():
+    """A pipeline's header is a first document with only `name` (and
+    optionally `execution`). A first document with `name` + `job:` is a task,
+    so its job: block is not lost as header metadata."""
+    dag = dag_utils.load_chain_dag_from_yaml_str(
+        textwrap.dedent("""\
+            name: train
+            job:
+              wait_for_scheduling_timeout: 2h
+            ---
+            name: eval
+            run: echo eval
+            """))
+    assert [t.name for t in dag.tasks] == ['train', 'eval']
+    assert [_timeout_of(t) for t in dag.tasks] == ['2h', None]
+    # A single document with name + job is a one-task DAG named after it.
+    single = dag_utils.load_chain_dag_from_yaml_str(
+        textwrap.dedent("""\
+            name: train
+            job:
+              wait_for_scheduling_timeout: 2h
+            """))
+    assert single.name == 'train'
+    assert [_timeout_of(t) for t in single.tasks] == ['2h']
+
+
+def test_job_block_is_not_a_job_group_header_field():
+    # job: is per task (each job of a group sets its own); it is not one of
+    # the group header's fields.
+    assert 'job' not in dag_utils._JOB_GROUP_HEADER_FIELDS
+
+
+def test_job_block_per_task_in_a_job_group():
     dag = dag_utils.load_job_group_from_yaml_str(
         textwrap.dedent("""\
             name: group
             execution: parallel
             ---
             name: trainer
-            queue_timeout: 1h
+            job:
+              wait_for_scheduling_timeout: 1h
             run: echo train
             ---
             name: server
             run: echo serve
             """))
-    assert [t.queue_timeout for t in dag.tasks] == ['1h', None]
+    assert [_timeout_of(t) for t in dag.tasks] == ['1h', None]
     reloaded = dag_utils.load_job_group_from_yaml_str(
         dag_utils.dump_job_group_to_yaml_str(dag))
-    assert [t.queue_timeout for t in reloaded.tasks] == ['1h', None]
+    assert [_timeout_of(t) for t in reloaded.tasks] == ['1h', None]
 
 
 # ---------------------------------------------------------------------------
@@ -317,33 +446,32 @@ def _make_executor(monkeypatch, task: task_lib.Task):
                                                    mock.Mock(), mock.Mock())
 
 
-def test_specs_carry_queue_timeout_seconds(monkeypatch):
-    task = task_lib.Task(run='true', queue_timeout='2h')
+def test_specs_carry_wait_for_scheduling_timeout_seconds(monkeypatch):
+    task = task_lib.Task(run='true', job={_FIELD: '2h'})
     task.set_resources(
         resources_lib.Resources(job_recovery={
             'strategy': 'EAGER_NEXT_REGION',
             'plugin_specific_key': 'x',
         }))
     executor = _make_executor(monkeypatch, task)
-    # job_recovery is untouched by queue_timeout: plugin strategies still get
-    # exactly their own keys.
+    # job_recovery is untouched by the job: block: plugin strategies still
+    # get exactly their own keys.
     assert executor.received_config == {'plugin_specific_key': 'x'}
     specs = controller_module._build_task_specs(executor)
-    assert specs['queue_timeout_seconds'] == 7200
+    assert specs[_SPECS_KEY] == 7200
     assert specs['max_restarts_on_errors'] == 0
 
 
-def test_specs_without_queue_timeout(monkeypatch):
+def test_specs_without_job_block(monkeypatch):
     executor = _make_executor(monkeypatch, task_lib.Task(run='true'))
     specs = controller_module._build_task_specs(executor)
-    assert specs['queue_timeout_seconds'] is None
+    assert specs[_SPECS_KEY] is None
 
 
-def test_specs_integer_queue_timeout(monkeypatch):
+def test_specs_integer_wait_for_scheduling_timeout(monkeypatch):
     executor = _make_executor(monkeypatch,
-                              task_lib.Task(run='true', queue_timeout=45))
-    assert controller_module._build_task_specs(
-        executor)['queue_timeout_seconds'] == 45
+                              task_lib.Task(run='true', job={_FIELD: 45}))
+    assert controller_module._build_task_specs(executor)[_SPECS_KEY] == 45
 
 
 # ---------------------------------------------------------------------------
@@ -368,37 +496,37 @@ def _row(status: ManagedJobStatus,
     ManagedJobStatus.RECOVERING
 ])
 def test_breach_when_not_started_in_time(status):
-    breach = controller_module._deadline_breach({'queue_timeout_seconds': 60},
+    breach = controller_module._deadline_breach({_SPECS_KEY: 60},
                                                 _row(status,
                                                      submitted_at=_NOW - 61),
                                                 _NOW)
     assert breach is not None
-    assert breach.kind == managed_job_state.DeadlineKind.QUEUE_TIMEOUT
+    assert breach.kind == _KIND
     assert breach.limit_seconds == 60
-    assert 'queue_timeout=1m' in breach.reason
+    assert _REASON_1M in breach.reason
     assert 'waited 1m1s' in breach.reason
 
 
 def test_no_breach_before_deadline():
     assert controller_module._deadline_breach(
-        {'queue_timeout_seconds': 60},
-        _row(ManagedJobStatus.STARTING, submitted_at=_NOW - 59), _NOW) is None
+        {_SPECS_KEY: 60}, _row(ManagedJobStatus.STARTING,
+                               submitted_at=_NOW - 59), _NOW) is None
 
 
 def test_breach_exactly_at_deadline():
-    assert controller_module._deadline_breach({'queue_timeout_seconds': 60},
+    assert controller_module._deadline_breach({_SPECS_KEY: 60},
                                               _row(ManagedJobStatus.STARTING,
                                                    submitted_at=_NOW - 60),
                                               _NOW) is not None
 
 
 def test_no_breach_once_started():
-    # Started once: queue_timeout no longer applies, even while RECOVERING
+    # Started once: the timeout no longer applies, even while RECOVERING
     # long after the deadline.
     for status in (ManagedJobStatus.RUNNING, ManagedJobStatus.RECOVERING,
                    ManagedJobStatus.PENDING):
         assert controller_module._deadline_breach(
-            {'queue_timeout_seconds': 60},
+            {_SPECS_KEY: 60},
             _row(status, submitted_at=_NOW - 10_000,
                  start_at=_NOW - 9_000), _NOW) is None
 
@@ -410,20 +538,20 @@ def test_no_breach_once_started():
 ])
 def test_no_breach_for_terminal_or_cancelling(status):
     assert controller_module._deadline_breach(
-        {'queue_timeout_seconds': 60}, _row(
-            status, submitted_at=_NOW - 10_000), _NOW) is None
+        {_SPECS_KEY: 60}, _row(status,
+                               submitted_at=_NOW - 10_000), _NOW) is None
 
 
 def test_no_breach_without_config_or_submission():
     assert controller_module._deadline_breach(
         {}, _row(ManagedJobStatus.STARTING, submitted_at=0), _NOW) is None
     assert controller_module._deadline_breach(
-        {'queue_timeout_seconds': None},
-        _row(ManagedJobStatus.STARTING, submitted_at=0), _NOW) is None
+        {_SPECS_KEY: None}, _row(ManagedJobStatus.STARTING,
+                                 submitted_at=0), _NOW) is None
     # PENDING with no submitted_at: never claimed by a controller.
     assert controller_module._deadline_breach(
-        {'queue_timeout_seconds': 60},
-        _row(ManagedJobStatus.PENDING, submitted_at=None), _NOW) is None
+        {_SPECS_KEY: 60}, _row(ManagedJobStatus.PENDING,
+                               submitted_at=None), _NOW) is None
 
 
 def test_format_seconds():
@@ -440,7 +568,7 @@ def test_format_seconds():
 
 
 @pytest.mark.asyncio
-async def test_queue_timeout_cancels_job_blocked_in_launch(
+async def test_wait_for_scheduling_timeout_cancels_job_blocked_in_launch(
         _mock_managed_jobs_db_conn, monkeypatch):
     """The core case: the job's coroutine is stuck in launch() forever (as a
     first launch retries until it gets capacity), and the deadline loop
@@ -477,7 +605,7 @@ async def test_queue_timeout_cancels_job_blocked_in_launch(
     task.event_callback = None
     task.envs = {constants.TASK_ID_ENV_VAR: 'test-task-id'}
     task.resources = None
-    task.queue_timeout = '1m'
+    task.job = {_FIELD: '1m'}
     # As in StrategyExecutor.__init__: the executor's DAG holds its one task.
     executor.dag.tasks = [task]
 
@@ -500,8 +628,7 @@ async def test_queue_timeout_cancels_job_blocked_in_launch(
 
     # The task was claimed (STARTING) with the deadline persisted in specs.
     assert _task_row(job_id, 0)['status'] == ManagedJobStatus.STARTING
-    assert managed_job_state.get_task_specs(job_id,
-                                            0)['queue_timeout_seconds'] == 60
+    assert managed_job_state.get_task_specs(job_id, 0)[_SPECS_KEY] == 60
 
     await manager._check_deadlines(time.time())
 
@@ -511,24 +638,25 @@ async def test_queue_timeout_cancels_job_blocked_in_launch(
     assert manager._cancel_info[job_id] == (False, None)
     row = _task_row(job_id, 0)
     assert row['failure_reason'].startswith(
-        'Cancelled: task did not start within queue_timeout=1m (waited 2m')
+        'Cancelled: task did not start within '
+        'job.wait_for_scheduling_timeout=1m (waited 2m')
     reasons = [e['reason'] for e in _events(job_id)]
     assert any(
-        'queue_timeout=1m' in r and
+        _REASON_1M in r and
         r.startswith(managed_job_state.CANCEL_REQUESTED_EVENT_REASON_PREFIX)
         for r in reasons), reasons
     # The queue's details column shows it.
-    assert 'queue_timeout=1m' in managed_job_state.get_cancel_request_reasons(
-        [job_id])[job_id]
+    assert _REASON_1M in managed_job_state.get_cancel_request_reasons([job_id
+                                                                      ])[job_id]
 
 
 @pytest.mark.asyncio
-async def test_queue_timeout_full_cancel_path_ends_cancelled(
+async def test_wait_for_scheduling_timeout_full_cancel_path_ends_cancelled(
         _mock_managed_jobs_db_conn, monkeypatch):
     """Through run_job_loop: the job ends CANCELLED via the same path as a
     user cancel (CANCELLING, cleanup, CANCELLED, schedule DONE)."""
     job_id = _create_job()
-    await _start_task(job_id, 0, time.time() - 120, queue_timeout_seconds=60)
+    await _start_task(job_id, 0, time.time() - 120, timeout_seconds=60)
     running = _RunningJob()
 
     job_controller = mock.MagicMock()
@@ -573,7 +701,7 @@ async def test_queue_timeout_full_cancel_path_ends_cancelled(
     manager._download_logs_for_cancelled_job.assert_awaited_once()
     row = _task_row(job_id, 0)
     assert row['status'] == ManagedJobStatus.CANCELLED
-    assert 'queue_timeout=1m' in row['failure_reason']
+    assert _REASON_1M in row['failure_reason']
     assert (managed_job_state.get_job_schedule_state(job_id) ==
             managed_job_state.ManagedJobScheduleState.DONE)
     statuses = [e['new_status'] for e in _events(job_id)]
@@ -584,7 +712,7 @@ async def test_queue_timeout_full_cancel_path_ends_cancelled(
 
 @pytest.mark.asyncio
 async def test_no_config_is_a_no_op(_mock_managed_jobs_db_conn):
-    """Backward compat: tasks without queue_timeout are never touched, and
+    """Backward compat: tasks without a job: block are never touched, and
     the loop writes nothing to the DB."""
     job_id = _create_job()
     await _start_task(job_id, 0, time.time() - 10**6)
@@ -613,7 +741,7 @@ async def test_no_config_is_a_no_op(_mock_managed_jobs_db_conn):
 @pytest.mark.asyncio
 async def test_specs_written_before_this_change_are_a_no_op(
         _mock_managed_jobs_db_conn):
-    """A task whose specs predate queue_timeout_seconds (an upgraded
+    """A task whose specs predate the timeout's specs key (an upgraded
     controller resuming an old job) has no deadline."""
     job_id = _create_job()
     await managed_job_state.set_starting_async(job_id, 0, 'run_0',
@@ -632,7 +760,7 @@ async def test_specs_written_before_this_change_are_a_no_op(
 @pytest.mark.asyncio
 async def test_within_deadline_not_cancelled(_mock_managed_jobs_db_conn):
     job_id = _create_job()
-    await _start_task(job_id, 0, time.time() - 30, queue_timeout_seconds=3600)
+    await _start_task(job_id, 0, time.time() - 30, timeout_seconds=3600)
     manager = _manager()
     job_task = asyncio.create_task(_RunningJob().run())
     manager.job_tasks[job_id] = job_task
@@ -645,11 +773,11 @@ async def test_within_deadline_not_cancelled(_mock_managed_jobs_db_conn):
 @pytest.mark.asyncio
 async def test_started_task_not_cancelled_even_while_recovering(
         _mock_managed_jobs_db_conn):
-    """queue_timeout stops applying once the task has started; a later
+    """The timeout stops applying once the task has started; a later
     recovery (which never resets start_at) does not bring it back."""
     job_id = _create_job()
     submitted_at = time.time() - 10_000
-    await _start_task(job_id, 0, submitted_at, queue_timeout_seconds=60)
+    await _start_task(job_id, 0, submitted_at, timeout_seconds=60)
     await managed_job_state.set_started_async(job_id, 0, submitted_at + 30,
                                               _noop_callback)
     await managed_job_state.set_recovering_async(job_id, 0, False,
@@ -675,9 +803,9 @@ async def test_started_task_not_cancelled_even_while_recovering(
 async def test_backoff_pending_task_is_still_on_the_clock(
         _mock_managed_jobs_db_conn):
     """A launch in retry backoff sets the task back to PENDING; it keeps its
-    submitted_at, so queue_timeout keeps counting."""
+    submitted_at, so the timeout keeps counting."""
     job_id = _create_job()
-    await _start_task(job_id, 0, time.time() - 120, queue_timeout_seconds=60)
+    await _start_task(job_id, 0, time.time() - 120, timeout_seconds=60)
     await managed_job_state.set_backoff_pending_async(job_id, 0)
     assert _task_row(job_id, 0)['status'] == ManagedJobStatus.PENDING
     manager = _manager()
@@ -686,7 +814,7 @@ async def test_backoff_pending_task_is_still_on_the_clock(
     await manager._check_deadlines(time.time())
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(job_task, timeout=10)
-    assert 'queue_timeout' in _task_row(job_id, 0)['failure_reason']
+    assert _FIELD in _task_row(job_id, 0)['failure_reason']
 
 
 @pytest.mark.asyncio
@@ -694,11 +822,11 @@ async def test_terminal_and_cancelling_jobs_not_touched(
         _mock_managed_jobs_db_conn):
     # Job A: already CANCELLING (e.g. the user cancelled it) and overdue.
     job_a = _create_job()
-    await _start_task(job_a, 0, time.time() - 10**4, queue_timeout_seconds=60)
+    await _start_task(job_a, 0, time.time() - 10**4, timeout_seconds=60)
     await managed_job_state.set_cancelling_async(job_a, _noop_callback)
     # Job B: its only task already ended.
     job_b = _create_job()
-    await _start_task(job_b, 0, time.time() - 10**4, queue_timeout_seconds=60)
+    await _start_task(job_b, 0, time.time() - 10**4, timeout_seconds=60)
     await managed_job_state.set_failed_async(
         job_b,
         0,
@@ -731,12 +859,12 @@ async def test_set_deadline_exceeded_skips_cancelling_job(
     """The state write itself refuses a job that is already CANCELLING, so a
     user cancel landing between the check and the write wins."""
     job_id = _create_job()
-    await _start_task(job_id, 0, time.time() - 120, queue_timeout_seconds=60)
+    await _start_task(job_id, 0, time.time() - 120, timeout_seconds=60)
     await managed_job_state.set_cancelling_async(job_id, _noop_callback)
     recorded = await managed_job_state.set_deadline_exceeded_async(
         job_id,
         0,
-        kind=managed_job_state.DeadlineKind.QUEUE_TIMEOUT,
+        kind=_KIND,
         limit_seconds=60,
         now=time.time(),
         failure_reason='Cancelled: x',
@@ -752,12 +880,12 @@ async def test_pipeline_uses_the_current_task_clock(_mock_managed_jobs_db_conn):
     task 1's own submitted_at counts, so the job is not cancelled."""
     job_id = _create_job(num_tasks=2)
     now = time.time()
-    await _start_task(job_id, 0, now - 10_000, queue_timeout_seconds=60)
+    await _start_task(job_id, 0, now - 10_000, timeout_seconds=60)
     await managed_job_state.set_started_async(job_id, 0, now - 9_990,
                                               _noop_callback)
     await managed_job_state.set_succeeded_async(job_id, 0, now - 20,
                                                 _noop_callback)
-    await _start_task(job_id, 1, now - 20, queue_timeout_seconds=60)
+    await _start_task(job_id, 1, now - 20, timeout_seconds=60)
 
     manager = _manager()
     job_task = asyncio.create_task(_RunningJob().run())
@@ -771,7 +899,7 @@ async def test_pipeline_uses_the_current_task_clock(_mock_managed_jobs_db_conn):
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(job_task, timeout=10)
     assert _task_row(job_id, 0)['failure_reason'] is None
-    assert 'queue_timeout=1m' in _task_row(job_id, 1)['failure_reason']
+    assert _REASON_1M in _task_row(job_id, 1)['failure_reason']
 
 
 @pytest.mark.asyncio
@@ -781,7 +909,7 @@ async def test_pending_later_pipeline_task_has_no_clock(
     submitted_at) is not on the clock."""
     job_id = _create_job(num_tasks=2)
     now = time.time()
-    await _start_task(job_id, 0, now - 30, queue_timeout_seconds=60)
+    await _start_task(job_id, 0, now - 30, timeout_seconds=60)
     manager = _manager()
     job_task = asyncio.create_task(_RunningJob().run())
     manager.job_tasks[job_id] = job_task
@@ -790,7 +918,7 @@ async def test_pending_later_pipeline_task_has_no_clock(
     # but task 1 never contributed: the reason is on task 0.
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(job_task, timeout=10)
-    assert 'queue_timeout' in _task_row(job_id, 0)['failure_reason']
+    assert _FIELD in _task_row(job_id, 0)['failure_reason']
     assert _task_row(job_id, 1)['failure_reason'] is None
 
 
@@ -799,10 +927,10 @@ async def test_job_group_any_task_breaching_cancels_the_job(
         _mock_managed_jobs_db_conn):
     job_id = _create_job(num_tasks=2)
     now = time.time()
-    await _start_task(job_id, 0, now - 30, queue_timeout_seconds=3600)
+    await _start_task(job_id, 0, now - 30, timeout_seconds=3600)
     await managed_job_state.set_started_async(job_id, 0, now - 20,
                                               _noop_callback)
-    await _start_task(job_id, 1, now - 120, queue_timeout_seconds=60)
+    await _start_task(job_id, 1, now - 120, timeout_seconds=60)
     manager = _manager()
     job_task = asyncio.create_task(_RunningJob().run())
     manager.job_tasks[job_id] = job_task
@@ -810,7 +938,7 @@ async def test_job_group_any_task_breaching_cancels_the_job(
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(job_task, timeout=10)
     assert _task_row(job_id, 0)['failure_reason'] is None
-    assert 'queue_timeout=1m' in _task_row(job_id, 1)['failure_reason']
+    assert _REASON_1M in _task_row(job_id, 1)['failure_reason']
 
 
 @pytest.mark.asyncio
@@ -819,11 +947,11 @@ async def test_cancelled_once_and_user_cancel_race(_mock_managed_jobs_db_conn):
     cancel signal takes precedence (its graceful settings are kept)."""
     # Job A: deadline cancel, then more ticks.
     job_a = _create_job()
-    await _start_task(job_a, 0, time.time() - 120, queue_timeout_seconds=60)
+    await _start_task(job_a, 0, time.time() - 120, timeout_seconds=60)
     # Job B: overdue, but a user cancel signal has already been consumed by
     # cancel_job() and is waiting for run_job_loop.
     job_b = _create_job()
-    await _start_task(job_b, 0, time.time() - 120, queue_timeout_seconds=60)
+    await _start_task(job_b, 0, time.time() - 120, timeout_seconds=60)
 
     manager = _manager()
     job_a_task = mock.MagicMock()
@@ -841,7 +969,7 @@ async def test_cancelled_once_and_user_cancel_race(_mock_managed_jobs_db_conn):
     assert job_a_task.cancel.call_count == 1
     assert manager._cancel_info[job_a] == (False, None)
     reasons = [e['reason'] for e in _events(job_a)]
-    assert sum('queue_timeout' in r for r in reasons) == 1
+    assert sum(_FIELD in r for r in reasons) == 1
 
     job_b_task.cancel.assert_not_called()
     assert manager._cancel_info[job_b] == (True, 60)
@@ -852,9 +980,9 @@ async def test_cancelled_once_and_user_cancel_race(_mock_managed_jobs_db_conn):
 async def test_one_job_failing_does_not_affect_others(
         _mock_managed_jobs_db_conn, monkeypatch):
     job_a = _create_job()
-    await _start_task(job_a, 0, time.time() - 120, queue_timeout_seconds=60)
+    await _start_task(job_a, 0, time.time() - 120, timeout_seconds=60)
     job_b = _create_job()
-    await _start_task(job_b, 0, time.time() - 120, queue_timeout_seconds=60)
+    await _start_task(job_b, 0, time.time() - 120, timeout_seconds=60)
     manager = _manager()
     tasks = {}
     for job_id in (job_a, job_b):
@@ -910,7 +1038,7 @@ async def test_overdue_job_adopted_after_restart_is_cancelled_first_tick(
     restart or failover) cancels an already-overdue job on its first tick
     with no other state."""
     job_id = _create_job()
-    await _start_task(job_id, 0, time.time() - 7200, queue_timeout_seconds=3600)
+    await _start_task(job_id, 0, time.time() - 7200, timeout_seconds=3600)
     fresh_manager = _manager()
     job_task = asyncio.create_task(_RunningJob().run())
     fresh_manager.job_tasks[job_id] = job_task
@@ -958,7 +1086,7 @@ def _set_deadline_exceeded(job_id: int, task_id: int, limit_seconds: float,
     return managed_job_state.set_deadline_exceeded_async(
         job_id,
         task_id,
-        kind=managed_job_state.DeadlineKind.QUEUE_TIMEOUT,
+        kind=_KIND,
         limit_seconds=limit_seconds,
         now=now,
         failure_reason='Cancelled: x',
@@ -974,7 +1102,7 @@ async def test_task_starting_after_the_read_is_not_cancelled(
     cancel."""
     job_id = _create_job()
     submitted_at = time.time() - 120
-    await _start_task(job_id, 0, submitted_at, queue_timeout_seconds=60)
+    await _start_task(job_id, 0, submitted_at, timeout_seconds=60)
     real_read = managed_job_state.get_unfinished_task_deadline_rows_async
 
     async def _read_then_start(job_ids):
@@ -1012,7 +1140,7 @@ async def test_set_deadline_exceeded_refuses_a_started_task(
         _mock_managed_jobs_db_conn):
     job_id = _create_job()
     now = time.time()
-    await _start_task(job_id, 0, now - 120, queue_timeout_seconds=60)
+    await _start_task(job_id, 0, now - 120, timeout_seconds=60)
     await managed_job_state.set_started_async(job_id, 0, now - 1,
                                               _noop_callback)
     events_before = _events(job_id)
@@ -1028,7 +1156,7 @@ async def test_set_deadline_exceeded_refuses_when_not_yet_due(
     view of the clock, or a task re-submitted since): not recorded."""
     job_id = _create_job()
     now = time.time()
-    await _start_task(job_id, 0, now - 30, queue_timeout_seconds=60)
+    await _start_task(job_id, 0, now - 30, timeout_seconds=60)
     events_before = _events(job_id)
     assert await _set_deadline_exceeded(job_id, 0, 60, now) is False
     assert _task_row(job_id, 0)['failure_reason'] is None
@@ -1044,7 +1172,7 @@ async def test_set_deadline_exceeded_records_when_due(
         _mock_managed_jobs_db_conn):
     job_id = _create_job()
     now = time.time()
-    await _start_task(job_id, 0, now - 60, queue_timeout_seconds=60)
+    await _start_task(job_id, 0, now - 60, timeout_seconds=60)
     assert await _set_deadline_exceeded(job_id, 0, 60, now) is True
     assert _task_row(job_id, 0)['failure_reason'] == 'Cancelled: x'
     assert sum(e['reason'] == 'y' for e in _events(job_id)) == 1
@@ -1080,7 +1208,7 @@ async def test_pending_graceful_user_cancel_wins_over_the_deadline(
     leaves the job to the user's cancel (records nothing), and the job ends
     CANCELLED with the user's graceful settings, not (False, None)."""
     job_id = _create_job()
-    await _start_task(job_id, 0, time.time() - 120, queue_timeout_seconds=60)
+    await _start_task(job_id, 0, time.time() - 120, timeout_seconds=60)
     running = _RunningJob()
     job_controller = mock.MagicMock()
     job_controller.load_dag = mock.AsyncMock()
@@ -1135,7 +1263,7 @@ async def test_user_cancel_arriving_during_the_record_keeps_its_settings(
     the pre-check). The deadline still does not hard-cancel: cancel_job()
     applies the user's settings on its next poll."""
     job_id = _create_job()
-    await _start_task(job_id, 0, time.time() - 120, queue_timeout_seconds=60)
+    await _start_task(job_id, 0, time.time() - 120, timeout_seconds=60)
     real_set = managed_job_state.set_deadline_exceeded_async
 
     async def _signal_then_set(*args, **kwargs):
@@ -1171,7 +1299,7 @@ async def test_pending_hard_user_cancel_also_wins(_mock_managed_jobs_db_conn,
     deadline defers to it too, so the job's cancel is attributed to the
     user."""
     job_id = _create_job()
-    await _start_task(job_id, 0, time.time() - 120, queue_timeout_seconds=60)
+    await _start_task(job_id, 0, time.time() - 120, timeout_seconds=60)
     (_signal_dir / str(job_id)).touch()
     manager = _manager()
     job_task = asyncio.create_task(_RunningJob().run())
@@ -1194,26 +1322,27 @@ def _unwrap(fn):
     return fn
 
 
-def _queue_timeout_task() -> task_lib.Task:
-    return task_lib.Task(run='echo hi', queue_timeout='2h')
+def _timeout_task() -> task_lib.Task:
+    return task_lib.Task(run='echo hi', job={_FIELD: '2h'})
 
 
-def test_launch_queue_timeout_refuses_an_old_server():
+def test_launch_wait_for_scheduling_timeout_refuses_an_old_server():
     raw_launch = _unwrap(jobs_sdk.launch)
-    too_old = server_constants.MIN_JOBS_QUEUE_TIMEOUT_API_VERSION - 1
+    too_old = _MIN_VERSION - 1
     with mock.patch.object(jobs_sdk.versions,
                            'get_remote_api_version',
                            return_value=too_old), \
          mock.patch.object(jobs_sdk.server_common,
                            'make_authenticated_request') as mock_request:
-        with pytest.raises(exceptions.NotSupportedError, match='queue_timeout'):
-            raw_launch(_queue_timeout_task())
+        with pytest.raises(exceptions.NotSupportedError,
+                           match='job.wait_for_scheduling_timeout'):
+            raw_launch(_timeout_task())
         mock_request.assert_not_called()
 
 
-def _queue_timeout_in(dag_yaml: str) -> List[Any]:
+def _job_blocks_in(dag_yaml: str) -> List[Any]:
     return [
-        doc.get('queue_timeout')
+        doc.get('job')
         for doc in yaml_utils.safe_load_all(dag_yaml)
         if isinstance(doc, dict) and 'run' in doc
     ]
@@ -1228,12 +1357,13 @@ def _sent_dags(mock_request) -> List[str]:
 
 
 @pytest.mark.parametrize('api_version,expected', [
-    (server_constants.MIN_JOBS_QUEUE_TIMEOUT_API_VERSION - 1, None),
-    (server_constants.MIN_JOBS_QUEUE_TIMEOUT_API_VERSION, '2h'),
+    (_MIN_VERSION - 1, None),
+    (_MIN_VERSION, {
+        _FIELD: '2h'
+    }),
 ])
-def test_validate_omits_queue_timeout_for_an_older_server(
-        api_version, expected):
-    """An older server's strict task schema rejects queue_timeout, so the
+def test_validate_omits_job_block_for_an_older_server(api_version, expected):
+    """An older server's strict task schema rejects the job: block, so the
     client drops it (it only matters to managed jobs)."""
     with mock.patch.object(client_sdk.versions,
                            'get_remote_api_version',
@@ -1242,19 +1372,20 @@ def test_validate_omits_queue_timeout_for_an_older_server(
                            'make_authenticated_request') as mock_request:
         mock_request.return_value.status_code = 200
         _unwrap(client_sdk.validate)(dag_utils.convert_entrypoint_to_dag(
-            _queue_timeout_task()))
+            _timeout_task()))
     (dag_yaml,) = _sent_dags(mock_request)
-    assert _queue_timeout_in(dag_yaml) == [expected]
+    assert _job_blocks_in(dag_yaml) == [expected]
 
 
 @pytest.mark.parametrize('api_version,expected', [
-    (server_constants.MIN_JOBS_QUEUE_TIMEOUT_API_VERSION - 1, None),
-    (server_constants.MIN_JOBS_QUEUE_TIMEOUT_API_VERSION, '2h'),
+    (_MIN_VERSION - 1, None),
+    (_MIN_VERSION, {
+        _FIELD: '2h'
+    }),
 ])
-def test_optimize_omits_queue_timeout_for_an_older_server(
-        api_version, expected):
+def test_optimize_omits_job_block_for_an_older_server(api_version, expected):
     """optimize() sends the DAG without validating it first (e.g. from a
-    script), so it drops the field itself."""
+    script), so it drops the block itself."""
     with mock.patch.object(client_sdk.versions,
                            'get_remote_api_version',
                            return_value=api_version), \
@@ -1262,16 +1393,16 @@ def test_optimize_omits_queue_timeout_for_an_older_server(
                            'make_authenticated_request') as mock_request, \
          mock.patch.object(client_sdk.server_common, 'get_request_id'):
         _unwrap(client_sdk.optimize)(dag_utils.convert_entrypoint_to_dag(
-            _queue_timeout_task()))
+            _timeout_task()))
     (dag_yaml,) = _sent_dags(mock_request)
-    assert _queue_timeout_in(dag_yaml) == [expected]
+    assert _job_blocks_in(dag_yaml) == [expected]
 
 
 @pytest.mark.parametrize('entrypoint', ['launch', 'exec'])
-def test_launch_and_exec_omit_queue_timeout_for_an_older_server(entrypoint):
-    """`sky launch` / `sky exec` with a task YAML that sets queue_timeout
-    work against an older server: every DAG sent omits the field."""
-    too_old = server_constants.MIN_JOBS_QUEUE_TIMEOUT_API_VERSION - 1
+def test_launch_and_exec_omit_job_block_for_an_older_server(entrypoint):
+    """`sky launch` / `sky exec` with a task YAML that sets a job: block
+    work against an older server: every DAG sent omits the block."""
+    too_old = _MIN_VERSION - 1
     with mock.patch.object(client_sdk.versions,
                            'get_remote_api_version',
                            return_value=too_old), \
@@ -1285,21 +1416,21 @@ def test_launch_and_exec_omit_queue_timeout_for_an_older_server(entrypoint):
                            side_effect=lambda dag, **_: (dag, None)):
         mock_request.return_value.status_code = 200
         fn = _unwrap(getattr(client_sdk, entrypoint))
-        fn(_queue_timeout_task(), cluster_name='c')
+        fn(_timeout_task(), cluster_name='c')
     sent = _sent_dags(mock_request)
     # validate, then the launch / exec request itself.
     assert len(sent) == 2, sent
     for dag_yaml in sent:
-        assert _queue_timeout_in(dag_yaml) == [None]
+        assert _job_blocks_in(dag_yaml) == [None]
 
 
 def test_jobs_launch_refuses_an_old_server_before_validate_could_strip():
-    """The managed-jobs gate runs before sdk.validate(), so the field is never
+    """The managed-jobs gate runs before sdk.validate(), so the block is never
     silently dropped from a managed job: the launch fails instead, with no
     request sent."""
     raw_launch = _unwrap(jobs_sdk.launch)
-    too_old = server_constants.MIN_JOBS_QUEUE_TIMEOUT_API_VERSION - 1
-    task = _queue_timeout_task()
+    too_old = _MIN_VERSION - 1
+    task = _timeout_task()
     with mock.patch.object(jobs_sdk.versions,
                            'get_remote_api_version',
                            return_value=too_old), \
@@ -1311,29 +1442,30 @@ def test_jobs_launch_refuses_an_old_server_before_validate_could_strip():
                            'make_authenticated_request') as mock_request, \
          mock.patch.object(client_sdk.server_common,
                            'make_authenticated_request') as mock_sdk_request:
-        with pytest.raises(exceptions.NotSupportedError, match='queue_timeout'):
+        with pytest.raises(exceptions.NotSupportedError,
+                           match='job.wait_for_scheduling_timeout'):
             raw_launch(task)
         mock_validate.assert_not_called()
         mock_request.assert_not_called()
         mock_sdk_request.assert_not_called()
-    assert task.queue_timeout == '2h'
+    assert task.job == {_FIELD: '2h'}
 
 
-def test_uses_queue_timeout_detection():
-    assert jobs_sdk._uses_queue_timeout(
-        dag_utils.convert_entrypoint_to_dag(_queue_timeout_task()))
+def test_uses_wait_for_scheduling_timeout_detection():
+    assert jobs_sdk._uses_wait_for_scheduling_timeout(
+        dag_utils.convert_entrypoint_to_dag(_timeout_task()))
     plain = task_lib.Task(run='echo hi')
     plain.set_resources(resources_lib.Resources(job_recovery='FAILOVER'))
-    assert not jobs_sdk._uses_queue_timeout(
+    assert not jobs_sdk._uses_wait_for_scheduling_timeout(
         dag_utils.convert_entrypoint_to_dag(plain))
-    assert not jobs_sdk._uses_queue_timeout(
+    assert not jobs_sdk._uses_wait_for_scheduling_timeout(
         dag_utils.convert_entrypoint_to_dag(task_lib.Task(run='echo hi')))
     # Any task of a pipeline setting it counts.
     with dag_lib.Dag() as dag:
         first = task_lib.Task(run='echo a')
-        second = task_lib.Task(run='echo b', queue_timeout=60)
+        second = task_lib.Task(run='echo b', job={_FIELD: 60})
         first >> second  # pylint: disable=pointless-statement
-    assert jobs_sdk._uses_queue_timeout(dag)
+    assert jobs_sdk._uses_wait_for_scheduling_timeout(dag)
 
 
 def test_cancel_request_event_reason_format():
