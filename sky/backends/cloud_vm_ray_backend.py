@@ -1186,13 +1186,10 @@ class RetryingVmProvisioner(object):
                     _add_to_blocked_resources(
                         self._blocked_resources,
                         to_provision.copy(region=None, zone=None))
-                    # A cluster that was ever up is never failed over for (see
-                    # _yield_zones); without no_failover the caller's tail
-                    # asserts INIT instead of reporting the config error.
                     raise exceptions.ResourcesUnavailableError(
                         f'Failed to provision on cloud {to_provision.cloud} due to '
-                        f'invalid cloud config: {common_utils.format_exception(e)}',
-                        no_failover=prev_cluster_ever_up)
+                        f'invalid cloud config: {common_utils.format_exception(e)}'
+                    )
 
                 if ('config_hash' in config_dict and skip_if_config_hash_matches
                         == config_dict['config_hash']):
