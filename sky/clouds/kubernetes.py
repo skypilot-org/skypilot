@@ -343,7 +343,11 @@ class Kubernetes(clouds.Cloud):
         if resources.region is not None:
             contexts: List[Optional[str]] = [resources.region]
         else:
-            contexts = list(type(cloud).existing_allowed_contexts())
+            try:
+                contexts = list(type(cloud).existing_allowed_contexts())
+            except Exception:  # pylint: disable=broad-except
+                # e.g. no kubernetes package: the launch reports it.
+                return
         none = schemas.RemoteIdentityOptions.NONE.value
         overrides = resources.cluster_config_overrides
         for context in contexts:

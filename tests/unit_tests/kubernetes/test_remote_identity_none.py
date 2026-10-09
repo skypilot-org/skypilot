@@ -409,6 +409,17 @@ class TestCheckedAtSubmit:
                            match='cannot override it'):
             self._check_task(k8s, self._resources_on(loosening))
 
+    def test_contexts_that_cannot_be_listed_are_left_to_the_launch(
+            self, server_config):
+        server_config(_k8s(remote_identity=_NONE))
+        resources = self._resources_on(_k8s(remote_identity='SERVICE_ACCOUNT'),
+                                       region=None)
+        with mock.patch.object(kubernetes_cloud.Kubernetes,
+                               'existing_allowed_contexts',
+                               side_effect=ImportError('no kubernetes')):
+            kubernetes_cloud.Kubernetes.check_resources_keep_server_none(
+                resources)
+
     def test_another_cloud_is_not_checked(self, server_config):
         server_config(_k8s(remote_identity=_NONE))
         self._check(_k8s(remote_identity='SERVICE_ACCOUNT'), cloud=clouds.AWS())
