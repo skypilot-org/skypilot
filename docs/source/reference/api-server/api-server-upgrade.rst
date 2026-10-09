@@ -81,7 +81,167 @@ You can also directly set this value in the ``values.yaml`` file, e.g.:
 
 .. note::
 
-    Once :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>` or :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>` is specified, no other SkyPilot configuration can be specified in the helm chart. That is, :ref:`apiService.config <helm-values-apiService-config>` must be ``null``. To set any other SkyPilot configuration, see :ref:`sky-api-server-config`.
+    Once :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>` or :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>` is specified, no other SkyPilot configuration can be specified in the helm chart. That is, :ref:`apiService.config <helm-values-apiService-config>` must be ``null``. To set any other SkyPilot configuration, see :ref:`sky-api-server-config`. To move an existing API server that was deployed without a database, including its config, see :ref:`api-server-migrate-sqlite-to-postgres`.
+
+.. _api-server-migrate-sqlite-to-postgres:
+
+Migrate an existing API server to PostgreSQL
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+An API server deployed without a database keeps its state in SQLite files on its persistent volume. To move that state (users, clusters, managed jobs, services, recipes, and the API server config) to PostgreSQL, run the ``sky.utils.db.migrate_sqlite_to_postgres`` module once with the API server stopped, then switch the Helm deployment to the database.
+
+The migration:
+
+* refuses a target database that already holds SkyPilot data, so start from a new, empty database;
+* only reads the SQLite files, so rolling back is pointing the API server back at them;
+* creates the schema with the same SkyPilot version as the API server, so run it with the API server's image;
+* copies all tables in a single transaction and checks the row counts, so a failed run leaves the target empty;
+* stores the API server config (``~/.sky/config.yaml``, which the API server initialized from :ref:`apiService.config <helm-values-apiService-config>`) in the database, where an API server backed by PostgreSQL reads it from.
+
+What to expect:
+
+* The API server is down from the first step until the last. Managed jobs, clusters, and service replicas keep running, and the API server picks them up once it is back.
+* With :ref:`consolidation mode <jobs-consolidation-mode>`, the managed job and service controllers run inside the API server, so service endpoints are unreachable while the API server is down.
+* The API request history is not migrated.
+* The migration itself is quick. For example, a state of about 1.5 GB (about 340,000 rows across 24 tables) took about 2 minutes to copy into Amazon Aurora PostgreSQL.
+
+The steps below use the following variables:
+
+.. code-block:: bash
+
+    RELEASE_NAME=skypilot  # Helm release name of the API server
+    NAMESPACE=skypilot     # Namespace of the API server
+
+**Step 1: Stop the API server**
+
+The managed job and service controllers in the API server keep updating job, cluster, and service statuses in SQLite. A copy taken while they run misses the updates made after it, and a job that finished in that gap would be running again in PostgreSQL, where recovery can relaunch it. Scale the API server to zero:
+
+.. code-block:: bash
+
+    helm upgrade $RELEASE_NAME skypilot/skypilot-nightly --devel \
+      --namespace $NAMESPACE \
+      --reuse-values \
+      --set apiService.replicas=0
+
+    kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api
+
+Wait until the API server pod is gone. If the release is managed by Argo CD with self-heal enabled, set ``apiService.replicas: 0`` in the values in Git instead, as self-healing reverts a manual scale-down.
+
+**Step 2: Back up the state volume**
+
+The migration does not modify the SQLite files, but take a backup before you start, e.g. a `volume snapshot <https://kubernetes.io/docs/concepts/storage/volume-snapshots/>`_ of the ``${RELEASE_NAME}-state`` persistent volume claim, or a snapshot with your cloud provider.
+
+**Step 3: Run the migration**
+
+Store the connection URI of the new, empty database in a secret. The same secret is used by the API server in the next step:
+
+.. code-block:: bash
+
+    kubectl create secret generic skypilot-db-connection-uri \
+      --namespace $NAMESPACE \
+      --from-literal connection_string=postgresql://<username>:<password>@<host>:<port>/<database>
+
+Start a pod with the API server's image that mounts the API server's state volume. The volume is mounted writable because SQLite needs to create its shared-memory file to read a database in WAL mode; the migration does not write to the SQLite files.
+
+.. code-block:: bash
+
+    IMAGE=$(kubectl get deployment ${RELEASE_NAME}-api-server -n $NAMESPACE \
+      -o jsonpath='{.spec.template.spec.containers[?(@.name=="skypilot-api")].image}')
+
+    kubectl apply -n $NAMESPACE -f - <<EOF
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: skypilot-db-migration
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: migration
+        image: $IMAGE
+        command: ["sleep", "infinity"]
+        env:
+        - name: SKYPILOT_DB_CONNECTION_URI
+          valueFrom:
+            secretKeyRef:
+              name: skypilot-db-connection-uri
+              key: connection_string
+        volumeMounts:
+        - name: state-volume
+          mountPath: /root/.sky
+          subPath: .sky
+      volumes:
+      - name: state-volume
+        persistentVolumeClaim:
+          claimName: ${RELEASE_NAME}-state
+    EOF
+
+    kubectl wait pod/skypilot-db-migration -n $NAMESPACE --for=condition=Ready
+
+.. note::
+
+    If you set ``storage.existingClaim``, use that claim instead of ``${RELEASE_NAME}-state``. Add the API server's ``nodeSelector``, ``tolerations``, or image pull secrets to the pod if your cluster requires them.
+
+Run the migration:
+
+.. code-block:: bash
+
+    kubectl exec -n $NAMESPACE skypilot-db-migration -- \
+      python -m sky.utils.db.migrate_sqlite_to_postgres
+
+It prints the number of rows copied per table. To migrate a config other than ``~/.sky/config.yaml``, pass ``--config <path>``. If it fails, the database is left empty and the API server can be started again on SQLite (see :ref:`rollback <api-server-migrate-sqlite-to-postgres-rollback>`).
+
+An API server backed by PostgreSQL reads its config from the database and does not start if ``~/.sky/config.yaml`` on its volume still holds the old config. Move the file aside, keeping it for a rollback, and delete the pod:
+
+.. code-block:: bash
+
+    kubectl exec -n $NAMESPACE skypilot-db-migration -- \
+      mv /root/.sky/config.yaml /root/.sky/config.yaml.sqlite
+    kubectl delete pod skypilot-db-migration -n $NAMESPACE
+
+**Step 4: Start the API server on PostgreSQL**
+
+Point the API server at the database, unset :ref:`apiService.config <helm-values-apiService-config>` (it must be ``null`` with a database; the config was migrated into the database), and scale the API server back up:
+
+.. code-block:: bash
+
+    helm upgrade $RELEASE_NAME skypilot/skypilot-nightly --devel \
+      --namespace $NAMESPACE \
+      --reuse-values \
+      --set apiService.dbConnectionSecretName=skypilot-db-connection-uri \
+      --set apiService.config=null \
+      --set apiService.replicas=1
+
+With GitOps, make the same change to the values in Git.
+
+**Step 5: Verify**
+
+Check that the state was carried over and that new work runs:
+
+.. code-block:: bash
+
+    sky api info
+    sky status
+    sky jobs queue
+    sky serve status
+    sky jobs launch -y 'echo hello'
+
+New managed job IDs continue after the largest migrated one. Further config changes are made through the :ref:`dashboard or the API <sky-api-server-config>`.
+
+.. tip::
+
+    Only the API server's own processes pool database connections by default. Other processes, such as the managed job and service controllers in :ref:`consolidation mode <jobs-consolidation-mode>`, open a new connection for every query, which adds a network round trip and a TLS handshake each time with a remote database. If ``sky serve status`` or ``sky jobs queue`` is slow after the migration, set ``SKYPILOT_SERVER_DB_CONNECTION_POOL_SIZE`` (e.g. ``2``) in :ref:`apiService.extraEnvs <helm-values-apiService-extraEnvs>` so that every process reuses its connections.
+
+.. _api-server-migrate-sqlite-to-postgres-rollback:
+
+**Rollback**
+
+The SQLite files are left as they were, so to go back to SQLite:
+
+1. Scale the API server to zero as in step 1.
+2. Restore the config file. In a pod that mounts the state volume as in step 3, run ``mv /root/.sky/config.yaml.sqlite /root/.sky/config.yaml``.
+3. Revert the Helm values: unset ``apiService.dbConnectionSecretName``, restore ``apiService.config``, and set ``apiService.replicas`` back to ``1``.
+
+Anything written while the API server ran on PostgreSQL is not carried back. To retry the migration, recreate the database so that it is empty.
 
 .. _sky-api-server-helm-upgrade:
 
