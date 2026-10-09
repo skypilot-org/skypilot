@@ -1709,9 +1709,9 @@ One of:
   also uploaded to the pods.
 - ``NO_UPLOAD``: like ``SERVICE_ACCOUNT``, and your local kubeconfig is not
   uploaded. The pods still have the service account's token.
-- ``NONE``: the pods get no Kubernetes identity: no token is mounted and no
-  roles are granted. Autodown is not available. See
-  :ref:`kubernetes-remote-identity-none`.
+- ``NONE`` (case-insensitive, so ``none`` too): the pods get no Kubernetes
+  identity: no token is mounted and no roles are granted. Autodown is not
+  available. See :ref:`kubernetes-remote-identity-none`.
 
 .. _config-yaml-kubernetes-allowed-contexts:
 

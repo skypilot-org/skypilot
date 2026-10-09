@@ -1010,9 +1010,9 @@ def _launch(
             raise ValueError('Job Groups do not support pools. Please remove '
                              'the --pool argument when launching a job group.')
     dag.validate()
-    for task_ in dag.tasks:
-        for resources in task_.resources:
-            clouds.Kubernetes.check_resources_keep_server_none(resources)
+    if pool is None:  # A pool job launches no cluster of its own.
+        for task_ in dag.tasks:
+            clouds.Kubernetes.check_task_keeps_server_none(task_)
     # TODO(aylei): use consolidated job controller instead of performing
     # pre-mount operations when submitting jobs.
     dag.pre_mount_volumes()

@@ -28,6 +28,7 @@ from sky.utils import yaml_utils
 
 _CTX = 'test-context'
 _NONE = schemas.RemoteIdentityOptions.NONE.value
+_K8S = kubernetes_cloud.Kubernetes()
 _DEFAULT_SA = kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME
 _TOKEN_VOLUME = {
     'name': 'tok',
@@ -251,8 +252,8 @@ class TestExemptions:
 
     def test_an_in_process_identity_overrides_none(self, server_config):
         server_config(_k8s(remote_identity=_NONE))
-        assert _identity(kubernetes_identity='skypilot-proxy-agent') == (
-            'skypilot-proxy-agent', 'true', False)
+        assert _identity(kubernetes_identity='fixed-sa') == ('fixed-sa', 'true',
+                                                             False)
 
     def test_only_a_string_identity_exempts(self, server_config):
         # A MagicMock attribute is not None; it must not read as an exemption.
@@ -296,7 +297,7 @@ class TestAutodownUnsupportedUnderNone:
     def test_an_exempt_cluster_can_autodown(self, server_config):
         server_config(_k8s(remote_identity=_NONE))
         assert clouds.CloudImplementationFeatures.AUTODOWN not in (
-            self._unsupported(kubernetes_identity='skypilot-proxy-agent'))
+            self._unsupported(kubernetes_identity='fixed-sa'))
 
     def _autostop_down(self):
         resources = _resources()
@@ -336,21 +337,35 @@ class TestCheckedAtSubmit:
     """jobs launch / serve up refuse what the cluster launch would refuse, so
     the controller does not retry a refused launch forever."""
 
-    def _check(self,
-               task_config=None,
-               region=_CTX,
-               kubernetes_identity=None,
-               cloud=None):
+    def _resources_on(self,
+                      task_config=None,
+                      region=_CTX,
+                      kubernetes_identity=None,
+                      cloud=_K8S):
         resources = _resources(task_config, kubernetes_identity)
         resources.region = region
         resources.cloud = cloud
+        return resources
+
+    def _check(self, task_config=None, **kwargs):
+        resources = self._resources_on(task_config, **kwargs)
+        with mock.patch.object(kubernetes_cloud.Kubernetes,
+                               'existing_allowed_contexts',
+                               return_value=[_CTX]) as contexts:
+            kubernetes_cloud.Kubernetes.check_resources_keep_server_none(
+                resources)
+        return contexts
+
+    def _check_task(self, *alternatives):
+        task = mock.MagicMock()
+        task.resources = list(alternatives)
         with mock.patch.object(kubernetes_cloud.Kubernetes,
                                'existing_allowed_contexts',
                                return_value=[_CTX]):
-            kubernetes_cloud.Kubernetes.check_resources_keep_server_none(
-                resources)
+            kubernetes_cloud.Kubernetes.check_task_keeps_server_none(task)
 
-    @pytest.mark.parametrize('region', [_CTX, None], ids=['pinned', 'any'])
+    @pytest.mark.parametrize('region', [_CTX, None],
+                             ids=['context', 'any-context'])
     def test_a_task_loosening_server_none_is_refused(self, server_config,
                                                      region):
         server_config(_k8s(remote_identity=_NONE))
@@ -376,6 +391,24 @@ class TestCheckedAtSubmit:
         server_config({})
         self._check(_k8s(remote_identity='SERVICE_ACCOUNT'))
 
+    def test_an_unpinned_task_is_left_to_the_launch(self, server_config):
+        # It may land on another cloud; contexts are not even listed, so a
+        # server without the kubernetes package is unaffected.
+        server_config(_k8s(remote_identity=_NONE))
+        contexts = self._check(_k8s(remote_identity='SERVICE_ACCOUNT'),
+                               region=None,
+                               cloud=None)
+        contexts.assert_not_called()
+
+    def test_refused_only_when_every_alternative_is(self, server_config):
+        server_config(_k8s(remote_identity=_NONE))
+        loosening = _k8s(remote_identity='SERVICE_ACCOUNT')
+        k8s = self._resources_on(loosening)
+        self._check_task(k8s, self._resources_on(loosening, cloud=clouds.AWS()))
+        with pytest.raises(exceptions.InvalidCloudConfigs,
+                           match='cannot override it'):
+            self._check_task(k8s, self._resources_on(loosening))
+
     def test_another_cloud_is_not_checked(self, server_config):
         server_config(_k8s(remote_identity=_NONE))
         self._check(_k8s(remote_identity='SERVICE_ACCOUNT'), cloud=clouds.AWS())
@@ -383,7 +416,7 @@ class TestCheckedAtSubmit:
     def test_an_exempt_cluster_is_not_checked(self, server_config):
         server_config(_k8s(remote_identity=_NONE))
         self._check(_k8s(remote_identity='SERVICE_ACCOUNT'),
-                    kubernetes_identity='skypilot-proxy-agent')
+                    kubernetes_identity='fixed-sa')
 
 
 class TestLeakGuard:
@@ -450,10 +483,9 @@ class TestResourcesCarryTheIdentity:
 
     def test_copy_and_pickle_keep_it(self):
         r = resources_lib.Resources(cpus='1')
-        r.set_kubernetes_identity('skypilot-proxy-agent')
-        assert r.copy(cpus='2').kubernetes_identity == 'skypilot-proxy-agent'
-        assert pickle.loads(
-            pickle.dumps(r)).kubernetes_identity == 'skypilot-proxy-agent'
+        r.set_kubernetes_identity('fixed-sa')
+        assert r.copy(cpus='2').kubernetes_identity == 'fixed-sa'
+        assert pickle.loads(pickle.dumps(r)).kubernetes_identity == 'fixed-sa'
 
     def test_a_handle_pickled_before_it_existed_loads_without_it(self):
         r = resources_lib.Resources(cpus='1')
@@ -468,13 +500,13 @@ class TestResourcesCarryTheIdentity:
 
     def test_a_requester_cannot_set_it_through_yaml(self):
         r = resources_lib.Resources(cpus='1')
-        r.set_kubernetes_identity('skypilot-proxy-agent')
+        r.set_kubernetes_identity('fixed-sa')
         config = r.to_yaml_config()
         assert not any('kubernetes_identity' in k for k in config)
         with pytest.raises(exceptions.InvalidSkyPilotConfigError):
             resources_lib.Resources.from_yaml_config({
                 'cpus': '1',
-                '_kubernetes_identity': 'skypilot-proxy-agent'
+                '_kubernetes_identity': 'fixed-sa'
             })
 
 

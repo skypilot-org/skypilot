@@ -42,6 +42,7 @@ from sky.utils import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
+    from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -199,8 +200,8 @@ def _match_remote_identity(remote_identity: Any,
         remote_identity = next(
             (sa_name for pattern, sa_name in remote_identity.items()
              if fnmatch.fnmatchcase(context or '', str(pattern))), None)
-    # Like the other clouds' enum, NONE is case-insensitive: a security
-    # setting must not silently become a service account named `none`.
+    # NONE is case-insensitive: a security setting must not silently become
+    # a service account named `none`.
     none = schemas.RemoteIdentityOptions.NONE.value
     if isinstance(remote_identity, str) and remote_identity.upper() == none:
         return none
@@ -304,24 +305,45 @@ class Kubernetes(clouds.Cloud):
         return _match_remote_identity(merged, context) == none
 
     @classmethod
-    def check_resources_keep_server_none(
-            cls, resources: 'resources_lib.Resources') -> None:
-        """Raises if `resources` would loosen a NONE the server's config set.
+    def check_task_keeps_server_none(cls, task: 'task_lib.Task') -> None:
+        """Raises if every resource alternative of `task` would loosen a NONE
+        the server's config set.
 
         For managed jobs and services, checked when they are submitted: their
         cluster launch would be refused anyway, and the controller would retry
-        it forever instead of failing.
+        it forever instead of failing. An alternative that may land elsewhere
+        is left to the launch, which fails over to it.
+        """
+        errors = []
+        for resources in task.resources:
+            try:
+                cls.check_resources_keep_server_none(resources)
+            except exceptions.InvalidCloudConfigs as e:
+                errors.append(e)
+                continue
+            return
+        if errors:
+            raise errors[0]
+
+    @classmethod
+    def check_resources_keep_server_none(
+            cls, resources: 'resources_lib.Resources') -> None:
+        """Raises if `resources`, pinned to Kubernetes, would loosen a NONE
+        the server's config set.
+
+        Unpinned resources are not checked: they may land on another cloud.
+        Without a context, any allowed context with a server NONE counts, even
+        if the launch might first pick one without it.
         """
         cloud = resources.cloud
-        if cloud is not None and not isinstance(cloud, Kubernetes):
+        if not isinstance(cloud, Kubernetes):
             return
         if isinstance(resources.kubernetes_identity, str):
             return
         if resources.region is not None:
             contexts: List[Optional[str]] = [resources.region]
         else:
-            contexts = list((type(cloud) if cloud is not None else
-                             cls).existing_allowed_contexts())
+            contexts = list(type(cloud).existing_allowed_contexts())
         none = schemas.RemoteIdentityOptions.NONE.value
         overrides = resources.cluster_config_overrides
         for context in contexts:
