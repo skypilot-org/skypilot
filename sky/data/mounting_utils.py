@@ -305,9 +305,16 @@ def get_akave_mount_cmd(akave_credentials_path: str,
 
     rclone (used on ARM64) ignores AWS_SHARED_CREDENTIALS_FILE/AWS_PROFILE
     unless env auth is enabled, and would otherwise send unsigned requests.
+
+    Akave returns 500 for multipart UploadPart requests that goofys's AWS SDK
+    sends with aws-chunked encoding and a trailing checksum (its default), so
+    any write larger than one part (~5MB) fails. AWS_REQUEST_CHECKSUM_
+    CALCULATION=when_required disables it so parts are sent as plain PUTs.
     """
     cred_env = (f'AWS_SHARED_CREDENTIALS_FILE={akave_credentials_path} '
-                f'AWS_PROFILE={akave_profile_name}')
+                f'AWS_PROFILE={akave_profile_name} '
+                'AWS_REQUEST_CHECKSUM_CALCULATION=when_required '
+                'AWS_RESPONSE_CHECKSUM_VALIDATION=when_required')
     return _get_s3_compatible_mount_cmd(bucket_name=bucket_name,
                                         mount_path=mount_path,
                                         _bucket_sub_path=_bucket_sub_path,
