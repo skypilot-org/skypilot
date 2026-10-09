@@ -1210,6 +1210,15 @@ def get_task_schema():
             'num_nodes': {
                 'type': 'integer',
             },
+            'queue_timeout': {
+                'anyOf': [{
+                    'type': 'string',
+                    'pattern': constants.TIME_PATTERN_SECONDS,
+                }, {
+                    'type': 'integer',
+                    'minimum': 1,
+                }],
+            },
             # resources config is validated separately using RESOURCES_SCHEMA
             'resources': {
                 'type': 'object',

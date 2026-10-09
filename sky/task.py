@@ -23,6 +23,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import git
 from sky.utils import registry
+from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
@@ -334,6 +335,7 @@ class Task:
         resources: Optional[Union['resources_lib.Resources',
                                   List['resources_lib.Resources'],
                                   Set['resources_lib.Resources']]] = None,
+        queue_timeout: Optional[Union[str, int]] = None,
         # Advanced:
         docker_image: Optional[str] = None,
         event_callback: Optional[str] = None,
@@ -417,6 +419,9 @@ class Task:
           resources: either a sky.Resources, a set of them, or a list of them.
             A set or a list of resources asks the optimizer to "pick the
             best of these resources" to run this task.
+          queue_timeout: (Managed jobs only) Cancel the managed job if this
+            task has not started running within this duration of being
+            submitted, e.g. ``'2h'``, or an integer number of seconds.
           docker_image: (EXPERIMENTAL: Only in effect when LocalDockerBackend
             is used.) The base docker image that this Task will be built on.
             Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
@@ -444,6 +449,7 @@ class Task:
         if secrets is not None:
             self._secrets = {k: SecretStr(v) for k, v in secrets.items()}
         self._volumes = volumes or {}
+        self._queue_timeout = queue_timeout
         self._managed_secret_refs: List[ManagedSecretRef] = []
         self._api_server_access = api_server_access
 
@@ -530,6 +536,7 @@ class Task:
         """
         self.validate_name()
         self.validate_run()
+        self.validate_queue_timeout()
         if not skip_workdir:
             self.expand_and_validate_workdir()
         if not skip_file_mounts:
@@ -552,6 +559,15 @@ class Task:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('run must be a shell script (str). '
                                  f'Got {type(self.run)}')
+
+    def validate_queue_timeout(self):
+        """Validates the queue_timeout field format."""
+        if self.queue_timeout is None:
+            return
+        # The schema also admits zero ('0', '0s'), and a Task built through
+        # the Python SDK skips the schema, so check here too.
+        resources_utils.parse_positive_duration_seconds(self.queue_timeout,
+                                                        'queue_timeout')
 
     def expand_and_validate_file_mounts(self):
         """Expand file_mounts paths to absolute paths and validate them.
@@ -814,6 +830,7 @@ class Task:
             envs=config.pop('envs', None),
             secrets=inline_secrets or None,
             volumes=config.pop('volumes', None),
+            queue_timeout=config.pop('queue_timeout', None),
             event_callback=config.pop('event_callback', None),
             api_server_access=config.pop('api_server_access', True),
             _file_mounts_mapping=config.pop('file_mounts_mapping', None),
@@ -1205,6 +1222,10 @@ class Task:
     @property
     def volumes(self) -> Dict[str, Union[str, Dict[str, Any]]]:
         return self._volumes
+
+    @property
+    def queue_timeout(self) -> Optional[Union[str, int]]:
+        return self._queue_timeout
 
     def set_volumes(self, volumes: Dict[str, Union[str, Dict[str,
                                                              Any]]]) -> None:
@@ -2023,6 +2044,7 @@ class Task:
             add_if_not_none('service', self.service.to_yaml_config())
 
         add_if_not_none('num_nodes', self.num_nodes)
+        add_if_not_none('queue_timeout', self.queue_timeout)
 
         if self.inputs is not None:
             add_if_not_none('inputs',
