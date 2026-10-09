@@ -20,6 +20,12 @@ case "$PROVIDER" in
     ZONE=${3:-"us-central1-a"}
     NODE_COUNT=${4:-1}
     MACHINE_TYPE=${5:-"e2-standard-8"}
+    # Pin the pod range instead of letting GKE auto-allocate a /14 from
+    # 10.0.0.0/9: that space holds only 32 /14 blocks and runs out when the
+    # project has many other clusters or Filestore instances. 100.64.0.0/10
+    # (RFC 6598) is supported by GKE for pods and is not used by default-mode
+    # subnets or Filestore. Override with GKE_CLUSTER_IPV4_CIDR if needed.
+    POD_CIDR=${GKE_CLUSTER_IPV4_CIDR:-"100.64.0.0/14"}
 
     echo "Creating GKE cluster..."
     echo "Cluster Name: $CLUSTER_NAME"
@@ -27,13 +33,15 @@ case "$PROVIDER" in
     echo "Zone: $ZONE"
     echo "Node Count: $NODE_COUNT"
     echo "Machine Type: $MACHINE_TYPE"
+    echo "Pod CIDR: $POD_CIDR"
 
     gcloud container clusters create "$CLUSTER_NAME" \
         --project="$PROJECT_ID" \
         --zone="$ZONE" \
         --num-nodes="$NODE_COUNT" \
         --machine-type="$MACHINE_TYPE" \
-        --enable-ip-alias
+        --enable-ip-alias \
+        --cluster-ipv4-cidr="$POD_CIDR"
 
     echo "Getting cluster credentials..."
     gcloud container clusters get-credentials "$CLUSTER_NAME" --zone="$ZONE" --project="$PROJECT_ID"
