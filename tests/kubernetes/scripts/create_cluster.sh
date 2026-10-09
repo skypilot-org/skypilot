@@ -29,8 +29,11 @@ case "$PROVIDER" in
     POD_CIDR=${GKE_CLUSTER_IPV4_CIDR:-}
     if [ -z "$POD_CIDR" ]; then
       USED_BLOCKS=" "
-      for cidr in $(gcloud container clusters list --project="$PROJECT_ID" \
-          --format='value(clusterIpv4Cidr)'); do
+      # Separate assignment so set -e stops on a failed listing instead of
+      # treating every block as free.
+      EXISTING_CIDRS=$(gcloud container clusters list --project="$PROJECT_ID" \
+          --format='value(clusterIpv4Cidr)')
+      for cidr in $EXISTING_CIDRS; do
         IFS='./' read -r o1 o2 _ _ prefix <<< "$cidr"
         if [ "$o1" != "100" ] || [ "$o2" -lt 64 ] || [ "$o2" -gt 127 ]; then
           continue
