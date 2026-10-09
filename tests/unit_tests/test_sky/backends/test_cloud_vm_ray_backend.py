@@ -977,3 +977,72 @@ class TestSkyletPort:
         with pytest.raises(_Stop):
             handle._open_and_update_skylet_tunnel()  # pylint: disable=protected-access
         assert dialed[0][1] == 29070
+
+
+class TestProvisionExistingClusterError:
+    """A provisioning error on an existing cluster reaches the user."""
+
+    @staticmethod
+    def _provision(prev_status, retry_zones_error=None, features_error=None):
+        provisioner = object.__new__(cloud_vm_ray_backend.RetryingVmProvisioner)
+        provisioner._dag = MagicMock()  # pylint: disable=protected-access
+        provisioner._optimize_target = MagicMock()  # pylint: disable=protected-access
+        provisioner._requested_features = set()  # pylint: disable=protected-access
+        provisioner._blocked_resources = set()  # pylint: disable=protected-access
+        provisioner.log_dir = '/tmp'
+        provisioner._retry_zones = MagicMock(side_effect=retry_zones_error)  # pylint: disable=protected-access
+        to_provision = MagicMock()
+        setattr(to_provision, 'assert_launchable', lambda: to_provision)
+        to_provision.cloud.check_features_are_supported.side_effect = (
+            features_error)
+        config = cloud_vm_ray_backend.RetryingVmProvisioner.ToProvisionConfig(
+            'c1',
+            to_provision,
+            1,
+            prev_status,
+            MagicMock(),
+            prev_cluster_ever_up=prev_status is not None,
+            prev_config_hash=None)
+        task_mock = MagicMock()
+        task_mock.is_controller_task.return_value = False
+        return provisioner.provision_with_retries(
+            task_mock,
+            config,
+            dryrun=False,
+            stream_logs=False,
+            skip_unnecessary_provisioning=False)
+
+    _ERRORS = [
+        pytest.param(
+            dict(retry_zones_error=exceptions.ResourcesUnavailableError(
+                'invalid cloud credentials: expired')),
+            'expired',
+            id='retry_zones'),
+        pytest.param(dict(
+            features_error=exceptions.NotSupportedError('no autodown here')),
+                     'no autodown here',
+                     id='features'),
+    ]
+
+    @pytest.mark.parametrize('error,message', _ERRORS)
+    @pytest.mark.parametrize(
+        'status',
+        [status_lib.ClusterStatus.UP, status_lib.ClusterStatus.STOPPED])
+    def test_up_or_stopped_cluster_reports_the_error(self, status, error,
+                                                     message):
+        with pytest.raises(exceptions.ResourcesUnavailableError) as e:
+            self._provision(status, **error)
+        assert e.value.no_failover
+        assert message in str(e.value)
+
+    @pytest.mark.parametrize('error,message', _ERRORS)
+    def test_init_cluster_still_fails_over(self, error, message):
+        del message
+        with patch.object(cloud_vm_ray_backend.optimizer.Optimizer,
+                          'optimize',
+                          side_effect=exceptions.ResourcesUnavailableError(
+                              'nothing left')) as optimize:
+            with pytest.raises(exceptions.ResourcesUnavailableError) as e:
+                self._provision(status_lib.ClusterStatus.INIT, **error)
+        optimize.assert_called_once()
+        assert not e.value.no_failover
