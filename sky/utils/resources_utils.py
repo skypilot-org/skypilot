@@ -719,7 +719,7 @@ def parse_positive_duration_seconds(value: Any, field_name: str) -> int:
         ValueError: If the value is not a valid positive duration.
     """
     seconds: Optional[int] = None
-    # bool is a subclass of int; `queue_timeout: true` is not a duration.
+    # bool is a subclass of int; `true` is not a duration.
     # Strings must match the same pattern the YAML schema enforces, so a
     # value set through the Python SDK is held to the same format.
     if ((isinstance(value, int) and not isinstance(value, bool)) or

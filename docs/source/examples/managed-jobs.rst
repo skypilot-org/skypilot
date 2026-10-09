@@ -303,22 +303,29 @@ In this configuration:
   You should **not** use exit code 137 in :code:`recover_on_exit_codes`. This code is used internally by SkyPilot and including it may interfere with proper recovery behavior.
 
 
-.. _jobs-queue-timeout:
+.. _jobs-wait-for-scheduling-timeout:
 
 Giving up on jobs that cannot get resources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-By default, a managed job that cannot find available resources keeps trying indefinitely. To give up instead, set the top-level :code:`queue_timeout` field: if the job has not started running within that long of being submitted, it is cancelled.
+By default, a managed job that cannot get resources keeps trying indefinitely. If capacity that never shows up is worse than no job at all (e.g., an 8-GPU job that is only useful if it starts today), set :ref:`job.wait_for_scheduling_timeout <yaml-spec-job-wait-for-scheduling-timeout>` to give up instead:
 
 .. code-block:: yaml
 
-  # Cancel the job if it has not started running within 2 hours.
-  queue_timeout: 2h
+  job:
+    # Cancel the job if it has not started running within 2 hours.
+    wait_for_scheduling_timeout: 2h
 
   resources:
     accelerators: H100:8
 
-The clock starts at the job's :code:`SUBMITTED` time in :code:`sky jobs queue`, when the jobs controller starts launching it. Everything from then until the job first starts running counts: provisioning, launch retries and backoff, and waiting in an external scheduler's queue (e.g., Kueue). Once the job has started, :code:`queue_timeout` no longer applies, including while it recovers from a later preemption. In a pipeline or job group, each task can set its own, and its clock starts when that task is submitted. The job ends :code:`CANCELLED`, and the reason is shown in :code:`sky jobs queue` and the job's events. The jobs controller enforces it within about 30 seconds of the deadline, including after a controller restart.
+The timeout applies to both cloud VMs and Kubernetes. The clock starts at the job's :code:`SUBMITTED` time in :code:`sky jobs queue`, and everything until the job first starts running counts: on cloud VMs, the controller retrying the launch across regions and clouds (and backing off between attempts); on Kubernetes, also waiting for the pods to be scheduled, including in a Kueue queue. Once the job has started, the timeout no longer applies, including while the job recovers from a later preemption.
+
+When the timeout fires, the job is cancelled through the same path as :code:`sky jobs cancel` and ends :code:`CANCELLED`. :code:`sky jobs queue` shows the reason in its details column, e.g., ``task did not start within job.wait_for_scheduling_timeout=2h (waited 2h25s)``, and so do the job's events.
+
+.. note::
+
+  :ref:`kubernetes.kueue.admission_timeout <config-yaml-kubernetes-kueue-admission-timeout>` is different: it bounds a single launch attempt's wait for Kueue admission, after which that attempt fails and the controller retries (the job re-enters the queue). :code:`job.wait_for_scheduling_timeout` bounds the job's whole wait, across all retries, and then cancels it.
 
 
 When will my job be recovered?
@@ -335,7 +342,7 @@ Here's how various kinds of failures will be handled by SkyPilot:
    * - User code fails (:code:`setup` or :code:`run` commands have non-zero exit code):
      - If the exit code is in :code:`recover_on_exit_codes`, always restart. Otherwise, if :code:`max_restarts_on_errors` is set, restart up to that many times. If neither condition is met, set the job to :code:`FAILED` or :code:`FAILED_SETUP`.
    * - Can't find available resources due to capacity:
-     - Try other infra (clusters, regions, or clouds) indefinitely until resources are found, or until :code:`queue_timeout` (if set) is reached before the job first starts.
+     - Try other infra (clusters, regions, or clouds) indefinitely until resources are found, or, if :ref:`job.wait_for_scheduling_timeout <jobs-wait-for-scheduling-timeout>` is set, until it is reached before the job first starts.
    * - Cloud config/auth issue or invalid job configuration:
      - Mark the job as :code:`FAILED_PRECHECKS` and exit. Won't be retried.
 
