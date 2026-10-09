@@ -1203,7 +1203,7 @@ Go to the `Account <https://cloud.vast.ai/account/>`_ page on your Vast console 
 
 .. code-block:: shell
 
-  pip install "vastai-sdk>=0.1.12"
+  pip install "vastai-sdk>=1.0.0,<2"
   mkdir -p ~/.config/vastai
   echo "<your_api_key_here>" > ~/.config/vastai/vast_api_key
 
