@@ -52,6 +52,8 @@ General examples:
 
 - [**`env_check.yaml`**](./env_check.yaml): Using environment variables in the `run` commands.
 
+- [**`gpu_health_check/`**](./gpu_health_check/README.md): Run a GPU memory and RAS test suite ([Pantheon](https://pantheongpu.com)) on the GPU SkyPilot provisions, and fail the task if the memory is faulty.
+
 - [**`multi_echo.py`**](./multi_echo.py): Launch and schedule hundreds of bash commands on the clouds, with configurable resources.  Similar to grid search.
 
 ...and many more.
