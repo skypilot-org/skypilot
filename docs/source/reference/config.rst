@@ -1697,9 +1697,21 @@ Default: ``loadbalancer``.
 ``kubernetes.remote_identity``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Service account for remote authentication (optional).
+Identity for the pods SkyPilot launches (optional).
 
-Name of the service account to use for remote authentication.
+One of:
+
+- ``SERVICE_ACCOUNT`` (default): pods run as ``skypilot-service-account``,
+  which SkyPilot creates and grants permissions.
+- The name of your own service account: pods run as that account. SkyPilot
+  creates nothing for it, and you own its permissions.
+- ``LOCAL_CREDENTIALS``: like ``SERVICE_ACCOUNT``, and your local kubeconfig is
+  also uploaded to the pods.
+- ``NO_UPLOAD``: like ``SERVICE_ACCOUNT``, and your local kubeconfig is not
+  uploaded. The pods still have the service account's token.
+- ``NONE`` (case-insensitive, so ``none`` too): the pods get no Kubernetes
+  identity: no token is mounted and no roles are granted. Autodown is not
+  available. See :ref:`kubernetes-remote-identity-none`.
 
 .. _config-yaml-kubernetes-allowed-contexts:
 

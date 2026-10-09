@@ -254,6 +254,14 @@ def pytest_addoption(parser):
               'ensure the tests will not be skipped but no actual effect)'),
     )
     parser.addoption(
+        '--remote-identity-none',
+        action='store_true',
+        default=False,
+        help=('Run the Kubernetes tests with client config '
+              '`kubernetes.remote_identity: NONE`. Tests marked '
+              'no_remote_identity_none are skipped.'),
+    )
+    parser.addoption(
         '--grpc',
         action='store_true',
         default=False,
@@ -329,6 +337,9 @@ def pytest_configure(config):
         'resource so only one instance runs at a time org-wide, while every '
         'other test still runs in parallel. The name must be a plain slug '
         '(no commas or quotes)')
+    config.addinivalue_line(
+        'markers', 'no_remote_identity_none: skip under --remote-identity-none '
+        '(the test needs pod credentials, autodown, or another identity)')
     for cloud in all_clouds_in_smoke_tests:
         cloud_keyword = cloud_to_pytest_keyword[cloud]
         config.addinivalue_line(
@@ -352,6 +363,10 @@ def pytest_configure(config):
             raise ValueError(
                 '--remote-server and --postgres are not compatible. '
                 'Postgres backend is not supported with remote server testing.')
+    if (config.getoption('--remote-identity-none') and
+            not config.getoption('--kubernetes') and
+            config.getoption('--generic-cloud') != 'kubernetes'):
+        raise ValueError('--remote-identity-none requires --kubernetes.')
 
     pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
 
@@ -414,6 +429,8 @@ def pytest_collection_modifyitems(config, items):
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
     skip_marks['postgres'] = pytest.mark.skip(
         reason='skipped, because --postgres option is set')
+    skip_marks['no_remote_identity_none'] = pytest.mark.skip(
+        reason='skipped, because --remote-identity-none option is set')
 
     cloud_to_run = _get_cloud_to_run(config)
     generic_cloud = _generic_cloud(config)
@@ -457,6 +474,9 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_marks['batch'])
         if ('no_postgres' in item.keywords) and config.getoption('--postgres'):
             item.add_marker(skip_marks['postgres'])
+        if ('no_remote_identity_none' in item.keywords and
+                config.getoption('--remote-identity-none')):
+            item.add_marker(skip_marks['no_remote_identity_none'])
 
         # Skip tests marked as resource_heavy if --no-resource-heavy is set
         marks = [mark.name for mark in item.iter_markers()]
@@ -609,6 +629,8 @@ def _common_execution_tags(config) -> Dict[str, str]:
         tags['queue'] = queue
     if config.getoption('--grpc'):
         tags['grpc'] = 'true'
+    if config.getoption('--remote-identity-none'):
+        tags['remote_identity'] = 'none'
     base_branch = config.getoption('--base-branch')
     if base_branch:
         tags['base_branch'] = base_branch
@@ -1023,6 +1045,16 @@ def setup_grpc_backend_env(request):
         yield
         return
     os.environ['PYTEST_SKYPILOT_GRPC_ENABLED'] = '1'
+    yield
+
+
+@pytest.fixture(scope='session', autouse=True)
+def setup_remote_identity_none_env(request):
+    """Mark the session as --remote-identity-none for override_sky_config."""
+    if not request.config.getoption('--remote-identity-none'):
+        yield
+        return
+    os.environ['PYTEST_SKYPILOT_REMOTE_IDENTITY_NONE'] = '1'
     yield
 
 

@@ -14,53 +14,12 @@
           },
           "labels": {
             "parent": "skypilot",
-            "skypilot-binpack": "gpu",
             "skypilot-cluster": "sky-cluster-abc123",
             "skypilot-user": "testuser"
           }
         },
         "spec": {
-          "affinity": {
-            "nodeAffinity": {
-              "requiredDuringSchedulingIgnoredDuringExecution": {
-                "nodeSelectorTerms": [
-                  {
-                    "matchExpressions": [
-                      {
-                        "key": "skypilot.co/accelerator",
-                        "operator": "In",
-                        "values": [
-                          "H100"
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
-            },
-            "podAffinity": {
-              "preferredDuringSchedulingIgnoredDuringExecution": [
-                {
-                  "podAffinityTerm": {
-                    "labelSelector": {
-                      "matchExpressions": [
-                        {
-                          "key": "skypilot-binpack",
-                          "operator": "In",
-                          "values": [
-                            "gpu"
-                          ]
-                        }
-                      ]
-                    },
-                    "topologyKey": "kubernetes.io/hostname"
-                  },
-                  "weight": 1
-                }
-              ]
-            }
-          },
-          "automountServiceAccountToken": true,
+          "automountServiceAccountToken": false,
           "containers": [
             {
               "args": "<omitted>",
@@ -107,6 +66,10 @@
                 {
                   "name": "SKYPILOT_IN_CLUSTER_CONTEXT_NAME",
                   "value": "my-k8s-context"
+                },
+                {
+                  "name": "NVIDIA_VISIBLE_DEVICES",
+                  "value": "none"
                 }
               ],
               "image": "us-docker.pkg.dev/skypilot-oss/skypilot/skypilot:latest",
@@ -130,13 +93,9 @@
                 }
               ],
               "resources": {
-                "limits": {
-                  "nvidia.com/gpu": 1
-                },
                 "requests": {
                   "cpu": 4,
-                  "memory": "16G",
-                  "nvidia.com/gpu": 1
+                  "memory": "16G"
                 }
               },
               "volumeMounts": [
@@ -231,7 +190,7 @@
     "networking_mode": "portforward",
     "port_mode": "portforward",
     "region": "kubernetes",
-    "remote_identity_none": false,
+    "remote_identity_none": true,
     "services": [
       {
         "apiVersion": "v1",

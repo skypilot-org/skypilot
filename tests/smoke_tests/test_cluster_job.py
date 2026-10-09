@@ -1653,6 +1653,7 @@ def test_services_on_kubernetes():
 
 # ---------- Pod Annotations on Kubernetes ----------
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_identity_none  # Autodown.
 def test_add_pod_annotations_for_autodown_with_launch():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -1692,6 +1693,7 @@ def test_add_pod_annotations_for_autodown_with_launch():
 
 
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_identity_none  # Autodown.
 def test_add_and_remove_pod_annotations_with_autostop():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -4678,6 +4680,7 @@ def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support autostop
+@pytest.mark.no_remote_identity_none  # Autodown.
 def test_autodown(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     num_nodes = 2
@@ -5201,6 +5204,7 @@ def test_kubernetes_pod_config_change_detection():
 
 # ---------- Testing Kubernetes remote_identity override ----------
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_identity_none  # Sets other identities on purpose.
 def test_kubernetes_remote_identity_override():
     """Test that config.kubernetes.remote_identity can be overridden in task YAML.
 
@@ -5230,6 +5234,75 @@ def test_kubernetes_remote_identity_override():
         ],
         f'sky down -y {name}',
         timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing Kubernetes remote_identity: NONE ----------
+_K8S_SA_TOKEN = '/var/run/secrets/kubernetes.io/serviceaccount/token'
+_K8S_IDENTITY_NONE = '--config kubernetes.remote_identity=NONE'
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_remote_identity_none():
+    """With remote_identity: NONE the pod has no API token, and the cluster
+    still launches, runs, takes exec/ssh/logs and tears down.
+
+    Under --remote-identity-none the whole session is NONE, so the control
+    (a token without NONE) is skipped.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    launch = (f'sky launch -y --infra kubernetes '
+              f'{smoke_tests_utils.LOW_RESOURCE_ARG}')
+    commands = [
+        f'{launch} -c {name} {_K8S_IDENTITY_NONE} "test ! -e {_K8S_SA_TOKEN}"',
+        f'sky logs {name} 1 --status',
+        f'sky exec {name} "test ! -e {_K8S_SA_TOKEN}"',
+        f'sky logs {name} 2 --status',
+        f'ssh {name} "test ! -e {_K8S_SA_TOKEN}"',
+        f'sky queue {name}',
+        f'sky down -y {name}',
+    ]
+    if not smoke_tests_utils.is_remote_identity_none_test():
+        commands += [
+            f'{launch} -c {name}-sa "test -e {_K8S_SA_TOKEN}"',
+            f'sky logs {name}-sa 1 --status',
+        ]
+    test = smoke_tests_utils.Test(
+        'kubernetes_remote_identity_none',
+        commands,
+        f'sky down -y {name} {name}-sa',
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_remote_identity_none_refusals():
+    """NONE refuses what would need, or hand back, pod credentials: autodown,
+    and a pod_config that mounts the token. Dryrun only, so no pods.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    launch = (f'sky launch -y -c {name} --infra kubernetes --dryrun '
+              f'{smoke_tests_utils.LOW_RESOURCE_ARG}')
+    autodown = f'{launch} --down -i 1 echo hi'
+    automount = (f'{launch} --config '
+                 'kubernetes.pod_config.spec.automountServiceAccountToken=true'
+                 ' echo hi')
+    commands = [
+        f's=$({autodown} {_K8S_IDENTITY_NONE} 2>&1) && exit 1; echo "$s"; '
+        'echo "$s" | grep "Autodown needs the pod to delete itself"',
+        f's=$({automount} {_K8S_IDENTITY_NONE} 2>&1) && exit 1; echo "$s"; '
+        'echo "$s" | grep "automountServiceAccountToken would give them some"',
+    ]
+    if not smoke_tests_utils.is_remote_identity_none_test():
+        # Controls: the same commands without NONE are accepted.
+        commands += [autodown, automount]
+    test = smoke_tests_utils.Test(
+        'kubernetes_remote_identity_none_refusals',
+        commands,
+        f'sky down -y {name}',
+        timeout=10 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
