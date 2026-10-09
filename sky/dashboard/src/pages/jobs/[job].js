@@ -73,6 +73,7 @@ import {
 import { TelemetrySection } from '@/components/TelemetrySection';
 import { hasAccelerator } from '@/utils/gpuUtils';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
+import { isJobGroup } from '@/components/jobs';
 import PropTypes from 'prop-types';
 
 function JobDetails({
@@ -370,10 +371,7 @@ function JobDetails({
     allTasks.find((t) => t.dag_yaml)?.dag_yaml || detailJobData?.dag_yaml;
   const jobEntrypoint =
     allTasks.find((t) => t.entrypoint)?.entrypoint || detailJobData?.entrypoint;
-  const jobIsJobGroup =
-    allTasks.find((t) => t.is_job_group)?.is_job_group ||
-    detailJobData?.is_job_group ||
-    allTasks.length > 1;
+  const jobIsJobGroup = isJobGroup(allTasks);
 
   // For execution, check stored values first, then apply defaults for multi-task jobs
   // Older jobs may not have these fields stored, so provide sensible defaults
