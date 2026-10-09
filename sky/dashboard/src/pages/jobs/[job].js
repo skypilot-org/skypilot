@@ -39,7 +39,6 @@ import {
 } from 'lucide-react';
 import {
   CustomTooltip as Tooltip,
-  formatFullTimestamp,
   formatDuration,
   renderPoolLink,
   extractNodeTypes,
@@ -1244,6 +1243,8 @@ function JobDetailsContent({
   const [expandedYamlDocs, setExpandedYamlDocs] = useState({});
   const [showFullYaml, setShowFullYaml] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+  // The commit gets its own flag so copying it does not tick the YAML copy.
+  const [isCommitCopied, setIsCommitCopied] = useState(false);
   const [isCommandCopied, setIsCommandCopied] = useState(false);
 
   // Auto-scroll refs
@@ -1625,620 +1626,527 @@ function JobDetailsContent({
     );
   }
 
-  // Default 'info' tab content
-  return (
-    <div className="grid grid-cols-2 gap-6">
+  // Collapsible SkyPilot YAML row at the bottom of the info card.
+  const yamlBlock =
+    jobData.dag_yaml && jobData.dag_yaml !== '{}' ? (
       <div>
-        <div className="text-gray-600 font-medium text-base">
-          {taskContext ? 'Task' : 'Job ID (Name)'}
-        </div>
-        <div className="text-base mt-1 flex items-center gap-2">
-          {taskContext ? (
-            // Same shape as a declared task's page; the handle
-            // `<root>-<index>` is what `sky jobs cancel` / `logs` take.
-            <span
-              title={`sky jobs cancel ${taskContext.rootId} --task ${taskContext.index}`}
+        {/* Full-width collapsible row; -mx-4 lets its border reach the card edges. */}
+        <div className="flex items-center gap-2 -mx-4 px-4 border-t border-gray-200 pt-4">
+          <button
+            onClick={toggleYamlExpanded}
+            aria-expanded={isYamlExpanded}
+            className="flex items-center gap-3 text-left focus:outline-none text-gray-900 hover:text-gray-700 transition-colors duration-200"
+          >
+            {isYamlExpanded ? (
+              <ChevronDownIcon className="w-4 h-4 text-gray-500" />
+            ) : (
+              <ChevronRightIcon className="w-4 h-4 text-gray-500" />
+            )}
+            <span className="text-base">SkyPilot YAML</span>
+          </button>
+
+          <Tooltip
+            content={isCopied ? 'Copied!' : 'Copy YAML'}
+            className="text-muted-foreground"
+          >
+            <button
+              onClick={copyYamlToClipboard}
+              className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
             >
-              {taskContext.index}
-              {jobData.name && (
-                <span className="text-gray-500"> ({jobData.name})</span>
+              {isCopied ? (
+                <CheckIcon className="w-4 h-4 text-green-600" />
+              ) : (
+                <CopyIcon className="w-4 h-4" />
               )}
-            </span>
-          ) : (
-            <span>
-              {jobData.id} {jobData.name ? `(${jobData.name})` : ''}
-            </span>
-          )}
+            </button>
+          </Tooltip>
+        </div>
+
+        {isYamlExpanded && (
+          <div className="mt-3">
+            {(() => {
+              const yamlDocs = formatJobYaml(jobData.dag_yaml);
+              // Build JobGroup header with name and execution
+              const hasJobGroupConfig = jobData.name || jobData.execution;
+              const jobGroupHeader = hasJobGroupConfig
+                ? [
+                    jobData.name ? `name: ${jobData.name}` : null,
+                    jobData.execution
+                      ? `execution: ${jobData.execution}`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join('\n') + '\n---\n'
+                : '';
+
+              if (yamlDocs.length === 0) {
+                return <div className="text-gray-500">No YAML available</div>;
+              } else if (yamlDocs.length === 1) {
+                // Single document - show directly
+                return (
+                  <YamlCodeBlock
+                    value={jobGroupHeader + yamlDocs[0].content}
+                    readOnly
+                  />
+                );
+              } else {
+                // Multiple documents - show toggle and content
+                return (
+                  <div className="space-y-4">
+                    {/* Toggle for Full YAML vs Per-Job */}
+                    <div className="flex items-center space-x-4 pb-2 border-b border-gray-200">
+                      <button
+                        onClick={() => setShowFullYaml(false)}
+                        className={`text-sm px-2 py-1 rounded ${!showFullYaml ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:text-gray-800'}`}
+                      >
+                        By Job
+                      </button>
+                      <button
+                        onClick={() => setShowFullYaml(true)}
+                        className={`text-sm px-2 py-1 rounded ${showFullYaml ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:text-gray-800'}`}
+                      >
+                        Full YAML
+                      </button>
+                    </div>
+
+                    {showFullYaml ? (
+                      // Show full YAML with JobGroup header
+                      <YamlCodeBlock
+                        value={
+                          jobGroupHeader +
+                          yamlDocs.map((doc) => doc.content).join('\n---\n')
+                        }
+                        readOnly
+                      />
+                    ) : (
+                      // Show per-job YAMLs
+                      yamlDocs.map((doc, index) => (
+                        <div
+                          key={index}
+                          className="border-b border-gray-200 pb-4 last:border-b-0"
+                        >
+                          <button
+                            onClick={() => toggleYamlDocExpanded(index)}
+                            className="flex items-center justify-between w-full text-left focus:outline-none"
+                          >
+                            <div className="flex items-center">
+                              {expandedYamlDocs[index] ? (
+                                <ChevronDownIcon className="w-4 h-4 mr-2" />
+                              ) : (
+                                <ChevronRightIcon className="w-4 h-4 mr-2" />
+                              )}
+                              <span className="text-sm font-medium text-gray-700">
+                                Job {index + 1}: {doc.preview}
+                              </span>
+                            </div>
+                          </button>
+                          {expandedYamlDocs[index] && (
+                            <div className="mt-3 ml-6">
+                              <YamlCodeBlock value={doc.content} readOnly />
+                            </div>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                );
+              }
+            })()}
+          </div>
+        )}
+      </div>
+    ) : null;
+
+  // Info tab: short fields in a grid of up to four columns, long values in
+  // full-width rows below. Every field is a label over its value.
+  const isEmpty = (v) =>
+    v == null || v === '' || v === '-' || v === '–' || v === 'N/A';
+  const dash = <span className="text-gray-400">-</span>;
+  const show = (v) => (isEmpty(v) ? dash : v);
+  // Base column count must not be grid-cols-2: a stylesheet loaded later can
+  // redefine it and override the breakpoint variants.
+  // newRow starts a new row at 4 columns; narrower grids flow normally so
+  // short groups leave no gaps.
+  const field = (label, value, { wide = false, newRow = false } = {}) => (
+    <div
+      key={label}
+      className={`min-w-0 ${wide ? 'col-span-full' : ''} ${newRow ? 'min-[1400px]:col-start-1' : ''}`}
+    >
+      <div className="text-sm text-gray-500">{label}</div>
+      <div className="text-base text-gray-900 mt-1 break-words">{value}</div>
+    </div>
+  );
+  // 'Oct 6, 5:37:41 PM PDT': short enough to stay on one line in a cell.
+  // The year shows only when it is not the current year.
+  const shortTimestamp = (date) =>
+    date
+      ? date.toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year:
+            date.getFullYear() === new Date().getFullYear()
+              ? undefined
+              : 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          second: '2-digit',
+          timeZoneName: 'short',
+        })
+      : dash;
+  // A job group sums its tasks' durations, matching the CLI's aggregated
+  // row. A task that has not started contributes 0.
+  const totalDuration =
+    allTasks.length > 1
+      ? allTasks.reduce((sum, t) => sum + (t.job_duration || 0), 0)
+      : jobData.job_duration;
+  const requested =
+    allTasks.length > 1
+      ? (() => {
+          const list = allTasks
+            .map((t) => t.requested_resources || t.resources_str)
+            .filter((v) => !isEmpty(v));
+          const unique = [...new Set(list)];
+          if (unique.length === 0) return null;
+          return unique.length === 1
+            ? `${unique[0]} (x${allTasks.length} tasks)`
+            : `${list[0]} (+${allTasks.length - 1} more)`;
+        })()
+      : jobData.requested_resources;
+  const partitions = [
+    ...new Set(
+      allTasks
+        .filter((t) => t.cloud && t.cloud.toLowerCase() === 'slurm' && t.zone)
+        .map((t) => t.zone)
+    ),
+  ];
+  // Also passed to the infra slot as `defaultContent`, so a plugin can
+  // return it unchanged for jobs it does not restyle.
+  const infraContent = isEmpty(jobData.infra) ? (
+    dash
+  ) : (
+    <NonCapitalizedTooltip
+      content={jobData.full_infra || jobData.infra}
+      className="text-sm text-muted-foreground"
+    >
+      <span>
+        <Link href="/infra" className="text-blue-600 hover:underline">
+          {jobData.cloud || jobData.infra.split('(')[0].trim()}
+        </Link>
+        {jobData.infra.includes('(') &&
+          ' ' + jobData.infra.substring(jobData.infra.indexOf('('))}
+      </span>
+    </NonCapitalizedTooltip>
+  );
+  // Copy icon centered on the text line it follows (vertical-align: middle).
+  const copyButton = (copied, onClick, title) => (
+    <button
+      onClick={onClick}
+      title={title}
+      className="ml-2 inline-flex items-center align-middle text-gray-400 hover:text-gray-700 focus:outline-none"
+    >
+      {copied ? (
+        <CheckIcon className="w-3.5 h-3.5 text-green-600" />
+      ) : (
+        <CopyIcon className="w-3.5 h-3.5" />
+      )}
+    </button>
+  );
+  const batchTotal = jobData.batch_total_batches;
+  // Batch progress bar, with a note on incomplete batches once the job ends.
+  const batchBar = () => {
+    const completed = jobData.batch_completed_batches || 0;
+    const pct = batchTotal > 0 ? Math.round((completed / batchTotal) * 100) : 0;
+    const barColor = completed >= batchTotal ? 'bg-green-500' : 'bg-blue-500';
+    const isTerminal = [
+      'SUCCEEDED',
+      'FAILED',
+      'CANCELLED',
+      'FAILED_SETUP',
+      'FAILED_PRECHECKS',
+      'FAILED_NO_RESOURCE',
+      'FAILED_CONTROLLER',
+    ].includes(jobData.status);
+    return (
+      <span className="block space-y-1.5">
+        <span className="flex items-center gap-3">
+          <span className="block w-40 bg-gray-200 rounded-full h-2.5">
+            <span
+              className={`block ${barColor} h-2.5 rounded-full transition-all`}
+              style={{ width: `${pct}%` }}
+            />
+          </span>
+          <span className="text-sm text-gray-600">
+            {completed}/{batchTotal} ({pct}%)
+          </span>
+        </span>
+        {isTerminal && completed < batchTotal && (
+          <span className="block text-xs text-red-600">
+            {batchTotal - completed} batches incomplete
+          </span>
+        )}
+      </span>
+    );
+  };
+  const hasLinks = combinedLinks && Object.keys(combinedLinks).length > 0;
+  const pool = renderPoolLink(jobData.pool, jobData.pool_hash, poolsData);
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 min-[1400px]:grid-cols-4 gap-x-6 gap-y-5 [&_a]:text-blue-600 [&_a]:no-underline [&_a:hover]:underline">
+      {field(
+        taskContext ? 'Task' : 'Job',
+        <span className="inline-flex flex-wrap items-center gap-2">
+          {/* `<root>-<index>` is what `sky jobs cancel` / `logs` take. */}
+          <span
+            title={
+              taskContext
+                ? `sky jobs cancel ${taskContext.rootId} --task ${taskContext.index}`
+                : undefined
+            }
+          >
+            {taskContext ? taskContext.index : jobData.id}
+            {jobData.name ? ` (${jobData.name})` : ''}
+          </span>
           {taskContext && (
             <DynamicBadge launchedFrom={taskContext.launchedFrom} />
           )}
-          {/* Badge for batch job */}
           {(jobData.is_batch === true ||
             jobData.batch_total_batches != null) && <BatchBadge />}
-          {/* Badge for job group */}
           {jobData.is_job_group && (
             <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-700">
               JobGroup
             </span>
           )}
-        </div>
-        {taskContext && taskContext.parentTask && (
-          <div className="text-sm text-gray-500 mt-1">
-            Launched by Task:{' '}
-            <Link
-              href={taskContext.parentTask.href}
-              className="text-sky-blue hover:text-sky-blue-bright hover:underline"
-            >
-              {taskContext.parentTask.label}
-            </Link>
-          </div>
-        )}
-      </div>
-      {taskContext && (
-        <div>
-          <div className="text-gray-600 font-medium text-base">Job</div>
-          <div className="text-base mt-1">
-            <Link
-              href={`/jobs/${taskContext.rootId}`}
-              className="text-sky-blue hover:text-sky-blue-bright hover:underline"
-            >
+        </span>
+      )}
+      {taskContext &&
+        field(
+          'Job',
+          <span className="block">
+            <Link href={`/jobs/${taskContext.rootId}`}>
               {taskContext.rootId}
               {taskContext.rootName ? ` (${taskContext.rootName})` : ''}
             </Link>
-          </div>
-        </div>
-      )}
-      <div>
-        <div className="text-gray-600 font-medium text-base">Status</div>
-        <div className="text-base mt-1">
-          {(() => {
-            const isBatchRunning =
-              jobData.status === 'RUNNING' &&
-              jobData.batch_total_batches != null;
-            if (isBatchRunning) {
-              const completed = jobData.batch_completed_batches || 0;
-              const total = jobData.batch_total_batches;
-              const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-              const barColor =
-                completed >= total ? 'bg-green-500' : 'bg-blue-500';
-              return (
-                <div className="flex items-center gap-3">
-                  <div className="w-32 bg-gray-200 rounded-full h-2.5">
-                    <div
-                      className={`${barColor} h-2.5 rounded-full transition-all`}
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  <span className="text-sm text-gray-600">
-                    {completed}/{total} batches ({pct}%)
-                  </span>
-                </div>
-              );
-            }
-            return (
-              <PluginSlot
-                name="jobs.detail.status.badge"
-                // The slot must see the status the fallback renders:
-                // jobData is the first task's row, not the group's
-                // aggregate.
-                context={{
-                  ...jobData,
-                  status: computedStatus,
-                  statusTooltip,
-                }}
-                fallback={
-                  <StatusBadge
-                    status={computedStatus}
-                    statusTooltip={statusTooltip}
-                  />
-                }
-              />
-            );
-          })()}
-        </div>
-      </div>
-      <div>
-        <div className="text-gray-600 font-medium text-base">User</div>
-        <div className="text-base mt-1">
-          <UserDisplay username={jobData.user} userHash={jobData.user_hash} />
-        </div>
-      </div>
-      <div>
-        <div className="text-gray-600 font-medium text-base">Workspace</div>
-        <div className="text-base mt-1">
-          <Link
-            href="/workspaces"
-            className="text-gray-700 hover:text-blue-600 hover:underline"
-          >
-            {jobData.workspace || 'default'}
-          </Link>
-        </div>
-      </div>
-      <div>
-        <div className="text-gray-600 font-medium text-base">Submitted</div>
-        <div className="text-base mt-1">
-          {jobData.submitted_at
-            ? formatFullTimestamp(jobData.submitted_at)
-            : 'N/A'}
-        </div>
-      </div>
-      <div>
-        <div className="text-gray-600 font-medium text-base">Started</div>
-        <div className="text-base mt-1">
-          {jobData.started_at ? formatFullTimestamp(jobData.started_at) : '-'}
-        </div>
-      </div>
-      <div>
-        <div className="text-gray-600 font-medium text-base">Duration</div>
-        <div className="text-base mt-1">
-          {(() => {
-            if (allTasks.length <= 1) {
-              return formatDuration(jobData.job_duration);
-            }
-            // For a job group, sum the durations of all tasks instead of
-            // showing only the first task's duration, matching the CLI's
-            // aggregated row. A task that has not started yet contributes
-            // 0; one that has started keeps accruing.
-            const totalDuration = allTasks.reduce(
-              (sum, t) => sum + (t.job_duration || 0),
-              0
-            );
-            return formatDuration(totalDuration);
-          })()}
-        </div>
-      </div>
-      <div>
-        <div className="text-gray-600 font-medium text-base">Recoveries</div>
-        <div className="text-base mt-1">{jobData.recoveries || 0}</div>
-      </div>
-      <div>
-        <div className="text-gray-600 font-medium text-base">
-          Requested Resources
-        </div>
-        <div className="text-base mt-1">
-          {allTasks.length > 1 ? (
-            <NonCapitalizedTooltip
-              content={`Aggregated from ${allTasks.length} tasks:\n${allTasks
-                .map(
-                  (task, index) =>
-                    `Task ${index}${task.task ? ` (${task.task})` : ''}: ${task.requested_resources || task.resources_str || 'N/A'}`
-                )
-                .join('\n')}`}
-              className="text-sm text-muted-foreground"
-            >
-              <span className="cursor-help border-b border-dotted border-gray-400">
-                {(() => {
-                  const resourcesList = allTasks
-                    .map((t) => t.requested_resources || t.resources_str)
-                    .filter(Boolean);
-                  const uniqueResources = [...new Set(resourcesList)];
-                  return uniqueResources.length === 1
-                    ? `${uniqueResources[0]} (x${allTasks.length} tasks)`
-                    : `${resourcesList[0]} (+${allTasks.length - 1} more)`;
-                })()}
-              </span>
-            </NonCapitalizedTooltip>
-          ) : (
-            jobData.requested_resources || 'N/A'
-          )}
-        </div>
-      </div>
-      <div>
-        <div className="text-gray-600 font-medium text-base">Infra</div>
-        <div className="text-base mt-1">
-          {(() => {
-            // The default rendering, also handed to the plugin slot as
-            // `defaultContent` so a plugin that only changes how *some* jobs
-            // read can return it unchanged for the rest. `fallback` keeps the
-            // no-plugin case identical.
-            const infraContent = jobData.infra ? (
-              <NonCapitalizedTooltip
-                content={jobData.full_infra || jobData.infra}
-                className="text-sm text-muted-foreground"
-              >
-                <span>
-                  <Link href="/infra" className="text-blue-600 hover:underline">
-                    {jobData.cloud || jobData.infra.split('(')[0].trim()}
-                  </Link>
-                  {jobData.infra.includes('(') && (
-                    <span>
-                      {' ' +
-                        jobData.infra.substring(jobData.infra.indexOf('('))}
-                    </span>
-                  )}
-                </span>
-              </NonCapitalizedTooltip>
-            ) : (
-              '-'
-            );
-            return (
-              <PluginSlot
-                name="jobs.detail.infra"
-                context={{ job: jobData, defaultContent: infraContent }}
-                fallback={infraContent}
-              />
-            );
-          })()}
-        </div>
-      </div>
-      {/* Slurm schedules onto a partition (its zone); it is how quota and
-          priority are carved up on a Slurm cluster, so it gets its own row.
-          Multi-task jobs list every task's partition, like Requested
-          Resources above. */}
-      {(() => {
-        const slurmTasks = allTasks.filter(
-          (t) => t.cloud && t.cloud.toLowerCase() === 'slurm' && t.zone
-        );
-        if (slurmTasks.length === 0) return null;
-        const partitions = [...new Set(slurmTasks.map((t) => t.zone))];
-        return (
-          <div>
-            <div className="text-gray-600 font-medium text-base">Partition</div>
-            <div className="text-base mt-1">
-              {allTasks.length > 1 ? (
-                <NonCapitalizedTooltip
-                  content={slurmTasks
-                    .map(
-                      (task) =>
-                        `Task ${allTasks.indexOf(task)}${task.task ? ` (${task.task})` : ''}: ${task.zone}`
-                    )
-                    .join('\n')}
-                  className="text-sm text-muted-foreground"
-                >
-                  <span className="cursor-help border-b border-dotted border-gray-400">
-                    {partitions.join(', ')}
-                  </span>
-                </NonCapitalizedTooltip>
-              ) : (
-                partitions[0]
-              )}
-            </div>
-          </div>
-        );
-      })()}
-      <div>
-        <div className="text-gray-600 font-medium text-base">Resources</div>
-        <div className="text-base mt-1">
-          {jobData.resources_str_full || jobData.resources_str || '-'}
-        </div>
-      </div>
-      <div>
-        <div className="text-gray-600 font-medium text-base">Git Commit</div>
-        <div className="text-base mt-1 flex items-center">
-          {jobData.git_commit && jobData.git_commit !== '-' ? (
-            <span className="flex items-center mr-2">
-              {jobData.git_commit}
-              <Tooltip
-                content={isCopied ? 'Copied!' : 'Copy commit'}
-                className="text-muted-foreground"
-              >
-                <button
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(jobData.git_commit);
-                    setIsCopied(true);
-                    setTimeout(() => setIsCopied(false), 2000);
-                  }}
-                  className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
-                >
-                  {isCopied ? (
-                    <CheckIcon className="w-4 h-4 text-green-600" />
-                  ) : (
-                    <CopyIcon className="w-4 h-4" />
-                  )}
-                </button>
-              </Tooltip>
-            </span>
-          ) : (
-            <span className="text-gray-400">-</span>
-          )}
-        </div>
-      </div>
-
-      <div>
-        <div className="text-gray-600 font-medium text-base">Pool</div>
-        <div className="text-base mt-1">
-          {renderPoolLink(jobData.pool, jobData.pool_hash, poolsData)}
-        </div>
-      </div>
-
-      {jobData.depends_on?.length > 0 && (
-        <div>
-          <div className="text-gray-600 font-medium text-base">Depends On</div>
-          <div className="text-base mt-1">
-            {jobData.depends_on.map((dependency, index) => (
-              <span key={dependency}>
-                {index > 0 && ', '}
-                <Link
-                  href={`/jobs/${dependency}`}
-                  className="text-blue-600 hover:underline"
-                >
-                  {dependency}
+            {taskContext.parentTask && (
+              <span className="block">
+                <span className="text-gray-500">launched by</span>{' '}
+                <Link href={taskContext.parentTask.href}>
+                  {taskContext.parentTask.label}
                 </Link>
               </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Batch Progress section - only for batch jobs */}
-      {jobData.batch_total_batches != null && (
-        <div>
-          <div className="text-gray-600 font-medium text-base">
-            Batch Progress
-          </div>
-          <div className="text-base mt-1">
-            {(() => {
-              const completed = jobData.batch_completed_batches || 0;
-              const total = jobData.batch_total_batches;
-              const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-              const barColor =
-                completed >= total ? 'bg-green-500' : 'bg-blue-500';
-              const failed = total - completed;
-              const isTerminal = [
-                'SUCCEEDED',
-                'FAILED',
-                'CANCELLED',
-                'FAILED_SETUP',
-                'FAILED_PRECHECKS',
-                'FAILED_NO_RESOURCE',
-                'FAILED_CONTROLLER',
-              ].includes(jobData.status);
-              return (
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-3">
-                    <div className="w-40 bg-gray-200 rounded-full h-2.5">
-                      <div
-                        className={`${barColor} h-2.5 rounded-full transition-all`}
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <span className="text-sm text-gray-600">
-                      {completed}/{total} ({pct}%)
-                    </span>
-                  </div>
-                  {isTerminal && failed > 0 && completed < total && (
-                    <div className="text-xs text-red-600">
-                      {total - completed} batches incomplete
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-          </div>
-        </div>
-      )}
-
-      {/* External Links section - full width row */}
-      <div className="col-span-2">
-        <div className="text-gray-600 font-medium text-base">
-          External Links
-        </div>
-        <div className="text-base mt-1">
-          {combinedLinks && Object.keys(combinedLinks).length > 0 ? (
-            <div className="flex flex-wrap gap-4">
-              {Object.entries(combinedLinks).map(([label, url]) => {
-                const normalizedUrl = normalizeUrl(url);
-                return (
-                  <a
-                    key={label}
-                    href={normalizedUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:text-blue-800 hover:underline"
-                  >
-                    {label}
-                  </a>
-                );
-              })}
-            </div>
-          ) : (
-            <span className="text-gray-400">-</span>
-          )}
-        </div>
-      </div>
-
-      {/* Details section - surfaces the reason behind the current status
-          (e.g. why a job is still PENDING). A plugin may take over this slot
-          to render richer queue-specific details (e.g. Kueue); otherwise the
-          OSS fallback shows the plain details string so the reason is visible
-          here in the job details view, not just in the event table. */}
-      {jobData.details && (
+            )}
+          </span>
+        )}
+      {field(
+        'Status',
         <PluginSlot
-          name="jobs.detail.queue_details"
-          context={{
-            details: jobData.details,
-            queueName: jobData.kueue_queue_name,
-            infra: jobData.full_infra,
-            jobData: jobData,
-            title: 'Queue Details',
-          }}
+          name="jobs.detail.status.badge"
+          // The slot must see the status the fallback renders: jobData is
+          // the first task's row, not the group's aggregate.
+          context={{ ...jobData, status: computedStatus, statusTooltip }}
           fallback={
-            <div>
-              <div className="text-gray-600 font-medium text-base">Details</div>
-              <div className="text-base mt-1 whitespace-pre-wrap break-words">
-                {jobData.details}
-              </div>
-            </div>
+            <StatusBadge
+              status={computedStatus}
+              statusTooltip={statusTooltip}
+            />
           }
         />
       )}
-
-      {/* Entrypoint section - full width row */}
-      {(jobData.entrypoint || jobData.dag_yaml) && (
-        <div className="col-span-2">
-          <div className="flex items-center">
-            <div className="text-gray-600 font-medium text-base">
-              Entrypoint
-            </div>
-            {jobData.entrypoint && (
-              <Tooltip
-                content={isCommandCopied ? 'Copied!' : 'Copy command'}
-                className="text-muted-foreground"
+      {field(
+        'Submitted',
+        <span className="block min-w-0">
+          <span className="block">{shortTimestamp(jobData.submitted_at)}</span>
+          <span
+            className="flex items-center min-w-0 text-gray-500"
+            title={jobData.user}
+          >
+            <span className="flex-shrink-0 mr-1">by</span>
+            <UserDisplay
+              username={jobData.user}
+              userHash={jobData.user_hash}
+              className="flex items-center gap-1 min-w-0"
+              linkClassName="block truncate min-w-0"
+            />
+          </span>
+        </span>
+      )}
+      {field(
+        'Workspace',
+        <Link href="/workspaces">{jobData.workspace || 'default'}</Link>
+      )}
+      {field(
+        'Duration',
+        <span className="block">
+          {jobData.started_at || totalDuration > 0
+            ? show(formatDuration(totalDuration))
+            : dash}
+          {jobData.started_at && (
+            <span className="block">
+              <span className="text-gray-500">started at</span>{' '}
+              {shortTimestamp(jobData.started_at)}
+            </span>
+          )}
+        </span>,
+        // Task pages have an extra Job cell; let timing fill that row.
+        { newRow: !taskContext }
+      )}
+      {field('Recoveries', jobData.recoveries || 0)}
+      {batchTotal != null && field('Batch Progress', batchBar())}
+      <div
+        key="divider-compute"
+        className="hidden min-[1400px]:block col-span-full border-t border-gray-100"
+      />
+      {field(
+        'Requested Resources',
+        allTasks.length > 1 && !isEmpty(requested) ? (
+          <NonCapitalizedTooltip
+            content={`Aggregated from ${allTasks.length} tasks:\n${allTasks
+              .map(
+                (task, index) =>
+                  `Task ${index}${task.task ? ` (${task.task})` : ''}: ${task.requested_resources || task.resources_str || 'N/A'}`
+              )
+              .join('\n')}`}
+            className="text-sm text-muted-foreground"
+          >
+            <span className="cursor-help border-b border-dotted border-gray-400">
+              {requested}
+            </span>
+          </NonCapitalizedTooltip>
+        ) : (
+          show(requested)
+        ),
+        { newRow: true }
+      )}
+      {field(
+        'Resources',
+        show(jobData.resources_str_full || jobData.resources_str)
+      )}
+      {field(
+        'Infra',
+        <PluginSlot
+          name="jobs.detail.infra"
+          context={{ job: jobData, defaultContent: infraContent }}
+          fallback={infraContent}
+        />
+      )}
+      {/* Slurm schedules onto a partition (its zone); it is how quota and
+          priority are carved up on a Slurm cluster, so it gets its own field. */}
+      {partitions.length > 0 &&
+        field(
+          'Partition',
+          allTasks.length > 1 ? (
+            <NonCapitalizedTooltip
+              content={allTasks
+                .filter(
+                  (t) => t.cloud && t.cloud.toLowerCase() === 'slurm' && t.zone
+                )
+                .map(
+                  (task) =>
+                    `Task ${allTasks.indexOf(task)}${task.task ? ` (${task.task})` : ''}: ${task.zone}`
+                )
+                .join('\n')}
+              className="text-sm text-muted-foreground"
+            >
+              <span className="cursor-help border-b border-dotted border-gray-400">
+                {partitions.join(', ')}
+              </span>
+            </NonCapitalizedTooltip>
+          ) : (
+            partitions.join(', ')
+          )
+        )}
+      {field('Pool', isEmpty(jobData.pool) ? dash : pool)}
+      {field(
+        'Git Commit',
+        isEmpty(jobData.git_commit) ? (
+          dash
+        ) : (
+          <span>
+            {jobData.git_commit.slice(0, 7)}
+            {copyButton(
+              isCommitCopied,
+              async () => {
+                await navigator.clipboard.writeText(jobData.git_commit);
+                setIsCommitCopied(true);
+                setTimeout(() => setIsCommitCopied(false), 2000);
+              },
+              'Copy commit'
+            )}
+          </span>
+        )
+      )}
+      {field(
+        'External Links',
+        hasLinks ? (
+          <span className="flex flex-wrap gap-4">
+            {Object.entries(combinedLinks).map(([label, url]) => (
+              <a
+                key={label}
+                href={normalizeUrl(url)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 hover:text-blue-800 hover:underline"
               >
-                <button
-                  onClick={copyCommandToClipboard}
-                  className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
-                >
-                  {isCommandCopied ? (
-                    <CheckIcon className="w-4 h-4 text-green-600" />
-                  ) : (
-                    <CopyIcon className="w-4 h-4" />
-                  )}
-                </button>
-              </Tooltip>
+                {label}
+              </a>
+            ))}
+          </span>
+        ) : (
+          dash
+        )
+      )}
+      {jobData.depends_on?.length > 0 &&
+        field(
+          'Depends On',
+          <span>
+            {jobData.depends_on.map((dependency, index) => (
+              <span key={dependency}>
+                {index > 0 && ', '}
+                <Link href={`/jobs/${dependency}`}>{dependency}</Link>
+              </span>
+            ))}
+          </span>
+        )}
+      {/* The reason behind the current status (e.g. why a job is PENDING).
+          A plugin may take over this slot; the fallback shows the string. */}
+      {jobData.details && (
+        <div className="col-span-full min-w-0">
+          <PluginSlot
+            name="jobs.detail.queue_details"
+            context={{
+              details: jobData.details,
+              queueName: jobData.kueue_queue_name,
+              infra: jobData.full_infra,
+              jobData: jobData,
+              title: 'Status reason',
+              variant: 'compact',
+            }}
+            fallback={field(
+              'Details',
+              <span className="whitespace-pre-wrap">{jobData.details}</span>,
+              { wide: true }
             )}
-          </div>
-
-          <div className="space-y-4 mt-3">
-            {/* Launch Command */}
-            {jobData.entrypoint && (
-              <div>
-                <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
-                  <code className="text-sm text-gray-800 font-mono break-all">
-                    {jobData.entrypoint}
-                  </code>
-                </div>
-              </div>
-            )}
-
-            {/* Job YAML - Collapsible */}
-            {jobData.dag_yaml && jobData.dag_yaml !== '{}' && (
-              <div>
-                <div className="flex items-center mb-2">
-                  <button
-                    onClick={toggleYamlExpanded}
-                    className="flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200"
-                  >
-                    {isYamlExpanded ? (
-                      <ChevronDownIcon className="w-4 h-4 mr-1" />
-                    ) : (
-                      <ChevronRightIcon className="w-4 h-4 mr-1" />
-                    )}
-                    <span className="text-base">Show SkyPilot YAML</span>
-                  </button>
-
-                  <Tooltip
-                    content={isCopied ? 'Copied!' : 'Copy YAML'}
-                    className="text-muted-foreground"
-                  >
-                    <button
-                      onClick={copyYamlToClipboard}
-                      className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
-                    >
-                      {isCopied ? (
-                        <CheckIcon className="w-4 h-4 text-green-600" />
-                      ) : (
-                        <CopyIcon className="w-4 h-4" />
-                      )}
-                    </button>
-                  </Tooltip>
-                </div>
-
-                {isYamlExpanded && (
-                  <div>
-                    {(() => {
-                      const yamlDocs = formatJobYaml(jobData.dag_yaml);
-                      // Build JobGroup header with name and execution
-                      const hasJobGroupConfig =
-                        jobData.name || jobData.execution;
-                      const jobGroupHeader = hasJobGroupConfig
-                        ? [
-                            jobData.name ? `name: ${jobData.name}` : null,
-                            jobData.execution
-                              ? `execution: ${jobData.execution}`
-                              : null,
-                          ]
-                            .filter(Boolean)
-                            .join('\n') + '\n---\n'
-                        : '';
-
-                      if (yamlDocs.length === 0) {
-                        return (
-                          <div className="text-gray-500">No YAML available</div>
-                        );
-                      } else if (yamlDocs.length === 1) {
-                        // Single document - show directly
-                        return (
-                          <YamlCodeBlock
-                            value={jobGroupHeader + yamlDocs[0].content}
-                            readOnly
-                          />
-                        );
-                      } else {
-                        // Multiple documents - show toggle and content
-                        return (
-                          <div className="space-y-4">
-                            {/* Toggle for Full YAML vs Per-Job */}
-                            <div className="flex items-center space-x-4 pb-2 border-b border-gray-200">
-                              <button
-                                onClick={() => setShowFullYaml(false)}
-                                className={`text-sm px-2 py-1 rounded ${!showFullYaml ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:text-gray-800'}`}
-                              >
-                                By Job
-                              </button>
-                              <button
-                                onClick={() => setShowFullYaml(true)}
-                                className={`text-sm px-2 py-1 rounded ${showFullYaml ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:text-gray-800'}`}
-                              >
-                                Full YAML
-                              </button>
-                            </div>
-
-                            {showFullYaml ? (
-                              // Show full YAML with JobGroup header
-                              <YamlCodeBlock
-                                value={
-                                  jobGroupHeader +
-                                  yamlDocs
-                                    .map((doc) => doc.content)
-                                    .join('\n---\n')
-                                }
-                                readOnly
-                              />
-                            ) : (
-                              // Show per-job YAMLs
-                              yamlDocs.map((doc, index) => (
-                                <div
-                                  key={index}
-                                  className="border-b border-gray-200 pb-4 last:border-b-0"
-                                >
-                                  <button
-                                    onClick={() => toggleYamlDocExpanded(index)}
-                                    className="flex items-center justify-between w-full text-left focus:outline-none"
-                                  >
-                                    <div className="flex items-center">
-                                      {expandedYamlDocs[index] ? (
-                                        <ChevronDownIcon className="w-4 h-4 mr-2" />
-                                      ) : (
-                                        <ChevronRightIcon className="w-4 h-4 mr-2" />
-                                      )}
-                                      <span className="text-sm font-medium text-gray-700">
-                                        Job {index + 1}: {doc.preview}
-                                      </span>
-                                    </div>
-                                  </button>
-                                  {expandedYamlDocs[index] && (
-                                    <div className="mt-3 ml-6">
-                                      <YamlCodeBlock
-                                        value={doc.content}
-                                        readOnly
-                                      />
-                                    </div>
-                                  )}
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        );
-                      }
-                    })()}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          />
         </div>
       )}
+      {jobData.entrypoint ? (
+        <div key="Entrypoint" className="col-span-full min-w-0">
+          <div className="text-sm text-gray-500">
+            Entrypoint
+            {copyButton(
+              isCommandCopied,
+              copyCommandToClipboard,
+              'Copy command'
+            )}
+          </div>
+          <div className="mt-1 bg-gray-50 border border-gray-200 rounded-md p-3">
+            <code className="text-sm text-gray-800 font-mono break-all">
+              {jobData.entrypoint}
+            </code>
+          </div>
+        </div>
+      ) : (
+        field('Entrypoint', dash, { wide: true })
+      )}
+      {yamlBlock && <div className="col-span-full min-w-0">{yamlBlock}</div>}
     </div>
   );
 }
