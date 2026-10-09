@@ -75,12 +75,13 @@ EXTERNAL_LOCAL_ENV_VARS = [
 
 def request_body_env_vars() -> dict:
     env_vars = {}
+    is_local = common.is_api_server_local()
     for env_var in os.environ:
         if (env_var.startswith(constants.SKYPILOT_ENV_VAR_PREFIX) and
                 not env_var.startswith(
                     constants.SKYPILOT_SERVER_ENV_VAR_PREFIX)):
             env_vars[env_var] = os.environ[env_var]
-        if common.is_api_server_local() and env_var in EXTERNAL_LOCAL_ENV_VARS:
+        if is_local and env_var in EXTERNAL_LOCAL_ENV_VARS:
             env_vars[env_var] = os.environ[env_var]
     env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
     env_vars[constants.USER_ENV_VAR] = common_utils.get_local_user_name()
@@ -90,7 +91,7 @@ def request_body_env_vars() -> dict:
     # can include it in its own usage report.
     if common.basic_auth_enabled and common.client_user_hash is not None:
         env_vars[constants.CLIENT_USER_HASH_ENV_VAR] = common.client_user_hash
-    if not common.is_api_server_local():
+    if not is_local:
         # Used in job controller, for local API server, keep the
         # SKYPILOT_CONFIG env var to use the config for the managed job.
         env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
@@ -186,21 +187,22 @@ class RequestBody(BasePayload):
     workspace_access: Optional[str] = None
 
     def __init__(self, **data):
-        data['env_vars'] = data.get('env_vars', request_body_env_vars())
-        usage_lib_entrypoint = usage_lib.messages.usage.entrypoint
-        if usage_lib_entrypoint is None:
-            usage_lib_entrypoint = ''
-        data['entrypoint'] = data.get('entrypoint', usage_lib_entrypoint)
-        data['entrypoint_command'] = data.get(
-            'entrypoint_command', common_utils.get_pretty_entrypoint_cmd())
-        data['using_remote_api_server'] = data.get(
-            'using_remote_api_server', not common.is_api_server_local())
-        data['override_skypilot_config'] = data.get(
-            'override_skypilot_config',
-            get_override_skypilot_config_from_client())
-        data['override_skypilot_config_path'] = data.get(
-            'override_skypilot_config_path',
-            get_override_skypilot_config_path_from_client())
+        # Compute defaults only for missing keys; they are costly per request.
+        if 'env_vars' not in data:
+            data['env_vars'] = request_body_env_vars()
+        if 'entrypoint' not in data:
+            data['entrypoint'] = usage_lib.messages.usage.entrypoint or ''
+        if 'entrypoint_command' not in data:
+            data['entrypoint_command'] = (
+                common_utils.get_pretty_entrypoint_cmd())
+        if 'using_remote_api_server' not in data:
+            data['using_remote_api_server'] = not common.is_api_server_local()
+        if 'override_skypilot_config' not in data:
+            data['override_skypilot_config'] = (
+                get_override_skypilot_config_from_client())
+        if 'override_skypilot_config_path' not in data:
+            data['override_skypilot_config_path'] = (
+                get_override_skypilot_config_path_from_client())
         super().__init__(**data)
 
     def to_kwargs(self) -> Dict[str, Any]:
