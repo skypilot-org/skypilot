@@ -23,13 +23,18 @@ These tests pin:
   configured deadline otherwise, always `lock < statement < idle <= deadline`,
   and read from the same source as `db_lookup.AUTH_DB_TIMEOUT_SECONDS`; a
   nonsensical setting is refused loudly instead of reaching the database;
-* SQLite: no SET LOCAL at all (unsupported there); behavior unchanged.
+* SQLite: no SET LOCAL at all (unsupported there). The lock_timeout value
+  bounds the busy timeout of the upsert's own connection, and pooled
+  connections keep the engine's busy timeout.
 """
 
 # pylint: disable=protected-access,redefined-outer-name,missing-class-docstring
 import os
+import sqlite3
 import subprocess
 import sys
+import threading
+import time
 from unittest import mock
 
 import pytest
@@ -341,7 +346,7 @@ def _fresh_sqlite_db(tmp_path, monkeypatch):
     return global_user_state._db_manager.get_engine()
 
 
-class TestSqliteUpsertIsUnchanged:
+class TestSqliteUpsertIssuesNoSetLocal:
 
     def test_sqlite_issues_no_set_local(self, tmp_path, monkeypatch):
         engine = _fresh_sqlite_db(tmp_path, monkeypatch)
@@ -378,6 +383,69 @@ class TestSqliteUpsertIsUnchanged:
             global_user_state.add_or_update_user(
                 models.User(id='u-sqlite-2', name='tester'))
         bound.assert_not_called()
+
+
+def _pooled_busy_timeouts_ms(engine):
+    """Busy timeout of every connection currently idle in the engine pool."""
+    conns = [engine.connect() for _ in range(engine.pool.checkedin())]
+    try:
+        return [
+            c.exec_driver_sql('PRAGMA busy_timeout').scalar() for c in conns
+        ]
+    finally:
+        for c in conns:
+            c.close()
+
+
+class TestSqliteUpsertIsBounded:
+    """On SQLite the upsert waits for the write lock at most the Postgres
+    lock_timeout value, and pooled connections keep the engine timeout."""
+
+    def test_upsert_gives_up_within_the_auth_deadline(self, tmp_path,
+                                                      monkeypatch):
+        monkeypatch.setenv(_DEADLINE_ENV, '1')
+        engine = _fresh_sqlite_db(tmp_path, monkeypatch)
+        blocker = sqlite3.connect(engine.url.database)
+        blocker.execute('BEGIN IMMEDIATE')
+        try:
+            start = time.monotonic()
+            with pytest.raises(sqlalchemy.exc.OperationalError,
+                               match='database is locked'):
+                global_user_state.add_or_update_user(
+                    models.User(id='u-locked', name='tester'))
+            assert time.monotonic() - start < 1
+        finally:
+            blocker.rollback()
+            blocker.close()
+
+    def test_bound_does_not_leak_to_pooled_connections(self, tmp_path,
+                                                       monkeypatch):
+        monkeypatch.setenv(_DEADLINE_ENV, '1')
+        engine = _fresh_sqlite_db(tmp_path, monkeypatch)
+        engine_timeout_ms = db_utils._DB_TIMEOUT_S * 1000
+        with engine.begin() as conn:
+            conn.exec_driver_sql('CREATE TABLE probe (value INTEGER)')
+        global_user_state.add_or_update_user(
+            models.User(id='u-ok', name='tester'))
+        assert set(_pooled_busy_timeouts_ms(engine)) == {engine_timeout_ms}
+
+        blocker = sqlite3.connect(engine.url.database, check_same_thread=False)
+        blocker.execute('BEGIN IMMEDIATE')
+        with pytest.raises(sqlalchemy.exc.OperationalError):
+            global_user_state.add_or_update_user(
+                models.User(id='u-locked', name='tester'))
+        assert set(_pooled_busy_timeouts_ms(engine)) == {engine_timeout_ms}
+
+        # A plain write on the same engine still waits past sqlite3's
+        # default 5s timeout.
+        release = threading.Timer(6, blocker.commit)
+        release.start()
+        try:
+            with engine.begin() as conn:
+                conn.exec_driver_sql('INSERT INTO probe VALUES (1)')
+        finally:
+            release.join()
+            blocker.close()
 
 
 def test_set_local_statement_text_is_valid_sql():
