@@ -72,11 +72,15 @@ class Config(Dict[str, Any]):
         Returns:
             The value of the nested key, or 'default_value' if not found.
         """
-        config = copy.deepcopy(self)
-        if override_configs is not None:
-            config = _recursive_update(config, override_configs,
-                                       allowed_override_keys,
-                                       disallowed_override_keys)
+        if not override_configs:
+            missing = object()
+            value = _get_nested(self, keys, missing, pop=False)
+            if value is missing:
+                return default_value
+            return copy.deepcopy(value)
+        config = _recursive_update(copy.deepcopy(self), override_configs,
+                                   allowed_override_keys,
+                                   disallowed_override_keys)
         return _get_nested(config, keys, default_value, pop=False)
 
     def set_nested(self, keys: Tuple[str, ...], value: Any) -> None:

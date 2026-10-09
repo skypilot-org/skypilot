@@ -22,6 +22,36 @@ def test_nested_config(monkeypatch) -> None:
     }
 
 
+def test_get_nested_returns_isolated_copy() -> None:
+    """Mutating a value returned by get_nested leaves the config unchanged."""
+    config = config_utils.Config({
+        'kubernetes': {
+            'allowed_contexts': ['a', 'b'],
+            'pod_config': {
+                'metadata': {}
+            }
+        }
+    })
+    contexts = config.get_nested(('kubernetes', 'allowed_contexts'), None)
+    contexts.append('c')
+    for override in (None, {}):
+        sub = config.get_nested(('kubernetes',), None, override)
+        sub['pod_config']['metadata']['x'] = 1
+    assert config == {
+        'kubernetes': {
+            'allowed_contexts': ['a', 'b'],
+            'pod_config': {
+                'metadata': {}
+            }
+        }
+    }
+
+    default = ['d']
+    assert config.get_nested(('kubernetes', 'missing'), default) is default
+    assert config.get_nested(
+        ('kubernetes', 'allowed_contexts', 'x'), default) is default
+
+
 def test_recursive_update_k8s_config():
     base_config = {
         'kubernetes': {

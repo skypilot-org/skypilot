@@ -63,6 +63,31 @@ def test_request_body_env_vars_client_user_hash_none_with_basic_auth(
     assert constants.CLIENT_USER_HASH_ENV_VAR not in env_vars
 
 
+def test_request_body_skips_defaults_for_supplied_fields(monkeypatch):
+    """Fields the client sent are kept and their defaults are not computed."""
+
+    def _fail(*args, **kwargs):
+        raise AssertionError('default computed for a supplied field')
+
+    monkeypatch.setattr(payloads, 'request_body_env_vars', _fail)
+    monkeypatch.setattr(payloads.common, 'is_api_server_local', _fail)
+    monkeypatch.setattr(payloads.common_utils, 'get_pretty_entrypoint_cmd',
+                        _fail)
+    monkeypatch.setattr(payloads, 'get_override_skypilot_config_from_client',
+                        _fail)
+    monkeypatch.setattr(payloads,
+                        'get_override_skypilot_config_path_from_client', _fail)
+    body = payloads.RequestBody(env_vars={'A': 'b'},
+                                entrypoint='e',
+                                entrypoint_command='c',
+                                using_remote_api_server=True,
+                                override_skypilot_config={},
+                                override_skypilot_config_path=None)
+    assert body.env_vars == {'A': 'b'}
+    assert body.entrypoint == 'e'
+    assert body.using_remote_api_server is True
+
+
 def test_create_debug_dump_body_overall_deadline_threads_through():
     """overall_deadline must survive to_kwargs so the executor forwards it to
     core.create_debug_dump; omitting it stays None (back-compat)."""
