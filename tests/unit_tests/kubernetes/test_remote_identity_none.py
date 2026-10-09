@@ -49,6 +49,9 @@ def server_config(tmp_path, monkeypatch):
     def load(config):
         path = tmp_path / 'config.yaml'
         path.write_text(yaml_utils.dump_yaml_str(config))
+        # Another test may have left this set; it would replace the file below.
+        monkeypatch.delenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                           raising=False)
         monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', str(path))
         monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH',
                             str(tmp_path / 'nonexistent.yaml'))
