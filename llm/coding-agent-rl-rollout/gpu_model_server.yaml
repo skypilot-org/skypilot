@@ -1,0 +1,27 @@
+# Serve a coder model with vLLM (OpenAI-compatible API) on a GPU. The rollout
+# sandboxes in run_split_cluster.py dial this server to fix the bug.
+#
+# Launch on your GPU cluster/context, e.g.:
+#   sky launch -c model-server -d --infra k8s/<gpu-context> \
+#     llm/coding-agent-rl-rollout/gpu_model_server.yaml
+#
+# Then expose it for the sandbox cluster to reach (expose_model_server.sh) and
+# pass the resulting /v1 URL to the driver via --head-url.
+
+name: vime-model-server
+
+resources:
+  accelerators: A100:1
+  image_id: docker:vllm/vllm-openai:v0.6.6
+  ports: 8000
+
+envs:
+  MODEL: Qwen/Qwen2.5-Coder-7B-Instruct
+
+run: |
+  export HF_HUB_ENABLE_HF_TRANSFER=1
+  vllm serve "$MODEL" \
+    --served-model-name model \
+    --host 0.0.0.0 --port 8000 \
+    --max-model-len 16384 \
+    --gpu-memory-utilization 0.90
