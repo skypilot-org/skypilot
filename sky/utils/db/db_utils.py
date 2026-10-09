@@ -980,7 +980,7 @@ def get_engine(
             return async_sqlite_engine
         if db_path not in _sqlite_engine_cache:
             _sqlite_engine_cache[db_path] = sqlalchemy.create_engine(
-                'sqlite:///' + db_path)
+                'sqlite:///' + db_path, connect_args={'timeout': _DB_TIMEOUT_S})
             sql_metrics.install(_sqlite_engine_cache[db_path],
                                 f'sqlite_{db_name}')
         engine = _sqlite_engine_cache[db_path]
