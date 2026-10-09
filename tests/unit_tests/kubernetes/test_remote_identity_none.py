@@ -72,6 +72,7 @@ def _resources(task_config=None, kubernetes_identity=None):
     resources.image_id = None
     resources.requires_fuse = False
     resources.kubernetes_identity = kubernetes_identity
+    resources.remote_identity_none_at_launch = None
     resources.network_tier = resources_utils.NetworkTier.BEST
     setattr(resources, 'assert_launchable', lambda: resources)
     return resources
@@ -294,6 +295,23 @@ class TestAutodownUnsupportedUnderNone:
         assert clouds.CloudImplementationFeatures.AUTODOWN not in (
             self._unsupported())
 
+    def test_a_cluster_launched_before_none_can_still_autodown(
+            self, server_config):
+        # Its pods have a token; today's NONE does not take it away.
+        server_config(_k8s(remote_identity=_NONE))
+        resources = _resources()
+        resources.remote_identity_none_at_launch = False
+        assert not kubernetes_cloud.Kubernetes.remote_identity_is_none(
+            _CTX, resources)
+
+    def test_a_cluster_launched_under_none_still_cannot(self, server_config):
+        # Its pods have no token, whatever today's config or client says.
+        server_config({})
+        resources = _resources()
+        resources.remote_identity_none_at_launch = True
+        assert kubernetes_cloud.Kubernetes.remote_identity_is_none(
+            _CTX, resources)
+
     def test_an_exempt_cluster_can_autodown(self, server_config):
         server_config(_k8s(remote_identity=_NONE))
         assert clouds.CloudImplementationFeatures.AUTODOWN not in (
@@ -420,6 +438,45 @@ class TestCheckedAtSubmit:
             kubernetes_cloud.Kubernetes.check_resources_keep_server_none(
                 resources)
 
+    def _check_request(self, client_config=None, contexts=None):
+        side = {
+            'side_effect': contexts
+        } if isinstance(contexts, Exception) else {
+            'return_value': [_CTX]
+        }
+        with mock.patch.object(kubernetes_cloud.Kubernetes,
+                               'existing_allowed_contexts', **side), \
+                skypilot_config.override_skypilot_config(client_config):
+            kubernetes_cloud.Kubernetes.check_request_keeps_server_none()
+
+    @pytest.mark.parametrize('client,match', [
+        (_k8s(remote_identity='SERVICE_ACCOUNT'), 'cannot override it'),
+        (_k8s(pod_config={'spec': {
+            'automountServiceAccountToken': True
+        }}), 'would give them some'),
+    ],
+                             ids=['remote_identity', 'pod_config'])
+    def test_a_request_config_loosening_server_none_is_refused(
+            self, server_config, client, match):
+        # Whatever the task: this config goes to the controller with the job.
+        server_config(_k8s(remote_identity=_NONE))
+        with pytest.raises(exceptions.InvalidCloudConfigs, match=match):
+            self._check_request(client)
+
+    def test_a_request_config_that_keeps_none_passes(self, server_config):
+        server_config(_k8s(remote_identity=_NONE))
+        self._check_request()
+
+    def test_the_same_request_config_without_server_none_passes(
+            self, server_config):
+        server_config({})
+        self._check_request(_k8s(remote_identity='SERVICE_ACCOUNT'))
+
+    def test_a_request_check_without_contexts_passes(self, server_config):
+        server_config(_k8s(remote_identity=_NONE))
+        self._check_request(_k8s(remote_identity='SERVICE_ACCOUNT'),
+                            contexts=ImportError('no kubernetes'))
+
     def test_another_cloud_is_not_checked(self, server_config):
         server_config(_k8s(remote_identity=_NONE))
         self._check(_k8s(remote_identity='SERVICE_ACCOUNT'), cloud=clouds.AWS())
@@ -495,8 +552,10 @@ class TestResourcesCarryTheIdentity:
     def test_copy_and_pickle_keep_it(self):
         r = resources_lib.Resources(cpus='1')
         r.set_kubernetes_identity('fixed-sa')
-        assert r.copy(cpus='2').kubernetes_identity == 'fixed-sa'
-        assert pickle.loads(pickle.dumps(r)).kubernetes_identity == 'fixed-sa'
+        r.set_remote_identity_none_at_launch(True)
+        for copied in (r.copy(cpus='2'), pickle.loads(pickle.dumps(r))):
+            assert copied.kubernetes_identity == 'fixed-sa'
+            assert copied.remote_identity_none_at_launch is True
 
     def test_a_handle_pickled_before_it_existed_loads_without_it(self):
         r = resources_lib.Resources(cpus='1')
@@ -505,9 +564,11 @@ class TestResourcesCarryTheIdentity:
         state = dict(state)
         state['_version'] = 35
         state.pop('_kubernetes_identity', None)
+        state.pop('_remote_identity_none', None)
         old = resources_lib.Resources.__new__(resources_lib.Resources)
         old.__setstate__(state)
         assert old.kubernetes_identity is None
+        assert old.remote_identity_none_at_launch is None
 
     def test_a_requester_cannot_set_it_through_yaml(self):
         r = resources_lib.Resources(cpus='1')

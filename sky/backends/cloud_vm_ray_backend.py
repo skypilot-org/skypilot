@@ -1209,6 +1209,13 @@ class RetryingVmProvisioner(object):
                 if zones and len(zones) == 1:
                     launched_resources = launched_resources.copy(
                         zone=zones[0].name)
+                if isinstance(to_provision.cloud, clouds.Kubernetes):
+                    # What the pods actually got, so later autodown checks on
+                    # this cluster do not depend on today's config.
+                    provider = yaml_utils.read_yaml(cluster_config_file).get(
+                        'provider', {})
+                    launched_resources.set_remote_identity_none_at_launch(
+                        bool(provider.get('remote_identity_none', False)))
 
                 prev_cluster_ips, prev_ssh_ports, prev_cluster_info = (None,
                                                                        None,

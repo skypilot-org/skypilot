@@ -293,6 +293,9 @@ class Kubernetes(clouds.Cloud):
         """Whether pods launched for `resources` in `context` get no token."""
         if isinstance(resources.kubernetes_identity, str):
             return False
+        # An existing cluster: what its pods got, not what today's config says.
+        if isinstance(resources.remote_identity_none_at_launch, bool):
+            return resources.remote_identity_none_at_launch
         none = schemas.RemoteIdentityOptions.NONE.value
         if cls._server_remote_identity(context) == none:
             return True
@@ -303,6 +306,35 @@ class Kubernetes(clouds.Cloud):
             default_value=schemas.get_default_remote_identity('kubernetes'),
             override_configs=resources.cluster_config_overrides)
         return _match_remote_identity(merged, context) == none
+
+    @classmethod
+    def check_request_keeps_server_none(cls) -> None:
+        """Raises if the request's own config loosens a NONE the server's
+        config set for an allowed context.
+
+        For managed jobs and services, checked when they are submitted: the
+        request's config travels with them to their controller, which reads
+        it as its server config, so the loosened value would not be refused
+        there. Whatever the task's resources are, since that config applies to
+        every cluster the controller launches.
+        """
+        try:
+            contexts = cls.existing_allowed_contexts()
+        except Exception:  # pylint: disable=broad-except
+            return  # e.g. no kubernetes package: nothing to launch there.
+        none = schemas.RemoteIdentityOptions.NONE.value
+        for context in contexts:
+            if cls._server_remote_identity(context) != none:
+                continue
+            requested = _match_remote_identity(
+                skypilot_config.get_effective_workspace_region_config(
+                    cloud='kubernetes',
+                    region=context,
+                    keys=('remote_identity',),
+                    default_value=schemas.get_default_remote_identity(
+                        'kubernetes')), context)
+            if requested is not None:
+                cls._refuse_undoing_none(context, requested, {})
 
     @classmethod
     def check_task_keeps_server_none(cls, task: 'task_lib.Task') -> None:

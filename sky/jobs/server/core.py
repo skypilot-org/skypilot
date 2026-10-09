@@ -1011,6 +1011,7 @@ def _launch(
                              'the --pool argument when launching a job group.')
     dag.validate()
     if pool is None:  # A pool job launches no cluster of its own.
+        clouds.Kubernetes.check_request_keeps_server_none()
         for task_ in dag.tasks:
             clouds.Kubernetes.check_task_keeps_server_none(task_)
     # TODO(aylei): use consolidated job controller instead of performing
