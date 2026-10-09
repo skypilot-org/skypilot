@@ -3798,38 +3798,75 @@ async def get_unfinished_task_deadline_rows_async(
     return dict(rows_by_job)
 
 
-async def set_deadline_exceeded_async(job_id: int, task_id: int,
-                                      failure_reason: str,
-                                      event_reason: str) -> bool:
-    """Record that a task exceeded one of its deadlines (e.g. queue_timeout).
+class DeadlineKind(enum.Enum):
+    """A managed-job time limit, named by the field that sets it.
 
-    In one transaction: set the task's ``failure_reason`` and append a
+    Each kind is measured against its own clock in the task's row; see
+    _deadline_exceeded_clause.
+    """
+    # From submitted_at, while the task has not started (start_at unset).
+    QUEUE_TIMEOUT = 'queue_timeout'
+
+
+def _deadline_exceeded_clause(kind: DeadlineKind, limit_seconds: float,
+                              now: float) -> 'sqlalchemy.ColumnElement':
+    """SQL predicate on a task row: ``kind``'s deadline has passed at ``now``.
+
+    The SQL counterpart of the controller's in-memory check, so the write in
+    set_deadline_exceeded_async re-decides on the row's current values.
+    """
+    if kind == DeadlineKind.QUEUE_TIMEOUT:
+        return sqlalchemy.and_(
+            spot_table.c.start_at.is_(None),
+            spot_table.c.submitted_at.is_not(None),
+            spot_table.c.submitted_at <= now - limit_seconds,
+        )
+    raise ValueError(f'Unknown deadline kind: {kind!r}')
+
+
+async def set_deadline_exceeded_async(job_id: int, task_id: int,
+                                      kind: DeadlineKind, limit_seconds: float,
+                                      now: float, failure_reason: str,
+                                      event_reason: str) -> bool:
+    """Record that a task exceeded one of its deadlines, if it still has.
+
+    The deadline is re-checked in the same UPDATE that records it, against
+    the row's current timestamps, so this write decides: a task that started
+    (or a job that started cancelling) after the caller read its row is left
+    alone. In one transaction: set the task's ``failure_reason`` and append a
     CANCELLING job event with ``event_reason``, so both the job record and
     its event timeline say why the controller is about to cancel the job.
-    Applies only while the task has not ended and the job is not already
-    being cancelled.
+
+    Args:
+        job_id: The managed job.
+        task_id: The task whose deadline was exceeded.
+        kind: Which deadline; selects the clock it is measured against.
+        limit_seconds: The deadline, in seconds.
+        now: The time the deadline was evaluated at, as epoch seconds.
+        failure_reason: Written to the task's failure_reason.
+        event_reason: The reason of the CANCELLING job event.
 
     Returns:
         True if the reason was recorded (the caller should go on to cancel
-        the job), False if the task already ended or the job is already
-        cancelling (nothing to do).
+        the job). False if the deadline no longer holds, the task already
+        ended, or the job is already being cancelled (nothing to do).
     """
+    other_task = spot_table.alias('other_task')
+    job_is_cancelling = sqlalchemy.exists().where(
+        sqlalchemy.and_(
+            other_task.c.spot_job_id == job_id,
+            other_task.c.status == ManagedJobStatus.CANCELLING.value,
+        ))
 
     async def _op(session: sql_async.AsyncSession) -> bool:
-        cancelling = await session.execute(
-            sqlalchemy.select(spot_table.c.task_id).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.status == ManagedJobStatus.CANCELLING.value,
-                )).limit(1))
-        if cancelling.first() is not None:
-            return False
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
                     spot_table.c.spot_job_id == job_id,
                     spot_table.c.task_id == task_id,
                     spot_table.c.end_at.is_(None),
+                    _deadline_exceeded_clause(kind, limit_seconds, now),
+                    sqlalchemy.not_(job_is_cancelling),
                 )).values({spot_table.c.failure_reason: failure_reason}))
         if result.rowcount != 1:
             await session.rollback()
