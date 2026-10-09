@@ -841,6 +841,19 @@ class TestAkaveStorage:
         assert '/mnt/data' in cmd
         assert 'AWS_SHARED_CREDENTIALS_FILE=' in cmd
 
+    def test_akave_mount_cmd_rclone_uses_env_auth(self):
+        """rclone (ARM64) must read the Akave profile from the environment."""
+        cmd = mounting_utils.get_akave_mount_cmd(
+            akave_credentials_path='~/.akave/akave.credentials',
+            akave_profile_name='akave',
+            bucket_name='test-bucket',
+            endpoint_url='https://s3.example.com',
+            mount_path='/mnt/data')
+        rclone_cmd, goofys_cmd = cmd.rsplit('; else ', 1)
+        assert 'rclone mount :s3:test-bucket' in rclone_cmd
+        assert '--s3-env-auth=true' in rclone_cmd
+        assert '--s3-env-auth' not in goofys_cmd
+
     def test_akave_in_store_enabled_clouds(self):
         """Verify Akave is in STORE_ENABLED_CLOUDS."""
         assert 'Akave' in storage_lib.STORE_ENABLED_CLOUDS
