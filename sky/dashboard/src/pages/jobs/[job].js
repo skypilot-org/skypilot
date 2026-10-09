@@ -163,9 +163,8 @@ function JobDetails({
   const [selectedNode, setSelectedNode] = useState('all');
   const [logNodes, setLogNodes] = useState([]);
   // If a plugin owns the logs slot, the OSS "(Logs are not streaming;
-  // click refresh ...)" hint is misleading — the plugin's component
-  // streams live. Hide it. (ControllerLogsSection makes the same check
-  // independently for the controller-logs heading.)
+  // click refresh ...)" hint does not apply. Hide it. (ControllerLogsSection
+  // makes the same check independently for the controller-logs heading.)
   const logsSlotHasPlugin = usePluginComponents('jobs.detail.logs').length > 0;
   const [logExtractedLinks, setLogExtractedLinks] = useState({});
   // Track download-in-flight per kind ('logs' / 'controller' / per-task)
@@ -1025,10 +1024,9 @@ function JobDetails({
               />
             )}
 
-            {/* Plugin Slot: Job Detail GPU metrics. The built-in
-                TelemetrySection above covers Kubernetes; this lets a plugin
-                contribute a GPU-metrics/telemetry panel for other infra
-                (empty when no plugin registers for it). */}
+            {/* Plugin Slot: Job Detail GPU metrics. Rendered after the
+                built-in TelemetrySection above (empty when no plugin
+                registers for it). */}
             <PluginSlot
               name="jobs.detail.gpu-metrics"
               context={{

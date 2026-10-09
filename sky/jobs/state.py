@@ -162,10 +162,8 @@ spot_table = sqlalchemy.Table(
     # Optional plugin-provided override for the user-facing status. The core
     # state machine never reads this column; it always uses `status`. Read
     # paths (status counts, status filter, returned status) may surface this
-    # value instead of `status` via the optional `status_expr` seam, so a
-    # plugin can present a refined status (e.g. show a still-launching job as
-    # PENDING while it waits in an external scheduler queue) without altering
-    # the underlying job lifecycle. NULL means "no override".
+    # value instead of `status` via the optional `status_expr` seam, without
+    # altering the underlying job lifecycle. NULL means "no override".
     sqlalchemy.Column('status_override', sqlalchemy.Text, server_default=None),
     # When the job was accepted, as epoch seconds. T0 of the launch timeline.
     #
@@ -205,7 +203,7 @@ spot_table = sqlalchemy.Table(
     #
     # Only two of these are read today. t_time_to_running and
     # t_controller_queue are the conditional-UPDATE targets that make recording
-    # exactly-once across replicas, one for a task that ran and one for a task
+    # exactly-once across processes, one for a task that ran and one for a task
     # that never did. The other six have no reader: the Prometheus series are
     # observed from the in-memory breakdown in the same call that computes it,
     # not from these columns. They are stored for the job-detail view, which
@@ -1318,7 +1316,7 @@ async def set_backoff_pending_async(job_id: int,
     """Set the task to PENDING state if its launch is waiting to continue.
 
     This is used while the launch is in retry backoff, or while the launch
-    request is parked waiting to resume (e.g. waiting for external admission).
+    request is parked waiting to resume (e.g. waiting on a cluster lock).
 
     This should only be used to transition from STARTING or RECOVERING back to
     PENDING.
@@ -2078,8 +2076,8 @@ def get_managed_jobs_highest_priority(
 # 2. Filters: which of those rows pass. Visibility (``accessible_workspaces``,
 #    ``user_hashes``) and the explicit filters (name, pool, workspace, infra,
 #    status, skip_finished, submitted window). Each is tested on the row's own
-#    job or task; a dynamic task is its own job here (SKY-7163 tracks moving
-#    the job-level filters to the tree root).
+#    job or task; a dynamic task is its own job here (the job-level
+#    filters may later move to the tree root).
 #
 # 3. Slice: which page. The pagination unit is the tree, so a group and its
 #    dynamic tasks always share a page. ``total`` counts trees. Paging takes
@@ -6080,8 +6078,8 @@ def record_launch_timeline(job_id: int, task_id: int,
 
     Returns whether this writer was the one that recorded it. The update is
     conditional on the timeline still being absent, so concurrent API server
-    replicas write it exactly once and only the winner emits the metrics --
-    otherwise every rate would be multiplied by the replica count.
+    instances write it exactly once and only the winner emits the metrics --
+    otherwise the job would be counted once per instance.
     """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
@@ -6143,7 +6141,7 @@ def record_controller_queue_only(job_id: int, task_id: int,
                                  duration: float) -> bool:
     """Record the controller wait of a task that never ran, once.
 
-    Returns whether this writer recorded it, so concurrent replicas count the
+    Returns whether this writer recorded it, so concurrent writers count the
     task exactly once.
     """
     engine = _db_manager.get_engine()

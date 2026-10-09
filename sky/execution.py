@@ -952,11 +952,9 @@ def launch(
     # ``_include_credentials`` is accepted unconditionally so the
     # request payload's ``LaunchBody.to_kwargs`` mapping always type-
     # checks against this signature. The in-tree implementation does
-    # not bundle credentials with the response; a downstream extension
-    # may override this function and re-register the ``launch``
-    # response encoder to return a 3-tuple when the flag is set.
-    # Without such an override, the client decodes the legacy 2-key
-    # response shape and falls back to the ``/status`` SSH-config path.
+    # not bundle credentials with the response, so the client decodes
+    # the legacy 2-key response shape and falls back to the ``/status``
+    # SSH-config path.
     del _include_credentials
     return _execute(
         entrypoint=entrypoint,

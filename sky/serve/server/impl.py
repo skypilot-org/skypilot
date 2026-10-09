@@ -841,7 +841,7 @@ class _DefaultServiceStatusRunner:
 
     Registered lazily by ``sky.serve.runner.current()``. Plugins override
     by calling ``sky.serve.runner.register()`` with their own
-    implementation (e.g. an in-process runner for consolidation mode).
+    implementation.
     """
 
     def get_service_status(

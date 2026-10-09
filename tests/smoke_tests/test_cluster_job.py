@@ -2036,9 +2036,8 @@ def test_volume_env_mount_kubernetes():
                 # Cancel by name, never -a: on a shared remote API server all
                 # concurrently running smoke tests submit jobs as the same
                 # service-account user, so `-a` cancels *their* in-flight jobs
-                # too (observed in enterprise CI: one such teardown killed an
-                # unrelated job-group test's job and another lane's kueue
-                # blocker mid-run).
+                # too (observed in CI: one such teardown killed an unrelated
+                # job-group test's job mid-run).
                 f'sky jobs cancel -y -n {name}-job || true',
                 # The managed job's worker cluster is torn down in the
                 # controller's `finally` block, and the controller only sets

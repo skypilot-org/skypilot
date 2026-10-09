@@ -52,9 +52,7 @@ _MAX_RETRY = 3
 _TITLE = '\n\n' + '=' * 20 + ' {} ' + '=' * 20 + '\n'
 
 # Hooks that report where a provider actually placed a cluster's instances,
-# for providers that submit work to one control plane and then execute it on
-# another -- the submission target names the control plane, so on its own it
-# does not say where the instances ended up.
+# when that can differ from the region the launch was submitted to.
 #
 # Each hook is called with ``(provider_name, region_name,
 # cluster_name_on_cloud)`` and returns the name of the execution target, or
