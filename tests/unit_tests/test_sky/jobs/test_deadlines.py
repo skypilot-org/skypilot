@@ -7,7 +7,8 @@ a job coroutine can block for arbitrarily long inside the strategy executor's
 validation, YAML round trips for single tasks, pipelines and job groups, the
 persisted task specs), the pure breach check, and the loop itself against a
 real (temp SQLite) managed-jobs state DB, including a job whose coroutine
-never returns from ``launch()``.
+never returns from ``launch()``, the races with the task starting and with a
+pending user cancel, and the client dropping the field for an older server.
 """
 import asyncio
 import contextlib
@@ -25,6 +26,8 @@ from sky import dag as dag_lib
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import task as task_lib
+from sky.client import sdk as client_sdk
+from sky.jobs import constants as jobs_constants
 from sky.jobs import controller as controller_module
 from sky.jobs import recovery_strategy
 from sky.jobs import state as managed_job_state
@@ -35,6 +38,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import schemas
+from sky.utils import yaml_utils
 
 ManagedJobStatus = managed_job_state.ManagedJobStatus
 
@@ -60,6 +64,16 @@ def _mock_managed_jobs_db_conn(tmp_path, monkeypatch):
                         async_engine)
     managed_job_state.create_table(engine)
     yield engine
+
+
+@pytest.fixture(autouse=True)
+def _signal_dir(tmp_path, monkeypatch):
+    """A private cancel-signal directory (where `sky jobs cancel` writes)."""
+    signal_dir = tmp_path / 'signals'
+    signal_dir.mkdir()
+    monkeypatch.setattr(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                        str(signal_dir))
+    return signal_dir
 
 
 async def _noop_callback(status: str) -> None:
@@ -354,13 +368,15 @@ def _row(status: ManagedJobStatus,
     ManagedJobStatus.RECOVERING
 ])
 def test_breach_when_not_started_in_time(status):
-    reason = controller_module._deadline_breach({'queue_timeout_seconds': 60},
+    breach = controller_module._deadline_breach({'queue_timeout_seconds': 60},
                                                 _row(status,
                                                      submitted_at=_NOW - 61),
                                                 _NOW)
-    assert reason is not None
-    assert 'queue_timeout=1m' in reason
-    assert 'waited 1m1s' in reason
+    assert breach is not None
+    assert breach.kind == managed_job_state.DeadlineKind.QUEUE_TIMEOUT
+    assert breach.limit_seconds == 60
+    assert 'queue_timeout=1m' in breach.reason
+    assert 'waited 1m1s' in breach.reason
 
 
 def test_no_breach_before_deadline():
@@ -718,7 +734,13 @@ async def test_set_deadline_exceeded_skips_cancelling_job(
     await _start_task(job_id, 0, time.time() - 120, queue_timeout_seconds=60)
     await managed_job_state.set_cancelling_async(job_id, _noop_callback)
     recorded = await managed_job_state.set_deadline_exceeded_async(
-        job_id, 0, failure_reason='Cancelled: x', event_reason='y')
+        job_id,
+        0,
+        kind=managed_job_state.DeadlineKind.QUEUE_TIMEOUT,
+        limit_seconds=60,
+        now=time.time(),
+        failure_reason='Cancelled: x',
+        event_reason='y')
     assert recorded is False
     assert _task_row(job_id, 0)['failure_reason'] is None
     assert all(e['reason'] != 'y' for e in _events(job_id))
@@ -926,6 +948,242 @@ def test_main_starts_the_deadline_loop(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Races: the task starting, and a user cancel, between the check and the
+# cancel.
+# ---------------------------------------------------------------------------
+
+
+def _set_deadline_exceeded(job_id: int, task_id: int, limit_seconds: float,
+                           now: float):
+    return managed_job_state.set_deadline_exceeded_async(
+        job_id,
+        task_id,
+        kind=managed_job_state.DeadlineKind.QUEUE_TIMEOUT,
+        limit_seconds=limit_seconds,
+        now=now,
+        failure_reason='Cancelled: x',
+        event_reason='y')
+
+
+@pytest.mark.asyncio
+async def test_task_starting_after_the_read_is_not_cancelled(
+        _mock_managed_jobs_db_conn, monkeypatch):
+    """The deadline loop read the row while the task had not started; the
+    task then starts (set_started_async) before the cancel is recorded. The
+    conditional write sees start_at and refuses: no reason, no event, no
+    cancel."""
+    job_id = _create_job()
+    submitted_at = time.time() - 120
+    await _start_task(job_id, 0, submitted_at, queue_timeout_seconds=60)
+    real_read = managed_job_state.get_unfinished_task_deadline_rows_async
+
+    async def _read_then_start(job_ids):
+        rows = await real_read(job_ids)
+        assert rows[job_id][0]['start_at'] is None
+        # The job coroutine marks the task started right after the read.
+        await managed_job_state.set_started_async(job_id, 0, time.time(),
+                                                  _noop_callback)
+        return rows
+
+    monkeypatch.setattr(managed_job_state,
+                        'get_unfinished_task_deadline_rows_async',
+                        _read_then_start)
+    manager = _manager()
+    job_task = asyncio.create_task(_RunningJob().run())
+    manager.job_tasks[job_id] = job_task
+
+    await manager._check_deadlines(time.time())
+
+    await asyncio.sleep(0)
+    assert not job_task.done()
+    assert job_id not in manager._cancel_info
+    row = _task_row(job_id, 0)
+    assert row['status'] == ManagedJobStatus.RUNNING
+    assert row['failure_reason'] is None
+    # The start was recorded; no CANCELLING event was.
+    statuses = [e['new_status'] for e in _events(job_id)]
+    assert ManagedJobStatus.RUNNING in statuses
+    assert ManagedJobStatus.CANCELLING not in statuses
+    job_task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_set_deadline_exceeded_refuses_a_started_task(
+        _mock_managed_jobs_db_conn):
+    job_id = _create_job()
+    now = time.time()
+    await _start_task(job_id, 0, now - 120, queue_timeout_seconds=60)
+    await managed_job_state.set_started_async(job_id, 0, now - 1,
+                                              _noop_callback)
+    events_before = _events(job_id)
+    assert await _set_deadline_exceeded(job_id, 0, 60, now) is False
+    assert _task_row(job_id, 0)['failure_reason'] is None
+    assert _events(job_id) == events_before
+
+
+@pytest.mark.asyncio
+async def test_set_deadline_exceeded_refuses_when_not_yet_due(
+        _mock_managed_jobs_db_conn):
+    """submitted_at is newer than now - limit (e.g. a caller with a stale
+    view of the clock, or a task re-submitted since): not recorded."""
+    job_id = _create_job()
+    now = time.time()
+    await _start_task(job_id, 0, now - 30, queue_timeout_seconds=60)
+    events_before = _events(job_id)
+    assert await _set_deadline_exceeded(job_id, 0, 60, now) is False
+    assert _task_row(job_id, 0)['failure_reason'] is None
+    assert _events(job_id) == events_before
+    # A task never claimed by a controller (no submitted_at) has no clock.
+    unclaimed = _create_job()
+    assert await _set_deadline_exceeded(unclaimed, 0, 60, now) is False
+    assert _task_row(unclaimed, 0)['failure_reason'] is None
+
+
+@pytest.mark.asyncio
+async def test_set_deadline_exceeded_records_when_due(
+        _mock_managed_jobs_db_conn):
+    job_id = _create_job()
+    now = time.time()
+    await _start_task(job_id, 0, now - 60, queue_timeout_seconds=60)
+    assert await _set_deadline_exceeded(job_id, 0, 60, now) is True
+    assert _task_row(job_id, 0)['failure_reason'] == 'Cancelled: x'
+    assert sum(e['reason'] == 'y' for e in _events(job_id)) == 1
+
+
+def _write_cancel_signal(signal_dir, job_id: int, content: str) -> None:
+    """As `sky jobs cancel` does (managed_job_utils.cancel_jobs_by_id)."""
+    (signal_dir / str(job_id)).write_text(content, encoding='utf-8')
+
+
+def _patch_run_job_loop_deps(monkeypatch, job_controller) -> None:
+    monkeypatch.setattr(controller_module, 'JobController',
+                        mock.MagicMock(return_value=job_controller))
+    monkeypatch.setattr(controller_module.context, 'get',
+                        mock.MagicMock(return_value=mock.MagicMock()))
+    monkeypatch.setattr(controller_module.file_content_utils,
+                        'get_job_env_content',
+                        mock.MagicMock(return_value=None))
+    monkeypatch.setattr(controller_module.usage_lib,
+                        'install_fresh_messages_for_current_context',
+                        mock.MagicMock())
+    dag = mock.MagicMock()
+    dag.tasks = [mock.MagicMock(event_callback=None)]
+    monkeypatch.setattr(controller_module, '_get_dag',
+                        mock.MagicMock(return_value=dag))
+
+
+@pytest.mark.asyncio
+async def test_pending_graceful_user_cancel_wins_over_the_deadline(
+        _mock_managed_jobs_db_conn, monkeypatch, _signal_dir):
+    """`sky jobs cancel --graceful` wrote its signal, but cancel_job() has
+    not polled it yet when the overdue job's deadline tick runs. The deadline
+    leaves the job to the user's cancel (records nothing), and the job ends
+    CANCELLED with the user's graceful settings, not (False, None)."""
+    job_id = _create_job()
+    await _start_task(job_id, 0, time.time() - 120, queue_timeout_seconds=60)
+    running = _RunningJob()
+    job_controller = mock.MagicMock()
+    job_controller.load_dag = mock.AsyncMock()
+    job_controller.run = running.run
+    _patch_run_job_loop_deps(monkeypatch, job_controller)
+
+    manager = _manager()
+    manager._cleanup = mock.AsyncMock()
+    manager._download_logs_for_cancelled_job = mock.AsyncMock()
+    loop_task = asyncio.create_task(
+        manager.run_job_loop.__wrapped__(manager, job_id, 'job.log'))
+    for _ in range(100):
+        if job_id in manager.job_tasks:
+            break
+        await asyncio.sleep(0.01)
+    assert job_id in manager.job_tasks
+
+    _write_cancel_signal(
+        _signal_dir, job_id,
+        f'{managed_job_utils._JOBS_GRACEFUL_CANCEL_SIGNAL}:60')
+    events_before = _events(job_id)
+    await manager._check_deadlines(time.time())
+
+    # The deadline did not cancel or record anything.
+    await asyncio.sleep(0)
+    assert not running.cancelled.is_set()
+    assert job_id not in manager._cancel_info
+    assert _task_row(job_id, 0)['failure_reason'] is None
+    assert _events(job_id) == events_before
+
+    # cancel_job()'s next poll applies the user's cancel.
+    cancel_loop = asyncio.create_task(manager.cancel_job())
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(loop_task, timeout=10)
+    finally:
+        cancel_loop.cancel()
+    manager._cleanup.assert_awaited_once_with(job_id,
+                                              pool=None,
+                                              graceful=True,
+                                              graceful_timeout=60)
+    row = _task_row(job_id, 0)
+    assert row['status'] == ManagedJobStatus.CANCELLED
+    assert row['failure_reason'] is None
+    assert not (_signal_dir / str(job_id)).exists()
+
+
+@pytest.mark.asyncio
+async def test_user_cancel_arriving_during_the_record_keeps_its_settings(
+        _mock_managed_jobs_db_conn, monkeypatch, _signal_dir):
+    """The user's signal lands while the deadline is being recorded (after
+    the pre-check). The deadline still does not hard-cancel: cancel_job()
+    applies the user's settings on its next poll."""
+    job_id = _create_job()
+    await _start_task(job_id, 0, time.time() - 120, queue_timeout_seconds=60)
+    real_set = managed_job_state.set_deadline_exceeded_async
+
+    async def _signal_then_set(*args, **kwargs):
+        _write_cancel_signal(
+            _signal_dir, job_id,
+            f'{managed_job_utils._JOBS_GRACEFUL_CANCEL_SIGNAL}:30')
+        return await real_set(*args, **kwargs)
+
+    monkeypatch.setattr(managed_job_state, 'set_deadline_exceeded_async',
+                        _signal_then_set)
+    manager = _manager()
+    job_task = asyncio.create_task(_RunningJob().run())
+    manager.job_tasks[job_id] = job_task
+    await manager._check_deadlines(time.time())
+    await asyncio.sleep(0)
+    assert not job_task.done()
+    assert job_id not in manager._cancel_info
+    assert job_id not in manager._deadline_cancelled
+
+    cancel_loop = asyncio.create_task(manager.cancel_job())
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(job_task, timeout=10)
+    finally:
+        cancel_loop.cancel()
+    assert manager._cancel_info[job_id] == (True, 30)
+
+
+@pytest.mark.asyncio
+async def test_pending_hard_user_cancel_also_wins(_mock_managed_jobs_db_conn,
+                                                  _signal_dir):
+    """A plain (non-graceful) `sky jobs cancel` signal is an empty file; the
+    deadline defers to it too, so the job's cancel is attributed to the
+    user."""
+    job_id = _create_job()
+    await _start_task(job_id, 0, time.time() - 120, queue_timeout_seconds=60)
+    (_signal_dir / str(job_id)).touch()
+    manager = _manager()
+    job_task = asyncio.create_task(_RunningJob().run())
+    manager.job_tasks[job_id] = job_task
+    await manager._check_deadlines(time.time())
+    await asyncio.sleep(0)
+    assert not job_task.done()
+    assert _task_row(job_id, 0)['failure_reason'] is None
+    job_task.cancel()
+
+
+# ---------------------------------------------------------------------------
 # Client-side version gate.
 # ---------------------------------------------------------------------------
 
@@ -951,6 +1209,114 @@ def test_launch_queue_timeout_refuses_an_old_server():
         with pytest.raises(exceptions.NotSupportedError, match='queue_timeout'):
             raw_launch(_queue_timeout_task())
         mock_request.assert_not_called()
+
+
+def _queue_timeout_in(dag_yaml: str) -> List[Any]:
+    return [
+        doc.get('queue_timeout')
+        for doc in yaml_utils.safe_load_all(dag_yaml)
+        if isinstance(doc, dict) and 'run' in doc
+    ]
+
+
+def _sent_dags(mock_request) -> List[str]:
+    sent = []
+    for call in mock_request.call_args_list:
+        body = call.kwargs['json']
+        sent.append(body.get('dag', body.get('task')))
+    return sent
+
+
+@pytest.mark.parametrize('api_version,expected', [
+    (server_constants.MIN_JOBS_QUEUE_TIMEOUT_API_VERSION - 1, None),
+    (server_constants.MIN_JOBS_QUEUE_TIMEOUT_API_VERSION, '2h'),
+])
+def test_validate_omits_queue_timeout_for_an_older_server(
+        api_version, expected):
+    """An older server's strict task schema rejects queue_timeout, so the
+    client drops it (it only matters to managed jobs)."""
+    with mock.patch.object(client_sdk.versions,
+                           'get_remote_api_version',
+                           return_value=api_version), \
+         mock.patch.object(client_sdk.server_common,
+                           'make_authenticated_request') as mock_request:
+        mock_request.return_value.status_code = 200
+        _unwrap(client_sdk.validate)(dag_utils.convert_entrypoint_to_dag(
+            _queue_timeout_task()))
+    (dag_yaml,) = _sent_dags(mock_request)
+    assert _queue_timeout_in(dag_yaml) == [expected]
+
+
+@pytest.mark.parametrize('api_version,expected', [
+    (server_constants.MIN_JOBS_QUEUE_TIMEOUT_API_VERSION - 1, None),
+    (server_constants.MIN_JOBS_QUEUE_TIMEOUT_API_VERSION, '2h'),
+])
+def test_optimize_omits_queue_timeout_for_an_older_server(
+        api_version, expected):
+    """optimize() sends the DAG without validating it first (e.g. from a
+    script), so it drops the field itself."""
+    with mock.patch.object(client_sdk.versions,
+                           'get_remote_api_version',
+                           return_value=api_version), \
+         mock.patch.object(client_sdk.server_common,
+                           'make_authenticated_request') as mock_request, \
+         mock.patch.object(client_sdk.server_common, 'get_request_id'):
+        _unwrap(client_sdk.optimize)(dag_utils.convert_entrypoint_to_dag(
+            _queue_timeout_task()))
+    (dag_yaml,) = _sent_dags(mock_request)
+    assert _queue_timeout_in(dag_yaml) == [expected]
+
+
+@pytest.mark.parametrize('entrypoint', ['launch', 'exec'])
+def test_launch_and_exec_omit_queue_timeout_for_an_older_server(entrypoint):
+    """`sky launch` / `sky exec` with a task YAML that sets queue_timeout
+    work against an older server: every DAG sent omits the field."""
+    too_old = server_constants.MIN_JOBS_QUEUE_TIMEOUT_API_VERSION - 1
+    with mock.patch.object(client_sdk.versions,
+                           'get_remote_api_version',
+                           return_value=too_old), \
+         mock.patch.object(client_sdk.server_common,
+                           'make_authenticated_request') as mock_request, \
+         mock.patch.object(client_sdk.server_common, 'get_request_id'), \
+         mock.patch.object(client_sdk.server_common,
+                           'check_server_healthy_or_start_fn'), \
+         mock.patch.object(client_sdk.client_common,
+                           'upload_mounts_to_api_server',
+                           side_effect=lambda dag, **_: (dag, None)):
+        mock_request.return_value.status_code = 200
+        fn = _unwrap(getattr(client_sdk, entrypoint))
+        fn(_queue_timeout_task(), cluster_name='c')
+    sent = _sent_dags(mock_request)
+    # validate, then the launch / exec request itself.
+    assert len(sent) == 2, sent
+    for dag_yaml in sent:
+        assert _queue_timeout_in(dag_yaml) == [None]
+
+
+def test_jobs_launch_refuses_an_old_server_before_validate_could_strip():
+    """The managed-jobs gate runs before sdk.validate(), so the field is never
+    silently dropped from a managed job: the launch fails instead, with no
+    request sent."""
+    raw_launch = _unwrap(jobs_sdk.launch)
+    too_old = server_constants.MIN_JOBS_QUEUE_TIMEOUT_API_VERSION - 1
+    task = _queue_timeout_task()
+    with mock.patch.object(jobs_sdk.versions,
+                           'get_remote_api_version',
+                           return_value=too_old), \
+         mock.patch.object(client_sdk.versions,
+                           'get_remote_api_version',
+                           return_value=too_old), \
+         mock.patch.object(jobs_sdk.sdk, 'validate') as mock_validate, \
+         mock.patch.object(jobs_sdk.server_common,
+                           'make_authenticated_request') as mock_request, \
+         mock.patch.object(client_sdk.server_common,
+                           'make_authenticated_request') as mock_sdk_request:
+        with pytest.raises(exceptions.NotSupportedError, match='queue_timeout'):
+            raw_launch(task)
+        mock_validate.assert_not_called()
+        mock_request.assert_not_called()
+        mock_sdk_request.assert_not_called()
+    assert task.queue_timeout == '2h'
 
 
 def test_uses_queue_timeout_detection():
