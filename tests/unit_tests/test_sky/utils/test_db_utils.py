@@ -1,6 +1,8 @@
 """Unit tests for database utilities with SKY_RUNTIME_DIR environment variable."""
 import os
 import sqlite3
+import threading
+import time
 from unittest import mock
 
 import pytest
@@ -49,6 +51,64 @@ class TestSkyRuntimeDirEnvVar:
             db_path = call_args[0][0]
             expected_path = str(tmp_path / '.sky/test.db')
             assert expected_path in db_path
+
+
+class TestSqliteEngineLockTimeout:
+    """The sync SQLite engine waits for the write lock for _DB_TIMEOUT_S."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_engine_cache(self, tmp_path, monkeypatch):
+        monkeypatch.setenv('SKY_RUNTIME_DIR', str(tmp_path))
+        monkeypatch.setattr(db_utils, '_sqlite_engine_cache', {})
+
+    def test_busy_timeout_is_db_timeout(self):
+        engine = db_utils.get_engine(db_name='lock_timeout')
+        with engine.connect() as conn:
+            busy_timeout_ms = conn.execute(
+                sqlalchemy.text('PRAGMA busy_timeout')).scalar()
+        assert busy_timeout_ms == db_utils._DB_TIMEOUT_S * 1000
+
+    def test_write_waits_past_sqlite_default_timeout(self, tmp_path):
+        engine = db_utils.get_engine(db_name='lock_timeout')
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text('CREATE TABLE items (value TEXT)'))
+        blocker = sqlite3.connect(tmp_path / '.sky/lock_timeout.db',
+                                  check_same_thread=False)
+        blocker.execute('BEGIN IMMEDIATE')
+        # Hold the lock longer than sqlite3's default 5s timeout.
+        release = threading.Timer(6, blocker.commit)
+        release.start()
+        try:
+            with engine.begin() as conn:
+                conn.execute(sqlalchemy.text('INSERT INTO items VALUES (1)'))
+            with engine.connect() as conn:
+                assert conn.execute(
+                    sqlalchemy.text('SELECT COUNT(*) FROM items')).scalar() == 1
+        finally:
+            release.join()
+            blocker.close()
+            engine.dispose()
+
+    def test_write_fails_when_lock_budget_expires(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(db_utils, '_DB_TIMEOUT_S', 0.05)
+        engine = db_utils.get_engine(db_name='lock_timeout')
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text('CREATE TABLE items (value TEXT)'))
+        blocker = sqlite3.connect(tmp_path / '.sky/lock_timeout.db')
+        blocker.execute('BEGIN IMMEDIATE')
+        try:
+            start = time.monotonic()
+            with pytest.raises(sqlalchemy.exc.OperationalError,
+                               match='database is locked'):
+                with engine.begin() as conn:
+                    conn.execute(
+                        sqlalchemy.text('INSERT INTO items VALUES (1)'))
+            # sqlite3's default 5s timeout would exceed this bound.
+            assert time.monotonic() - start < 2
+        finally:
+            blocker.rollback()
+            blocker.close()
+            engine.dispose()
 
 
 @pytest_asyncio.fixture

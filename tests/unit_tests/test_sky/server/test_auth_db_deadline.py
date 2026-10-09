@@ -32,6 +32,7 @@ These tests pin the containment behavior:
 import asyncio
 import functools
 import os
+import sqlite3
 import time
 import unittest.mock as mock
 
@@ -244,6 +245,28 @@ class TestAuthProxyDeadline:
                 return_value=models.User(id='u-1', name='tester')), \
                 mock.patch('sky.global_user_state.add_or_update_user',
                            _slow(False)):
+            response = await middleware.dispatch(mock_request,
+                                                 call_next_sentinel)
+
+        _assert_retryable_timeout_503(response)
+        assert not call_next_sentinel.reached
+
+    @pytest.mark.asyncio
+    async def test_sqlite_busy_user_upsert_is_503(self, mock_request,
+                                                  call_next_sentinel):
+        proxy_config = mock.Mock()
+        proxy_config.enabled = True
+        with mock.patch.object(server.server_config,
+                               'load_external_proxy_config',
+                               return_value=proxy_config):
+            middleware = server.AuthProxyMiddleware(app=mock.Mock())
+
+        with mock.patch.object(
+                server,
+                '_extract_user_from_header',
+                return_value=models.User(id='u-1', name='tester')), \
+                mock.patch('sky.global_user_state.add_or_update_user',
+                           _raises_sqlite_error('database is locked')):
             response = await middleware.dispatch(mock_request,
                                                  call_next_sentinel)
 
@@ -576,6 +599,17 @@ def _raises_db_error(pgcode, message='canceling statement due to timeout'):
     return _call
 
 
+def _raises_sqlite_error(message):
+    """A synchronous stand-in for a SQLite DB call that fails."""
+
+    def _call(*args, **kwargs):
+        del args, kwargs
+        raise sqlalchemy.exc.OperationalError('INSERT INTO users ...', {},
+                                              sqlite3.OperationalError(message))
+
+    return _call
+
+
 # The three timeouts `global_user_state.add_or_update_user` sets on its own
 # Postgres transaction, and the SQLSTATE each produces.
 _SERVER_TIMEOUT_PGCODES = (
@@ -621,6 +655,25 @@ class TestServerSideTimeoutMapping:
 
         with pytest.raises(asyncio.TimeoutError):
             await db_lookup.call_with_deadline(_raw)
+
+    @pytest.mark.asyncio
+    async def test_sqlite_busy_timeout_becomes_timeout_error(self, monkeypatch):
+        """SQLite's form of lock_timeout: the users upsert's busy timeout."""
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        with pytest.raises(db_lookup.AuthDBTimeoutError) as excinfo:
+            await db_lookup.call_with_deadline(
+                _raises_sqlite_error('database is locked'))
+        assert isinstance(excinfo.value.__cause__,
+                          sqlalchemy.exc.OperationalError)
+
+    @pytest.mark.asyncio
+    async def test_other_sqlite_errors_still_propagate_unchanged(
+            self, monkeypatch):
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        with pytest.raises(sqlalchemy.exc.OperationalError) as excinfo:
+            await db_lookup.call_with_deadline(
+                _raises_sqlite_error('no such table: users'))
+        assert not isinstance(excinfo.value, asyncio.TimeoutError)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
