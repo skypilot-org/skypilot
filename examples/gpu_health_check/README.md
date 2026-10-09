@@ -71,7 +71,7 @@ ERROR: Job 2 failed with return code list: [1]
 Job finished (status: FAILED).
 ```
 
-To check a GPU before a real task, launch this task first and then submit your own task to the same cluster with `sky exec gpucheck my_task.yaml`. It runs in the same CUDA image, so it does not need `apt` or `sudo` of its own.
+To check a GPU before a real task, launch this task first and then submit your own task to the same cluster with `sky exec gpucheck my_task.yaml`. It runs in the same CUDA image, so it does not need `apt` or `sudo` of its own. `sky exec` runs only the `run` section of a task and skips its `setup` and file mounts, so a task that needs either should be started with `sky launch -c gpucheck my_task.yaml` instead.
 
 ## Notes
 
