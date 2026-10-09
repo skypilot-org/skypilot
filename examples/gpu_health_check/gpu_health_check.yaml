@@ -1,0 +1,46 @@
+# Check the GPU you were given before you trust it with a long job.
+#
+# Runs the "diagnostics" suite of Pantheon (https://pantheongpu.com), an
+# open-source GPU test suite: a March C- memory test, GALPAT, a row-disturb
+# hammer, a charge-retention test and a RAS/ECC scrub. Each test verifies its
+# own results, and the task exits non-zero if one of them finds corrupted
+# memory, so it can gate a pipeline or run ahead of a real task.
+#
+# Usage:
+#   sky launch -c gpucheck gpu_health_check.yaml
+#   sky launch -c gpucheck gpu_health_check.yaml --gpus L4:1 --infra vast
+#   sky down gpucheck
+#
+# Check that the gate really fires (injects one fault into one test):
+#   sky exec gpucheck gpu_health_check.yaml --env SUITE=march_test --env EXTRA_ARGS=--inject_error
+#
+# Example output: see README.md.
+name: gpu-health-check
+
+resources:
+  # Any single GPU; override with --gpus. The CUDA devel image carries the
+  # compiler Pantheon uses to build its kernels for the GPU it finds, and it
+  # also works on clouds that only run containers.
+  accelerators: {L4:1, A10G:1, A10:1, T4:1, RTX4090:1}
+  image_id: docker:nvidia/cuda:12.8.1-devel-ubuntu22.04
+
+envs:
+  PANTHEON_VERSION: 1.2.2
+  SUITE: diagnostics   # a suite or one test, see `pantheon --help`
+  DURATION: 30         # seconds per test
+  EXTRA_ARGS: ''
+
+setup: |
+  set -euo pipefail
+  # The devel image has no pip or venv support.
+  apt-get update -qq
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends python3-venv > /dev/null
+  python3 -m venv ~/pantheon-venv
+  ~/pantheon-venv/bin/pip install -q "pantheon-gpu==${PANTHEON_VERSION}"
+
+run: |
+  set -euo pipefail
+  mkdir -p ~/pantheon-run && cd ~/pantheon-run
+  # Builds the test kernels on the first run (a few minutes), then runs the
+  # suite on every GPU of the node at once.
+  ~/pantheon-venv/bin/pantheon --test "${SUITE}" --duration "${DURATION}" --gpu all ${EXTRA_ARGS}
