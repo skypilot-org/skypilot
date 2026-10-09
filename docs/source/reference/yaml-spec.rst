@@ -193,6 +193,27 @@ A task can set this to a smaller value than the size of a cluster.
   num_nodes: 4
 
 
+.. _yaml-spec-queue-timeout:
+
+``queue_timeout``
+~~~~~~~~~~~~~~~~~
+
+Cancel a managed job that has not started running within this long of being submitted (optional). By default, a managed job that cannot get resources keeps trying indefinitely.
+
+This field is **only supported for managed jobs** (``sky jobs launch``). It is
+ignored by ``sky launch`` and ``sky exec``.
+
+The value is a duration string with an optional unit suffix: ``s`` (seconds),
+``m`` (minutes), ``h`` (hours), ``d`` (days), ``w`` (weeks). A plain number is
+treated as seconds. Must be positive.
+
+The clock starts at the task's :code:`SUBMITTED` time in :code:`sky jobs queue`. Provisioning, launch retries, and waiting in an external scheduler's queue (e.g., Kueue) all count. Once the task has started running, :code:`queue_timeout` no longer applies, including during later recoveries. In a pipeline or job group, each task can set its own. The job ends :code:`CANCELLED`, with the reason in its details and events. See :ref:`jobs-queue-timeout`.
+
+.. code-block:: yaml
+
+  queue_timeout: 2h
+
+
 .. _yaml-spec-resources:
 
 ``resources``

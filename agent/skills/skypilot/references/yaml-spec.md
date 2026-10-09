@@ -187,6 +187,30 @@ num_nodes: 4
 ```
 
 
+### ``queue_timeout``
+
+Cancel a managed job that has not started running within this long of being
+submitted (optional). By default, a managed job that cannot get resources
+keeps trying indefinitely.
+
+This field is **only supported for managed jobs** (`sky jobs launch`). It is
+ignored by `sky launch` and `sky exec`.
+
+The value is a duration string with an optional unit suffix: `s` (seconds),
+`m` (minutes), `h` (hours), `d` (days), `w` (weeks). A plain number is
+treated as seconds. Must be positive.
+
+Provisioning, launch retries, and waiting in an external scheduler's queue all
+count; once the task has started running, it no longer applies. In a pipeline
+or job group, each task can set its own. The job ends `CANCELLED`, with the
+reason in its details and events.
+
+```yaml
+queue_timeout: 2h
+
+```
+
+
 ### ``resources``
 
 Per-node resource requirements (optional).

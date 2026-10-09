@@ -303,6 +303,24 @@ In this configuration:
   You should **not** use exit code 137 in :code:`recover_on_exit_codes`. This code is used internally by SkyPilot and including it may interfere with proper recovery behavior.
 
 
+.. _jobs-queue-timeout:
+
+Giving up on jobs that cannot get resources
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+By default, a managed job that cannot find available resources keeps trying indefinitely. To give up instead, set the top-level :code:`queue_timeout` field: if the job has not started running within that long of being submitted, it is cancelled.
+
+.. code-block:: yaml
+
+  # Cancel the job if it has not started running within 2 hours.
+  queue_timeout: 2h
+
+  resources:
+    accelerators: H100:8
+
+The clock starts at the job's :code:`SUBMITTED` time in :code:`sky jobs queue`, when the jobs controller starts launching it. Everything from then until the job first starts running counts: provisioning, launch retries and backoff, and waiting in an external scheduler's queue (e.g., Kueue). Once the job has started, :code:`queue_timeout` no longer applies, including while it recovers from a later preemption. In a pipeline or job group, each task can set its own, and its clock starts when that task is submitted. The job ends :code:`CANCELLED`, and the reason is shown in :code:`sky jobs queue` and the job's events. The jobs controller enforces it within about 30 seconds of the deadline, including after a controller restart.
+
+
 When will my job be recovered?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -317,7 +335,7 @@ Here's how various kinds of failures will be handled by SkyPilot:
    * - User code fails (:code:`setup` or :code:`run` commands have non-zero exit code):
      - If the exit code is in :code:`recover_on_exit_codes`, always restart. Otherwise, if :code:`max_restarts_on_errors` is set, restart up to that many times. If neither condition is met, set the job to :code:`FAILED` or :code:`FAILED_SETUP`.
    * - Can't find available resources due to capacity:
-     - Try other infra (clusters, regions, or clouds) indefinitely until resources are found.
+     - Try other infra (clusters, regions, or clouds) indefinitely until resources are found, or until :code:`queue_timeout` (if set) is reached before the job first starts.
    * - Cloud config/auth issue or invalid job configuration:
      - Mark the job as :code:`FAILED_PRECHECKS` and exit. Won't be retried.
 
