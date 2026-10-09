@@ -163,11 +163,10 @@ aws_dependencies = [
 
 # Kubernetes 32.0.0 has an authentication bug:
 # https://github.com/kubernetes-client/python/issues/2333
-# Kubernetes 36.x has bearer-token authentication regressions
-# (kubernetes-client/python#2584, #2595, #2618). Even 36.0.3 is missing
-# the legacy token-prefix fallback; all three fixes are included in 37.0.0.
+# Kubernetes 36.0.0 breaks bearer-token auth through the kubeconfig and
+# in-cluster loaders (kubernetes-client/python#2584). Fixed in 36.0.1.
 kubernetes_dependencies = [
-    'kubernetes>=20.0.0,!=32.0.0,!=36.*',
+    'kubernetes>=20.0.0,!=32.0.0,!=36.0.0',
     'websockets',
     'python-dateutil',
 ]

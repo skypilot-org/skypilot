@@ -1,13 +1,14 @@
-"""Client-generation compatibility; run with both kubernetes==20 and ==37."""
+"""Client-generation compatibility; run with legacy, v36.0.1+, and v37 clients."""
 
 import copy
+import json
 import pathlib
 from types import SimpleNamespace
 from typing import Any, Dict, Optional
 from unittest import mock
 
 from kubernetes import client
-from kubernetes.config.incluster_config import InClusterConfigLoader
+from kubernetes.config import incluster_config
 import pytest
 
 from sky.adaptors import kubernetes
@@ -260,25 +261,73 @@ def test_normalize_pod_resource_quantities_preserves_invalid_values() -> None:
     assert spec == original
 
 
-def test_legacy_bearer_token_prefix() -> None:
-    configuration = client.Configuration()
-    configuration.api_key['authorization'] = 'fake-token'
-    configuration.api_key_prefix['authorization'] = 'Bearer'
-    assert configuration.auth_settings()['BearerToken']['value'] == (
-        'Bearer fake-token')
+def _assert_request_bearer_token(api_client: client.ApiClient,
+                                 expected_token: str) -> None:
+    # Exercise generated request authentication, not just auth_settings().
+    # Mock only transport so these tests can never contact a real cluster.
+    with mock.patch.object(
+            api_client.rest_client,
+            'request',
+            side_effect=RuntimeError('request reached transport')) as send:
+        with pytest.raises(RuntimeError, match='request reached transport'):
+            client.CoreV1Api(api_client).list_namespaced_pod('default')
+        send.assert_called_once()
+        headers = send.call_args.kwargs['headers']
+        scheme, token = headers['authorization'].split(' ', 1)
+        assert scheme.lower() == 'bearer'
+        assert token == expected_token
 
 
-def test_incluster_auth(tmp_path: pathlib.Path) -> None:
+@pytest.mark.parametrize('token_file', [False, True])
+def test_kubeconfig_auth_request_header(tmp_path: pathlib.Path,
+                                        monkeypatch: pytest.MonkeyPatch,
+                                        token_file: bool) -> None:
+    user = {'token': 'fake-token'}
+    if token_file:
+        token = tmp_path / 'token'
+        token.write_text('fake-token')
+        user = {'tokenFile': str(token)}
+    kubeconfig = tmp_path / 'config'
+    kubeconfig.write_text(
+        json.dumps({
+            'apiVersion': 'v1',
+            'kind': 'Config',
+            'current-context': 'test-context',
+            'clusters': [{
+                'name': 'test-cluster',
+                'cluster': {
+                    'server': 'https://127.0.0.1:6443'
+                }
+            }],
+            'users': [{
+                'name': 'test-user',
+                'user': user
+            }],
+            'contexts': [{
+                'name': 'test-context',
+                'context': {
+                    'cluster': 'test-cluster',
+                    'user': 'test-user'
+                }
+            }],
+        }))
+    monkeypatch.setenv('KUBECONFIG', str(kubeconfig))
+    # Match the production adaptor's config loading and client construction.
+    with kubernetes._get_api_client('test-context') as api_client:
+        _assert_request_bearer_token(api_client, 'fake-token')
+
+
+def test_incluster_auth_request_header(tmp_path: pathlib.Path,
+                                       monkeypatch: pytest.MonkeyPatch) -> None:
     token = tmp_path / 'token'
     certificate = tmp_path / 'ca.crt'
     token.write_text('fake-token')
     certificate.write_text('fake-certificate')
-    configuration = client.Configuration()
-    InClusterConfigLoader(token_filename=str(token),
-                          cert_filename=str(certificate),
-                          environ={
-                              'KUBERNETES_SERVICE_HOST': '127.0.0.1',
-                              'KUBERNETES_SERVICE_PORT': '443'
-                          }).load_and_set(configuration)
-    assert configuration.auth_settings()['BearerToken']['value'] == (
-        'bearer fake-token')
+    monkeypatch.setattr(incluster_config, 'SERVICE_TOKEN_FILENAME', str(token))
+    monkeypatch.setattr(incluster_config, 'SERVICE_CERT_FILENAME',
+                        str(certificate))
+    monkeypatch.setenv('KUBERNETES_SERVICE_HOST', '127.0.0.1')
+    monkeypatch.setenv('KUBERNETES_SERVICE_PORT', '443')
+    with kubernetes._get_api_client(
+            kubernetes.in_cluster_context_name()) as api_client:
+        _assert_request_bearer_token(api_client, 'fake-token')
