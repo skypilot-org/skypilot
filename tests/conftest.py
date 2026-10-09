@@ -728,8 +728,15 @@ def setup_policy_server(request, tmp_path_factory):
         yield
         return
 
-    # get the temp directory shared by all workers
-    root_tmp_dir = tmp_path_factory.getbasetemp().parent / 'policy_server'
+    # Get the temp directory shared by all workers of this run. Under
+    # pytest-xdist, each worker's basetemp is a subdirectory of the run's
+    # basetemp. Without xdist (smoke tests in Buildkite turn it off), the
+    # basetemp's parent is shared by every pytest run of the same user, so a
+    # run would pick up the files that an earlier run left behind.
+    run_tmp_dir = tmp_path_factory.getbasetemp()
+    if os.environ.get('PYTEST_XDIST_WORKER') is not None:
+        run_tmp_dir = run_tmp_dir.parent
+    root_tmp_dir = run_tmp_dir / 'policy_server'
 
     pathlib.Path(root_tmp_dir).mkdir(parents=True, exist_ok=True)
     fn = root_tmp_dir / 'policy_server.txt'
@@ -749,39 +756,61 @@ def setup_policy_server(request, tmp_path_factory):
             f.write(str(count))
         return count
 
-    def wait_server(port: int, timeout: int = 60):
+    # Starting the server imports sky, which can take more than a minute on a
+    # loaded CI host. A server process that exits is reported right away, so
+    # the long timeout only matters for a server that is still starting.
+    def wait_server(port: int,
+                    timeout: int = 300,
+                    server_process: Optional[subprocess.Popen] = None) -> float:
         start_time = time.time()
         success_count = 0
         while time.time() - start_time < timeout:
+            if server_process is not None and server_process.poll() is not None:
+                raise RuntimeError(
+                    f'Policy server exited with code {server_process.returncode}'
+                    f' after {time.time() - start_time:.0f}s, before it '
+                    f'accepted connections on port {port}. See its output '
+                    'above.')
             try:
                 socket.create_connection(('127.0.0.1', port), timeout=1).close()
                 success_count += 1
                 if success_count > 5:
-                    return True
+                    return time.time() - start_time
             except (socket.error, OSError):
                 pass
             time.sleep(0.5)
-        raise RuntimeError(f"Policy server not available after {timeout}s")
+        still_running = ''
+        if server_process is not None:
+            still_running = (f' The server process {server_process.pid} is '
+                             'still running.')
+        raise RuntimeError(
+            f'Policy server not available after {timeout}s: {success_count} '
+            f'of 6 connection checks to port {port} succeeded.{still_running}')
 
+    # Whether this worker holds a reference on the server, and so must release
+    # it when the session ends.
+    holds_reference = False
     try:
         policy_server_url: Optional[str] = None
         with filelock.FileLock(str(fn) + ".lock"):
             launch_server = True
             if fn.is_file():
-                ref_count(1)
                 policy_server_url = fn.read_text().strip()
                 print(
                     f'Using existing policy server {policy_server_url}, file: {fn}',
                     file=sys.stderr,
                     flush=True)
                 port = int(policy_server_url.split(':')[2])
-                # Healthz check the running server
+                # Healthz check the running server. The url file is written
+                # only after the server accepted connections, so a running
+                # server passes the check within seconds.
                 try:
-                    wait_server(port)
+                    wait_server(port, timeout=30)
                     # The server is running, reuse it
                     launch_server = False
                 except RuntimeError:
-                    # There is a broken state from previous crashed test, recover it
+                    # The server that another worker of this run started is
+                    # gone, start a new one.
                     print(
                         f'Policy server {policy_server_url} is not running, launching new server',
                         file=sys.stderr,
@@ -802,10 +831,23 @@ def setup_policy_server(request, tmp_path_factory):
                     '0.0.0.0', '--port',
                     str(port)
                 ])
-                wait_server(port)
+                try:
+                    elapsed = wait_server(port, server_process=server_process)
+                except BaseException:
+                    # Stop the server this worker started, so that it does
+                    # not outlive the failed session.
+                    server_process.kill()
+                    server_process.wait()
+                    raise
+                print(
+                    f'Policy server {policy_server_url} accepted connections '
+                    f'after {elapsed:.0f}s',
+                    file=sys.stderr,
+                    flush=True)
                 pid_file.write_text(str(server_process.pid))
                 fn.write_text(policy_server_url)
-                ref_count(1)
+            ref_count(1)
+            holds_reference = True
         if policy_server_url is not None:
             with smoke_tests_utils.override_sky_config(
                     config_dict={'admin_policy': policy_server_url}):
@@ -813,14 +855,19 @@ def setup_policy_server(request, tmp_path_factory):
         else:
             yield
     finally:
-        with filelock.FileLock(str(fn) + ".lock"):
-            count = ref_count(-1)
-            if count <= 0:
-                # All workers are done, run post cleanup.
-                pid = pid_file.read_text().strip()
-                if pid:
-                    os.kill(int(pid), signal.SIGKILL)
-                pathlib.Path(fn).unlink(missing_ok=True)
+        if holds_reference:
+            with filelock.FileLock(str(fn) + ".lock"):
+                count = ref_count(-1)
+                if count <= 0:
+                    # All workers are done, run post cleanup.
+                    pid = pid_file.read_text().strip()
+                    if pid:
+                        try:
+                            os.kill(int(pid), signal.SIGKILL)
+                        except ProcessLookupError:
+                            # The server already exited.
+                            pass
+                    pathlib.Path(fn).unlink(missing_ok=True)
 
 
 @pytest.fixture(scope='session', autouse=True)
