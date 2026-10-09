@@ -72,9 +72,10 @@ class TestCostReportCore(unittest.TestCase):
 
             result = core.cost_report(days=None)
 
-            # Should call with default 30 days when None is passed
+            # None means no time limit, so it must reach the query as-is
+            # rather than being replaced with the 30-day default.
             mock_get_history.assert_called_once_with(
-                days=30,
+                days=None,
                 abbreviate_response=False,
                 cluster_hashes=None,
                 cluster_names=None,
