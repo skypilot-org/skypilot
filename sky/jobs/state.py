@@ -3744,6 +3744,104 @@ async def get_all_task_ids_statuses_async(
         return [(row[0], ManagedJobStatus(row[1])) for row in result.fetchall()]
 
 
+@db_retries.retry_async
+async def get_unfinished_task_deadline_rows_async(
+        job_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
+    """The not-yet-ended tasks of ``job_ids``, with what deadlines need.
+
+    One query for every job a controller process owns, so the deadline
+    check costs one round trip per tick no matter how many jobs it holds.
+
+    Returns:
+        {job_id: [{'task_id', 'status', 'submitted_at', 'start_at',
+        'specs'}, ...]} for the tasks whose ``end_at`` is still NULL, in
+        task_id order. ``specs`` is the parsed task specs dict ({} if not
+        written yet). Jobs with no unfinished task are absent.
+    """
+    if not job_ids:
+        return {}
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.select(
+                spot_table.c.spot_job_id,
+                spot_table.c.task_id,
+                spot_table.c.status,
+                spot_table.c.submitted_at,
+                spot_table.c.start_at,
+                spot_table.c.specs,
+            ).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id.in_(job_ids),
+                    spot_table.c.end_at.is_(None),
+                )).order_by(spot_table.c.spot_job_id.asc(),
+                            spot_table.c.task_id.asc()))
+        rows = result.fetchall()
+    rows_by_job: Dict[int, List[Dict[str, Any]]] = collections.defaultdict(list)
+    for (job_id, task_id, status, submitted_at, start_at, specs) in rows:
+        parsed_specs: Dict[str, Any] = {}
+        if specs:
+            try:
+                loaded = json.loads(specs)
+                if isinstance(loaded, dict):
+                    parsed_specs = loaded
+            except (TypeError, ValueError):
+                logger.debug(f'Unparsable specs for job {job_id} task '
+                             f'{task_id}: {specs!r}')
+        rows_by_job[job_id].append({
+            'task_id': task_id,
+            'status': ManagedJobStatus(status),
+            'submitted_at': submitted_at,
+            'start_at': start_at,
+            'specs': parsed_specs,
+        })
+    return dict(rows_by_job)
+
+
+async def set_deadline_exceeded_async(job_id: int, task_id: int,
+                                      failure_reason: str,
+                                      event_reason: str) -> bool:
+    """Record that a task exceeded one of its deadlines (e.g. queue_timeout).
+
+    In one transaction: set the task's ``failure_reason`` and append a
+    CANCELLING job event with ``event_reason``, so both the job record and
+    its event timeline say why the controller is about to cancel the job.
+    Applies only while the task has not ended and the job is not already
+    being cancelled.
+
+    Returns:
+        True if the reason was recorded (the caller should go on to cancel
+        the job), False if the task already ended or the job is already
+        cancelling (nothing to do).
+    """
+
+    async def _op(session: sql_async.AsyncSession) -> bool:
+        cancelling = await session.execute(
+            sqlalchemy.select(spot_table.c.task_id).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.status == ManagedJobStatus.CANCELLING.value,
+                )).limit(1))
+        if cancelling.first() is not None:
+            return False
+        result = await session.execute(
+            sqlalchemy.update(spot_table).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id,
+                    spot_table.c.end_at.is_(None),
+                )).values({spot_table.c.failure_reason: failure_reason}))
+        if result.rowcount != 1:
+            await session.rollback()
+            return False
+        await _insert_job_event(session, job_id, None,
+                                ManagedJobStatus.CANCELLING, event_reason)
+        await session.commit()
+        return True
+
+    return await _retry_session(_op)
+
+
 async def set_starting_async(job_id: int,
                              task_id: int,
                              run_timestamp: str,
