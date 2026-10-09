@@ -24,6 +24,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import schemas
+from sky.utils import status_lib
 from sky.utils import yaml_utils
 
 _CTX = 'test-context'
@@ -583,6 +584,38 @@ class TestResourcesCarryTheIdentity:
                 'cpus': '1',
                 '_kubernetes_identity': 'fixed-sa'
             })
+
+    @pytest.mark.parametrize('task_identity', ['fixed-sa', None])
+    def test_relaunching_an_existing_cluster_takes_the_callers(
+            self, task_identity):
+        # A cluster launched before the caller passed an account (its handle
+        # has none) gets it on relaunch; without one, nothing changes.
+        launched = resources_lib.Resources(cloud=_K8S, cpus='1')
+        handle = mock.MagicMock(launched_resources=launched, launched_nodes=1)
+        record = {
+            'handle': handle,
+            'status': status_lib.ClusterStatus.UP,
+            'cluster_ever_up': True,
+            'config_hash': None,
+        }
+        requested = resources_lib.Resources(cloud=_K8S, cpus='1')
+        requested.set_kubernetes_identity(task_identity)
+        task = mock.MagicMock(resources={requested}, num_nodes=1)
+        backend = backends.CloudVmRayBackend()
+        with mock.patch('sky.global_user_state.get_cluster_from_name',
+                        return_value=record), \
+             mock.patch('sky.backends.backend_utils.refresh_cluster_record',
+                        return_value=record), \
+             mock.patch('sky.global_user_state.get_cluster_yaml_str',
+                        return_value=None), \
+             mock.patch.object(backends.CloudVmRayBackend,
+                               'check_resources_fit_cluster'), \
+             mock.patch.object(resources_lib.Resources,
+                               'assert_launchable', lambda self: self):
+            config = backend._check_existing_cluster(  # pylint: disable=protected-access
+                task, None, 'c1')
+        assert config.resources.kubernetes_identity == task_identity
+        assert launched.kubernetes_identity is None
 
 
 class TestServerConfigView:
