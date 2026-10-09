@@ -4773,6 +4773,12 @@ def normalize_pod_resource_quantities(pod_spec: Dict[str, Any]) -> None:
     resource_owners = [pod_spec]
     for field in ('containers', 'initContainers', 'ephemeralContainers'):
         resource_owners.extend(pod_spec.get(field) or [])
+    # Generic ephemeral volumes embed a PVC whose storage quantities are
+    # also validated as strings by the generated Pod/Deployment APIs.
+    for volume in pod_spec.get('volumes') or []:
+        ephemeral = volume.get('ephemeral') or {}
+        claim_template = ephemeral.get('volumeClaimTemplate') or {}
+        resource_owners.append(claim_template.get('spec') or {})
     for owner in resource_owners:
         resources = owner.get('resources') or {}
         for field in ('requests', 'limits'):

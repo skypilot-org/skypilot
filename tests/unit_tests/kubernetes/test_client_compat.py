@@ -261,6 +261,67 @@ def test_normalize_pod_resource_quantities_preserves_invalid_values() -> None:
     assert spec == original
 
 
+@pytest.mark.parametrize(('quantity', 'expected'), [
+    (1073741824, '1073741824'),
+    (1.5, '1.5'),
+    ('1Gi', '1Gi'),
+    (None, None),
+    (True, True),
+])
+def test_normalize_inline_pvc_quantities(quantity: Any, expected: Any) -> None:
+    spec = {
+        'volumes': [{
+            'name': 'scratch',
+            'ephemeral': {
+                'volumeClaimTemplate': {
+                    'metadata': {
+                        'labels': {
+                            'app': 'test'
+                        }
+                    },
+                    'spec': {
+                        'accessModes': ['ReadWriteOnce'],
+                        'resources': {
+                            'requests': {
+                                'storage': quantity
+                            },
+                            'limits': {
+                                'storage': quantity
+                            }
+                        },
+                    },
+                },
+            },
+        }, {
+            'name': 'existing',
+            'persistentVolumeClaim': {
+                'claimName': 'existing-pvc'
+            },
+        }, {
+            'name': 'empty',
+            'emptyDir': {},
+        }, {
+            'name': 'null-ephemeral',
+            'ephemeral': None,
+        }, {
+            'name': 'null-template',
+            'ephemeral': {
+                'volumeClaimTemplate': None
+            },
+        }],
+    }
+    expected_spec = copy.deepcopy(spec)
+    resources = expected_spec['volumes'][0]['ephemeral']['volumeClaimTemplate'][
+        'spec']['resources']
+    for field in ('requests', 'limits'):
+        resources[field]['storage'] = expected
+    utils.normalize_pod_resource_quantities(spec)
+    assert spec == expected_spec
+    # Normalization must be safe to repeat before retrying a request.
+    utils.normalize_pod_resource_quantities(spec)
+    assert spec == expected_spec
+
+
 def _assert_request_bearer_token(api_client: client.ApiClient,
                                  expected_token: str) -> None:
     # Exercise generated request authentication, not just auth_settings().
