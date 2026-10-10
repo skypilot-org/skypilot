@@ -18,6 +18,7 @@ def _reset_runtimes(monkeypatch):
     monkeypatch.setattr(runtime_chain, '_runtimes', [])
     runtime_chain._warn_conflict.cache_clear()
     runtime_chain._warn_ownership.cache_clear()
+    runtime_chain._warn_status_check_gap.cache_clear()
     yield
 
 
@@ -35,6 +36,7 @@ def _make_runtime(name, owns_return=False, hook_return=None):
     rt = mock.MagicMock(name=name)
     rt.owns = mock.MagicMock(return_value=owns_return)
     rt.get_job_status = mock.MagicMock(return_value=hook_return)
+    rt.get_status_check_gap_seconds = mock.MagicMock(return_value=None)
     rt.get_job_submitted_at = mock.MagicMock(return_value=None)
     rt.get_job_ended_at = mock.MagicMock(return_value=None)
     rt.get_exit_codes = mock.MagicMock(return_value=None)
@@ -404,3 +406,106 @@ def test_conflict_warns_once():
         for _ in range(3):
             runtime_chain._claimants(_make_handle())
     warning.assert_called_once()
+
+
+class _RuntimeWithoutGap:
+    """A runtime from before get_status_check_gap_seconds existed."""
+
+    def owns(self, handle):
+        del handle
+        return True
+
+
+class TestStatusCheckGap:
+    """get_status_check_gap_seconds() lets the runtime that owns a handle
+    set the controller's status-check gap for the job, and falls back to the
+    default (None) whenever the runtime cannot answer."""
+
+    def test_owner_sets_the_gap(self):
+        owner = _make_runtime('owner', owns_return=True)
+        owner.get_status_check_gap_seconds.return_value = 5
+        runtime_chain.register(owner)
+        handle = _make_handle()
+        gap = runtime_chain.get_status_check_gap_seconds(handle)
+        assert gap == 5.0 and isinstance(gap, float)
+        owner.get_status_check_gap_seconds.assert_called_once_with(handle)
+
+    def test_ray_backed_and_missing_handles_use_the_default(self):
+        owner = _make_runtime('owner', owns_return=True)
+        owner.get_status_check_gap_seconds.return_value = 5
+        runtime_chain.register(owner)
+        assert runtime_chain.get_status_check_gap_seconds(
+            _make_handle(has_ray=True)) is None
+        assert runtime_chain.get_status_check_gap_seconds(None) is None
+        owner.owns.assert_not_called()
+        owner.get_status_check_gap_seconds.assert_not_called()
+
+    def test_non_owner_is_not_asked(self):
+        other = _make_runtime('other', owns_return=False)
+        other.get_status_check_gap_seconds.return_value = 5
+        runtime_chain.register(other)
+        assert runtime_chain.get_status_check_gap_seconds(
+            _make_handle()) is None
+        other.get_status_check_gap_seconds.assert_not_called()
+
+    def test_runtime_without_the_hook_is_skipped(self):
+        later = _make_runtime('later', owns_return=True)
+        later.get_status_check_gap_seconds.return_value = 30
+        runtime_chain.register(_RuntimeWithoutGap())
+        runtime_chain.register(later)
+        assert runtime_chain.get_status_check_gap_seconds(
+            _make_handle()) == 30.0
+
+    def test_none_falls_through_to_the_next_claimant(self):
+        first = _make_runtime('first', owns_return=True)
+        second = _make_runtime('second', owns_return=True)
+        second.get_status_check_gap_seconds.return_value = 7.5
+        runtime_chain.register(first)
+        runtime_chain.register(second)
+        assert runtime_chain.get_status_check_gap_seconds(_make_handle()) == 7.5
+        first.get_status_check_gap_seconds.assert_called_once()
+
+    def test_failing_hook_uses_the_default_and_warns_once(self):
+        owner = _make_runtime('owner', owns_return=True)
+        owner.get_status_check_gap_seconds.side_effect = KeyError('gap')
+        later = _make_runtime('later', owns_return=True)
+        later.get_status_check_gap_seconds.return_value = 30
+        runtime_chain.register(owner)
+        runtime_chain.register(later)
+        with mock.patch.object(runtime_chain.logger, 'warning') as warning:
+            for _ in range(3):
+                assert runtime_chain.get_status_check_gap_seconds(
+                    _make_handle()) is None
+        gap_warnings = [
+            call for call in warning.call_args_list
+            if 'get_status_check_gap_seconds' in call.args[0]
+        ]
+        assert len(gap_warnings) == 1
+        assert 'KeyError' in gap_warnings[0].args[2]
+        # The owner failed; another runtime's gap does not stand in for it.
+        later.get_status_check_gap_seconds.assert_not_called()
+
+    @pytest.mark.parametrize(
+        'value',
+        [0, -5, float('nan'), float('inf'), True, '5', [5]])
+    def test_invalid_gap_uses_the_default(self, value):
+        """A gap of zero or less, or one that is not a finite number, would
+        make the monitor loop check its job without pause or never again."""
+        owner = _make_runtime('owner', owns_return=True)
+        owner.get_status_check_gap_seconds.return_value = value
+        runtime_chain.register(owner)
+        with mock.patch.object(runtime_chain.logger, 'warning') as warning:
+            assert runtime_chain.get_status_check_gap_seconds(
+                _make_handle()) is None
+        warning.assert_called_once()
+
+    def test_ownership_failure_uses_the_default(self):
+        """Unlike the status hooks, the gap may defer to the default when
+        ownership is unknown: the default gap only changes how often the job
+        is checked, and the check itself still refuses to guess the owner."""
+        owner = _make_runtime('owner')
+        owner.owns.side_effect = RuntimeError('config unavailable')
+        runtime_chain.register(owner)
+        assert runtime_chain.get_status_check_gap_seconds(
+            _make_handle()) is None
+        owner.get_status_check_gap_seconds.assert_not_called()
