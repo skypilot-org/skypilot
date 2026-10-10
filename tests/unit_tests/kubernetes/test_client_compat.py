@@ -150,12 +150,33 @@ def test_ingress_external_ip_names(attribute: str, ips: Optional[list],
                 ],
             }),
         status=SimpleNamespace(load_balancer=SimpleNamespace(ingress=None)))
+    if attribute == 'external_ips':
+        # An existing modern attribute wins even if its value is None or [].
+        service.spec.external_i_ps = ['192.0.2.99']
     with mock.patch.object(kubernetes, 'core_api') as core_api:
         core_api.return_value.list_namespaced_service.return_value.items = [
             service
         ]
         assert network_utils.get_ingress_external_ip_and_ports(None) == (
             expected, (30080, 30443))
+
+
+def test_ingress_external_ip_missing_attributes() -> None:
+    service = SimpleNamespace(
+        metadata=SimpleNamespace(
+            name='ingress-nginx-controller',
+            annotations={'skypilot.co/external-ip': '192.0.2.2'}),
+        spec=SimpleNamespace(ports=[
+            SimpleNamespace(name='http', node_port=30080),
+            SimpleNamespace(name='https', node_port=30443),
+        ]),
+        status=SimpleNamespace(load_balancer=SimpleNamespace(ingress=None)))
+    with mock.patch.object(kubernetes, 'core_api') as core_api:
+        core_api.return_value.list_namespaced_service.return_value.items = [
+            service
+        ]
+        with pytest.raises(AttributeError, match='external_i_ps'):
+            network_utils.get_ingress_external_ip_and_ports(None)
 
 
 def test_ingress_external_ip_installed_client() -> None:

@@ -262,9 +262,10 @@ def get_ingress_external_ip_and_ports(
         # 3. Otherwise return 'localhost'
         ip = None
         # The v36 generator renamed external_i_ps to external_ips.
-        external_ips = getattr(ingress_service.spec, 'external_ips', None)
-        if external_ips is None:
-            external_ips = getattr(ingress_service.spec, 'external_i_ps', None)
+        try:
+            external_ips = ingress_service.spec.external_ips
+        except AttributeError:
+            external_ips = ingress_service.spec.external_i_ps
         if external_ips:
             ip = external_ips[0]
         elif ingress_service.metadata.annotations is not None:
