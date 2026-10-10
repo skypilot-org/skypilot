@@ -19,6 +19,7 @@ from sky.provision import constants
 from sky.provision import docker_utils
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
+from sky.provision.kubernetes import host_network_ports
 from sky.provision.kubernetes import host_network_probe
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
@@ -1307,12 +1308,10 @@ def _wait_for_pods_to_schedule(namespace,
                     nop_if_duplicate=True,
                 )
             last_gated_pod_names = gated_pod_names
-            # Keep refreshing the spinner while gated. The message set above
-            # is written once, on entering the gated state; the admission
-            # wait that follows can last hours, and it is exactly the phase
-            # where live feedback (e.g. the workload's position in the
-            # queue) is most useful. Skipping the per-poll update would
-            # freeze the spinner on that static message for the whole wait.
+            # Keep calling the per-poll spinner update while gated, as the
+            # ungated loop below does. The message set above is written
+            # once, on entering the gated state, and the wait that follows
+            # can last hours.
             _update_spinner_message(iteration=iteration,
                                     pods=pods,
                                     context=context,
@@ -2433,6 +2432,52 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             'This is likely a resource leak. '
             'Use "sky down" to terminate the cluster.')
 
+    # hostNetwork port blocks, assigned per pod BEFORE the parallel dispatch
+    # below. Head and workers are created concurrently, so a worker cannot read
+    # the head's ports off a live head pod that may not exist yet -- but it
+    # needs the head's GCS port to join. So the server resolves every pod's
+    # block up front and hands the head's GCS port to all of them.
+    #
+    # Per pod rather than per cluster: podAntiAffinity already keeps
+    # same-cluster pods off one node, so sharing a block buys nothing, while a
+    # shared block means one pod that cannot schedule can never be given a
+    # different one without moving a healthy head.
+    host_network_port_blocks: Dict[str, Dict[str, int]] = {}
+    head_gcs_port: Optional[int] = None
+    if pod_spec.get('spec', {}).get('hostNetwork', False):
+        head_name = f'{cluster_name_on_cloud}-head'
+        # Only the head needs a ConfigMap fallback. A cluster created before
+        # this change declares no ports, so its head's block is only knowable
+        # from what the old probe published -- and a new worker that guesses
+        # instead would be handed a GCS port the head is not listening on.
+        # Workers need no fallback: an existing one is not recreated, and a
+        # new one is new.
+        #
+        # This is reached by RECOVERY, not by scaling: `sky launch --num-nodes`
+        # against an existing cluster is refused before provisioning, by
+        # check_resources_fit_cluster ("specify a new cluster name, or down
+        # the existing cluster first"). The live path is a pod lost to node
+        # failure or manual termination, where a launch at the SAME node count
+        # recreates it against a Running head -- the case the comment at the
+        # parallel dispatch below describes. Do not read "you cannot scale a
+        # cluster" as "a worker is never created next to an existing head".
+        head_pod = running_pods.get(head_name)
+        head_block = host_network_ports.resolve_block(
+            head_pod,
+            # Only a live pre-change head can be served by the ConfigMap, so
+            # there is nothing to read when there is no head pod -- and every
+            # post-change launch would otherwise pay for the lookup.
+            _head_block_from_configmap(cluster_name_on_cloud, namespace,
+                                       context, head_name)
+            if head_pod is not None else None,
+            context)
+        host_network_port_blocks[head_name] = head_block
+        head_gcs_port = head_block['gcs']
+        for i in range(1, config.count):
+            name = f'{cluster_name_on_cloud}-worker{i}'
+            host_network_port_blocks[name] = host_network_ports.resolve_block(
+                running_pods.get(name), configmap_ports=None, context=context)
+
     # Add nvidia runtime class if it exists
     nvidia_runtime_exists = False
     try:
@@ -2492,6 +2537,16 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 return
             pod_spec_copy['metadata']['name'] = pod_name
             pod_spec_copy['metadata']['labels']['component'] = pod_name
+
+        if host_network_port_blocks:
+            assert head_gcs_port is not None
+            # Read the name back off the spec rather than tracking it in a
+            # second variable: only the worker branch above binds pod_name,
+            # while both branches set metadata.name.
+            this_pod = pod_spec_copy['metadata']['name']
+            host_network_ports.apply_to_pod_spec(
+                pod_spec_copy, host_network_port_blocks[this_pod],
+                head_gcs_port, context)
 
         # Inject cache volume + volumeMount for the Docker sidecar container.
         if docker_config:
@@ -3053,6 +3108,48 @@ def cleanup_cluster_resources(
 _HOST_NETWORK_SSHD_WAIT_TIMEOUT_S = 60
 _HOST_NETWORK_SSHD_WAIT_INTERVAL_S = 2
 
+# The names the pre-change probe published (v0.13.0, #9644). Fixed, not derived
+# from HEAD_PORT_NAMES: that list grows (skylet was appended after the move),
+# and a name it gains never appears in an existing ConfigMap.
+_CONFIGMAP_PORT_NAMES = ('gcs', 'dashboard', 'node_manager', 'object_manager',
+                         'ray_client_server', 'dashboard_agent_listen',
+                         'runtime_env_agent', 'metrics_export', 'sshd')
+
+
+def _head_block_from_configmap(cluster_name_on_cloud: str, namespace: str,
+                               context: Optional[str],
+                               head_name: str) -> Optional[Dict[str, int]]:
+    """The head's port block as the pre-change probe published it.
+
+    Kept for one release so a cluster created before ports moved into the pod
+    spec can still be added to. Absent ConfigMap, or a cluster created after
+    the change, returns None and the caller allocates.
+    """
+    name = host_network_probe.ray_ports_configmap_name(cluster_name_on_cloud)
+    try:
+        cm = kubernetes.core_api(context).read_namespaced_config_map(
+            name=name, namespace=namespace)
+    except kubernetes.api_exception() as e:
+        if e.status != 404:
+            raise
+        return None
+    data = cm.data or {}
+    block: Dict[str, int] = {}
+    for port_name in _CONFIGMAP_PORT_NAMES:
+        key = (f'{host_network_probe.SSHD_KEY_PREFIX}{head_name}'
+               if port_name == 'sshd' else port_name)
+        value = data.get(key)
+        if value is None:
+            return None
+        try:
+            block[port_name] = int(value)
+        except ValueError:
+            logger.warning(f'ConfigMap {namespace}/{name} has a non-integer '
+                           f'value for {key!r}: {value!r}. Ignoring it and '
+                           'allocating a fresh host port block.')
+            return None
+    return block
+
 
 def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
                                   context: Optional[str],
@@ -3126,16 +3223,32 @@ def get_cluster_info(
         port = kubernetes_utils.get_head_ssh_port(cluster_name_on_cloud,
                                                   namespace, context)
 
-    # Each hostNetwork pod's sshd binds a probed port (host:22 is the
-    # K8s node's own sshd). The SSH config writer needs that port per
-    # pod, so wait for every hostNetwork pod's entry to land in the
-    # ConfigMap before caching the result.
-    host_network_pods = [
-        name for name, pod in running_pods.items() if pod.spec.host_network
-    ]
-    pod_sshd_ports = _read_host_network_sshd_ports(cluster_name_on_cloud,
-                                                   namespace, context,
-                                                   host_network_pods)
+    # A hostNetwork pod's sshd is not on 22 -- the K8s node's own sshd owns
+    # that -- so the SSH config writer needs the real port per pod. Read it
+    # off the pod, which declares it; a pod created before ports moved into
+    # the spec declares nothing, so fall back to the ConfigMap its probe
+    # published. Same order as the assignment side -- pod first, ConfigMap
+    # second -- but per pod rather than head-only: the ConfigMap carries
+    # sshd_<pod> for every pod, and SSH to a pre-existing *worker* needs its
+    # own entry. (The assignment side only ever needs the head's block, which
+    # is the only full block the ConfigMap holds.)
+    pod_sshd_ports: Dict[str, int] = {}
+    # Only pods that declare a block; the rest run skylet on the default.
+    pod_skylet_ports: Dict[str, int] = {}
+    legacy_pods = []
+    for name, pod in running_pods.items():
+        if not pod.spec.host_network:
+            continue
+        declared = host_network_ports.ports_from_pod(pod, context)
+        if declared is not None:
+            pod_sshd_ports[name] = declared['sshd']
+            pod_skylet_ports[name] = declared['skylet']
+        else:
+            legacy_pods.append(name)
+    if legacy_pods:
+        pod_sshd_ports.update(
+            _read_host_network_sshd_ports(cluster_name_on_cloud, namespace,
+                                          context, legacy_pods))
 
     head_pod_name = None
     cpu_request = None
@@ -3155,6 +3268,7 @@ def get_cluster_info(
                 internal_ip=internal_ip,
                 external_ip=None,
                 ssh_port=pod_sshd_ports.get(pod_name, port),
+                skylet_port=pod_skylet_ports.get(pod_name),
                 tags=pod.metadata.labels,
                 # TODO(hailong): `cluster.local` may need to be configurable
                 # Service name is same as the pod name for now.
@@ -3345,8 +3459,8 @@ def _check_nodes_health(
 ) -> Dict[str, str]:
     """Check health of specific Kubernetes nodes.
 
-    Tries the NodeInfoSource plugin first (fast, cached), then falls back
-    to direct Kubernetes API calls.
+    Tries a registered NodeInfoSource first, then falls back to direct
+    Kubernetes API calls.
 
     Args:
         context: Kubernetes context name.
@@ -3361,9 +3475,9 @@ def _check_nodes_health(
 
     issues: Dict[str, str] = {}
 
-    # Try NodeInfoSource plugin first (node-info-service sidecar).
-    # get() safely returns None when no provider is registered.
-    # Note: if a node is in node_names but not in the cache, it's silently
+    # Try NodeInfoSource first; get() safely returns None when no provider
+    # is registered.
+    # Note: if a node is in node_names but not in the result, it's silently
     # skipped (we don't fall back to the k8s API for missing entries). This
     # is acceptable since this is diagnostic-only and doesn't affect the
     # cluster status transition.
@@ -3477,8 +3591,8 @@ def get_missing_node_reason(node_names: List[str],
     it returns the same answer on every status refresh, with no dependence on
     what a previous call already consumed.
 
-    Note this deliberately does not use the NodeInfoSource cache that
-    ``_check_nodes_health`` prefers: a node absent from that cache is
+    Note this deliberately does not use the NodeInfoSource that
+    ``_check_nodes_health`` prefers: a node absent from its result is
     indistinguishable from a healthy one, and a deleted node is exactly the
     case this needs to report.
 
@@ -4597,9 +4711,8 @@ def query_instances(
     # Mapping from pod phase to skypilot status. These are the only valid pod
     # phases.
     # https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-phase
-    # ``status_map_overrides`` lets callers (e.g. plugin provisioners whose
-    # pods don't follow the ray-cluster lifecycle) selectively remap a
-    # subset of phases without duplicating this whole function.
+    # ``status_map_overrides`` lets callers selectively remap a subset of
+    # phases without duplicating this whole function.
     status_map = {
         'Pending': status_lib.ClusterStatus.INIT,
         'Running': status_lib.ClusterStatus.UP,

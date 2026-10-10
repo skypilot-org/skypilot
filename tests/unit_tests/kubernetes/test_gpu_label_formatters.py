@@ -349,6 +349,16 @@ class TestAcceleratorNameMatches:
         # A10 should not match A100
         assert not _accelerator_name_matches('A10', ['a100'])
 
+    def test_rtx_pro_6000_aliases(self):
+        """Test RTXPRO6000 (GCP catalog) matches RTX-PRO-6000 (GKE label)."""
+        gke_viable = ['nvidia-rtx-pro-6000', 'rtx-pro-6000']
+        assert _accelerator_name_matches('RTXPRO6000', gke_viable)
+        assert _accelerator_name_matches('rtxpro6000', gke_viable)
+        assert _accelerator_name_matches('RTX-PRO-6000', gke_viable)
+        assert _accelerator_name_matches('RTX-PRO-6000', ['rtxpro6000'])
+        assert not _accelerator_name_matches('RTX6000', gke_viable)
+        assert not _accelerator_name_matches('RTXPRO6000', ['rtx6000'])
+
     def test_case_insensitive(self):
         """Test case-insensitive matching."""
         assert _accelerator_name_matches('H200', ['H200'])

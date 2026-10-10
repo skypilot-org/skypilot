@@ -254,7 +254,25 @@ KIND_CONTEXT_NAME = 'kind-skypilot'  # Context name used by sky local up
 PORT_FORWARD_PROXY_CMD_TEMPLATE = 'kubernetes-port-forward-proxy-command.sh'
 # We add a version suffix to the port-forward proxy command to ensure backward
 # compatibility and avoid overwriting the older version.
-PORT_FORWARD_PROXY_CMD_VERSION = 3
+#
+# v4 reads a hostNetwork pod's sshd port off the pod spec instead of the
+# cluster's ray-ports ConfigMap. The bump is load-bearing, not cosmetic: this
+# script lives at ONE path per user and is re-copied on every auth setup, so
+# without it, upgrading and launching any Kubernetes cluster would replace the
+# script that every *pre-existing* hostNetwork cluster's stored
+# ssh_proxy_command points at. Those clusters' pods declare no ports, so the
+# new lookup finds nothing and SSH would fall back to 22 -- the node's own
+# sshd. Keeping v3 on disk leaves them on the script that still reads the
+# ConfigMap they did publish to.
+#
+# INVARIANT, new as of v4: versions may now read *different sources* for the
+# same value. Earlier bumps changed the script while every version still read
+# the same place, so re-deriving an existing cluster's proxy command with
+# current code was harmless. It is not any more -- handing an existing
+# cluster a v4 script points it at a pod spec that declares no ports. A
+# stored ssh_proxy_command must never be re-derived for a cluster that
+# already exists; it is written once, at provisioning.
+PORT_FORWARD_PROXY_CMD_VERSION = 4
 PORT_FORWARD_PROXY_CMD_PATH = ('~/.sky/kubernetes-port-forward-proxy-command-'
                                f'v{PORT_FORWARD_PROXY_CMD_VERSION}.sh')
 
@@ -550,6 +568,10 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     elif accelerator == 'H200':
         # H200s on GCP use this label format
         return 'nvidia-h200-141gb'
+    elif accelerator in ('RTX-PRO-6000', 'RTXPRO6000'):
+        # RTX PRO 6000 (G4) is labeled nvidia-rtx-pro-6000 in GKE, and is
+        # named RTXPRO6000 in the GCP catalog.
+        return 'nvidia-rtx-pro-6000'
     elif accelerator.startswith('tpu-'):
         return accelerator
     elif accelerator.startswith('amd-'):
@@ -811,6 +833,15 @@ class GFDLabelFormatter(GPULabelFormatter):
                                                  '').replace('RTX-', 'RTX')
 
 
+# Lowercase names of one accelerator that the prefix match in
+# _accelerator_name_matches cannot pair, mapped to a shared name. RTX PRO 6000
+# is 'RTXPRO6000' in the GCP catalog, while GKE labels it
+# 'nvidia-rtx-pro-6000', which GKELabelFormatter decodes to 'RTX-PRO-6000'.
+_ACCELERATOR_NAME_ALIASES = {
+    'rtxpro6000': 'rtx-pro-6000',
+}
+
+
 def _accelerator_name_matches(requested_acc: str,
                               viable_names: List[str]) -> bool:
     """Check if requested accelerator matches any viable name.
@@ -824,6 +855,9 @@ def _accelerator_name_matches(requested_acc: str,
       after upgrading, the same label now maps to canonical name (e.g., 'H200').
     - Users specify canonical names but the cluster uses fallback names.
 
+    Names listed in _ACCELERATOR_NAME_ALIASES also match their alias exactly
+    (e.g., 'RTXPRO6000' matches 'RTX-PRO-6000').
+
     Args:
         requested_acc: The accelerator type requested (e.g., from launched_resources).
         viable_names: List of viable accelerator names from node labels.
@@ -832,9 +866,14 @@ def _accelerator_name_matches(requested_acc: str,
         True if the requested accelerator matches any viable name.
     """
     requested_lower = requested_acc.lower()
+    requested_alias = _ACCELERATOR_NAME_ALIASES.get(requested_lower,
+                                                    requested_lower)
     for viable in viable_names:
         viable_lower = viable.lower()
         if requested_lower == viable_lower:
+            return True
+        if requested_alias == _ACCELERATOR_NAME_ALIASES.get(
+                viable_lower, viable_lower):
             return True
         # Check prefix match with '-' separator for backward compatibility.
         # E.g., 'H200' matches 'H200-SXM-80GB' and vice versa.
@@ -2443,6 +2482,54 @@ def _diagnose_deleted_pod(context: Optional[str], namespace: str,
     return _with_failure_hint(f'Pod {pod_name} was deleted: {reason}.', reason)
 
 
+# A container's own output explains a failure only when the process exited by
+# itself. OOMKilled and evictions are decided outside it, so its log would be
+# noise there.
+_SELF_EXIT_REASON = 'Error'
+_ERROR_LOG_TAIL_LINES = 50
+# The last line of a Python traceback, where its message starts.
+_EXCEPTION_LINE = re.compile(r'^[A-Za-z_][\w.]*(Error|Exception): ')
+
+
+def _self_exit_output(context: Optional[str], namespace: str, pod_name: str,
+                      pod: 'kubernetes_models.V1Pod') -> Optional[str]:
+    """What a container that exited with an error last printed, or None.
+
+    A failure raised in a container's own command -- not an exec -- leaves
+    its explanation only in the container log; the caller would otherwise
+    report just "Error (exit code 1)".
+    """
+    for cs in (pod.status.container_statuses or []):
+        for state, previous in ((cs.state, False), (cs.last_state, True)):
+            term = state.terminated if state else None
+            if (term is None or term.exit_code == 0 or
+                    term.reason != _SELF_EXIT_REASON):
+                continue
+            try:
+                log = kubernetes.core_api(context).read_namespaced_pod_log(
+                    pod_name,
+                    namespace,
+                    container=cs.name,
+                    previous=previous,
+                    tail_lines=_ERROR_LOG_TAIL_LINES,
+                    _request_timeout=kubernetes.API_TIMEOUT)
+            except Exception:  # pylint: disable=broad-except
+                return None
+            if not isinstance(log, str):
+                return None
+            lines = log.rstrip().splitlines()
+            first = max(0, len(lines) - 10)
+            for i in range(len(lines) - 1, -1, -1):
+                if _EXCEPTION_LINE.match(lines[i]):
+                    first = i
+                    break
+            tail = '\n'.join(lines[first:]).strip()
+            if not tail:
+                return None
+            return f'{constants.CONTAINER_OUTPUT_MARKER} {cs.name}:\n{tail}'
+    return None
+
+
 def diagnose_terminated_pod(context: Optional[str], namespace: str,
                             pod_name: str) -> Optional[str]:
     """Best-effort diagnosis of a pod that an exec/attach found already gone.
@@ -2467,7 +2554,11 @@ def diagnose_terminated_pod(context: Optional[str], namespace: str,
     if not pod_terminated_abnormally(pod):
         return None
     reason = get_condensed_pod_reason(pod)
-    return _with_failure_hint(f'Pod {pod_name} terminated: {reason}.', reason)
+    msg = _with_failure_hint(f'Pod {pod_name} terminated: {reason}.', reason)
+    output = _self_exit_output(context, namespace, pod_name, pod)
+    if output is not None:
+        msg += f'\n{output}'
+    return msg
 
 
 @dataclasses.dataclass
@@ -2901,6 +2992,32 @@ def get_node_affinity(
             },
         }]
     return node_affinity or None
+
+
+def get_pod_fields(
+    acc_label_key: Optional[str],
+    acc_label_values: Optional[List[str]],
+    avoid_label_keys: Optional[List[str]],
+) -> Dict[str, Any]:
+    """Builds the pod fields that SkyPilot computes in Python.
+
+    combine_pod_fields() merges the result, a partial pod manifest, into the
+    pod the cluster template renders.
+
+    Args:
+        acc_label_key: See get_node_affinity().
+        acc_label_values: See get_node_affinity().
+        avoid_label_keys: See get_node_affinity().
+
+    Returns:
+        A partial pod manifest, empty when no field applies.
+    """
+    pod_fields: Dict[str, Any] = {}
+    node_affinity = get_node_affinity(acc_label_key, acc_label_values,
+                                      avoid_label_keys)
+    if node_affinity is not None:
+        pod_fields['spec'] = {'affinity': {'nodeAffinity': node_affinity}}
+    return pod_fields
 
 
 def get_accelerator_label_keys(context: Optional[str],) -> List[str]:
@@ -3938,11 +4055,12 @@ def get_ssh_proxy_command(
             This key must be authorized to access the SSH jump pod.
         namespace: Kubernetes namespace to use.
         host_network: bool; Whether the target pod runs with
-            ``hostNetwork: true``. When True the proxy script discovers
-            the pod's probed sshd port from the cluster's ConfigMap;
-            when False it skips that lookup and uses port 22. Passed as
-            a flag so the script needs no per-connection `kubectl get
-            pod` probe to determine this.
+            ``hostNetwork: true``. When True the proxy script reads the
+            pod's assigned sshd port off the pod spec; when False it
+            skips that lookup and uses port 22. Passed as a flag so the
+            common path makes no kubectl call at all -- the port itself
+            cannot be passed, since this command is built during auth
+            setup, before the pod exists.
     """
     ssh_jump_ip = '127.0.0.1'  # Local end of the port-forward tunnel
     assert private_key_path is not None, 'Private key path must be provided'
@@ -4297,6 +4415,19 @@ def resolve_effective_pod_config(
         default_value={})
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
     return kubernetes_config
+
+
+def combine_pod_fields(cluster_yaml_obj: Dict[str, Any],
+                       pod_fields: Dict[str, Any]) -> Dict[str, Any]:
+    """Adds the pod fields from get_pod_fields() to the rendered pod.
+
+    Obeys the same add or update semantics as combine_pod_config_fields().
+    """
+    merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
+    config_utils.merge_k8s_configs(
+        merged_cluster_yaml_obj['available_node_types']['ray_head_default']
+        ['node_config'], copy.deepcopy(pod_fields))
+    return merged_cluster_yaml_obj
 
 
 def combine_pod_config_fields(
@@ -4737,10 +4868,9 @@ def _get_kubernetes_node_info(
         KubernetesNodesInfo: A model that contains the node info map and other
             information.
     """
-    # Try external node info source first (e.g., node-info-service cache).
-    # This allows plugins to provide cached node info for faster queries.
+    # Try the external node info source first, if one is registered.
     if plugin_extensions.NodeInfoSource.is_registered():
-        # Resolve context before calling the provider so it can be cached
+        # Resolve context before calling the provider.
         resolved_context = (context if context is not None else
                             get_current_kube_config_context_name())
         if resolved_context is not None:
@@ -5262,7 +5392,7 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
     if context is None:
         context = get_current_kube_config_context_name()
 
-    # Try external pod info source first (e.g., node-info-service cache).
+    # Try the external pod info source first, if one is registered.
     if plugin_extensions.PodInfoSource.is_registered():
         if context is not None:
             result = plugin_extensions.PodInfoSource.get(context)

@@ -467,7 +467,7 @@ class TestSecretBootstrap:
             assert service.secret_key is None
 
     def test_lost_race_adopts_the_stored_secret(self):
-        """Another replica won the insert; we must use its value, not ours."""
+        """Another process won the insert; we must use its value, not ours."""
         winner = secrets.token_urlsafe(32)
         with mock.patch('sky.users.token_service.global_user_state'
                        ) as mock_global_state:

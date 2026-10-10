@@ -80,8 +80,8 @@ class RequestBackend(abc.ABC):
         `name`, and `schedule_type` on the existing row so the
         persisted `env_vars` reflect the current process's
         `os.environ` rather than whatever the original creator
-        captured (which may be from a previous deployment generation
-        in HA setups).
+        captured (which may be from a previous deployment generation,
+        e.g. across a rolling update).
         """
         raise NotImplementedError
 

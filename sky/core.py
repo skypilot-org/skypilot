@@ -1,5 +1,6 @@
 """SDK functions for cluster/job management."""
 import concurrent.futures
+import itertools
 import json
 import shlex
 import typing
@@ -30,6 +31,7 @@ from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
 from sky.server.requests import request_names
+from sky.server.requests.serializers import encoders
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -56,6 +58,9 @@ else:
     jobsv1_pb2 = adaptors_common.LazyImport('sky.schemas.generated.jobsv1_pb2')
 
 logger = sky_logging.init_logger(__name__)
+
+# History records cost_report processes at a time.
+_COST_REPORT_CHUNK_SIZE = 256
 
 # ======================
 # = Cluster Management =
@@ -470,7 +475,8 @@ def cost_report(days: Optional[int] = None,
 
     Returns:
         A list of dicts, with each dict containing the cost information of a
-        cluster.
+        cluster. 'resources' is already encoded for the API response, and
+        sky.cost_report decodes it back to a resources.Resources.
     """
     if days is None:
         days = constants.COST_REPORT_DEFAULT_DAYS
@@ -478,14 +484,13 @@ def cost_report(days: Optional[int] = None,
     abbreviate_response = (dashboard_summary_response and
                            cluster_hashes is None and cluster_names is None)
 
-    cluster_reports = global_user_state.get_clusters_from_history(
-        days=days,
-        abbreviate_response=abbreviate_response,
-        cluster_hashes=cluster_hashes,
-        cluster_names=cluster_names,
-        exclude_managed_clusters=exclude_managed_clusters)
-    logger.debug(
-        f'{len(cluster_reports)} clusters found from history with {days} days.')
+    history = iter(
+        global_user_state.iter_clusters_from_history(
+            days=days,
+            abbreviate_response=abbreviate_response,
+            cluster_hashes=cluster_hashes,
+            cluster_names=cluster_names,
+            exclude_managed_clusters=exclude_managed_clusters))
 
     def _process_cluster_report(
             cluster_report: Dict[str, Any]) -> Dict[str, Any]:
@@ -511,21 +516,30 @@ def cost_report(days: Optional[int] = None,
 
         return report
 
-    # Process clusters in parallel
-    if not cluster_reports:
-        return []
-
-    if not abbreviate_response:
-        cluster_reports = subprocess_utils.run_in_parallel(
-            _process_cluster_report, cluster_reports)
-
-    for report in cluster_reports:
-        _update_record_with_resources(report, dashboard_summary_response)
-        if dashboard_summary_response:
-            report.pop('usage_intervals')
-            report.pop('user_hash')
-            report.pop('resources')
-
+    # Records are processed a chunk at a time, and each one's resources are
+    # encoded for the response as soon as its fields are derived, so only one
+    # chunk of unpickled resources is alive at a time.
+    cluster_reports: List[Dict[str, Any]] = []
+    while True:
+        chunk = list(itertools.islice(history, _COST_REPORT_CHUNK_SIZE))
+        if not chunk:
+            break
+        if not abbreviate_response:
+            # Process clusters in parallel
+            chunk = subprocess_utils.run_in_parallel(_process_cluster_report,
+                                                     chunk)
+        for report in chunk:
+            _update_record_with_resources(report, dashboard_summary_response)
+            if dashboard_summary_response:
+                report.pop('usage_intervals')
+                report.pop('user_hash')
+                report.pop('resources')
+            else:
+                report['resources'] = encoders.encode_resources(
+                    report['resources'])
+        cluster_reports.extend(chunk)
+    logger.debug(
+        f'{len(cluster_reports)} clusters found from history with {days} days.')
     return cluster_reports
 
 

@@ -15,7 +15,8 @@ import pickle
 import re
 import time
 import typing
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
+from typing import (Any, Dict, Iterator, List, Literal, Optional, Set, Tuple,
+                    Union)
 import uuid
 
 import sqlalchemy
@@ -60,8 +61,8 @@ DEFAULT_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
 # sits alongside expire together by default.
 DEFAULT_LAUNCH_ATTEMPT_RETENTION_HOURS = 30 * 24.0
 # How long an attempt may stay open before it is treated as abandoned. Well
-# past any provision timeout, because a launch parked waiting for quota is
-# legitimately open for hours and must not be swept out from under itself.
+# past any provision timeout, because a launch can legitimately stay open for
+# hours and must not be swept out from under itself.
 ABANDONED_LAUNCH_ATTEMPT_HOURS = 24.0
 DEBUG_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
 TERMINAL_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
@@ -352,10 +353,9 @@ cluster_event_table = sqlalchemy.Table(
 # through so launch latency can be broken down after the fact.
 #
 # Why a table rather than in-memory timers: a launch that parks on an external
-# condition (e.g. waiting for quota admission) raises ExecutionPausedError,
-# which unwinds bulk_provision entirely and resumes as a fresh call in a
-# possibly different executor worker. Milestones held in memory do not survive
-# that, so the wait that matters most is exactly the one that would be lost.
+# condition raises ExecutionPausedError, which unwinds bulk_provision entirely
+# and resumes as a fresh call in a possibly different executor worker.
+# Milestones held in memory do not survive that.
 #
 # Every segment is a subtraction between two persisted timestamps, so whoever
 # closes a segment can read the opening one back instead of carrying state.
@@ -400,16 +400,13 @@ launch_attempt_table = sqlalchemy.Table(
     # Recorded on the row rather than joined from the clusters table, which is
     # deleted on teardown -- the attempt outlives the cluster it provisioned.
     sqlalchemy.Column('workspace', sqlalchemy.Text, server_default=None),
-    # The external scheduler queue this launch was submitted to, where one
-    # gates it (a Kueue LocalQueue today). NULL where nothing does. Recorded by
-    # whichever scheduler plugin owns the admission boundary, and used only to
-    # slice the admission wait -- "which queue is starving" is the question it
-    # answers, and it is the only one that needs this dimension.
+    # The queue name recorded by record_launch_queue_for_cluster, if any.
+    # NULL otherwise. Used only to label the admission wait.
     sqlalchemy.Column('queue', sqlalchemy.Text, server_default=None),
     # Milestones, epoch seconds. Named cloud-agnostically: on Kubernetes
     # instances_requested is pod creation and instances_ready is all pods
     # running; on VM clouds they are the create call and the instances being
-    # up. admitted stays NULL where no external scheduler gates the workload.
+    # up. admitted stays NULL unless LaunchMilestone.ADMITTED is stamped.
     sqlalchemy.Column('provision_start', sqlalchemy.Float),
     sqlalchemy.Column('instances_requested',
                       sqlalchemy.Float,
@@ -506,11 +503,11 @@ system_config_table = sqlalchemy.Table(
     sqlalchemy.Column('updated_at', sqlalchemy.Integer),
 )
 
-# Renewable leases for fleet-wide leader election. Each row is one singleton
-# role: ``holder`` is the current leader's identity, ``epoch`` is a monotonic
-# fencing token bumped on every change of holder, and ``expires_at`` is the
-# server-side deadline by which the holder must renew or be taken over. See
-# ``sky.utils.leader_election.PgLeaseElector``.
+# Renewable leases for leader election across server processes. Each row is
+# one singleton role: ``holder`` is the current leader's identity, ``epoch`` is
+# a monotonic fencing token bumped on every change of holder, and
+# ``expires_at`` is the server-side deadline by which the holder must renew or
+# be taken over. See ``sky.utils.leader_election.PgLeaseElector``.
 leader_leases_table = sqlalchemy.Table(
     'leader_leases',
     Base.metadata,
@@ -2847,6 +2844,34 @@ def get_clusters_from_history(
         exclude_managed_clusters: bool = False) -> List[Dict[str, Any]]:
     """Get cluster reports from history.
 
+    See iter_clusters_from_history for the arguments.
+
+    Returns:
+        List of cluster records with history information, most recently
+        launched first.
+    """
+    return list(
+        iter_clusters_from_history(
+            days=days,
+            abbreviate_response=abbreviate_response,
+            cluster_hashes=cluster_hashes,
+            cluster_names=cluster_names,
+            exclude_managed_clusters=exclude_managed_clusters))
+
+
+def iter_clusters_from_history(
+        days: Optional[int] = None,
+        abbreviate_response: bool = False,
+        cluster_hashes: Optional[List[str]] = None,
+        cluster_names: Optional[List[str]] = None,
+        exclude_managed_clusters: bool = False) -> Iterator[Dict[str, Any]]:
+    """Yield cluster reports from history, most recently launched first.
+
+    All matching rows are fetched, and their usage intervals unpickled, before
+    the first record is yielded. Only a row's launched resources are unpickled
+    when its record is yielded, so a caller that consumes the records as they
+    come never holds the whole history's Resources objects at once.
+
     Args:
         days: If specified, only include historical clusters (those not
               currently active) that were last used within the past 'days'
@@ -2863,8 +2888,8 @@ def get_clusters_from_history(
               controller (managed jobs and services). Rows recorded before the
               is_managed column existed are treated as not managed.
 
-    Returns:
-        List of cluster records with history information.
+    Yields:
+        Cluster records with history information.
     """
     engine = _db_manager.get_engine()
 
@@ -2964,8 +2989,8 @@ def get_clusters_from_history(
     last_cluster_event_dict = _get_last_or_terminal_cluster_event_multiple(
         cluster_hashes)
 
-    records = []
-    for row in rows:
+    # Sort by launch time, descending in recency.
+    for row in sorted(rows, key=lambda row: -(row.launched_at or 0)):
         user_hash = row_to_user_hash[row.cluster_hash]
         user = user_hash_to_user.get(user_hash, None)
         user_name = user.name if user is not None else None
@@ -3022,11 +3047,7 @@ def get_clusters_from_history(
             record['last_creation_yaml'] = None
             record['last_creation_command'] = None
 
-        records.append(record)
-
-    # sort by launch time, descending in recency
-    records = sorted(records, key=lambda record: -(record['launched_at'] or 0))
-    return records
+        yield record
 
 
 @metrics_lib.time_me
@@ -4252,8 +4273,8 @@ class LaunchMilestone(enum.Enum):
     """A boundary in a provisioning attempt, one column of launch_attempts."""
     # Instances/pods asked for. Closes the provision-setup segment.
     INSTANCES_REQUESTED = 'instances_requested'
-    # An external scheduler (e.g. a quota admission gate) let the workload
-    # through. Never set where nothing gates it.
+    # Stamped by a caller when an external gate admits the workload. Never
+    # set otherwise.
     ADMITTED = 'admitted'
     # All instances/pods up. Closes the startup segment.
     INSTANCES_READY = 'instances_ready'
@@ -4444,21 +4465,21 @@ def claim_unobserved_launch_attempts(limit: int = 500) -> List[Any]:
     """Claim finished attempts that have not been turned into metrics yet.
 
     Claiming is a conditional UPDATE, so an attempt is observed exactly once
-    even when several API server replicas run this concurrently: only the
-    writer whose UPDATE matched gets the row. That is what lets the observer be
-    a plain background loop -- no global cursor to keep, and no leader election
-    to decide who is allowed to run it.
+    even when several API server instances sharing the database run this
+    concurrently: only the writer whose UPDATE matched gets the row. That is
+    what lets the observer be a plain background loop -- no global cursor to
+    keep, and no leader election to decide who is allowed to run it.
 
     Only closed attempts are returned; an in-flight one has segments that have
     not happened yet.
     """
     engine = _db_manager.get_engine()
     # The claim is one UPDATE. A row-at-a-time loop would instead hold write
-    # locks for its whole length, so a second replica would block for the
+    # locks for its whole length, so a second instance would block for the
     # length of the batch rather than for one statement. It still comes away
     # with nothing this tick -- its UPDATE re-checks metrics_observed_at IS
     # NULL and matches none -- which is the point: the observation happens
-    # exactly once, not once per replica.
+    # exactly once, not once per instance.
     #
     # Which rows this call won comes from RETURNING where the backend has it,
     # so the claim is a single statement. The timestamp is still written, but
@@ -4508,13 +4529,12 @@ def sweep_abandoned_launch_attempts(
     attempt, and it makes a lost measurement countable instead of silently
     missing.
 
-    Bounded by age rather than sweeping every open row. The table is shared
-    across API server replicas, so a server starting up does not mean nothing
-    is provisioning: during a rolling upgrade an older replica is still running
-    launches, and closing their rows would discard their milestones and let
-    their paused launches resume as duplicate attempts. The bound is generous
-    because a launch parked waiting for quota is legitimately open for hours;
-    an attempt older than it has outlived any provision timeout.
+    Bounded by age rather than sweeping every open row: a server starting up
+    does not mean nothing is provisioning, since launches that were in flight
+    across the restart may still resume, and closing their rows would discard
+    their milestones. The bound is generous because a launch can legitimately
+    stay open for hours; an attempt older than it has outlived any provision
+    timeout.
 
     Returns the number of attempts closed.
     """
@@ -4535,11 +4555,10 @@ def sweep_abandoned_launch_attempts(
 @_best_effort
 @db_retries.retry
 def record_launch_queue_for_cluster(cluster_name: str, queue: str) -> None:
-    """Note which external scheduler queue this launch was submitted to.
+    """Record a queue name on the attempt in flight for this cluster.
 
-    Separate from the admission milestone so that a launch still waiting is
-    already attributable to its queue -- otherwise the queue a workload is
-    stuck in would only be known once it stopped being stuck.
+    Set at most once per attempt, and independently of the ADMITTED
+    milestone, so it can be recorded before admission.
 
     Same targeting and no-op behaviour as record_launch_milestone_for_cluster.
     """
@@ -4574,8 +4593,8 @@ def record_launch_milestone_for_cluster(cluster_name: str,
                                         timestamp: float) -> None:
     """Stamp a milestone on whichever attempt is in flight for this cluster.
 
-    Lets provisioning code -- and scheduler plugins patched into it -- record a
-    boundary without the attempt id being threaded down through every layer.
+    Lets provisioning code record a boundary without the attempt id being
+    threaded down through every layer.
     A cluster has at most one launch running at a time, so the newest open row
     for the name is that launch: a row left behind by an earlier crashed launch
     is older, and the live attempt always sorts ahead of it.
@@ -4635,10 +4654,7 @@ def record_launch_milestone_for_cluster(cluster_name: str,
 def _record_admission_event(attempt: Any, admitted_at: float) -> None:
     """Note in the cluster's event log that a queued launch was admitted.
 
-    The event table already says a launch is *waiting* on a queue -- with the
-    queue's name and the position in it -- and never says when that stopped.
-    For a gated job the admission wait is routinely most of the start-up, so
-    its end is the one boundary a reader cannot otherwise place.
+    Emitted once, when the ADMITTED milestone is first stamped.
 
     The duration comes from `launch_phases`, not from subtracting here: the
     wait is measured from `instances_requested` where the cloud stamps it and

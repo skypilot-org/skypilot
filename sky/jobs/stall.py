@@ -52,11 +52,10 @@ from sky.utils import controller_utils
 
 logger = sky_logging.init_logger(__name__)
 
-# This module has a consumer outside this repository: a plugin's poller turns
-# the same two scans into events for deployments that do not scrape. The two
-# scans, their result types and the threshold helpers are an interface --
-# renaming or narrowing one breaks a caller that does not appear in any search
-# of this repo. Everything prefixed `_` is private.
+# This module has callers outside this repository. The two scans, their result
+# types and the threshold helpers are an interface -- renaming or narrowing one
+# breaks a caller that does not appear in any search of this repo. Everything
+# prefixed `_` is private.
 
 NEVER_CLAIMED = 'never_claimed'
 UNATTENDED = 'unattended'
@@ -354,9 +353,9 @@ def _clusters_with_live_requests(cluster_names: List[str]) -> Set[str]:
 
     One batched query rather than one per candidate: a fleet-wide stall is
     exactly when this scan has the most rows and the API server the least to
-    spare. A parked launch -- queue admission, a cluster lock, pod-group
-    resolution -- is a request in WAITING, which is what makes this the primary
-    suppressor: it covers every park without knowing which kind it is.
+    spare. A parked launch (e.g. one waiting on a cluster lock) is a request in
+    WAITING, which is what makes this the primary suppressor: it covers every
+    park without knowing which kind it is.
     """
     if not cluster_names:
         return set()
@@ -503,7 +502,7 @@ def _claim_gates(engine: sqlalchemy.engine.Engine,
     holds the gate shut and the unattended phase excludes pool jobs.
 
     `controllers` is the nominal count: `get_alive_controllers()` reads a
-    replica-local pid file and returns 0 where it is absent, which would hold
+    host-local pid file and returns 0 where it is absent, which would hold
     the gate shut everywhere else. It is sized from the calling process, so off
     consolidation mode it describes the wrong machine and the phase is
     suppressed instead -- which is what the metrics path does there anyway.

@@ -249,7 +249,7 @@ _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH = [
 
 # Filenames in `file_mounts` whose content sha256 should NOT participate in the
 # cluster yaml hash computed by `_deterministic_cluster_yaml_hash`. These are
-# transient on-disk caches whose bytes drift across replicas / time without any
+# transient on-disk caches whose bytes drift across hosts / time without any
 # user-meaningful semantic change (e.g., gcloud token refreshes), and including
 # them in the hash makes `sky launch --fast` re-provision unexpectedly.
 #
@@ -1347,6 +1347,9 @@ def write_cluster_config(
         variables.update(cloud_specific_failover_overrides)
     if extra_template_variables is not None:
         variables.update(extra_template_variables)
+    # Kubernetes pod fields are merged into the rendered pod below. A template
+    # that also rendered them would apply them twice.
+    pod_fields = variables.pop('pod_fields', None)
     common_utils.fill_template(cluster_config_template,
                                variables,
                                output_path=tmp_yaml_path)
@@ -1359,6 +1362,9 @@ def write_cluster_config(
         with open(tmp_yaml_path, 'r', encoding='utf-8') as f:
             tmp_yaml_str = f.read()
         cluster_yaml_obj = yaml_utils.safe_load(tmp_yaml_str)
+        # The user's pod_config is merged on top of these.
+        cluster_yaml_obj = kubernetes_utils.combine_pod_fields(
+            cluster_yaml_obj, pod_fields)
         combined_yaml_obj = kubernetes_utils.combine_pod_config_fields_and_metadata(
             cluster_yaml_obj,
             cluster_config_overrides=cluster_config_overrides,

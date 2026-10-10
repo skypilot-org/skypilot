@@ -60,6 +60,7 @@ from sky.server.requests import threads
 from sky.server.requests import workspace_access
 from sky.server.requests.queues import base as queue_base
 from sky.skylet import constants
+from sky.users import permission
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -749,6 +750,7 @@ def override_request_env_and_config(
                 name=request_body.env_vars[constants.USER_ENV_VAR])
             _, user = global_user_state.add_or_update_user(user,
                                                            return_user=True)
+            _seed_role_if_missing(user.id)
             using_remote_api_server = request_body.using_remote_api_server
 
         # Force color to be enabled.
@@ -902,6 +904,32 @@ def _maybe_observe_request_pending(request: api_requests.Request) -> None:
                                           time.time() - request.created_at)
 
 
+def _seed_role_if_missing(user_id: str) -> None:
+    """Give the request's user a role if they do not have one yet.
+
+    The auth middlewares seed a role when they first see a user, but a request
+    that reaches the server without authentication creates the user here. One
+    such server is the API server on a jobs controller, which sees the job's
+    user first on the request that launches the job's cluster. Without a role
+    the user fails every workspace check except `default`, so the job retries
+    forever.
+
+    Best-effort: `role_seed_missing` can be wrong on a worker whose policy copy
+    is stale, and the seed takes the distributed policy lock, which can time
+    out. A skipped or failed seed must not fail a request that would succeed
+    without it; the workspace check that follows decides as before.
+    """
+    service = permission.permission_service
+    if not (service.role_seed_missing(user_id) and
+            service.claim_role_seed_attempt(user_id)):
+        return
+    try:
+        permission.seed_new_user_role(user_id)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to seed a role for user {user_id}: '
+                       f'{common_utils.format_exception(e)}')
+
+
 def _request_execution_wrapper(request_id: str,
                                ignore_return_value: bool,
                                num_db_connections_per_worker: int = 0) -> None:
@@ -980,7 +1008,6 @@ def _request_execution_wrapper(request_id: str,
             # Clear any leftover retry-backoff message now that we are running.
             request_task.status_msg = None
             func = request_task.entrypoint
-            request_body = request_task.request_body
             request_name = request_task.name
 
         # Store copies of the original stdout and stderr file descriptors
@@ -1004,7 +1031,7 @@ def _request_execution_wrapper(request_id: str,
                              sky_logging.add_debug_log_handler(request_id))
             with debug_log_ctx, \
                 override_request_env_and_config(
-                    request_body, request_id, request_name), \
+                    request_task.request_body, request_id, request_name), \
                 tempstore.tempdir():
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
@@ -1014,7 +1041,7 @@ def _request_execution_wrapper(request_id: str,
                  labels(request=request_name, pid=pid).inc())
                 with metrics_utils.time_it(name=request_name,
                                            group='request_execution'):
-                    return_value = func(**request_body.to_kwargs())
+                    return_value = func(**request_task.request_body.to_kwargs())
                 f.flush()
     except KeyboardInterrupt:
         logger.info(f'Request {request_id} cancelled by user')
@@ -1071,8 +1098,12 @@ def _request_execution_wrapper(request_id: str,
         _in_request_execution = False
         _restore_output()
         try:
-            # Capture the peak RSS before GC.
+            # Capture the peak RSS while the request's result is still
+            # referenced.
             peak_rss = max(proc.memory_info().rss, metrics_lib.peak_rss_bytes)
+            # Unreference the request's payload and result before
+            # release_memory() so that their memory can be returned too.
+            return_value = request_task = None
             # Clear request level cache to release all memory used by the
             # request.
             annotations.clear_request_level_cache()
@@ -1373,7 +1404,7 @@ async def schedule_internal_daemon_async(
     """Submit an internal daemon's request to the executor.
 
     Idempotent under concurrent callers (multiple uvicorn workers in the
-    same process; multiple replicas sharing a PG-backed request store):
+    same process; multiple API server instances sharing a request store):
 
     - First caller inserts a fresh PENDING row + enqueues onto the task
       queue.

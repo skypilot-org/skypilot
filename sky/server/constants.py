@@ -159,8 +159,8 @@ OAUTH2_PROXY_BASE_URL_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL'
 OAUTH2_PROXY_ENABLED_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED'
 
 # The websockets library (used by uvicorn for WebSocket upgrades) defaults to
-# MAX_LINE_LENGTH=8192 bytes per header line. Enterprise SSO cookies from
-# oauth2proxy (Azure AD, Okta, etc.) commonly exceed 8KB, causing WebSocket
+# MAX_LINE_LENGTH=8192 bytes per header line. Large auth cookies from an auth
+# proxy (e.g. oauth2-proxy) can exceed 8KB, causing WebSocket
 # upgrade requests to be rejected with HTTP 400. Regular HTTP requests (parsed
 # by h11 with a 16KB default) are unaffected. These constants raise the limit
 # so that WebSocket upgrades succeed with large auth cookies.
@@ -189,8 +189,7 @@ DEFAULT_DAEMON_LOG_MAX_BYTES = 128 * 1024 * 1024  # 128 MB
 DEFAULT_LOGS_RETENTION_HOURS = 720  # 30 days
 
 # Interval for the server-side heartbeat daemon that sends fleet-wide GPU
-# counts to Loki, plus plugin metrics when a plugin registered a provider
-# (e.g., GPU inventory from billing plugin).
+# counts to Loki, plus plugin metrics when a plugin registered a provider.
 SERVER_HEARTBEAT_INTERVAL_SECONDS = 600  # 10 minutes
 
 # The chunk size for the zip file to be uploaded to the API server. We split
