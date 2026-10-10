@@ -470,16 +470,21 @@ def _build_variables(case_name: str) -> Dict[str, Any]:
 
     ``pod_fields`` is built by calling the same production helper
     (``kubernetes_utils.get_pod_fields``) that
-    ``make_deploy_resources_variables`` uses, from the raw accelerator-label
-    vars the case carries. Deriving it here rather than hard-coding it is what
+    ``make_deploy_resources_variables`` uses, from the raw accelerator, spot
+    and flex-start vars the case carries. Deriving it here rather than hard-coding it is what
     makes the goldens a semantic-identity proof for the Python lift.
     """
     variables = base_variables()
     variables.update(CASES[case_name])
     variables['pod_fields'] = kubernetes_utils.get_pod_fields(
-        variables['k8s_acc_label_key'],
-        variables['k8s_acc_label_values'],
-        variables['avoid_label_keys'],
+        acc_label_key=variables['k8s_acc_label_key'],
+        acc_label_values=variables['k8s_acc_label_values'],
+        avoid_label_keys=variables['avoid_label_keys'],
+        topology_label_key=variables['k8s_topology_label_key'],
+        topology_label_value=variables['k8s_topology_label_value'],
+        spot_label_key=variables['k8s_spot_label_key'],
+        spot_label_value=variables['k8s_spot_label_value'],
+        enable_flex_start=variables['k8s_enable_flex_start'],
     )
     return variables
 
