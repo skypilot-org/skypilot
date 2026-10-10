@@ -822,6 +822,10 @@ Raise these if your clusters are reached over a link with outages of tens of
 seconds, e.g. ``attempts: 7`` and ``interval_seconds: 10`` to tolerate about
 a minute.
 
+The probe runs while holding the cluster's status lock. If the retries take
+longer than about 20 seconds, a concurrent status refresh of the same cluster
+returns the cached status instead of waiting for the probe to finish.
+
 Default: ``attempts: 5``, ``interval_seconds: 1``.
 
 Example:

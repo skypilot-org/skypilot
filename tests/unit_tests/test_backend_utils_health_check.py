@@ -202,13 +202,13 @@ def test_kubernetes_default_retry_is_unchanged():
     assert sleeps == [1, 1]
 
 
-def test_kubernetes_persistent_failure_is_unchanged():
+def test_kubernetes_persistent_failure_skips_final_sleep():
     ready, head_runner, sleeps, _, init_messages = _refresh(
         clouds.Kubernetes(), [_SSM_NOT_CONNECTED] * 5)
 
     assert ready is False
     assert head_runner.run.call_count == 5
-    assert sleeps == [1] * 5
+    assert sleeps == [1] * 4
     assert '0/1 ready' in init_messages[0]
 
 
@@ -219,7 +219,7 @@ def test_kubernetes_honours_config():
 
     assert ready is False
     assert head_runner.run.call_count == 2
-    assert sleeps == [3, 3]
+    assert sleeps == [3]
 
 
 @pytest.mark.parametrize('config,expected_sleeps',
@@ -236,6 +236,29 @@ def test_partial_ray_cluster_is_retried(config, expected_sleeps):
     assert ready is True
     assert head_runner.run.call_count == 2
     assert sleeps == expected_sleeps
+
+
+def test_persistent_partial_ray_cluster_skips_final_sleep():
+    ready, head_runner, sleeps, _, init_messages = _refresh(
+        clouds.AWS(), [(0, _HEALTHY_1_NODE, '')] * 3,
+        config=_health_check(attempts=3, interval_seconds=10),
+        launched_nodes=2)
+
+    assert ready is False
+    assert head_runner.run.call_count == 3
+    assert sleeps == [10, 10]
+    assert '1/2 ready' in init_messages[0]
+
+
+@pytest.mark.parametrize('interval_seconds', [float('nan'), float('inf')])
+def test_non_finite_interval_falls_back_to_default(interval_seconds):
+    ready, head_runner, sleeps, _, _ = _refresh(
+        clouds.AWS(), [_SSM_NOT_CONNECTED, (0, _HEALTHY_1_NODE, '')],
+        config=_health_check(interval_seconds=interval_seconds))
+
+    assert ready is True
+    assert head_runner.run.call_count == 2
+    assert sleeps == [1]
 
 
 @pytest.mark.parametrize('health_check', [{}, {

@@ -2751,6 +2751,12 @@ def _update_cluster_status(
             interval_seconds = skypilot_config.get_nested(
                 ('provision', 'health_check', 'interval_seconds'),
                 DEFAULT_HEALTH_CHECK_INTERVAL_SECONDS)
+            if not math.isfinite(interval_seconds):
+                # The schema accepts YAML's .nan and .inf, which would make
+                # time.sleep raise and mark a healthy cluster INIT.
+                logger.warning('Ignoring non-finite provision.health_check.'
+                               f'interval_seconds: {interval_seconds}')
+                interval_seconds = DEFAULT_HEALTH_CHECK_INTERVAL_SECONDS
             for i in range(attempts):
                 try:
                     ready_head, ready_workers, output, stderr = (
@@ -2799,7 +2805,8 @@ def _update_cluster_status(
                         raise e
                     # We retry for kubernetes because coreweave can have a
                     # transient network issue.
-                    time.sleep(interval_seconds)
+                    if i < attempts - 1:
+                        time.sleep(interval_seconds)
                     continue
                 if ready_head + ready_workers == total_nodes:
                     return True
@@ -2816,7 +2823,8 @@ def _update_cluster_status(
                 #   (not preempted), but
                 # - The ray cluster is somehow degraded so not all instances are
                 #   showing up
-                time.sleep(interval_seconds)
+                if i < attempts - 1:
+                    time.sleep(interval_seconds)
 
             ray_status_details = (
                 f'{ready_head + ready_workers}/{total_nodes} ready')
