@@ -559,14 +559,11 @@ When `recover_on_exit_codes` is set, any job failure with a matching exit code
 triggers recovery without counting against `max_restarts_on_errors`. This is
 useful for known transient failures.
 
-To give up on a job that cannot get resources, set
-`job.wait_for_scheduling_timeout` in the top-level `job:` section (managed-job
-lifecycle settings; not part of `job_recovery`). The job is cancelled
-(`CANCELLED`, reason shown in `sky jobs queue`) if it has not started running
-within that long of being submitted, whether it is retrying cloud VM launches
-or waiting to be scheduled on Kubernetes (e.g. in a Kueue queue). Once the job
-has started, later recoveries do not re-arm it. Managed jobs only; ignored by
-`sky launch` / `sky exec`.
+To give up on a job that cannot get resources, set the top-level
+`job.wait_for_scheduling_timeout` (not part of `job_recovery`). The job ends
+`CANCELLED` if it has not started within that long of being submitted, whether
+it is retrying cloud VM launches or waiting in a Kubernetes queue such as
+Kueue. Later recoveries do not re-arm it.
 
 ```yaml
 job:

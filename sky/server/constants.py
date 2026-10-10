@@ -62,10 +62,8 @@ MIN_JOBS_INCLUDE_TREE_API_VERSION = 63
 # Minimum server API version that accepts `depends_on` on a managed jobs
 # launch.
 MIN_JOBS_DEPENDS_ON_API_VERSION = 64
-# Minimum server API version that accepts (and enforces) the task's `job:`
-# block (managed-job lifecycle settings: `wait_for_scheduling_timeout`) on a
-# managed jobs launch. An older server rejects the unknown top-level task key
-# with a schema error.
+# Minimum server API version that accepts the task's `job:` section
+# (`job.wait_for_scheduling_timeout`).
 MIN_JOBS_WAIT_FOR_SCHEDULING_TIMEOUT_API_VERSION = 65
 
 # Minimum API version that supports Sky Batch (sky.batch module).

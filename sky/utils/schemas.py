@@ -1178,20 +1178,12 @@ def _task_config_schema():
 
 
 def get_task_job_schema():
-    """Schema for task-YAML's `job:` block: managed-job lifecycle settings.
-
-    Only managed jobs (`sky jobs launch`) read it; `sky launch` / `sky exec`
-    ignore it.
-    """
+    """Schema for the task's `job:` section: managed-job lifecycle settings."""
     return {
         'type': 'object',
         'required': [],
-        # Strict on the client too, like the rest of the task schema: each
-        # setting needs a client that knows it (and its API version gate).
         'additionalProperties': False,
         'properties': {
-            # Cancel the job if the task has not started running within this
-            # long of being submitted.
             'wait_for_scheduling_timeout': {
                 'anyOf': [{
                     'type': 'string',

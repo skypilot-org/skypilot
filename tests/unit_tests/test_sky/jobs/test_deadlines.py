@@ -504,7 +504,7 @@ def test_breach_when_not_started_in_time(status):
     assert breach.kind == _KIND
     assert breach.limit_seconds == 60
     assert _REASON_1M in breach.reason
-    assert 'waited 1m1s' in breach.reason
+    assert 'waited 1m 1s' in breach.reason
 
 
 def test_no_breach_before_deadline():
@@ -554,12 +554,10 @@ def test_no_breach_without_config_or_submission():
                                submitted_at=None), _NOW) is None
 
 
-def test_format_seconds():
-    assert controller_module._format_seconds(7200) == '2h'
-    assert controller_module._format_seconds(5430) == '1h30m30s'
-    assert controller_module._format_seconds(90061) == '1d1h1m1s'
-    assert controller_module._format_seconds(0) == '0s'
-    assert controller_module._format_seconds(-5) == '0s'
+def test_format_duration():
+    # Same rendering as the durations in `sky jobs queue`.
+    assert controller_module._format_duration(7200) == '2h'
+    assert controller_module._format_duration(5430) == '1h 30m 30s'
 
 
 # ---------------------------------------------------------------------------

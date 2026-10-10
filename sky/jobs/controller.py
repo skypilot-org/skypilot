@@ -53,6 +53,7 @@ from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import log_links
+from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
@@ -195,9 +196,8 @@ async def check_network_connection() -> None:
         await asyncio.sleep(random.uniform(0, min(waited, reuse_window)))
 
 
-# How often each controller process checks the deadlines
-# (job.wait_for_scheduling_timeout) of the jobs it runs. A deadline is
-# enforced within one interval of being reached.
+# How often each controller process checks its jobs' deadlines
+# (job.wait_for_scheduling_timeout).
 _DEADLINE_CHECK_INTERVAL_SECONDS = 30
 
 
@@ -288,10 +288,10 @@ def _task_uses_kubernetes(task: 'sky.Task') -> bool:
 
 
 def _deadline_specs(task: 'sky.Task') -> Dict[str, Optional[int]]:
-    """The task's deadlines, in seconds (None if unset), for its specs.
+    """The task's deadlines in seconds (None if unset), for its specs.
 
-    Read back from the DB by ControllerManager.deadline_loop (see
-    _deadline_breach), so a deadline survives controller restarts.
+    ControllerManager.deadline_loop reads them back from the DB, so a
+    deadline survives controller restarts.
     """
     wait_seconds = None
     wait_timeout = task.job.get('wait_for_scheduling_timeout')
@@ -319,15 +319,9 @@ def _build_task_specs(
     return base_specs
 
 
-def _format_seconds(seconds: float) -> str:
-    """Compact duration, e.g. 7200 -> '2h', 5430 -> '1h30m30s'."""
-    remaining = max(0, int(seconds))
-    parts = []
-    for unit, size in (('d', 86400), ('h', 3600), ('m', 60), ('s', 1)):
-        count, remaining = divmod(remaining, size)
-        if count:
-            parts.append(f'{count}{unit}')
-    return ''.join(parts) or '0s'
+def _format_duration(seconds: float) -> str:
+    """E.g. 7200 -> '2h', 5430 -> '1h 30m 30s', as in `sky jobs queue`."""
+    return log_utils.readable_time_duration(0, seconds, absolute=True)
 
 
 class _DeadlineBreach(typing.NamedTuple):
@@ -341,32 +335,22 @@ class _DeadlineBreach(typing.NamedTuple):
 
 def _deadline_breach(specs: Dict[str, Any], task_row: Dict[str, Any],
                      now: float) -> Optional[_DeadlineBreach]:
-    """Return which deadline a task has exceeded, or None.
+    """Return the deadline a task has exceeded, or None.
 
-    Pure: decides from the task's persisted specs and timestamps only, so the
-    result is the same no matter which controller process (or incarnation)
-    evaluates it.
+    Decides from the task's persisted specs and timestamps only, so any
+    controller process evaluating it gets the same answer.
 
     Args:
         specs: The task's persisted specs (see _build_task_specs).
         task_row: The task's row: 'status', 'submitted_at' and 'start_at'.
         now: Current time, as epoch seconds.
-
-    Returns:
-        The deadline exceeded (its kind, limit and a reason), or None if the
-        task is within all of its deadlines (or has none). The kind and limit
-        let managed_job_state.set_deadline_exceeded_async re-check the same
-        deadline atomically when it records it.
     """
     status = task_row['status']
     if (status.is_terminal() or
             status == managed_job_state.ManagedJobStatus.CANCELLING):
         return None
-    # job.wait_for_scheduling_timeout: the task has to reach RUNNING
-    # (start_at is written once, on the first start) within this long of
-    # being submitted. Covers launch retries, backoff, and waiting for
-    # admission in an external scheduler; once the task has started it no
-    # longer applies.
+    # start_at is written once, on the first start, so the timeout covers
+    # only the wait before it.
     wait_timeout = specs.get('wait_for_scheduling_timeout_seconds')
     submitted_at = task_row['submitted_at']
     if (wait_timeout is not None and task_row['start_at'] is None and
@@ -378,14 +362,13 @@ def _deadline_breach(specs: Dict[str, Any], task_row: Dict[str, Any],
                 limit_seconds=wait_timeout,
                 reason=('task did not start within '
                         'job.wait_for_scheduling_timeout='
-                        f'{_format_seconds(wait_timeout)} (waited '
-                        f'{_format_seconds(waited)})'))
+                        f'{_format_duration(wait_timeout)} (waited '
+                        f'{_format_duration(waited)})'))
     return None
 
 
 def _has_pending_cancel_signal(job_id: int) -> bool:
-    """Whether a user cancel signal for the job awaits ControllerManager's
-    cancel_job() (which polls for it and removes it once applied)."""
+    """Whether a user cancel signal awaits ControllerManager.cancel_job()."""
     return os.path.exists(
         os.path.join(jobs_constants.CONSOLIDATED_SIGNAL_PATH, str(job_id)))
 
@@ -4033,17 +4016,13 @@ class ControllerManager:
     async def deadline_loop(self):
         """Cancel the jobs of this process that exceed a deadline.
 
-        A loop of its own rather than a check in the per-job monitor loop:
-        a job's coroutine can block for arbitrarily long inside the strategy
-        executor's launch() and recover() (both retry until capacity is
-        found), so a check placed there never runs while a job waits for
-        resources, which is exactly when job.wait_for_scheduling_timeout
-        matters.
+        This is a loop of its own, not a check in the per-job monitor loop:
+        a job's coroutine blocks inside the strategy executor's launch() and
+        recover() for as long as they retry, which is exactly while
+        job.wait_for_scheduling_timeout matters.
 
-        The deadlines and the clocks they are measured against are read from
-        the DB (the task specs and timestamps), so a job adopted by another
-        controller process after a restart is cancelled on that process's
-        first check if it is already overdue.
+        Deadlines and clocks are read from the DB, so a process that adopts
+        an overdue job after a restart cancels it on its first check.
         """
         logger.info(f'Starting deadline loop for pid {self._pid}...')
         while True:
@@ -4091,19 +4070,12 @@ class ControllerManager:
 
     async def _cancel_for_deadline(self, job_id: int, task_id: int,
                                    breach: _DeadlineBreach, now: float) -> None:
-        """Cancel a job that exceeded a deadline, as a user cancel would.
+        """Cancel a job that exceeded a deadline, as cancel_job() would.
 
-        Records the reason (the task's failure_reason and a job event), then
-        cancels the job's coroutine the same way cancel_job() does for a
-        cancel signal, so the job goes through the normal cancellation path
-        (CANCELLING, log download, cluster teardown, CANCELLED).
-
-        The record is conditional on the deadline still holding in the DB
+        The reason is recorded only if the deadline still holds in the DB
         (see set_deadline_exceeded_async), so a task that started after its
-        row was read is not cancelled. A user cancel that is still waiting
-        for cancel_job() to pick it up takes precedence: the job is left to
-        it, so its graceful settings apply, and it still ends CANCELLED
-        within one cancel_job() poll.
+        row was read is not cancelled. A pending user cancel takes
+        precedence, so its graceful settings apply.
         """
         if not await self._can_cancel_for_deadline(job_id):
             return
@@ -4136,11 +4108,9 @@ class ControllerManager:
                     # the task.
                     return
                 if _has_pending_cancel_signal(job_id):
-                    # A user cancel arrived while the reason was being
-                    # recorded: leave the job to cancel_job() so the user's
-                    # graceful settings apply. (cancel_job() holds
-                    # _job_tasks_lock while it applies a signal, so it cannot
-                    # be halfway through one here.)
+                    # A user cancel arrived while the reason was recorded.
+                    # cancel_job() holds _job_tasks_lock while it applies a
+                    # signal, so it cannot be halfway through one here.
                     logger.info(f'Job {job_id} has a pending cancel request; '
                                 'leaving it to that request.')
                     return
@@ -4150,9 +4120,7 @@ class ControllerManager:
             self._deadline_cancelled.add(job_id)
 
     async def _can_cancel_for_deadline(self, job_id: int) -> bool:
-        """Whether the job is still running here and not being cancelled,
-        either already or by a user cancel that cancel_job() has yet to pick
-        up."""
+        """Whether the job runs here and no cancel is applied or pending."""
         async with self._job_tasks_lock:
             task = self.job_tasks.get(job_id)
             if task is None or task.done():
