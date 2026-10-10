@@ -56,7 +56,7 @@ ALL_REGIONS = [
     'ap-east-1',
     'ap-southeast-3',
     'ap-south-1',
-    # 'ap-south-2', # no supported AMI
+    'ap-south-2',
     'ap-northeast-3',
     'ap-northeast-2',
     'ap-southeast-1',
