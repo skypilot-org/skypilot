@@ -22,6 +22,12 @@ class DashboardCache {
     this.backgroundJobs = new Map(); // Track ongoing background refresh jobs
     this.pendingRequests = new Map(); // Track in-flight requests to deduplicate concurrent calls
     this.generations = new Map(); // key -> generation, bumped on invalidation
+    // Number of foreground/background fetches still running for a key. Unlike
+    // the deduplication markers above (which invalidation may remove while a
+    // fetch is still running), this survives until the fetch actually settles,
+    // so generation bookkeeping is only dropped once nothing can complete
+    // against a key.
+    this.inFlight = new Map(); // key -> count of fetches still running
     this.debugMode = false; // Added for debug mode
     this.preloader = null; // Reference to cache preloader for coordination
   }
@@ -101,6 +107,7 @@ class DashboardCache {
       // while this request is in flight, the response is stale and must not
       // repopulate the cache.
       const generationAtStart = this._getGeneration(key);
+      this._incrementInFlight(key);
       try {
         const freshData = await fetchFunction(...args);
 
@@ -144,9 +151,13 @@ class DashboardCache {
         // If no cached data and fetch fails, re-throw the error
         throw error;
       } finally {
-        // Remove the pending request marker
-        this.pendingRequests.delete(key);
-        this._cleanupGeneration(key);
+        // Only clear the deduplication marker if it still belongs to this
+        // request; an invalidation may have swapped in a newer request that is
+        // still in flight and must keep its marker.
+        if (this.pendingRequests.get(key) === requestPromise) {
+          this.pendingRequests.delete(key);
+        }
+        this._decrementInFlight(key);
       }
     })();
 
@@ -198,6 +209,11 @@ class DashboardCache {
         keysToDelete.add(key);
       }
     }
+    for (const key of this.inFlight.keys()) {
+      if (key.startsWith(`${functionHash}_`)) {
+        keysToDelete.add(key);
+      }
+    }
 
     // Delete all matching entries
     keysToDelete.forEach((key) => {
@@ -212,20 +228,16 @@ class DashboardCache {
    * Clear all cache entries
    */
   clear() {
-    // Bump the generation of every known key so any in-flight request that
-    // completes after the clear cannot repopulate the cache.
-    for (const key of this.cache.keys()) {
-      this._bumpGeneration(key);
-    }
-    for (const key of this.backgroundJobs.keys()) {
-      this._bumpGeneration(key);
-    }
-    for (const key of this.pendingRequests.keys()) {
+    // Bump the generation of every key with a fetch still in flight so a
+    // request that completes after the clear cannot repopulate the cache.
+    for (const key of this.inFlight.keys()) {
       this._bumpGeneration(key);
     }
     this.cache.clear();
     this.backgroundJobs.clear();
     this.pendingRequests.clear();
+    // `inFlight` is intentionally left alone: those fetches are still running
+    // and will decrement themselves on completion.
   }
 
   /**
@@ -308,8 +320,10 @@ class DashboardCache {
    */
   _refreshInBackground(fetchFunction, args, key) {
     // Mark that we have a background job running for this key
-    this.backgroundJobs.set(key, true);
+    const job = {};
+    this.backgroundJobs.set(key, job);
     const generationAtStart = this._getGeneration(key);
+    this._incrementInFlight(key);
 
     // Execute the refresh asynchronously
     fetchFunction(...args)
@@ -335,9 +349,12 @@ class DashboardCache {
         console.warn(`Background refresh failed for ${key}:`, error);
       })
       .finally(() => {
-        // Remove the background job marker
-        this.backgroundJobs.delete(key);
-        this._cleanupGeneration(key);
+        // Remove the background job marker only if it still belongs to this
+        // job; an invalidation may have started a newer refresh for the key.
+        if (this.backgroundJobs.get(key) === job) {
+          this.backgroundJobs.delete(key);
+        }
+        this._decrementInFlight(key);
       });
   }
 
@@ -360,23 +377,39 @@ class DashboardCache {
    * @private
    */
   _bumpGeneration(key) {
-    if (!this.pendingRequests.has(key) && !this.backgroundJobs.has(key)) {
+    if (!this.inFlight.has(key)) {
       return;
     }
     this.generations.set(key, this._getGeneration(key) + 1);
   }
 
   /**
-   * Drop a key's generation entry once no request can still complete against
-   * it. Called from the completion path of both foreground and background
-   * requests so invalidation bookkeeping does not outlive the request it
-   * guards.
+   * Record that a foreground or background fetch started for a key. Kept
+   * separate from the deduplication markers (which invalidation may remove
+   * while a fetch is still running) so the generation guard survives until the
+   * fetch actually settles.
    * @private
    */
-  _cleanupGeneration(key) {
-    if (!this.pendingRequests.has(key) && !this.backgroundJobs.has(key)) {
-      this.generations.delete(key);
+  _incrementInFlight(key) {
+    this.inFlight.set(key, (this.inFlight.get(key) || 0) + 1);
+  }
+
+  /**
+   * Record that a fetch settled for a key. Once no fetch is still running the
+   * generation guard is no longer needed and can be dropped: any later fetch
+   * starts from the implicit generation 0, and a later invalidation bumps it
+   * again, so dropping the entry here cannot let a stale response repopulate
+   * the cache.
+   * @private
+   */
+  _decrementInFlight(key) {
+    const remaining = (this.inFlight.get(key) || 0) - 1;
+    if (remaining > 0) {
+      this.inFlight.set(key, remaining);
+      return;
     }
+    this.inFlight.delete(key);
+    this.generations.delete(key);
   }
 
   /**

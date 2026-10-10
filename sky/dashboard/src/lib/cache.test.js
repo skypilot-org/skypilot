@@ -334,5 +334,46 @@ describe('DashboardCache', () => {
       cache.invalidate(mockFetch, ['arg1']);
       expect(cache.generations.size).toBe(0);
     });
+
+    test('overlapping requests never let a stale response refill after repeated invalidation', async () => {
+      const resolvers = [];
+      const fetch = jest.fn(
+        () => new Promise((resolve) => resolvers.push(resolve))
+      );
+      const key = cache._generateKey(fetch, ['arg1']);
+
+      // A starts at generation 0.
+      const a = cache.get(fetch, ['arg1']);
+      expect(cache.inFlight.get(key)).toBe(1);
+
+      // Invalidate -> generation 1; A's dedup marker is removed but A is still
+      // running.
+      cache.invalidate(fetch, ['arg1']);
+      expect(cache.generations.get(key)).toBe(1);
+
+      // B starts at generation 1 while A is still in flight.
+      const b = cache.get(fetch, ['arg1']);
+      expect(cache.inFlight.get(key)).toBe(2);
+
+      // A settles first. It must not remove B's marker or the generation
+      // guard that B still relies on.
+      resolvers[0]({ data: 'stale-a' });
+      await a;
+      expect(cache.pendingRequests.size).toBe(1);
+      expect(cache.generations.get(key)).toBe(1);
+
+      // A second invalidation bumps the generation to 2.
+      cache.invalidate(fetch, ['arg1']);
+      expect(cache.generations.get(key)).toBe(2);
+
+      // B settles last with a response fetched before the second invalidation.
+      // Its captured generation (1) no longer matches, so it must be dropped.
+      resolvers[1]({ data: 'stale-b' });
+      await b;
+
+      expect(cache.cache.size).toBe(0);
+      expect(cache.generations.size).toBe(0);
+      expect(cache.inFlight.size).toBe(0);
+    });
   });
 });
