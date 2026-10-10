@@ -129,6 +129,10 @@ API_SERVER_CMD = '-m sky.server.server'
 API_SERVER_CLIENT_DIR = pathlib.Path(
     runtime_utils.runtime_tilde_path('~/.sky/api_server/clients'))
 RETRY_COUNT_ON_TIMEOUT = 3
+# Gateway errors a reverse proxy in front of a remote API server returns when
+# its upstream blips. The health check retries them like a timeout.
+_HEALTH_CHECK_RETRY_STATUS_CODES = (502, 504)
+_HEALTH_CHECK_INITIAL_BACKOFF_SECONDS = 0.5
 
 # The maximum time to wait for the API server to start, set to a conservative
 # value that unlikely to reach since the server might be just starting slowly
@@ -605,7 +609,15 @@ def _handle_non_200_server_status(
                                      error=body.get('message', ''))
         except requests.JSONDecodeError:
             pass
-    return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
+    return ApiServerInfo(status=ApiServerStatus.UNHEALTHY,
+                         error=f'HTTP {response.status_code}')
+
+
+def _connection_error_reason(e: requests.exceptions.ConnectionError) -> str:
+    # requests wraps urllib3's MaxRetryError, whose `reason` is the error that
+    # actually happened, e.g. a refused connection or a failed DNS lookup.
+    cause = e.args[0] if e.args else None
+    return str(getattr(cause, 'reason', None) or e)
 
 
 @cachetools.cached(cache=cachetools.TTLCache(maxsize=10,
@@ -613,25 +625,48 @@ def _handle_non_200_server_status(
                                              timer=time.time),
                    lock=threading.RLock())
 def get_api_server_status_response(
-        endpoint: Optional[str] = None) -> Optional['requests.Response']:
+        endpoint: Optional[str] = None) -> Union['requests.Response', str]:
+    """Sends the health check request to the API server.
+
+    Timeouts are retried. For a remote server, connection errors and gateway
+    errors from a reverse proxy are retried too, with a short backoff.
+
+    Returns:
+        The response, or a string describing why no usable response was
+        received.
+    """
     # Cache the response to set the api version across multiple threads.
     # Refer to https://github.com/skypilot-org/skypilot/issues/8879
-    time_out_try_count = 1
     server_url = endpoint if endpoint is not None else get_server_url()
-    while time_out_try_count <= RETRY_COUNT_ON_TIMEOUT:
+    # A refused connection to a local server means it is not running yet, and
+    # the caller starts it. Retrying would only delay that.
+    retry_on_connection_error = not is_api_server_local(server_url)
+    backoff = common_utils.Backoff(
+        initial_backoff=_HEALTH_CHECK_INITIAL_BACKOFF_SECONDS)
+    attempt = 0
+    while True:
+        attempt += 1
+        is_last_attempt = attempt >= RETRY_COUNT_ON_TIMEOUT
         try:
-            return make_authenticated_request('GET',
-                                              '/api/health',
-                                              server_url=server_url,
-                                              timeout=2.5)
-        except requests.exceptions.Timeout:
-            if time_out_try_count == RETRY_COUNT_ON_TIMEOUT:
-                return None
-            time_out_try_count += 1
+            response = make_authenticated_request('GET',
+                                                  '/api/health',
+                                                  server_url=server_url,
+                                                  timeout=2.5)
+        except requests.exceptions.Timeout as e:
+            if is_last_attempt:
+                return f'health check timed out: {e}'
             continue
-        except requests.exceptions.ConnectionError:
-            return None
-    return None
+        except requests.exceptions.ConnectionError as e:
+            if is_last_attempt or not retry_on_connection_error:
+                return _connection_error_reason(e)
+        else:
+            if (is_last_attempt or response.status_code
+                    not in _HEALTH_CHECK_RETRY_STATUS_CODES):
+                return response
+        sleep_time = backoff.current_backoff()
+        logger.debug(f'Health check to {server_url} failed, retrying in '
+                     f'{sleep_time:.1f}s (attempt {attempt}).')
+        time.sleep(sleep_time)
 
 
 def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
@@ -655,8 +690,9 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
         or VERSION_MISMATCH.
     """
     response = get_api_server_status_response(endpoint)
-    if response is None:
-        return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
+    if isinstance(response, str):
+        logger.debug(f'Health check failed: {response}')
+        return ApiServerInfo(status=ApiServerStatus.UNHEALTHY, error=response)
 
     logger.debug(f'Health check status: {response.status_code}')
 
@@ -1061,7 +1097,8 @@ def check_server_healthy(
             raise exceptions.APIVersionMismatchError(msg)
     elif api_server_status == ApiServerStatus.UNHEALTHY:
         with ux_utils.print_exception_no_traceback():
-            raise exceptions.ApiServerConnectionError(endpoint)
+            raise exceptions.ApiServerConnectionError(endpoint,
+                                                      api_server_info.error)
 
     # If the user ran pip upgrade, but the server wasn't restarted, warn them.
     # We check this using the info from /api/health, rather than in the
@@ -1122,10 +1159,10 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
         if api_server_status == ApiServerStatus.NEEDS_AUTH:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ApiServerAuthenticationError(endpoint)
-    except exceptions.ApiServerConnectionError as exc:
+    except exceptions.ApiServerConnectionError:
         if not is_api_server_local(endpoint):
             with ux_utils.print_exception_no_traceback():
-                raise exceptions.ApiServerConnectionError(endpoint) from exc
+                raise
         # Fail early (before taking the creation lock) if silently starting
         # a local API server is disabled on this machine.
         check_local_api_server_enabled_or_raise()
