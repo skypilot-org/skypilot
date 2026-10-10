@@ -798,33 +798,17 @@ Example:
 ``provision.health_check``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Retries of the cluster health probe (optional).
+Retries of the health probe that SkyPilot runs on a cluster's head node when
+refreshing its status (optional). If every attempt fails, the cluster is marked
+``INIT``, which a :ref:`managed job <managed-jobs>` treats as a preemption.
 
-When refreshing the status of a cluster whose nodes are all up on the cloud
-side, SkyPilot probes the SkyPilot runtime on the head node (over SSH, or
-``kubectl exec`` on Kubernetes). If the probe keeps failing, the cluster is
-marked ``INIT``; for a
-:ref:`managed job <managed-jobs>`, the jobs controller treats this like a
-preemption and relaunches the cluster. The probe can fail transiently on a
-healthy cluster, for example on an SSH banner-exchange timeout or while the
-agent behind an SSH proxy restarts (such as the AWS SSM agent used with
-:ref:`aws.use_ssm <config-yaml-aws-use-ssm>`), so a failed probe is retried:
+- ``attempts``: number of probes, including the first. ``1`` disables retries.
+- ``interval_seconds``: wait between probes.
 
-- ``attempts``: maximum number of probes, including the first one. Set to
-  ``1`` to mark the cluster ``INIT`` on the first failure.
-- ``interval_seconds``: wait between probes. The same interval is used while
-  waiting for all nodes to show up in the Ray cluster.
-
-Outside Kubernetes, a probe that reaches the head node but finds the SkyPilot
-runtime not running is not retried.
-
-Raise these if your clusters are reached over a link with outages of tens of
-seconds, e.g. ``attempts: 7`` and ``interval_seconds: 10`` to tolerate about
-a minute.
-
-The probe runs while holding the cluster's status lock. If the retries take
-longer than about 20 seconds, a concurrent status refresh of the same cluster
-returns the cached status instead of waiting for the probe to finish.
+Raise them if the head node is reached over a flaky link, e.g. SSH through
+:ref:`aws.use_ssm <config-yaml-aws-use-ssm>`. If the retries take longer than
+about 20 seconds, concurrent status refreshes of the cluster return its cached
+status.
 
 Default: ``attempts: 5``, ``interval_seconds: 1``.
 

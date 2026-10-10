@@ -385,8 +385,6 @@ class TestUpdateClusterStatusBareHandle:
              mock.patch.object(backend_utils.time, 'sleep'):
             add_or_update, events = self._refresh(handle)
 
-        # The probe is retried in case the timeout was transient; the hint is
-        # printed once the retries are exhausted.
         assert (head_runner.run.call_count ==
                 backend_utils.DEFAULT_HEALTH_CHECK_ATTEMPTS)
         assert any('to recover from INIT status' in str(c)

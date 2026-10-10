@@ -133,9 +133,6 @@ K8S_PODS_NOT_FOUND_PATTERN = re.compile(r'.*(NotFound|pods .* not found).*',
 _RAY_CLUSTER_NOT_FOUND_MESSAGE = 'Ray cluster is not found'
 WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 
-# How many times the cluster health probe (`ray status` on the head node) runs
-# during a status refresh, and how long to wait between runs, before the
-# cluster is marked INIT. Configurable via `provision.health_check`.
 DEFAULT_HEALTH_CHECK_ATTEMPTS = 5
 DEFAULT_HEALTH_CHECK_INTERVAL_SECONDS = 1
 
@@ -2752,8 +2749,6 @@ def _update_cluster_status(
                 ('provision', 'health_check', 'interval_seconds'),
                 DEFAULT_HEALTH_CHECK_INTERVAL_SECONDS)
             if not math.isfinite(interval_seconds):
-                # The schema accepts YAML's .nan and .inf, which would make
-                # time.sleep raise and mark a healthy cluster INIT.
                 logger.warning('Ignoring non-finite provision.health_check.'
                                f'interval_seconds: {interval_seconds}')
                 interval_seconds = DEFAULT_HEALTH_CHECK_INTERVAL_SECONDS
@@ -2765,11 +2760,8 @@ def _update_cluster_status(
                     logger.debug(f'Refreshing status ({cluster_name!r}) attempt'
                                  f' {i}: {common_utils.format_exception(e)}')
                     if cloud_name != 'kubernetes':
-                        # A transient failure (SSH banner-exchange timeout,
-                        # an SSH proxy such as the SSM agent restarting, ...)
-                        # must not mark a healthy cluster INIT, which managed
-                        # jobs treat as a preemption. Only a reachable head
-                        # without the runtime is not worth retrying.
+                        # Retry transient SSH failures; a missing runtime
+                        # will not come back on its own.
                         if (i < attempts - 1 and _RAY_CLUSTER_NOT_FOUND_MESSAGE
                                 not in e.error_msg):
                             time.sleep(interval_seconds)

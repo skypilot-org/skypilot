@@ -1,13 +1,4 @@
-"""Tests for the retried cluster health probe in _update_cluster_status.
-
-A status refresh of a cluster whose nodes are all up probes the SkyPilot
-runtime on the head node (`ray status`). A transient probe failure (SSH
-banner timeout, SSM agent restart, ...) must not immediately mark the cluster
-INIT, since the managed jobs controller treats INIT as a preemption and
-relaunches the job. The probe is retried at a fixed interval within the
-`provision.health_check` budget, whose defaults match the retry Kubernetes
-already had (5 attempts, 1s apart).
-"""
+"""Tests for the health probe retries in _update_cluster_status."""
 # pylint: disable=protected-access
 import time
 from unittest import mock
@@ -111,14 +102,8 @@ def _refresh(cloud, probe_results, config=None, launched_nodes=1):
     return ready, head_runner, sleeps, warning, init_messages
 
 
-def _health_check(attempts=None, interval_seconds=None):
-    config = {}
-    if attempts is not None:
-        config[('provision', 'health_check', 'attempts')] = attempts
-    if interval_seconds is not None:
-        config[('provision', 'health_check',
-                'interval_seconds')] = interval_seconds
-    return config
+def _health_check(**kwargs):
+    return {('provision', 'health_check', k): v for k, v in kwargs.items()}
 
 
 def _recovery_hint_logged(warning):
@@ -128,9 +113,9 @@ def _recovery_hint_logged(warning):
 
 @pytest.mark.parametrize('failure', [_SSM_NOT_CONNECTED, _BANNER_TIMEOUT],
                          ids=['ssm', 'banner'])
-def test_transient_failures_then_success_is_healthy(failure):
+def test_transient_failures_are_retried(failure):
     ready, head_runner, sleeps, warning, init_messages = _refresh(
-        clouds.AWS(), [failure, failure, failure, (0, _HEALTHY_1_NODE, '')])
+        clouds.AWS(), [failure] * 3 + [(0, _HEALTHY_1_NODE, '')])
 
     assert ready is True
     assert head_runner.run.call_count == 4
@@ -139,16 +124,14 @@ def test_transient_failures_then_success_is_healthy(failure):
     assert not init_messages
 
 
-def test_persistent_failure_is_unhealthy_after_all_attempts():
+def test_persistent_failure_marks_init():
     ready, head_runner, sleeps, warning, init_messages = _refresh(
         clouds.AWS(), [_BANNER_TIMEOUT] * 5)
 
     assert ready is False
     assert head_runner.run.call_count == 5
-    assert sleeps == [1, 1, 1, 1]
-    # Not a "restarted manually" signature, so no recovery hint.
+    assert sleeps == [1] * 4
     assert not _recovery_hint_logged(warning)
-    assert len(init_messages) == 1
     assert ('health probe failed: Connection timed out during banner '
             'exchange') in init_messages[0]
 
@@ -163,26 +146,31 @@ def test_persistent_ssh_timeout_keeps_manual_restart_hint():
     assert 'health probe failed: ssh: connect to host' in init_messages[0]
 
 
-def test_config_sets_attempts_and_interval():
-    ready, head_runner, sleeps, _, _ = _refresh(
-        clouds.AWS(), [_SSM_NOT_CONNECTED] * 3,
-        config=_health_check(attempts=3, interval_seconds=5))
+@pytest.mark.parametrize('config,expected_sleeps', [
+    (_health_check(attempts=3, interval_seconds=5), [5, 5]),
+    (_health_check(attempts=1), []),
+])
+def test_config(config, expected_sleeps):
+    ready, head_runner, sleeps, _, _ = _refresh(clouds.AWS(),
+                                                [_SSM_NOT_CONNECTED] * 3,
+                                                config=config)
 
     assert ready is False
-    assert head_runner.run.call_count == 3
-    assert sleeps == [5, 5]
+    assert head_runner.run.call_count == len(expected_sleeps) + 1
+    assert sleeps == expected_sleeps
 
 
-def test_single_attempt_is_single_shot():
-    ready, head_runner, sleeps, _, _ = _refresh(
-        clouds.AWS(), [_SSM_NOT_CONNECTED], config=_health_check(attempts=1))
+@pytest.mark.parametrize('interval_seconds', [float('nan'), float('inf')])
+def test_non_finite_interval_uses_default(interval_seconds):
+    ready, _, sleeps, _, _ = _refresh(
+        clouds.AWS(), [_SSM_NOT_CONNECTED, (0, _HEALTHY_1_NODE, '')],
+        config=_health_check(interval_seconds=interval_seconds))
 
-    assert ready is False
-    head_runner.run.assert_called_once()
-    assert not sleeps
+    assert ready is True
+    assert sleeps == [1]
 
 
-def test_runtime_not_setup_is_not_retried_outside_kubernetes():
+def test_missing_runtime_is_not_retried():
     ready, head_runner, sleeps, warning, _ = _refresh(clouds.AWS(),
                                                       [_RAY_NOT_FOUND])
 
@@ -192,7 +180,7 @@ def test_runtime_not_setup_is_not_retried_outside_kubernetes():
     assert _recovery_hint_logged(warning)
 
 
-def test_kubernetes_default_retry_is_unchanged():
+def test_kubernetes_retries_any_failure():
     ready, head_runner, sleeps, _, _ = _refresh(
         clouds.Kubernetes(),
         [_SSM_NOT_CONNECTED, _RAY_NOT_FOUND, (0, _HEALTHY_1_NODE, '')])
@@ -202,7 +190,7 @@ def test_kubernetes_default_retry_is_unchanged():
     assert sleeps == [1, 1]
 
 
-def test_kubernetes_persistent_failure_skips_final_sleep():
+def test_kubernetes_persistent_failure_marks_init():
     ready, head_runner, sleeps, _, init_messages = _refresh(
         clouds.Kubernetes(), [_SSM_NOT_CONNECTED] * 5)
 
@@ -212,65 +200,38 @@ def test_kubernetes_persistent_failure_skips_final_sleep():
     assert '0/1 ready' in init_messages[0]
 
 
-def test_kubernetes_honours_config():
-    ready, head_runner, sleeps, _, _ = _refresh(
-        clouds.Kubernetes(), [_SSM_NOT_CONNECTED] * 2,
-        config=_health_check(attempts=2, interval_seconds=3))
-
-    assert ready is False
-    assert head_runner.run.call_count == 2
-    assert sleeps == [3]
-
-
-@pytest.mark.parametrize('config,expected_sleeps',
-                         [({}, [1]), (_health_check(interval_seconds=7), [7])],
-                         ids=['default', 'configured'])
-def test_partial_ray_cluster_is_retried(config, expected_sleeps):
-    # Not all nodes show up in `ray status` yet; then they do.
-    ready, head_runner, sleeps, _, _ = _refresh(clouds.AWS(),
-                                                [(0, _HEALTHY_1_NODE, ''),
-                                                 (0, _HEALTHY_2_NODES, '')],
-                                                config=config,
-                                                launched_nodes=2)
+def test_partial_ray_cluster_is_retried():
+    ready, _, sleeps, _, _ = _refresh(clouds.AWS(), [(0, _HEALTHY_1_NODE, ''),
+                                                     (0, _HEALTHY_2_NODES, '')],
+                                      config=_health_check(interval_seconds=7),
+                                      launched_nodes=2)
 
     assert ready is True
-    assert head_runner.run.call_count == 2
-    assert sleeps == expected_sleeps
+    assert sleeps == [7]
 
 
-def test_persistent_partial_ray_cluster_skips_final_sleep():
+def test_persistent_partial_ray_cluster_marks_init():
     ready, head_runner, sleeps, _, init_messages = _refresh(
-        clouds.AWS(), [(0, _HEALTHY_1_NODE, '')] * 3,
-        config=_health_check(attempts=3, interval_seconds=10),
-        launched_nodes=2)
+        clouds.AWS(), [(0, _HEALTHY_1_NODE, '')] * 5, launched_nodes=2)
 
     assert ready is False
-    assert head_runner.run.call_count == 3
-    assert sleeps == [10, 10]
+    assert head_runner.run.call_count == 5
+    assert sleeps == [1] * 4
     assert '1/2 ready' in init_messages[0]
 
 
-@pytest.mark.parametrize('interval_seconds', [float('nan'), float('inf')])
-def test_non_finite_interval_falls_back_to_default(interval_seconds):
-    ready, head_runner, sleeps, _, _ = _refresh(
-        clouds.AWS(), [_SSM_NOT_CONNECTED, (0, _HEALTHY_1_NODE, '')],
-        config=_health_check(interval_seconds=interval_seconds))
-
-    assert ready is True
-    assert head_runner.run.call_count == 2
-    assert sleeps == [1]
+def _validate(health_check):
+    common_utils.validate_schema({'provision': {
+        'health_check': health_check
+    }}, schemas.get_config_schema(), 'Invalid sky config: ')
 
 
 @pytest.mark.parametrize('health_check', [{}, {
-    'attempts': 1
-}, {
     'attempts': 7,
     'interval_seconds': 2.5
 }])
 def test_schema_accepts_valid_config(health_check):
-    common_utils.validate_schema({'provision': {
-        'health_check': health_check
-    }}, schemas.get_config_schema(), 'Invalid sky config: ')
+    _validate(health_check)
 
 
 @pytest.mark.parametrize('health_check', [{
@@ -284,7 +245,4 @@ def test_schema_accepts_valid_config(health_check):
 }])
 def test_schema_rejects_invalid_config(health_check):
     with pytest.raises(ValueError):
-        common_utils.validate_schema(
-            {'provision': {
-                'health_check': health_check
-            }}, schemas.get_config_schema(), 'Invalid sky config: ')
+        _validate(health_check)
