@@ -326,6 +326,17 @@ export async function setClusterHistoryDeleted(clusterHashes, deleted) {
       showToast(msg, 'error');
       return false;
     }
+    const body = await response.json();
+    // The server returns how many rows it actually flagged. A zero-row
+    // update means the caller asked to remove/restore rows it does not own
+    // (or that do not exist), so surface that instead of claiming success
+    // and letting the stale row linger in the table.
+    if ((body.updated ?? 0) === 0 && (clusterHashes?.length ?? 0) > 0) {
+      const msg = 'No matching history rows were updated.';
+      console.error(msg);
+      showToast(msg, 'error');
+      return false;
+    }
     return true;
   } catch (error) {
     console.error('Error updating cluster history:', error);
@@ -706,6 +717,10 @@ export function useClusterData(options = {}) {
         sortOrder,
         filters,
         allUsers,
+        // The plugin owns the /cost_report query; tell it whether soft-
+        // deleted rows should be listed (so it can request include_deleted
+        // and surface the "Show hidden" toggle).
+        includeHiddenHistory,
       },
     ]);
 
@@ -726,6 +741,7 @@ export function useClusterData(options = {}) {
         sortOrder,
         filters,
         allUsers,
+        includeHiddenHistory,
       };
       dashboardCache
         .get(pluginFetch, [nextPageOptions], { ttl: 30000 })
@@ -741,10 +757,16 @@ export function useClusterData(options = {}) {
       hasNext: resultHasNext,
       hasPrev: resultHasPrev,
       isServerPagination: true,
-      // The pagination plugin fetches on its own and hides soft-deleted
-      // rows server-side, so the hidden count (and the restore affordance)
-      // is only available on the client-side path.
-      hiddenHistoryCount: 0,
+      // The plugin reports how many of the caller's history rows are soft-
+      // deleted. It is the plugin's job to fetch those rows (and include
+      // them in items only when includeHiddenHistory is set); older plugins
+      // that omit the field leave the count at 0, which keeps the toggle
+      // hidden rather than rendering a broken restore affordance.
+      hiddenHistoryCount:
+        result.hiddenHistoryCount ??
+        result.hidden_history_count ??
+        result.deletedCount ??
+        0,
     };
   }, [
     page,
@@ -755,6 +777,7 @@ export function useClusterData(options = {}) {
     sortOrder,
     filters,
     allUsers,
+    includeHiddenHistory,
   ]);
 
   /**

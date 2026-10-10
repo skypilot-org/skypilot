@@ -267,4 +267,55 @@ describe('DashboardCache', () => {
       expect(cache.pendingRequests.size).toBe(0);
     });
   });
+
+  describe('Generation-aware invalidation', () => {
+    test('does not cache a response that resolves after invalidate', async () => {
+      const mockFetch = createMockFetch({ data: 'stale' }, 100);
+
+      const promise = cache.get(mockFetch, ['arg1']);
+      expect(cache.pendingRequests.size).toBe(1);
+
+      // Invalidate while the request is still in flight. The pending promise
+      // must still resolve to the caller, but it must not repopulate the
+      // cache (a newer fetch owns the key now).
+      cache.invalidate(mockFetch, ['arg1']);
+
+      jest.advanceTimersByTime(100);
+      const result = await promise;
+
+      expect(result).toEqual({ data: 'stale' });
+      expect(cache.cache.size).toBe(0);
+    });
+
+    test('background refresh does not resurrect invalidated data', async () => {
+      let value = { data: 'v1' };
+      const mockFetch = jest.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        return value;
+      });
+
+      // Populate the cache with v1.
+      const first = cache.get(mockFetch, ['arg1']);
+      jest.advanceTimersByTime(100);
+      await first;
+      expect(cache.getCached(mockFetch, ['arg1'])).toEqual({ data: 'v1' });
+
+      // A cache hit triggers a background refresh that is still in flight.
+      value = { data: 'v2' };
+      await cache.get(mockFetch, ['arg1']);
+      expect(cache.backgroundJobs.size).toBe(1);
+
+      // Invalidate before the background refresh resolves.
+      cache.invalidateFunction(mockFetch);
+
+      jest.advanceTimersByTime(100);
+      // Flush the background refresh's .then/.finally microtasks.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // The stale v2 response must not repopulate the cache.
+      expect(cache.cache.size).toBe(0);
+      expect(cache.backgroundJobs.size).toBe(0);
+    });
+  });
 });

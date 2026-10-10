@@ -261,7 +261,9 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('is_managed', sqlalchemy.Integer, server_default='0'),
     # Whether the row was soft-deleted from the history view (e.g. via the
     # dashboard's "remove from history"). The record is kept so usage/cost
-    # data stays recoverable; history listings just skip flagged rows.
+    # data stays recoverable; history listings just skip flagged rows. Like
+    # is_managed, the column is nullable with a server_default of '0', and
+    # NULL (rows predating the column) is treated as not deleted.
     sqlalchemy.Column('is_deleted', sqlalchemy.Integer, server_default='0'),
 )
 
@@ -3085,9 +3087,12 @@ def set_cluster_history_deleted(cluster_hashes: List[str],
         deleted: True to hide the rows from history listings, False to
             restore them.
         caller_user_hash: When set, only rows owned by this user are
-            updated, so a caller cannot touch another user's history. None
-            (the local, unauthenticated case) updates the given rows
-            regardless of owner.
+            updated, so a caller cannot touch another user's history. Rows
+            with no recorded owner (legacy rows whose user_hash is NULL) are
+            treated as owned by the caller, matching
+            iter_clusters_from_history, which attributes those rows to the
+            current user. None (the local, unauthenticated case) updates the
+            given rows regardless of owner.
 
     Returns:
         The number of rows updated.
@@ -3098,8 +3103,15 @@ def set_cluster_history_deleted(cluster_hashes: List[str],
     with orm.Session(engine) as session:
         conditions = [cluster_history_table.c.cluster_hash.in_(cluster_hashes)]
         if caller_user_hash is not None:
+            # Match the reader's ownership rule: iter_clusters_from_history
+            # attributes rows with no recorded owner (user_hash IS NULL) to
+            # the current user, so the writer must treat those rows as owned
+            # by the caller too. Otherwise a signed-in user would be offered
+            # a remove action that silently updates nothing.
             conditions.append(
-                cluster_history_table.c.user_hash == caller_user_hash)
+                sqlalchemy.or_(
+                    cluster_history_table.c.user_hash == caller_user_hash,
+                    cluster_history_table.c.user_hash.is_(None)))
         update_stmt = sqlalchemy.update(cluster_history_table).where(
             *conditions).values(is_deleted=int(deleted))
         result = session.execute(update_stmt)

@@ -26,6 +26,11 @@ def upgrade():
     the dashboard) without losing the underlying usage/cost record: the row
     is flagged instead of deleted, so `sky cost-report` and the dashboard
     history list skip it while the data stays recoverable.
+
+    The column is nullable with a server_default of '0', mirroring the
+    existing ``is_managed`` column: rows written before the column existed
+    (or by older code) keep NULL, which history listings treat as "not
+    deleted" (see ``iter_clusters_from_history``).
     """
     from alembic import op  # pylint: disable=import-outside-toplevel
 

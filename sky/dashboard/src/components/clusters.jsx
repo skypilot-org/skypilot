@@ -821,10 +821,14 @@ export function ClusterTable({
         // The cached history response predates the update (2 minute TTL);
         // drop it so the refetch sees the new flags.
         dashboardCache.invalidateFunction(getClusterHistory);
+        // Removing a row can shrink the dataset below the current page (e.g.
+        // deleting the only row on the last page would otherwise leave an
+        // empty table); land back on the first page before refetching.
+        setPage(1);
         refresh();
       }
     },
-    [refresh]
+    [refresh, setPage]
   );
 
   // Sync page/limit to URL query params.
@@ -1414,10 +1418,12 @@ export function ClusterTable({
 
   return (
     <div>
-      {/* Hidden-history toggle: only meaningful on the client-side
-          pagination path, which is what knows about soft-deleted rows
-          (see the hook's server-side branch). */}
-      {showHistory && !isServerPagination && hiddenHistoryCount > 0 && (
+      {/* Hidden-history toggle: shows when there are soft-deleted rows. On
+          the client-side path the hook computes the count directly; on the
+          server-side (pagination plugin) path the plugin reports it via
+          `hiddenHistoryCount`. Older plugins that omit it leave the count
+          at 0, which keeps this toggle hidden. */}
+      {showHistory && hiddenHistoryCount > 0 && (
         <div className="flex items-center mb-2">
           <button
             type="button"

@@ -131,6 +131,38 @@ class TestClusterHistorySoftDelete(unittest.TestCase):
         self.assertEqual(updated, 2)
         self.assertNotIn('h-u2', self._listed_hashes())
 
+    def test_soft_delete_legacy_null_user_hash_rows(self):
+        """A signed-in caller can flag NULL-user_hash rows.
+
+        Rows written before user_hash existed carry NULL; the history listing
+        attributes those to the signed-in user (``iter_clusters_from_history``
+        maps ``user_hash IS NULL`` to the current user). The flagging helper
+        must apply the same ownership rule so the caller can remove such rows
+        (otherwise the remove action the listing offers would silently update
+        nothing).
+        """
+        _insert_history_row(self.engine,
+                            'h-null-owner',
+                            name='null-owner',
+                            user_hash=None)
+
+        updated = global_user_state.set_cluster_history_deleted(
+            ['h-null-owner'], deleted=True, caller_user_hash='u1')
+        self.assertEqual(updated, 1)
+        self.assertNotIn('h-null-owner', self._listed_hashes())
+
+        # A NULL-owner row is attributed to whichever user is signed in (the
+        # reader never filters history by user_hash), so a different signed-in
+        # caller also owns it from their view and can flag it too.
+        _insert_history_row(self.engine,
+                            'h-null-owner-2',
+                            name='null-owner-2',
+                            user_hash=None)
+        updated = global_user_state.set_cluster_history_deleted(
+            ['h-null-owner-2'], deleted=True, caller_user_hash='other-user')
+        self.assertEqual(updated, 1)
+        self.assertNotIn('h-null-owner-2', self._listed_hashes())
+
     def test_soft_delete_unknown_hashes_are_a_noop(self):
         """Hashes with no history row simply update nothing."""
         updated = global_user_state.set_cluster_history_deleted(

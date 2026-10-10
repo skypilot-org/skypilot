@@ -289,7 +289,10 @@ describe('cluster history soft delete', () => {
 
   describe('setClusterHistoryDeleted', () => {
     it('posts the hashes and the flag to the soft delete endpoint', async () => {
-      apiClient.post.mockResolvedValue({ ok: true });
+      apiClient.post.mockResolvedValue({
+        ok: true,
+        json: async () => ({ updated: 2 }),
+      });
 
       const ok = await setClusterHistoryDeleted(['h1', 'h2'], true);
 
@@ -298,6 +301,17 @@ describe('cluster history soft delete', () => {
         '/cluster_history/soft_delete',
         { cluster_hashes: ['h1', 'h2'], deleted: true }
       );
+    });
+
+    it('reports failure when the server updated no rows', async () => {
+      apiClient.post.mockResolvedValue({
+        ok: true,
+        json: async () => ({ updated: 0 }),
+      });
+
+      const ok = await setClusterHistoryDeleted(['h1'], true);
+
+      expect(ok).toBe(false);
     });
 
     it('reports failure when the request errors', async () => {
@@ -360,6 +374,43 @@ describe('cluster history soft delete', () => {
       // The count is the number of soft-deleted rows, regardless of whether
       // they are currently listed: the toggle flips to "Hide N hidden
       // clusters" while they are shown.
+      expect(result.current.hiddenHistoryCount).toBe(1);
+    });
+  });
+
+  describe('useClusterData server-side pagination hidden history', () => {
+    const currentUser = { id: 'u-1', name: 'alice' };
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      window.__skyPaginationFetch = jest.fn();
+    });
+
+    it('forwards includeHiddenHistory to the plugin and surfaces its count', async () => {
+      dashboardCache.get.mockResolvedValue({
+        total: 2,
+        items: [
+          terminatedRow('h1', 'kept', false),
+          terminatedRow('h2', 'removed', true),
+        ],
+        hasNext: false,
+        hiddenHistoryCount: 1,
+      });
+
+      const filters = [];
+      const { result } = renderHook(() =>
+        useClusterData({
+          showHistory: true,
+          currentUser,
+          filters,
+          includeHiddenHistory: true,
+        })
+      );
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      const [pluginFetch, [options]] = dashboardCache.get.mock.calls[0];
+      expect(pluginFetch).toBe(window.__skyPaginationFetch);
+      expect(options.includeHiddenHistory).toBe(true);
       expect(result.current.hiddenHistoryCount).toBe(1);
     });
   });
