@@ -1079,8 +1079,10 @@ def _label_or_default(value: Optional[str], default: str) -> str:
 _EMERGENCY_EPISODES_MAX_SERIES = 100
 
 _RECOVERY_EVENTS_HELP = (
-    'Count of managed-job RECOVERING events currently retained in '
-    'job_events, by recovery source and workspace. NOT monotone: '
+    'Count of managed-job recovery events currently retained in '
+    'job_events, by recovery source and workspace: every RECOVERING event, '
+    'plus the RUNNING events of emergency recoveries that kept the job on '
+    'its cluster instead of relaunching it. NOT monotone: '
     'job_events has a retention window, so aged-out rows decrease the '
     'value — use clamp_min(delta(...), 0) for rates, never increase(). '
     'Events written before recovery_source existed (NULL) are excluded.')
@@ -1112,8 +1114,10 @@ class ManagedJobsCollector:
     Also emits two recovery-observability gauges:
 
     * ``sky_managed_job_recovery_events_count{recovery_source,
-      workspace}`` — RECOVERING ``job_events`` rows currently retained,
-      by source (FAILURE / EMERGENCY / RESTART). Not monotone (event
+      workspace}`` — recovery ``job_events`` rows currently retained
+      (RECOVERING, plus RUNNING / WINDING_DOWN rows tagged EMERGENCY by an
+      emergency recovery that kept the job on its cluster), by source
+      (FAILURE / EMERGENCY / RESTART). Not monotone (event
       retention prunes old rows), so rate queries must use
       ``clamp_min(delta(...), 0)``, never ``increase(...)``.
     * ``sky_managed_job_emergency_recovery_attempts{job_id, job_name,

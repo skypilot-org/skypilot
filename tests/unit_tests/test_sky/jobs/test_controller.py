@@ -3455,8 +3455,13 @@ class TestJobGroupResumeWithFinishedPrimaries:
              patch('sky.jobs.controller.context') as ctx:
             runtime.is_registered.return_value = False
             state.ManagedJobStatus = managed_job_state.ManagedJobStatus
+            state.RecoverySource = managed_job_state.RecoverySource
             state.get_job_status_with_task_id_async = AsyncMock(
                 side_effect=status_of)
+            # The RUNNING watcher's resume checks for an open emergency
+            # episode; none here.
+            state.has_open_emergency_episode_async = AsyncMock(
+                return_value=False)
             networking.dns_addresses_for_task.return_value = None
             ctx.contextual_async = lambda f: f
 

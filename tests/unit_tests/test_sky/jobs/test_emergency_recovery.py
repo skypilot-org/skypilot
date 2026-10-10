@@ -25,7 +25,11 @@ from sky.jobs import constants as jobs_constants
 from sky.jobs import controller
 from sky.jobs import scheduler
 from sky.jobs import state
+from sky.jobs import utils as managed_job_utils
+from sky.skylet import constants as skylet_constants
+from sky.skylet import job_lib
 from sky.utils import controller_utils
+from sky.utils import status_lib
 
 _PID = 1234
 _PID_STARTED_AT = 111.0
@@ -247,6 +251,218 @@ class TestEmergencyRecoveryState:
         assert _get_task_row(engine)['status'] == 'RECOVERING'
         assert _get_recovering_events(engine, 1) == []
         assert not calls
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('status', ['RUNNING', 'WINDING_DOWN'])
+    async def test_record_emergency_kept_running(self,
+                                                 _mock_managed_jobs_db_conn,
+                                                 status):
+        """An emergency on a running task changes nothing about the task:
+        no status flip, no duration accounting, no callback. It is recorded
+        as a job event carrying the task's current status, tagged EMERGENCY,
+        so alerting and metrics still see the episode."""
+        engine = _mock_managed_jobs_db_conn
+        started_running_at = time.time() - 100
+        _seed_job(engine,
+                  status=status,
+                  last_recovered_at=started_running_at,
+                  job_duration=12.5)
+
+        recorded = await state.record_emergency_kept_running_async(
+            1, 0, reason='kept running')
+
+        assert recorded is True
+        row = _get_task_row(engine)
+        assert row['status'] == status
+        assert row['last_recovered_at'] == started_running_at
+        assert row['job_duration'] == 12.5
+        assert row['recovering_from_failure'] is None
+        events = state.get_job_events(1)
+        assert [(e['new_status'], e['reason']) for e in events
+               ] == [(state.ManagedJobStatus(status), 'kept running')]
+        # Not a recovery: no RECOVERING event, but the EMERGENCY source is on
+        # the event and the metric counts it.
+        assert _get_recovering_events(engine, 1) == []
+        assert state.get_recovery_event_counts_by_source_workspace() == [
+            (state.RecoverySource.EMERGENCY.value, None, 1)
+        ]
+
+    @pytest.mark.asyncio
+    async def test_record_emergency_reattached_closes_the_episode(
+            self, _mock_managed_jobs_db_conn):
+        """The re-attached event closes the kept-running episode: the task's
+        latest event goes EMERGENCY-sourced -> unsourced, the status stays
+        RUNNING, and the source-keyed metric still counts one attempt."""
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine, status='RUNNING')
+        assert await state.has_open_emergency_episode_async(1, 0) is False
+
+        await state.record_emergency_kept_running_async(1,
+                                                        0,
+                                                        reason='kept running')
+        assert await state.has_open_emergency_episode_async(1, 0) is True
+
+        assert await state.record_emergency_reattached_async(1, 0) is True
+
+        assert await state.has_open_emergency_episode_async(1, 0) is False
+        assert _get_task_row(engine)['status'] == 'RUNNING'
+        events = {
+            (e['new_status'], e['reason']) for e in state.get_job_events(1)
+        }
+        assert events == {
+            (state.ManagedJobStatus.RUNNING, 'kept running'),
+            (state.ManagedJobStatus.RUNNING, state.EMERGENCY_REATTACHED_REASON),
+        }
+        assert _get_recovering_events(engine, 1) == []
+        assert state.get_recovery_event_counts_by_source_workspace() == [
+            (state.RecoverySource.EMERGENCY.value, None, 1)
+        ]
+
+    @pytest.mark.asyncio
+    async def test_latest_event_source_counts_job_level_events(
+            self, _mock_managed_jobs_db_conn):
+        """A job group's emergency is one job-level event (task_id None);
+        every member sees it as its latest until it closes the episode for
+        itself with its own re-attached event."""
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine, status='RUNNING')
+        for member in (0, 1):
+            await state.add_job_event_async(1, member,
+                                            state.ManagedJobStatus.RUNNING,
+                                            'Job has started')
+        await state.add_job_event_async(
+            1,
+            None,
+            state.ManagedJobStatus.RUNNING,
+            'group emergency',
+            recovery_source=state.RecoverySource.EMERGENCY)
+        assert await state.has_open_emergency_episode_async(1, 0) is True
+        assert await state.has_open_emergency_episode_async(1, 1) is True
+
+        assert await state.record_emergency_reattached_async(1, 0) is True
+
+        # Closed for member 0 only; member 1 still has it as its latest.
+        assert await state.has_open_emergency_episode_async(1, 0) is False
+        assert await state.has_open_emergency_episode_async(1, 1) is True
+
+    @pytest.mark.asyncio
+    async def test_relaunching_emergency_opens_no_episode(
+            self, _mock_managed_jobs_db_conn):
+        """An emergency that moved the task to RECOVERING relaunched it:
+        the relaunch's own RUNNING event must not leave a kept-cluster
+        episode open for a later restart to 're-attach' to."""
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine, status='RUNNING')
+        await state.add_job_event_async(1, 0, state.ManagedJobStatus.STARTING,
+                                        'Job is starting')
+        await state.add_job_event_async(
+            1,
+            0,
+            state.ManagedJobStatus.RECOVERING,
+            'Unexpected controller error (emergency recovery attempt 1/10)',
+            recovery_source=state.RecoverySource.EMERGENCY)
+        await state.add_job_event_async(1, 0, state.ManagedJobStatus.RUNNING,
+                                        'Job has recovered')
+
+        assert await state.has_open_emergency_episode_async(1, 0) is False
+
+    @pytest.mark.asyncio
+    async def test_group_emergency_opens_only_for_running_members(
+            self, _mock_managed_jobs_db_conn):
+        """A group emergency keeps only the members that were running; a
+        member still starting is not re-attached when it later starts."""
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine, status='RUNNING')
+        await state.add_job_event_async(1, 0, state.ManagedJobStatus.RUNNING,
+                                        'Job has started')
+        await state.add_job_event_async(1, 1, state.ManagedJobStatus.STARTING,
+                                        'Job is starting')
+        await state.add_job_event_async(
+            1,
+            None,
+            state.ManagedJobStatus.RUNNING,
+            'group emergency',
+            recovery_source=state.RecoverySource.EMERGENCY)
+        await state.add_job_event_async(1, 1, state.ManagedJobStatus.RUNNING,
+                                        'Job has started')
+
+        assert await state.has_open_emergency_episode_async(1, 0) is True
+        assert await state.has_open_emergency_episode_async(1, 1) is False
+
+    @pytest.mark.asyncio
+    async def test_group_emergency_while_all_starting_opens_nothing(
+            self, _mock_managed_jobs_db_conn):
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine, status='RUNNING')
+        await state.add_job_event_async(1, 0, state.ManagedJobStatus.STARTING,
+                                        'Job is starting')
+        await state.add_job_event_async(
+            1,
+            None,
+            state.ManagedJobStatus.STARTING,
+            'group emergency',
+            recovery_source=state.RecoverySource.EMERGENCY)
+        await state.add_job_event_async(1, 0, state.ManagedJobStatus.RUNNING,
+                                        'Job has started')
+
+        assert await state.has_open_emergency_episode_async(1, 0) is False
+
+    @pytest.mark.asyncio
+    async def test_open_episode_survives_informational_events(
+            self, _mock_managed_jobs_db_conn):
+        """An episode is closed by the re-attached event or by a status
+        change away from RUNNING/WINDING_DOWN, not by any later event: an
+        informational RUNNING event in between leaves it open, and a
+        later emergency reopens a closed one."""
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine, status='RUNNING')
+        await state.record_emergency_kept_running_async(1,
+                                                        0,
+                                                        reason='attempt 1')
+        await state.add_job_event_async(1, 0, state.ManagedJobStatus.RUNNING,
+                                        'links harvested from the job log')
+        assert await state.has_open_emergency_episode_async(1, 0) is True
+
+        # A cancel request (job-level CANCELLING event) closes it: the
+        # cancellation path owns the task from here.
+        await state.add_job_event_async(1, None,
+                                        state.ManagedJobStatus.CANCELLING,
+                                        'cancel requested')
+        assert await state.has_open_emergency_episode_async(1, 0) is False
+
+        # A new emergency reopens it; the re-attached event closes it.
+        await state.record_emergency_kept_running_async(1,
+                                                        0,
+                                                        reason='attempt 2')
+        assert await state.has_open_emergency_episode_async(1, 0) is True
+        assert await state.record_emergency_reattached_async(1, 0) is True
+        assert await state.has_open_emergency_episode_async(1, 0) is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('status', ['STARTING', 'RECOVERING', 'SUCCEEDED'])
+    async def test_record_emergency_reattached_requires_running(
+            self, _mock_managed_jobs_db_conn, status):
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine, status=status)
+
+        assert await state.record_emergency_reattached_async(1, 0) is False
+
+        assert state.get_job_events(1) == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        'status', ['PENDING', 'STARTING', 'RECOVERING', 'CANCELLING', 'FAILED'])
+    async def test_record_emergency_kept_running_requires_running(
+            self, _mock_managed_jobs_db_conn, status):
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine, status=status)
+
+        recorded = await state.record_emergency_kept_running_async(
+            1, 0, reason='kept running')
+
+        assert recorded is False
+        assert _get_task_row(engine)['status'] == status
+        assert not state.get_job_events(1)
 
     @pytest.mark.asyncio
     async def test_set_emergency_recovering_accumulates_duration(
@@ -592,6 +808,7 @@ class _RetryLoopHarness:
         self.normalize = AsyncMock()
         self.set_cancelling = AsyncMock()
         self.set_cancelled = AsyncMock()
+        self.add_event = AsyncMock()
         self.sleeps = []
 
         async def _fake_sleep(seconds):
@@ -614,11 +831,17 @@ class _RetryLoopHarness:
                             self.get_latest_task)
         monkeypatch.setattr(f'{mjs}.set_emergency_recovering_async',
                             self.set_emergency)
+        # The adopt path (RUNNING task keeps its cluster) records the
+        # emergency on a job event instead of changing the status.
+        self.record_kept_running = AsyncMock(return_value=True)
+        monkeypatch.setattr(f'{mjs}.record_emergency_kept_running_async',
+                            self.record_kept_running)
         monkeypatch.setattr(
             f'{mjs}.normalize_schedule_state_for_emergency_retry_async',
             self.normalize)
         monkeypatch.setattr(f'{mjs}.set_cancelling_async', self.set_cancelling)
         monkeypatch.setattr(f'{mjs}.set_cancelled_async', self.set_cancelled)
+        monkeypatch.setattr(f'{mjs}.add_job_event_async', self.add_event)
         monkeypatch.setattr(
             'sky.jobs.controller.managed_job_utils.event_callback_func',
             MagicMock(return_value=AsyncMock()))
@@ -630,6 +853,8 @@ class TestEmergencyRetryLoop:
 
     @pytest.mark.asyncio
     async def test_unexpected_error_retries_and_succeeds(self, monkeypatch):
+        """A RUNNING task keeps its status and its cluster: the retry
+        re-attaches instead of relaunching."""
         h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
 
         await h.jc.run()
@@ -641,12 +866,136 @@ class TestEmergencyRetryLoop:
         assert h.record_attempt.await_args.args[1] == 1  # attempt count
         _assert_jittered(
             h.sleeps, [jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS])
-        # The doomed cluster is torn down during the bookkeeping (before the
-        # backoff), not left running until the retry's forced recovery.
-        h.jc._cleanup_cluster.assert_awaited_once()
+        # No status flip and no teardown: the job stays RUNNING on its
+        # cluster through the backoff.
+        h.set_emergency.assert_not_awaited()
+        h.jc._cleanup_cluster.assert_not_awaited()
+        # The emergency is still recorded, on a job event, with the attempt
+        # number the on-call tooling keys on.
+        h.record_kept_running.assert_awaited_once()
+        reason = h.record_kept_running.await_args.kwargs['reason']
+        assert 'emergency recovery attempt 1/' in reason
+        assert 'keeps running on its cluster' in reason
+        assert '[RuntimeError] boom' in reason
         # Normal finally ran exactly once.
         h.set_cancelling.assert_awaited_once()
         h.set_cancelled.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('status', [
+        state.ManagedJobStatus.STARTING,
+        state.ManagedJobStatus.RECOVERING,
+    ])
+    async def test_not_running_task_marks_recovering_and_tears_down(
+            self, monkeypatch, status):
+        """A task that never reached RUNNING (or was already relaunching)
+        keeps the relaunch path: RECOVERING + early teardown, then the
+        retry's forced recovery."""
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        h.get_latest_task.return_value = (0, status)
+
+        await h.jc.run()
+
+        assert h.jc._run_one_task.call_count == 2
+        h.set_emergency.assert_awaited_once()
+        assert 'emergency recovery attempt 1/' in (
+            h.set_emergency.await_args.kwargs['reason'])
+        # The doomed cluster is torn down during the bookkeeping (before the
+        # backoff), not left running until the retry's forced recovery.
+        h.jc._cleanup_cluster.assert_awaited_once()
+        h.record_kept_running.assert_not_awaited()
+        _assert_jittered(
+            h.sleeps, [jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS])
+
+    @pytest.mark.asyncio
+    async def test_winding_down_task_keeps_cluster(self, monkeypatch):
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        h.get_latest_task.return_value = (0,
+                                          state.ManagedJobStatus.WINDING_DOWN)
+
+        await h.jc.run()
+
+        h.set_emergency.assert_not_awaited()
+        h.jc._cleanup_cluster.assert_not_awaited()
+        h.record_kept_running.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_running_task_last_attempt_relaunches(self, monkeypatch):
+        """The last attempt of an episode relaunches instead of re-attaching:
+        an error that recurs on every re-attach may be tied to the cluster
+        or handle, and one relaunch is the only thing that can clear it
+        before the budget runs out."""
+        max_attempts = jobs_constants.EMERGENCY_RECOVERY_MAX_ATTEMPTS
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        h.get_budget.return_value = (max_attempts - 1, time.time())
+
+        await h.jc.run()
+
+        assert h.record_attempt.await_args.args[1] == max_attempts
+        h.record_kept_running.assert_not_awaited()
+        h.set_emergency.assert_awaited_once()
+        h.jc._cleanup_cluster.assert_awaited_once()
+        h.jc._update_failed_task_state.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_running_task_event_recorded_once_across_rounds(
+            self, monkeypatch):
+        """A transient failure after the event is recorded must not make
+        the outer retry record it again."""
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        normalize_calls = {'n': 0}
+
+        async def _normalize(job_id):
+            normalize_calls['n'] += 1
+            if normalize_calls['n'] == 1:
+                raise ConnectionError('db blip after recording the event')
+
+        h.normalize.side_effect = _normalize
+
+        await h.jc.run()
+
+        assert normalize_calls['n'] == 2  # the round was re-run
+        h.record_kept_running.assert_awaited_once()
+        h.jc._update_failed_task_state.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_running_task_gone_retries_without_backoff(self, monkeypatch):
+        """If the task stopped running between the status read and the
+        event write (cancelled, or finished by another writer), the resume
+        logic owns it: retry the job loop immediately."""
+        h = _RetryLoopHarness(monkeypatch,
+                              [RuntimeError('boom'),
+                               asyncio.CancelledError()])
+        h.record_kept_running.return_value = False
+
+        with pytest.raises(asyncio.CancelledError):
+            await h.jc.run()
+
+        assert h.jc._run_one_task.call_count == 2
+        assert not h.sleeps
+        h.jc._cleanup_cluster.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_kept_cluster_backoff_keeps_full_ladder(self, monkeypatch):
+        """A task that keeps its cluster sleeps the same full jittered ladder
+        as a torn-down one, so a persistent error still takes hours to
+        exhaust the budget and there is time to remediate by hand."""
+        attempt = 5
+        base = jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS
+        nominal = base * 2**(attempt - 1)
+
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        h.get_budget.return_value = (attempt - 1, time.time())
+        await h.jc.run()
+        _assert_jittered(h.sleeps, [nominal])
+        h.jc._cleanup_cluster.assert_not_awaited()
+
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        h.get_budget.return_value = (attempt - 1, time.time())
+        h.get_latest_task.return_value = (0, state.ManagedJobStatus.STARTING)
+        await h.jc.run()
+        _assert_jittered(h.sleeps, [nominal])
+        h.jc._cleanup_cluster.assert_awaited_once()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('error,expected_status', [
@@ -710,6 +1059,7 @@ class TestEmergencyRetryLoop:
         h = _RetryLoopHarness(monkeypatch,
                               [RuntimeError('boom'),
                                asyncio.CancelledError()])
+        h.get_latest_task.return_value = (0, state.ManagedJobStatus.STARTING)
         h.set_emergency.return_value = False
 
         with pytest.raises(asyncio.CancelledError):
@@ -783,8 +1133,10 @@ class TestEmergencyRetryLoop:
 
     @pytest.mark.asyncio
     async def test_backoff_sequence_and_final_escape(self, monkeypatch):
+        """A task on the relaunch path sleeps the full jittered ladder."""
         max_attempts = jobs_constants.EMERGENCY_RECOVERY_MAX_ATTEMPTS
         h = _RetryLoopHarness(monkeypatch, RuntimeError('boom'))
+        h.get_latest_task.return_value = (0, state.ManagedJobStatus.STARTING)
         now = time.time()
         h.get_budget.side_effect = [
             (i, None if i == 0 else now) for i in range(max_attempts + 1)
@@ -806,12 +1158,41 @@ class TestEmergencyRetryLoop:
             state.ManagedJobStatus.FAILED_CONTROLLER)
 
     @pytest.mark.asyncio
+    async def test_running_task_episode_keeps_cluster_until_last_attempt(
+            self, monkeypatch):
+        """A RUNNING task that keeps failing is re-attached on every
+        attempt but the last, sleeping the full ladder (hours in total, so
+        there is time to remediate by hand); the last attempt relaunches;
+        then the budget is exhausted and the job fails."""
+        max_attempts = jobs_constants.EMERGENCY_RECOVERY_MAX_ATTEMPTS
+        h = _RetryLoopHarness(monkeypatch, RuntimeError('boom'))
+        now = time.time()
+        h.get_budget.side_effect = [
+            (i, None if i == 0 else now) for i in range(max_attempts + 1)
+        ]
+
+        await h.jc.run()
+
+        base = jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS
+        cap = jobs_constants.EMERGENCY_RECOVERY_BACKOFF_CAP_SECONDS
+        nominal = [min(base * 2**i, cap) for i in range(max_attempts)]
+        _assert_jittered(h.sleeps, nominal)
+        assert h.record_kept_running.await_count == max_attempts - 1
+        h.set_emergency.assert_awaited_once()
+        h.jc._cleanup_cluster.assert_awaited_once()
+        assert h.jc._run_one_task.call_count == max_attempts + 1
+        h.jc._update_failed_task_state.assert_awaited_once()
+        assert h.jc._update_failed_task_state.await_args.args[1] == (
+            state.ManagedJobStatus.FAILED_CONTROLLER)
+
+    @pytest.mark.asyncio
     async def test_backoff_is_jittered(self, monkeypatch):
         """The backoff is not deterministic: repeated attempts at the same
         nominal (the capped steady state) produce different sleeps, each
         within +/-50% of the nominal."""
         max_attempts = jobs_constants.EMERGENCY_RECOVERY_MAX_ATTEMPTS
         h = _RetryLoopHarness(monkeypatch, RuntimeError('boom'))
+        h.get_latest_task.return_value = (0, state.ManagedJobStatus.STARTING)
         now = time.time()
         h.get_budget.side_effect = [
             (i, None if i == 0 else now) for i in range(max_attempts + 1)
@@ -902,11 +1283,13 @@ class TestEmergencyRetryLoop:
     @pytest.mark.asyncio
     async def test_emergency_calls_on_before_recovery_before_teardown(
             self, monkeypatch):
-        """The emergency path tears the cluster down before the retry runs,
-        so it must give the runtime a chance to snapshot the about-to-be-lost
-        run's logs first (on_before_recovery), mirroring the normal recovery
-        path. Otherwise every emergency records a capture failure."""
+        """The emergency path tears a STARTING task's cluster down before
+        the retry runs, so it must give the runtime a chance to snapshot the
+        about-to-be-lost run's logs first (on_before_recovery), mirroring the
+        normal recovery path. Otherwise every emergency records a capture
+        failure. (A RUNNING task keeps its cluster, so neither runs.)"""
         h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        h.get_latest_task.return_value = (0, state.ManagedJobStatus.STARTING)
         order = []
 
         monkeypatch.setattr(
@@ -931,6 +1314,28 @@ class TestEmergencyRetryLoop:
 
         # The hook ran, and it ran before the teardown.
         assert order[:2] == ['hook', 'teardown']
+
+    @pytest.mark.asyncio
+    async def test_running_task_skips_hook_and_teardown(self, monkeypatch):
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        order = []
+
+        monkeypatch.setattr(
+            'sky.jobs.controller.managed_job_runtime.is_registered',
+            lambda: True)
+        monkeypatch.setattr(
+            'sky.jobs.controller.managed_job_runtime.on_before_recovery',
+            lambda *args, **kwargs: order.append('hook'))
+
+        async def _cleanup(name):
+            order.append('teardown')
+
+        h.jc._cleanup_cluster = AsyncMock(side_effect=_cleanup)
+
+        await h.jc.run()
+
+        assert order == []
+        assert h.jc._run_one_task.call_count == 2
 
 
 class TestBatchCoordinatorEmergencyResume:
@@ -1054,6 +1459,154 @@ class TestPoolEmergencyDuplicateGuard:
         cancel_spy.assert_called_once()
 
 
+class TestEmergencyReattachResume:
+    """_run_one_task: a RUNNING task whose latest job event is the
+    EMERGENCY-sourced kept-running event resumes with the re-attach flag
+    set, so the monitor loop records the re-attach once the job answers; a
+    RUNNING resume with any other latest event (a plain restart) does not.
+    Neither is forced into recovery."""
+
+    async def _resume(self, monkeypatch, open_episode):
+        jc = controller.JobController.__new__(controller.JobController)
+        jc._job_id = 1
+        jc._dag = MagicMock()
+        jc._pool = None
+        jc._backend = MagicMock()
+        jc._backend.run_timestamp = 'sky-2026-01-01-00-00-00-000000'
+        jc.starting = set()
+        jc.starting_lock = asyncio.Lock()
+        jc.starting_signal = MagicMock()
+        task = MagicMock()
+        task.name = 'task0'
+        task.metadata = {}
+        task.run = 'echo hi'
+        task.envs = {skylet_constants.TASK_ID_ENV_VAR: 'tid'}
+        task.resources = None
+        executor = MagicMock()
+        executor.on_resume = AsyncMock()
+        executor.monitor_task = AsyncMock(return_value=None)
+        monitor = AsyncMock(return_value=True)
+        jc._monitor_one_task = monitor
+
+        mjs = 'sky.jobs.controller.managed_job_state'
+        monkeypatch.setattr(
+            f'{mjs}.get_job_status_with_task_id_async',
+            AsyncMock(return_value=state.ManagedJobStatus.RUNNING))
+        monkeypatch.setattr(f'{mjs}.has_open_emergency_episode_async',
+                            AsyncMock(return_value=open_episode))
+        monkeypatch.setattr(f'{mjs}.get_file_mounts_blob_id',
+                            lambda job_id: None)
+        monkeypatch.setattr('sky.jobs.controller._add_k8s_annotations',
+                            lambda task, job_id: None)
+        monkeypatch.setattr(
+            'sky.jobs.controller.recovery_strategy.StrategyExecutor.make',
+            MagicMock(return_value=executor))
+        monkeypatch.setattr(
+            'sky.jobs.controller.managed_job_utils.event_callback_func',
+            MagicMock(return_value=AsyncMock()))
+        monkeypatch.setattr(
+            'sky.jobs.controller.usage_lib.messages.usage.update_task_id',
+            lambda *args, **kwargs: None)
+
+        assert await jc._run_one_task(0, task) is True
+        executor.on_resume.assert_awaited_once()
+        return monitor.await_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_open_emergency_episode_sets_reattach(self, monkeypatch):
+        kwargs = await self._resume(monkeypatch, open_episode=True)
+        assert kwargs['force_transit_to_recovering'] is False
+        assert kwargs['emergency_reattach'] is True
+
+    @pytest.mark.asyncio
+    async def test_plain_restart_does_not(self, monkeypatch):
+        kwargs = await self._resume(monkeypatch, open_episode=False)
+        assert kwargs['force_transit_to_recovering'] is False
+        assert kwargs['emergency_reattach'] is False
+
+
+class TestEmergencyReattachEvent:
+    """_monitor_one_task: the re-attach is recorded on the first status the
+    job answers, once; a plain resume records nothing."""
+
+    async def _monitor(self, monkeypatch, answers, reattach):
+        jc = controller.JobController.__new__(controller.JobController)
+        jc._job_id = 1
+        jc._pool = None
+        jc._backend = MagicMock()
+        jc._update_live_log_links = AsyncMock(return_value=True)
+        task = MagicMock()
+        task.num_nodes = 1
+        calls = {'n': 0}
+
+        async def _get_job_status(*args, **kwargs):
+            calls['n'] += 1
+            if calls['n'] > len(answers):
+                raise asyncio.CancelledError()
+            return answers[calls['n'] - 1]
+
+        monkeypatch.setattr(
+            'sky.jobs.controller.managed_job_utils.get_job_status',
+            _get_job_status)
+        monkeypatch.setattr(
+            'sky.jobs.controller.backend_utils.async_check_network_connection',
+            AsyncMock())
+        monkeypatch.setattr(
+            'sky.jobs.controller.managed_job_runtime.is_registered',
+            lambda: False)
+        monkeypatch.setattr('asyncio.sleep', AsyncMock())
+        # A transient probe failure checks the cluster, which is healthy.
+        monkeypatch.setattr(
+            'sky.jobs.controller.cloud_api_retries.with_cloud_api_retries',
+            lambda fn: fn())
+        monkeypatch.setattr(
+            'sky.jobs.controller.backend_utils.refresh_cluster_status_handle',
+            lambda *args, **kwargs: (status_lib.ClusterStatus.UP, MagicMock()))
+        record = AsyncMock(return_value=True)
+        monkeypatch.setattr(
+            'sky.jobs.controller.managed_job_state.'
+            'record_emergency_reattached_async', record)
+        monkeypatch.setattr(
+            'sky.jobs.controller.managed_job_utils.event_callback_func',
+            MagicMock(return_value=AsyncMock()))
+
+        with pytest.raises(asyncio.CancelledError):
+            await jc._monitor_one_task(task_id=0,
+                                       task=task,
+                                       cluster_name='cluster',
+                                       executor=MagicMock(),
+                                       emergency_reattach=reattach)
+        return record
+
+    @pytest.mark.asyncio
+    async def test_records_once_on_first_answer(self, monkeypatch):
+        record = await self._monitor(monkeypatch,
+                                     answers=[(job_lib.JobStatus.RUNNING, None),
+                                              (job_lib.JobStatus.RUNNING, None)
+                                             ],
+                                     reattach=True)
+        record.assert_awaited_once_with(1, 0)
+
+    @pytest.mark.asyncio
+    async def test_transient_failure_then_answer(self, monkeypatch):
+        # A transient probe failure is not an answer; the event waits for
+        # a real one.
+        record = await self._monitor(monkeypatch,
+                                     answers=[(None, 'ssh blip'),
+                                              (job_lib.JobStatus.RUNNING, None)
+                                             ],
+                                     reattach=True)
+        record.assert_awaited_once_with(1, 0)
+
+    @pytest.mark.asyncio
+    async def test_plain_resume_records_nothing(self, monkeypatch):
+        record = await self._monitor(monkeypatch,
+                                     answers=[(job_lib.JobStatus.RUNNING, None)
+                                             ],
+                                     reattach=False)
+        record.assert_not_awaited()
+
+
 class TestTaskPrepFailureIsTerminal:
     """Preparing the task spec is deterministic, so it must not be retried.
 
@@ -1133,6 +1686,15 @@ class TestJobGroupEmergencyRecovery:
         # Job-level bookkeeping still runs.
         h.normalize.assert_awaited_once()
         assert 1 not in h.jc.starting  # launch slot released
+        # The attempt is recorded once, on the job (task_id None): no
+        # member changes status, and alerting expects one row per attempt.
+        h.add_event.assert_awaited_once()
+        args, kwargs = h.add_event.await_args
+        assert args[0] == 1 and args[1] is None
+        assert args[2] == state.ManagedJobStatus.RUNNING
+        assert args[3].startswith(
+            'Unexpected controller error (emergency recovery attempt 1/')
+        assert kwargs['recovery_source'] == state.RecoverySource.EMERGENCY
 
     @pytest.mark.asyncio
     async def test_group_cancelling_member_retries_without_backoff(
@@ -1178,8 +1740,11 @@ class TestJobGroupEmergencyRecovery:
 
     @pytest.mark.asyncio
     async def test_single_task_surgery_unchanged(self, monkeypatch):
-        """Regression pin: single jobs keep the mark + early teardown."""
+        """Regression pin: a single job's task that is not RUNNING keeps the
+        mark + early teardown; a RUNNING one keeps its cluster but still
+        resolves the latest task (not the group-only bulk probe)."""
         h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        h.get_latest_task.return_value = (0, state.ManagedJobStatus.STARTING)
 
         await h.jc.run()
 
@@ -1187,3 +1752,12 @@ class TestJobGroupEmergencyRecovery:
         h.jc._cleanup_cluster.assert_awaited_once()
         # The group-only bulk status probe is never used on this path.
         h.get_task_statuses.assert_not_awaited()
+
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+
+        await h.jc.run()
+
+        h.get_latest_task.assert_awaited_once()
+        h.get_task_statuses.assert_not_awaited()
+        h.set_emergency.assert_not_awaited()
+        h.jc._cleanup_cluster.assert_not_awaited()
