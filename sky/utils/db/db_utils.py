@@ -706,7 +706,7 @@ def get_auth_db_timeout_seconds() -> float:
     Read from ``constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS`` (default
     ``constants.DEFAULT_AUTH_DB_TIMEOUT_SECONDS``). This is the single
     source for that value: ``sky.server.auth.db_lookup`` uses it as the
-    client-side ``asyncio.wait_for`` deadline on every auth DB lookup, and
+    client-side ``asyncio_utils.wait_for`` deadline on every auth DB lookup, and
     ``sky.global_user_state.add_or_update_user`` derives the server-side
     ``SET LOCAL`` timeouts on the users upsert from it, so the database
     always gives up at or before the caller does. The environment is read

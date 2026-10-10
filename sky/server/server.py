@@ -3745,7 +3745,7 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                 # wait() ourselves or leave a zombie.
                 try:
                     waiter = loop.run_in_executor(None, proc.wait)
-                    await asyncio.wait_for(waiter, timeout=5)
+                    await asyncio_utils.wait_for(waiter, timeout=5)
                 except asyncio.TimeoutError:
                     logger.warning('kubectl did not exit 5s after SIGTERM; '
                                    'sending SIGKILL.')

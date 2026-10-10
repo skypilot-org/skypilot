@@ -9,7 +9,7 @@ minutes the bounded auth executor saturates within seconds and every
 authenticated endpoint fails for the duration of the DB incident.
 
 ``call_with_deadline`` puts a client-side total deadline on each lookup.
-``asyncio.wait_for`` is deliberately the bounding layer: a server-side
+``asyncio_utils.wait_for`` is deliberately the bounding layer: a server-side
 ``statement_timeout`` cannot cover time spent queued inside a transaction
 pooler (no server connection is assigned yet) or waiting for a pool
 checkout. On timeout the request fails fast with a 503 the client retries
@@ -41,6 +41,7 @@ from sky.metrics import utils as metrics_utils
 from sky.server import middleware_utils
 from sky.server.requests import executor
 from sky.users import permission
+from sky.utils import asyncio_utils
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils.db import db_utils
@@ -65,7 +66,7 @@ AUTH_DB_TIMEOUT_SECONDS = db_utils.get_auth_db_timeout_seconds()
 # timeouts on its own transaction (see `global_user_state.add_or_update_user`),
 # derived from the same configured deadline as `AUTH_DB_TIMEOUT_SECONDS` and
 # strictly below or equal to it, so the database normally fails the call
-# *before* `asyncio.wait_for` does -- and, unlike `wait_for`, actually
+# *before* `asyncio_utils.wait_for` does -- and, unlike `wait_for`, actually
 # releases the executor thread. Such an error is the same condition as the
 # client-side deadline (a slow or locked database) and gets the same
 # retryable 503; anything else still propagates unchanged.
@@ -139,9 +140,9 @@ def _record_timeout(site: str, cause: str, pool: str) -> None:
 async def _run_with_deadline(pool: Any, pool_name: str,
                              func: Callable[..., Any], *args: Any) -> Any:
     try:
-        return await asyncio.wait_for(context_utils.to_thread_with_executor(
-            pool, func, *args),
-                                      timeout=AUTH_DB_TIMEOUT_SECONDS)
+        return await asyncio_utils.wait_for(
+            context_utils.to_thread_with_executor(pool, func, *args),
+            timeout=AUTH_DB_TIMEOUT_SECONDS)
     except Exception as e:  # pylint: disable=broad-except
         pgcode = _server_timeout_pgcode(e)
         if pgcode is None:

@@ -50,6 +50,7 @@ from sky.skylet import log_lib
 from sky.skylet import runtime_utils
 from sky.usage import usage_lib
 from sky.utils import annotations
+from sky.utils import asyncio_utils
 from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import context as context_lib
@@ -767,7 +768,11 @@ async def get_job_status(
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     job_ids = None if job_id is None else [job_id]
     try:
-        statuses = await asyncio.wait_for(
+        # The controller's monitoring loop calls this between sleeps, and
+        # cancelling that loop's task is how a managed job is cancelled.
+        # asyncio_utils.wait_for, unlike asyncio.wait_for before Python 3.12,
+        # never swallows that cancel when it lands as the fetch completes.
+        statuses = await asyncio_utils.wait_for(
             asyncio.to_thread(backend.get_job_status,
                               handle,
                               job_ids=job_ids,
