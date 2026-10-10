@@ -319,13 +319,13 @@ By default, a managed job that cannot get resources keeps trying indefinitely. I
   resources:
     accelerators: H100:8
 
-The timeout applies to both cloud VMs and Kubernetes. The clock starts at the job's :code:`SUBMITTED` time in :code:`sky jobs queue`, and everything until the job first starts running counts: on cloud VMs, the controller retrying the launch across regions and clouds (and backing off between attempts); on Kubernetes, also waiting for the pods to be scheduled, including in a Kueue queue. Once the job has started, the timeout no longer applies, including while the job recovers from a later preemption.
+The clock starts at the job's :code:`SUBMITTED` time and covers everything until the job first starts running: on cloud VMs, the controller retrying the launch across regions and clouds; on Kubernetes, also waiting for the pods to be scheduled, including in a Kueue queue. Once the job has started, the timeout no longer applies, including during recovery from a later preemption.
 
-When the timeout fires, the job is cancelled through the same path as :code:`sky jobs cancel` and ends :code:`CANCELLED`. :code:`sky jobs queue` shows the reason in its details column, e.g., ``task did not start within job.wait_for_scheduling_timeout=2h (waited 2h25s)``, and so do the job's events.
+When the timeout fires, the job is cancelled as with :code:`sky jobs cancel` and ends :code:`CANCELLED`. The reason, e.g. ``task did not start within job.wait_for_scheduling_timeout=2h (waited 2h 25s)``, is shown in the details column of :code:`sky jobs queue` and in the job's events.
 
 .. note::
 
-  :ref:`kubernetes.kueue.admission_timeout <config-yaml-kubernetes-kueue-admission-timeout>` is different: it bounds a single launch attempt's wait for Kueue admission, after which that attempt fails and the controller retries (the job re-enters the queue). :code:`job.wait_for_scheduling_timeout` bounds the job's whole wait, across all retries, and then cancels it.
+  :ref:`kubernetes.kueue.admission_timeout <config-yaml-kubernetes-kueue-admission-timeout>` bounds a single launch attempt's wait for Kueue admission; when it fires, the controller retries and the job re-enters the queue. :code:`job.wait_for_scheduling_timeout` bounds the whole wait, across all retries, and then cancels the job.
 
 
 When will my job be recovered?

@@ -432,11 +432,9 @@ def kubernetes_label_gpus(
 def _omit_job_section_for_older_server(dag: 'sky.Dag') -> None:
     """Drops the tasks' `job:` section if the server predates it.
 
-    An older server's task schema rejects the unknown top-level key. `job:`
-    holds managed-job lifecycle settings only, and a managed jobs launch that
-    sets one refuses such a server outright before it gets here (see
-    sky/jobs/client/sdk.py), so on every other request (cluster launch, exec,
-    optimize, ...) nothing is lost.
+    An older server rejects the unknown key. `job:` only affects managed
+    jobs, whose launch refuses such a server before reaching here (see
+    sky/jobs/client/sdk.py), so nothing is lost.
     """
     if not any(task.job for task in dag.tasks):
         return

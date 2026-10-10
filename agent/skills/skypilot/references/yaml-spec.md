@@ -194,12 +194,9 @@ num_nodes: 4
 
 Lifecycle settings for managed jobs (optional).
 
-The `job` section applies only to managed jobs (`sky jobs launch`). It is
-ignored by `sky launch` and `sky exec`. More lifecycle settings may be
-added here in the future.
-
-The section is per task: in a pipeline or a
-job group, each task can set its own `job` section.
+Only `sky jobs launch` reads this section; `sky launch` and `sky exec`
+ignore it. In a pipeline or job group,
+each task can set its own `job` section.
 
 ```yaml
 job:
@@ -211,35 +208,23 @@ job:
 ### ``job.wait_for_scheduling_timeout``
 
 Cancel the managed job if the task has not started running within this long
-of being submitted (optional). By default, a managed job that cannot get
-resources keeps trying indefinitely.
+of being submitted (optional; defaults to no limit, i.e. keep retrying until
+resources are found).
 
-Format: a duration string with an optional unit suffix: `s` (seconds),
+Format: a positive duration with an optional unit suffix: `s` (seconds),
 `m` (minutes), `h` (hours), `d` (days), `w` (weeks), e.g. `90s`,
-`30m`, `2h`. A plain integer is treated as seconds. Must be positive.
+`30m`, `2h`. A plain integer is treated as seconds.
 
-The clock starts at the task's `SUBMITTED` time in
-`sky jobs queue`, when the jobs controller starts launching it.
-Everything from then until the task first starts running counts:
-provisioning, launch retries across clouds, regions and Kubernetes clusters,
-backoff between retries, and waiting in a Kubernetes scheduler's queue (e.g.,
-Kueue).
+The clock starts at the task's `SUBMITTED` time and covers launch
+retries, backoff and waiting in a Kubernetes scheduler's queue (e.g., Kueue).
+It covers only the initial wait: once the task has started, a later recovery
+does not re-arm it. In a pipeline or job group, each task has its own clock,
+and any task exceeding its timeout cancels the whole job.
 
-The timeout covers only the initial wait. Once the task has started running,
-it no longer applies, and a later recovery (e.g., after a preemption) does not
-re-arm it. In a pipeline or job group, each task has its own clock, which
-starts when that task is submitted. If any task exceeds its timeout, the
-whole job is cancelled.
-
-When it fires, the job ends `CANCELLED`, through the same path as
-`sky jobs cancel`: its clusters are torn down. The reason (e.g.,
-`task did not start within job.wait_for_scheduling_timeout=2h`) is shown in
-the details column of `sky jobs queue` and in the job's events. The
-jobs controller enforces the timeout within about 30 seconds of the deadline,
-including after a controller restart.
-
-See jobs-wait-for-scheduling-timeout in the managed jobs guide for an
-example and how it compares to Kueue's admission timeout.
+The job then ends `CANCELLED`, as with `sky jobs cancel`, and the
+reason is shown in `sky jobs queue`. The timeout is enforced within
+about 30 seconds of the deadline, including across controller restarts. See
+jobs-wait-for-scheduling-timeout for an example.
 
 ```yaml
 job:

@@ -3747,10 +3747,7 @@ async def get_all_task_ids_statuses_async(
 @db_retries.retry_async
 async def get_unfinished_task_deadline_rows_async(
         job_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
-    """The not-yet-ended tasks of ``job_ids``, with what deadlines need.
-
-    One query for every job a controller process owns, so the deadline
-    check costs one round trip per tick no matter how many jobs it holds.
+    """The not-yet-ended tasks of ``job_ids``, in one query.
 
     Returns:
         {job_id: [{'task_id', 'status', 'submitted_at', 'start_at',
@@ -3799,23 +3796,14 @@ async def get_unfinished_task_deadline_rows_async(
 
 
 class DeadlineKind(enum.Enum):
-    """A managed-job time limit, named by the field that sets it.
-
-    Each kind is measured against its own clock in the task's row; see
-    _deadline_exceeded_clause.
-    """
-    # job.wait_for_scheduling_timeout: from submitted_at, while the task has
-    # not started (start_at unset).
+    """A managed-job time limit; see _deadline_exceeded_clause."""
+    # job.wait_for_scheduling_timeout: from submitted_at, until start_at.
     WAIT_FOR_SCHEDULING_TIMEOUT = 'wait_for_scheduling_timeout'
 
 
 def _deadline_exceeded_clause(kind: DeadlineKind, limit_seconds: float,
                               now: float) -> 'sqlalchemy.ColumnElement':
-    """SQL predicate on a task row: ``kind``'s deadline has passed at ``now``.
-
-    The SQL counterpart of the controller's in-memory check, so the write in
-    set_deadline_exceeded_async re-decides on the row's current values.
-    """
+    """SQL predicate: ``kind``'s deadline has passed at ``now``."""
     if kind == DeadlineKind.WAIT_FOR_SCHEDULING_TIMEOUT:
         return sqlalchemy.and_(
             spot_table.c.start_at.is_(None),
@@ -3831,12 +3819,10 @@ async def set_deadline_exceeded_async(job_id: int, task_id: int,
                                       event_reason: str) -> bool:
     """Record that a task exceeded one of its deadlines, if it still has.
 
-    The deadline is re-checked in the same UPDATE that records it, against
-    the row's current timestamps, so this write decides: a task that started
-    (or a job that started cancelling) after the caller read its row is left
-    alone. In one transaction: set the task's ``failure_reason`` and append a
-    CANCELLING job event with ``event_reason``, so both the job record and
-    its event timeline say why the controller is about to cancel the job.
+    The deadline is re-checked in the same UPDATE, against the row's current
+    values, so a task that started (or a job that started cancelling) after
+    the caller read its row is left alone. In one transaction, sets the
+    task's ``failure_reason`` and appends a CANCELLING job event.
 
     Args:
         job_id: The managed job.
