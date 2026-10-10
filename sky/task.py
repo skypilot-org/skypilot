@@ -23,6 +23,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import git
 from sky.utils import registry
+from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
@@ -334,6 +335,7 @@ class Task:
         resources: Optional[Union['resources_lib.Resources',
                                   List['resources_lib.Resources'],
                                   Set['resources_lib.Resources']]] = None,
+        job: Optional[Dict[str, Any]] = None,
         # Advanced:
         docker_image: Optional[str] = None,
         event_callback: Optional[str] = None,
@@ -417,6 +419,11 @@ class Task:
           resources: either a sky.Resources, a set of them, or a list of them.
             A set or a list of resources asks the optimizer to "pick the
             best of these resources" to run this task.
+          job: (Managed jobs only) Lifecycle settings of the managed job, as
+            in the ``job:`` section of a task YAML, e.g.
+            ``{'wait_for_scheduling_timeout': '2h'}`` to cancel the job if this
+            task has not started running within 2 hours of being submitted.
+            Ignored by ``sky launch`` and ``sky exec``.
           docker_image: (EXPERIMENTAL: Only in effect when LocalDockerBackend
             is used.) The base docker image that this Task will be built on.
             Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
@@ -444,6 +451,13 @@ class Task:
         if secrets is not None:
             self._secrets = {k: SecretStr(v) for k, v in secrets.items()}
         self._volumes = volumes or {}
+        if job is not None and not isinstance(job, dict):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Invalid job section: expected a mapping of managed-job '
+                    'lifecycle settings, e.g. `wait_for_scheduling_timeout: '
+                    f'2h`. Got: {job!r}')
+        self._job: Dict[str, Any] = job or {}
         self._managed_secret_refs: List[ManagedSecretRef] = []
         self._api_server_access = api_server_access
 
@@ -530,6 +544,7 @@ class Task:
         """
         self.validate_name()
         self.validate_run()
+        self.validate_job()
         if not skip_workdir:
             self.expand_and_validate_workdir()
         if not skip_file_mounts:
@@ -552,6 +567,22 @@ class Task:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('run must be a shell script (str). '
                                  f'Got {type(self.run)}')
+
+    def validate_job(self):
+        """Validates the job (managed-job lifecycle settings) section."""
+        if not self.job:
+            return
+        # A Task built through the Python SDK skips the YAML schema, so hold
+        # it to the same schema here.
+        common_utils.validate_schema(self.job,
+                                     schemas.get_task_job_schema(),
+                                     'Invalid job section: ',
+                                     skip_none=False)
+        timeout = self.job.get('wait_for_scheduling_timeout')
+        if timeout is not None:
+            # The schema also admits zero ('0', '0s').
+            resources_utils.parse_positive_duration_seconds(
+                timeout, 'job.wait_for_scheduling_timeout')
 
     def expand_and_validate_file_mounts(self):
         """Expand file_mounts paths to absolute paths and validate them.
@@ -814,6 +845,7 @@ class Task:
             envs=config.pop('envs', None),
             secrets=inline_secrets or None,
             volumes=config.pop('volumes', None),
+            job=config.pop('job', None),
             event_callback=config.pop('event_callback', None),
             api_server_access=config.pop('api_server_access', True),
             _file_mounts_mapping=config.pop('file_mounts_mapping', None),
@@ -1205,6 +1237,11 @@ class Task:
     @property
     def volumes(self) -> Dict[str, Union[str, Dict[str, Any]]]:
         return self._volumes
+
+    @property
+    def job(self) -> Dict[str, Any]:
+        """Managed-job lifecycle settings (the task YAML's ``job:``)."""
+        return self._job
 
     def set_volumes(self, volumes: Dict[str, Union[str, Dict[str,
                                                              Any]]]) -> None:
@@ -2023,6 +2060,7 @@ class Task:
             add_if_not_none('service', self.service.to_yaml_config())
 
         add_if_not_none('num_nodes', self.num_nodes)
+        add_if_not_none('job', self.job, no_empty=True)
 
         if self.inputs is not None:
             add_if_not_none('inputs',

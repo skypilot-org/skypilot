@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 64  # managed jobs: depends_on on launch
+API_VERSION = 65  # managed jobs: job.wait_for_scheduling_timeout
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -62,6 +62,9 @@ MIN_JOBS_INCLUDE_TREE_API_VERSION = 63
 # Minimum server API version that accepts `depends_on` on a managed jobs
 # launch.
 MIN_JOBS_DEPENDS_ON_API_VERSION = 64
+# Minimum server API version that accepts the task's `job:` section
+# (`job.wait_for_scheduling_timeout`).
+MIN_JOBS_WAIT_FOR_SCHEDULING_TIMEOUT_API_VERSION = 65
 
 # Minimum API version that supports Sky Batch (sky.batch module).
 MIN_BATCH_API_VERSION = 49

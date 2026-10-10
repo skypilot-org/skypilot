@@ -24,6 +24,9 @@ workdir: ~/my-task-code
 
 num_nodes: 4
 
+job:
+  wait_for_scheduling_timeout: 2h
+
 resources:
   # Infra to use. Click to see schema and example values.
   infra: aws
@@ -183,6 +186,49 @@ A task can set this to a smaller value than the size of a cluster.
 
 ```yaml
 num_nodes: 4
+
+```
+
+
+### ``job``
+
+Lifecycle settings for managed jobs (optional).
+
+Only `sky jobs launch` reads this section; `sky launch` and `sky exec`
+ignore it. In a pipeline or job group,
+each task can set its own `job` section.
+
+```yaml
+job:
+  wait_for_scheduling_timeout: 2h
+
+```
+
+
+### ``job.wait_for_scheduling_timeout``
+
+Cancel the managed job if the task has not started running within this long
+of being submitted (optional; defaults to no limit, i.e. keep retrying until
+resources are found).
+
+Format: a positive duration with an optional unit suffix: `s` (seconds),
+`m` (minutes), `h` (hours), `d` (days), `w` (weeks), e.g. `90s`,
+`30m`, `2h`. A plain integer is treated as seconds.
+
+The clock starts at the task's `SUBMITTED` time and covers launch
+retries, backoff and waiting in a Kubernetes scheduler's queue (e.g., Kueue).
+It covers only the initial wait: once the task has started, a later recovery
+does not re-arm it. In a pipeline or job group, each task has its own clock,
+and any task exceeding its timeout cancels the whole job.
+
+The job then ends `CANCELLED`, as with `sky jobs cancel`, and the
+reason is shown in `sky jobs queue`. The timeout is enforced within
+about 30 seconds of the deadline, including across controller restarts. See
+jobs-wait-for-scheduling-timeout for an example.
+
+```yaml
+job:
+  wait_for_scheduling_timeout: 2h
 
 ```
 

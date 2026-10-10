@@ -155,6 +155,13 @@ def _resolve_job_group(
     raise ValueError(f'Unsupported job_group value: {requested_job_group!r}')
 
 
+def _uses_wait_for_scheduling_timeout(dag: 'sky.Dag') -> bool:
+    """Whether any task of the DAG sets job.wait_for_scheduling_timeout."""
+    return any(
+        task_.job.get('wait_for_scheduling_timeout') is not None
+        for task_ in dag.tasks)
+
+
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
@@ -218,6 +225,13 @@ def launch(
                 'depends_on is not supported by your API server. Please '
                 'upgrade the API server.')
     dag = dag_utils.convert_entrypoint_to_dag(task)
+    if (_uses_wait_for_scheduling_timeout(dag) and
+        (remote_api_version is None or remote_api_version <
+         server_constants.MIN_JOBS_WAIT_FOR_SCHEDULING_TIMEOUT_API_VERSION)):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'job.wait_for_scheduling_timeout is not supported by your API '
+                'server. Please upgrade the API server.')
 
     if name is not None:
         dag.name = name
