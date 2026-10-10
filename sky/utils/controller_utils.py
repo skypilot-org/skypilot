@@ -1324,8 +1324,10 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # Step 6: Replace the source field that is local path in all storage_mounts
     # with bucket URI and remove the name field.
     for storage_obj in task.storage_mounts.values():
+        # A list source is a list of local paths, uploaded in step 4.
         if (storage_obj.source is not None and
-                not data_utils.is_cloud_store_url(storage_obj.source)):
+            (isinstance(storage_obj.source, list) or
+             not data_utils.is_cloud_store_url(storage_obj.source))):
             # Need to replace the local path with bucket URI, and remove the
             # name field, so that the storage mount can work on the jobs
             # controller.

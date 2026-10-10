@@ -1308,3 +1308,38 @@ def test_shared_bucket_upload_paths_are_scoped_per_workspace(
             f'gs://file-mounts-bucket/{prefix}/tmp-files/file-0')
 
     assert paths_by_workspace['team-a'] != paths_by_workspace['team-b']
+
+
+def test_list_source_storage_mount_points_at_bucket(tmp_path, monkeypatch):
+    """A storage mount whose source is a list of local paths is translated.
+
+    The paths are uploaded to the bucket like a single local path, so after
+    translation the mount must read from the bucket. The list must not be
+    passed to URL parsing.
+    """
+    dirs = []
+    for name in ('d1', 'd2'):
+        local_dir = tmp_path / name
+        local_dir.mkdir()
+        (local_dir / 'data.txt').write_text('data\n')
+        dirs.append(str(local_dir))
+
+    monkeypatch.setattr(
+        controller_utils.skypilot_config,
+        'get_nested',
+        lambda keys, default_value, override_configs=None: default_value)
+
+    storage = storage_lib.Storage(name='list-source-bucket',
+                                  source=dirs,
+                                  mode=storage_lib.StorageMode.COPY)
+    storage.stores[storage_lib.StoreType.GCS] = mock.Mock(
+        spec=storage_lib.GcsStore)
+    task = task_lib.Task(run='ls -R /data')
+    task.storage_mounts = {'/data': storage}
+    # The upload itself is not under test.
+    monkeypatch.setattr(task, 'sync_storage_mounts', lambda: None)
+
+    controller_utils.maybe_translate_local_file_mounts_and_sync_up(task, 'jobs')
+
+    assert task.storage_mounts['/data'].source == 'gs://list-source-bucket'
+    assert task.storage_mounts['/data'].force_delete
