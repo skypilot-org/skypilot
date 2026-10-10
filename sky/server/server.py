@@ -84,6 +84,7 @@ from sky.server.auth import loopback
 from sky.server.auth import oauth2_proxy
 from sky.server.auth import sessions as auth_sessions
 from sky.server.blob import blob_storage as bs
+from sky.server.guard_integration import attach_guard
 from sky.server.requests import executor
 from sky.server.requests import log_provider
 from sky.server.requests import payloads
@@ -1363,9 +1364,6 @@ app.add_middleware(SecurityHeadersMiddleware)
 # SKYPILOT_GUARD_ENABLED is set). Added inside SecurityHeaders so screened
 # requests are still headered, and outside the auth middlewares so blocked
 # requests never reach the bcrypt/DB auth path.
-from sky.server.guard_integration import (
-    attach_guard)  # pylint: disable=import-outside-toplevel,wrong-import-position
-
 attach_guard(app)
 
 # Load plugins after all the middlewares are added, to keep the core
