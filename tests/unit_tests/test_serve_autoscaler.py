@@ -3,6 +3,7 @@ import unittest
 from unittest import mock
 
 from sky.serve import autoscalers
+from sky.serve import constants
 from sky.serve import replica_managers
 from sky.serve import serve_state
 
@@ -151,6 +152,45 @@ class TestSelectNonterminalReplicasToScaleDown(unittest.TestCase):
         # Should select old version replica first despite having more jobs
         self.assertEqual(len(result), 1)
         self.assertEqual(result, [1])
+
+
+class TestFromSpecVersion(unittest.TestCase):
+    """Autoscaler.from_spec should start at the running service version."""
+
+    def _make_spec(self):
+        """A minimal spec that resolves to a plain RequestRateAutoscaler."""
+        spec = mock.Mock()
+        spec.pool = False
+        spec.use_ondemand_fallback = False
+        spec.target_qps_per_replica = 2.0  # float -> RequestRateAutoscaler
+        spec.min_replicas = 2
+        spec.max_replicas = 5
+        spec.num_overprovision = None
+        spec.upscale_delay_seconds = None
+        spec.downscale_delay_seconds = None
+        return spec
+
+    def test_defaults_to_initial_version(self):
+        """A brand-new service starts at INITIAL_VERSION (unchanged behavior)."""
+        autoscaler = autoscalers.Autoscaler.from_spec('svc', self._make_spec())
+        self.assertEqual(autoscaler.latest_version, constants.INITIAL_VERSION)
+        self.assertEqual(autoscaler.latest_version_ever_ready,
+                         constants.INITIAL_VERSION - 1)
+
+    def test_starts_at_running_version(self):
+        """After a restart/update, the autoscaler adopts the running version.
+
+        Regression test for #8562: previously latest_version stayed at
+        INITIAL_VERSION while replicas ran at a higher version, causing the
+        autoscaler to repeatedly scale the live replicas up and back down.
+        """
+        autoscaler = autoscalers.Autoscaler.from_spec('svc',
+                                                      self._make_spec(),
+                                                      version=3)
+        self.assertEqual(autoscaler.latest_version, 3)
+        # Invariant preserved: ever_ready is one below latest_version and is
+        # re-derived from real replica readiness on the next autoscaler loop.
+        self.assertEqual(autoscaler.latest_version_ever_ready, 2)
 
 
 if __name__ == '__main__':
