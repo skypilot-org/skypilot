@@ -200,3 +200,98 @@ def test_force_caller_scope_cancel_body_viewer_forbidden(mock_svc):
     with pytest.raises(fastapi.HTTPException) as exc:
         role_filter.force_caller_scope_cancel_body(_viewer_request(), body)
     assert exc.value.status_code == 403
+
+
+# --- rbac.restrict_all_users_mutations --------------------------------------
+
+
+def _restrict(enabled: bool):
+    return mock.patch.object(role_filter.rbac,
+                             'restrict_all_users_mutations',
+                             return_value=enabled)
+
+
+def _cancel_body(all_users: bool):
+    return payloads.CancelBody(cluster_name='c',
+                               job_ids=None,
+                               all_users=all_users)
+
+
+@mock.patch.object(role_filter.permission, 'permission_service')
+def test_reject_all_users_cancel_body_user_denied(mock_svc):
+    _roles_returning(mock_svc, [rbac.RoleName.USER.value])
+    with _restrict(True):
+        with pytest.raises(fastapi.HTTPException) as exc:
+            role_filter.reject_all_users_cancel_body(_user_request(),
+                                                     _cancel_body(True))
+    assert exc.value.status_code == 403
+    assert '--all-users' in exc.value.detail
+
+
+@mock.patch.object(role_filter.permission, 'permission_service')
+def test_reject_all_users_cancel_body_admin_allowed(mock_svc):
+    _roles_returning(mock_svc,
+                     [rbac.RoleName.ADMIN.value, rbac.RoleName.USER.value])
+    with _restrict(True):
+        body = _cancel_body(True)
+        assert role_filter.reject_all_users_cancel_body(_admin_request(),
+                                                        body) is body
+
+
+@mock.patch.object(role_filter.permission, 'permission_service')
+def test_reject_all_users_cancel_body_disabled_by_default(mock_svc):
+    _roles_returning(mock_svc, [rbac.RoleName.USER.value])
+    with _restrict(False):
+        body = _cancel_body(True)
+        assert role_filter.reject_all_users_cancel_body(_user_request(),
+                                                        body) is body
+
+
+@mock.patch.object(role_filter.permission, 'permission_service')
+def test_reject_all_users_cancel_body_without_flag_allowed(mock_svc):
+    # `-a/--all` (own jobs only) is untouched by the restriction.
+    _roles_returning(mock_svc, [rbac.RoleName.USER.value])
+    with _restrict(True):
+        body = _cancel_body(False)
+        assert role_filter.reject_all_users_cancel_body(_user_request(),
+                                                        body) is body
+
+
+def test_reject_all_users_cancel_body_no_auth_allowed():
+    # No per-user identity (local/single-user server): no RBAC applies.
+    with _restrict(True):
+        body = _cancel_body(True)
+        assert role_filter.reject_all_users_cancel_body(_anonymous_request(),
+                                                        body) is body
+
+
+@mock.patch.object(role_filter.permission, 'permission_service')
+def test_reject_all_users_jobs_cancel_body_user_denied(mock_svc):
+    _roles_returning(mock_svc, [rbac.RoleName.USER.value])
+    with _restrict(True):
+        with pytest.raises(fastapi.HTTPException) as exc:
+            role_filter.reject_all_users_jobs_cancel_body(
+                _user_request(), payloads.JobsCancelBody(all_users=True))
+    assert exc.value.status_code == 403
+
+
+@mock.patch.object(role_filter.permission, 'permission_service')
+def test_reject_all_users_jobs_cancel_body_all_own_allowed(mock_svc):
+    # `sky jobs cancel -a` cancels only the caller's jobs; not restricted.
+    _roles_returning(mock_svc, [rbac.RoleName.USER.value])
+    with _restrict(True):
+        body = payloads.JobsCancelBody(all=True)
+        assert role_filter.reject_all_users_jobs_cancel_body(
+            _user_request(), body) is body
+
+
+@mock.patch.object(role_filter.permission, 'permission_service')
+def test_all_users_mutations_restricted_flag(mock_svc):
+    _roles_returning(mock_svc, [rbac.RoleName.USER.value])
+    with _restrict(True):
+        assert role_filter.all_users_mutations_restricted(_user_request())
+    with _restrict(False):
+        assert not role_filter.all_users_mutations_restricted(_user_request())
+    _roles_returning(mock_svc, [rbac.RoleName.ADMIN.value])
+    with _restrict(True):
+        assert not role_filter.all_users_mutations_restricted(_admin_request())
