@@ -115,7 +115,7 @@
             },
             {
               "args": "<omitted>",
-              "image": "moby/buildkit:v0.28.0-rootless",
+              "image": "moby/buildkit:v0.33.1-rootless",
               "name": "buildkitd",
               "securityContext": {
                 "appArmorProfile": {

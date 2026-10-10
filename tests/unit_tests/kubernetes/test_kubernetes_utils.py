@@ -3808,6 +3808,7 @@ class TestDockerSidecarDefaults(unittest.TestCase):
     def test_defaults_returns_valid_buildkit(self):
         defaults = utils.DOCKER_SIDECAR_DEFAULTS[utils.DockerMode.BUILD]
         assert isinstance(defaults, utils.DockerSidecarDefaults)
+        assert defaults.image == 'moby/buildkit:v0.33.1-rootless'
         assert defaults.cli_image
         assert defaults.cache_mount == '/home/user/.local/share/buildkit'
 
