@@ -1038,6 +1038,19 @@ class CostReportBody(RequestBody):
     # Used by the dashboard so that clusters backing managed jobs do not show
     # up in the cluster history view.
     exclude_managed_clusters: bool = False
+    # Whether to include clusters soft-deleted from the history view. None,
+    # the default, resolves automatically: targeted lookups (cluster_hashes
+    # or cluster_names given, e.g. the dashboard's detail page) keep
+    # resolving soft-deleted rows, while bulk listings skip them.
+    include_deleted: Optional[bool] = None
+
+
+class ClusterHistorySoftDeleteBody(RequestBody):
+    """The request body for the cluster history soft delete endpoint."""
+    # The cluster history rows (by cluster_hash) to update.
+    cluster_hashes: List[str]
+    # True to hide the rows from history listings, False to restore them.
+    deleted: bool = True
 
 
 class CreateDebugDumpBody(RequestBody):

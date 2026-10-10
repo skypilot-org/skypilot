@@ -419,7 +419,8 @@ def cost_report(days: Optional[int] = None,
                 dashboard_summary_response: bool = False,
                 cluster_hashes: Optional[List[str]] = None,
                 cluster_names: Optional[List[str]] = None,
-                exclude_managed_clusters: bool = False) -> List[Dict[str, Any]]:
+                exclude_managed_clusters: bool = False,
+                include_deleted: Optional[bool] = None) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
 
@@ -472,6 +473,13 @@ def cost_report(days: Optional[int] = None,
             controller (managed jobs and services). Used by the dashboard so
             that clusters backing managed jobs do not show up in the cluster
             history view.
+        include_deleted: Whether to include clusters that were soft-deleted
+            from the history view (see global_user_state
+            .set_cluster_history_deleted). None, the default, resolves
+            automatically: a targeted lookup (cluster_hashes or
+            cluster_names given, e.g. the dashboard's cluster detail page)
+            keeps resolving soft-deleted rows, while a bulk listing (CLI
+            cost report, dashboard history view) skips them.
 
     Returns:
         A list of dicts, with each dict containing the cost information of a
@@ -484,13 +492,21 @@ def cost_report(days: Optional[int] = None,
     abbreviate_response = (dashboard_summary_response and
                            cluster_hashes is None and cluster_names is None)
 
+    # A targeted lookup must keep resolving a soft-deleted row (e.g. the
+    # dashboard detail page reached through an old link), while bulk
+    # listings hide rows that were removed from the history view.
+    if include_deleted is None:
+        include_deleted = (cluster_hashes is not None or
+                           cluster_names is not None)
+
     history = iter(
         global_user_state.iter_clusters_from_history(
             days=days,
             abbreviate_response=abbreviate_response,
             cluster_hashes=cluster_hashes,
             cluster_names=cluster_names,
-            exclude_managed_clusters=exclude_managed_clusters))
+            exclude_managed_clusters=exclude_managed_clusters,
+            include_deleted=include_deleted))
 
     def _process_cluster_report(
             cluster_report: Dict[str, Any]) -> Dict[str, Any]:

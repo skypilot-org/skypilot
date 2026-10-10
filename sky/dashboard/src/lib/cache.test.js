@@ -267,4 +267,113 @@ describe('DashboardCache', () => {
       expect(cache.pendingRequests.size).toBe(0);
     });
   });
+
+  describe('Generation-aware invalidation', () => {
+    test('does not cache a response that resolves after invalidate', async () => {
+      const mockFetch = createMockFetch({ data: 'stale' }, 100);
+
+      const promise = cache.get(mockFetch, ['arg1']);
+      expect(cache.pendingRequests.size).toBe(1);
+
+      // Invalidate while the request is still in flight. The pending promise
+      // must still resolve to the caller, but it must not repopulate the
+      // cache (a newer fetch owns the key now).
+      cache.invalidate(mockFetch, ['arg1']);
+
+      jest.advanceTimersByTime(100);
+      const result = await promise;
+
+      expect(result).toEqual({ data: 'stale' });
+      expect(cache.cache.size).toBe(0);
+    });
+
+    test('background refresh does not resurrect invalidated data', async () => {
+      let value = { data: 'v1' };
+      const mockFetch = jest.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        return value;
+      });
+
+      // Populate the cache with v1.
+      const first = cache.get(mockFetch, ['arg1']);
+      jest.advanceTimersByTime(100);
+      await first;
+      expect(cache.getCached(mockFetch, ['arg1'])).toEqual({ data: 'v1' });
+
+      // A cache hit triggers a background refresh that is still in flight.
+      value = { data: 'v2' };
+      await cache.get(mockFetch, ['arg1']);
+      expect(cache.backgroundJobs.size).toBe(1);
+
+      // Invalidate before the background refresh resolves.
+      cache.invalidateFunction(mockFetch);
+
+      jest.advanceTimersByTime(100);
+      // Flush the background refresh's .then/.finally microtasks.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // The stale v2 response must not repopulate the cache.
+      expect(cache.cache.size).toBe(0);
+      expect(cache.backgroundJobs.size).toBe(0);
+    });
+
+    test('invalidated keys do not leak generation entries', async () => {
+      const mockFetch = createMockFetch({ data: 'test' }, 100);
+
+      // A request in flight, invalidated, settles -> generation is cleaned up.
+      const promise = cache.get(mockFetch, ['arg1']);
+      cache.invalidate(mockFetch, ['arg1']);
+      expect(cache.generations.size).toBe(1);
+
+      jest.advanceTimersByTime(100);
+      await promise;
+      expect(cache.generations.size).toBe(0);
+
+      // Invalidating an idle key records no generation entry at all.
+      cache.invalidate(mockFetch, ['arg1']);
+      expect(cache.generations.size).toBe(0);
+    });
+
+    test('overlapping requests never let a stale response refill after repeated invalidation', async () => {
+      const resolvers = [];
+      const fetch = jest.fn(
+        () => new Promise((resolve) => resolvers.push(resolve))
+      );
+      const key = cache._generateKey(fetch, ['arg1']);
+
+      // A starts at generation 0.
+      const a = cache.get(fetch, ['arg1']);
+      expect(cache.inFlight.get(key)).toBe(1);
+
+      // Invalidate -> generation 1; A's dedup marker is removed but A is still
+      // running.
+      cache.invalidate(fetch, ['arg1']);
+      expect(cache.generations.get(key)).toBe(1);
+
+      // B starts at generation 1 while A is still in flight.
+      const b = cache.get(fetch, ['arg1']);
+      expect(cache.inFlight.get(key)).toBe(2);
+
+      // A settles first. It must not remove B's marker or the generation
+      // guard that B still relies on.
+      resolvers[0]({ data: 'stale-a' });
+      await a;
+      expect(cache.pendingRequests.size).toBe(1);
+      expect(cache.generations.get(key)).toBe(1);
+
+      // A second invalidation bumps the generation to 2.
+      cache.invalidate(fetch, ['arg1']);
+      expect(cache.generations.get(key)).toBe(2);
+
+      // B settles last with a response fetched before the second invalidation.
+      // Its captured generation (1) no longer matches, so it must be dropped.
+      resolvers[1]({ data: 'stale-b' });
+      await b;
+
+      expect(cache.cache.size).toBe(0);
+      expect(cache.generations.size).toBe(0);
+      expect(cache.inFlight.size).toBe(0);
+    });
+  });
 });

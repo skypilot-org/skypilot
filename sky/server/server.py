@@ -2832,6 +2832,31 @@ async def cost_report(request: fastapi.Request,
     )
 
 
+@app.post('/cluster_history/soft_delete')
+def cluster_history_soft_delete(
+        request: fastapi.Request,
+        soft_delete_body: payloads.ClusterHistorySoftDeleteBody
+) -> Dict[str, Any]:
+    """Soft-deletes (or restores) cluster history rows.
+
+    The rows are flagged, not removed, so the underlying usage/cost record
+    stays recoverable; history listings (CLI cost report, dashboard history
+    view) simply skip them. This is a cheap, local DB update, so unlike the
+    cluster operations it does not go through the request executor.
+
+    A signed-in caller can only update rows they own; passing hashes owned
+    by other users leaves those rows untouched (the returned count reflects
+    only the caller's rows).
+    """
+    auth_user = request.state.auth_user
+    caller_user_hash = auth_user.id if auth_user is not None else None
+    updated = global_user_state.set_cluster_history_deleted(
+        soft_delete_body.cluster_hashes,
+        deleted=soft_delete_body.deleted,
+        caller_user_hash=caller_user_hash)
+    return {'deleted': soft_delete_body.deleted, 'updated': updated}
+
+
 @app.post('/cluster_events')
 async def cluster_events(
         request: fastapi.Request,
