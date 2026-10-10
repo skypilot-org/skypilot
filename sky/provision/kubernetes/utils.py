@@ -4257,7 +4257,7 @@ DOCKER_SIDECAR_DEFAULTS: Dict[DockerMode, DockerSidecarDefaults] = {
         cache_mount='/var/lib/docker',
     ),
     DockerMode.BUILD: DockerSidecarDefaults(
-        image='moby/buildkit:v0.28.0-rootless',
+        image='moby/buildkit:v0.32.2-rootless',
         cli_image='docker:29.3-cli',
         cache_vol_name='buildkit-cache',
         cache_mount='/home/user/.local/share/buildkit',
