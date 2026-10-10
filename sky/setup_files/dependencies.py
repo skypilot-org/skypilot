@@ -129,6 +129,10 @@ server_dependencies = [
     GRPC,
     PROTOBUF,
     'aiosqlite',
+    # Optional fastapi-guard security middleware (server/server.py; default
+    # off). Needs python >= 3.10, so it is marker-gated: on 3.9 the flag
+    # raises an actionable error instead of installing.
+    'fastapi-guard>=8.1.0,<9.0.0; python_version >= "3.10"',
 ]
 
 local_ray = [

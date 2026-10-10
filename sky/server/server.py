@@ -1359,6 +1359,13 @@ app.add_middleware(RequestIDMiddleware)
 # added to all of them. The metrics middleware below is registered outside it
 # but only observes; it neither adds nor removes headers.
 app.add_middleware(SecurityHeadersMiddleware)
+# Optional fastapi-guard security middleware (off unless
+# SKYPILOT_GUARD_ENABLED is set). Added inside SecurityHeaders so screened
+# requests are still headered, and outside the auth middlewares so blocked
+# requests never reach the bcrypt/DB auth path.
+from sky.server.guard_integration import attach_guard
+
+attach_guard(app)
 
 # Load plugins after all the middlewares are added, to keep the core
 # middleware stack intact if a plugin adds new middlewares.
