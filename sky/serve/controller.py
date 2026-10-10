@@ -54,6 +54,7 @@ class SkyServeController:
                                                     version=version))
         self._autoscaler: autoscalers.Autoscaler = (
             autoscalers.Autoscaler.from_spec(service_name, service_spec))
+        self._autoscaler.latest_version = version
         self._host = host
         self._port = port
         self._app = fastapi.FastAPI(lifespan=self.lifespan)
