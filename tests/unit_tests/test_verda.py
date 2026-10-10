@@ -12,6 +12,8 @@ from sky.adaptors.verda import Instance
 from sky.adaptors.verda import InstanceStatus
 from sky.adaptors.verda import VerdaClient
 from sky.clouds import verda
+from sky.provision import common as provision_common
+from sky.provision.verda import instance as verda_instance
 
 
 def test_verda_cloud_basics():
@@ -310,3 +312,67 @@ class TestVerdaClientInstanceCreation:
             client.instance_create({})
 
         assert "Can't connect to Verda Cloud" in str(exc_info.value)
+
+
+class TestRunInstancesOsVolume:
+    """`os_volume` must only be sent when `image` is an OS image type."""
+
+    def _run(self, monkeypatch, image_id: str) -> dict:
+        created = []
+
+        def instances_get():
+            if not created:
+                return []
+            inst = MagicMock()
+            inst.instance_id = 'inst-1'
+            inst.hostname = 'sky-abc-head'
+            inst.status = InstanceStatus.RUNNING
+            return [inst]
+
+        def instance_create(payload):
+            created.append(payload)
+            response = MagicMock()
+            response.instance_id = 'inst-1'
+            return response
+
+        ssh_key = MagicMock()
+        ssh_key.public_key = 'ssh-ed25519 AAAA test'
+        ssh_key.id = 'key-1'
+        client = MagicMock()
+        client.instances_get.side_effect = instances_get
+        client.instance_create.side_effect = instance_create
+        client.ssh_keys_get.return_value = [ssh_key]
+        monkeypatch.setattr(verda_instance, 'verda', client)
+        monkeypatch.setattr(verda_instance.time, 'sleep', lambda _: None)
+
+        config = provision_common.ProvisionConfig(
+            provider_config={'zones': None},
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'InstanceType': '1A100.22V',
+                'DiskSize': 100,
+                'ImageId': image_id,
+                'PublicKey': 'ssh-ed25519 AAAA test',
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+        record = verda_instance.run_instances('FIN-01', 'sky-abc', 'sky-abc',
+                                              config)
+        assert record.created_instance_ids == ['inst-1']
+        assert len(created) == 1
+        return created[0]
+
+    def test_image_type_sends_os_volume(self, monkeypatch):
+        payload = self._run(monkeypatch, 'ubuntu-24.04-cuda-12.8-open-docker')
+        assert payload['image'] == 'ubuntu-24.04-cuda-12.8-open-docker'
+        assert payload['os_volume'] == {'name': 'sky-abc-head', 'size': 100}
+
+    def test_os_volume_id_omits_os_volume(self, monkeypatch):
+        volume_id = '0b1e7c3a-5d2f-4e8a-9c6b-1f2a3b4c5d6e'
+        payload = self._run(monkeypatch, volume_id)
+        assert payload['image'] == volume_id
+        assert 'os_volume' not in payload
