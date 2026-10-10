@@ -163,14 +163,10 @@ class TestBackwardCompatibility:
             # for legacy skypilot versions.
             'uv pip install uvicorn==0.35.0 && '
             f'{pip_install_cmd} && '
-            # Old SkyPilot versions pin `kubernetes>=20.0.0,!=32.0.0` with
-            # no upper bound, so uv resolves kubernetes==36.0.0 (released
-            # 2026-05-20), which breaks in-cluster auth, bearer token
-            # handling, and renames attributes used by sky launch/serve
-            # against k8s. The current branch pins `<36.0.0`; downgrade
-            # the base env to match so quicktest-core --kubernetes works.
-            # TODO: Remove once the base version tested against also
-            # pins `kubernetes<36.0.0`.
+            # Older wheels lack the v36/v37 model compatibility fixes.
+            # Keep the base environment on the legacy client; the current
+            # environment should exercise the latest supported client.
+            # TODO: Remove once the base version supports v37.
             'uv pip install "kubernetes<36.0.0"')
 
         # Hot-patch old env with me-south-1 fix (PR #9240 + #9244).

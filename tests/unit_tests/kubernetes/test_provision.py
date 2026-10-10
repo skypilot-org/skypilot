@@ -1,10 +1,12 @@
 """Tests for Kubernetes provision."""
 
+import copy
 import datetime
 import re
 from typing import Optional
 from unittest import mock
 
+from kubernetes import client as k8s_client
 import pytest
 import urllib3
 
@@ -131,6 +133,138 @@ def test_create_pods_raises_on_more_pods_than_requested(monkeypatch):
     config = _make_provision_config(count=2)
     with pytest.raises(RuntimeError, match='resource leak'):
         instance._create_pods('us', cluster_on_cloud, cluster_on_cloud, config)
+
+
+@pytest.mark.parametrize('deployment', [False, True])
+@pytest.mark.parametrize('volume_type', [None, 'ephemeral', 'emptyDir'])
+def test_create_pods_normalizes_quantities_before_api_validation(
+        monkeypatch: pytest.MonkeyPatch, deployment: bool,
+        volume_type: Optional[str]) -> None:
+    """Exercise the real generated API validators, mocking only transport."""
+    _patch_create_pods_k8s_boundary(monkeypatch, {}, None)
+    monkeypatch.setattr(kubernetes_utils, 'get_allowed_nodes_config',
+                        lambda *a, **k: None)
+    monkeypatch.setattr(kubernetes_utils, 'get_gpu_resource_key',
+                        lambda *a, **k: 'nvidia.com/gpu')
+    monkeypatch.setattr(instance.volume, 'check_pvc_usage_for_pod',
+                        lambda *a, **k: None)
+    monkeypatch.setattr(instance.volume, 'create_persistent_volume_claim',
+                        lambda *a, **k: None)
+    monkeypatch.setattr(subprocess_utils, 'run_in_parallel',
+                        lambda fn, items, *a, **k: [fn(i) for i in items])
+    config = _make_provision_config(count=1)
+    resource_requirements = {
+        'requests': {
+            'cpu': 0.5,
+            'memory': '1Gi',
+            'nvidia.com/gpu': 1
+        },
+        'limits': {
+            'cpu': 2,
+            'nvidia.com/gpu': 1
+        },
+    }
+    config.node_config['spec']['containers'] = [{
+        'name': 'main',
+        'image': 'busybox',
+        'resources': copy.deepcopy(resource_requirements),
+        'ports': [{
+            'containerPort': 8080
+        }],
+    }]
+    config.node_config['spec']['initContainers'] = [{
+        'name': 'init',
+        'image': 'busybox',
+        'resources': {
+            'requests': {
+                'cpu': 0.1
+            }
+        },
+    }]
+    if volume_type == 'ephemeral':
+        config.node_config['spec']['volumes'] = [{
+            'name': 'scratch',
+            'ephemeral': {
+                'volumeClaimTemplate': {
+                    'spec': {
+                        'accessModes': ['ReadWriteOnce'],
+                        'resources': {
+                            'requests': {
+                                'storage': 1073741824
+                            }
+                        },
+                    },
+                },
+            },
+        }]
+    elif volume_type == 'emptyDir':
+        config.node_config['spec']['volumes'] = [{
+            'name': 'scratch',
+            'emptyDir': {
+                'sizeLimit': 1073741824
+            },
+        }]
+    if volume_type is not None:
+        config.node_config['spec']['containers'][0]['volumeMounts'] = [{
+            'name': 'scratch',
+            'mountPath': '/scratch',
+        }]
+    if deployment:
+        config.node_config['deployment_spec'] = {
+            'metadata': {
+                'name': 'test-deployment'
+            },
+            'spec': {
+                'selector': {
+                    'matchLabels': {
+                        'app': 'test'
+                    }
+                },
+                'template': {
+                    'spec': {}
+                }
+            },
+        }
+        config.node_config['pvc_spec'] = {}
+    original = copy.deepcopy(config.node_config)
+    with k8s_client.ApiClient() as api_client:
+        # Stop at the transport boundary, after generated request validation
+        # and serialization. Never contact a cluster, even if validation fails.
+        send = mock.Mock(side_effect=RuntimeError('request reached transport'))
+        monkeypatch.setattr(api_client.rest_client, 'request', send)
+        monkeypatch.setattr(kubernetes, 'core_api',
+                            lambda *a, **k: k8s_client.CoreV1Api(api_client))
+        monkeypatch.setattr(kubernetes, 'apps_api',
+                            lambda *a, **k: k8s_client.AppsV1Api(api_client))
+        with pytest.raises(RuntimeError, match='request reached transport'):
+            instance._create_pods('us', 'test', 'test', config)
+        send.assert_called_once()
+        body = send.call_args.kwargs['body']
+        spec = body['spec']['template']['spec'] if deployment else body['spec']
+        assert spec['containers'][0]['resources'] == {
+            'requests': {
+                'cpu': '0.5',
+                'memory': '1Gi',
+                'nvidia.com/gpu': '1'
+            },
+            'limits': {
+                'cpu': '2',
+                'nvidia.com/gpu': '1'
+            },
+        }
+        assert spec['initContainers'][0]['resources']['requests'][
+            'cpu'] == '0.1'
+        assert spec['containers'][0]['ports'][0]['containerPort'] == 8080
+        if volume_type == 'ephemeral':
+            claim_spec = spec['volumes'][0]['ephemeral']['volumeClaimTemplate'][
+                'spec']
+            assert claim_spec['resources']['requests'][
+                'storage'] == '1073741824'
+        elif volume_type == 'emptyDir':
+            assert spec['volumes'][0]['emptyDir']['sizeLimit'] == '1073741824'
+    # In particular, accelerator counts must stay numeric in stored configs:
+    # _create_pods compares them to zero to select runtime classes/tolerations.
+    assert config.node_config == original
 
 
 def test_inject_ephemeral_volumes():
