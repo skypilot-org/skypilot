@@ -17,7 +17,7 @@ runs for everything that passes.
 """
 
 import os
-from typing import Any, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -28,7 +28,7 @@ DEFAULT_TRUSTED_PROXIES = '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16'
 
 
 def _csv(raw):
-    # type: (str | None) -> tuple
+    # type: (Optional[str]) -> tuple
     if not raw:
         return ()
     return tuple(item.strip() for item in raw.split(',') if item.strip())
@@ -50,7 +50,7 @@ def _env_bool(name):
 def _build_guard_config():
     # type: () -> SecurityConfig
     """Build the SecurityConfig from the SKYPILOT_GUARD_* env vars."""
-    from guard import SecurityConfig
+    import guard  # pylint: disable=import-outside-toplevel
 
     kwargs = {
         'enable_rate_limiting': True,
@@ -99,7 +99,7 @@ def _build_guard_config():
     if ipinfo_token := os.environ.get('SKYPILOT_GUARD_IPINFO_TOKEN'):
         kwargs['ipinfo_token'] = ipinfo_token
 
-    return SecurityConfig(**kwargs)
+    return guard.SecurityConfig(**kwargs)
 
 
 def attach_guard(app):
@@ -113,11 +113,11 @@ def attach_guard(app):
     if not _env_bool('SKYPILOT_GUARD_ENABLED'):
         return
     try:
-        from guard import SecurityMiddleware
+        import guard  # pylint: disable=import-outside-toplevel
     except ImportError as exc:
         raise ImportError(
             'SKYPILOT_GUARD_ENABLED requires fastapi-guard, which needs '
             'python >= 3.10. Install it with: pip install '
             '"skypilot[server]" fastapi-guard') from exc
 
-    app.add_middleware(SecurityMiddleware, config=_build_guard_config())
+    app.add_middleware(guard.SecurityMiddleware, config=_build_guard_config())

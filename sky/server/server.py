@@ -1363,7 +1363,9 @@ app.add_middleware(SecurityHeadersMiddleware)
 # SKYPILOT_GUARD_ENABLED is set). Added inside SecurityHeaders so screened
 # requests are still headered, and outside the auth middlewares so blocked
 # requests never reach the bcrypt/DB auth path.
-from sky.server.guard_integration import attach_guard
+from sky.server.guard_integration import (  # pylint: disable=import-outside-toplevel
+    attach_guard,
+)  # pylint: disable=wrong-import-position
 
 attach_guard(app)
 
