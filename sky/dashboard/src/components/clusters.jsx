@@ -44,12 +44,20 @@ import {
   getClusters,
   getClusterHistory,
   getOtherUsersClustersCount,
+  setClusterHistoryDeleted,
   useClusterData,
 } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { useWorkspacesConfig } from '@/hooks/useWorkspacesConfig';
 import { sortData } from '@/data/utils';
-import { SquareCode, Terminal, RotateCwIcon, Brackets } from 'lucide-react';
+import {
+  SquareCode,
+  Terminal,
+  RotateCwIcon,
+  Brackets,
+  Trash2,
+  RotateCcw,
+} from 'lucide-react';
 import { ServerIcon } from '@/components/elements/icons';
 import { relativeTime } from '@/components/utils';
 import { Layout } from '@/components/elements/layout';
@@ -721,6 +729,10 @@ export function ClusterTable({
     direction: 'ascending',
   });
 
+  // Whether rows removed from history (soft-deleted on the server) are
+  // listed alongside the rest, each with a restore action.
+  const [showHiddenHistory, setShowHiddenHistory] = useState(false);
+
   // Per-workspace writability, so the per-row Connect/VSCode actions can be
   // disabled for clusters in workspaces the user can only read (read-only
   // visibility). Shared with the cluster detail page; missing entry -> treated
@@ -785,6 +797,7 @@ export function ClusterTable({
     loading: hookLoading,
     refresh,
     isServerPagination,
+    hiddenHistoryCount,
   } = useClusterData({
     showHistory,
     historyDays,
@@ -795,7 +808,24 @@ export function ClusterTable({
     initialLimit: getInitialLimit(),
     allUsers,
     currentUser,
+    includeHiddenHistory: showHiddenHistory,
   });
+
+  // Soft-delete (or restore) one history row. The flag lives on the server,
+  // so refetching is what makes the row (dis)appear; no local bookkeeping
+  // that could drift out of sync.
+  const setHistoryRowDeleted = useCallback(
+    async (clusterHash, deleted) => {
+      const updated = await setClusterHistoryDeleted([clusterHash], deleted);
+      if (updated) {
+        // The cached history response predates the update (2 minute TTL);
+        // drop it so the refetch sees the new flags.
+        dashboardCache.invalidateFunction(getClusterHistory);
+        refresh();
+      }
+    },
+    [refresh]
+  );
 
   // Sync page/limit to URL query params.
   // Use window.history.replaceState instead of router.replace to avoid
@@ -1304,6 +1334,30 @@ export function ClusterTable({
               writable={isWorkspaceWritable(item.workspace)}
             />
           )}
+          {item.isHistorical &&
+            (item.is_deleted ? (
+              <Tooltip content="Restore this cluster to the history list">
+                <button
+                  type="button"
+                  onClick={() => setHistoryRowDeleted(item.cluster_hash, false)}
+                  aria-label={`Restore ${item.cluster} to history`}
+                  className="p-1 text-gray-400 transition-colors hover:text-sky-blue"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </button>
+              </Tooltip>
+            ) : (
+              <Tooltip content="Remove this cluster from the history list (kept on the server)">
+                <button
+                  type="button"
+                  onClick={() => setHistoryRowDeleted(item.cluster_hash, true)}
+                  aria-label={`Remove ${item.cluster} from history`}
+                  className="p-1 text-gray-400 transition-colors hover:text-red-500"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </Tooltip>
+            ))}
         </TableCell>
       ),
     },
@@ -1360,6 +1414,25 @@ export function ClusterTable({
 
   return (
     <div>
+      {/* Hidden-history toggle: only meaningful on the client-side
+          pagination path, which is what knows about soft-deleted rows
+          (see the hook's server-side branch). */}
+      {showHistory && !isServerPagination && hiddenHistoryCount > 0 && (
+        <div className="flex items-center mb-2">
+          <button
+            type="button"
+            onClick={() => {
+              // The row set changes size, so land on the first page.
+              setPage(1);
+              setShowHiddenHistory((v) => !v);
+            }}
+            className="text-xs text-gray-500 transition-colors hover:text-sky-blue"
+          >
+            {showHiddenHistory ? 'Hide' : 'Show'} {hiddenHistoryCount} hidden{' '}
+            cluster{hiddenHistoryCount === 1 ? '' : 's'}
+          </button>
+        </div>
+      )}
       <Card>
         <div className="overflow-x-auto rounded-lg">
           <Table className="min-w-full">

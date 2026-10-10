@@ -32,6 +32,7 @@ import {
   getClusters,
   getClusterHistory,
   getOtherUsersClustersCount,
+  setClusterHistoryDeleted,
   useClusterData,
 } from '@/data/connectors/clusters';
 
@@ -233,5 +234,133 @@ describe('useClusterData ownership scoping (client path)', () => {
       'mine-active',
     ]);
     expect(result.current.loading).toBe(false);
+  });
+});
+
+describe('cluster history soft delete', () => {
+  const terminatedRow = (hash, name, isDeleted) => ({
+    cluster: name,
+    cluster_hash: hash,
+    user_hash: 'u-1',
+    status: 'TERMINATED',
+    is_deleted: isDeleted,
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    apiClient.post = jest.fn();
+    delete window.__skyPaginationFetch;
+  });
+
+  describe('getClusterHistory', () => {
+    it('does not request deleted rows by default', async () => {
+      apiClient.fetch.mockResolvedValue([]);
+
+      await getClusterHistory();
+
+      const [, body] = apiClient.fetch.mock.calls[0];
+      expect(body.include_deleted).toBeUndefined();
+    });
+
+    it('requests deleted rows and carries their flag when asked', async () => {
+      apiClient.fetch.mockResolvedValue([
+        { name: 'kept', cluster_hash: 'h1', is_deleted: false },
+        { name: 'removed', cluster_hash: 'h2', is_deleted: true },
+      ]);
+
+      const history = await getClusterHistory(null, 30, null, true);
+
+      const [, body] = apiClient.fetch.mock.calls[0];
+      expect(body.include_deleted).toBe(true);
+      expect(history.map((c) => c.is_deleted)).toEqual([false, true]);
+    });
+
+    it('flags rows as not deleted when the server omits the field', async () => {
+      // Older API servers predate the flag; the table must not crash on it.
+      apiClient.fetch.mockResolvedValue([
+        { name: 'old-row', cluster_hash: 'h3' },
+      ]);
+
+      const history = await getClusterHistory();
+
+      expect(history[0].is_deleted).toBe(false);
+    });
+  });
+
+  describe('setClusterHistoryDeleted', () => {
+    it('posts the hashes and the flag to the soft delete endpoint', async () => {
+      apiClient.post.mockResolvedValue({ ok: true });
+
+      const ok = await setClusterHistoryDeleted(['h1', 'h2'], true);
+
+      expect(ok).toBe(true);
+      expect(apiClient.post).toHaveBeenCalledWith(
+        '/cluster_history/soft_delete',
+        { cluster_hashes: ['h1', 'h2'], deleted: true }
+      );
+    });
+
+    it('reports failure when the request errors', async () => {
+      apiClient.post.mockRejectedValue(new Error('boom'));
+
+      const ok = await setClusterHistoryDeleted(['h1'], false);
+
+      expect(ok).toBe(false);
+    });
+  });
+
+  describe('useClusterData hidden history', () => {
+    const currentUser = { id: 'u-1', name: 'alice' };
+
+    const mockHistory = (get) => {
+      get.mockImplementation((fn, args) => {
+        // getClusters (active) vs getClusterHistory (history) are told apart
+        // by their argument shapes: the history call is [null, days, ...].
+        if (args && args.length > 0 && args[0] === null) {
+          return Promise.resolve([
+            terminatedRow('h1', 'kept', false),
+            terminatedRow('h2', 'removed', true),
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+    };
+
+    it('hides soft-deleted rows and reports their count', async () => {
+      mockHistory(dashboardCache.get);
+
+      const filters = [];
+      const { result } = renderHook(() =>
+        useClusterData({ showHistory: true, currentUser, filters })
+      );
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.allData.map((c) => c.cluster)).toEqual(['kept']);
+      expect(result.current.hiddenHistoryCount).toBe(1);
+    });
+
+    it('lists soft-deleted rows when includeHiddenHistory is set', async () => {
+      mockHistory(dashboardCache.get);
+
+      const filters = [];
+      const { result } = renderHook(() =>
+        useClusterData({
+          showHistory: true,
+          currentUser,
+          filters,
+          includeHiddenHistory: true,
+        })
+      );
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.allData.map((c) => c.cluster)).toEqual([
+        'kept',
+        'removed',
+      ]);
+      // The count is the number of soft-deleted rows, regardless of whether
+      // they are currently listed: the toggle flips to "Hide N hidden
+      // clusters" while they are shown.
+      expect(result.current.hiddenHistoryCount).toBe(1);
+    });
   });
 });

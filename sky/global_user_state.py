@@ -259,6 +259,10 @@ cluster_history_table = sqlalchemy.Table(
     # point the clusters table row is gone and the join can no longer supply
     # the flag.
     sqlalchemy.Column('is_managed', sqlalchemy.Integer, server_default='0'),
+    # Whether the row was soft-deleted from the history view (e.g. via the
+    # dashboard's "remove from history"). The record is kept so usage/cost
+    # data stays recoverable; history listings just skip flagged rows.
+    sqlalchemy.Column('is_deleted', sqlalchemy.Integer, server_default='0'),
 )
 
 
@@ -2841,7 +2845,8 @@ def get_clusters_from_history(
         abbreviate_response: bool = False,
         cluster_hashes: Optional[List[str]] = None,
         cluster_names: Optional[List[str]] = None,
-        exclude_managed_clusters: bool = False) -> List[Dict[str, Any]]:
+        exclude_managed_clusters: bool = False,
+        include_deleted: bool = False) -> List[Dict[str, Any]]:
     """Get cluster reports from history.
 
     See iter_clusters_from_history for the arguments.
@@ -2856,7 +2861,8 @@ def get_clusters_from_history(
             abbreviate_response=abbreviate_response,
             cluster_hashes=cluster_hashes,
             cluster_names=cluster_names,
-            exclude_managed_clusters=exclude_managed_clusters))
+            exclude_managed_clusters=exclude_managed_clusters,
+            include_deleted=include_deleted))
 
 
 def iter_clusters_from_history(
@@ -2864,7 +2870,8 @@ def iter_clusters_from_history(
         abbreviate_response: bool = False,
         cluster_hashes: Optional[List[str]] = None,
         cluster_names: Optional[List[str]] = None,
-        exclude_managed_clusters: bool = False) -> Iterator[Dict[str, Any]]:
+        exclude_managed_clusters: bool = False,
+        include_deleted: bool = False) -> Iterator[Dict[str, Any]]:
     """Yield cluster reports from history, most recently launched first.
 
     All matching rows are fetched, and their usage intervals unpickled, before
@@ -2887,6 +2894,10 @@ def iter_clusters_from_history(
         exclude_managed_clusters: If True, exclude clusters launched by a
               controller (managed jobs and services). Rows recorded before the
               is_managed column existed are treated as not managed.
+        include_deleted: If True, also yield rows that were soft-deleted from
+              the history view (see set_cluster_history_deleted). Rows
+              recorded before the is_deleted column existed are treated as
+              not deleted.
 
     Yields:
         Cluster records with history information.
@@ -2924,6 +2935,7 @@ def iter_clusters_from_history(
             cluster_history_table.c.last_activity_time,
             cluster_history_table.c.launched_at,
             cluster_history_table.c.node_names,
+            cluster_history_table.c.is_deleted,
             cluster_table.c.status,
             cluster_table.c.workspace,
         ]
@@ -2967,6 +2979,14 @@ def iter_clusters_from_history(
                 sqlalchemy.or_(
                     cluster_history_table.c.is_managed.is_(None),
                     cluster_history_table.c.is_managed == int(False)))
+        if not include_deleted:
+            # Treat NULL (rows predating the is_deleted column) as not
+            # deleted, so soft-deleted rows stay hidden from listings while
+            # the underlying usage/cost record is retained.
+            query = query.filter(
+                sqlalchemy.or_(
+                    cluster_history_table.c.is_deleted.is_(None),
+                    cluster_history_table.c.is_deleted == int(False)))
         rows = query.all()
 
     usage_intervals_dict = {}
@@ -3035,6 +3055,7 @@ def iter_clusters_from_history(
             'workspace': workspace,
             'last_event': last_event,
             'node_names': common_utils.get_display_node_names(row.node_names),
+            'is_deleted': bool(row.is_deleted),
         }
         if include_creation_yaml:
             record['last_creation_yaml'] = row.last_creation_yaml
@@ -3048,6 +3069,42 @@ def iter_clusters_from_history(
             record['last_creation_command'] = None
 
         yield record
+
+
+def set_cluster_history_deleted(cluster_hashes: List[str],
+                                deleted: bool = True,
+                                caller_user_hash: Optional[str] = None) -> int:
+    """Soft-delete (or restore) cluster history rows.
+
+    Rows are flagged with is_deleted instead of being removed, so the
+    usage/cost record stays recoverable: history listings skip flagged rows
+    (see iter_clusters_from_history) until they are restored.
+
+    Args:
+        cluster_hashes: The history rows to update.
+        deleted: True to hide the rows from history listings, False to
+            restore them.
+        caller_user_hash: When set, only rows owned by this user are
+            updated, so a caller cannot touch another user's history. None
+            (the local, unauthenticated case) updates the given rows
+            regardless of owner.
+
+    Returns:
+        The number of rows updated.
+    """
+    if not cluster_hashes:
+        return 0
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        conditions = [cluster_history_table.c.cluster_hash.in_(cluster_hashes)]
+        if caller_user_hash is not None:
+            conditions.append(
+                cluster_history_table.c.user_hash == caller_user_hash)
+        update_stmt = sqlalchemy.update(cluster_history_table).where(
+            *conditions).values(is_deleted=int(deleted))
+        result = session.execute(update_stmt)
+        session.commit()
+        return result.rowcount
 
 
 @metrics_lib.time_me
