@@ -160,7 +160,12 @@ class Autoscaler:
         self.num_overprovision: Optional[int] = spec.num_overprovision
         # Target number of replicas is initialized to min replicas
         self.target_num_replicas: int = spec.min_replicas
-        self.latest_version: int = constants.INITIAL_VERSION
+        # Restore latest_version from DB on (re)start so that controller
+        # restarts do not reset the version counter to INITIAL_VERSION and
+        # cause spurious scale-churn or version-guard failures.
+        db_version = serve_state.get_latest_version(service_name)
+        self.latest_version: int = (db_version if db_version is not None else
+                                    constants.INITIAL_VERSION)
         # The latest_version_ever_ready should be smaller than the
         # latest_version, so we can fail early if the initial version got
         # unrecoverable failure.
@@ -379,12 +384,17 @@ class Autoscaler:
 
     def dump_dynamic_states(self) -> Dict[str, Any]:
         """Dump dynamic states from autoscaler."""
-        states = {'latest_version_ever_ready': self.latest_version_ever_ready}
+        states = {
+            'latest_version': self.latest_version,
+            'latest_version_ever_ready': self.latest_version_ever_ready,
+        }
         states.update(self._dump_dynamic_states())
         return states
 
     def load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
         """Load dynamic states to autoscaler."""
+        self.latest_version = dynamic_states.pop('latest_version',
+                                                  self.latest_version)
         self.latest_version_ever_ready = dynamic_states.pop(
             'latest_version_ever_ready', constants.INITIAL_VERSION)
         self._load_dynamic_states(dynamic_states)
