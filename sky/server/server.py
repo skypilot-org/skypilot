@@ -1364,8 +1364,7 @@ app.add_middleware(SecurityHeadersMiddleware)
 # requests are still headered, and outside the auth middlewares so blocked
 # requests never reach the bcrypt/DB auth path.
 from sky.server.guard_integration import (
-    attach_guard,  # pylint: disable=import-outside-toplevel; disable=wrong-import-position
-)
+    attach_guard)  # pylint: disable=import-outside-toplevel,wrong-import-position
 
 attach_guard(app)
 
