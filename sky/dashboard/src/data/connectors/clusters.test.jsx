@@ -32,6 +32,7 @@ import {
   getClusters,
   getClusterHistory,
   getOtherUsersClustersCount,
+  invalidateClusterHistoryCache,
   setClusterHistoryDeleted,
   useClusterData,
 } from '@/data/connectors/clusters';
@@ -412,6 +413,31 @@ describe('cluster history soft delete', () => {
       expect(pluginFetch).toBe(window.__skyPaginationFetch);
       expect(options.includeHiddenHistory).toBe(true);
       expect(result.current.hiddenHistoryCount).toBe(1);
+    });
+  });
+
+  describe('invalidateClusterHistoryCache', () => {
+    it('invalidates both the client history cache and the plugin fetch', () => {
+      const pluginFetch = jest.fn();
+      window.__skyPaginationFetch = pluginFetch;
+
+      invalidateClusterHistoryCache();
+
+      expect(dashboardCache.invalidateFunction).toHaveBeenCalledWith(
+        getClusterHistory
+      );
+      expect(dashboardCache.invalidateFunction).toHaveBeenCalledWith(
+        pluginFetch
+      );
+    });
+
+    it('invalidates only the client history cache when no plugin is present', () => {
+      invalidateClusterHistoryCache();
+
+      expect(dashboardCache.invalidateFunction).toHaveBeenCalledWith(
+        getClusterHistory
+      );
+      expect(dashboardCache.invalidateFunction).toHaveBeenCalledTimes(1);
     });
   });
 });

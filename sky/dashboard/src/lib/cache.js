@@ -146,6 +146,7 @@ class DashboardCache {
       } finally {
         // Remove the pending request marker
         this.pendingRequests.delete(key);
+        this._cleanupGeneration(key);
       }
     })();
 
@@ -336,6 +337,7 @@ class DashboardCache {
       .finally(() => {
         // Remove the background job marker
         this.backgroundJobs.delete(key);
+        this._cleanupGeneration(key);
       });
   }
 
@@ -350,10 +352,31 @@ class DashboardCache {
   /**
    * Bump a key's invalidation generation, so in-flight requests started
    * before this call are recognized as stale when they complete.
+   *
+   * Only a key with a request still in flight (pending or background) needs a
+   * recorded generation: once nothing can complete against the key, the value
+   * serves no purpose, and skipping it keeps `generations` from leaking one
+   * entry per distinct key for the life of the cache instance.
    * @private
    */
   _bumpGeneration(key) {
+    if (!this.pendingRequests.has(key) && !this.backgroundJobs.has(key)) {
+      return;
+    }
     this.generations.set(key, this._getGeneration(key) + 1);
+  }
+
+  /**
+   * Drop a key's generation entry once no request can still complete against
+   * it. Called from the completion path of both foreground and background
+   * requests so invalidation bookkeeping does not outlive the request it
+   * guards.
+   * @private
+   */
+  _cleanupGeneration(key) {
+    if (!this.pendingRequests.has(key) && !this.backgroundJobs.has(key)) {
+      this.generations.delete(key);
+    }
   }
 
   /**

@@ -317,5 +317,22 @@ describe('DashboardCache', () => {
       expect(cache.cache.size).toBe(0);
       expect(cache.backgroundJobs.size).toBe(0);
     });
+
+    test('invalidated keys do not leak generation entries', async () => {
+      const mockFetch = createMockFetch({ data: 'test' }, 100);
+
+      // A request in flight, invalidated, settles -> generation is cleaned up.
+      const promise = cache.get(mockFetch, ['arg1']);
+      cache.invalidate(mockFetch, ['arg1']);
+      expect(cache.generations.size).toBe(1);
+
+      jest.advanceTimersByTime(100);
+      await promise;
+      expect(cache.generations.size).toBe(0);
+
+      // Invalidating an idle key records no generation entry at all.
+      cache.invalidate(mockFetch, ['arg1']);
+      expect(cache.generations.size).toBe(0);
+    });
   });
 });

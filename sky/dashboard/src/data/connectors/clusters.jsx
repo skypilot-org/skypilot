@@ -345,6 +345,24 @@ export async function setClusterHistoryDeleted(clusterHashes, deleted) {
   }
 }
 
+/**
+ * Drop every cached cluster-history response, so the next fetch observes the
+ * server's current soft-delete flags.
+ *
+ * Covers both the client-side pagination path (`getClusterHistory`) and the
+ * pagination-plugin path (`window.__skyPaginationFetch`), whose per-page
+ * entries (including the prefetched next page) are cached separately. Without
+ * the plugin invalidation, restoring a hidden cluster only drops the client
+ * cache while `refresh()` reuses the stale plugin page, so the row stays
+ * hidden until a later refresh.
+ */
+export function invalidateClusterHistoryCache() {
+  dashboardCache.invalidateFunction(getClusterHistory);
+  if (isPaginationPluginAvailable()) {
+    dashboardCache.invalidateFunction(getPaginationFetch());
+  }
+}
+
 export async function streamClusterJobLogs({
   clusterName,
   jobId,

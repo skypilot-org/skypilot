@@ -42,8 +42,8 @@ import {
 } from '@/lib/utils';
 import {
   getClusters,
-  getClusterHistory,
   getOtherUsersClustersCount,
+  invalidateClusterHistoryCache,
   setClusterHistoryDeleted,
   useClusterData,
 } from '@/data/connectors/clusters';
@@ -514,7 +514,7 @@ export function Clusters() {
     dashboardCache.invalidate(getWorkspaces);
     // Only invalidate cluster history if we're currently showing history
     if (showHistory) {
-      dashboardCache.invalidateFunction(getClusterHistory);
+      invalidateClusterHistoryCache();
     }
 
     // Reset preloading state so ClusterTable can fetch fresh data immediately
@@ -819,8 +819,11 @@ export function ClusterTable({
       const updated = await setClusterHistoryDeleted([clusterHash], deleted);
       if (updated) {
         // The cached history response predates the update (2 minute TTL);
-        // drop it so the refetch sees the new flags.
-        dashboardCache.invalidateFunction(getClusterHistory);
+        // drop it so the refetch sees the new flags. This also drops the
+        // pagination-plugin's cached pages (including the prefetched next
+        // page), otherwise restoring a hidden cluster would reuse the stale
+        // plugin page and keep the row hidden.
+        invalidateClusterHistoryCache();
         // Removing a row can shrink the dataset below the current page (e.g.
         // deleting the only row on the last page would otherwise leave an
         // empty table); land back on the first page before refetching.
