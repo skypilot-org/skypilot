@@ -10,13 +10,19 @@ from typing import Dict, List, Optional, Tuple, Union
 import pandas as pd
 
 from sky.catalog import common
+from sky.catalog.vast import live_overlay as _live_overlay
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-_df = common.read_catalog('vast/vms.csv')
+_base_df = common.read_catalog('vast/vms.csv')
+# OverlayDataFrame transparently splices fresh prices from Vast's bundle
+# endpoint into the cached CSV catalog at read time. It is fail-open: any
+# failure path returns the unmodified base catalog, so disabling network or
+# uninstalling vastai_sdk leaves behavior identical to the CSV-only path.
+_df = _live_overlay.OverlayDataFrame(_base_df)
 
 
 def _apply_datacenter_filter(df: pd.DataFrame,
