@@ -7,6 +7,7 @@ import enum
 import fnmatch
 import functools
 import hashlib
+import itertools
 import math
 import os
 import pathlib
@@ -133,8 +134,7 @@ K8S_PODS_NOT_FOUND_PATTERN = re.compile(r'.*(NotFound|pods .* not found).*',
 _RAY_CLUSTER_NOT_FOUND_MESSAGE = 'Ray cluster is not found'
 WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 
-DEFAULT_HEALTH_CHECK_ATTEMPTS = 5
-DEFAULT_HEALTH_CHECK_INTERVAL_SECONDS = 1
+DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS = 5
 
 # We check network connection by going through _TEST_IP_LIST. We may need to
 # check multiple IPs because some IPs may be blocked on certain networks.
@@ -2742,17 +2742,27 @@ def _update_cluster_status(
             ready_workers = 0
             output = ''
             stderr = ''
-            attempts = skypilot_config.get_nested(
-                ('provision', 'health_check', 'attempts'),
-                DEFAULT_HEALTH_CHECK_ATTEMPTS)
-            interval_seconds = skypilot_config.get_nested(
-                ('provision', 'health_check', 'interval_seconds'),
-                DEFAULT_HEALTH_CHECK_INTERVAL_SECONDS)
-            if not math.isfinite(interval_seconds):
-                logger.warning('Ignoring non-finite provision.health_check.'
-                               f'interval_seconds: {interval_seconds}')
-                interval_seconds = DEFAULT_HEALTH_CHECK_INTERVAL_SECONDS
-            for i in range(attempts):
+            timeout = skypilot_config.get_nested(
+                ('provision', 'health_check_timeout'),
+                DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS)
+            if not math.isfinite(timeout):
+                logger.warning('Ignoring non-finite '
+                               f'provision.health_check_timeout: {timeout}')
+                timeout = DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS
+            # Counted from the first failure, so a probe that hangs until the
+            # SSH connect timeout still gets retried.
+            retry_deadline: Optional[float] = None
+
+            def wait_for_retry() -> bool:
+                nonlocal retry_deadline
+                if retry_deadline is None:
+                    retry_deadline = time.monotonic() + timeout
+                if time.monotonic() >= retry_deadline:
+                    return False
+                time.sleep(1)
+                return True
+
+            for i in itertools.count():
                 try:
                     ready_head, ready_workers, output, stderr = (
                         get_node_counts_from_ray_status(head_runner))
@@ -2762,9 +2772,8 @@ def _update_cluster_status(
                     if cloud_name != 'kubernetes':
                         # Retry transient SSH failures; a missing runtime
                         # will not come back on its own.
-                        if (i < attempts - 1 and _RAY_CLUSTER_NOT_FOUND_MESSAGE
-                                not in e.error_msg):
-                            time.sleep(interval_seconds)
+                        if (_RAY_CLUSTER_NOT_FOUND_MESSAGE not in e.error_msg
+                                and wait_for_retry()):
                             continue
                         # Non-k8s clusters can be manually restarted and:
                         # 1. Get new IP addresses, or
@@ -2797,9 +2806,9 @@ def _update_cluster_status(
                         raise e
                     # We retry for kubernetes because coreweave can have a
                     # transient network issue.
-                    if i < attempts - 1:
-                        time.sleep(interval_seconds)
-                    continue
+                    if wait_for_retry():
+                        continue
+                    break
                 if ready_head + ready_workers == total_nodes:
                     return True
                 logger.debug(f'Refreshing status ({cluster_name!r}) attempt '
@@ -2815,8 +2824,8 @@ def _update_cluster_status(
                 #   (not preempted), but
                 # - The ray cluster is somehow degraded so not all instances are
                 #   showing up
-                if i < attempts - 1:
-                    time.sleep(interval_seconds)
+                if not wait_for_retry():
+                    break
 
             ray_status_details = (
                 f'{ready_head + ready_workers}/{total_nodes} ready')

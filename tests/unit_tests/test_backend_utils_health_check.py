@@ -39,15 +39,29 @@ def _make_handle(cloud, launched_nodes=1):
     return handle
 
 
-def _refresh(cloud, probe_results, config=None, launched_nodes=1):
-    """Runs a status refresh of an all-nodes-up cluster.
+def _refresh(cloud,
+             probe_results,
+             timeout=None,
+             launched_nodes=1,
+             probe_seconds=0):
+    """Runs a status refresh of an all-nodes-up cluster on a fake clock.
 
     Returns (ready, head_runner, sleeps, warning_mock, init_messages).
     """
     handle = _make_handle(cloud, launched_nodes=launched_nodes)
     results = list(probe_results)
+    now = [0.0]
+
+    def _probe(*args, **kwargs):
+        del args, kwargs
+        now[0] += probe_seconds
+        return results.pop(0)
+
+    def _sleep(seconds):
+        now[0] += seconds
+
     head_runner = mock.Mock()
-    head_runner.run.side_effect = lambda *args, **kwargs: results.pop(0)
+    head_runner.run.side_effect = _probe
     handle.get_command_runners.return_value = [head_runner]
 
     record = {
@@ -69,13 +83,15 @@ def _refresh(cloud, probe_results, config=None, launched_nodes=1):
         if new_status == status_lib.ClusterStatus.INIT:
             init_messages.append(message)
 
-    overrides = config or {}
+    overrides = ({} if timeout is None else {
+        ('provision', 'health_check_timeout'): timeout
+    })
     add_or_update = mock.Mock()
     node_statuses = {
         f'node-{i}': (status_lib.ClusterStatus.UP, None)
         for i in range(launched_nodes)
     }
-    sleep = mock.Mock()
+    sleep = mock.Mock(side_effect=_sleep)
     with mock.patch.object(backend_utils,
                            '_query_cluster_status_via_cloud_api',
                            return_value=node_statuses), \
@@ -93,6 +109,8 @@ def _refresh(cloud, probe_results, config=None, launched_nodes=1):
                            side_effect=lambda keys, default_value, **_:
                            overrides.get(tuple(keys), default_value)), \
          mock.patch.object(backend_utils.time, 'sleep', sleep), \
+         mock.patch.object(backend_utils.time, 'monotonic',
+                           side_effect=lambda: now[0]), \
          mock.patch.object(backend_utils.logger, 'warning') as warning:
         backend_utils._update_cluster_status('test-cluster',
                                              record,
@@ -100,10 +118,6 @@ def _refresh(cloud, probe_results, config=None, launched_nodes=1):
     ready = add_or_update.call_args.kwargs['ready']
     sleeps = [c.args[0] for c in sleep.call_args_list]
     return ready, head_runner, sleeps, warning, init_messages
-
-
-def _health_check(**kwargs):
-    return {('provision', 'health_check', k): v for k, v in kwargs.items()}
 
 
 def _recovery_hint_logged(warning):
@@ -126,48 +140,56 @@ def test_transient_failures_are_retried(failure):
 
 def test_persistent_failure_marks_init():
     ready, head_runner, sleeps, warning, init_messages = _refresh(
-        clouds.AWS(), [_BANNER_TIMEOUT] * 5)
+        clouds.AWS(), [_BANNER_TIMEOUT] * 10)
 
     assert ready is False
-    assert head_runner.run.call_count == 5
-    assert sleeps == [1] * 4
+    assert head_runner.run.call_count == 6
+    assert sleeps == [1] * 5
     assert not _recovery_hint_logged(warning)
     assert ('health probe failed: Connection timed out during banner '
             'exchange') in init_messages[0]
 
 
+def test_slow_failure_is_still_retried():
+    # The probe hangs past the whole timeout, but the timeout starts at the
+    # failure.
+    ready, head_runner, _, _, _ = _refresh(
+        clouds.AWS(), [_BANNER_TIMEOUT, (0, _HEALTHY_1_NODE, '')],
+        probe_seconds=30)
+
+    assert ready is True
+    assert head_runner.run.call_count == 2
+
+
 def test_persistent_ssh_timeout_keeps_manual_restart_hint():
     ready, head_runner, _, warning, init_messages = _refresh(
-        clouds.AWS(), [_SSH_TIMED_OUT] * 5)
+        clouds.AWS(), [_SSH_TIMED_OUT] * 10)
 
     assert ready is False
-    assert head_runner.run.call_count == 5
+    assert head_runner.run.call_count == 6
     assert _recovery_hint_logged(warning)
     assert 'health probe failed: ssh: connect to host' in init_messages[0]
 
 
-@pytest.mark.parametrize('config,expected_sleeps', [
-    (_health_check(attempts=3, interval_seconds=5), [5, 5]),
-    (_health_check(attempts=1), []),
-])
-def test_config(config, expected_sleeps):
+@pytest.mark.parametrize('timeout,expected_sleeps', [(2.5, [1, 1, 1]), (0, [])])
+def test_timeout_config(timeout, expected_sleeps):
     ready, head_runner, sleeps, _, _ = _refresh(clouds.AWS(),
-                                                [_SSM_NOT_CONNECTED] * 3,
-                                                config=config)
+                                                [_SSM_NOT_CONNECTED] * 10,
+                                                timeout=timeout)
 
     assert ready is False
     assert head_runner.run.call_count == len(expected_sleeps) + 1
     assert sleeps == expected_sleeps
 
 
-@pytest.mark.parametrize('interval_seconds', [float('nan'), float('inf')])
-def test_non_finite_interval_uses_default(interval_seconds):
-    ready, _, sleeps, _, _ = _refresh(
-        clouds.AWS(), [_SSM_NOT_CONNECTED, (0, _HEALTHY_1_NODE, '')],
-        config=_health_check(interval_seconds=interval_seconds))
+@pytest.mark.parametrize('timeout', [float('nan'), float('inf')])
+def test_non_finite_timeout_uses_default(timeout):
+    ready, head_runner, _, _, _ = _refresh(clouds.AWS(),
+                                           [_SSM_NOT_CONNECTED] * 10,
+                                           timeout=timeout)
 
-    assert ready is True
-    assert sleeps == [1]
+    assert ready is False
+    assert head_runner.run.call_count == 6
 
 
 def test_missing_runtime_is_not_retried():
@@ -192,57 +214,53 @@ def test_kubernetes_retries_any_failure():
 
 def test_kubernetes_persistent_failure_marks_init():
     ready, head_runner, sleeps, _, init_messages = _refresh(
-        clouds.Kubernetes(), [_SSM_NOT_CONNECTED] * 5)
+        clouds.Kubernetes(), [_SSM_NOT_CONNECTED] * 10)
 
     assert ready is False
-    assert head_runner.run.call_count == 5
-    assert sleeps == [1] * 4
+    assert head_runner.run.call_count == 6
+    assert sleeps == [1] * 5
     assert '0/1 ready' in init_messages[0]
 
 
 def test_partial_ray_cluster_is_retried():
     ready, _, sleeps, _, _ = _refresh(clouds.AWS(), [(0, _HEALTHY_1_NODE, ''),
                                                      (0, _HEALTHY_2_NODES, '')],
-                                      config=_health_check(interval_seconds=7),
                                       launched_nodes=2)
 
     assert ready is True
-    assert sleeps == [7]
+    assert sleeps == [1]
 
 
 def test_persistent_partial_ray_cluster_marks_init():
     ready, head_runner, sleeps, _, init_messages = _refresh(
-        clouds.AWS(), [(0, _HEALTHY_1_NODE, '')] * 5, launched_nodes=2)
+        clouds.AWS(), [(0, _HEALTHY_1_NODE, '')] * 10, launched_nodes=2)
 
     assert ready is False
-    assert head_runner.run.call_count == 5
-    assert sleeps == [1] * 4
+    assert head_runner.run.call_count == 6
+    assert sleeps == [1] * 5
     assert '1/2 ready' in init_messages[0]
 
 
-def _validate(health_check):
-    common_utils.validate_schema({'provision': {
-        'health_check': health_check
-    }}, schemas.get_config_schema(), 'Invalid sky config: ')
+def _validate(provision):
+    common_utils.validate_schema({'provision': provision},
+                                 schemas.get_config_schema(),
+                                 'Invalid sky config: ')
 
 
-@pytest.mark.parametrize('health_check', [{}, {
-    'attempts': 7,
-    'interval_seconds': 2.5
+@pytest.mark.parametrize('timeout', [0, 30, 2.5])
+def test_schema_accepts_valid_timeout(timeout):
+    _validate({'health_check_timeout': timeout})
+
+
+@pytest.mark.parametrize('provision', [{
+    'health_check_timeout': -1
+}, {
+    'health_check_timeout': '30'
+}, {
+    'health_check': {
+        'attempts': 5
+    }
 }])
-def test_schema_accepts_valid_config(health_check):
-    _validate(health_check)
-
-
-@pytest.mark.parametrize('health_check', [{
-    'attempts': 0
-}, {
-    'attempts': '3'
-}, {
-    'interval_seconds': -1
-}, {
-    'timeout_seconds': 60
-}])
-def test_schema_rejects_invalid_config(health_check):
+def test_schema_rejects_invalid_config(provision):
     with pytest.raises(ValueError):
-        _validate(health_check)
+        _validate(provision)

@@ -69,9 +69,7 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`provision <config-yaml-provision>`:
     :ref:`ssh_timeout <config-yaml-provision-ssh-timeout>`: 10
     :ref:`install_conda <config-yaml-provision-install-conda>`: false
-    :ref:`health_check <config-yaml-provision-health-check>`:
-      attempts: 5
-      interval_seconds: 1
+    :ref:`health_check_timeout <config-yaml-provision-health-check-timeout>`: 5
 
   :ref:`kubernetes <config-yaml-kubernetes>`:
     :ref:`ports <config-yaml-kubernetes-ports>`: loadbalancer
@@ -793,33 +791,30 @@ Example:
   rely on a conda environment, either set ``install_conda: true`` or use a
   custom image that ships conda.
 
-.. _config-yaml-provision-health-check:
+.. _config-yaml-provision-health-check-timeout:
 
-``provision.health_check``
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+``provision.health_check_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Retries of the health probe that SkyPilot runs on a cluster's head node when
-refreshing its status (optional). If every attempt fails, the cluster is marked
-``INIT``, which a :ref:`managed job <managed-jobs>` treats as a preemption.
+How long, in seconds, SkyPilot keeps retrying the health probe of a cluster's
+head node after its first failure when refreshing the cluster's status
+(optional). Retries run every second. If the probe still fails, the cluster is
+marked ``INIT``, which a :ref:`managed job <managed-jobs>` treats as a
+preemption. ``0`` disables retries.
 
-- ``attempts``: number of probes, including the first. ``1`` disables retries.
-- ``interval_seconds``: wait between probes.
-
-Raise them if the head node is reached over a flaky link, e.g. SSH through
+Raise it if the head node is reached over a flaky link, e.g. SSH through
 :ref:`aws.use_ssm <config-yaml-aws-use-ssm>`. If the retries take longer than
 about 20 seconds, concurrent status refreshes of the cluster return its cached
 status.
 
-Default: ``attempts: 5``, ``interval_seconds: 1``.
+Default: ``5``.
 
 Example:
 
 .. code-block:: yaml
 
   provision:
-    health_check:
-      attempts: 7
-      interval_seconds: 10
+    health_check_timeout: 30
 
 .. _config-yaml-aws:
 
