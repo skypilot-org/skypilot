@@ -136,10 +136,10 @@ def test_create_pods_raises_on_more_pods_than_requested(monkeypatch):
 
 
 @pytest.mark.parametrize('deployment', [False, True])
-@pytest.mark.parametrize('inline_pvc', [False, True])
+@pytest.mark.parametrize('volume_type', [None, 'ephemeral', 'emptyDir'])
 def test_create_pods_normalizes_quantities_before_api_validation(
         monkeypatch: pytest.MonkeyPatch, deployment: bool,
-        inline_pvc: bool) -> None:
+        volume_type: Optional[str]) -> None:
     """Exercise the real generated API validators, mocking only transport."""
     _patch_create_pods_k8s_boundary(monkeypatch, {}, None)
     monkeypatch.setattr(kubernetes_utils, 'get_allowed_nodes_config',
@@ -181,7 +181,7 @@ def test_create_pods_normalizes_quantities_before_api_validation(
             }
         },
     }]
-    if inline_pvc:
+    if volume_type == 'ephemeral':
         config.node_config['spec']['volumes'] = [{
             'name': 'scratch',
             'ephemeral': {
@@ -197,6 +197,14 @@ def test_create_pods_normalizes_quantities_before_api_validation(
                 },
             },
         }]
+    elif volume_type == 'emptyDir':
+        config.node_config['spec']['volumes'] = [{
+            'name': 'scratch',
+            'emptyDir': {
+                'sizeLimit': 1073741824
+            },
+        }]
+    if volume_type is not None:
         config.node_config['spec']['containers'][0]['volumeMounts'] = [{
             'name': 'scratch',
             'mountPath': '/scratch',
@@ -247,11 +255,13 @@ def test_create_pods_normalizes_quantities_before_api_validation(
         assert spec['initContainers'][0]['resources']['requests'][
             'cpu'] == '0.1'
         assert spec['containers'][0]['ports'][0]['containerPort'] == 8080
-        if inline_pvc:
+        if volume_type == 'ephemeral':
             claim_spec = spec['volumes'][0]['ephemeral']['volumeClaimTemplate'][
                 'spec']
             assert claim_spec['resources']['requests'][
                 'storage'] == '1073741824'
+        elif volume_type == 'emptyDir':
+            assert spec['volumes'][0]['emptyDir']['sizeLimit'] == '1073741824'
     # In particular, accelerator counts must stay numeric in stored configs:
     # _create_pods compares them to zero to select runtime classes/tolerations.
     assert config.node_config == original

@@ -4764,7 +4764,7 @@ def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
 
 
 def normalize_pod_resource_quantities(pod_spec: Dict[str, Any]) -> None:
-    """Normalize resource requests/limits in a PodSpec in place before sending.
+    """Normalize resource quantities in a PodSpec in place before sending.
 
     Kubernetes accepts numeric quantities, but the v37 Python client validates
     request bodies with Pydantic and requires strings. Keep the internal
@@ -4773,9 +4773,14 @@ def normalize_pod_resource_quantities(pod_spec: Dict[str, Any]) -> None:
     resource_owners = [pod_spec]
     for field in ('containers', 'initContainers', 'ephemeralContainers'):
         resource_owners.extend(pod_spec.get(field) or [])
-    # Generic ephemeral volumes embed a PVC whose storage quantities are
-    # also validated as strings by the generated Pod/Deployment APIs.
     for volume in pod_spec.get('volumes') or []:
+        empty_dir = volume.get('emptyDir')
+        if empty_dir is not None:
+            size_limit = empty_dir.get('sizeLimit')
+            if type(size_limit) in (int, float):
+                empty_dir['sizeLimit'] = str(size_limit)
+        # Generic ephemeral volumes embed a PVC whose storage quantities are
+        # also validated as strings by the generated Pod/Deployment APIs.
         ephemeral = volume.get('ephemeral') or {}
         claim_template = ephemeral.get('volumeClaimTemplate') or {}
         resource_owners.append(claim_template.get('spec') or {})

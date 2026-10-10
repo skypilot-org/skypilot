@@ -343,6 +343,42 @@ def test_normalize_inline_pvc_quantities(quantity: Any, expected: Any) -> None:
     assert spec == expected_spec
 
 
+@pytest.mark.parametrize(('quantity', 'expected'), [
+    (1073741824, '1073741824'),
+    (1.5, '1.5'),
+    ('1Gi', '1Gi'),
+    (None, None),
+    (True, True),
+])
+def test_normalize_emptydir_size_limit(quantity: Any, expected: Any) -> None:
+    spec = {
+        'volumes': [{
+            'name': 'scratch',
+            'emptyDir': {
+                'sizeLimit': quantity,
+                'medium': 'Memory'
+            },
+        }, {
+            'name': 'unbounded',
+            'emptyDir': {},
+        }, {
+            'name': 'null-emptydir',
+            'emptyDir': None,
+        }, {
+            'name': 'existing',
+            'persistentVolumeClaim': {
+                'claimName': 'existing-pvc'
+            },
+        }],
+    }
+    expected_spec = copy.deepcopy(spec)
+    expected_spec['volumes'][0]['emptyDir']['sizeLimit'] = expected
+    utils.normalize_pod_resource_quantities(spec)
+    assert spec == expected_spec
+    utils.normalize_pod_resource_quantities(spec)
+    assert spec == expected_spec
+
+
 def _assert_request_bearer_token(api_client: client.ApiClient,
                                  expected_token: str) -> None:
     # Exercise generated request authentication, not just auth_settings().
