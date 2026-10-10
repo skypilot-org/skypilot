@@ -310,7 +310,7 @@ CASES: Dict[str, Dict[str, Any]] = {
     'docker_all': {
         'k8s_enable_docker_all': True,
         'k8s_docker_dind_image': 'docker:29.3-dind',
-        'k8s_docker_buildkit_image': 'moby/buildkit:v0.28.0-rootless',
+        'k8s_docker_buildkit_image': 'moby/buildkit:v0.33.1-rootless',
         'k8s_docker_config_dict': {
             'mode': 'all',
             'cache_volume': None
@@ -319,7 +319,7 @@ CASES: Dict[str, Dict[str, Any]] = {
     'docker_build': {
         'k8s_enable_docker_build': True,
         'k8s_docker_dind_image': 'docker:29.3-dind',
-        'k8s_docker_buildkit_image': 'moby/buildkit:v0.28.0-rootless',
+        'k8s_docker_buildkit_image': 'moby/buildkit:v0.33.1-rootless',
         'k8s_docker_config_dict': {
             'mode': 'build',
             'cache_volume': 'buildkit-cache'
@@ -425,7 +425,7 @@ CASES: Dict[str, Dict[str, Any]] = {
         'volume_mount_rw_paths': ['/mnt/pvc'],
         'k8s_enable_docker_all': True,
         'k8s_docker_dind_image': 'docker:29.3-dind',
-        'k8s_docker_buildkit_image': 'moby/buildkit:v0.28.0-rootless',
+        'k8s_docker_buildkit_image': 'moby/buildkit:v0.33.1-rootless',
         'k8s_docker_config_dict': {
             'mode': 'all',
             'cache_volume': None
@@ -454,7 +454,7 @@ CASES: Dict[str, Dict[str, Any]] = {
         },
         'k8s_enable_docker_build': True,
         'k8s_docker_dind_image': 'docker:29.3-dind',
-        'k8s_docker_buildkit_image': 'moby/buildkit:v0.28.0-rootless',
+        'k8s_docker_buildkit_image': 'moby/buildkit:v0.33.1-rootless',
         'k8s_docker_config_dict': {
             'mode': 'build',
             'cache_volume': 'buildkit-cache'
