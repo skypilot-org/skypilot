@@ -2930,6 +2930,10 @@ def get_config_schema():
             'install_conda': {
                 'type': 'boolean',
             },
+            'health_check_timeout': {
+                'type': 'number',
+                'minimum': 0,
+            },
         }
     }
 
