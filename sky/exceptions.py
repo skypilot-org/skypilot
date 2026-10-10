@@ -649,10 +649,11 @@ class RequestCancelled(Exception):
 class ApiServerConnectionError(RuntimeError):
     """Raised when the API server cannot be connected."""
 
-    def __init__(self, server_url: str):
+    def __init__(self, server_url: str, reason: Optional[str] = None):
+        reason_str = f' ({reason})' if reason else ''
         super().__init__(
-            f'Could not connect to SkyPilot API server at {server_url}. '
-            f'Please ensure that the server is running. '
+            f'Could not connect to SkyPilot API server at {server_url}'
+            f'{reason_str}. Please ensure that the server is running. '
             f'Try: curl {server_url}/api/health')
 
 
