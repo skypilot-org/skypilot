@@ -3392,6 +3392,57 @@ class TestRunJobLoopTransientDbErrors:
         assert 1 not in manager.job_tasks
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(('status', 'download_error', 'expected_events'), [
+        (managed_job_state.ManagedJobStatus.RUNNING, False,
+         ['download', 'cleanup']),
+        (managed_job_state.ManagedJobStatus.PENDING, False, ['cleanup']),
+        (managed_job_state.ManagedJobStatus.RUNNING, True,
+         ['download', 'cleanup']),
+    ])
+    async def test_cancel_during_env_load_preserves_logs_before_cleanup(
+            self, manager, monkeypatch, tmp_path, status, download_error,
+            expected_events):
+        env_loading = asyncio.Event()
+        blocker = asyncio.Event()
+        real_to_thread = asyncio.to_thread
+        events = []
+
+        async def to_thread(func, *args, **kwargs):
+            if func is controller_module.file_content_utils.get_job_env_content:
+                env_loading.set()
+                await blocker.wait()
+            return await real_to_thread(func, *args, **kwargs)
+
+        def download_logs(*args, **kwargs):
+            del args, kwargs
+            events.append('download')
+            if download_error:
+                raise RuntimeError('download failed')
+
+        manager._download_logs_for_cancelled_job.side_effect = download_logs
+        manager._cleanup.side_effect = (
+            lambda *args, **kwargs: events.append('cleanup'))
+        managed_job_state.get_all_task_ids_statuses_async.return_value = [
+            (0, status)
+        ]
+        monkeypatch.setattr(asyncio, 'to_thread', to_thread)
+        monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                            str(tmp_path))
+
+        await manager.start_job(1)
+        await env_loading.wait()
+        task = manager.job_tasks[1]
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert events == expected_events
+        if status == managed_job_state.ManagedJobStatus.PENDING:
+            controller_module.JobController.assert_not_called()
+        assert 1 not in manager.job_tasks
+
+    @pytest.mark.asyncio
     async def test_completed_initialization_task_is_not_registered(
             self, manager, monkeypatch, tmp_path):
         finalized = asyncio.Event()

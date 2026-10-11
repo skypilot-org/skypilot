@@ -3755,8 +3755,11 @@ class ControllerManager:
             # down, we skip gracefully.
             if active_task_ids:
                 try:
-                    # Only active tasks require a constructed controller.
-                    assert controller is not None
+                    if controller is None:
+                        controller = JobController(job_id, self.starting,
+                                                   self._job_tasks_lock,
+                                                   self._starting_signal, pool,
+                                                   job_rank)
                     await self._download_logs_for_cancelled_job(
                         controller, job_id, active_task_ids, dag, pool)
                 except Exception as e:  # pylint: disable=broad-except
