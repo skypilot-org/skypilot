@@ -209,9 +209,10 @@ class PostgresLock(DistributedLock):
         # Session-scoped advisory locks hold one connection across their whole
         # lifetime, which is unsafe through a transaction-mode pooler (the
         # backend can change between statements). Use a direct engine so the
-        # lock connection bypasses any configured pooler; when none is
-        # configured this is the same engine global_user_state uses.
-        engine = db_utils.get_engine(None, direct=True)
+        # lock connection bypasses any configured pooler. Keep it out of the
+        # state pool too: long-lived lock holders (including lock waiters)
+        # must not consume the connections needed for metadata under the lock.
+        engine = db_utils.get_engine(None, direct=True, no_pool=True)
         if engine.dialect.name != db_utils.SQLAlchemyDialect.POSTGRESQL.value:
             raise ValueError('PostgresLock requires PostgreSQL database. '
                              f'Current dialect: {engine.dialect.name}')
