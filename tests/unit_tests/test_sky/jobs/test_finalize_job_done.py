@@ -242,6 +242,91 @@ class TestFinalizeJobDone:
         assert _schedule_state(job_id) == ManagedJobScheduleState.DONE
 
 
+class TestFailJobControllerInitialization:
+
+    @staticmethod
+    def _claim(job_id: int, pid: int = 1234) -> dict:
+        return {
+            'job_id': job_id,
+            'controller_pid': pid,
+            'controller_pid_started_at': 1000.0,
+            'schedule_state': ManagedJobScheduleState.LAUNCHING,
+        }
+
+    def test_exact_claim_failed_without_clearing_cluster(
+            self, _mock_managed_jobs_db_conn):
+        job_id = _seed_job([(ManagedJobStatus.RUNNING, None)],
+                           ManagedJobScheduleState.LAUNCHING,
+                           submitted_at=900.0)
+        _set_job_info(job_id,
+                      controller_pid=1234,
+                      controller_pid_started_at=1000.0,
+                      current_cluster_name='live-cluster')
+
+        assert state.fail_job_controller_initialization(
+            self._claim(job_id), 'context restore failed; manual cleanup')
+
+        (status, end_at), = _task_rows(job_id)
+        assert status == ManagedJobStatus.FAILED_CONTROLLER
+        assert end_at is not None
+        assert _schedule_state(job_id) == ManagedJobScheduleState.DONE
+        assert _event_statuses(job_id) == [ManagedJobStatus.FAILED_CONTROLLER]
+        engine = state._db_manager.get_engine()
+        with orm.Session(engine) as session:
+            cluster_name = session.execute(
+                sqlalchemy.select(
+                    state.job_info_table.c.current_cluster_name).where(
+                        state.job_info_table.c.spot_job_id ==
+                        job_id)).fetchone()[0]
+        assert cluster_name == 'live-cluster'
+
+    def test_changed_owner_is_untouched(self, _mock_managed_jobs_db_conn):
+        job_id = _seed_job([(ManagedJobStatus.PENDING, None)],
+                           ManagedJobScheduleState.LAUNCHING)
+        _set_job_info(job_id,
+                      controller_pid=5678,
+                      controller_pid_started_at=2000.0)
+
+        assert not state.fail_job_controller_initialization(
+            self._claim(job_id), 'context restore failed; manual cleanup')
+
+        assert _task_rows(job_id) == [(ManagedJobStatus.PENDING, None)]
+        assert _schedule_state(job_id) == ManagedJobScheduleState.LAUNCHING
+        assert _event_statuses(job_id) == []
+
+    def test_terminal_task_keeps_status_and_event_history(
+            self, _mock_managed_jobs_db_conn):
+        end_at = 1234.5
+        job_id = _seed_job([(ManagedJobStatus.SUCCEEDED, end_at)],
+                           ManagedJobScheduleState.LAUNCHING)
+        _set_job_info(job_id,
+                      controller_pid=1234,
+                      controller_pid_started_at=1000.0)
+
+        assert state.fail_job_controller_initialization(
+            self._claim(job_id), 'context restore failed; manual cleanup')
+
+        assert _task_rows(job_id) == [(ManagedJobStatus.SUCCEEDED, end_at)]
+        assert _schedule_state(job_id) == ManagedJobScheduleState.DONE
+        assert _event_statuses(job_id) == []
+
+    def test_already_done_exact_owner_is_untouched(self,
+                                                   _mock_managed_jobs_db_conn):
+        end_at = 1234.5
+        job_id = _seed_job([(ManagedJobStatus.SUCCEEDED, end_at)],
+                           ManagedJobScheduleState.DONE)
+        _set_job_info(job_id,
+                      controller_pid=1234,
+                      controller_pid_started_at=1000.0)
+
+        assert not state.fail_job_controller_initialization(
+            self._claim(job_id), 'context restore failed; manual cleanup')
+
+        assert _task_rows(job_id) == [(ManagedJobStatus.SUCCEEDED, end_at)]
+        assert _schedule_state(job_id) == ManagedJobScheduleState.DONE
+        assert _event_statuses(job_id) == []
+
+
 class TestSetPendingCancelled:
     """set_pending_cancelled: PENDING cancel reaches CANCELLED+DONE atomically.
     """
@@ -284,8 +369,6 @@ class TestSetPendingCancelled:
 
     def test_unowned_launching_job_cancelled_and_done(
             self, _mock_managed_jobs_db_conn):
-        # A failed controller initialization can leave a LAUNCHING job with
-        # neither controller identity nor evidence that any task launched.
         job_id = self._seed(ManagedJobScheduleState.LAUNCHING,
                             [ManagedJobStatus.PENDING])
 
@@ -309,6 +392,24 @@ class TestSetPendingCancelled:
         assert _task_rows(job_id) == [(ManagedJobStatus.PENDING, None)]
         assert _schedule_state(job_id) == ManagedJobScheduleState.LAUNCHING
         assert _event_statuses(job_id) == []
+
+    def test_owned_launching_job_cancelled_by_matching_controller(
+            self, _mock_managed_jobs_db_conn):
+        job_id = self._seed(ManagedJobScheduleState.LAUNCHING,
+                            [ManagedJobStatus.PENDING])
+        _set_job_info(job_id,
+                      controller_pid=1234,
+                      controller_pid_started_at=1000.0)
+
+        assert state.set_pending_cancelled(job_id,
+                                           controller_pid=1234,
+                                           controller_pid_started_at=1000.0)
+
+        (status, end_at), = _task_rows(job_id)
+        assert status == ManagedJobStatus.CANCELLED
+        assert end_at is not None
+        assert _schedule_state(job_id) == ManagedJobScheduleState.DONE
+        assert _event_statuses(job_id) == [ManagedJobStatus.CANCELLED]
 
     def test_launching_job_with_cluster_untouched(self,
                                                   _mock_managed_jobs_db_conn):
