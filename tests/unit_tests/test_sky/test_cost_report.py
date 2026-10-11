@@ -4,13 +4,24 @@ import unittest
 from unittest import mock
 import weakref
 
+import pytest
+import sqlalchemy
+
 from sky import core
+from sky import global_user_state
+from sky import models
 from sky import resources as resources_lib
+from sky import skypilot_config
 from sky.server.requests import payloads
 from sky.server.requests.serializers import encoders
 from sky.skylet import constants
+from sky.users import permission
+from sky.utils import annotations
+from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import status_lib
 from sky.utils.cli_utils import status_utils
+from sky.utils.db import db_utils
 
 
 def _history_record(index, launched):
@@ -44,7 +55,8 @@ class TestCostReportCore(unittest.TestCase):
                 abbreviate_response=False,
                 cluster_hashes=None,
                 cluster_names=None,
-                exclude_managed_clusters=False)
+                exclude_managed_clusters=False,
+                workspaces_filter=None)
             self.assertEqual(result, [])
 
     def test_cost_report_custom_days(self):
@@ -61,7 +73,8 @@ class TestCostReportCore(unittest.TestCase):
                 abbreviate_response=False,
                 cluster_hashes=None,
                 cluster_names=None,
-                exclude_managed_clusters=False)
+                exclude_managed_clusters=False,
+                workspaces_filter=None)
             self.assertEqual(result, [])
 
     def test_cost_report_none_days(self):
@@ -78,7 +91,8 @@ class TestCostReportCore(unittest.TestCase):
                 abbreviate_response=False,
                 cluster_hashes=None,
                 cluster_names=None,
-                exclude_managed_clusters=False)
+                exclude_managed_clusters=False,
+                workspaces_filter=None)
             self.assertEqual(result, [])
 
     def test_cost_report_with_cluster_names_filter(self):
@@ -99,7 +113,8 @@ class TestCostReportCore(unittest.TestCase):
                 abbreviate_response=False,
                 cluster_hashes=None,
                 cluster_names=['my-cluster'],
-                exclude_managed_clusters=False)
+                exclude_managed_clusters=False,
+                workspaces_filter=None)
 
     def test_cost_report_with_both_hash_and_name_filters(self):
         """Test cost_report forwards both filters when both are given."""
@@ -117,7 +132,8 @@ class TestCostReportCore(unittest.TestCase):
                 abbreviate_response=False,
                 cluster_hashes=['abc'],
                 cluster_names=['my-cluster'],
-                exclude_managed_clusters=False)
+                exclude_managed_clusters=False,
+                workspaces_filter=None)
 
     def test_cost_report_with_pickle_errors(self):
         """Test cost_report handles pickle errors gracefully when loading historical data."""
@@ -138,7 +154,8 @@ class TestCostReportCore(unittest.TestCase):
                 abbreviate_response=False,
                 cluster_hashes=None,
                 cluster_names=None,
-                exclude_managed_clusters=False)
+                exclude_managed_clusters=False,
+                workspaces_filter=None)
 
     def test_cost_report_encodes_resources_for_the_response(self):
         """Full reports carry each row's resources already encoded."""
@@ -604,6 +621,167 @@ class TestCostReportCLI(unittest.TestCase):
 
         # Verify cost_report was called
         mock_sdk_cost_report.assert_called_once_with(days=7)
+
+
+class _MinimalHandle:
+    launched_resources = None
+
+
+@pytest.fixture
+def two_workspaces(tmp_path, monkeypatch):
+    """alice is a member of private ws-a, bob of private ws-b, root is admin.
+
+    Each has a live cluster in their workspace with a creation YAML and one
+    event. Yields a function that sets the calling user.
+    """
+    monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, str(tmp_path))
+    monkeypatch.setattr(
+        global_user_state,
+        '_db_manager',
+        db_utils.DatabaseManager(
+            'state',
+            global_user_state.create_table,
+            post_init_fn=lambda _: global_user_state._sqlite_supports_returning(
+            ),
+        ),
+    )
+    config = config_utils.Config({
+        'workspaces': {
+            'ws-a': {
+                'private': True,
+                'allowed_users': ['alice']
+            },
+            'ws-b': {
+                'private': True,
+                'allowed_users': ['bob']
+            },
+        }
+    })
+    with skypilot_config.replace_skypilot_config_in_process(config):
+        caller = {'id': 'alice'}
+        monkeypatch.setattr(common_utils, 'get_current_user',
+                            lambda: models.User(id=caller['id']))
+        for user, workspace in [('alice', 'ws-a'), ('bob', 'ws-b')]:
+            caller['id'] = user
+            _launch(f'{user}-cluster', workspace)
+
+        monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, 'true')
+        monkeypatch.setattr(
+            permission.permission_service, 'get_user_roles',
+            lambda user_id: ['admin'] if user_id == 'root' else ['user'])
+        policy = [['alice', 'ws-a', '*'], ['bob', 'ws-b', '*'],
+                  ['*', 'default', '*']]
+        monkeypatch.setattr(permission.permission_service, 'enforcer',
+                            mock.Mock(get_policy=lambda: policy))
+
+        def set_caller(user_id):
+            caller['id'] = user_id
+            annotations.clear_request_level_cache()
+
+        set_caller('alice')
+        yield set_caller
+    annotations.clear_request_level_cache()
+
+
+def _launch(name, workspace):
+    with mock.patch.object(skypilot_config,
+                           'get_active_workspace',
+                           return_value=workspace):
+        global_user_state.add_or_update_cluster(
+            cluster_name=name,
+            cluster_handle=_MinimalHandle(),
+            requested_resources=set(),
+            ready=True,
+            task_config={'run': f'echo {name}'})
+    global_user_state.add_cluster_event(
+        name, status_lib.ClusterStatus.UP, f'{name} is up',
+        global_user_state.ClusterEventType.STATUS_CHANGE)
+
+
+def _set_history_workspace(cluster_hash, workspace):
+    with global_user_state._db_manager.get_engine().begin() as conn:
+        conn.execute(
+            sqlalchemy.update(global_user_state.cluster_history_table).where(
+                global_user_state.cluster_history_table.c.cluster_hash ==
+                cluster_hash).values(workspace=workspace))
+
+
+def _names(**kwargs):
+    return sorted(r['name'] for r in core.cost_report(**kwargs))
+
+
+def test_history_lists_only_readable_workspaces(two_workspaces):
+    assert _names() == ['alice-cluster']
+    two_workspaces('bob')
+    assert _names() == ['bob-cluster']
+
+
+def test_history_of_foreign_cluster_is_not_reachable_by_name_or_hash(
+        two_workspaces):
+    bob_hash = global_user_state.get_cluster_hash('bob-cluster')
+    assert core.cost_report(cluster_names=['bob-cluster']) == []
+    assert core.cost_report(cluster_hashes=[bob_hash]) == []
+
+    own = core.cost_report(cluster_names=['alice-cluster'])
+    assert 'echo alice-cluster' in own[0]['last_creation_yaml']
+
+
+@pytest.mark.parametrize('history_workspace', [None, ''])
+def test_history_row_without_workspace_is_hidden(two_workspaces,
+                                                 history_workspace):
+    """Not treated as 'default', which every user can read."""
+    cluster_hash = global_user_state.get_cluster_hash('alice-cluster')
+    _set_history_workspace(cluster_hash, history_workspace)
+    # The record falls back to the live cluster's workspace...
+    assert _names() == ['alice-cluster']
+    # ...and with no live cluster there is nothing to fall back to.
+    global_user_state.remove_cluster('alice-cluster', terminate=True)
+    assert _names() == []
+
+
+def _launch_in_deleted_workspace():
+    _launch('old-cluster', 'ws-deleted')
+    global_user_state.remove_cluster('old-cluster', terminate=True)
+
+
+def test_admin_sees_history_of_deleted_workspace(two_workspaces):
+    _launch_in_deleted_workspace()
+    two_workspaces('root')
+    assert _names() == ['alice-cluster', 'bob-cluster', 'old-cluster']
+
+
+def test_history_is_unrestricted_off_the_api_server(two_workspaces,
+                                                    monkeypatch):
+    _launch_in_deleted_workspace()
+    monkeypatch.delenv(constants.ENV_VAR_IS_SKYPILOT_SERVER)
+    assert _names() == ['alice-cluster', 'bob-cluster', 'old-cluster']
+
+
+def test_history_of_read_only_workspace_is_visible(two_workspaces):
+    config = skypilot_config.to_dict()
+    config.set_nested(('workspaces', 'ws-b', 'read_access'), 'all')
+    with skypilot_config.replace_skypilot_config_in_process(config):
+        annotations.clear_request_level_cache()
+        assert _names() == ['alice-cluster', 'bob-cluster']
+
+
+def test_cluster_events_of_foreign_cluster_look_nonexistent(two_workspaces):
+    bob_hash = global_user_state.get_cluster_hash('bob-cluster')
+    assert core.get_cluster_events(cluster_hash=bob_hash) == []
+    assert core.get_cluster_events(
+        cluster_hash=bob_hash) == core.get_cluster_events(
+            cluster_hash='no-such-hash')
+    with pytest.raises(ValueError) as foreign:
+        core.get_cluster_events(cluster_name='bob-cluster')
+    assert str(foreign.value) == 'Hash for cluster bob-cluster not found.'
+
+    assert core.get_cluster_events(cluster_name='alice-cluster') == [
+        'alice-cluster is up'
+    ]
+    two_workspaces('root')
+    assert core.get_cluster_events(cluster_hash=bob_hash) == [
+        'bob-cluster is up'
+    ]
 
 
 if __name__ == '__main__':
