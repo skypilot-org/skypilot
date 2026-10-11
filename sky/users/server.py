@@ -128,15 +128,29 @@ def get_user_type(user: models.User) -> str:
     return models.UserType.LEGACY.value
 
 
+def _visible_user_ids(auth_user: Optional[models.User]) -> Optional[Set[str]]:
+    """User IDs the caller may see in the user list, or None for everyone.
+
+    No authenticated user is treated as admin, as in `GET /users/role`.
+    """
+    if auth_user is None or _caller_is_admin(auth_user.id):
+        return None
+    return permission.permission_service.get_users_sharing_private_workspaces(
+        auth_user.id)
+
+
 # All handlers in user handler are sync to get fastAPI run it in a
 # ThreadPoolExecutor to avoid blocking the async event loop.
 # TODO(aylei): make these async once we have the global_user_state async
 # support.
 @router.get('')
-def users() -> List[Dict[str, Any]]:
-    """Gets all users."""
+def users(request: fastapi.Request) -> List[Dict[str, Any]]:
+    """Gets the users visible to the caller."""
     all_users = []
     user_list = global_user_state.get_all_users()
+    visible_user_ids = _visible_user_ids(request.state.auth_user)
+    if visible_user_ids is not None:
+        user_list = [user for user in user_list if user.id in visible_user_ids]
 
     users_to_role = {}
     for role in rbac.get_supported_roles():
@@ -832,14 +846,24 @@ def _user_lock(user_id: str) -> Generator[None, None, None]:
 @router.get('/service-account-tokens')
 def get_service_account_tokens(
         request: fastapi.Request) -> List[Dict[str, Any]]:
-    """Get service account tokens. All users can see all tokens."""
+    """Get service account tokens.
+
+    Admins see all tokens. Other users see the tokens they created and those
+    whose service account they can see in the user list.
+    """
     auth_user = request.state.auth_user
     if auth_user is None:
         raise fastapi.HTTPException(status_code=401,
                                     detail='Authentication required')
 
-    # All authenticated users can see all tokens
     tokens = global_user_state.get_all_service_account_tokens()
+    visible_user_ids = _visible_user_ids(auth_user)
+    if visible_user_ids is not None:
+        tokens = [
+            token for token in tokens
+            if token['creator_user_hash'] == auth_user.id or
+            token['service_account_user_id'] in visible_user_ids
+        ]
 
     result = []
     for token in tokens:
