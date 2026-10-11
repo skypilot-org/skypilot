@@ -25,7 +25,7 @@ sky.server.versions module for more details.
 """
 import os
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Annotated, Any, Dict, List, Optional, Tuple, Union
 
 from sky import admin_policy
 from sky import serve
@@ -1045,10 +1045,19 @@ class CostReportBody(RequestBody):
     include_deleted: Optional[bool] = None
 
 
+# Each cluster hash is a short digest. Bounding the count and the per-hash
+# length keeps a single request from expanding the soft-delete UPDATE's SQL
+# IN() clause without limit; the dashboard updates one row per action, so
+# both bounds are generous.
+_ClusterHash = Annotated[str, pydantic.StringConstraints(max_length=64)]
+_SOFT_DELETE_MAX_HASHES = 100
+
+
 class ClusterHistorySoftDeleteBody(RequestBody):
     """The request body for the cluster history soft delete endpoint."""
     # The cluster history rows (by cluster_hash) to update.
-    cluster_hashes: List[str]
+    cluster_hashes: List[_ClusterHash] = pydantic.Field(
+        max_length=_SOFT_DELETE_MAX_HASHES)
     # True to hide the rows from history listings, False to restore them.
     deleted: bool = True
 

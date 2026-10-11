@@ -217,9 +217,11 @@ def get_cluster_dump_data(cluster_name: str) -> List[Tuple[str, Any]]:
     data: List[Tuple[str, Any]] = []
     cluster_record = global_user_state.get_cluster_from_name(cluster_name)
     # A single name can map to multiple history records when the name is
-    # reused across launches.
+    # reused across launches. include_deleted=True: a dump is for
+    # troubleshooting, so it must see soft-deleted rows too -- hiding a
+    # cluster from the history view should not blank its debug dump.
     history_records = global_user_state.get_clusters_from_history(
-        cluster_names=[cluster_name])
+        cluster_names=[cluster_name], include_deleted=True)
     if cluster_record is not None:
         data.append(
             ('cluster_info.json', serialize_cluster_record(cluster_record)))
