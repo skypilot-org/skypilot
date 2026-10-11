@@ -102,6 +102,15 @@ def _event_statuses(job_id: int) -> List[ManagedJobStatus]:
     return [event['new_status'] for event in state.get_job_events(job_id)]
 
 
+def _set_job_info(job_id: int, **values) -> None:
+    engine = state._db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(
+            sqlalchemy.update(state.job_info_table).where(
+                state.job_info_table.c.spot_job_id == job_id).values(values))
+        session.commit()
+
+
 class TestFinalizeJobDone:
     """finalize_job_done_async: last status write + DONE in one transaction."""
 
@@ -273,11 +282,51 @@ class TestSetPendingCancelled:
         assert _schedule_state(job_id) == ManagedJobScheduleState.INACTIVE
         assert _event_statuses(job_id) == [ManagedJobStatus.CANCELLED]
 
-    def test_claimed_job_untouched(self, _mock_managed_jobs_db_conn):
-        # A controller claimed the job (LAUNCHING) between the caller's
-        # status check and this call: the short-circuit must lose cleanly.
+    def test_unowned_launching_job_cancelled_and_done(
+            self, _mock_managed_jobs_db_conn):
+        # A failed controller initialization can leave a LAUNCHING job with
+        # neither controller identity nor evidence that any task launched.
         job_id = self._seed(ManagedJobScheduleState.LAUNCHING,
                             [ManagedJobStatus.PENDING])
+
+        assert state.set_pending_cancelled(job_id)
+
+        (status, end_at), = _task_rows(job_id)
+        assert status == ManagedJobStatus.CANCELLED
+        assert end_at is not None
+        assert _schedule_state(job_id) == ManagedJobScheduleState.DONE
+        assert _event_statuses(job_id) == [ManagedJobStatus.CANCELLED]
+
+    def test_owned_launching_job_untouched(self, _mock_managed_jobs_db_conn):
+        job_id = self._seed(ManagedJobScheduleState.LAUNCHING,
+                            [ManagedJobStatus.PENDING])
+        _set_job_info(job_id,
+                      controller_pid=1234,
+                      controller_pid_started_at=1000.0)
+
+        assert not state.set_pending_cancelled(job_id)
+
+        assert _task_rows(job_id) == [(ManagedJobStatus.PENDING, None)]
+        assert _schedule_state(job_id) == ManagedJobScheduleState.LAUNCHING
+        assert _event_statuses(job_id) == []
+
+    def test_launching_job_with_cluster_untouched(self,
+                                                  _mock_managed_jobs_db_conn):
+        job_id = self._seed(ManagedJobScheduleState.LAUNCHING,
+                            [ManagedJobStatus.PENDING])
+        _set_job_info(job_id, current_cluster_name='managed-job-cluster')
+
+        assert not state.set_pending_cancelled(job_id)
+
+        assert _task_rows(job_id) == [(ManagedJobStatus.PENDING, None)]
+        assert _schedule_state(job_id) == ManagedJobScheduleState.LAUNCHING
+        assert _event_statuses(job_id) == []
+
+    def test_launching_job_after_submission_rolled_back(
+            self, _mock_managed_jobs_db_conn):
+        job_id = _seed_job([(ManagedJobStatus.PENDING, None)],
+                           ManagedJobScheduleState.LAUNCHING,
+                           submitted_at=1000.0)
 
         assert not state.set_pending_cancelled(job_id)
 
