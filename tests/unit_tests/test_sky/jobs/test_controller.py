@@ -1914,6 +1914,165 @@ class TestTransientJobStatusRecoveryWindow:
     class _StopLoop(Exception):
         """Sentinel to break the otherwise-infinite monitoring loop."""
 
+    def _db_timeout_monitor(self, num_nodes=1):
+        instance = MagicMock()
+        instance._job_id = 1
+        instance._pool = None
+        instance._backend = MagicMock()
+        instance._cleanup_cluster = AsyncMock()
+        instance._update_live_log_links = AsyncMock(return_value=True)
+        task = MagicMock(name='task')
+        task.num_nodes = num_nodes
+        executor = MagicMock()
+        executor.recover = AsyncMock()
+        return instance, task, executor
+
+    @pytest.mark.asyncio
+    async def test_db_timeout_fetching_status_keeps_current_run(self):
+        instance, task, executor = self._db_timeout_monitor()
+        get_status = AsyncMock(side_effect=[
+            sqlalchemy.exc.TimeoutError('connection pool exhausted'),
+            (job_lib.JobStatus.SUCCEEDED, None),
+        ])
+        with patch.object(managed_job_utils, 'get_job_status', get_status), \
+             patch.object(managed_job_utils, 'try_to_get_job_end_time',
+                          return_value=123.45), \
+             patch.object(controller_module.backend_utils,
+                          'async_check_network_connection', new=AsyncMock()), \
+             patch.object(controller_module.backend_utils, 'get_clusters',
+                          return_value=[]), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=False), \
+             patch.object(managed_job_state, 'set_succeeded_async',
+                          new=AsyncMock()), \
+             patch.object(controller_module.asyncio, 'sleep', new=AsyncMock()):
+            assert await JobController._monitor_one_task_impl(
+                instance, 0, task, 'cluster', executor,
+                managed_job_utils.JobStatusLogger(), AsyncMock())
+
+        assert get_status.await_count == 2
+        executor.recover.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_started_state_timeout_does_not_launch_twice(self):
+        controller = JobController.__new__(JobController)
+        controller._job_id = 1
+        controller._pool = None
+        controller._backend = MagicMock()
+        controller._backend.run_timestamp = 'sky-2026-01-01-00-00-00-000000'
+        controller.starting = {1}
+        controller.starting_lock = asyncio.Lock()
+        controller.starting_signal = asyncio.Condition(controller.starting_lock)
+        task = MagicMock()
+        task.name = 'task'
+        task.metadata = {}
+        task.run = 'echo hi'
+        task.envs = {constants.TASK_ID_ENV_VAR: 'task-id'}
+        task.resources = None
+        executor = MagicMock()
+        executor.launch = AsyncMock(return_value=123.45)
+        executor.monitor_task = AsyncMock(return_value=True)
+        set_started = AsyncMock(side_effect=[
+            sqlalchemy.exc.TimeoutError('connection pool exhausted'), None
+        ])
+
+        with patch.object(controller_module, '_add_k8s_annotations'), \
+             patch.object(managed_job_state,
+                          'get_job_status_with_task_id_async',
+                          new=AsyncMock(return_value=
+                                        managed_job_state.ManagedJobStatus.PENDING)), \
+             patch.object(managed_job_utils, 'event_callback_func',
+                          return_value=AsyncMock()), \
+             patch.object(managed_job_utils,
+                          'generate_managed_job_cluster_name',
+                          return_value='cluster'), \
+             patch.object(managed_job_state, 'get_file_mounts_blob_id',
+                          return_value=None), \
+             patch.object(controller_module.recovery_strategy.StrategyExecutor,
+                          'make', return_value=executor), \
+             patch.object(controller_module.backend_utils,
+                          'get_timestamp_from_run_timestamp', return_value=1.0), \
+             patch.object(controller_module.backend_utils,
+                          'get_task_resources_str', return_value='1x CPU'), \
+             patch.object(controller_module, '_build_task_specs',
+                          return_value={}), \
+             patch.object(managed_job_state, 'set_starting_async',
+                          new=AsyncMock()), \
+             patch.object(managed_job_state, 'set_started_async', set_started), \
+             patch.object(controller_module.asyncio, 'sleep', new=AsyncMock()):
+            assert await controller._run_one_task(0, task)
+
+        executor.launch.assert_awaited_once()
+        assert set_started.await_count == 2
+        executor.monitor_task.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('failure_stage', ['end_time', 'state'])
+    async def test_confirmed_success_retries_only_terminal_bookkeeping(
+            self, failure_stage):
+        instance, task, executor = self._db_timeout_monitor()
+        pool_timeout = sqlalchemy.exc.TimeoutError('connection pool exhausted')
+        get_status = AsyncMock(side_effect=[(job_lib.JobStatus.SUCCEEDED,
+                                             None), (None, None)])
+        get_end_time = MagicMock(return_value=123.45)
+        set_succeeded = AsyncMock()
+        if failure_stage == 'end_time':
+            get_end_time.side_effect = [pool_timeout, 123.45]
+        else:
+            set_succeeded.side_effect = [pool_timeout, None]
+
+        with patch.object(managed_job_utils, 'get_job_status', get_status), \
+             patch.object(managed_job_utils, 'try_to_get_job_end_time',
+                          get_end_time), \
+             patch.object(controller_module.backend_utils,
+                          'async_check_network_connection', new=AsyncMock()), \
+             patch.object(controller_module.backend_utils, 'get_clusters',
+                          return_value=[]), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=False), \
+             patch.object(managed_job_state, 'set_succeeded_async',
+                          set_succeeded), \
+             patch.object(controller_module.asyncio, 'sleep', new=AsyncMock()):
+            assert await JobController._monitor_one_task_impl(
+                instance, 0, task, 'cluster', executor,
+                managed_job_utils.JobStatusLogger(), AsyncMock())
+
+        assert get_status.await_count == 1
+        assert set_succeeded.await_count == (1 if failure_stage == 'end_time'
+                                             else 2)
+        executor.recover.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_db_timeout_refreshing_multinode_cluster_keeps_current_run(
+            self):
+        instance, task, executor = self._db_timeout_monitor(num_nodes=2)
+        get_status = AsyncMock(side_effect=[
+            (job_lib.JobStatus.RUNNING, None),
+            (job_lib.JobStatus.SUCCEEDED, None),
+        ])
+        refresh = MagicMock(side_effect=sqlalchemy.exc.TimeoutError(
+            'connection pool exhausted'))
+        with patch.object(managed_job_utils, 'get_job_status', get_status), \
+             patch.object(managed_job_utils, 'try_to_get_job_end_time',
+                          return_value=123.45), \
+             patch.object(controller_module.backend_utils,
+                          'async_check_network_connection', new=AsyncMock()), \
+             patch.object(controller_module.backend_utils,
+                          'refresh_cluster_status_handle', refresh), \
+             patch.object(controller_module.backend_utils, 'get_clusters',
+                          return_value=[]), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=False), \
+             patch.object(managed_job_state, 'set_succeeded_async',
+                          new=AsyncMock()), \
+             patch.object(controller_module.asyncio, 'sleep', new=AsyncMock()):
+            assert await JobController._monitor_one_task_impl(
+                instance, 0, task, 'cluster', executor,
+                managed_job_utils.JobStatusLogger(), AsyncMock())
+
+        assert get_status.await_count == 2
+        executor.recover.assert_not_awaited()
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize('num_nodes', [1, 2])
     async def test_runtime_cancellation_uses_controller_cleanup(
