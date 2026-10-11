@@ -219,7 +219,8 @@ class TestPostgresLock:
             drivers.append(driver)
             return driver
 
-        def make_engine(_uri, **kwargs):
+        def make_engine(uri, **kwargs):
+            assert str(uri) == 'postgresql+psycopg2://test/db'
             pool_class = kwargs['poolclass']
             pool_kwargs = {}
             if pool_class is sqlalchemy.pool.QueuePool:
