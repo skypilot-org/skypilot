@@ -1285,9 +1285,14 @@ export function ManagedJobsTable({
     ]).then(([usersData, workspacesData]) => {
       setValueList((prev) => ({
         ...prev,
+        // Union with the jobs' own owners: the user list is scoped to the
+        // caller's private workspaces, so it can miss owners of visible jobs.
         user: usersData
           ? [
-              ...new Set(usersData.map((u) => u.username).filter(Boolean)),
+              ...new Set([
+                ...users,
+                ...usersData.map((u) => u.username).filter(Boolean),
+              ]),
             ].sort()
           : prev.user,
         workspace: workspacesData
