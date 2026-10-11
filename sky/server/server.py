@@ -1326,6 +1326,14 @@ app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(GracefulShutdownMiddleware)
 app.add_middleware(PathCleanMiddleware)
 app.add_middleware(CacheControlStaticMiddleware)
+# Optional fastapi-guard security middleware (off unless
+# SKYPILOT_GUARD_ENABLED is set). Added before CORSMiddleware so the guard
+# nests inside it (last-added is outermost) and guard-generated 403/429
+# responses still leave with CORS headers, and outside the auth middlewares
+# below so blocked requests never reach the bcrypt/DB auth path. The
+# security-headers middleware added later still wraps it, so screened
+# responses keep those headers too.
+attach_guard(app)
 app.add_middleware(
     cors.CORSMiddleware,
     # TODO(zhwu): in production deployment, we should restrict the allowed
@@ -1360,11 +1368,6 @@ app.add_middleware(RequestIDMiddleware)
 # added to all of them. The metrics middleware below is registered outside it
 # but only observes; it neither adds nor removes headers.
 app.add_middleware(SecurityHeadersMiddleware)
-# Optional fastapi-guard security middleware (off unless
-# SKYPILOT_GUARD_ENABLED is set). Added inside SecurityHeaders so screened
-# requests are still headered, and outside the auth middlewares so blocked
-# requests never reach the bcrypt/DB auth path.
-attach_guard(app)
 
 # Load plugins after all the middlewares are added, to keep the core
 # middleware stack intact if a plugin adds new middlewares.

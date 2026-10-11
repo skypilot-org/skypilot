@@ -24,7 +24,11 @@ if TYPE_CHECKING:
     from guard import SecurityConfig
 
 DEFAULT_EXCLUDED_PATHS = '/api/health,/docs,/redoc,/openapi.json'
-DEFAULT_TRUSTED_PROXIES = '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16'
+# Empty by default on purpose: API servers are often reached from
+# private-network peers, and trusting private-range proxies would let any
+# of them spoof X-Forwarded-For past the blocklist and rate limits. Behind
+# a reverse proxy, list it in SKYPILOT_GUARD_TRUSTED_PROXIES.
+DEFAULT_TRUSTED_PROXIES = ''
 
 
 def _csv(raw):
@@ -42,9 +46,18 @@ def _env_int(name, default):
     return int(raw)
 
 
-def _env_bool(name):
-    # type: (str) -> bool
-    return os.environ.get(name, '').strip().lower() in ('1', 'true', 'yes')
+def _env_bool(name, default=False):
+    # type: (str, bool) -> bool
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in ('1', 'true', 'yes'):
+        return True
+    if normalized in ('', '0', 'false', 'no', 'off'):
+        return False
+    raise ValueError('%s must be a boolean (1/true/yes or 0/false/no/off), '
+                     'got %r' % (name, raw))
 
 
 def _build_guard_config():
@@ -60,6 +73,17 @@ def _build_guard_config():
         'auto_ban_threshold': _env_int('SKYPILOT_GUARD_AUTO_BAN_THRESHOLD', 10),
         'auto_ban_duration': _env_int('SKYPILOT_GUARD_AUTO_BAN_DURATION', 300),
         'enable_penetration_detection': True,
+        # Repeated rate-limit violations feed the ban engine by default (the
+        # advertised auto-ban behavior); set
+        # SKYPILOT_GUARD_RATE_LIMIT_AUTO_BAN=0 for 429-only enforcement.
+        'enable_rate_limit_auto_ban': _env_bool(
+            'SKYPILOT_GUARD_RATE_LIMIT_AUTO_BAN', True),
+        # Request bodies here are data (DAG specs, request payloads), not
+        # commands the server executes: signature-scanning them
+        # false-positives on ordinary content. URL, query, and header
+        # screening stays on; body scanning is opt-in via
+        # SKYPILOT_GUARD_SCAN_BODY.
+        'detection_scan_body': _env_bool('SKYPILOT_GUARD_SCAN_BODY'),
         # In-memory state unless a Redis URL is configured: never implicitly
         # depend on a Redis server being reachable. Local `sky api start` is
         # single-process; `sky api start --deploy` runs one worker per CPU,
@@ -69,9 +93,8 @@ def _build_guard_config():
         'blacklist': _csv(os.environ.get('SKYPILOT_GUARD_BLOCKED_IPS')),
         'blocked_user_agents': list(
             _csv(os.environ.get('SKYPILOT_GUARD_BLOCKED_USER_AGENTS'))),
-        'trusted_proxies': _csv(
-            os.environ.get('SKYPILOT_GUARD_TRUSTED_PROXIES'))
-                           or _csv(DEFAULT_TRUSTED_PROXIES),
+        'trusted_proxies': _csv(os.environ.get('SKYPILOT_GUARD_TRUSTED_PROXIES')
+                               ),
         'trusted_proxy_depth': _env_int('SKYPILOT_GUARD_TRUSTED_PROXY_DEPTH',
                                         1),
         'exclude_paths': list(

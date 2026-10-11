@@ -123,6 +123,33 @@ class TestGuardIntegration(unittest.TestCase):
         config = _build_guard_config()
         self.assertFalse(config.enable_redis)
 
+    def test_zero_trust_proxy_default(self):
+        from sky.server.guard_integration import _build_guard_config
+
+        os.environ['SKYPILOT_GUARD_ENABLED'] = 'true'
+        config = _build_guard_config()
+        # No proxy is trusted unless explicitly listed: a private-network
+        # peer must not be able to spoof X-Forwarded-For.
+        self.assertEqual(config.trusted_proxies, ())
+        # Bodies are data here (DAG specs, request payloads): signature
+        # scanning of bodies is opt-in.
+        self.assertFalse(config.detection_scan_body)
+        # Repeated rate-limit violations feed the ban engine by default.
+        self.assertTrue(config.enable_rate_limit_auto_ban)
+
+        os.environ['SKYPILOT_GUARD_TRUSTED_PROXIES'] = '10.0.0.1,10.0.0.2'
+        config = _build_guard_config()
+        self.assertEqual(config.trusted_proxies, ('10.0.0.1', '10.0.0.2'))
+
+    def test_invalid_boolean_fails_loudly(self):
+        import fastapi
+
+        from sky.server.guard_integration import attach_guard
+
+        os.environ['SKYPILOT_GUARD_ENABLED'] = 'tru'
+        with self.assertRaisesRegex(ValueError, 'SKYPILOT_GUARD_ENABLED'):
+            attach_guard(fastapi.FastAPI())
+
 
 if __name__ == '__main__':
     unittest.main()
