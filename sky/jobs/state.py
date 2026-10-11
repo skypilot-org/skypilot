@@ -600,6 +600,7 @@ async def _retry_task_status_update(
     update: Callable[[sql_async.AsyncSession], Awaitable[int]],
     failure_prefix: str,
     idempotent: bool = False,
+    retry_forever: bool = False,
 ) -> None:
     """Run a one-row task status update with commit-lost-safe retry."""
     prior_update_matched = False
@@ -629,7 +630,12 @@ async def _retry_task_status_update(
             logger.error(message)
             raise exceptions.ManagedJobStatusError(message)
 
-    await db_retries.with_db_retries_async(_op)
+    if retry_forever:
+        await db_retries.with_db_retries_async(_op,
+                                               max_retries=None,
+                                               deadline=float('inf'))
+    else:
+        await db_retries.with_db_retries_async(_op)
 
 
 async def _retry_schedule_state_update(
@@ -3792,8 +3798,11 @@ async def set_starting_async(job_id: int,
     await callback_func('STARTING')
 
 
-async def set_started_async(job_id: int, task_id: int, start_time: float,
-                            callback_func: AsyncCallbackType):
+async def set_started_async(job_id: int,
+                            task_id: int,
+                            start_time: float,
+                            callback_func: AsyncCallbackType,
+                            retry_db_forever: bool = False):
     """Set the task to started state."""
     logger.info('Job started.')
 
@@ -3840,7 +3849,8 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
                                     ManagedJobStatus.RUNNING,
                                     _op,
                                     'Failed to set the task to started.',
-                                    idempotent=True)
+                                    idempotent=True,
+                                    retry_forever=retry_db_forever)
     await callback_func('STARTED')
 
 
@@ -4423,7 +4433,8 @@ async def set_recovered_async(job_id: int,
                               task_id: int,
                               recovered_time: float,
                               callback_func: AsyncCallbackType,
-                              count_recovery: bool = True):
+                              count_recovery: bool = True,
+                              retry_db_forever: bool = False):
     """Set the task to recovered.
 
     recovery_count only counts genuine failure recoveries: the increment is
@@ -4435,8 +4446,6 @@ async def set_recovered_async(job_id: int,
     a recovery episode at all (e.g. a kept-STARTING resume whose relaunch
     retry moved the row to RECOVERING).
     """
-    await add_job_event_async(job_id, task_id, ManagedJobStatus.RUNNING,
-                              'Job has recovered')
     if count_recovery:
         count_expr = spot_table.c.recovery_count + sqlalchemy.case(
             (sqlalchemy.or_(spot_table.c.recovering_from_failure.is_(None),
@@ -4464,10 +4473,19 @@ async def set_recovered_async(job_id: int,
                 # future recovery must open a fresh episode.
                 spot_table.c.recovering_from_failure: None,
             }))
+        if result.rowcount == 1:
+            await _insert_job_event(session, job_id, task_id,
+                                    ManagedJobStatus.RUNNING,
+                                    'Job has recovered')
         return result.rowcount
 
-    await _retry_task_status_update(job_id, task_id, ManagedJobStatus.RUNNING,
-                                    _op, 'Failed to set the task to recovered.')
+    await _retry_task_status_update(job_id,
+                                    task_id,
+                                    ManagedJobStatus.RUNNING,
+                                    _op,
+                                    'Failed to set the task to recovered.',
+                                    idempotent=True,
+                                    retry_forever=retry_db_forever)
     logger.info('==== Recovered. ====')
     await callback_func('RECOVERED')
 

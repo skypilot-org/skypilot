@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import dotenv
 import filelock
+import sqlalchemy.exc
 
 import sky
 from sky import core
@@ -102,6 +103,44 @@ def _status_check_gap_seconds(first_check: bool) -> float:
         return random.uniform(0, gap)
     return gap * random.uniform(1 - _STATUS_CHECK_GAP_JITTER,
                                 1 + _STATUS_CHECK_GAP_JITTER)
+
+
+async def _retry_post_launch_transition(
+    transition: typing.Callable[[], typing.Awaitable[None]],
+    description: str,
+) -> None:
+    """Retry DB bookkeeping after external work has been launched."""
+    while True:
+        try:
+            await transition()
+            return
+        except Exception as db_error:  # pylint: disable=broad-except
+            # A bare TimeoutError can come from the user event callback. Only
+            # retry SQLAlchemy errors here; state transitions retry their own
+            # DB connection failures before invoking the callback.
+            if (not isinstance(db_error, sqlalchemy.exc.SQLAlchemyError) or
+                    not db_retries.is_transient(db_error)):
+                raise
+            logger.warning(
+                'Controller database is unavailable while recording '
+                f'{description}. Retrying bookkeeping without relaunching '
+                'the worker: '
+                f'{common_utils.format_exception(db_error)}')
+            await asyncio.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
+
+
+async def _retry_post_launch_db_read(
+    read: typing.Callable[[], typing.Awaitable[Any]],
+    description: str,
+) -> Any:
+    """Retry a DB-only read after external work has been launched."""
+    try:
+        return await db_retries.with_db_retries_async(lambda _: read(),
+                                                      max_retries=None,
+                                                      deadline=float('inf'))
+    except asyncio.CancelledError:
+        logger.info(f'Cancelled while {description}.')
+        raise
 
 
 # One network check per controller process per status-check gap. Every
@@ -929,8 +968,9 @@ class JobController:
         if self._pool:
             # Update the cluster name when using pool.
             cluster_name, job_id_on_pool_cluster = (
-                await
-                managed_job_state.get_pool_submit_info_async(self._job_id))
+                await _retry_post_launch_db_read(
+                    lambda: managed_job_state.get_pool_submit_info_async(
+                        self._job_id), 'loading the launched pool job'))
         if cluster_name is None:
             # Check if we have been cancelled here, in the case where a user
             # quickly cancels the job we want to gracefully handle it here,
@@ -938,8 +978,10 @@ class JobController:
             logger.info(f'Cluster name is None for job {self._job_id}, '
                         f'task {task_id}. Checking if we have been '
                         'cancelled.')
-            status = await (managed_job_state.get_job_status_with_task_id_async(
-                job_id=self._job_id, task_id=task_id))
+            status = await _retry_post_launch_db_read(
+                lambda: managed_job_state.get_job_status_with_task_id_async(
+                    job_id=self._job_id, task_id=task_id),
+                'checking whether the launched job was cancelled')
             logger.debug(f'Status for job {self._job_id}, task {task_id}:'
                          f'{status}')
             if status == managed_job_state.ManagedJobStatus.CANCELLED:
@@ -949,26 +991,13 @@ class JobController:
         assert cluster_name is not None, (cluster_name, job_id_on_pool_cluster)
 
         if not is_resume:
-            while True:
-                try:
-                    await managed_job_state.set_started_async(
-                        job_id=self._job_id,
-                        task_id=task_id,
-                        start_time=remote_job_submitted_at,
-                        callback_func=callback_func)
-                    break
-                except Exception as db_error:  # pylint: disable=broad-except
-                    if not db_retries.is_transient(db_error):
-                        raise
-                    # launch() already confirmed the worker. Retry only its
-                    # state transition so it cannot be relaunched.
-                    logger.warning(
-                        'Controller database is unavailable while recording '
-                        'the started job. Retrying bookkeeping without '
-                        'relaunching the worker: '
-                        f'{common_utils.format_exception(db_error)}')
-                    await asyncio.sleep(
-                        managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
+            await _retry_post_launch_transition(
+                lambda: managed_job_state.set_started_async(
+                    job_id=self._job_id,
+                    task_id=task_id,
+                    start_time=remote_job_submitted_at,
+                    callback_func=callback_func,
+                    retry_db_forever=True), 'the started job')
 
         async with self.starting_lock:
             try:
@@ -1983,8 +2012,9 @@ class JobController:
             # Update cluster_name for pools after recovery
             if self._pool is not None:
                 pool_cluster_name, job_id_on_pool_cluster = (
-                    await
-                    managed_job_state.get_pool_submit_info_async(self._job_id))
+                    await _retry_post_launch_db_read(
+                        lambda: managed_job_state.get_pool_submit_info_async(
+                            self._job_id), 'loading the recovered pool job'))
                 assert pool_cluster_name is not None
                 cluster_name = pool_cluster_name
 
@@ -1995,29 +2025,36 @@ class JobController:
                 # to RECOVERING; complete via set_recovered but don't count it
                 # toward recovery_count — a launch retry is not a recovery
                 # (fresh launches that retry don't count either).
-                cur_status = await (
-                    managed_job_state.get_job_status_with_task_id_async(
-                        job_id=self._job_id, task_id=task_id))
+                cur_status = await _retry_post_launch_db_read(
+                    lambda: managed_job_state.get_job_status_with_task_id_async(
+                        job_id=self._job_id, task_id=task_id),
+                    'loading the recovered job status')
                 if (cur_status == managed_job_state.ManagedJobStatus.RECOVERING
                    ):
-                    await managed_job_state.set_recovered_async(
+                    await _retry_post_launch_transition(
+                        lambda: managed_job_state.set_recovered_async(
+                            self._job_id,
+                            task_id,
+                            recovered_time=recovered_time,
+                            callback_func=callback_func,
+                            count_recovery=False,
+                            retry_db_forever=True), 'the recovered job')
+                else:
+                    await _retry_post_launch_transition(
+                        lambda: managed_job_state.set_started_async(
+                            self._job_id,
+                            task_id,
+                            start_time=recovered_time,
+                            callback_func=callback_func,
+                            retry_db_forever=True), 'the started job')
+            else:
+                await _retry_post_launch_transition(
+                    lambda: managed_job_state.set_recovered_async(
                         self._job_id,
                         task_id,
                         recovered_time=recovered_time,
                         callback_func=callback_func,
-                        count_recovery=False)
-                else:
-                    await managed_job_state.set_started_async(
-                        self._job_id,
-                        task_id,
-                        start_time=recovered_time,
-                        callback_func=callback_func)
-            else:
-                await managed_job_state.set_recovered_async(
-                    self._job_id,
-                    task_id,
-                    recovered_time=recovered_time,
-                    callback_func=callback_func)
+                        retry_db_forever=True), 'the recovered job')
 
             # Call recovery callback if provided
             if on_recovery is not None:
@@ -2461,18 +2498,23 @@ class JobController:
             JobGroups don't support pools, so cluster_name is always
             deterministic and provided by the caller.
             """
-            handle = await asyncio.to_thread(
-                global_user_state.get_handle_from_cluster_name, cluster_name)
+            handle = await _retry_post_launch_db_read(
+                lambda: asyncio.to_thread(
+                    global_user_state.get_handle_from_cluster_name, cluster_name
+                ), 'loading the launched cluster handle')
 
             # Only set STARTED state if not resuming (already started before)
             if not is_resuming:
                 callback_func = managed_job_utils.event_callback_func(
                     job_id=self._job_id, task_id=task_id, task=task)
-                await managed_job_state.set_started_async(
-                    job_id=self._job_id,
-                    task_id=task_id,
-                    start_time=time.time(),
-                    callback_func=callback_func)
+                start_time = time.time()
+                await _retry_post_launch_transition(
+                    lambda: managed_job_state.set_started_async(
+                        job_id=self._job_id,
+                        task_id=task_id,
+                        start_time=start_time,
+                        callback_func=callback_func,
+                        retry_db_forever=True), 'the started job')
 
             return handle
 
