@@ -1283,24 +1283,52 @@ class JobController:
             runtime_handle = None
             runtime_error = None
             if managed_job_runtime.is_registered():
-                runtime_handle = await asyncio.to_thread(
-                    global_user_state.get_handle_from_cluster_name,
-                    cluster_name)
+                try:
+                    runtime_handle = await asyncio.to_thread(
+                        global_user_state.get_handle_from_cluster_name,
+                        cluster_name)
+                except Exception as exc:  # pylint: disable=broad-except
+                    if not db_retries.is_transient(exc):
+                        raise
+                    logger.warning(
+                        'Controller database is unavailable while loading the '
+                        'runtime handle. Keeping the current run and retrying '
+                        'without recovery: '
+                        f'{common_utils.format_exception(exc)}')
+                    if force_transit_to_recovering:
+                        await asyncio.sleep(
+                            managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
+                    continue
                 try:
                     runtime_cursor = (
                         await managed_job_state.get_runtime_cursor_async(
                             self._job_id, task_id))
-                    runtime_recovery = await asyncio.to_thread(
-                        managed_job_runtime.get_recovery_status,
-                        runtime_handle,
-                        cluster_name,
-                        job_id=self._job_id,
-                        task_id=task_id,
-                        task=task,
-                        previous=runtime_cursor)
                 except Exception as exc:  # pylint: disable=broad-except
+                    if db_retries.is_transient(exc):
+                        logger.warning(
+                            'Controller database is unavailable while loading '
+                            'the runtime cursor. Keeping the current run and '
+                            'retrying without recovery: '
+                            f'{common_utils.format_exception(exc)}')
+                        if force_transit_to_recovering:
+                            await asyncio.sleep(
+                                managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
+                        continue
                     runtime_error = common_utils.format_exception(exc)
                     transient_job_check_error_reason = runtime_error
+                if runtime_error is None:
+                    try:
+                        runtime_recovery = await asyncio.to_thread(
+                            managed_job_runtime.get_recovery_status,
+                            runtime_handle,
+                            cluster_name,
+                            job_id=self._job_id,
+                            task_id=task_id,
+                            task=task,
+                            previous=runtime_cursor)
+                    except Exception as exc:  # pylint: disable=broad-except
+                        runtime_error = common_utils.format_exception(exc)
+                        transient_job_check_error_reason = runtime_error
             if runtime_recovery is not None:
                 job_status = runtime_recovery.job_status
                 status_logger.log('No job found.' if job_status is None else

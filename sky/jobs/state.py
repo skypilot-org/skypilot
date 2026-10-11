@@ -599,6 +599,7 @@ async def _retry_task_status_update(
     target_status: 'ManagedJobStatus',
     update: Callable[[sql_async.AsyncSession], Awaitable[int]],
     failure_prefix: str,
+    idempotent: bool = False,
 ) -> None:
     """Run a one-row task status update with commit-lost-safe retry."""
     prior_update_matched = False
@@ -613,7 +614,8 @@ async def _retry_task_status_update(
             await session.commit()
             if count == 1:
                 return
-            if count == 0 and attempt > 0 and prior_update_matched:
+            if count == 0 and (idempotent or
+                               (attempt > 0 and prior_update_matched)):
                 current = await session.execute(
                     sqlalchemy.select(spot_table.c.status).where(
                         sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
@@ -3793,8 +3795,6 @@ async def set_starting_async(job_id: int,
 async def set_started_async(job_id: int, task_id: int, start_time: float,
                             callback_func: AsyncCallbackType):
     """Set the task to started state."""
-    await add_job_event_async(job_id, task_id, ManagedJobStatus.RUNNING,
-                              'Job has started')
     logger.info('Job started.')
 
     async def _op(session: sql_async.AsyncSession) -> int:
@@ -3830,10 +3830,17 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
                 # Defensive: no recovery episode is open once RUNNING.
                 spot_table.c.recovering_from_failure: None,
             }))
+        if result.rowcount == 1:
+            await _insert_job_event(session, job_id, task_id,
+                                    ManagedJobStatus.RUNNING, 'Job has started')
         return result.rowcount
 
-    await _retry_task_status_update(job_id, task_id, ManagedJobStatus.RUNNING,
-                                    _op, 'Failed to set the task to started.')
+    await _retry_task_status_update(job_id,
+                                    task_id,
+                                    ManagedJobStatus.RUNNING,
+                                    _op,
+                                    'Failed to set the task to started.',
+                                    idempotent=True)
     await callback_func('STARTED')
 
 
@@ -4670,8 +4677,6 @@ def set_winding_down(job_id: int, task_id: int) -> None:
 async def set_succeeded_async(job_id: int, task_id: int, end_time: float,
                               callback_func: AsyncCallbackType):
     """Set the task to succeeded, if it is in a non-terminal state."""
-    await add_job_event_async(job_id, task_id, ManagedJobStatus.SUCCEEDED,
-                              'Job has succeeded')
 
     async def _op(session: sql_async.AsyncSession) -> int:
         result = await session.execute(
@@ -4692,10 +4697,18 @@ async def set_succeeded_async(job_id: int, task_id: int, end_time: float,
                 # state.
                 spot_table.c.recovering_from_failure: None,
             }))
+        if result.rowcount == 1:
+            await _insert_job_event(session, job_id, task_id,
+                                    ManagedJobStatus.SUCCEEDED,
+                                    'Job has succeeded')
         return result.rowcount
 
-    await _retry_task_status_update(job_id, task_id, ManagedJobStatus.SUCCEEDED,
-                                    _op, 'Failed to set the task to succeeded.')
+    await _retry_task_status_update(job_id,
+                                    task_id,
+                                    ManagedJobStatus.SUCCEEDED,
+                                    _op,
+                                    'Failed to set the task to succeeded.',
+                                    idempotent=True)
     await callback_func('SUCCEEDED')
     logger.info('Job succeeded.')
 

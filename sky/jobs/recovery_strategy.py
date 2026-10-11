@@ -571,19 +571,38 @@ class StrategyExecutor:
             job_checking_retry_cnt += 1
             runtime_status = None
             handle = None
-            try:
-                if managed_job_runtime.is_registered():
+            if managed_job_runtime.is_registered():
+                try:
                     handle = await asyncio.to_thread(
                         global_user_state.get_handle_from_cluster_name,
                         self.cluster_name)
+                except Exception as e:  # pylint: disable=broad-except
+                    if db_retries.is_transient(e):
+                        job_checking_retry_cnt -= 1
+                        logger.warning(
+                            'Controller database is unavailable while loading '
+                            'the runtime handle. Keeping the launched job and '
+                            'retrying: '
+                            f'{common_utils.format_exception(e)}')
+                        await asyncio.sleep(managed_job_utils.
+                                            JOB_STARTED_STATUS_CHECK_GAP_SECONDS
+                                           )
+                        continue
+                    reason = f':{_error_kind(e)}'
+                    logger.info(
+                        'Unexpected exception during fetching job status: '
+                        f'{common_utils.format_exception(e)}')
+                    continue
+                try:
                     runtime_status = await asyncio.to_thread(
                         managed_job_runtime.get_job_status, handle,
                         self.cluster_name)
-            except Exception as e:  # pylint: disable=broad-except
-                reason = f':{_error_kind(e)}'
-                logger.info('Unexpected exception during fetching job status: '
-                            f'{common_utils.format_exception(e)}')
-                continue
+                except Exception as e:  # pylint: disable=broad-except
+                    reason = f':{_error_kind(e)}'
+                    logger.info(
+                        'Unexpected exception during fetching job status: '
+                        f'{common_utils.format_exception(e)}')
+                    continue
             # A submitted runtime job can requeue or finish before launch
             # returns. Its owner determines whether submission succeeded.
             if runtime_status is None:
@@ -1295,26 +1314,50 @@ class StrategyExecutor:
                             self.job_id_on_pool_cluster = job_id_on_pool_cluster
                             persist_pool_job = (
                                 state.set_job_id_on_pool_cluster_async)
-                            while True:
+                            try:
+                                while True:
+                                    try:
+                                        await persist_pool_job(
+                                            self.job_id, job_id_on_pool_cluster)
+                                        break
+                                    except Exception as e:  # pylint: disable=broad-except
+                                        if not db_retries.is_transient(e):
+                                            raise
+                                        # sdk.exec already submitted this job.
+                                        # Retry only persistence, or the outer
+                                        # launch loop would submit the workload
+                                        # a second time.
+                                        logger.warning(
+                                            'Controller database is unavailable '
+                                            'while recording the pool job ID. '
+                                            'Retrying bookkeeping without '
+                                            'submitting another job: '
+                                            f'{common_utils.format_exception(e)}'
+                                        )
+                                        await asyncio.sleep(
+                                            managed_job_utils.
+                                            JOB_STARTED_STATUS_CHECK_GAP_SECONDS
+                                        )
+                            except asyncio.CancelledError:
+                                logger.info(
+                                    'Cancelling pool job '
+                                    f'{job_id_on_pool_cluster} on '
+                                    f'{self.cluster_name} after its ID could '
+                                    'not be persisted.')
                                 try:
-                                    await persist_pool_job(
-                                        self.job_id, job_id_on_pool_cluster)
-                                    break
-                                except Exception as e:  # pylint: disable=broad-except
-                                    if not db_retries.is_transient(e):
-                                        raise
-                                    # sdk.exec already submitted this job. Retry
-                                    # only persistence, or the outer launch loop
-                                    # would submit the workload a second time.
+                                    from sky import core
+                                    await asyncio.to_thread(
+                                        core.cancel,
+                                        cluster_name=self.cluster_name,
+                                        job_ids=[job_id_on_pool_cluster],
+                                        _try_cancel_if_cluster_is_init=True)
+                                except Exception as cancel_error:  # pylint: disable=broad-except
                                     logger.warning(
-                                        'Controller database is unavailable '
-                                        'while recording the pool job ID. '
-                                        'Retrying bookkeeping without '
-                                        'submitting another job: '
-                                        f'{common_utils.format_exception(e)}')
-                                    await asyncio.sleep(
-                                        managed_job_utils.
-                                        JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
+                                        'Failed to cancel the unpersisted pool '
+                                        'job: '
+                                        f'{common_utils.format_exception(cancel_error)}'
+                                    )
+                                raise
                         logger.info('Managed job cluster launched.')
                     except _LaunchRequestParked:
                         # Not a launch failure - handled by the outer loop,

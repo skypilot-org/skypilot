@@ -398,6 +398,71 @@ def _mock_managed_jobs_db_conn(tmp_path, monkeypatch):
     yield engine
 
 
+def _seed_pending_task() -> int:
+    job_id = managed_job_state.set_job_info_without_job_id(
+        name='callback-timeout-job',
+        workspace='default',
+        entrypoint='ep',
+        pool=None,
+        pool_hash=None,
+        user_hash='user1')
+    managed_job_state.set_pending(job_id,
+                                  task_id=0,
+                                  task_name='task',
+                                  resources_str='{}',
+                                  metadata='{}')
+    return job_id
+
+
+@pytest.mark.asyncio
+async def test_started_callback_timeout_is_idempotent(
+        _mock_managed_jobs_db_conn):
+    job_id = _seed_pending_task()
+    callback = AsyncMock()
+    await managed_job_state.set_starting_async(job_id, 0, 'run_0', 1.0, '{}',
+                                               {}, callback)
+    callback.reset_mock()
+    callback.side_effect = [
+        sqlalchemy.exc.TimeoutError('callback pool exhausted'), None
+    ]
+
+    with pytest.raises(sqlalchemy.exc.TimeoutError):
+        await managed_job_state.set_started_async(job_id, 0, 2.0, callback)
+    assert (await managed_job_state.get_job_status_with_task_id_async(
+        job_id, 0)) == managed_job_state.ManagedJobStatus.RUNNING
+    await managed_job_state.set_started_async(job_id, 0, 2.0, callback)
+
+    events = managed_job_state.get_job_events(job_id)
+    assert sum(event['new_status'] == managed_job_state.ManagedJobStatus.RUNNING
+               for event in events) == 1
+    assert callback.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_succeeded_callback_timeout_is_idempotent(
+        _mock_managed_jobs_db_conn):
+    job_id = _seed_pending_task()
+    no_op_callback = AsyncMock()
+    await managed_job_state.set_starting_async(job_id, 0, 'run_0', 1.0, '{}',
+                                               {}, no_op_callback)
+    await managed_job_state.set_started_async(job_id, 0, 2.0, no_op_callback)
+    callback = AsyncMock(side_effect=[
+        sqlalchemy.exc.TimeoutError('callback pool exhausted'), None
+    ])
+
+    with pytest.raises(sqlalchemy.exc.TimeoutError):
+        await managed_job_state.set_succeeded_async(job_id, 0, 3.0, callback)
+    assert (await managed_job_state.get_job_status_with_task_id_async(
+        job_id, 0)) == managed_job_state.ManagedJobStatus.SUCCEEDED
+    await managed_job_state.set_succeeded_async(job_id, 0, 3.0, callback)
+
+    events = managed_job_state.get_job_events(job_id)
+    assert sum(
+        event['new_status'] == managed_job_state.ManagedJobStatus.SUCCEEDED
+        for event in events) == 1
+    assert callback.await_count == 2
+
+
 @pytest.fixture
 def _seed_pipeline_task0_succeeded_task1_pending(_mock_managed_jobs_db_conn):
     """Seed a real 2-task pipeline job: task 0 SUCCEEDED, task 1 PENDING.
@@ -1951,6 +2016,87 @@ class TestTransientJobStatusRecoveryWindow:
                 managed_job_utils.JobStatusLogger(), AsyncMock())
 
         assert get_status.await_count == 2
+        executor.recover.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('failure_stage', ['handle', 'cursor'])
+    async def test_runtime_db_timeout_keeps_current_run(self, failure_stage):
+        instance, task, executor = self._db_timeout_monitor()
+        timeout = sqlalchemy.exc.TimeoutError('connection pool exhausted')
+        handle = MagicMock()
+        get_handle = MagicMock(return_value=handle)
+        get_cursor = AsyncMock(return_value=None)
+        if failure_stage == 'handle':
+            get_handle.side_effect = [timeout, handle]
+        else:
+            get_cursor.side_effect = [timeout, None]
+        observation = controller_module.managed_job_runtime.RuntimeObservation(
+            runtime_id='allocation',
+            restart_count=0,
+            job_status=job_lib.JobStatus.SUCCEEDED)
+        ordinary_probe = AsyncMock(
+            side_effect=AssertionError('runtime owns status'))
+
+        with patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name', get_handle), \
+             patch.object(managed_job_state, 'get_runtime_cursor_async',
+                          get_cursor), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=True), \
+             patch.object(controller_module.managed_job_runtime,
+                          'get_recovery_status', return_value=observation), \
+             patch.object(managed_job_state, 'observe_runtime_async',
+                          new=AsyncMock()), \
+             patch.object(managed_job_utils, 'get_job_status', ordinary_probe), \
+             patch.object(managed_job_utils, 'try_to_get_job_end_time',
+                          return_value=123.45), \
+             patch.object(controller_module.backend_utils,
+                          'async_check_network_connection', new=AsyncMock()), \
+             patch.object(controller_module.backend_utils, 'get_clusters',
+                          return_value=[]), \
+             patch.object(managed_job_state, 'set_succeeded_async',
+                          new=AsyncMock()), \
+             patch.object(controller_module.asyncio, 'sleep', new=AsyncMock()):
+            assert await JobController._monitor_one_task_impl(
+                instance, 0, task, 'cluster', executor,
+                managed_job_utils.JobStatusLogger(), AsyncMock())
+
+        assert get_handle.call_count == 2
+        assert get_cursor.await_count == (1 if failure_stage == 'handle' else 2)
+        ordinary_probe.assert_not_awaited()
+        executor.recover.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_runtime_timeout_exhausts_window(self, monkeypatch):
+        monkeypatch.setattr(managed_job_utils,
+                            'JOB_STATUS_FETCH_MIN_ELAPSED_SECONDS', 0)
+        monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_FETCH_MIN_RETRIES',
+                            1)
+        instance, task, executor = self._db_timeout_monitor()
+        runtime_probe = MagicMock(
+            side_effect=TimeoutError('runtime unavailable'))
+        ordinary_probe = AsyncMock(
+            side_effect=AssertionError('runtime owns status'))
+
+        with patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name', return_value=MagicMock()), \
+             patch.object(managed_job_state, 'get_runtime_cursor_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=True), \
+             patch.object(controller_module.managed_job_runtime,
+                          'get_recovery_status', runtime_probe), \
+             patch.object(managed_job_utils, 'get_job_status', ordinary_probe), \
+             patch.object(controller_module.backend_utils,
+                          'async_check_network_connection', new=AsyncMock()), \
+             patch.object(controller_module.asyncio, 'sleep', new=AsyncMock()):
+            with pytest.raises(RuntimeError, match='runtime unavailable'):
+                await JobController._monitor_one_task_impl(
+                    instance, 0, task, 'cluster', executor,
+                    managed_job_utils.JobStatusLogger(), AsyncMock())
+
+        assert runtime_probe.call_count == 2
+        ordinary_probe.assert_not_awaited()
         executor.recover.assert_not_awaited()
 
     @pytest.mark.asyncio
