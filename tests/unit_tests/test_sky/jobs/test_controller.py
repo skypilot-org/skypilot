@@ -3403,6 +3403,8 @@ class TestRunJobLoopTransientDbErrors:
         managed_job_state.finalize_job_done_async.side_effect = finalize
         monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
                             str(tmp_path))
+        monkeypatch.setattr(controller_module, '_background_tasks_lock',
+                            asyncio.Lock())
 
         async with controller_module._background_tasks_lock:
             start_task = asyncio.create_task(manager.start_job(1))
