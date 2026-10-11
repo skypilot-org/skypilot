@@ -1473,7 +1473,7 @@ def set_failed(
 
 
 def set_pending_cancelled(job_id: int) -> bool:
-    """Set the job as cancelled, if it is PENDING and WAITING/INACTIVE.
+    """Set an unstarted PENDING job as cancelled.
 
     This may fail if the job is not PENDING, e.g. another process has changed
     its state in the meantime.
@@ -1495,11 +1495,14 @@ def set_pending_cancelled(job_id: int) -> bool:
     For a WAITING job, the schedule_state goes straight to DONE, claiming the
     job away from the scheduler: get_waiting_job_async locks the job_info row
     before claiming, so the job either becomes DONE here or is claimed there,
-    never both. For an INACTIVE job (mid-submission), the schedule_state is
-    left as INACTIVE: the in-flight submission will overwrite it to WAITING
-    regardless (scheduler_set_waiting has no state guard), so writing DONE
-    here would be undone and strand a cancelled job in WAITING. The
-    submission proceeds as today and a controller claims the job afterwards.
+    never both. An unowned LAUNCHING job also goes to DONE when its controller
+    identity and current cluster are unset. This is the state left by a
+    controller that fails before initialization completes. For an INACTIVE
+    job (mid-submission), the schedule_state is left as INACTIVE: the in-flight
+    submission will overwrite it to WAITING regardless (scheduler_set_waiting
+    has no state guard), so writing DONE here would be undone and strand a
+    cancelled job in WAITING. The submission proceeds as today and a
+    controller claims the job afterwards.
 
     Cancelling an INACTIVE job only covers the task rows that exist at the
     time. They are inserted one transaction at a time, so for a multi-task
@@ -1513,20 +1516,31 @@ def set_pending_cancelled(job_id: int) -> bool:
     """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        # Claim the job away from the scheduler first: WAITING -> DONE.
+        # A scheduler claim writes LAUNCHING and both controller identity
+        # fields in one transaction. LAUNCHING without an identity is an
+        # unowned claim; requiring no assigned cluster and no submitted task
+        # below keeps active launches on the normal cleanup path.
         done_count = session.query(job_info_table).filter(
             job_info_table.c.spot_job_id == job_id,
-            job_info_table.c.schedule_state ==
-            ManagedJobScheduleState.WAITING.value).update(
-                {
-                    job_info_table.c.schedule_state:
-                        ManagedJobScheduleState.DONE.value
-                },
-                synchronize_session=False)
+            sqlalchemy.or_(
+                job_info_table.c.schedule_state ==
+                ManagedJobScheduleState.WAITING.value,
+                sqlalchemy.and_(
+                    job_info_table.c.schedule_state ==
+                    ManagedJobScheduleState.LAUNCHING.value,
+                    job_info_table.c.controller_pid.is_(None),
+                    job_info_table.c.controller_pid_started_at.is_(None),
+                    job_info_table.c.current_cluster_name.is_(None),
+                ))).update(
+                    {
+                        job_info_table.c.schedule_state:
+                            ManagedJobScheduleState.DONE.value
+                    },
+                    synchronize_session=False)
         if done_count == 0:
-            # Not WAITING. Only proceed if the job is INACTIVE
-            # (mid-submission); see the docstring for why INACTIVE keeps its
-            # schedule_state.
+            # Not WAITING or an unowned LAUNCHING job. Only proceed if the job
+            # is INACTIVE (mid-submission); see the docstring for why INACTIVE
+            # keeps its schedule_state.
             row = session.execute(
                 sqlalchemy.select(job_info_table.c.schedule_state).where(
                     job_info_table.c.spot_job_id == job_id)).fetchone()
