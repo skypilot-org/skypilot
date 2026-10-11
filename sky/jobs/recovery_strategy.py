@@ -1327,13 +1327,15 @@ class StrategyExecutor:
                                         # Retry only persistence, or the outer
                                         # launch loop would submit the workload
                                         # a second time.
+                                        detail = common_utils.format_exception(
+                                            e)
                                         logger.warning(
-                                            'Controller database is unavailable '
+                                            'Controller database is '
+                                            'unavailable '
                                             'while recording the pool job ID. '
                                             'Retrying bookkeeping without '
                                             'submitting another job: '
-                                            f'{common_utils.format_exception(e)}'
-                                        )
+                                            f'{detail}')
                                         await asyncio.sleep(
                                             managed_job_utils.
                                             JOB_STARTED_STATUS_CHECK_GAP_SECONDS
@@ -1345,6 +1347,8 @@ class StrategyExecutor:
                                     f'{self.cluster_name} after its ID could '
                                     'not be persisted.')
                                 try:
+                                    # Avoid sky.core -> sky.jobs import cycle.
+                                    # pylint: disable-next=import-outside-toplevel
                                     from sky import core
                                     await asyncio.to_thread(
                                         core.cancel,
@@ -1352,11 +1356,11 @@ class StrategyExecutor:
                                         job_ids=[job_id_on_pool_cluster],
                                         _try_cancel_if_cluster_is_init=True)
                                 except Exception as cancel_error:  # pylint: disable=broad-except
+                                    detail = common_utils.format_exception(
+                                        cancel_error)
                                     logger.warning(
                                         'Failed to cancel the unpersisted pool '
-                                        'job: '
-                                        f'{common_utils.format_exception(cancel_error)}'
-                                    )
+                                        f'job: {detail}')
                                 raise
                         logger.info('Managed job cluster launched.')
                     except _LaunchRequestParked:
