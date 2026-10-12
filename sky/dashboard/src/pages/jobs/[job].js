@@ -41,6 +41,7 @@ import {
   CustomTooltip as Tooltip,
   formatDuration,
   renderPoolLink,
+  TimestampWithTooltip,
   extractNodeTypes,
 } from '@/components/utils';
 import { LogFilter } from '@/components/utils';
@@ -1965,8 +1966,8 @@ function JobDetailsContent({
             : dash}
           {jobData.started_at && (
             <span className="block">
-              <span className="text-gray-500">started at</span>{' '}
-              {shortTimestamp(jobData.started_at)}
+              <span className="text-gray-500">started</span>{' '}
+              <TimestampWithTooltip date={jobData.started_at} />
             </span>
           )}
         </span>,

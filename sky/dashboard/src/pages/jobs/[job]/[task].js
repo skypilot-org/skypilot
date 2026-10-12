@@ -15,6 +15,7 @@ import {
   CustomTooltip as Tooltip,
   formatDuration,
   renderPoolLink,
+  TimestampWithTooltip,
 } from '@/components/utils';
 import { LogFilter } from '@/components/utils';
 import {
@@ -458,8 +459,8 @@ function TaskDetailsContent({ taskData, taskIndex, poolsData }) {
             : dash}
           {taskData.started_at && (
             <span className="block">
-              <span className="text-gray-500">started at</span>{' '}
-              {shortTimestamp(taskData.started_at)}
+              <span className="text-gray-500">started</span>{' '}
+              <TimestampWithTooltip date={taskData.started_at} />
             </span>
           )}
         </span>
