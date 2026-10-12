@@ -1347,7 +1347,10 @@ class JobController:
                     'Check cluster status to determine if the job is '
                     'preempted or failed.')
                 status_check_window.record_failure()
-            else:
+            elif job_status is not None and not job_status.is_terminal():
+                # Only a live job resets the window. "No transient error" also
+                # covers a skipped probe and a terminal status, and resetting
+                # on those re-opens it every round, so no budget ever expires.
                 status_check_window.reset()
 
             if runtime_error is not None:
@@ -1485,15 +1488,16 @@ class JobController:
                 # transient condition and back off, reusing the transient
                 # job-status-check window. Sharing the window (rather than
                 # keeping a separate one for this handler) is deliberate: a
-                # successful get_job_status resets it, so while the job-status
-                # probe keeps returning a healthy status -- a direct positive
-                # liveness signal -- the loop keeps retrying instead of
-                # escalating. Restarting a demonstrably running job is exactly
-                # the false alarm this handler exists to prevent, and recovery
-                # could not relaunch anyway while the provider API is
-                # unreachable. Only when both get_job_status and this refresh
-                # keep failing until the window's budgets are exhausted is
-                # the error re-raised, escalating to emergency recovery.
+                # non-terminal job status resets it, so while the probe keeps
+                # observing a live job -- a direct positive liveness signal --
+                # the loop keeps retrying instead of escalating. Restarting a
+                # demonstrably running job is exactly the false alarm this
+                # handler exists to prevent, and recovery could not relaunch
+                # anyway while the provider API is unreachable. Only while the
+                # probe keeps saying the job is alive, though: anything else,
+                # including a skipped probe, lets this handler's failures
+                # accumulate until the budgets are exhausted and the error is
+                # re-raised, escalating to emergency recovery.
                 status_logger.reset()
                 status_check_window.record_failure()
                 if status_check_window.exhausted:
