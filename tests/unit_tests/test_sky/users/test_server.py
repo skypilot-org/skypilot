@@ -1250,14 +1250,13 @@ class TestUserContextIsolation:
 
 
 @pytest.fixture
-def workspace_members(tmp_path, monkeypatch):
-    """Real user, token and policy tables.
+def users_and_tokens(tmp_path, monkeypatch):
+    """Real user, token and role tables.
 
-    alice, bob and service account sa-a are members of private ws-a; carol is
-    the only member of private ws-b. ws-open is granted to '*' and also names
-    carol and dave directly. Everyone is in `default` through its '*' grant.
-    An admin created token t-a for sa-a; carol created t-b for sa-b, which is in
-    no private workspace.
+    alice and bob are users, vic a viewer, and sa-a and sa-b service accounts.
+    alice, bob and sa-a share private workspace ws-a, which must not make them
+    visible to each other. The admin created token t-a for sa-a; bob created
+    t-b for sa-b.
     """
     engine = sqlalchemy.create_engine(f'sqlite:///{tmp_path}/state.db')
     monkeypatch.setattr(global_user_state._db_manager, '_engine', engine)
@@ -1269,18 +1268,17 @@ def workspace_members(tmp_path, monkeypatch):
                                    db_class=sqlalchemy_adapter.CasbinRule))
     monkeypatch.setattr(permission, 'permission_service', service)
 
-    for user_id in ['admin', 'alice', 'bob', 'carol', 'dave', 'sa-a', 'sa-b']:
+    for user_id, role in [('admin', 'admin'), ('alice', 'user'),
+                          ('bob', 'user'), ('vic', 'viewer'), ('sa-a', 'user'),
+                          ('sa-b', 'user')]:
         global_user_state.add_or_update_user(
             models.User(id=user_id, name=user_id))
-        service.enforcer.add_grouping_policy(
-            user_id, 'admin' if user_id == 'admin' else 'user')
-    for user_id, workspace in [('*', 'default'), ('alice', 'ws-a'),
-                               ('bob', 'ws-a'), ('sa-a', 'ws-a'),
-                               ('carol', 'ws-b'), ('*', 'ws-open'),
-                               ('carol', 'ws-open'), ('dave', 'ws-open')]:
-        service.enforcer.add_policy(user_id, workspace, '*')
+        service.enforcer.add_grouping_policy(user_id, role)
+    for user_id in ['alice', 'bob', 'sa-a']:
+        service.enforcer.add_policy(user_id, 'ws-a', '*')
+    service.enforcer.add_policy('*', 'default', '*')
     for token_id, creator, service_account in [('t-a', 'admin', 'sa-a'),
-                                               ('t-b', 'carol', 'sa-b')]:
+                                               ('t-b', 'bob', 'sa-b')]:
         global_user_state.add_service_account_token(token_id, token_id,
                                                     f'hash-{token_id}', creator,
                                                     service_account)
@@ -1293,9 +1291,9 @@ def _request_as(user_id):
     return request
 
 
-@pytest.mark.usefixtures('workspace_members')
-class TestWorkspaceScopedVisibility:
-    """Non-admins only see users and tokens from their private workspaces."""
+@pytest.mark.usefixtures('users_and_tokens')
+class TestRoleScopedVisibility:
+    """Admins see all users and tokens; others see themselves and their own."""
 
     @staticmethod
     def _user_ids(user_id):
@@ -1307,30 +1305,20 @@ class TestWorkspaceScopedVisibility:
                       for token in server.get_service_account_tokens(
                           _request_as(user_id)))
 
-    def test_member_sees_workspace_colleagues(self):
-        # sa-a is in ws-a too, but service accounts are never listed.
-        assert self._user_ids('alice') == ['alice', 'bob']
-
-    def test_public_workspace_member_sees_only_self(self):
-        assert self._user_ids('dave') == ['dave']
-
-    def test_sharing_a_public_workspace_reveals_no_one(self):
-        # carol and dave are both named in ws-open, which is granted to '*'.
-        assert self._user_ids('carol') == ['carol']
+    @pytest.mark.parametrize('user_id', ['alice', 'vic'])
+    def test_non_admin_sees_only_self(self, user_id):
+        assert self._user_ids(user_id) == [user_id]
 
     def test_admin_sees_everyone_but_service_accounts(self):
-        assert self._user_ids('admin') == [
-            'admin', 'alice', 'bob', 'carol', 'dave'
-        ]
+        assert self._user_ids('admin') == ['admin', 'alice', 'bob', 'vic']
 
-    def test_creator_sees_own_token(self):
-        assert self._token_ids('carol') == ['t-b']
+    def test_service_account_sees_no_users(self):
+        # Service accounts are never listed, not even to themselves.
+        assert self._user_ids('sa-a') == []
 
-    def test_member_sees_workspace_service_account_token(self):
-        assert self._token_ids('bob') == ['t-a']
-
-    def test_other_workspace_sees_no_tokens(self):
-        assert self._token_ids('dave') == []
+    def test_non_admin_sees_only_tokens_they_created(self):
+        assert self._token_ids('bob') == ['t-b']
+        assert self._token_ids('alice') == []
 
     def test_admin_sees_all_tokens(self):
         assert self._token_ids('admin') == ['t-a', 't-b']

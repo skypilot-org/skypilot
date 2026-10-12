@@ -521,8 +521,8 @@ describe('the Infra suggestions the table publishes', () => {
   });
 });
 
-// GET /users only returns the caller's private-workspace colleagues, so the
-// owner of a visible job (e.g. in `default`) can be missing from it.
+// For a non-admin, GET /users returns only the caller, so the owners of other
+// visible jobs are missing from it.
 describe('the User suggestions the table publishes', () => {
   it('keep the owners of visible jobs that the user list omits', async () => {
     respondWith(PAGE);

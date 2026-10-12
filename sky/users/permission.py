@@ -662,27 +662,6 @@ class PermissionService:
             return None
         return writable | self._read_only_visible(workspace_names)
 
-    def get_users_sharing_private_workspaces(self, user_id: str) -> Set[str]:
-        """Return the user plus every member of their private workspaces.
-
-        Workspaces granted to '*' are skipped: everyone is in them, so counting
-        them would make every user visible.
-
-        NOTE: like `_writable_workspace_names`, this only matches direct
-        (user_id, workspace, '*') and wildcard ('*', workspace, '*') policies,
-        not casbin role hierarchies.
-        """
-        self._load_policy_no_lock()
-        members: Dict[str, Set[str]] = {}
-        for rule in self._ensure_enforcer().get_policy():
-            if len(rule) >= 3 and rule[2] == '*':
-                members.setdefault(rule[1], set()).add(rule[0])
-        result = {user_id}
-        for workspace_members in members.values():
-            if user_id in workspace_members and '*' not in workspace_members:
-                result |= workspace_members
-        return result
-
     def _writable_workspace_names(
             self, user_id: str,
             workspace_names: Set[str]) -> Optional[Set[str]]:
