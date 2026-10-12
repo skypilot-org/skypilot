@@ -3315,8 +3315,10 @@ class TestRunJobLoopTransientDbErrors:
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures('_mock_managed_jobs_db_conn')
+    @pytest.mark.parametrize('lost_ack', [False, True])
     async def test_wrapper_failure_fails_claimed_job(self, monkeypatch,
-                                                     tmp_path, sleeps):
+                                                     tmp_path, sleeps,
+                                                     lost_ack):
         job_id = managed_job_state.set_job_info_without_job_id(
             name='job',
             workspace='default',
@@ -3363,7 +3365,10 @@ class TestRunJobLoopTransientDbErrors:
         def flaky_fail(job, reason):
             nonlocal attempts
             attempts += 1
-            if attempts <= 6:
+            if lost_ack and attempts == 1:
+                assert real_fail(job, reason)
+                raise self._db_error()
+            if not lost_ack and attempts <= 6:
                 raise self._db_error()
             return real_fail(job, reason)
 
@@ -3372,11 +3377,18 @@ class TestRunJobLoopTransientDbErrors:
                             'fail_job_controller_initialization', flaky_fail)
         monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
                             str(tmp_path))
+        signal_dir = tmp_path / 'signals'
+        signal_dir.mkdir()
+        signal_path = signal_dir / str(job_id)
+        signal_path.write_text('cancel')
+        monkeypatch.setattr(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                            str(signal_dir))
 
         await manager.start_job(job_id)
 
-        assert attempts == 7
-        assert len(sleeps) == 6
+        assert attempts == (2 if lost_ack else 7)
+        assert len(sleeps) == (1 if lost_ack else 6)
+        assert not signal_path.exists()
         assert (managed_job_state.get_job_schedule_state(job_id) ==
                 managed_job_state.ManagedJobScheduleState.DONE)
         assert (managed_job_state.get_status(job_id) ==

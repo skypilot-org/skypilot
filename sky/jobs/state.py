@@ -5555,7 +5555,29 @@ def fail_job_controller_initialization(job: Dict[str, Any],
                 }))
         if result.rowcount != 1:
             session.rollback()
-            return False
+            # A retry may follow a committed transaction whose acknowledgement
+            # was lost. Only accept the exact failure written by this claim.
+            return bool(
+                session.execute(
+                    sqlalchemy.select(spot_table.c.spot_job_id).select_from(
+                        job_info_table.join(
+                            spot_table, job_info_table.c.spot_job_id ==
+                            spot_table.c.spot_job_id)).
+                    where(
+                        sqlalchemy.and_(
+                            job_info_table.c.spot_job_id == job['job_id'],
+                            job_info_table.c.controller_pid.
+                            is_not_distinct_from(job['controller_pid']),
+                            job_info_table.c.controller_pid_started_at.
+                            is_not_distinct_from(
+                                job['controller_pid_started_at']),
+                            job_info_table.c.schedule_state ==
+                            ManagedJobScheduleState.DONE.value,
+                            spot_table.c.status ==
+                            ManagedJobStatus.FAILED_CONTROLLER.value,
+                            spot_table.c.failure_reason == failure_reason,
+                            spot_table.c.end_at.is_not(None),
+                        )).limit(1)).first())
         failed_result = session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
