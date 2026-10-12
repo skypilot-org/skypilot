@@ -460,6 +460,7 @@ def test_workspace_multiple_aws_profiles():
 @pytest.mark.no_remote_server
 # We can't restart the api server in the dependency test.
 @pytest.mark.no_dependency
+@pytest.mark.no_remote_identity_none  # Sets other identities.
 def test_workspace_k8s_remote_identity():
     """Does each team's cluster run under its own Kubernetes ServiceAccount?
 

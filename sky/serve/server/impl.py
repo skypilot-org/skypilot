@@ -14,6 +14,7 @@ import colorama
 import filelock
 
 from sky import backends
+from sky import clouds
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
@@ -170,6 +171,8 @@ def up(
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, request_name=request_names.AdminPolicyRequestName.SERVE_UP)
+    clouds.Kubernetes.check_request_keeps_server_none()
+    clouds.Kubernetes.check_task_keeps_server_none(dag.tasks[0])
     dag.resolve_and_validate_volumes()
     dag.pre_mount_volumes()
     task = dag.tasks[0]
@@ -570,6 +573,8 @@ def update(
     dag, _ = admin_policy_utils.apply(
         task, request_name=request_names.AdminPolicyRequestName.SERVE_UPDATE)
     task = dag.tasks[0]
+    clouds.Kubernetes.check_request_keeps_server_none()
+    clouds.Kubernetes.check_task_keeps_server_none(task)
     if pool:
         _maybe_display_run_warning(task)
         # Use dummy run script for pool.
