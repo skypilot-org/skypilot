@@ -204,6 +204,8 @@ _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
 # - firewall_rule: This is a newly added section for gcp in provider section.
 # - security_group: In #2485 we introduces the changed of security group, so we
 #   should take the latest security group name.
+# - remote_identity: Like IamInstanceProfile on AWS, a changed identity should
+#   apply to new nodes of an existing cluster.
 _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('provider', 'availability_zone'),
     # Clouds with new provisioner has docker_login_config in the
@@ -218,6 +220,7 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     # we need to take this field from the new yaml.
     ('provider', 'tpu_node'),
     ('provider', 'security_group', 'GroupName'),
+    ('provider', 'remote_identity'),
     ('available_node_types', 'ray.head.default', 'node_config',
      'IamInstanceProfile'),
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),

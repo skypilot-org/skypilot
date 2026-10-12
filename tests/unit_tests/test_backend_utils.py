@@ -655,6 +655,26 @@ def test_replace_yaml_dicts_preserves_old_subfield_on_restart():
     assert sg['ManagedBySkyPilot'] is False
 
 
+def test_replace_yaml_dicts_takes_new_remote_identity_on_relaunch():
+    new_yaml = ('cluster_name: c\n'
+                'provider:\n'
+                '  type: external\n'
+                '  remote_identity: team-a@p.iam.gserviceaccount.com\n'
+                'auth: {ssh_user: ubuntu}\n')
+    old_yaml = ('cluster_name: c\n'
+                'provider:\n'
+                '  type: external\n'
+                '  remote_identity: LOCAL_CREDENTIALS\n'
+                'auth: {ssh_user: ubuntu}\n')
+
+    out = backend_utils._replace_yaml_dicts(
+        new_yaml, old_yaml,
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
+    assert (yaml_utils.read_yaml_str(out)['provider']['remote_identity'] ==
+            'team-a@p.iam.gserviceaccount.com')
+
+
 def test_replace_yaml_dicts_restores_new_nested_field_when_old_is_null():
     """Old yaml has the intermediate key present but null (e.g. `key:`).
 
