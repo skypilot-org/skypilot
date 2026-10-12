@@ -5,7 +5,7 @@
 /**
  * Thresholds for switching to large-unit display. Counts at or above these
  * render as "<n>.<d> k/TB" so five- and six-digit numbers stay one glance
- * wide: >=10000 CPU ("44.2k"), >=10000 GB memory ("681.7 TB").
+ * wide: >=10000 CPU ("44.2k"), >=10000 GB memory ("665.8 TB"; 1 TB = 1024 GB).
  */
 const CPU_K_THRESHOLD = 10000;
 const MEMORY_TB_THRESHOLD_GB = 10000;
@@ -33,7 +33,7 @@ export function formatCpu(cpu) {
 export function formatMemory(memory) {
   if (memory === null || memory === undefined) return '-';
   if (memory >= MEMORY_TB_THRESHOLD_GB) {
-    return `${(memory / 1000).toFixed(1)} TB`;
+    return `${(memory / 1024).toFixed(1)} TB`;
   }
   return `${Math.round(memory)} GB`;
 }

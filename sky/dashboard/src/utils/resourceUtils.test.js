@@ -31,10 +31,10 @@ describe('formatMemory', () => {
   });
 
   it('switches to one-decimal TB at 10000 GB', () => {
-    expect(formatMemory(10000)).toBe('10.0 TB');
-    expect(formatMemory(681745)).toBe('681.7 TB');
-    expect(formatMemory(240573)).toBe('240.6 TB');
-    expect(formatMemory(67105)).toBe('67.1 TB');
+    expect(formatMemory(10000)).toBe('9.8 TB');
+    expect(formatMemory(681745)).toBe('665.8 TB');
+    expect(formatMemory(240573)).toBe('234.9 TB');
+    expect(formatMemory(67105)).toBe('65.5 TB');
   });
 
   it('returns - for null and undefined', () => {
