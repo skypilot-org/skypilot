@@ -613,6 +613,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('gcp', 'managed_instance_group'),
     ('gcp', 'enable_gvnic'),
     ('gcp', 'enable_gpu_direct'),
+    ('gcp', 'enable_nested_virtualization'),
     ('gcp', 'placement_policy'),
     ('vast', 'datacenter_only'),
     ('vast', 'create_instance_kwargs'),

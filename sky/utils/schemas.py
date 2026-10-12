@@ -1990,6 +1990,9 @@ def get_config_schema():
                 'enable_gpu_direct': {
                     'type': 'boolean'
                 },
+                'enable_nested_virtualization': {
+                    'type': 'boolean'
+                },
                 'placement_policy': {
                     'type': 'string',
                 },

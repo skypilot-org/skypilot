@@ -210,6 +210,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`remote_identity <config-yaml-gcp-remote-identity>`: LOCAL_CREDENTIALS
     :ref:`enable_gvnic <config-yaml-gcp-enable-gvnic>`: false
     :ref:`enable_gpu_direct <config-yaml-gcp-enable-gpu-direct>`: false
+    :ref:`enable_nested_virtualization <config-yaml-gcp-enable-nested-virtualization>`: false
     :ref:`placement_policy <config-yaml-gcp-placement-policy>`: compact
     :ref:`capabilities <config-yaml-gcp-capabilities>`:
       - storage
@@ -1413,6 +1414,18 @@ Default: ``false``.
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Enable GPUDirect-TCPX, a high-performance networking technology that establishes direct communication between GPUs and network interfaces for `a3-highgpu-8g` or `a3-edgegpu-8g` instances launched by SkyPilot. When enabled, this configuration automatically activates the gVNIC network interface for optimal performance.
+
+Default: ``false``.
+
+.. _config-yaml-gcp-enable-nested-virtualization:
+
+``gcp.enable_nested_virtualization``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Expose the ``advancedMachineFeatures.enableNestedVirtualization`` flag on all
+GCP instances launched by SkyPilot. Required for VMs that host nested VMs
+(e.g. Firecracker-based agent sandboxes). Only selected machine families
+(e.g. C3, N4, M3) support the flag; GCP rejects it elsewhere.
 
 Default: ``false``.
 

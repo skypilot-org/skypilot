@@ -711,6 +711,15 @@ class GCP(clouds.Cloud):
                 keys=('enable_gvnic',),
                 default_value=False,
                 override_configs=resources.cluster_config_overrides)
+        # Nested virtualization (advancedMachineFeatures.enableNestedVirtualization)
+        # for VMs that host nested VMs (e.g. Firecracker-based sandboxes).
+        resources_vars['enable_nested_virtualization'] = (
+            skypilot_config.get_effective_region_config(
+                cloud='gcp',
+                region=region_name,
+                keys=('enable_nested_virtualization',),
+                default_value=False,
+                override_configs=resources.cluster_config_overrides))
         placement_policy = skypilot_config.get_effective_region_config(
             cloud='gcp',
             region=region_name,
