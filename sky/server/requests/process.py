@@ -101,16 +101,24 @@ class DisposableExecutor:
     TODO(aylei): use the official `max_tasks_per_child` when upgrade to 3.11
     """
 
-    def __init__(self,
-                 max_workers: Optional[int] = None,
-                 initializer: Optional[Callable] = None,
-                 initargs: Tuple = ()):
+    def __init__(
+            self,
+            max_workers: Optional[int] = None,
+            initializer: Optional[Callable] = None,
+            initargs: Tuple = (),
+            mp_context: Optional[multiprocessing.context.BaseContext] = None):
         self.max_workers: Optional[int] = max_workers
         self.workers: Dict[int, multiprocessing.Process] = {}
         self._shutdown: bool = False
         self._lock: threading.Lock = threading.Lock()
         self._initializer: Optional[Callable] = initializer
         self._initargs: Tuple = initargs
+        # Context used to create worker processes and their result queues.
+        # Falls back to the module-level default (the process-wide start
+        # method) when not provided.
+        self._mp_context: multiprocessing.context.BaseContext = (
+            mp_context
+            if mp_context is not None else multiprocessing.get_context())
 
     def _monitor_worker(self, process: multiprocessing.Process,
                         future: concurrent.futures.Future,
@@ -152,11 +160,13 @@ class DisposableExecutor:
                 raise exceptions.ExecutionPoolFullError(
                     'Maximum workers reached')
 
-        result_queue: multiprocessing.Queue = multiprocessing.Queue()
-        process = multiprocessing.Process(target=_disposable_worker,
-                                          args=(fn, self._initializer,
-                                                self._initargs, result_queue,
-                                                args, kwargs))
+        result_queue: multiprocessing.Queue = self._mp_context.Queue()
+        # BaseContext.Process is provided by every concrete context but the
+        # typeshed stub only declares it on the subclasses.
+        process = self._mp_context.Process(  # type: ignore[attr-defined]
+            target=_disposable_worker,
+            args=(fn, self._initializer, self._initargs, result_queue, args,
+                  kwargs))
         process.daemon = True
         process.start()
 
@@ -200,18 +210,23 @@ class BurstableExecutor:
     # requests.
     _burst_executor: Optional[DisposableExecutor] = None
 
-    def __init__(self,
-                 garanteed_workers: int,
-                 burst_workers: int = 0,
-                 **kwargs):
+    def __init__(
+            self,
+            garanteed_workers: int,
+            burst_workers: int = 0,
+            mp_context: Optional[multiprocessing.context.BaseContext] = None,
+            **kwargs):
+        self._mp_context = mp_context
         if garanteed_workers > 0:
             self._guaranteed_workers = garanteed_workers
             self._guaranteed_pool_kwargs = kwargs
             self._guaranteed_pool_lock = threading.Lock()
             self._executor = PoolExecutor(max_workers=garanteed_workers,
+                                          mp_context=mp_context,
                                           **kwargs)
         if burst_workers > 0:
             self._burst_executor = DisposableExecutor(max_workers=burst_workers,
+                                                      mp_context=mp_context,
                                                       **kwargs)
 
     def submit_until_success(self, fn, *args,
@@ -286,6 +301,7 @@ class BurstableExecutor:
                                  daemon=True).start()
                 self._executor = PoolExecutor(
                     max_workers=self._guaranteed_workers,
+                    mp_context=self._mp_context,
                     **self._guaranteed_pool_kwargs)
         return self._submit_to_guaranteed_pool(fn, *args, **kwargs)
 
