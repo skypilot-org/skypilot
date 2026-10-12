@@ -1,5 +1,6 @@
 """Unit tests for the middleware utilities."""
 
+import asyncio
 import enum
 import http
 
@@ -833,3 +834,189 @@ def test_a_fault_publishing_one_series_does_not_lose_the_others(monkeypatch):
         (('path', '/ssh-interactive-auth'),),
         (('path', 'other'),),
     }
+
+
+def _http_scope(path='/status'):
+    return {
+        'type': 'http',
+        'asgi': {
+            'version': '3.0'
+        },
+        'http_version': '1.1',
+        'method': 'GET',
+        'scheme': 'http',
+        'path': path,
+        'raw_path': path.encode(),
+        'root_path': '',
+        'query_string': b'',
+        'headers': [],
+        'client': ('127.0.0.1', 80),
+        'server': ('127.0.0.1', 80),
+        'state': {},
+    }
+
+
+async def _no_body():
+    return {'type': 'http.request', 'body': b'', 'more_body': False}
+
+
+class _Reject(middleware_utils.ASGIMiddleware):
+    """Answers every request with the given status."""
+
+    def __init__(self, app, status):
+        super().__init__(app)
+        self.status = status
+
+    async def on_request(self, request):
+        middleware_utils.mark_rejection(
+            request, middleware_utils.REJECT_REASON_UNAUTHORIZED)
+        return fastapi.responses.JSONResponse(status_code=self.status,
+                                              content={'detail': 'no'})
+
+
+class _Stamp(middleware_utils.ASGIMiddleware):
+    """Records what it saw and stamps a response header."""
+
+    def __init__(self, app):
+        super().__init__(app)
+        self.statuses = []
+
+    def on_response(self, request, status_code, headers):
+        self.statuses.append(status_code)
+        headers['X-Stamp'] = request.url.path
+
+
+async def _ok_app(scope, receive, send):
+    del scope, receive
+    await send({
+        'type': 'http.response.start',
+        'status': 200,
+        'headers': [(b'content-type', b'text/plain')],
+    })
+    await send({'type': 'http.response.body', 'body': b'ok'})
+
+
+@pytest.mark.asyncio
+async def test_asgi_middleware_short_circuits_without_calling_the_app():
+    app_calls = []
+
+    async def app(scope, receive, send):
+        app_calls.append(scope)
+
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+
+    await _Reject(app, 401)(_http_scope(), _no_body, send)
+
+    assert not app_calls
+    assert sent[0]['type'] == 'http.response.start'
+    assert sent[0]['status'] == 401
+
+
+@pytest.mark.asyncio
+async def test_asgi_middleware_on_response_edits_the_headers_sent():
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+
+    stamp = _Stamp(_ok_app)
+    await stamp(_http_scope('/status'), _no_body, send)
+
+    assert stamp.statuses == [200]
+    headers = dict(sent[0]['headers'])
+    assert headers[b'x-stamp'] == b'/status'
+    assert headers[b'content-type'] == b'text/plain'
+    assert sent[1] == {'type': 'http.response.body', 'body': b'ok'}
+
+
+@pytest.mark.asyncio
+async def test_asgi_middleware_on_response_sees_an_inner_rejection():
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+
+    stamp = _Stamp(_Reject(_ok_app, 403))
+    await stamp(_http_scope('/status'), _no_body, send)
+
+    assert stamp.statuses == [403]
+    assert dict(sent[0]['headers'])[b'x-stamp'] == b'/status'
+
+
+@pytest.mark.asyncio
+async def test_asgi_middleware_streams_the_body_without_buffering():
+    """Each body chunk reaches the server before the app produces the next."""
+    first_chunk_sent = asyncio.Event()
+
+    async def app(scope, receive, send):
+        del scope, receive
+        await send({'type': 'http.response.start', 'status': 200})
+        await send({
+            'type': 'http.response.body',
+            'body': b'a',
+            'more_body': True
+        })
+        await asyncio.wait_for(first_chunk_sent.wait(), timeout=5)
+        await send({'type': 'http.response.body', 'body': b'b'})
+
+    bodies = []
+
+    async def send(message):
+        if message['type'] == 'http.response.body':
+            bodies.append(message['body'])
+            first_chunk_sent.set()
+
+    await _Stamp(app)(_http_scope(), _no_body, send)
+
+    assert bodies == [b'a', b'b']
+
+
+@pytest.mark.asyncio
+async def test_asgi_middleware_passes_other_scopes_through():
+    seen = []
+
+    async def app(scope, receive, send):
+        del receive, send
+        seen.append(scope['type'])
+
+    async def send(message):
+        del message
+
+    stamp = _Stamp(app)
+    await stamp({'type': 'lifespan'}, _no_body, send)
+
+    assert seen == ['lifespan']
+    assert not stamp.statuses
+
+
+@pytest.mark.asyncio
+async def test_websocket_aware_judges_a_handshake_with_on_request():
+    app_calls = []
+
+    async def app(scope, receive, send):
+        del scope, receive, send
+        app_calls.append(True)
+
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+
+    async def receive():
+        return {'type': 'websocket.connect'}
+
+    refused = middleware_utils.websocket_aware(_Reject)(app, status=401)
+    await refused(_make_websocket_scope(), receive, send)
+    assert sent == [{
+        'type': 'websocket.close',
+        'code': 4401,
+        'reason': 'Unauthorized'
+    }]
+    assert not app_calls
+
+    accepted = middleware_utils.websocket_aware(_Stamp)(app)
+    await accepted(_make_websocket_scope(), receive, send)
+    assert app_calls == [True]
