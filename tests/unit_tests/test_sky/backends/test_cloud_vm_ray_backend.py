@@ -3,6 +3,7 @@
 import multiprocessing
 import socket
 import time
+import types
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
@@ -16,6 +17,8 @@ from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
 from sky.backends.cloud_vm_ray_backend import SSHTunnelInfo
+from sky.provision import common as provision_common
+from sky.skylet import constants as skylet_constants
 from sky.utils import locks
 from sky.utils import status_lib
 
@@ -451,6 +454,44 @@ class TestCloudVmRayBackendGetGrpcChannel:
             raise socket.error("Connection error")
         return None
 
+    @pytest.mark.parametrize('has_stale_tunnel', [False, True])
+    @pytest.mark.parametrize('concurrent_tunnel_created', [False, True])
+    def test_get_grpc_channel_rechecks_tunnel_after_acquiring_lock(
+            self, has_stale_tunnel, concurrent_tunnel_created):
+        """Reuse a tunnel created after the initial read but before locking."""
+        handle = CloudVmRayResourceHandle(**self.MOCK_HANDLE_KWARGS)
+        stale_tunnel = SSHTunnelInfo(port=self.INITIAL_TUNNEL_PORT,
+                                     pid=self.INITIAL_TUNNEL_PID)
+        healthy_tunnel = SSHTunnelInfo(port=self.INITIAL_TUNNEL_PORT + 1,
+                                       pid=self.INITIAL_TUNNEL_PID + 1)
+        tunnel_state = {'tunnel': stale_tunnel if has_stale_tunnel else None}
+
+        def acquire_lock():
+            # Another process finishes opening a tunnel just before this
+            # process acquires the exclusive lock.
+            if concurrent_tunnel_created:
+                tunnel_state['tunnel'] = healthy_tunnel
+
+        exclusive_lock = MagicMock()
+        exclusive_lock.acquire.return_value.__enter__.side_effect = acquire_lock
+        with patch.object(handle, '_get_skylet_ssh_tunnel',
+                          side_effect=lambda: tunnel_state['tunnel']), \
+                patch.object(handle, '_open_and_update_skylet_tunnel',
+                             return_value=healthy_tunnel) as open_tunnel, \
+                patch.object(locks, 'get_lock', return_value=exclusive_lock), \
+                patch('grpc.insecure_channel') as channel, \
+                patch('socket.socket') as mock_socket:
+            mock_socket.return_value.__enter__.return_value.connect.side_effect = (
+                self._socket_connect_side_effect)
+
+            assert handle.get_grpc_channel() == channel.return_value
+            assert channel.call_args.args[
+                0] == f'localhost:{healthy_tunnel.port}'
+            if concurrent_tunnel_created:
+                open_tunnel.assert_not_called()
+            else:
+                open_tunnel.assert_called_once_with()
+
     def test_get_grpc_channel_multiprocess_race_condition(self):
         """Test get_grpc_channel with multiple processes racing for tunnel creation."""
         tunnel_creation_count = multiprocessing.Value('i', 0)
@@ -803,3 +844,205 @@ class TestProvisionClusterLockParking:
                                      is_launched_by_jobs_controller=True)
         assert result is sentinel
         assert locked_provision.call_count == 2
+
+
+class TestSlurmContainerImageBackfill:
+    """Backfilling provider.container_image for pre-upgrade Slurm clusters."""
+
+    @staticmethod
+    def _handle(cloud, image):
+        launched = MagicMock()
+        launched.cloud = MagicMock(spec=cloud)
+        launched.extract_docker_image.return_value = image
+        return CloudVmRayResourceHandle(
+            cluster_name='test-cluster',
+            cluster_name_on_cloud='test-cluster-abc',
+            cluster_yaml='test-cluster.yml',
+            launched_nodes=1,
+            launched_resources=launched,
+        )
+
+    def test_backfills_legacy_container_cluster(self):
+        handle = self._handle(clouds.Slurm, 'ubuntu:24.04')
+        with patch('sky.global_user_state.get_cluster_yaml_dict',
+                   return_value={'provider': {'cluster': 'c'}}), \
+             patch('sky.global_user_state.set_cluster_yaml') as mock_set:
+            handle._maybe_backfill_slurm_container_image()
+        mock_set.assert_called_once()
+        name, written = mock_set.call_args.args
+        assert name == 'test-cluster'
+        from sky.utils import yaml_utils
+        assert (yaml_utils.safe_load(written)['provider']['container_image'] ==
+                'ubuntu:24.04')
+
+    def test_noop_when_already_present(self):
+        handle = self._handle(clouds.Slurm, 'ubuntu:24.04')
+        with patch('sky.global_user_state.get_cluster_yaml_dict',
+                   return_value={'provider': {
+                       'container_image': 'ubuntu:24.04'
+                   }}), \
+             patch('sky.global_user_state.set_cluster_yaml') as mock_set:
+            handle._maybe_backfill_slurm_container_image()
+        mock_set.assert_not_called()
+
+    def test_reconciles_stale_value(self):
+        handle = self._handle(clouds.Slurm, 'ubuntu:24.04')
+        with patch('sky.global_user_state.get_cluster_yaml_dict',
+                   return_value={'provider': {
+                       'container_image': 'old:1'
+                   }}), \
+             patch('sky.global_user_state.set_cluster_yaml') as mock_set:
+            handle._maybe_backfill_slurm_container_image()
+        _, written = mock_set.call_args.args
+        from sky.utils import yaml_utils
+        assert (yaml_utils.safe_load(written)['provider']['container_image'] ==
+                'ubuntu:24.04')
+
+    def test_noop_for_non_container_slurm(self):
+        handle = self._handle(clouds.Slurm, None)
+        with patch('sky.global_user_state.get_cluster_yaml_dict') as mock_get, \
+             patch('sky.global_user_state.set_cluster_yaml') as mock_set:
+            handle._maybe_backfill_slurm_container_image()
+        mock_get.assert_not_called()
+        mock_set.assert_not_called()
+
+    def test_noop_for_non_slurm_cloud(self):
+        handle = self._handle(clouds.AWS, 'ubuntu:24.04')
+        with patch('sky.global_user_state.get_cluster_yaml_dict') as mock_get, \
+             patch('sky.global_user_state.set_cluster_yaml') as mock_set:
+            handle._maybe_backfill_slurm_container_image()
+        mock_get.assert_not_called()
+        mock_set.assert_not_called()
+
+
+def _head(skylet_port=None):
+    return provision_common.InstanceInfo(instance_id='h',
+                                         internal_ip='10.0.0.1',
+                                         external_ip=None,
+                                         tags={},
+                                         skylet_port=skylet_port)
+
+
+class TestSkyletPort:
+    """The skylet tunnel dials the head's skylet, not a constant.
+
+    Two hostNetwork heads on one node used to share the default: the second
+    skylet listened on the next free port while the server dialed the
+    default, so one cluster's jobs ran on the other.
+    """
+
+    def _handle(self, head, with_info=True):
+        handle = CloudVmRayResourceHandle(
+            **TestCloudVmRayBackendGetGrpcChannel.MOCK_HANDLE_KWARGS)
+        if with_info:
+            info = MagicMock()
+            info.get_head_instance.return_value = head
+            handle.cached_cluster_info = info
+        else:
+            handle.cached_cluster_info = None
+        return handle
+
+    def test_an_assigned_port_is_dialed(self):
+        assert self._handle(_head(29070)).skylet_port == 29070
+
+    def test_no_assignment_is_the_default(self):
+        assert (self._handle(
+            _head()).skylet_port == skylet_constants.SKYLET_GRPC_PORT)
+
+    def test_a_head_pickled_before_the_field_is_the_default(self):
+        old = types.SimpleNamespace(instance_id='h', ssh_port=22)
+        assert (
+            self._handle(old).skylet_port == skylet_constants.SKYLET_GRPC_PORT)
+
+    def test_no_cluster_info_is_the_default(self):
+        assert (self._handle(
+            None,
+            with_info=False).skylet_port == skylet_constants.SKYLET_GRPC_PORT)
+
+    def test_the_tunnel_dials_the_heads_port(self, monkeypatch):
+        handle = self._handle(_head(29070))
+        monkeypatch.setattr(handle, 'get_command_runners',
+                            lambda: [MagicMock()])
+        dialed = []
+
+        class _Stop(Exception):
+            pass
+
+        def fake_tunnel(runner, port_pair):
+            del runner
+            dialed.append(port_pair)
+            raise _Stop()
+
+        monkeypatch.setattr(backend_utils, 'open_ssh_tunnel', fake_tunnel)
+        with pytest.raises(_Stop):
+            handle._open_and_update_skylet_tunnel()  # pylint: disable=protected-access
+        assert dialed[0][1] == 29070
+
+
+class TestProvisionExistingClusterError:
+    """A provisioning error on an existing cluster reaches the user."""
+
+    @staticmethod
+    def _provision(prev_status, retry_zones_error=None, features_error=None):
+        provisioner = object.__new__(cloud_vm_ray_backend.RetryingVmProvisioner)
+        provisioner._dag = MagicMock()  # pylint: disable=protected-access
+        provisioner._optimize_target = MagicMock()  # pylint: disable=protected-access
+        provisioner._requested_features = set()  # pylint: disable=protected-access
+        provisioner._blocked_resources = set()  # pylint: disable=protected-access
+        provisioner.log_dir = '/tmp'
+        provisioner._retry_zones = MagicMock(side_effect=retry_zones_error)  # pylint: disable=protected-access
+        to_provision = MagicMock()
+        setattr(to_provision, 'assert_launchable', lambda: to_provision)
+        to_provision.cloud.check_features_are_supported.side_effect = (
+            features_error)
+        config = cloud_vm_ray_backend.RetryingVmProvisioner.ToProvisionConfig(
+            'c1',
+            to_provision,
+            1,
+            prev_status,
+            MagicMock(),
+            prev_cluster_ever_up=prev_status is not None,
+            prev_config_hash=None)
+        task_mock = MagicMock()
+        task_mock.is_controller_task.return_value = False
+        return provisioner.provision_with_retries(
+            task_mock,
+            config,
+            dryrun=False,
+            stream_logs=False,
+            skip_unnecessary_provisioning=False)
+
+    _ERRORS = [
+        pytest.param(
+            dict(retry_zones_error=exceptions.ResourcesUnavailableError(
+                'invalid cloud credentials: expired')),
+            'expired',
+            id='retry_zones'),
+        pytest.param(dict(
+            features_error=exceptions.NotSupportedError('no autodown here')),
+                     'no autodown here',
+                     id='features'),
+    ]
+
+    @pytest.mark.parametrize('error,message', _ERRORS)
+    @pytest.mark.parametrize(
+        'status',
+        [status_lib.ClusterStatus.UP, status_lib.ClusterStatus.STOPPED])
+    def test_up_or_stopped_cluster_reports_the_error(self, status, error,
+                                                     message):
+        with pytest.raises(exceptions.ResourcesUnavailableError) as e:
+            self._provision(status, **error)
+        assert e.value.no_failover
+        assert message in str(e.value)
+
+    @pytest.mark.parametrize('error,message', _ERRORS)
+    def test_init_cluster_still_fails_over(self, error, message):
+        del message
+        with patch.object(cloud_vm_ray_backend.optimizer.Optimizer,
+                          'optimize',
+                          side_effect=exceptions.ResourcesUnavailableError(
+                              'nothing left')) as optimize:
+            with pytest.raises(exceptions.ResourcesUnavailableError) as e:
+                self._provision(status_lib.ClusterStatus.INIT, **error)
+        optimize.assert_called_once()
+        assert not e.value.no_failover

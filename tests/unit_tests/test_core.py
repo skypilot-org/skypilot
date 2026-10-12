@@ -6,6 +6,7 @@ from sky import admin_policy as sky_admin_policy
 from sky import clouds
 from sky import core
 from sky import exceptions
+from sky import global_user_state
 from sky import models
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
 from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
@@ -995,3 +996,34 @@ def test_tail_logs_reraises_when_reader_finds_nothing(
     with mock.patch('sky.logs.get_log_reader', return_value=reader):
         with pytest.raises(exceptions.ClusterDoesNotExist):
             core.tail_logs('test-cluster', job_id=7)
+
+
+def test_down_graceful_tolerates_missing_command_runners(monkeypatch) -> None:
+    """A graceful ``down`` must still tear the cluster down when the
+    provisioner cannot produce command runners.
+
+    Some provisioners have no exec access into the instances, so
+    ``get_command_runners()`` raises. If that propagates, ``down()`` aborts
+    before ``teardown()`` and the cluster's resources are leaked.
+    """
+    handle = mock.MagicMock(spec=CloudVmRayResourceHandle)
+    handle.get_command_runners.side_effect = RuntimeError(
+        'provisioner does not support command runners')
+    backend = mock.MagicMock(spec=CloudVmRayBackend)
+
+    monkeypatch.setattr(global_user_state, 'get_handle_from_cluster_name',
+                        lambda name: handle)
+    monkeypatch.setattr(core.backend_utils, 'get_backend_from_handle',
+                        lambda h: backend)
+    monkeypatch.setattr(core.usage_lib,
+                        'record_cluster_name_for_current_operation',
+                        lambda name: None)
+    monkeypatch.setattr(core, '_maybe_run_down_hooks',
+                        lambda *args, **kwargs: None)
+
+    core.down('test-cluster', graceful=True)
+
+    handle.get_command_runners.assert_called_once()
+    backend.teardown.assert_called_once_with(handle,
+                                             terminate=True,
+                                             purge=False)

@@ -4,6 +4,7 @@
 
 import collections
 import copy
+import datetime
 import os
 import re
 import tempfile
@@ -19,8 +20,11 @@ import yaml
 
 from sky import exceptions
 from sky import models
+from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.catalog import kubernetes_catalog
+from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils
+from sky.skylet import constants
 
 
 # Test for exception on permanent errors like 401 (Unauthorized)
@@ -623,6 +627,56 @@ def test_detect_gpu_label_formatter_invalid_label_skip():
         assert lf is not None
         assert isinstance(lf, utils.CoreWeaveLabelFormatter)
         utils.detect_gpu_label_formatter.cache_clear()
+
+
+@pytest.mark.parametrize('accelerator', ['RTX-PRO-6000', 'RTXPRO6000'])
+def test_gke_label_formatter_rtx_pro_6000(accelerator):
+    """RTX PRO 6000 is labeled nvidia-rtx-pro-6000 in GKE, not
+    nvidia-tesla-rtx-pro-6000."""
+    assert utils.GKELabelFormatter.get_label_values(accelerator) == [
+        'nvidia-rtx-pro-6000'
+    ]
+    assert utils.GKELabelFormatter.get_accelerator_from_label_value(
+        'nvidia-rtx-pro-6000') == 'RTX-PRO-6000'
+
+
+@pytest.mark.parametrize('accelerator', ['RTX-PRO-6000', 'RTXPRO6000'])
+def test_get_accelerator_label_key_values_gke_rtx_pro_6000(accelerator):
+    """Without an autoscaler, both RTX PRO 6000 names find a GKE node
+    labeled nvidia-rtx-pro-6000."""
+    label_key = utils.GKELabelFormatter.GPU_LABEL_KEY
+    node_labels = {'gpu-node': [(label_key, 'nvidia-rtx-pro-6000')]}
+    with mock.patch('sky.skypilot_config.get_effective_region_config',
+                    return_value=None), \
+         mock.patch('sky.provision.kubernetes.utils.detect_accelerator_resource',
+                    return_value=(True, set())), \
+         mock.patch('sky.provision.kubernetes.utils.detect_gpu_label_formatter',
+                    return_value=(utils.GKELabelFormatter(), node_labels)):
+        assert utils.get_accelerator_label_key_values(
+            'gke_project_us-central1_cluster', accelerator,
+            1) == (label_key, ['nvidia-rtx-pro-6000'], None, None)
+
+
+@pytest.mark.parametrize('accelerator', ['RTX-PRO-6000', 'RTXPRO6000'])
+def test_gke_autoscaler_node_pool_rtx_pro_6000(accelerator):
+    """A GKE autoscaling node pool of nvidia-rtx-pro-6000 GPUs, which may
+    have no nodes yet, can create a node for both RTX PRO 6000 names."""
+    node_pool = {
+        'name': 'g4-pool',
+        'config': {
+            'machineType': 'g4-standard-48',
+            'accelerators': [{
+                'acceleratorType': 'nvidia-rtx-pro-6000',
+                'acceleratorCount': '1'
+            }]
+        }
+    }
+    # pylint: disable=protected-access
+    fits = utils.GKEAutoscaler._check_instance_fits_gke_autoscaler_node_pool
+    with mock.patch('sky.clouds.GCP.get_vcpus_mem_from_instance_type',
+                    return_value=(48, 180.0)):
+        assert fits(f'4CPU--16GB--{accelerator}:1', node_pool)
+        assert not fits(f'4CPU--16GB--{accelerator}:2', node_pool)
 
 
 def test_detect_gpu_label_formatter_suppresses_warning_for_coreweave_format():
@@ -5313,6 +5367,90 @@ def test_diagnose_terminated_pod_non_oom_has_no_hint(monkeypatch):
     assert 'Hint:' not in msg
 
 
+# The shape a host port clash leaves in the container log: a traceback whose
+# last frame is the explanation the user needs.
+_CLASH_LOG = """+ python -m sky.provision.kubernetes.host_network_probe --mode head
+Traceback (most recent call last):
+  File "/opt/sky/host_network_probe.py", line 170, in _verify_free
+    sock.bind(('0.0.0.0', port))
+OSError: [Errno 98] Address already in use
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/sky/host_network_probe.py", line 174, in _verify_free
+    raise RuntimeError(
+RuntimeError: Assigned host port 33499 (gcs) is already in use on this node.
+Launching again assigns a different block and usually succeeds.
+This node's ephemeral port range is 32768-60999, which covers port 33499.
+"""
+
+
+def _error_pod(**status_kwargs):
+    return _make_pod(
+        phase='Failed',
+        container_statuses=[_make_container_status(**status_kwargs)])
+
+
+def test_diagnose_self_exit_surfaces_the_exception_not_the_traceback(
+        monkeypatch):
+    """The clash message was only reachable through kubectl logs."""
+    core_api = _patch_read_pod(monkeypatch,
+                               pod=_error_pod(terminated_reason='Error',
+                                              terminated_exit_code=1))
+    core_api.read_namespaced_pod_log.return_value = _CLASH_LOG
+    msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert 'Error (exit code 1)' in msg
+    assert 'Assigned host port 33499 (gcs) is already in use' in msg
+    # Recovery's OOM classifier stops at this marker; the pair must agree.
+    assert constants.CONTAINER_OUTPUT_MARKER in msg
+    assert 'which covers port 33499' in msg
+    # From the last exception on, not the chained one above it.
+    assert 'OSError' not in msg
+    assert 'Traceback' not in msg
+    assert core_api.read_namespaced_pod_log.call_args.kwargs['previous'] is False
+
+
+def test_diagnose_self_exit_without_a_traceback_keeps_the_last_lines(
+        monkeypatch):
+    core_api = _patch_read_pod(monkeypatch,
+                               pod=_error_pod(terminated_reason='Error',
+                                              terminated_exit_code=2))
+    core_api.read_namespaced_pod_log.return_value = '\n'.join(
+        f'line {i}' for i in range(30)) + '\n'
+    msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert 'line 29' in msg and 'line 20' in msg
+    assert 'line 19' not in msg
+
+
+def test_diagnose_a_restarted_container_reads_the_previous_run(monkeypatch):
+    core_api = _patch_read_pod(monkeypatch,
+                               pod=_error_pod(last_terminated_reason='Error',
+                                              last_terminated_exit_code=1))
+    core_api.read_namespaced_pod_log.return_value = _CLASH_LOG
+    utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert core_api.read_namespaced_pod_log.call_args.kwargs['previous'] is True
+
+
+def test_diagnose_oom_does_not_read_the_log(monkeypatch):
+    """Killed from outside: the container's output does not say why."""
+    core_api = _patch_read_pod(monkeypatch,
+                               pod=_error_pod(terminated_reason='OOMKilled',
+                                              terminated_exit_code=137))
+    utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    core_api.read_namespaced_pod_log.assert_not_called()
+
+
+def test_diagnose_log_read_failure_keeps_the_reason(monkeypatch):
+    """The log is extra context; losing it must not lose the reason."""
+    core_api = _patch_read_pod(monkeypatch,
+                               pod=_error_pod(terminated_reason='Error',
+                                              terminated_exit_code=1))
+    core_api.read_namespaced_pod_log.side_effect = RuntimeError('forbidden')
+    msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert msg == 'Pod mypod terminated: Error (exit code 1).'
+
+
 def test_diagnose_terminated_pod_evicted_ephemeral(monkeypatch):
     pod = _make_pod(
         phase='Failed',
@@ -5358,6 +5496,215 @@ def test_match_kubernetes_failure_hint_generic_eviction():
     assert hint is not None
     assert hint.startswith(
         'The pod was evicted by the node under resource pressure.')
+
+
+def test_match_kubernetes_failure_hint_ignores_a_token_inside_a_longer_word():
+    """A queue controller's eviction must not trip the node-pressure hint.
+
+    A queue admission controller that evicts an admitted workload names the
+    eviction `WorkloadEvictedDueToPodsReadyTimeout`, which contains 'Evicted'
+    as part of a camelCase identifier. Matched as a substring, the provision
+    failure told the user to increase `resources.memory` / `resources.disk_size`
+    -- advice that cannot fix a workload a queue evicted.
+    """
+    pod_names = ['sky-cluster-head']
+    cluster = 'sky-cluster'
+    reason = (f'Pod(s) {pod_names} of cluster {cluster!r} were deleted while '
+              'SkyPilot was waiting for them to be scheduled: '
+              'sky-cluster-head: Preempted by Kueue: '
+              'WorkloadEvictedDueToPodsReadyTimeout (Exceeded the PodsReady '
+              'timeout default/sky-cluster).')
+    assert utils.match_kubernetes_failure_hint(reason) is None
+
+
+def test_reason_matches_failure_token_word_boundaries():
+    # Named as a word of its own, whatever punctuation surrounds it.
+    assert utils.reason_matches_failure_token('Evicted: low on memory',
+                                              'Evicted')
+    assert utils.reason_matches_failure_token('pod-0 (Evicted)', 'Evicted')
+    assert utils.reason_matches_failure_token('Evicted', 'Evicted')
+    # Buried in a longer word: not this failure.
+    assert not utils.reason_matches_failure_token(
+        'WorkloadEvictedDueToPodsReadyTimeout', 'Evicted')
+    assert not utils.reason_matches_failure_token('PodEvicted', 'Evicted')
+    assert not utils.reason_matches_failure_token('Evicted2', 'Evicted')
+    # Only alphanumeric edges are anchored, so a multi-word marker wrapped in
+    # punctuation still matches.
+    assert utils.reason_matches_failure_token(
+        f'OOMKilled (exit code 137, {utils.NO_MEMORY_LIMIT_MARKER})',
+        utils.NO_MEMORY_LIMIT_MARKER)
+
+
+# ---------------------------------------------------------------------------
+#  Deriving a reason from a pod's own events (reason_from_pod_events,
+#  last_pod_event_context), which outlive the pod they describe.
+# ---------------------------------------------------------------------------
+
+_POD_CREATED_AT = datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc)
+
+
+def _make_pod_event(reason, message, type_='Normal', at=0):
+    """A pod event, shaped like what the API server returns.
+
+    *at* is seconds relative to _POD_CREATED_AT; a negative value is an event
+    left behind by whatever held the same pod name before this pod.
+    """
+    event = mock.MagicMock()
+    event.reason = reason
+    event.message = message
+    event.type = type_
+    # event_last_observed prefers these over the creation timestamp; leaving
+    # them as auto-created MagicMocks would make the event read as undated.
+    event.series = None
+    event.last_timestamp = None
+    event.event_time = None
+    event.metadata.creation_timestamp = (_POD_CREATED_AT +
+                                         datetime.timedelta(seconds=at))
+    return event
+
+
+def test_a_deletion_cause_outranks_a_newer_generic_event():
+    """The informative event is usually not the last one: the kubelet's
+    Killing follows whatever actually caused the deletion."""
+    events = [
+        _make_pod_event('Killing', 'Stopping container ray-node', at=12),
+        _make_pod_event('Stopped',
+                        'Exceeded the PodsReady timeout default/wl',
+                        at=10),
+    ]
+    assert utils.reason_from_pod_events(events) == (
+        'Stopped by Kueue: Exceeded the PodsReady timeout default/wl')
+
+
+def test_events_that_do_not_name_a_deletion_cause_do_not_count():
+    """Callers report whatever comes back as an identified cause, so the
+    scheduler's complaint and the kubelet's kill notice must not."""
+    assert utils.reason_from_pod_events([
+        _make_pod_event('FailedScheduling',
+                        '0/1 nodes are available: 1 Insufficient cpu.',
+                        type_='Warning',
+                        at=5),
+        _make_pod_event('Scheduled', 'Successfully assigned ns/p to n'),
+    ]) is None
+    assert utils.reason_from_pod_events(
+        [_make_pod_event('Killing', 'Stopping container ray-node')]) is None
+    assert utils.reason_from_pod_events([]) is None
+
+
+def test_a_reason_reads_like_a_pod_status_reason():
+    """The shape is '<Reason>: <message>', the same as what
+    get_condensed_pod_reason produces, so the two are interchangeable in a
+    failure message. The kubelet is not the only thing that emits Evicted --
+    node autoscalers emit it for every pod they drain -- so the message is
+    left to name the actor."""
+    assert utils.reason_from_pod_events([
+        _make_pod_event('Evicted',
+                        'The node was low on resource: ephemeral-storage',
+                        type_='Warning')
+    ]) == 'Evicted: The node was low on resource: ephemeral-storage'
+    # 'Stopped' alone reads like the user stopped something, so that one
+    # reason is reported with its actor.
+    assert utils.reason_from_pod_events([_make_pod_event('Stopped', '')
+                                        ]) == 'Stopped by Kueue'
+
+
+def test_events_from_before_the_pod_are_not_evidence():
+    """An event older than the pod describes whatever held its name before
+    it."""
+    old = [
+        _make_pod_event('Stopped',
+                        'Exceeded the PodsReady timeout default/old',
+                        at=-1800)
+    ]
+    assert utils.reason_from_pod_events(old, _POD_CREATED_AT) is None
+    # Without a creation time to compare against, nothing is filtered.
+    assert utils.reason_from_pod_events(old) is not None
+    # Clock skew between this process and the API server that stamps the
+    # events must not throw away the pod's own events.
+    recent = [
+        _make_pod_event('Stopped',
+                        'Exceeded the PodsReady timeout default/wl',
+                        at=-5)
+    ]
+    assert utils.reason_from_pod_events(recent, _POD_CREATED_AT) is not None
+
+
+def test_an_undated_event_is_not_assumed_to_be_stale():
+    event = _make_pod_event('Stopped', 'Exceeded the PodsReady timeout')
+    event.metadata.creation_timestamp = None
+    assert utils.reason_from_pod_events([event], _POD_CREATED_AT) is not None
+
+
+def test_the_last_event_is_offered_as_context():
+    """Not as a cause -- see the tests above -- but it is still the last thing
+    anything said about the pod."""
+    assert utils.last_pod_event_context([
+        _make_pod_event('Scheduled', 'Successfully assigned ns/p to n', at=6),
+        _make_pod_event('FailedScheduling',
+                        '0/1 nodes are available',
+                        type_='Warning',
+                        at=5),
+    ]) == 'FailedScheduling: 0/1 nodes are available'
+    assert utils.last_pod_event_context(
+        [_make_pod_event('Killing', 'Stopping container ray-node',
+                         at=5)]) == 'Killing: Stopping container ray-node'
+    assert utils.last_pod_event_context([
+        _make_pod_event('Scheduled', 'Successfully assigned ns/p to n')
+    ]) is None
+
+
+def _patch_pod_events(monkeypatch, core_api, events):
+    core_api.list_namespaced_event.return_value = mock.MagicMock(items=events)
+    monkeypatch.setattr(utils.kubernetes, 'core_api', lambda context: core_api)
+
+
+def test_diagnose_terminated_pod_deleted_pod_reports_its_events(monkeypatch):
+    """The runtime-setup path shares the gap this change is about: a pod that
+    something else deleted reads back as a 404, and the diagnosis used to
+    return nothing at all. Its events outlive it and say who did it."""
+    core_api = _patch_read_pod(monkeypatch,
+                               side_effect=kubernetes.client.rest.ApiException(
+                                   status=404, reason='Not Found'))
+    _patch_pod_events(monkeypatch, core_api, [
+        _make_pod_event('Stopped', 'Exceeded the PodsReady timeout default/wl')
+    ])
+    msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert msg == ('Pod mypod was deleted: Stopped by Kueue: Exceeded the '
+                   'PodsReady timeout default/wl.')
+
+
+def test_diagnose_terminated_pod_deleted_pod_keeps_its_hint(monkeypatch):
+    core_api = _patch_read_pod(monkeypatch,
+                               side_effect=kubernetes.client.rest.ApiException(
+                                   status=404, reason='Not Found'))
+    _patch_pod_events(monkeypatch, core_api, [
+        _make_pod_event('Evicted',
+                        'The node was low on resource: ephemeral-storage.',
+                        type_='Warning')
+    ])
+    msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert msg is not None
+    assert 'was deleted: Evicted' in msg
+    assert 'Hint:' in msg
+    assert 'resources.disk_size' in msg
+
+
+def test_diagnose_terminated_pod_deleted_pod_with_nothing_to_say(monkeypatch):
+    """Every `sky down` leaves a pod that reads back as a 404; only one whose
+    events name a cause is worth reporting."""
+    core_api = _patch_read_pod(monkeypatch,
+                               side_effect=kubernetes.client.rest.ApiException(
+                                   status=404, reason='Not Found'))
+    _patch_pod_events(monkeypatch, core_api,
+                      [_make_pod_event('Killing', 'Stopping container ray')])
+    assert utils.diagnose_terminated_pod('ctx', 'ns', 'mypod') is None
+
+
+def test_diagnose_terminated_pod_other_api_error_returns_none(monkeypatch):
+    _patch_read_pod(monkeypatch,
+                    side_effect=kubernetes.client.rest.ApiException(
+                        status=500, reason='Internal Server Error'))
+    assert utils.diagnose_terminated_pod('ctx', 'ns', 'mypod') is None
 
 
 def test_get_failure_hint_reasons_flattens_table():
@@ -5465,82 +5812,6 @@ def test_get_handled_taint_keys_includes_neuron():
     assert utils.NEURON_RESOURCE_KEY in utils.get_handled_taint_keys()
 
 
-class TestOCINetworkEnvVars:
-    """OCI network_tier: best NCCL env-var injection per GPU shape."""
-
-    _NET = utils.KubernetesHighPerformanceNetworkType.OCI_ROCE
-
-    def test_gb200_profile(self):
-        """GB200 gets the MNNVL/NVLS InfiniBand profile, not RoCEv2."""
-        env = self._NET.get_network_env_vars('GB200')
-        # The rack-scale NVLink knobs that make GB200 distinct.
-        assert env['NCCL_MNNVL_ENABLE'] == '1'
-        assert env['NCCL_NVLS_ENABLE'] == '1'
-        assert env['NCCL_NET_PLUGIN'] == 'sys'
-        assert env['NCCL_CUMEM_ENABLE'] == '1'
-        assert env['NCCL_IB_HCA'] == 'mlx5_0,mlx5_1,mlx5_3,mlx5_4'
-        assert env['NCCL_SOCKET_IFNAME'] == 'eth0'
-
-    def test_gb200_is_replacement_not_union(self):
-        """GB200 must drop the RoCEv2-only knobs, not merge them in.
-
-        The official OCI GB200 configmap omits DSCP/GID/UCX; folding the
-        RoCE defaults in would inject values OCI does not ship for GB200.
-        """
-        env = self._NET.get_network_env_vars('GB200')
-        for absent in ('NCCL_IB_GID_INDEX', 'NCCL_IB_TC', 'UCX_TLS',
-                       'UCX_NET_DEVICES'):
-            assert absent not in env, absent
-
-    def test_gb200_case_insensitive(self):
-        env = self._NET.get_network_env_vars('gb200')
-        assert env['NCCL_MNNVL_ENABLE'] == '1'
-
-    def test_gb300_profile(self):
-        """GB300 is MNNVL/NVLS but keeps IB tuning and NET_PLUGIN=none."""
-        env = self._NET.get_network_env_vars('GB300')
-        assert env['NCCL_MNNVL_ENABLE'] == '1'
-        assert env['NCCL_NVLS_ENABLE'] == '1'
-        assert env['NCCL_NET_PLUGIN'] == 'none'
-        # Leading '=' is NCCL's exact-name-match prefix; must be preserved.
-        assert env['NCCL_IB_HCA'] == ('=mlx5_0,mlx5_1,mlx5_2,mlx5_3,'
-                                      'mlx5_5,mlx5_6,mlx5_7,mlx5_8')
-        # GB300-specific knobs absent from GB200.
-        assert env['NCCL_NET_GDR_C2C'] == '1'
-        assert env['NCCL_DMABUF_ENABLE'] == '1'
-        assert env['NCCL_IB_TIMEOUT'] == '22'
-
-    def test_gb200_and_gb300_are_distinct(self):
-        """The two GB profiles must not be identical (NET_PLUGIN differs)."""
-        gb200 = self._NET.get_network_env_vars('GB200')
-        gb300 = self._NET.get_network_env_vars('GB300')
-        assert gb200 != gb300
-        assert gb200['NCCL_NET_PLUGIN'] == 'sys'
-        assert gb300['NCCL_NET_PLUGIN'] == 'none'
-
-    def test_default_roce_profile_for_other_shapes(self):
-        """H100/None fall back to the existing RoCEv2 profile unchanged."""
-        expected = {
-            'NCCL_IB_HCA': 'mlx5',
-            'NCCL_IB_GID_INDEX': '3',
-            'NCCL_IB_TC': '41',
-            'NCCL_SOCKET_IFNAME': 'eth0',
-            'UCX_TLS': 'tcp',
-            'UCX_NET_DEVICES': 'eth0',
-        }
-        assert self._NET.get_network_env_vars('H100') == expected
-        assert self._NET.get_network_env_vars(None) == expected
-        # GB200/GB300 must NOT return the default RoCE profile.
-        assert self._NET.get_network_env_vars('GB200') != expected
-        assert self._NET.get_network_env_vars('GB300') != expected
-
-    def test_non_oci_types_ignore_acc_type(self):
-        """acc_type only affects OCI; other types return their fixed dict."""
-        coreweave = utils.KubernetesHighPerformanceNetworkType.COREWEAVE
-        assert (coreweave.get_network_env_vars('GB200') ==
-                coreweave.get_network_env_vars(None))
-
-
 class TestGetNodeAffinity:
     """Tests for utils.get_node_affinity."""
 
@@ -5613,3 +5884,255 @@ class TestGetNodeAffinity:
             'requiredDuringSchedulingIgnoredDuringExecution',
             'preferredDuringSchedulingIgnoredDuringExecution',
         }
+
+
+class TestPodFields:
+    """Tests for utils.get_pod_fields and utils.combine_pod_fields."""
+
+    @staticmethod
+    def _cluster_yaml(pod_spec):
+        return {
+            'available_node_types': {
+                'ray_head_default': {
+                    'node_config': {
+                        'spec': pod_spec
+                    }
+                }
+            }
+        }
+
+    @staticmethod
+    def _pod_spec(cluster_yaml):
+        return cluster_yaml['available_node_types']['ray_head_default'][
+            'node_config']['spec']
+
+    def test_empty_when_no_field_applies(self):
+        assert utils.get_pod_fields(None, None, None) == {}
+
+    def test_node_affinity_is_a_pod_spec_field(self):
+        pod_fields = utils.get_pod_fields('skypilot.co/accelerator', ['H100'],
+                                          ['some-other-key'])
+        assert pod_fields == {
+            'spec': {
+                'affinity': {
+                    'nodeAffinity': utils.get_node_affinity(
+                        'skypilot.co/accelerator', ['H100'], ['some-other-key'])
+                }
+            }
+        }
+
+    def test_combine_keeps_what_the_template_rendered(self):
+        """The merge adds to an affinity the template already rendered."""
+        pod_affinity = {
+            'preferredDuringSchedulingIgnoredDuringExecution': [{
+                'weight': 1
+            }]
+        }
+        cluster_yaml = self._cluster_yaml({
+            'containers': [{
+                'name': 'ray-node'
+            }],
+            'affinity': {
+                'podAffinity': pod_affinity
+            },
+        })
+        pod_fields = utils.get_pod_fields('skypilot.co/accelerator', ['H100'],
+                                          None)
+
+        combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
+
+        assert self._pod_spec(combined) == {
+            'containers': [{
+                'name': 'ray-node'
+            }],
+            'affinity': {
+                'podAffinity': pod_affinity,
+                'nodeAffinity': pod_fields['spec']['affinity']['nodeAffinity'],
+            },
+        }
+
+    def test_combine_adds_an_affinity_the_template_did_not_render(self):
+        cluster_yaml = self._cluster_yaml(
+            {'containers': [{
+                'name': 'ray-node'
+            }]})
+        pod_fields = utils.get_pod_fields(None, None, ['some-other-key'])
+
+        combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
+
+        assert self._pod_spec(
+            combined)['affinity'] == pod_fields['spec']['affinity']
+
+    def test_combine_leaves_its_inputs_untouched(self):
+        cluster_yaml = self._cluster_yaml(
+            {'containers': [{
+                'name': 'ray-node'
+            }]})
+        pod_fields = utils.get_pod_fields('skypilot.co/accelerator', ['H100'],
+                                          None)
+        expected_pod_fields = copy.deepcopy(pod_fields)
+
+        combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
+        self._pod_spec(combined)['affinity']['nodeAffinity'].clear()
+
+        assert 'affinity' not in self._pod_spec(cluster_yaml)
+        assert pod_fields == expected_pod_fields
+
+
+def _make_pod_with_spec(*,
+                        container_name='c',
+                        memory_limit=None,
+                        container_statuses=None,
+                        phase='Failed'):
+    """A pod whose spec declares `container_name`, optionally with a limit."""
+    limits = {'memory': memory_limit} if memory_limit is not None else None
+    container = kubernetes.client.V1Container(
+        name=container_name,
+        resources=kubernetes.client.V1ResourceRequirements(
+            requests={'memory': '2Gi'}, limits=limits))
+    return kubernetes.client.V1Pod(
+        spec=kubernetes.client.V1PodSpec(containers=[container]),
+        status=kubernetes.client.V1PodStatus(
+            phase=phase, container_statuses=container_statuses))
+
+
+def test_is_unbounded_oom_only_when_limit_absent():
+    unbounded = _make_pod_with_spec()
+    bounded = _make_pod_with_spec(memory_limit='4Gi')
+    assert utils.is_unbounded_oom('OOMKilled', unbounded, 'c')
+    # A container that OOMed against its own limit is not a node-level OOM.
+    assert not utils.is_unbounded_oom('OOMKilled', bounded, 'c')
+    # Only OOM kills are classified.
+    assert not utils.is_unbounded_oom('Error', unbounded, 'c')
+
+
+def test_is_unbounded_oom_false_when_container_not_in_spec():
+    # We cannot confirm the container was unbounded, so we must not claim it
+    # was: a confidently wrong node-level hint is worse than the generic one.
+    pod = _make_pod_with_spec(container_name='other')
+    assert not utils.is_unbounded_oom('OOMKilled', pod, 'c')
+    assert utils.annotate_oom_reason('OOMKilled', pod, 'c') == 'OOMKilled'
+
+
+def test_annotate_oom_reason_tags_only_unbounded():
+    assert utils.annotate_oom_reason(
+        'OOMKilled', _make_pod_with_spec(),
+        'c') == f'OOMKilled ({utils.NO_MEMORY_LIMIT_MARKER})'
+    assert utils.annotate_oom_reason('OOMKilled',
+                                     _make_pod_with_spec(memory_limit='4Gi'),
+                                     'c') == 'OOMKilled'
+    assert utils.annotate_oom_reason('Evicted', _make_pod_with_spec(),
+                                     'c') == 'Evicted'
+
+
+def test_get_condensed_pod_reason_marks_unbounded_oom():
+    pod = _make_pod_with_spec(container_statuses=[
+        _make_container_status(terminated_reason='OOMKilled',
+                               terminated_exit_code=137)
+    ])
+    assert utils.get_condensed_pod_reason(pod) == (
+        f'OOMKilled (exit code 137, {utils.NO_MEMORY_LIMIT_MARKER})')
+
+
+def test_get_condensed_pod_reason_bounded_oom_unchanged():
+    # With a limit set the message must stay exactly as it was.
+    pod = _make_pod_with_spec(memory_limit='4Gi',
+                              container_statuses=[
+                                  _make_container_status(
+                                      terminated_reason='OOMKilled',
+                                      terminated_exit_code=137)
+                              ])
+    assert utils.get_condensed_pod_reason(pod) == 'OOMKilled (exit code 137)'
+
+
+def test_unbounded_oom_hint_recommends_set_pod_resource_limits():
+    hint = utils.match_kubernetes_failure_hint(
+        f'OOMKilled (exit code 137, {utils.NO_MEMORY_LIMIT_MARKER})')
+    assert hint is not None
+    assert 'set_pod_resource_limits' in hint
+    # The hint must link the docs section, not just name the config.
+    assert utils.SET_POD_RESOURCE_LIMITS_DOC_URL in hint
+    assert '#kubernetes-set-pod-resource-limits' in (
+        utils.SET_POD_RESOURCE_LIMITS_DOC_URL)
+
+
+def test_unbounded_oom_hint_precedes_plain_oomkilled():
+    # The unbounded reason contains 'OOMKilled' too, so ordering decides which
+    # hint wins; the node-level one is the specific (and correct) advice.
+    unbounded = utils.match_kubernetes_failure_hint(
+        f'OOMKilled (exit code 137, {utils.NO_MEMORY_LIMIT_MARKER})')
+    bounded = utils.match_kubernetes_failure_hint('OOMKilled (exit code 137)')
+    assert unbounded != bounded
+    assert 'no memory limit' in unbounded
+    assert bounded.startswith('The container ran out of memory.')
+
+
+# ---------------------------------------------------------------------------
+# Control vs. execution context
+# ---------------------------------------------------------------------------
+# The two are the same string for every cluster today. What these tests pin is
+# the shape that keeps it that way -- the fallback, and the in-cluster
+# handling -- so that the day a provisioner records a real placement, the
+# blast radius is one accessor and everything here still holds.
+
+_EXECUTION_KEY = k8s_constants.PROVIDER_EXECUTION_CONTEXT_KEY
+
+
+def test_control_and_execution_context_agree_by_default():
+    provider_config = {'context': 'ctx-a'}
+    assert utils.get_control_context_from_config(provider_config) == 'ctx-a'
+    assert utils.get_execution_context_from_config(provider_config) == 'ctx-a'
+
+
+def test_execution_context_falls_back_to_control_context():
+    """Every cluster provisioned before the key existed must still resolve."""
+    provider_config = {'context': 'ctx-a'}
+    assert _EXECUTION_KEY not in provider_config
+    assert utils.get_execution_context_from_config(provider_config) == 'ctx-a'
+
+
+def test_recorded_execution_context_wins():
+    """The one behaviour that matters once placements can differ: the
+    execution reader follows the recorded placement, and the control reader
+    keeps addressing the cluster the objects were submitted to."""
+    provider_config = {'context': 'ctx-manager', _EXECUTION_KEY: 'ctx-worker'}
+    assert utils.get_execution_context_from_config(
+        provider_config) == 'ctx-worker'
+    assert utils.get_control_context_from_config(
+        provider_config) == 'ctx-manager'
+
+
+def test_in_cluster_execution_context_resolves_to_none():
+    """A recorded in-cluster context has to be mapped to None just as
+    `provider.context` is -- it is not a kubeconfig entry, and passing it to
+    the client would defeat in-cluster auth."""
+    provider_config = {
+        'context': 'ctx-a',
+        _EXECUTION_KEY: kubernetes_adaptor.in_cluster_context_name(),
+    }
+    assert utils.get_execution_context_from_config(provider_config) is None
+
+
+def test_in_cluster_control_context_resolves_to_none():
+    provider_config = {'context': kubernetes_adaptor.in_cluster_context_name()}
+    assert utils.get_control_context_from_config(provider_config) is None
+    # ... and the fallback inherits that, rather than the raw name.
+    assert utils.get_execution_context_from_config(provider_config) is None
+
+
+def test_set_execution_context_records_alongside_the_control_context():
+    provider_config = {'context': 'ctx-a'}
+    utils.set_execution_context_in_config(provider_config, 'ctx-worker')
+    assert provider_config[_EXECUTION_KEY] == 'ctx-worker'
+    # `provider.context` is untouched: teardown, status and resource cleanup
+    # all read it and must keep pointing at the submitting cluster.
+    assert provider_config['context'] == 'ctx-a'
+
+
+def test_set_execution_context_ignores_none():
+    """Nothing to record for a cluster with no context: leaving the key out
+    keeps the fallback in charge rather than pinning a null placement."""
+    provider_config = {'context': 'ctx-a'}
+    utils.set_execution_context_in_config(provider_config, None)
+    assert _EXECUTION_KEY not in provider_config
+    assert utils.get_execution_context_from_config(provider_config) == 'ctx-a'

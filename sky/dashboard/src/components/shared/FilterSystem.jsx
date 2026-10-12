@@ -67,28 +67,41 @@ export const evaluateCondition = (item, filter) => {
   }
 };
 
-// Main filter function
-export const filterData = (data, filters) => {
-  if (filters.length === 0) {
+// Main filter function.
+//
+// Filters on different properties always narrow each other (AND). Filters on
+// the *same* property AND too, unless the caller names that property in
+// `options.orProperties` -- then its values are alternatives (OR), which is
+// what a multi-valued filter like `?status=RUNNING,STOPPED` means.
+//
+// The default is AND so that pages which have not adopted the schema keep their
+// existing behaviour. Note that key/value filters such as Labels want AND even
+// when they repeat: `team:ml` plus `env:prod` reads as an intersection.
+export const filterData = (data, filters, options = {}) => {
+  if (!filters || filters.length === 0) {
     return data;
   }
 
-  return data.filter((item) => {
-    let result = null;
+  const orProperties = new Set(
+    (options.orProperties || []).map((p) => String(p).toLowerCase())
+  );
 
-    for (let i = 0; i < filters.length; i++) {
-      const filter = filters[i];
-      const current = evaluateCondition(item, filter);
-
-      if (result === null) {
-        result = current;
-      } else {
-        result = result && current;
-      }
+  const groups = new Map();
+  for (const filter of filters) {
+    const key = (filter.property || '').toLowerCase();
+    if (!groups.has(key)) {
+      groups.set(key, []);
     }
+    groups.get(key).push(filter);
+  }
 
-    return result;
-  });
+  return data.filter((item) =>
+    [...groups.entries()].every(([property, group]) =>
+      orProperties.has(property)
+        ? group.some((f) => evaluateCondition(item, f))
+        : group.every((f) => evaluateCondition(item, f))
+    )
+  );
 };
 
 // URL parameter handling utilities
@@ -169,8 +182,15 @@ export const FilterDropdown = ({
   propertyList = [],
   valueList,
   setFilters,
+  // Optional: pages that mirror filter state into the URL themselves (via
+  // useUrlFilterState) pass neither of these.
   updateURLParams,
   onFilterAdd,
+  // Optional: how a chip joins the existing ones. Defaults to appending, which
+  // is what pages without a filter schema expect. A page whose URL can only
+  // carry one value per property passes a helper that replaces instead, so the
+  // chips and the address bar cannot disagree.
+  addFilter,
   placeholder = 'Filter items',
 }) => {
   const inputRef = useRef(null);
@@ -258,16 +278,11 @@ export const FilterDropdown = ({
   const handleOptionSelect = (option) => {
     const property = getPropertyLabel(propertyValue);
     setFilters((prevFilters) => {
-      const updatedFilters = [
-        ...prevFilters,
-        {
-          property,
-          operator: ':',
-          value: option,
-        },
-      ];
+      const updatedFilters = addFilter
+        ? addFilter(prevFilters, property, option)
+        : [...prevFilters, { property, operator: ':', value: option }];
 
-      updateURLParams(updatedFilters);
+      updateURLParams?.(updatedFilters);
       return updatedFilters;
     });
     if (onFilterAdd) onFilterAdd(property, option);
@@ -280,16 +295,11 @@ export const FilterDropdown = ({
     if (e.key === 'Enter' && value.trim() !== '') {
       const property = getPropertyLabel(propertyValue);
       setFilters((prevFilters) => {
-        const updatedFilters = [
-          ...prevFilters,
-          {
-            property,
-            operator: ':',
-            value: value,
-          },
-        ];
+        const updatedFilters = addFilter
+          ? addFilter(prevFilters, property, value)
+          : [...prevFilters, { property, operator: ':', value }];
 
-        updateURLParams(updatedFilters);
+        updateURLParams?.(updatedFilters);
         return updatedFilters;
       });
       if (onFilterAdd) onFilterAdd(property, value);
@@ -397,14 +407,14 @@ export const Filters = ({ filters = [], setFilters, updateURLParams }) => {
         (_, _index) => _index !== index
       );
 
-      updateURLParams(updatedFilters);
+      updateURLParams?.(updatedFilters);
 
       return updatedFilters;
     });
   };
 
   const clearFilters = () => {
-    updateURLParams([]);
+    updateURLParams?.([]);
     setFilters([]);
   };
 

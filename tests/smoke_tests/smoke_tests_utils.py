@@ -16,6 +16,7 @@ from types import MethodType
 from typing import (Any, BinaryIO, Callable, Dict, Generator, List, NamedTuple,
                     Optional, Sequence, Set, Tuple, Union)
 from unittest.mock import patch
+import urllib.parse
 import uuid
 
 import colorama
@@ -25,6 +26,7 @@ from smoke_tests.docker import docker_utils
 
 import sky
 from sky import clouds
+from sky import jobs
 from sky import serve
 from sky import skypilot_config
 from sky.client import sdk
@@ -232,7 +234,13 @@ _WAIT_UNTIL_VOLUME_IS_NOT_FOUND = (
     'start_time=$SECONDS; '
     'while true; do '
     'vols=$(sky volumes ls); '
-    'if ! echo "$vols" | grep -q "{volume_name}"; then '
+    # Matched on the whole first field, as the readiness wait is, so that a
+    # longer name containing this one -- another test's, or the same test's in
+    # a concurrent run -- cannot hold the wait open. `{awk_match}` widens that
+    # to a prefix, for a caller waiting on every volume of one cluster.
+    'found=$(echo "$vols" | awk -v n="{volume_name}" '
+    '\'{awk_match} {{print $1; exit}}\'); '
+    'if [ -z "$found" ]; then '
     '  echo "Volume {volume_name} successfully removed."; break; '
     'fi; '
     'if (( $SECONDS - $start_time > {timeout} )); then '
@@ -246,9 +254,19 @@ _WAIT_UNTIL_VOLUME_IS_NOT_FOUND = (
 
 
 def get_cmd_wait_until_volume_is_not_found(volume_name: str,
-                                           timeout: int = 120):
+                                           timeout: int = 120,
+                                           match_prefix: bool = False):
+    """Blocks until no volume named `volume_name` is listed.
+
+    With `match_prefix`, until no volume whose name *starts with* it is: the
+    volumes a launch creates for a task's inline `volumes:` entries are named
+    after the cluster, one per mount path, so that is how a caller waits for
+    all of them.
+    """
+    awk_match = 'index($1, n) == 1' if match_prefix else '$1 == n'
     return _WAIT_UNTIL_VOLUME_IS_NOT_FOUND.format(volume_name=volume_name,
-                                                  timeout=timeout)
+                                                  timeout=timeout,
+                                                  awk_match=awk_match)
 
 
 _WAIT_UNTIL_VOLUME_IS_READY = (
@@ -598,6 +616,35 @@ def get_replica_cluster_name_on_gcp(name: str, replica_id: int) -> str:
         cluster_name, sky.GCP.max_cluster_name_length())
 
 
+def get_managed_job_cluster_name_prefix_on_gcp(job_name: str) -> str:
+    """Prefix of a managed job's GCP cluster name that is safe to filter on.
+
+    The jobs controller names a job's cluster
+    ``<job_name[:JOBS_CLUSTER_NAME_PREFIX_LENGTH]>-<job_id>`` and the GCP
+    provisioner then applies ``make_cluster_name_on_cloud`` with GCP's 35-char
+    limit, which truncates the display name and appends
+    ``-<2-char hash>-<8-char user hash>``. The 24- to 25-char names that
+    ``get_cluster_name`` produces no longer fit, so the job id and the tail of
+    the name are cut off and a ``labels.ray-cluster-name:<full name>`` filter
+    never matches. Only the leading ``35 - 2 - 1 - 9 = 23`` characters are
+    guaranteed to survive, so return those. gcloud's ``:`` operator is a
+    word-prefix match, so the prefix also matches when nothing was truncated.
+    Matching on ~23 chars keeps the first two chars of ``test_id``, the same
+    entropy the filter had before ``test_id`` grew to four chars.
+    """
+    display_name_prefix = common_utils.make_cluster_name_on_cloud(
+        job_name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+    # '-<user hash>' is appended after the cluster name hash.
+    user_hash_length = common_utils.USER_HASH_LENGTH + 1
+    max_length = sky.GCP.max_cluster_name_length()
+    assert max_length is not None
+    keep = (max_length - common_utils.CLUSTER_NAME_HASH_LENGTH - 1 -
+            user_hash_length)
+    # A cut can land on a separator; a trailing '-' would make the gcloud
+    # ':' pattern end in an empty word.
+    return display_name_prefix[:keep].rstrip('-')
+
+
 def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
     name_on_cloud = get_replica_cluster_name_on_gcp(name, replica_id)
     query_cmd = (f'gcloud compute instances list --filter='
@@ -797,6 +844,14 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
     if test.env:
         env_dict.update(test.env)
 
+    # The test's overall exit status. Tracked separately from any single
+    # `proc` because a command may be a callable, which has no process
+    # behind it: a test whose first command is a callable would otherwise
+    # reach the reporting block below with `proc` unbound and die with
+    # `UnboundLocalError`, masking the real failure in the pytest summary.
+    returncode = 0
+    command = None
+
     with override_sky_config(test, env_dict, config_dict=test.config_dict):
         for command in test.commands:
             if callable(command):
@@ -812,7 +867,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                     test.echo(error_in_callable)
                     write(error_in_callable + '\n')
                     flush()
-                    proc.returncode = 1
+                    returncode = 1
                     break
                 continue
             write(f'+ {command}\n')
@@ -835,18 +890,18 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                 flush()
                 # Kill the current process.
                 proc.terminate()
-                proc.returncode = 1  # None if we don't set it.
+                returncode = 1  # proc.returncode is None if we don't set it.
                 break
 
-            if proc.returncode:
+            returncode = proc.returncode
+            if returncode:
                 break
 
         style = colorama.Style
         fore = colorama.Fore
-        outcome = (
-            f'{fore.RED}Failed{style.RESET_ALL} (returned {proc.returncode})'
-            if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
-        reason = f'\nReason: {command}' if proc.returncode else ''
+        outcome = (f'{fore.RED}Failed{style.RESET_ALL} (returned {returncode})'
+                   if returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
+        reason = f'\nReason: {command}' if returncode else ''
         msg = (f'{outcome}.'
                f'{reason}')
         if log_to_stdout:
@@ -856,7 +911,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
             test.echo(msg)
             write(msg)
 
-        if proc.returncode:
+        if returncode:
             # Fetch controller logs for failed jobs
             script_path = os.path.join(os.path.dirname(__file__), 'scripts',
                                        'fetch_failed_job_logs.sh')
@@ -901,7 +956,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                     write(f'Server log file not found: {log_path}')
                 write('=== End of Sky API Server Log ===')
 
-        if (proc.returncode == 0 or
+        if (returncode == 0 or
                 pytest.terminate_on_failure) and test.teardown is not None:
             subprocess_utils.run(
                 test.teardown,
@@ -912,7 +967,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                 env=env_dict,
             )
 
-        if proc.returncode:
+        if returncode:
             if log_to_stdout:
                 raise Exception(f'test failed')
             else:
@@ -1359,7 +1414,14 @@ def services_account_token_configured_in_env_file() -> bool:
     if file_path is not None:
         with open(file_path, 'r') as f:
             content = f.read()
-            print(content, file=sys.stderr, flush=True)
+            # Which env-file config a run picked up is worth seeing in the
+            # log, but the file is a client config: it carries
+            # api_server.service_account_token in plaintext. Print it through
+            # the same redaction the config dumps use, never raw.
+            print(config_utils.dump_redacted_yaml(
+                yaml_utils.safe_load(content)),
+                  file=sys.stderr,
+                  flush=True)
             return 'service_account_token' in content
     return False
 
@@ -1381,6 +1443,33 @@ def get_api_server_url() -> str:
                 return endpoint
         return docker_utils.get_api_server_endpoint_inside_docker()
     return server_common.get_server_url()
+
+
+def endpoint_url_has_credentials() -> bool:
+    """Whether the API server endpoint URL embeds basic-auth credentials.
+
+    TEMPORARY. This exists to work around a known gap in OSS auth and every
+    caller must be removed once that gap is fixed.
+
+    A URL of the form ``https://user:pw@host`` is the documented login for the
+    helm chart's basic-auth ingress. A job launched with ``api_server_access``
+    gets that URL copied into its pod next to a service-account token. When
+    the pod's client sends a request, ``requests`` builds a Basic header from
+    the URL credentials and overwrites the ``Authorization: Bearer`` header
+    the token was set on (``PreparedRequest.prepare_auth``; reproduced on
+    requests 2.34.2). The ingress validates Basic and strips the header, so
+    the API server gets no credential and records the job under the pod's
+    self-generated user id instead of the launching user's.
+
+    A test that expects the launching user to see a job launched from a task
+    cannot pass under this condition. Callers relax to all-users queries when
+    this returns True and stay strict everywhere else. Returns False when the
+    endpoint URL cannot be parsed.
+    """
+    try:
+        return urllib.parse.urlsplit(get_api_server_url()).username is not None
+    except ValueError:
+        return False
 
 
 def get_metrics_server_url() -> str:
@@ -1623,8 +1712,12 @@ def write_blob(file: BinaryIO, total_size: int):
 def wait_for_managed_job_status_sdk(job_name: Optional[str] = None,
                                     target_statuses: Optional[list] = None,
                                     timeout: int = 360,
-                                    job_id: Optional[int] = None) -> dict:
+                                    job_id: Optional[int] = None,
+                                    all_users: bool = False) -> dict:
     """Wait for a managed job to reach one of the target statuses.
+
+    ``all_users`` widens the query past the calling user. Only pass it when
+    the job under test is known to belong to someone else.
 
     Identify the job by ``job_id`` where possible: job names are not unique,
     so on a long-lived API server a name-based wait can match a terminal
@@ -1641,6 +1734,7 @@ def wait_for_managed_job_status_sdk(job_name: Optional[str] = None,
     while time.time() - start_time < timeout:
         jobs_list = sky.get(
             sky.jobs.queue_v2(refresh=False,
+                              all_users=all_users,
                               job_ids=None if job_id is None else [job_id],
                               fields=['job_id', 'job_name', 'status']))[0]
         if job_id is None:

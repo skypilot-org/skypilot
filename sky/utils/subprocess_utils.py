@@ -45,15 +45,17 @@ def _safe_children(process: 'psutil.Process') -> List['psutil.Process']:
     except psutil.NoSuchProcess:
         # Parent process exited, skip
         return []
-    except psutil.AccessDenied as e:
+    except (psutil.AccessDenied, PermissionError) as e:
         # process.children will lookup all processes in the same PID namespace,
         # and we will encounter this error if there is a process we cannot
         # access. Log and ignore it with _fallback_children()
         bad_pid = getattr(e, 'pid', None)
+        denied_path = getattr(e, 'filename', None)
         diag = _pid_diag(bad_pid) if bad_pid is not None else {}
         logger.warning(
-            f'psutil.Process.children() hit AccessDenied '
-            f'(pid={bad_pid} uid={diag.get("uid", "?")} '
+            f'psutil.Process.children() hit {type(e).__name__} '
+            f'(pid={bad_pid} path={denied_path or "?"} '
+            f'uid={diag.get("uid", "?")} '
             f'exe={diag.get("exe", "?")}); falling back to /proc walk '
             f'that ignores unreadable PIDs.')
         # Snapshot the parent's create_time so the fallback can reject any

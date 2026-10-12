@@ -2,11 +2,11 @@
 // This utility manages background preloading of cache data to improve page switching performance
 
 import dashboardCache from './cache';
+import { MANAGED_JOBS_SUMMARY_ARGS } from '@/data/connectors/constants';
 import { getClusters } from '@/data/connectors/clusters';
 import {
   getManagedJobs,
   getManagedJobsWithClientPagination,
-  MANAGED_JOBS_SUMMARY_ARGS,
 } from '@/data/connectors/jobs';
 import {
   getWorkspaces,
@@ -124,7 +124,7 @@ class CachePreloader {
 
   /**
    * Register a plugin page with its fetch functions for background preloading
-   * @param {string} pageName - The plugin page name (e.g., 'gpu-manager')
+   * @param {string} pageName - The plugin page name (e.g., 'my-page')
    * @param {Array<{fn: Function, args: Array}>} functions - Functions to preload
    */
   registerPluginPage(pageName, functions) {

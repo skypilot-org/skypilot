@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import pathlib
 import tempfile
 import time
@@ -6,10 +7,14 @@ from unittest import mock
 
 import pytest
 
+from sky import dag as dag_lib
+from sky import task as task_lib
 from sky.backends import cloud_vm_ray_backend
 from sky.exceptions import ClusterDoesNotExist
 from sky.jobs import utils
+from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.utils import dag_utils
 
 # String path for mock.patch — can't use the constant directly because
 # mock.patch needs the dotted path to the attribute being patched.
@@ -579,6 +584,60 @@ def test_cancel_signal_file_graceful_with_timeout():
                 assert content == 'graceful:300'
 
 
+def test_cancel_request_info_event_reason():
+    """The event reason names the requester and the request ID."""
+    info = utils.CancelRequestInfo(user_hash='abcd1234',
+                                   user_name='alice',
+                                   request_id='req-1')
+    assert info.event_reason() == ('Cancellation requested by user alice '
+                                   '(request ID: req-1)')
+
+    # No display name available (e.g. no user row on the controller): fall
+    # back to the hash rather than dropping the identity.
+    info = utils.CancelRequestInfo(user_hash='abcd1234', request_id='req-1')
+    assert info.event_reason() == ('Cancellation requested by user abcd1234 '
+                                   '(request ID: req-1)')
+
+    # Partial information is still worth recording.
+    assert utils.CancelRequestInfo(user_name='alice').event_reason() == (
+        'Cancellation requested by user alice')
+    assert utils.CancelRequestInfo(request_id='req-1').event_reason() == (
+        'Cancellation requested (request ID: req-1)')
+
+    # Nothing identifying -> nothing worth writing.
+    assert utils.CancelRequestInfo().event_reason() is None
+
+
+@contextlib.contextmanager
+def _cancellable_job(tmpdir):
+    """Patches around cancel_jobs_by_id for a single cancellable job 42."""
+    with mock.patch('sky.jobs.constants.CONSOLIDATED_SIGNAL_PATH', tmpdir), \
+         mock.patch('sky.jobs.state.is_legacy_controller_process',
+                    return_value=False), \
+         mock.patch('sky.jobs.state.get_status',
+                    return_value=mock.MagicMock(
+                        is_terminal=mock.MagicMock(return_value=False),
+                        __eq__=mock.MagicMock(return_value=False))), \
+         mock.patch('sky.jobs.utils.update_managed_jobs_statuses'), \
+         mock.patch('sky.jobs.state.get_workspace', return_value='default'), \
+         mock.patch('sky.jobs.state.add_job_event') as mock_add_event:
+        yield mock_add_event
+
+
+def test_cancel_event_failure_does_not_block_cancel():
+    """A failed audit write must not fail the cancellation."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with _cancellable_job(tmpdir) as mock_add_event:
+            mock_add_event.side_effect = RuntimeError('db is down')
+            msg = utils.cancel_jobs_by_id(
+                job_ids=[42],
+                current_workspace='default',
+                cancel_request_info=utils.CancelRequestInfo(user_name='alice'))
+
+            assert 'scheduled to be cancelled' in msg
+            assert (pathlib.Path(tmpdir) / '42').exists()
+
+
 @mock.patch('sky.utils.subprocess_utils.run_in_parallel')
 @mock.patch('sky.backends.task_codegen.TaskCodeGen.get_rclone_flush_script')
 def test_graceful_job_cancel_calls_flush(mock_flush_script, mock_run_parallel):
@@ -1104,6 +1163,57 @@ class TestCollectDebugDumpManifestParallel:
         assert len(job_info_items) == len(ok_jobs)
 
 
+class TestJobInfoDumpRedaction:
+    """job_info.json in a debug dump should carry no credentials."""
+
+    def test_api_server_access_credentials_redacted(self, tmp_path,
+                                                    monkeypatch):
+        task = task_lib.Task.from_yaml_str('name: train\n'
+                                           'secrets:\n'
+                                           '  HF_TOKEN: inline-secret\n'
+                                           'run: echo hi\n')
+        # What jobs launch injects into a task with api_server_access.
+        endpoint = 'https://alice:basic-pass@example.com'
+        task.update_envs({constants.SKY_API_SERVER_URL_ENV_VAR: endpoint})
+        task.update_secrets(
+            {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR: 'job-token-value'})
+        dag = dag_lib.Dag()
+        dag.add(task)
+        dag_yaml = dag_utils.dump_dag_to_yaml_str(dag)
+        user_yaml = dag_utils.dump_dag_to_yaml_str(dag,
+                                                   use_user_specified_yaml=True)
+        credentials = ('job-token-value', 'inline-secret', 'basic-pass')
+        assert all(c in dag_yaml for c in credentials)
+        record = {
+            'job_id': 1,
+            'user_yaml': user_yaml,
+            'original_user_yaml_content': user_yaml,
+            'dag_yaml_content': dag_yaml,
+        }
+
+        monkeypatch.setattr(utils.managed_job_constants,
+                            'JOBS_CONTROLLER_LOGS_DIR', str(tmp_path))
+        monkeypatch.setattr(utils.managed_job_state, 'get_managed_job_tasks',
+                            lambda job_id: [record])
+        monkeypatch.setattr(utils.managed_job_state,
+                            'get_job_events',
+                            lambda job_id, limit=None: [])
+        monkeypatch.setattr(utils.managed_job_state,
+                            'get_all_task_ids_names_statuses_logs',
+                            lambda job_id: [])
+        monkeypatch.setattr(utils.managed_job_state, 'get_pool_submit_info',
+                            lambda job_id: (None, None))
+
+        inline_data, _, errors, _, _ = utils._collect_job_debug_manifest(1)
+
+        assert not errors
+        job_info = next(d['content']
+                        for d in inline_data
+                        if d['relative_path'] == 'managed_jobs/1/job_info.json')
+        for credential in credentials:
+            assert credential not in job_info
+
+
 class TestControllerSystemLogScoping:
     """Scope managed_jobs/controller_system/*.log to the controllers that
     actually ran the requested jobs.
@@ -1464,3 +1574,114 @@ class TestCleanupExpiredApiAccessTokens:
     def test_no_expired_tokens_is_noop(self, mock_get_expired):
         mock_get_expired.return_value = []
         assert utils.cleanup_expired_api_access_tokens() == 0
+
+
+def _make_window(min_elapsed_seconds=60, min_retries=3):
+    return utils.TransientStatusCheckWindow(
+        min_elapsed_seconds=min_elapsed_seconds, min_retries=min_retries)
+
+
+class TestTransientStatusCheckWindow:
+    """A run of failed status checks ends only when *both* budgets are spent.
+
+    Either budget alone is unreliable. A single status-check round can outlast
+    the time budget by itself, because the cluster-status refresh that runs
+    before recovery performs its own retried probes -- so a time-only budget
+    can be spent before even one retry happens, and the job is recovered
+    having never been retried. Conversely, a burst of checks that each fail
+    immediately can exhaust a retry-only budget within seconds, long before a
+    transient condition has had a chance to clear.
+    """
+
+    def test_fresh_window_is_not_exhausted(self):
+        window = _make_window()
+        assert not window.active
+        assert not window.exhausted
+        assert window.retries == 0
+        assert window.elapsed == 0.0
+
+    def test_time_alone_does_not_exhaust_the_window(self):
+        clock = {'t': 1000.0}
+        with mock.patch.object(time, 'time', side_effect=lambda: clock['t']):
+            window = _make_window(min_elapsed_seconds=60, min_retries=3)
+            window.record_failure()
+            # One round that takes far longer than the whole time budget.
+            clock['t'] += 10_000
+            assert window.elapsed >= 60
+            assert window.retries == 0
+            assert not window.exhausted, (
+                'a slow round must not spend the window before any retry')
+
+    def test_retries_alone_do_not_exhaust_the_window(self):
+        clock = {'t': 1000.0}
+        with mock.patch.object(time, 'time', side_effect=lambda: clock['t']):
+            window = _make_window(min_elapsed_seconds=60, min_retries=3)
+            window.record_failure()
+            # Failures that each return immediately: the clock barely moves.
+            for _ in range(5):
+                window.next_backoff()
+            assert window.retries >= 3
+            assert window.elapsed < 60
+            assert not window.exhausted, (
+                'a burst of fast failures must not spend the window early')
+
+    def test_both_budgets_spent_exhausts_the_window(self):
+        clock = {'t': 1000.0}
+        with mock.patch.object(time, 'time', side_effect=lambda: clock['t']):
+            window = _make_window(min_elapsed_seconds=60, min_retries=3)
+            window.record_failure()
+            for _ in range(3):
+                window.next_backoff()
+            clock['t'] += 61
+            assert window.exhausted
+
+    def test_reset_clears_both_budgets(self):
+        clock = {'t': 1000.0}
+        with mock.patch.object(time, 'time', side_effect=lambda: clock['t']):
+            window = _make_window(min_elapsed_seconds=60, min_retries=1)
+            window.record_failure()
+            window.next_backoff()
+            clock['t'] += 61
+            assert window.exhausted
+            window.reset()
+            assert not window.active
+            assert window.retries == 0
+            assert window.elapsed == 0.0
+            assert not window.exhausted
+
+    def test_backoff_never_overshoots_the_time_budget(self):
+        clock = {'t': 1000.0}
+        with mock.patch.object(time, 'time', side_effect=lambda: clock['t']):
+            window = _make_window(min_elapsed_seconds=60, min_retries=100)
+            window.record_failure()
+            clock['t'] += 59.5
+            # Only 0.5s of the time budget is left, so the sleep is clamped to
+            # it: the window must be re-evaluated as soon as the budget
+            # expires rather than sleeping past it.
+            assert window.next_backoff() == pytest.approx(0.5)
+            clock['t'] += 10
+            # Past the time budget the retry budget is what remains, so the
+            # plain backoff applies instead of a clamp to a negative value.
+            assert window.next_backoff() > 0
+
+    def test_budgets_are_read_from_config(self):
+        overrides = {
+            ('jobs', 'status_check', 'min_elapsed_seconds'): 600,
+            ('jobs', 'status_check', 'min_retries'): 10,
+        }
+        clock = {'t': 1000.0}
+        with mock.patch.object(
+                utils.skypilot_config,
+                'get_nested',
+                side_effect=lambda keys, default_value, **kwargs: overrides.get(
+                    tuple(keys), default_value)), \
+             mock.patch.object(time, 'time', side_effect=lambda: clock['t']):
+            window = utils.TransientStatusCheckWindow()
+            window.record_failure()
+            for _ in range(9):
+                window.next_backoff()
+            clock['t'] += 601
+            assert not window.exhausted, (
+                'the configured retry budget was not honored')
+            window.next_backoff()
+            assert window.exhausted

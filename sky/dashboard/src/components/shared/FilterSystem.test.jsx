@@ -1,5 +1,6 @@
 import {
   evaluateCondition,
+  filterData,
   updateFiltersByURLParams,
 } from '@/components/shared/FilterSystem';
 
@@ -132,5 +133,62 @@ describe('evaluateCondition', () => {
         value: 'alice',
       })
     ).toBe(true);
+  });
+});
+
+describe('filterData grouping', () => {
+  const rows = [
+    { status: 'RUNNING', user: 'alice' },
+    { status: 'STOPPED', user: 'alice' },
+    { status: 'RUNNING', user: 'bob' },
+  ];
+  const f = (property, value) => ({ property, operator: ':', value });
+
+  it('ANDs same-property values by default, so existing pages are unchanged', () => {
+    const out = filterData(rows, [
+      f('Status', 'RUNNING'),
+      f('Status', 'STOPPED'),
+    ]);
+    expect(out).toHaveLength(0);
+  });
+
+  it('ORs a property the caller opts in', () => {
+    const out = filterData(
+      rows,
+      [f('Status', 'RUNNING'), f('Status', 'STOPPED')],
+      { orProperties: ['Status'] }
+    );
+    expect(out).toHaveLength(3);
+  });
+
+  it('keeps key/value filters intersecting even when opted-in siblings OR', () => {
+    const labelled = [
+      { status: 'RUNNING', labels: { team: 'ml', env: 'prod' } },
+      { status: 'RUNNING', labels: { team: 'ml' } },
+    ];
+    const out = filterData(
+      labelled,
+      [f('Labels', 'team:ml'), f('Labels', 'env:prod')],
+      { orProperties: ['Status'] }
+    );
+    expect(out).toHaveLength(1);
+  });
+
+  it('ANDs across different properties', () => {
+    const out = filterData(rows, [f('Status', 'RUNNING'), f('User', 'alice')]);
+    expect(out).toEqual([{ status: 'RUNNING', user: 'alice' }]);
+  });
+
+  it('combines both: (status OR status) AND user', () => {
+    const out = filterData(
+      rows,
+      [f('Status', 'RUNNING'), f('Status', 'STOPPED'), f('User', 'alice')],
+      { orProperties: ['Status'] }
+    );
+    expect(out).toHaveLength(2);
+  });
+
+  it('returns everything when there are no filters', () => {
+    expect(filterData(rows, [])).toBe(rows);
   });
 });

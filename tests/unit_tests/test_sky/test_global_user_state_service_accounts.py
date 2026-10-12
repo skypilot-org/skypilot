@@ -6,6 +6,7 @@ from unittest import mock
 import pytest
 
 from sky import global_user_state
+from sky import models
 from sky.skylet import constants
 from sky.utils.db import db_utils
 
@@ -427,3 +428,30 @@ class TestGetExpiredServiceAccountTokensByNamePrefix:
                 'prefix%', now))
 
         assert {r['token_id'] for r in results} == {'literal-match'}
+
+
+def test_service_account_creator_lookup_and_rotation(tmp_path, monkeypatch):
+    monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, str(tmp_path))
+    monkeypatch.setattr(
+        global_user_state, '_db_manager',
+        db_utils.DatabaseManager('state', global_user_state.create_table))
+    creator = models.User(id='creator', name='jane.doe@example.com')
+    global_user_state.add_or_update_user(creator)
+    global_user_state.add_or_update_user(
+        models.User(id='sa-test', name='inference'))
+    assert global_user_state.get_service_account_creator('sa-test') is None
+    global_user_state.add_service_account_token(
+        token_id='test-token',
+        token_name='inference',
+        token_hash='hash',
+        creator_user_hash=creator.id,
+        service_account_user_id='sa-test')
+    found = global_user_state.get_service_account_creator('sa-test')
+    assert found is not None
+    assert (found.id, found.name) == (creator.id, creator.name)
+    global_user_state.rotate_service_account_token('test-token', 'rotated-hash')
+    found = global_user_state.get_service_account_creator('sa-test')
+    assert found is not None
+    assert found.id == creator.id
+    global_user_state.delete_user(creator.id)
+    assert global_user_state.get_service_account_creator('sa-test') is None

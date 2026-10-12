@@ -397,7 +397,7 @@ class PostgresLock(DistributedLock):
         NLB idle-timeout, ``idle_in_transaction_session_timeout``,
         manual ``pg_terminate_backend``, network partitions.  All of these
         free the advisory lock server-side while ``self._acquired`` stays
-        ``True`` locally, leaving the holder unaware that another replica
+        ``True`` locally, leaving the holder unaware that another process
         could now hold the same lock.
 
         This method exposes a cheap ``SELECT 1`` probe on the very connection
@@ -505,13 +505,19 @@ class LockAcquirableCondition:
         self._lock_id = lock_id
         self._poll_interval_seconds = poll_interval_seconds
 
-    def wait(self, *, is_cancelled: Callable[[], bool],
-             fallback_wait_seconds: float) -> bool:
+    def wait(self,
+             *,
+             is_cancelled: Callable[[], bool],
+             fallback_wait_seconds: float,
+             update_status_msg: Optional[Callable[[str], None]] = None) -> bool:
         """Block until the lock is acquirable; return False if cancelled."""
         # There is no better signal than the probe itself; on probe errors
         # (e.g. a database glitch) the exception propagates to the scheduler,
         # which falls back to a fixed ``fallback_wait_seconds`` backoff.
         del fallback_wait_seconds
+        # The reason cannot change while waiting -- the lock holder is the
+        # whole story -- so the message written at pause time stands.
+        del update_status_msg
         while True:
             if is_cancelled():
                 return False

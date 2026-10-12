@@ -11,7 +11,9 @@ from sky import exceptions
 from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.exceptions import ClusterNotUpError
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.resources import Resources
+from sky.skylet import constants
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import status_lib
@@ -177,6 +179,9 @@ def test_write_cluster_config_w_post_provision_runcmd_aws(
         0] == cluster_config_template, "config template incorrect"
     assert mock_fill_template.call_args[0][1][
         'runcmd'] == expected_runcmd, "runcmd not passed correctly"
+    # VM clouds create the default user Python environment.
+    assert (constants.SKY_USER_ENV_CREATION_COMMANDS
+            in mock_fill_template.call_args[0][1]['uv_installation_commands'])
 
 
 @mock.patch.object(skypilot_config, '_global_config_context',
@@ -212,6 +217,49 @@ def test_write_cluster_config_w_post_provision_runcmd_kubernetes(
         0] == cluster_config_template, "config template incorrect"
     assert mock_fill_template.call_args[0][1][
         'runcmd'] == expected_runcmd, "runcmd not passed correctly"
+    # Kubernetes images already ship the default user Python environment.
+    assert (
+        constants.SKY_USER_ENV_CREATION_COMMANDS
+        not in mock_fill_template.call_args[0][1]['uv_installation_commands'])
+
+
+@mock.patch.object(skypilot_config, '_global_config_context',
+                   skypilot_config.ConfigContext())
+@mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+            return_value=[])
+@mock.patch('sky.provision.kubernetes.utils.get_accelerator_label_keys',
+            return_value=['skypilot.co/accelerator'])
+@mock.patch('sky.utils.common_utils.fill_template',
+            wraps=common_utils.fill_template)
+def test_write_cluster_config_merges_pod_fields_kubernetes(
+        mock_fill_template, *mocks):
+    """Pod fields computed in Python reach the pod in the cluster YAML."""
+    os.environ[
+        skypilot_config.
+        ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_k8s_config_runcmd.yaml'
+    skypilot_config.reload_config()
+
+    config_dict = backend_utils.write_cluster_config(
+        to_provision=Resources(cloud=clouds.Kubernetes(),
+                               instance_type='4CPU--16GB'),
+        num_nodes=1,
+        cluster_config_template='kubernetes-ray.yml.j2',
+        cluster_name="display",
+        local_wheel_path=pathlib.Path('/tmp/fake'),
+        wheel_hash='b1bd84059bc0342f7843fcbe04ab563e',
+        region=clouds.Region(name='fake-context'),
+        dryrun=True,
+        keep_launch_fields_in_existing_config=True)
+
+    pod_spec = yaml_utils.read_yaml(
+        config_dict['ray']
+    )['available_node_types']['ray_head_default']['node_config']['spec']
+    # A CPU-only pod prefers nodes without accelerators.
+    assert pod_spec['affinity'][
+        'nodeAffinity'] == kubernetes_utils.get_node_affinity(
+            None, None, ['skypilot.co/accelerator'])
+    # They get there through the merge, not as a template variable.
+    assert 'pod_fields' not in mock_fill_template.call_args[0][1]
 
 
 @mock.patch.object(skypilot_config, '_global_config_context',

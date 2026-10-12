@@ -289,6 +289,13 @@ export function formatAutostop(autostop, toDown) {
   return autostopStr;
 }
 
+// Sizes come from the API as a number of GiB.
+export const formatSize = (size) => {
+  if (size == null) return '-';
+  if (size >= 1024) return `${+(size / 1024).toFixed(1)}Ti`;
+  return `${size}Gi`;
+};
+
 // Format duration from seconds to a readable format
 export function formatDuration(durationInSeconds) {
   if (!durationInSeconds && durationInSeconds !== 0) return '-';

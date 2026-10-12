@@ -27,8 +27,12 @@ def bootstrap_instances(
     _configure_services(namespace, context, config.provider_config)
 
     requested_service_account = config.node_config['spec']['serviceAccountName']
-    if (requested_service_account ==
-            kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME):
+    # Both of SkyPilot's own accounts are reconciled here. Which roles exist
+    # to bind is decided in the template: a controller cluster renders the
+    # provisioner-only ones, a workload cluster does not, and the configurers
+    # below no-op on a field the template left out.
+    if (requested_service_account
+            in kubernetes_utils.MANAGED_SERVICE_ACCOUNT_NAMES):
         # If the user has requested a different service account (via pod_config
         # in ~/.sky/config.yaml), we assume they have already set up the
         # necessary roles and role bindings.
@@ -110,6 +114,53 @@ def using_existing_msg(resource_type: str, name: str) -> str:
 
 def updating_existing_msg(resource_type: str, name: str) -> str:
     return f'updating existing {resource_type} "{name}"'
+
+
+def _format_rules(rules: Optional[List[Any]]) -> List[str]:
+    """Render policy rules compactly, for logs.
+
+    Tolerant by design: this only ever runs inside a warning that exists to
+    say what is being overwritten, so an unfamiliar rule shape must degrade to
+    something readable rather than raise and lose the whole message.
+    """
+
+    def _field(rule: Any, *names: str) -> Any:
+        for name in names:
+            value = (rule.get(name) if isinstance(rule, dict) else getattr(
+                rule, name, None))
+            if value:
+                return value
+        return None
+
+    out = []
+    for rule in rules or []:
+        if not isinstance(rule, str):
+            groups = _field(rule, 'api_groups', 'apiGroups') or ['']
+            resources = _field(rule, 'resources') or []
+            verbs = _field(rule, 'verbs') or []
+            if resources or verbs:
+                out.append(f'{list(groups)}/{list(resources)}: {list(verbs)}')
+                continue
+        out.append(str(rule))
+    return out
+
+
+def overwriting_rules_msg(resource_type: str, name: str, existing: Any,
+                          new: Any) -> str:
+    """Warning shown when SkyPilot rewrites the rules of an existing role.
+
+    SkyPilot cannot tell a narrowing an administrator applied on purpose
+    from a role left behind by an older version, so it says what it is
+    doing and points at the supported way to keep a narrowed set.
+    """
+    return (f'overwriting the rules of {resource_type} "{name}" with '
+            f'SkyPilot\'s own.\n'
+            f'  currently on the cluster: {_format_rules(existing)}\n'
+            f'  replacing with:           {_format_rules(new)}\n'
+            'If these rules were narrowed deliberately, that change is undone '
+            'on every launch. To run with a permission set SkyPilot does not '
+            'manage, create your own service account and point '
+            'kubernetes.remote_identity at it instead.')
 
 
 def not_found_msg(resource_type: str, name: str) -> str:
@@ -247,6 +298,7 @@ def _create_or_patch_resource(
     list_fn: Callable[[], Any],
     patch_fn: Optional[Callable[[], None]],
     needs_update_fn: Optional[Callable[[Any], bool]],
+    new_rules: Optional[List[Any]] = None,
 ) -> None:
     """Creates a K8s resource with upsert semantics and 409 race handling.
 
@@ -279,8 +331,16 @@ def _create_or_patch_resource(
         logger.info(f'{log_prefix}: '
                     f'{using_existing_msg(resource_field, name)}')
         return
-    logger.info(f'{log_prefix}: '
-                f'{updating_existing_msg(resource_field, name)}')
+    if new_rules is not None:
+        # Rewriting an existing role's rules is the one update that can
+        # silently undo an operator's change, so it is a warning rather
+        # than a debug-level breadcrumb.
+        msg = overwriting_rules_msg(resource_field, name,
+                                    getattr(existing, 'rules', None), new_rules)
+        logger.warning(f'{log_prefix}: {msg}')
+    else:
+        logger.info(f'{log_prefix}: '
+                    f'{updating_existing_msg(resource_field, name)}')
     assert patch_fn is not None, ('patch_fn must be provided when '
                                   'needs_update_fn is provided')
     patch_fn()
@@ -357,6 +417,7 @@ def _configure_autoscaler_role(namespace: str, context: Optional[str],
         patch_fn=lambda: kubernetes.auth_api(context).patch_namespaced_role(
             name, namespace, resource),
         needs_update_fn=lambda existing: new_role.rules != existing.rules,
+        new_rules=new_role.rules,
     )
 
 
@@ -451,6 +512,7 @@ def _configure_autoscaler_cluster_role(namespace, context,
         patch_fn=lambda: kubernetes.auth_api(context).patch_cluster_role(
             name, resource),
         needs_update_fn=lambda existing: new_cr.rules != existing.rules,
+        new_rules=new_cr.rules,
     )
 
 
@@ -508,6 +570,17 @@ def _configure_skypilot_system_namespace(
     skypilot_system_namespace = provider_config['skypilot_system_namespace']
     context = kubernetes_utils.get_context_from_config(provider_config)
     kubernetes_utils.create_namespace(skypilot_system_namespace, context)
+
+    # Only a controller cluster is granted a role here -- it bootstraps the
+    # FUSE device manager for the clusters it launches. A workload cluster
+    # still wants the namespace to exist (_configure_fuse_mounting creates the
+    # daemonset in it), so the namespace creation above is unconditional and
+    # only the role and its binding are skipped.
+    if 'autoscaler_skypilot_system_role_binding' not in provider_config:
+        logger.info(
+            '_configure_skypilot_system_namespace: '
+            f'{not_provided_msg("autoscaler_skypilot_system_role_binding")}')
+        return
 
     # Note - this must be run only after the service account has been
     # created in the cluster (in bootstrap_instances).
