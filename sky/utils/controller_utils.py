@@ -244,6 +244,22 @@ class Controllers(enum.Enum):
         return controller
 
     @classmethod
+    def from_prefix(cls, name: Optional[str]) -> Optional['Controllers']:
+        """The controller whose reserved prefix ``name`` carries.
+
+        Unlike ``from_name(expect_exact_match=False)``, it never records
+        ``name`` as the controller's cluster name and never asserts on it, so
+        it is safe on names a user typed.
+        """
+        if name is None:
+            return None
+        if name.startswith(common.SKY_SERVE_CONTROLLER_PREFIX):
+            return cls.SKY_SERVE_CONTROLLER
+        if name.startswith(common.JOB_CONTROLLER_PREFIX):
+            return cls.JOBS_CONTROLLER
+        return None
+
+    @classmethod
     def from_type(cls, controller_type: str) -> Optional['Controllers']:
         """Get the controller by controller type.
 
@@ -464,10 +480,9 @@ def check_cluster_name_not_controller(
     # Not from_name(expect_exact_match=False): on a mismatch it records the
     # name as the real controller's, in a process the server reuses across
     # requests, so a rejected name would become the next controller launched.
-    if cluster_name is None or not common.is_controller_name(cluster_name):
+    controller = Controllers.from_prefix(cluster_name)
+    if cluster_name is None or controller is None:
         return
-    controller = (Controllers.SKY_SERVE_CONTROLLER if cluster_name.startswith(
-        common.SKY_SERVE_CONTROLLER_PREFIX) else Controllers.JOBS_CONTROLLER)
     msg = controller.value.check_cluster_name_hint(cluster_name)
     if operation_str is not None:
         msg += f' {operation_str} is not allowed.'
