@@ -333,9 +333,9 @@ class ASGIMiddleware:
                     headers: starlette.datastructures.MutableHeaders) -> None:
         """Adjust the response headers before they are sent.
 
-        Called for every response the inner layers send, including the ones
-        an inner middleware answers itself, but not for the response this
-        layer's own `on_request` returns.
+        Called for every response that leaves this layer: the one its own
+        `on_request` returns, and every one the inner layers send, including
+        the ones an inner middleware answers itself.
         """
         del request, status_code, headers
 
@@ -346,13 +346,16 @@ class ASGIMiddleware:
             await self.app(scope, receive, send)
             return
         request = fastapi.Request(scope, receive)
+        if type(self).on_response is not ASGIMiddleware.on_response:
+            send = self._send_with_headers(request, send)
         response = await self.on_request(request)
-        if response is not None:
-            await response(scope, receive, send)
-            return
-        if type(self).on_response is ASGIMiddleware.on_response:
+        if response is None:
             await self.app(scope, receive, send)
-            return
+        else:
+            await response(scope, receive, send)
+
+    def _send_with_headers(self, request: fastapi.Request,
+                           send: starlette.types.Send) -> starlette.types.Send:
 
         async def send_with_headers(message: starlette.types.Message) -> None:
             if message['type'] == 'http.response.start':
@@ -363,7 +366,7 @@ class ASGIMiddleware:
                     starlette.datastructures.MutableHeaders(scope=message))
             await send(message)
 
-        await self.app(scope, receive, send_with_headers)
+        return send_with_headers
 
     async def dispatch(self, request: fastapi.Request,
                        call_next: CallNext) -> fastapi.Response:
@@ -371,7 +374,7 @@ class ASGIMiddleware:
         response = await self.on_request(request)
         if response is None:
             response = await call_next(request)
-            self.on_response(request, response.status_code, response.headers)
+        self.on_response(request, response.status_code, response.headers)
         return response
 
 
@@ -404,7 +407,7 @@ def websocket_aware(middleware_cls: Type[ASGIMiddleware]):
     rejection -- so attempts is the denominator and the outcomes are each
     counted rather than subtracted; see the comment on the attempt counter
     for why subtraction would over-count accepts. (The metrics middleware
-    cannot count these scopes itself: it passes non-HTTP scopes straight
+    does not count these scopes: it passes non-HTTP scopes straight
     through.) A middleware exception while judging a
     handshake is stamped `unhandled_exception` and counted with a 500.
 

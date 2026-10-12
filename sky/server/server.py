@@ -1197,8 +1197,8 @@ class CacheControlStaticMiddleware(middleware_utils.ASGIMiddleware):
                        receive: starlette.types.Receive,
                        send: starlette.types.Send) -> None:
         # Matched on the path as received, before inner layers rewrite it.
-        if (scope['type'] == 'http' and starlette.datastructures.URL(
-                scope=scope).path.startswith('/dashboard/_next')):
+        if (scope['type'] == 'http' and
+                scope['path'].startswith('/dashboard/_next')):
             await super().__call__(scope, receive, send)
         else:
             await self.app(scope, receive, send)
@@ -1292,14 +1292,12 @@ class APIVersionMiddleware(middleware_utils.ASGIMiddleware):
             return None
         middleware_utils.mark_rejection(
             request, middleware_utils.REJECT_REASON_API_VERSION)
-        response = fastapi.responses.JSONResponse(
+        return fastapi.responses.JSONResponse(
             status_code=400,
             content={
                 'error': common.ApiServerStatus.VERSION_MISMATCH.value,
                 'message': version_info.error,
             })
-        self.on_response(request, response.status_code, response.headers)
-        return response
 
     def on_response(self, request: fastapi.Request, status_code: int,
                     headers: starlette.datastructures.MutableHeaders) -> None:

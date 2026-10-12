@@ -6,7 +6,6 @@ import http
 
 import fastapi
 import pytest
-import starlette.middleware.base
 
 from sky.metrics import utils as metrics_utils
 from sky.server import middleware_utils
@@ -25,23 +24,21 @@ class NamedIntStatus(enum.IntEnum):
         return 'HTTPStatus.SERVICE_UNAVAILABLE'
 
 
-class RecordingMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class RecordingMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware used for testing websocket adaptation."""
 
     def __init__(self, app, behavior):
         super().__init__(app)
         self.behavior = behavior
-        self.dispatch_calls = 0
-        self.call_next_calls = 0
+        self.on_request_calls = 0
         self.last_scope_type = None
 
-    async def dispatch(self, request, call_next):
-        self.dispatch_calls += 1
+    async def on_request(self, request):
+        self.on_request_calls += 1
         self.last_scope_type = request.scope['type']
 
         if self.behavior == 'accept':
-            self.call_next_calls += 1
-            return await call_next(request)
+            return None
         if self.behavior == 'unauthorized':
             return fastapi.Response(status_code=http.HTTPStatus.UNAUTHORIZED)
         if self.behavior == 'forbidden':
@@ -107,8 +104,7 @@ async def test_websocket_accept_invokes_app():
 
     assert app_scopes == ['websocket']
     assert sent_messages == [{'type': 'websocket.accept'}]
-    assert middleware.middleware.dispatch_calls == 1
-    assert middleware.middleware.call_next_calls == 1
+    assert middleware.middleware.on_request_calls == 1
     assert middleware.middleware.last_scope_type == 'http'
 
 
@@ -993,30 +989,19 @@ async def test_asgi_middleware_passes_other_scopes_through():
 
 
 @pytest.mark.asyncio
-async def test_websocket_aware_judges_a_handshake_with_on_request():
-    app_calls = []
+async def test_asgi_middleware_on_response_sees_its_own_rejection():
 
-    async def app(scope, receive, send):
-        del scope, receive, send
-        app_calls.append(True)
+    class RejectAndStamp(_Reject, _Stamp):
+        pass
 
     sent = []
 
     async def send(message):
         sent.append(message)
 
-    async def receive():
-        return {'type': 'websocket.connect'}
+    middleware = RejectAndStamp(_ok_app, 401)
+    await middleware(_http_scope('/status'), _no_body, send)
 
-    refused = middleware_utils.websocket_aware(_Reject)(app, status=401)
-    await refused(_make_websocket_scope(), receive, send)
-    assert sent == [{
-        'type': 'websocket.close',
-        'code': 4401,
-        'reason': 'Unauthorized'
-    }]
-    assert not app_calls
-
-    accepted = middleware_utils.websocket_aware(_Stamp)(app)
-    await accepted(_make_websocket_scope(), receive, send)
-    assert app_calls == [True]
+    assert middleware.statuses == [401]
+    assert sent[0]['status'] == 401
+    assert dict(sent[0]['headers'])[b'x-stamp'] == b'/status'
