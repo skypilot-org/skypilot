@@ -3810,6 +3810,10 @@ class TestDockerSidecarDefaults(unittest.TestCase):
         assert isinstance(defaults, utils.DockerSidecarDefaults)
         assert defaults.cli_image
         assert defaults.cache_mount == '/home/user/.local/share/buildkit'
+        # v0.28.0's build-history listing has a nil-pointer panic, fixed
+        # upstream in v0.29.0 (moby/buildkit#6614, see #11013): pin the
+        # version so a future edit can't silently reintroduce it.
+        assert defaults.image == 'moby/buildkit:v0.32.2-rootless'
 
     def test_defaults_unknown_mode_raises(self):
         with self.assertRaises(ValueError):
