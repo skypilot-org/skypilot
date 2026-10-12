@@ -33,7 +33,11 @@ import {
   EmptyTableState,
 } from '@/components/ui/table';
 import { EmptyState } from '@/components/elements/EmptyState';
-import { GitAuthor, isGitSourced } from '@/components/elements/RecipeSource';
+import {
+  GitAuthor,
+  getRecipeOwnerLabel,
+  isGitSourced,
+} from '@/components/elements/RecipeSource';
 import { isForceEmpty } from '@/lib/utils';
 import { sortData } from '@/data/utils';
 import {
@@ -287,8 +291,8 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
     recipes.forEach((r) => {
       if (r.name) names.add(r.name);
       if (r.recipe_type) types.add(r.recipe_type);
-      if (r.user_name) owners.add(r.user_name);
-      else if (r.user_id) owners.add(r.user_id);
+      const owner = getRecipeOwnerLabel(r);
+      if (owner) owners.add(owner);
     });
 
     return {
@@ -327,7 +331,7 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
           if (propertyKey === 'name') itemValue = item.name || '';
           else if (propertyKey === 'type') itemValue = item.recipe_type || '';
           else if (propertyKey === 'owner')
-            itemValue = item.user_name || item.user_id || '';
+            itemValue = getRecipeOwnerLabel(item);
 
           if (!itemValue.toLowerCase().includes(filter.value.toLowerCase())) {
             return false;
@@ -337,6 +341,14 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
       });
     }
 
+    // The owner column shows getRecipeOwnerLabel, so sort by that too.
+    if (sortConfig.key === 'user_name') {
+      return sortData(
+        result.map((r) => ({ ...r, owner_label: getRecipeOwnerLabel(r) })),
+        'owner_label',
+        sortConfig.direction
+      );
+    }
     return sortData(result, sortConfig.key, sortConfig.direction);
   }, [recipes, filters, sortConfig]);
 

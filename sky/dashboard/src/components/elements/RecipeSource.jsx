@@ -12,16 +12,38 @@ export function shortSha(sha) {
   return sha ? sha.slice(0, 7) : '';
 }
 
+// Path segments for file and commit pages on known git hosts. Hosts not
+// listed here only get a link to the repository itself.
+const GIT_HOST_PATHS = [
+  { match: 'github', blob: 'blob', commit: 'commit' },
+  { match: 'gitlab', blob: '-/blob', commit: '-/commit' },
+  { match: 'bitbucket', blob: 'src', commit: 'commits' },
+];
+
+function getGitHostPaths(url) {
+  let host = '';
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch (e) {
+    return null;
+  }
+  return GIT_HOST_PATHS.find((h) => host.includes(h.match)) || null;
+}
+
 // URL of the recipe's file in the repository, at `rev` (a sha or a ref).
 export function getSourceFileUrl(source, rev) {
-  if (!source?.url || !source?.path) return source?.url || null;
+  if (!source?.url) return null;
   const base = source.url.replace(/\/+$/, '');
-  return `${base}/blob/${rev || source.ref}/${source.path}`;
+  const paths = getGitHostPaths(base);
+  if (!source.path || !paths) return base;
+  return `${base}/${paths.blob}/${rev || source.ref}/${source.path}`;
 }
 
 export function getSourceCommitUrl(source) {
   if (!source?.url || !source?.sha) return null;
-  return `${source.url.replace(/\/+$/, '')}/commit/${source.sha}`;
+  const base = source.url.replace(/\/+$/, '');
+  const paths = getGitHostPaths(base);
+  return paths ? `${base}/${paths.commit}/${source.sha}` : null;
 }
 
 export function getSourceRepoName(source) {
@@ -54,6 +76,12 @@ export function GitBadge({ href }) {
     );
   }
   return <span className={className}>{content}</span>;
+}
+
+// Owner shown for a recipe, used by the owner column, filter and sort.
+export function getRecipeOwnerLabel(recipe) {
+  if (isGitSourced(recipe)) return 'Git';
+  return recipe?.user_name || recipe?.user_id || '';
 }
 
 // Author of a git-sourced recipe.
