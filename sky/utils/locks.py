@@ -204,7 +204,9 @@ class PostgresLock(DistributedLock):
         return int.from_bytes(hash_digest[:8], 'big') & ((1 << 63) - 1)
 
     @db_retries.retry
-    def _get_connection(self) -> sqlalchemy.pool.PoolProxiedConnection:
+    def _get_connection(
+            self,
+            no_pool: bool = False) -> sqlalchemy.pool.PoolProxiedConnection:
         """Get database connection."""
         # Session-scoped advisory locks hold one connection across their whole
         # lifetime, which is unsafe through a transaction-mode pooler (the
@@ -212,11 +214,14 @@ class PostgresLock(DistributedLock):
         # lock connection bypasses any configured pooler. Keep it out of the
         # state pool too: long-lived lock holders (including lock waiters)
         # must not consume the connections needed for metadata under the lock.
-        engine = db_utils.get_engine(None, direct=True, lock_pool=True)
+        engine = db_utils.get_engine(None,
+                                     direct=True,
+                                     no_pool=no_pool,
+                                     lock_pool=not no_pool)
         if engine.dialect.name != db_utils.SQLAlchemyDialect.POSTGRESQL.value:
             raise ValueError('PostgresLock requires PostgreSQL database. '
                              f'Current dialect: {engine.dialect.name}')
-        # Borrow a dedicated connection from the pool. Idempotent under
+        # Borrow a dedicated connection from the engine. Idempotent under
         # retry: raw_connection() either returns a checked-out conn or
         # raises with nothing taken — no partial state, no leak.
         connection = engine.raw_connection()
@@ -323,7 +328,9 @@ class PostgresLock(DistributedLock):
 
             # The lock is held by another routine, force unlock it.
             if self._connection is None:
-                self._connection = self._get_connection()
+                # Teardown must still be able to clear a lock when unrelated
+                # lock holders have filled the bounded lock pool.
+                self._connection = self._get_connection(no_pool=True)
             cursor = self._connection.cursor()
             if self._shared_lock:
                 unlock_func = 'pg_advisory_unlock_shared'

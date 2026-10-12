@@ -256,6 +256,9 @@ class TestPostgresLock:
                                            timeout=0.02,
                                            poll_interval=0.005).acquire()
                     assert engines[1].pool._timeout == 0
+                    locks.PostgresLock('pool_isolation_force').force_unlock()
+                    assert len(engines) == 3
+                    assert isinstance(engines[2].pool, sqlalchemy.NullPool)
             finally:
                 for lock in acquired:
                     lock.release()
