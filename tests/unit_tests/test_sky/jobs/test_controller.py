@@ -2306,8 +2306,8 @@ class TestTransientJobStatusRecoveryWindow:
         # iterations: the inner retry wrapper is stubbed out below, so this
         # does not silently shrink if its own attempt budget changes.
         max_rounds = 10
-        # Each round advances the clock past the time budget on its own, so the
-        # retry budget is what decides when the window is spent.
+        # 31s per round: two rounds clear the 60s time budget, so the 5-retry
+        # budget is what decides when the window is spent.
         clock = {'t': 1000.0}
         rounds = {'n': 0}
 
