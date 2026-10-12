@@ -428,7 +428,7 @@ def _start(service_name: str,
     service_dir = os.path.expanduser(
         serve_utils.generate_remote_service_dir_name(service_name))
 
-    # Pod IP for HA leader-aware routing.
+    # Pod IP, so requests handled on another pod can reach this controller.
     pod_ip: Optional[str] = os.environ.get('POD_IP')
 
     if not is_recovery:
@@ -615,8 +615,8 @@ def _start(service_name: str,
 
         # Self-check cadence (seconds): how often we re-read DB to confirm
         # we're still the authoritative controller. Ghost detection only
-        # matters in HA deployments and is checked once per
-        # interval to avoid DB load.
+        # matters when another instance may take over the controller and is
+        # checked once per interval to avoid DB load.
         orphan_check_interval_seconds = 30
         own_pid = os.getpid()
         loop_count = 0

@@ -243,7 +243,7 @@ _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH = [
 
 # Filenames in `file_mounts` whose content sha256 should NOT participate in the
 # cluster yaml hash computed by `_deterministic_cluster_yaml_hash`. These are
-# transient on-disk caches whose bytes drift across replicas / time without any
+# transient on-disk caches whose bytes drift across hosts / time without any
 # user-meaningful semantic change (e.g., gcloud token refreshes), and including
 # them in the hash makes `sky launch --fast` re-provision unexpectedly.
 #

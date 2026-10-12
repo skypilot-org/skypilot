@@ -225,14 +225,14 @@ class _LaunchRequestParked(Exception):
 
     Raised while supervising the inner sky.launch request when the request is
     set to WAITING by the API server, i.e. the launch is waiting on some
-    external condition (e.g. admission to a queue) and has yielded its
-    executor worker. We mirror that at the job scheduling layer: exit the
-    scheduled_launch context so the job releases its launch slot instead of
-    holding it for the entire wait.
+    external condition (e.g. a cluster lock held by another operation) and has
+    yielded its executor worker. We mirror that at the job scheduling layer:
+    exit the scheduled_launch context so the job releases its launch slot
+    instead of holding it for the entire wait.
 
     Notably, this must not tear down the partially provisioned cluster: a
-    parked launch keeps its resources (e.g. its position in an admission
-    queue) and will reuse them on resume.
+    parked launch keeps any resources it already has and will reuse them on
+    resume.
     """
 
     def __init__(self, request_id: str, status_msg: Optional[str]):
@@ -278,8 +278,9 @@ class StrategyExecutor:
             file_mounts_blob_id: If set, the content-addressed blob id
                 associated with this job's uploaded file mounts. It is
                 forwarded to the inner ``sdk.launch`` so that whichever API
-                server replica executes the launch can resolve the blob to
-                its own extraction cache (critical under HA failover).
+                server process executes the launch can resolve the blob to
+                its own extraction cache (critical when that process runs on
+                a different host from the one that received the upload).
         """
         assert isinstance(backend, backends.CloudVmRayBackend), (
             'Only CloudVMRayBackend is supported.')
@@ -379,6 +380,12 @@ class StrategyExecutor:
         FAILED_SETUP with the exception message and return False. Letting
         it escape gets swallowed into the group's monitor results with no
         terminal state set for the task.
+
+        A strategy that checks the network before each poll should call
+        ``sky.jobs.controller.check_network_connection()`` rather than
+        ``backend_utils.async_check_network_connection()``: it shares one
+        check across every monitor loop in the controller process, where the
+        latter sends one request per job per poll.
 
         Returns:
             None: fall back to OSS default monitor.
@@ -802,8 +809,8 @@ class StrategyExecutor:
         While waiting on the request's log stream (started by
         _start_stream_task), periodically poll the request's status: if the
         API server has parked the request as WAITING (the request yielded its
-        executor worker to wait for some external condition, e.g. admission
-        to a queue), raise _LaunchRequestParked so that the caller can
+        executor worker to wait for some external condition, e.g. a cluster
+        lock), raise _LaunchRequestParked so that the caller can
         release this job's launch slot for the duration of the wait.
 
         The stream task is deliberately left running when parking: the
@@ -1088,9 +1095,10 @@ class StrategyExecutor:
                                         f'{blob_id}: task sources are cloud '
                                         'URLs.')
                                     blob_id = None
-                                # HA failover may land the controller on new
-                                # hosts, ensure blob extraction on the current
-                                # host.
+                                # The controller may now run on a different
+                                # host than the upload landed on (e.g. after
+                                # an API server restart), so ensure blob
+                                # extraction on the current host.
                                 if blob_id is not None:
                                     await asyncio.to_thread(
                                         server_common.resolve_blob_dir, blob_id,
@@ -1424,15 +1432,14 @@ class StrategyExecutor:
 
             except _LaunchRequestParked as e:
                 # The underlying launch request yielded its executor worker
-                # and is waiting to resume (e.g. waiting for admission to a
-                # queue). Mirror it at this layer: we have exited the
+                # and is waiting to resume (e.g. waiting on a cluster lock).
+                # Mirror it at this layer: we have exited the
                 # scheduled_launch context above, releasing this job's launch
                 # slot, so that other jobs (including higher-priority ones)
                 # can launch while this job waits. This mirrors the
                 # retry-backoff path below, except that:
                 # - the cluster is NOT torn down: the parked launch keeps its
-                #   partially provisioned resources (e.g. its position in an
-                #   admission queue), and
+                #   partially provisioned resources, and
                 # - we wait for the request to resume instead of sleeping a
                 #   fixed backoff, and then re-attach to the same request.
                 # The waiting itself happens at the top of the next loop

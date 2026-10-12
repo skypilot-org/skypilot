@@ -3324,7 +3324,7 @@
         },
         "definition": "label_values(sky_apiserver_requests_total{app=\"$app\"},pod)",
         "includeAll": true,
-        "label": "Replica",
+        "label": "Pod",
         "multi": true,
         "name": "pod",
         "options": [],

@@ -72,8 +72,8 @@ _DENIED_LOG_TTL_SECONDS = 300
 _PROBE_DUTY_CYCLE = 0.1
 
 # Cap on repairs queued but not yet run. The per-principal claim bounds the
-# rate; this bounds a burst, so one SCIM push that strands hundreds cannot grow
-# an unbounded queue behind a single worker thread.
+# rate; this bounds a burst, so one bulk change that strands hundreds cannot
+# grow an unbounded queue behind a single worker thread.
 _REPAIR_MAX_IN_FLIGHT = 64
 
 # Materialized once: the role set is a static enum, and this is consulted on
@@ -375,7 +375,7 @@ class PermissionService:
 
         # The model was loaded by the enforcer's constructor, before the lock
         # was acquired -- and waiting for it can take seconds. Anything another
-        # replica wrote in that window is missing here, so this method would
+        # process wrote in that window is missing here, so this method would
         # consider it redundant and delete it.
         self._load_policy_no_lock()
 
@@ -481,7 +481,18 @@ class PermissionService:
             # Deliberately here rather than in the callee, which
             # `_maybe_initialize_policies` calls once per user in a loop.
             self._load_policy_no_lock()
-            self._add_user_if_not_exists_no_lock(user_id, role)
+            if self._add_user_if_not_exists_no_lock(user_id, role):
+                # As in `update_role`: a first role can grant workspace access
+                # that was denied and cached while the user had none. Clear
+                # after the write so a reader cannot re-cache the old answer.
+                # The role is already saved, so a failed clear must not fail
+                # the caller; a stale entry expires with the cache TTL.
+                try:
+                    self.invalidate_user_permission_cache(user_id)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.warning(
+                        'Failed to clear cached workspace permissions for '
+                        f'user {user_id}: {common_utils.format_exception(e)}')
 
     def _add_user_if_not_exists_no_lock(self,
                                         user_id: str,
@@ -1261,7 +1272,7 @@ class PermissionService:
 
         Idempotent and concurrency-safe: policy writes are guarded by the
         distributed policy lock and ``add_policy`` skips duplicates, so
-        concurrent replicas / workers converge on the same result.
+        concurrent server processes converge on the same result.
 
         Lock ordering matters: a workspace update (`update_workspace_fn`)
         takes the config lock exclusively, then the policy lock nested

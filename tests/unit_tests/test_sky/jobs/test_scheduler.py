@@ -1,8 +1,8 @@
 """Unit tests for sky.jobs.scheduler.kill_local_job_controllers.
 
 Used during shutdown (lock-loss suicide and uvicorn graceful shutdown) to
-prevent split-brain: this replica's controllers must not outlive the
-moment another replica's refresh daemon could acquire the consolidation
+prevent split-brain: this server's controllers must not outlive the
+moment another server's refresh daemon could acquire the consolidation
 lock. The helper must be best-effort — it runs on shutdown paths where
 raising would either prevent SIGTERM or stall drain.
 """

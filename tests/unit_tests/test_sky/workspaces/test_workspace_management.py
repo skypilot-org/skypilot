@@ -73,7 +73,7 @@ class TestWorkspaceManagement(unittest.TestCase):
         # Verify the function called the right methods
         mock_to_dict.assert_called_once()
         # Acquires the distributed config lock and reloads from the backing
-        # store inside it (so a cross-replica-stale in-memory read can't clobber).
+        # store inside it (so a stale in-memory read can't clobber).
         mock_lock.assert_called_once()
         mock_reload.assert_called_once()
         mock_update_no_lock.assert_called_once()

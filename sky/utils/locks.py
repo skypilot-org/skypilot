@@ -397,7 +397,7 @@ class PostgresLock(DistributedLock):
         NLB idle-timeout, ``idle_in_transaction_session_timeout``,
         manual ``pg_terminate_backend``, network partitions.  All of these
         free the advisory lock server-side while ``self._acquired`` stays
-        ``True`` locally, leaving the holder unaware that another replica
+        ``True`` locally, leaving the holder unaware that another process
         could now hold the same lock.
 
         This method exposes a cheap ``SELECT 1`` probe on the very connection

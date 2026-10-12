@@ -8,13 +8,14 @@ The supported logging services are:
 
 - ``aws``: :ref:`AWS CloudWatch <external-logging-storage-aws>`
 - ``gcp``: :ref:`GCP Cloud Logging <external-logging-storage-gcp>`
+- ``otlp``: :ref:`Any OpenTelemetry (OTLP) endpoint <external-logging-storage-otlp>`, e.g., an OpenTelemetry Collector or an observability backend with OTLP ingest
 
 To enable external logging storage, set the following in your SkyPilot config:
 
 .. code-block:: yaml
 
     logs:
-      store: aws  # Or 'gcp', etc.
+      store: aws  # Or 'gcp', 'otlp', etc.
       aws:
         ...  # Service-specific options; see below.
 
@@ -184,3 +185,62 @@ The credentials used must have the following permissions to send logs to GCP clo
 
 - ``logging.logEntries.create``
 - ``logging.logEntries.route``
+
+
+.. _external-logging-storage-otlp:
+
+OpenTelemetry (OTLP)
+~~~~~~~~~~~~~~~~~~~~
+
+SkyPilot can send logs to any endpoint that accepts the `OpenTelemetry Protocol (OTLP) <https://opentelemetry.io/docs/specs/otlp/>`_, such as an `OpenTelemetry Collector <https://opentelemetry.io/docs/collector/>`_ or an observability backend with native OTLP ingest.
+
+Configuration options:
+
+- ``endpoint``: The base URL of the OTLP endpoint (required), e.g., ``https://otel-collector.example.com:4318``. For OTLP/HTTP, ``/v1/logs`` is appended to the URL path, so a path prefix is preserved (e.g., ``https://gateway.example.com/otlp`` sends to ``/otlp/v1/logs``). If no port is given, the scheme's default port (80 or 443) is used.
+- ``protocol``: ``http/protobuf`` (default) or ``grpc``.
+- ``headers``: Additional HTTP headers to send, e.g., a tenant ID. The values are written to the logging agent's configuration file on the cluster, so use ``headers_file`` for secrets.
+- ``headers_file``: The path to a file with one ``Name: value`` header per line, for credentials such as ``Authorization: Bearer <token>``. Blank lines and lines starting with ``#`` are ignored. Refer to :ref:`Authenticating to an OTLP endpoint <external-logging-storage-otlp-authentication>` for more details.
+- ``compression``: ``none`` (default) or ``gzip``.
+- ``tls.insecure_skip_verify``: Skip verifying the endpoint's TLS certificate for ``https`` endpoints, e.g., for a collector with a self-signed certificate (default: ``false``).
+- ``resource_attributes``: Additional OTLP resource attributes to attach to the logs.
+
+Example:
+
+.. code-block:: yaml
+
+  logs:
+    store: otlp
+    otlp:
+      endpoint: https://otel-collector.example.com:4318
+      headers_file: /path/to/otlp_headers
+      compression: gzip
+      resource_attributes:
+        deployment.environment: production
+
+Each log line is sent as an OTLP log record, with the line as the record body and the log file path in the ``log_path`` attribute. Logs are sent with the following resource attributes, which can be used to filter them in the backend:
+
+- ``service.name``: ``skypilot``, unless overridden in ``resource_attributes``.
+- ``skypilot.cluster_name``: The name of the SkyPilot cluster.
+- ``skypilot.cluster_id``: The unique ID of the SkyPilot cluster.
+
+.. note::
+
+  Log lines longer than 256 KB are skipped.
+
+.. _external-logging-storage-otlp-authentication:
+
+Authenticating to an OTLP endpoint
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Most OTLP endpoints authenticate requests with an HTTP header. Put the header in a file and set ``logs.otlp.headers_file`` to its path:
+
+.. code-block:: text
+
+  # /path/to/otlp_headers
+  Authorization: Bearer <token>
+
+The file is uploaded to each cluster and readable only by the cluster's user. Its values are passed to the logging agent through environment variables, so they are not written to the agent's configuration file or to SkyPilot's logs.
+
+.. note::
+
+  In :ref:`client-server architecture<sky-api-server>`, the ``logs.otlp.headers_file`` refers to the file on the remote API server instead of the local machine.

@@ -27,7 +27,7 @@ def register_volume_deleted_hook(hook_id: str, fn: VolumeDeletedHook) -> None:
 
     Args:
         hook_id: A stable, unique identifier for this hook (e.g.
-            ``"automount.volume_delete_cleanup"``). Re-registering with the
+            ``"my_plugin.on_volume_deleted"``). Re-registering with the
             same ID replaces the previous callback so a plugin loaded twice
             in the same process does not fire its hook twice.
         fn: The callback to invoke.

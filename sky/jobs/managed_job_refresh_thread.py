@@ -64,7 +64,7 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
                 # touch the signal file, and call ha_recovery →
                 # maybe_start_controllers — which would spawn fresh
                 # controllers under a now-released lock while the new
-                # leader on another replica is doing the same. Stop the
+                # leader in another API server is doing the same. Stop the
                 # thread instead so the SIGTERM-driven drain runs to
                 # completion without further controller churn.
                 return
@@ -75,7 +75,7 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
                 # If we previously held the lock and lost the session
                 # mid-recovery, retrying would run as a stale leader
                 # (local `_acquired` flag still True, server-side lock
-                # released, another replica can grab it).  Hand off via
+                # released, another API server can grab it).  Hand off via
                 # SIGTERM, same as the steady-state probe path.
                 if self._lock.is_locked() and not self._lock_still_held():
                     self._suicide_on_lock_loss()
@@ -88,7 +88,7 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         # Touch the signal file BEFORE acquiring the lock: new controllers
         # must not be started until recovery has run. During a rolling
         # update we block on acquire() while the old API server still holds
-        # the lock; if a controller were started on this replica in that
+        # the lock; if a controller were started on this server in that
         # window, the old server's update_managed_jobs_statuses wouldn't see
         # its process and could mark the job FAILED_CONTROLLER. The signal
         # file makes update_managed_jobs_statuses and the scheduler's
@@ -124,7 +124,7 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         # The wait above widens the window between acquiring the lock and
         # running recovery, during which the lock's underlying session could go
         # silently stale (PostgresLock only). Re-verify we still hold the lock
-        # before recovery; otherwise another replica may have taken it and
+        # before recovery; otherwise another API server may have taken it and
         # could be recovering concurrently, so step down rather than run a
         # second recovery loop. _suicide_on_lock_loss re-touches the signal
         # file and SIGTERMs the process, so leave the file in place here.
@@ -159,7 +159,7 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
             time.sleep(1)
 
     def _lock_still_held(self) -> bool:
-        """True iff we are confident this replica still owns the lock."""
+        """True iff we are confident this process still owns the lock."""
         assert self._lock is not None
         if isinstance(self._lock, locks.PostgresLock):
             # Check is only relevant for PG lock
@@ -182,7 +182,7 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
             logger.warning('Failed to touch recovery signal file on lock-loss')
         # The lock is already released, kill job controllers to avoid split
         # brain, e.g. new job controllers might have been launched on the new
-        # replica during rolling-update
+        # pod during a rolling update
         try:
             managed_job_scheduler.kill_local_job_controllers()
         except Exception:  # pylint: disable=broad-except

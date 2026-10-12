@@ -3,9 +3,8 @@
 A ``ManagedJobRunner`` is the strategy object that the server's managed-job
 entry points (queue, cancel, tail_logs) delegate to. The registered runner
 decides *how* the operation executes — the default runner generates Python
-code and runs it on the controller via subprocess, while a plugin-provided
-runner might call the managed jobs DB directly when the controller is
-in-process.
+code and runs it on the controller via subprocess; a registered runner may
+execute it differently.
 
 At most one runner is registered at a time. If nothing has registered,
 ``current()`` lazily constructs ``_DefaultManagedJobRunner`` from
@@ -92,10 +91,8 @@ class ManagedJobRunner(Protocol):
 
         Unlike the other methods here this one takes no ``handle`` or
         ``backend``: the answer comes from the jobs database and from the
-        cluster's own events, and nothing is asked of the controller. The
-        extension point exists so a runner can add what the infrastructure
-        knows about the same job -- on Slurm, what the allocation waited on
-        and for how long -- which the default implementation cannot read.
+        cluster's own events, and nothing is asked of the controller. A
+        registered runner may add rows to the default timeline.
 
         ``include_cluster_events`` merges the underlying cluster's
         launch-progress events into the timeline; ``limit`` caps the merged

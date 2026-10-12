@@ -559,7 +559,7 @@ def update_workspace(
 
     if expected_config is not None:
         # This process's config may predate a write handled elsewhere (another
-        # worker or replica); refresh it so the early conflict check below
+        # worker or server); refresh it so the early conflict check below
         # doesn't report a conflict against a stale copy.
         skypilot_config.safe_reload_config()
     # Get the current workspace configuration for comparison
@@ -1086,7 +1086,7 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
     # Workspaces whose removal passed validation. The actual strip + write is
     # (re)done INSIDE the config lock in the modifier from the fresh config, not
     # from this pre-lock snapshot, so concurrent per-user removals across
-    # workers/replicas can't clobber each other via a stale read-modify-write.
+    # workers/servers can't clobber each other via a stale read-modify-write.
     validated_changes: Set[str] = set()
 
     # Pre-fetch active resources for the WHOLE batch of workspaces ONCE.
@@ -1164,7 +1164,7 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
                 # Read-modify-write INSIDE the lock from the fresh config, not
                 # from the pre-lock snapshot above. Otherwise concurrent
                 # removals of different users from the same workspace (e.g.
-                # several deprovisions in parallel, across workers/replicas)
+                # several deprovisions in parallel, across workers/servers)
                 # each strip their own user from a stale snapshot and the last
                 # writer's full-replace resurrects the users the others removed.
                 ws_config = workspaces[workspace_name]

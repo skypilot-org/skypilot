@@ -104,6 +104,96 @@ def _status_check_gap_seconds(first_check: bool) -> float:
                                 1 + _STATUS_CHECK_GAP_JITTER)
 
 
+# One network check per controller process per status-check gap. Every
+# monitor loop checks the network before it polls its job, so a process that
+# monitors thousands of jobs makes thousands of HTTPS requests per gap, all to
+# the same destination, where one answer serves every loop.
+# _network_check_ok_at is the time.monotonic() of the last check that
+# succeeded; only a success is reused by loops that check later.
+# _network_check_in_flight is the check running now, if any. Loops that find
+# no recent success wait for it instead of starting their own and get its
+# result, success or failure, so during an outage each loop retries on its own
+# jittered timer rather than queueing behind one failing check after another.
+# A success releases every waiting loop at once, and after an outage that is
+# every loop in the process, so a loop that waited spreads itself out before
+# it polls (see check_network_connection).
+# The check task is created inside the event loop: this module is imported
+# before asyncio.run() creates the controller's loop, and on Python 3.9 an
+# asyncio primitive binds to the current loop when it is constructed.
+_network_check_in_flight: Optional['asyncio.Task[None]'] = None
+_network_check_ok_at: Optional[float] = None
+
+
+def _network_check_is_fresh() -> bool:
+    """Whether the last successful network check can stand in for a new one.
+
+    A check is reused for the shortest gap a loop sleeps between two polls,
+    JOB_STATUS_CHECK_GAP_SECONDS minus its jitter, so a process with a single
+    loop still checks the network before every poll, exactly as before. The
+    gap is read on every call, as _status_check_gap_seconds reads it.
+    """
+    if _network_check_ok_at is None:
+        return False
+    max_age = (managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS *
+               (1 - _STATUS_CHECK_GAP_JITTER))
+    return time.monotonic() - _network_check_ok_at < max_age
+
+
+async def _run_network_check() -> None:
+    global _network_check_in_flight, _network_check_ok_at
+    try:
+        await backend_utils.async_check_network_connection()
+        _network_check_ok_at = time.monotonic()
+    finally:
+        _network_check_in_flight = None
+
+
+def _retrieve_network_check_result(task: 'asyncio.Task[None]') -> None:
+    # Every waiter may have been cancelled before the check finished; reading
+    # the exception here keeps asyncio from logging it as never retrieved.
+    if not task.cancelled():
+        task.exception()
+
+
+async def check_network_connection() -> None:
+    """Checks the network connection, reusing a recent successful check.
+
+    Raises exceptions.NetworkError when the check fails. Loops that find no
+    recent success share the check in flight instead of each starting their
+    own, and all get its result: when it succeeds they return, and when it
+    fails each of them raises NetworkError and retries on its own timer. A
+    failure is not reused by loops that check after it finished.
+
+    A loop that waited on a check another loop started returns after a random
+    delay of up to as long as it waited (at most the reuse window). Without
+    it, the loops released by one success would all poll their jobs at the
+    same moment: after an outage, every loop of the process. A loop that waited
+    for a healthy check is delayed by at most that check's duration.
+
+    A recovery strategy that owns its monitor loop
+    (StrategyExecutor.monitor_task) should check the network through this
+    function as well, so that its loops share the process's check.
+    """
+    global _network_check_in_flight
+    if _network_check_is_fresh():
+        return
+    check = _network_check_in_flight
+    started_here = check is None
+    if check is None:
+        check = asyncio.create_task(_run_network_check())
+        check.add_done_callback(_retrieve_network_check_result)
+        _network_check_in_flight = check
+    waiting_since = time.monotonic()
+    # Shielded: a loop cancelled while it waits (its job was cancelled) must
+    # not cancel the check that other loops are waiting on.
+    await asyncio.shield(check)
+    if not started_here:
+        reuse_window = (managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS *
+                        (1 - _STATUS_CHECK_GAP_JITTER))
+        waited = time.monotonic() - waiting_since
+        await asyncio.sleep(random.uniform(0, min(waited, reuse_window)))
+
+
 async def create_background_task(coro: typing.Coroutine) -> None:
     """Create a background task and add it to the set of background tasks.
 
@@ -457,11 +547,9 @@ class JobController:
         write-only logging store), we still keep the local copy so ``sky jobs
         logs`` can serve a finished job's logs.
 
-        Being configured is not the same as having worked: the agent may never
-        have run on the cluster this job landed on. A registered
-        ``LogDeliverySource`` (the component that deploys the agent) can report
-        that, and we then keep the local copy instead of leaving the job with no
-        readable logs anywhere.
+        A registered ``LogDeliverySource`` may report that this cluster's logs
+        were not delivered; we then keep the local copy instead of skipping
+        it.
         """
         if (logs.is_logging_agent_configured() and
                 logs.get_log_reader() is not None):
@@ -1164,7 +1252,7 @@ class JobController:
                 # Check the network connection to avoid false alarm for job
                 # failure. Network glitch was observed even in the VM.
                 try:
-                    await backend_utils.async_check_network_connection()
+                    await check_network_connection()
                 except exceptions.NetworkError:
                     logger.info(
                         'Network is not available. Retrying again in about '
@@ -1259,7 +1347,10 @@ class JobController:
                     'Check cluster status to determine if the job is '
                     'preempted or failed.')
                 status_check_window.record_failure()
-            else:
+            elif job_status is not None and not job_status.is_terminal():
+                # Only a live job resets the window. "No transient error" also
+                # covers a skipped probe and a terminal status, and resetting
+                # on those re-opens it every round, so no budget ever expires.
                 status_check_window.reset()
 
             if runtime_error is not None:
@@ -1397,15 +1488,16 @@ class JobController:
                 # transient condition and back off, reusing the transient
                 # job-status-check window. Sharing the window (rather than
                 # keeping a separate one for this handler) is deliberate: a
-                # successful get_job_status resets it, so while the job-status
-                # probe keeps returning a healthy status -- a direct positive
-                # liveness signal -- the loop keeps retrying instead of
-                # escalating. Restarting a demonstrably running job is exactly
-                # the false alarm this handler exists to prevent, and recovery
-                # could not relaunch anyway while the provider API is
-                # unreachable. Only when both get_job_status and this refresh
-                # keep failing until the window's budgets are exhausted is
-                # the error re-raised, escalating to emergency recovery.
+                # non-terminal job status resets it, so while the probe keeps
+                # observing a live job -- a direct positive liveness signal --
+                # the loop keeps retrying instead of escalating. Restarting a
+                # demonstrably running job is exactly the false alarm this
+                # handler exists to prevent, and recovery could not relaunch
+                # anyway while the provider API is unreachable. Only while the
+                # probe keeps saying the job is alive, though: anything else,
+                # including a skipped probe, lets this handler's failures
+                # accumulate until the budgets are exhausted and the error is
+                # re-raised, escalating to emergency recovery.
                 status_logger.reset()
                 status_check_window.record_failure()
                 if status_check_window.exhausted:
@@ -2352,6 +2444,11 @@ class JobController:
                 (err for _, err in failed_syncs if isinstance(err, Exception)),
                 failed_syncs[0][1])
 
+        # All tasks have started (fresh or resumed): free the launch slot
+        # start_job reserved, as _run_one_task does after set_started. Groups
+        # bypass scheduled_launch, so nothing else frees it before job end.
+        await self._release_launch_slot()
+
         # Phase 3: Set up networking
         # Build list of (task, handle) for non-terminal tasks with valid
         # handles. Skip tasks that inline the DNS mapping — they already
@@ -2975,7 +3072,9 @@ class JobController:
                 'bookkeeping failed repeatedly.)')
 
     async def _release_launch_slot(self) -> None:
-        """Free this job's shared launching slot for the backoff.
+        """Free this job's shared launching slot.
+
+        Used once a job group has started, and before the emergency backoff.
 
         The launching slots are the in-memory ``starting`` set
         (LAUNCHES_PER_WORKER per worker). A job added at start_job time (or,

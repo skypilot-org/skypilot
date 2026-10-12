@@ -7,7 +7,7 @@ not the full daemon loop:
   (probes the underlying PG session) and any other ``DistributedLock``
   (trusts the local ``is_locked`` flag).
 * ``_suicide_on_lock_loss`` sends ``SIGTERM`` to the API server PID so
-  K8s restarts the pod and the leader is re-elected on another replica.
+  K8s restarts the pod and the leader is re-elected on another server.
 * ``start_managed_job_refresh_daemon`` gates on consolidation mode,
   preserving the historical ``should_skip_managed_job_status_refresh``
   semantics now that the daemon no longer lives in
@@ -165,7 +165,7 @@ class TestOuterLoopStopsAfterSuicide:
     otherwise the next iteration would skip the lock acquire (the local
     _acquired flag is stale) and run ha_recovery_for_consolidation_mode,
     which would spawn fresh controllers under a now-released lock while
-    the new leader on another replica is doing the same.
+    the new leader on another server is doing the same.
     """
 
     def test_run_returns_after_become_leader_returns_normally(self):
@@ -226,7 +226,7 @@ class TestOuterLoopExceptionHandling:
         suicide.assert_called_once()
 
     def test_retry_when_acquire_threw(self):
-        """acquire() itself failed (e.g. another replica holds the lock,
+        """acquire() itself failed (e.g. another server holds the lock,
         or transient PG hiccup); is_locked stays False, just retry."""
         thread = mjrt.ManagedJobRefreshDaemonThread()
         get_lock_p, lock = self._patches(is_locked=False, session_alive=False)
@@ -271,7 +271,7 @@ class TestBecomeLeaderOrdering:
 
     During a rolling update we block on acquire() while the old API server
     still holds the lock. If the gate file is missing in that window, a
-    controller started on this replica would be invisible to the old
+    controller started on this server would be invisible to the old
     server's update_managed_jobs_statuses, which could mark the job
     FAILED_CONTROLLER. The signal file gates controller starts, so it must
     be touched up-front, not after we win the lock.
@@ -367,7 +367,7 @@ class TestBecomeLeaderOrdering:
 
     def test_steps_down_if_lock_lost_during_wait(self, tmp_path, monkeypatch):
         """If the lock session goes stale during the post-acquire wait, we
-        must NOT run recovery — another replica may now hold the lock. Step
+        must NOT run recovery — another server may now hold the lock. Step
         down via _suicide_on_lock_loss and leave the gate file in place (the
         suicide path re-touches it to keep controllers gated)."""
         signal_file = tmp_path / 'restart_signal'

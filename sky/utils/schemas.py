@@ -1444,6 +1444,8 @@ class RemoteIdentityOptions(enum.Enum):
     LOCAL_CREDENTIALS = 'LOCAL_CREDENTIALS'
     SERVICE_ACCOUNT = 'SERVICE_ACCOUNT'
     NO_UPLOAD = 'NO_UPLOAD'
+    # Kubernetes only: the pod gets no API credentials at all.
+    NONE = 'NONE'
 
 
 def get_default_remote_identity(cloud: str) -> str:
@@ -1467,7 +1469,9 @@ _REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {
         'type': 'string',
         'case_insensitive_enum': [
-            option.value for option in RemoteIdentityOptions
+            option.value
+            for option in RemoteIdentityOptions
+            if option is not RemoteIdentityOptions.NONE
         ]
     }
 }
@@ -1511,8 +1515,8 @@ _SBATCH_OPTIONS_SCHEMA = {
 
 # `quota.queue` names the QOS a job is submitted with (`sbatch --qos`) and
 # `quota.account` the account it is charged to (`sbatch --account`), mirroring
-# `kubernetes.quota.queue`. Permissive so external schedulers (registered via
-# plugins) can layer their own sub-fields under `quota`.
+# `kubernetes.quota.queue`. Permissive so plugins can layer their own
+# sub-fields under `quota`.
 _SLURM_QUOTA_SCHEMA = {
     'type': 'object',
     'required': [],
@@ -1745,10 +1749,9 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         },
     },
     # Alias of `kueue.local_queue_name`; `quota.queue` takes precedence
-    # when both are set. Permissive so external schedulers (registered
-    # via plugins) can layer their own sub-fields under `quota` without
-    # requiring per-key OSS schema updates; sub-field validation is the
-    # consumer's responsibility.
+    # when both are set. Permissive so plugins can layer their own
+    # sub-fields under `quota` without requiring per-key OSS schema
+    # updates; sub-field validation is the consumer's responsibility.
     'quota': {
         'type': 'object',
         'required': [],
@@ -2938,10 +2941,21 @@ def get_config_schema():
         'type': 'object',
         'required': ['store'],
         'additionalProperties': False,
+        # The OTLP store has no default endpoint, so its block is required.
+        'if': {
+            'properties': {
+                'store': {
+                    'case_insensitive_enum': ['otlp'],
+                },
+            },
+        },
+        'then': {
+            'required': ['otlp'],
+        },
         'properties': {
             'store': {
                 'type': 'string',
-                'case_insensitive_enum': ['gcp', 'aws'],
+                'case_insensitive_enum': ['gcp', 'aws', 'otlp'],
             },
             'gcp': {
                 'type': 'object',
@@ -2979,6 +2993,48 @@ def get_config_schema():
                         'type': 'boolean',
                     },
                     'additional_tags': {
+                        'type': 'object',
+                        'additionalProperties': {
+                            'type': 'string',
+                        },
+                    },
+                },
+            },
+            'otlp': {
+                'type': 'object',
+                'required': ['endpoint'],
+                'additionalProperties': False,
+                'properties': {
+                    'endpoint': {
+                        'type': 'string',
+                    },
+                    'protocol': {
+                        'type': 'string',
+                        'case_insensitive_enum': ['http/protobuf', 'grpc'],
+                    },
+                    'headers': {
+                        'type': 'object',
+                        'additionalProperties': {
+                            'type': 'string',
+                        },
+                    },
+                    'headers_file': {
+                        'type': 'string',
+                    },
+                    'compression': {
+                        'type': 'string',
+                        'case_insensitive_enum': ['none', 'gzip'],
+                    },
+                    'tls': {
+                        'type': 'object',
+                        'additionalProperties': False,
+                        'properties': {
+                            'insecure_skip_verify': {
+                                'type': 'boolean',
+                            },
+                        },
+                    },
+                    'resource_attributes': {
                         'type': 'object',
                         'additionalProperties': {
                             'type': 'string',

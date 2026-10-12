@@ -629,6 +629,56 @@ def test_detect_gpu_label_formatter_invalid_label_skip():
         utils.detect_gpu_label_formatter.cache_clear()
 
 
+@pytest.mark.parametrize('accelerator', ['RTX-PRO-6000', 'RTXPRO6000'])
+def test_gke_label_formatter_rtx_pro_6000(accelerator):
+    """RTX PRO 6000 is labeled nvidia-rtx-pro-6000 in GKE, not
+    nvidia-tesla-rtx-pro-6000."""
+    assert utils.GKELabelFormatter.get_label_values(accelerator) == [
+        'nvidia-rtx-pro-6000'
+    ]
+    assert utils.GKELabelFormatter.get_accelerator_from_label_value(
+        'nvidia-rtx-pro-6000') == 'RTX-PRO-6000'
+
+
+@pytest.mark.parametrize('accelerator', ['RTX-PRO-6000', 'RTXPRO6000'])
+def test_get_accelerator_label_key_values_gke_rtx_pro_6000(accelerator):
+    """Without an autoscaler, both RTX PRO 6000 names find a GKE node
+    labeled nvidia-rtx-pro-6000."""
+    label_key = utils.GKELabelFormatter.GPU_LABEL_KEY
+    node_labels = {'gpu-node': [(label_key, 'nvidia-rtx-pro-6000')]}
+    with mock.patch('sky.skypilot_config.get_effective_region_config',
+                    return_value=None), \
+         mock.patch('sky.provision.kubernetes.utils.detect_accelerator_resource',
+                    return_value=(True, set())), \
+         mock.patch('sky.provision.kubernetes.utils.detect_gpu_label_formatter',
+                    return_value=(utils.GKELabelFormatter(), node_labels)):
+        assert utils.get_accelerator_label_key_values(
+            'gke_project_us-central1_cluster', accelerator,
+            1) == (label_key, ['nvidia-rtx-pro-6000'], None, None)
+
+
+@pytest.mark.parametrize('accelerator', ['RTX-PRO-6000', 'RTXPRO6000'])
+def test_gke_autoscaler_node_pool_rtx_pro_6000(accelerator):
+    """A GKE autoscaling node pool of nvidia-rtx-pro-6000 GPUs, which may
+    have no nodes yet, can create a node for both RTX PRO 6000 names."""
+    node_pool = {
+        'name': 'g4-pool',
+        'config': {
+            'machineType': 'g4-standard-48',
+            'accelerators': [{
+                'acceleratorType': 'nvidia-rtx-pro-6000',
+                'acceleratorCount': '1'
+            }]
+        }
+    }
+    # pylint: disable=protected-access
+    fits = utils.GKEAutoscaler._check_instance_fits_gke_autoscaler_node_pool
+    with mock.patch('sky.clouds.GCP.get_vcpus_mem_from_instance_type',
+                    return_value=(48, 180.0)):
+        assert fits(f'4CPU--16GB--{accelerator}:1', node_pool)
+        assert not fits(f'4CPU--16GB--{accelerator}:2', node_pool)
+
+
 def test_detect_gpu_label_formatter_suppresses_warning_for_coreweave_format():
     """Tests that warnings are not logged when GKE label keys have
     CoreWeave-formatted values (e.g., cloud.google.com/gke-accelerator=H100_NVLINK_80GB).
