@@ -3,22 +3,38 @@
  */
 
 /**
+ * Thresholds for switching to large-unit display. Counts at or above these
+ * render as "<n>.<d> k/TB" so five- and six-digit numbers stay one glance
+ * wide: >=10000 CPU ("44.2k"), >=10000 GB memory ("681.7 TB").
+ */
+const CPU_K_THRESHOLD = 10000;
+const MEMORY_TB_THRESHOLD_GB = 10000;
+
+/**
  * Format CPU count for display
  * @param {number|null|undefined} cpu - CPU count value
- * @returns {string} - Formatted CPU string (integer if whole, 1 decimal otherwise, or '-')
+ * @returns {string} - Formatted CPU string: "<n>.<d>k" at or above 10000,
+ *   integer otherwise, or '-' for null/undefined
  */
 export function formatCpu(cpu) {
   if (cpu === null || cpu === undefined) return '-';
+  if (cpu >= CPU_K_THRESHOLD) {
+    return `${(cpu / 1000).toFixed(1)}k`;
+  }
   return Math.round(cpu).toString();
 }
 
 /**
  * Format memory in GB for display
  * @param {number|null|undefined} memory - Memory value in GB
- * @returns {string} - Formatted memory string (e.g., "16.0 GB" or "-")
+ * @returns {string} - Formatted memory string: "<n>.<d> TB" at or above
+ *   10000 GB, "<n> GB" otherwise, or '-' for null/undefined
  */
 export function formatMemory(memory) {
   if (memory === null || memory === undefined) return '-';
+  if (memory >= MEMORY_TB_THRESHOLD_GB) {
+    return `${(memory / 1000).toFixed(1)} TB`;
+  }
   return `${Math.round(memory)} GB`;
 }
 
