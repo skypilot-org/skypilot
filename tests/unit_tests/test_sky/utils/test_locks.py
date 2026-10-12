@@ -226,7 +226,7 @@ class TestPostgresLock:
             if pool_class is sqlalchemy.pool.QueuePool:
                 pool_kwargs = dict(pool_size=kwargs['pool_size'],
                                    max_overflow=kwargs['max_overflow'],
-                                   timeout=0.01)
+                                   timeout=kwargs.get('pool_timeout', 0.01))
             engine = mock.Mock()
             engine.dialect.name = 'postgresql'
             engine.pool = pool_class(connect, **pool_kwargs)
@@ -248,6 +248,14 @@ class TestPostgresLock:
                 if not state_pool_busy:
                     held.append(state_engine.raw_connection())
                     assert state_engine.pool.checkedout() == 1
+                    with pytest.raises(locks.LockTimeout):
+                        locks.PostgresLock('pool_isolation_over_budget'
+                                          ).acquire(blocking=False)
+                    with pytest.raises(locks.LockTimeout):
+                        locks.PostgresLock('pool_isolation_timed',
+                                           timeout=0.02,
+                                           poll_interval=0.005).acquire()
+                    assert engines[1].pool._timeout == 0
             finally:
                 for lock in acquired:
                     lock.release()
@@ -256,6 +264,48 @@ class TestPostgresLock:
                 for engine in engines:
                     engine.pool.dispose()
         assert all(driver.close.called for driver in drivers)
+
+    @pytest.mark.parametrize('pooler', [False, True])
+    @pytest.mark.parametrize('pool_size', [0, 2])
+    def test_lock_engine_pool_modes(self, monkeypatch, pooler, pool_size):
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI', 'postgresql://test/db')
+        monkeypatch.setenv('SKYPILOT_SERVER_DB_CONNECTION_POOL_SIZE',
+                           str(pool_size))
+        monkeypatch.setenv('SKYPILOT_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW',
+                           '3')
+        monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
+        if pooler:
+            monkeypatch.setenv('SKYPILOT_DB_POOL_CONNECTION_URI',
+                               'postgresql://test@pool/db')
+        else:
+            monkeypatch.delenv('SKYPILOT_DB_POOL_CONNECTION_URI', raising=False)
+        monkeypatch.setattr(db_utils, '_postgres_engine_cache', {})
+        created = []
+
+        def make_engine(uri, **kwargs):
+            engine = mock.Mock()
+            engine.dialect.name = 'postgresql'
+            pool_kwargs = {}
+            if kwargs['poolclass'] is sqlalchemy.pool.QueuePool:
+                pool_kwargs = dict(pool_size=kwargs['pool_size'],
+                                   max_overflow=kwargs['max_overflow'])
+            engine.pool = kwargs['poolclass'](mock.Mock(), **pool_kwargs)
+            created.append((str(uri), kwargs['poolclass'], engine))
+            return engine
+
+        with mock.patch('sqlalchemy.create_engine', side_effect=make_engine):
+            state_engine = db_utils.get_engine(None)
+            lock_engine = db_utils.get_engine(None, direct=True, lock_pool=True)
+        assert state_engine is not lock_engine
+        assert created[0][0] == ('postgresql+psycopg2://test@pool/db'
+                                 if pooler else 'postgresql+psycopg2://test/db')
+        assert created[1][0] == 'postgresql+psycopg2://test/db'
+        expected_pool = (sqlalchemy.NullPool if pooler or pool_size == 0 else
+                         sqlalchemy.pool.QueuePool)
+        assert created[1][1] is expected_pool
+        for _, _, engine in created:
+            engine.pool.dispose()
 
     def test_postgres_lock_initialization(self):
         """Test PostgresLock initialization."""

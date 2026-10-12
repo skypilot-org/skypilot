@@ -212,7 +212,7 @@ class PostgresLock(DistributedLock):
         # lock connection bypasses any configured pooler. Keep it out of the
         # state pool too: long-lived lock holders (including lock waiters)
         # must not consume the connections needed for metadata under the lock.
-        engine = db_utils.get_engine(None, direct=True, no_pool=True)
+        engine = db_utils.get_engine(None, direct=True, lock_pool=True)
         if engine.dialect.name != db_utils.SQLAlchemyDialect.POSTGRESQL.value:
             raise ValueError('PostgresLock requires PostgreSQL database. '
                              f'Current dialect: {engine.dialect.name}')
@@ -237,10 +237,19 @@ class PostgresLock(DistributedLock):
         if self._acquired:
             return AcquireReturnProxy(self)
 
-        self._connection = self._get_connection()
-        cursor = self._connection.cursor()
-
         start_time = time.time()
+        while True:
+            try:
+                self._connection = self._get_connection()
+                break
+            except sqlalchemy.exc.TimeoutError as e:
+                if (not blocking or (self.timeout is not None and
+                                     time.time() - start_time > self.timeout)):
+                    raise LockTimeout(
+                        f'Failed to acquire postgres lock {self.lock_id}: '
+                        'lock connection pool is full') from e
+                time.sleep(self.poll_interval)
+        cursor = self._connection.cursor()
 
         if self._shared_lock:
             lock_func = 'pg_try_advisory_lock_shared'
