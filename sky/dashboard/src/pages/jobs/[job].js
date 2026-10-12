@@ -2060,7 +2060,12 @@ function JobDetailsContent({
           dash
         ) : (
           <span>
-            {jobData.git_commit.slice(0, 7)}
+            <NonCapitalizedTooltip
+              content={jobData.git_commit}
+              className="text-sm text-muted-foreground"
+            >
+              <span>{jobData.git_commit.slice(0, 7)}</span>
+            </NonCapitalizedTooltip>
             {copyButton(
               isCommitCopied,
               async () => {
