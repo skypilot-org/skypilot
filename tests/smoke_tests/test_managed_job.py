@@ -944,9 +944,8 @@ def test_managed_jobs_kubernetes_accelerator_node_constraint():
 
     SkyPilot pins a Kubernetes pod to nodes carrying the requested
     accelerator type via a nodeSelector/nodeAffinity constraint on the
-    cluster's accelerator label (see the ``k8s_acc_label_key`` /
-    ``k8s_acc_label_values`` block in
-    ``sky/templates/kubernetes-ray.yml.j2``). This test asserts that
+    cluster's accelerator label (see ``get_node_affinity`` in
+    ``sky/provision/kubernetes/utils.py``). This test asserts that
     contract end-to-end: the job's own pod fetches its own manifest via
     kubectl (using its bound ServiceAccount for in-cluster auth) and checks
     that the requested GPU type is present in its own nodeSelector/

@@ -1124,8 +1124,8 @@ class Kubernetes(clouds.Cloud):
         # cannot form the fabric (NCCL degrades or fails to init). SkyPilot
         # schedules each pod independently with no cross-pod topology
         # constraint, so on a multi-AZ cluster they can scatter. For a
-        # multi-node network_tier: best job on AWS EFA, tell the template to
-        # inject a required same-zone podAffinity keyed on the per-job label so
+        # multi-node network_tier: best job on AWS EFA, get_pod_affinity()
+        # adds a required same-zone podAffinity keyed on the per-job label so
         # every replica follows the first into whatever AZ it lands in (the user
         # names no zone). network_type is only AWS_EFA when network_tier is
         # BEST, so this stays off for every other tier and cloud.
@@ -1387,10 +1387,7 @@ class Kubernetes(clouds.Cloud):
             'timeout': str(timeout),
             'k8s_efa_count': str(k8s_efa_count)
                              if k8s_efa_count is not None else None,
-            'k8s_efa_same_az': k8s_efa_same_az,
             'k8s_port_mode': port_mode.value,
-            'k8s_acc_label_key': k8s_acc_label_key,
-            'k8s_acc_label_values': k8s_acc_label_values,
             # Merged into the rendered pod by write_cluster_config().
             'pod_fields': kubernetes_utils.get_pod_fields(
                 acc_label_key=k8s_acc_label_key,
@@ -1400,7 +1397,9 @@ class Kubernetes(clouds.Cloud):
                 topology_label_value=k8s_topology_label_value,
                 spot_label_key=spot_label_key,
                 spot_label_value=spot_label_value,
-                enable_flex_start=enable_flex_start),
+                enable_flex_start=enable_flex_start,
+                efa_same_az=k8s_efa_same_az,
+                cluster_name_on_cloud=cluster_name.name_on_cloud),
             'k8s_service_account_name': k8s_service_account_name,
             # Gates the provisioner-only roles: only a controller pod
             # provisions, and only in non-consolidation deployments --

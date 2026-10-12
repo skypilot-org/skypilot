@@ -894,8 +894,15 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
 
         # Verify GPU-related variables are set
         self.assertEqual(deploy_vars['accelerator_count'], '8')
-        self.assertEqual(deploy_vars['k8s_acc_label_key'], 'accelerator')
-        self.assertEqual(deploy_vars['k8s_acc_label_values'], ['H100'])
+        node_affinity = deploy_vars['pod_fields']['spec']['affinity'][
+            'nodeAffinity']
+        self.assertEqual(
+            node_affinity['requiredDuringSchedulingIgnoredDuringExecution']
+            ['nodeSelectorTerms'][0]['matchExpressions'], [{
+                'key': 'accelerator',
+                'operator': 'In',
+                'values': ['H100'],
+            }])
         self.assertEqual(deploy_vars['k8s_resource_key'], 'nvidia.com/gpu')
         self.assertFalse(deploy_vars['tpu_requested'])  # H100 is GPU, not TPU
 
@@ -4415,10 +4422,9 @@ class TestDeriveEfaCountFromCatalog(unittest.TestCase):
 
 
 class TestKubernetesEfaSameAzAffinity(unittest.TestCase):
-    """Multi-node network_tier: best on AWS EFA sets k8s_efa_same_az so the pod
-    template injects a required same-zone podAffinity (EFA is single-AZ).
-    Single-node and non-EFA network types must not set it. Fails without the
-    fix (the deploy var does not exist).
+    """Multi-node network_tier: best on AWS EFA gives the pod a required
+    same-zone podAffinity (EFA is single-AZ). Single-node and non-EFA network
+    types must not.
     """
 
     def _deploy_vars(self, num_nodes, network_type):
@@ -4483,56 +4489,37 @@ class TestKubernetesEfaSameAzAffinity(unittest.TestCase):
                 num_nodes=num_nodes,
                 dryrun=False)
 
-    def test_multinode_aws_efa_best_sets_same_az(self):
+    def _same_az_term(self, num_nodes, network_type):
+        pod_affinity = self._deploy_vars(
+            num_nodes,
+            network_type)['pod_fields']['spec']['affinity']['podAffinity']
+        return pod_affinity.get(
+            'requiredDuringSchedulingIgnoredDuringExecution')
+
+    def test_multinode_aws_efa_best_requires_one_zone(self):
         from sky.provision.kubernetes.utils import (
             KubernetesHighPerformanceNetworkType as N)
-        self.assertTrue(self._deploy_vars(2, N.AWS_EFA)['k8s_efa_same_az'])
 
-    def test_single_node_aws_efa_does_not_set_same_az(self):
+        # The term selects on the (non-deprecated) cluster-name label and the
+        # single-AZ topology key.
+        self.assertEqual(self._same_az_term(2, N.AWS_EFA), [{
+            'labelSelector': {
+                'matchLabels': {
+                    'skypilot-cluster-name': 'c'
+                }
+            },
+            'topologyKey': 'topology.kubernetes.io/zone',
+        }])
+
+    def test_single_node_aws_efa_does_not_require_a_zone(self):
         from sky.provision.kubernetes.utils import (
             KubernetesHighPerformanceNetworkType as N)
-        self.assertFalse(self._deploy_vars(1, N.AWS_EFA)['k8s_efa_same_az'])
+        self.assertIsNone(self._same_az_term(1, N.AWS_EFA))
 
-    def test_multinode_non_efa_does_not_set_same_az(self):
+    def test_multinode_non_efa_does_not_require_a_zone(self):
         from sky.provision.kubernetes.utils import (
             KubernetesHighPerformanceNetworkType as N)
-        self.assertFalse(self._deploy_vars(2, N.NONE)['k8s_efa_same_az'])
-
-    def _render_same_az_affinity(self, same_az):
-        """Render just the k8s_efa_same_az podAffinity block from the live
-        template, so a wrong label or topologyKey is caught -- not only the
-        deploy var. Keeps the assertion coupled to the real template file."""
-        import jinja2
-
-        import sky
-        template_path = os.path.join(os.path.dirname(sky.__file__), 'templates',
-                                     'kubernetes-ray.yml.j2')
-        with open(template_path, 'r', encoding='utf-8') as fin:
-            full = fin.read()
-        begin_marker = '{% if k8s_efa_same_az %}'
-        end_marker = '{% endif %}'
-        begin = full.index(begin_marker)
-        end = full.index(end_marker, begin) + len(end_marker)
-        snippet = full[begin:end]
-        return jinja2.Template(snippet).render(
-            k8s_efa_same_az=same_az, cluster_name_on_cloud='my-cluster')
-
-    def test_same_az_affinity_renders_cluster_name_label_and_zone(self):
-        # When the flag is set the rendered podAffinity must carry the
-        # (non-deprecated) cluster-name label and the single-AZ topology key.
-        rendered = self._render_same_az_affinity(same_az=True)
-        self.assertIn('requiredDuringSchedulingIgnoredDuringExecution',
-                      rendered)
-        self.assertIn('skypilot-cluster-name: my-cluster', rendered)
-        self.assertIn('topologyKey: topology.kubernetes.io/zone', rendered)
-        # Must not use the deprecated skypilot-cluster label.
-        self.assertNotIn('skypilot-cluster:', rendered)
-
-    def test_same_az_affinity_absent_when_flag_unset(self):
-        # When the flag is unset the same-AZ affinity must not be rendered.
-        rendered = self._render_same_az_affinity(same_az=False)
-        self.assertNotIn('topology.kubernetes.io/zone', rendered)
-        self.assertNotIn('skypilot-cluster-name', rendered)
+        self.assertIsNone(self._same_az_term(2, N.NONE))
 
 
 class TestKubernetesOciRoceHostNetworkOptOut(unittest.TestCase):
