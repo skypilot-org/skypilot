@@ -1322,3 +1322,34 @@ class TestRoleScopedVisibility:
 
     def test_admin_sees_all_tokens(self):
         assert self._token_ids('admin') == ['t-a', 't-b']
+
+    @staticmethod
+    def _policy_loads(monkeypatch, call):
+        service = permission.permission_service
+        # pylint: disable-next=protected-access
+        load = mock.Mock(wraps=service._load_policy_no_lock)
+        monkeypatch.setattr(service, '_load_policy_no_lock', load)
+        call()
+        return load.call_count
+
+    @pytest.mark.parametrize('user_id', ['admin', 'alice', 'vic', 'sa-a'])
+    def test_user_list_adds_no_policy_load(self, user_id, monkeypatch):
+        loads = self._policy_loads(monkeypatch, lambda: self._user_ids(user_id))
+        # One per role, as for the unfiltered list.
+        assert loads == len(rbac.get_supported_roles())
+
+    def test_user_list_sees_role_change_from_another_process(self, tmp_path):
+        # Another process's enforcer, writing the same policy table.
+        other = casbin.SyncedEnforcer(
+            os.path.join(os.path.dirname(permission.__file__), 'model.conf'),
+            sqlalchemy_adapter.Adapter(
+                sqlalchemy.create_engine(f'sqlite:///{tmp_path}/state.db'),
+                db_class=sqlalchemy_adapter.CasbinRule))
+        other.remove_grouping_policy('alice', 'user')
+        other.add_grouping_policy('alice', 'admin')
+        assert self._user_ids('alice') == ['admin', 'alice', 'bob', 'vic']
+
+    def test_token_roles_load_only_for_visible_tokens(self, monkeypatch):
+        # One for the admin check, then one for bob's only token.
+        assert self._policy_loads(monkeypatch,
+                                  lambda: self._token_ids('bob')) == 2

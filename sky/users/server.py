@@ -140,15 +140,18 @@ def users(request: fastapi.Request) -> List[Dict[str, Any]]:
     """
     all_users = []
     user_list = global_user_state.get_all_users()
-    auth_user = request.state.auth_user
-    if auth_user is not None and not _caller_is_admin(auth_user.id):
-        user_list = [user for user in user_list if user.id == auth_user.id]
 
     users_to_role = {}
     for role in rbac.get_supported_roles():
         user_ids = permission.permission_service.get_users_for_role(role)
         for user_id in user_ids:
             users_to_role[user_id] = role
+
+    auth_user = request.state.auth_user
+    # The loop above has just reloaded the policy.
+    if auth_user is not None and not _is_admin(
+            permission.permission_service.roles_in_memory(auth_user.id)):
+        user_list = [user for user in user_list if user.id == auth_user.id]
 
     for user in user_list:
         # Filter out service accounts - they have IDs starting with "sa-"
