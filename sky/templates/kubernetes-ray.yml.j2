@@ -30,6 +30,9 @@ provider:
     # The networking mode used to ssh to pods. One of KubernetesNetworkingMode.
     networking_mode: {{k8s_networking_mode}}
 
+    # remote_identity: NONE -- the account is created, no roles are bound.
+    remote_identity_none: {{k8s_remote_identity_none | default(false)}}
+
     # We use internal IPs since we set up a port-forward between the kubernetes
     # cluster and the local machine.
     use_internal_ips: true

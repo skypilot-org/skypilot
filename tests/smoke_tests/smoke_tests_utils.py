@@ -721,6 +721,11 @@ def override_sky_config(
         )
     if is_grpc_enabled_test():
         env_overrides[env_options.Options.ENABLE_GRPC.env_key] = '1'
+    if is_remote_identity_none_test():
+        # After the shallow update above, which would replace a test's whole
+        # `kubernetes` dict.
+        override_sky_config_dict.set_nested(('kubernetes', 'remote_identity'),
+                                            'NONE')
 
     if not override_sky_config_dict:
         yield None
@@ -1172,9 +1177,11 @@ def launch_cluster_for_cloud_cmd(cloud: str,
         # running the test on the remote server if --remote-server is specified.
         return 'true'
     else:
-        return (
-            f'sky launch -y -c {cluster_name} --infra {cloud} {LOW_RESOURCE_ARG} --async'
-        )
+        # The helper's kubectl needs its pod's token, which NONE removes.
+        identity = (' --config kubernetes.remote_identity=SERVICE_ACCOUNT'
+                    if is_remote_identity_none_test() else '')
+        return (f'sky launch -y -c {cluster_name} --infra {cloud} '
+                f'{LOW_RESOURCE_ARG} --async{identity}')
 
 
 def k8s_landed_context_file(name: str) -> str:
@@ -1403,6 +1410,11 @@ def is_postgres_backend_test() -> bool:
 
 def is_grpc_enabled_test() -> bool:
     return os.environ.get('PYTEST_SKYPILOT_GRPC_ENABLED', None) is not None
+
+
+def is_remote_identity_none_test() -> bool:
+    return os.environ.get('PYTEST_SKYPILOT_REMOTE_IDENTITY_NONE',
+                          None) is not None
 
 
 def pytest_config_file_override() -> Optional[str]:

@@ -989,6 +989,7 @@ class TestProvisionExistingClusterError:
         provisioner._optimize_target = MagicMock()  # pylint: disable=protected-access
         provisioner._requested_features = set()  # pylint: disable=protected-access
         provisioner._blocked_resources = set()  # pylint: disable=protected-access
+        provisioner._is_launched_by_jobs_controller = False  # pylint: disable=protected-access
         provisioner.log_dir = '/tmp'
         provisioner._retry_zones = MagicMock(side_effect=retry_zones_error)  # pylint: disable=protected-access
         to_provision = MagicMock()
