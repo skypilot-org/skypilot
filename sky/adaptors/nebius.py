@@ -5,6 +5,7 @@ import os
 import threading
 from typing import (Any, Awaitable, Dict, List, NamedTuple, Optional, Tuple,
                     Union)
+import weakref
 
 from sky import sky_logging
 from sky import skypilot_config
@@ -329,23 +330,48 @@ _SDK_CLOSE_TIMEOUT = 30
 _sdk_lock = threading.Lock()
 
 
+class _SDKHandle:
+    """Keep an SDK alive while service clients, requests or operations use it.
+
+    The SDK's renewal task retains the raw SDK, so finalizing the SDK itself
+    cannot reclaim it. This separate handle is retained by the cache and SDK
+    consumers, but not by the SDK's internal background tasks.
+    """
+
+    def __init__(self, sdk_client: Any) -> None:
+        self._sdk_client = sdk_client
+        # At interpreter exit the OS reclaims process-owned resources. Do not
+        # attempt to start/join event-loop threads during interpreter shutdown.
+        finalizer = weakref.finalize(self, _close_sdk, sdk_client)
+        # Typeshed declares this writable property as a field outside __slots__.
+        finalizer.atexit = False  # type: ignore[misc]
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._sdk_client, name)
+
+
 class _SDKCacheEntry(NamedTuple):
     credential_version: Union[str, Tuple[int, int, int, int]]
-    client: Any
+    client: _SDKHandle
 
 
-_sdk_cache: Dict[Tuple[bool, str, Optional[str]], _SDKCacheEntry] = {}
+_SDKSource = Tuple[bool, str, Optional[str]]
+_sdk_cache: Dict[_SDKSource, _SDKCacheEntry] = {}
+_sdk_sources: Dict[Tuple[str, Optional[str]], _SDKSource] = {}
+
+
+async def _close_sdk_async(sdk_client: Any) -> None:
+    try:
+        await asyncio.wait_for(sdk_client.close(), timeout=_SDK_CLOSE_TIMEOUT)
+    except Exception:  # pylint: disable=broad-except
+        logger.warning('Failed to close a cached Nebius SDK.', exc_info=True)
 
 
 def _close_sdk(sdk_client: Any) -> None:
-    # sdk() can also be called from an asyncio.run() loop (catalog fetching).
-    # SDK.sync_close() rejects asynchronous callers, so close on our own loop.
-    try:
-        sync_call(
-            asyncio.wait_for(sdk_client.close(), timeout=_SDK_CLOSE_TIMEOUT))
-    except Exception:  # pylint: disable=broad-except
-        # Try every client during cache clearing, even if one fails to close.
-        logger.warning('Failed to close a cached Nebius SDK.', exc_info=True)
+    # The last reference can disappear on an SDK thread or an async caller's
+    # loop. Never block that thread while waiting for the SDK to shut down.
+    asyncio.run_coroutine_threadsafe(_close_sdk_async(sdk_client),
+                                     _get_event_loop())
 
 
 def _sdk(token: Optional[str], cred_path: Optional[str]):
@@ -356,6 +382,7 @@ def _sdk(token: Optional[str], cred_path: Optional[str]):
         os.path.expanduser(
             cred_path if cred_path is not None else iam_token_path()))
     source = (token is not None, source_path, domain)
+    owner = (skypilot_config.get_active_workspace(), domain)
     with _sdk_lock:
         credential_version: Union[str, Tuple[int, int, int, int]]
         if token is not None:
@@ -366,35 +393,41 @@ def _sdk(token: Optional[str], cred_path: Optional[str]):
             stat = os.stat(source_path)
             credential_version = (stat.st_ino, stat.st_size, stat.st_mtime_ns,
                                   stat.st_ctime_ns)
-        previous = _sdk_cache.get(source)
-        if (previous is not None and
-                previous.credential_version == credential_version):
-            return previous.client
-        if token is not None:
-            sdk_client = nebius.sdk.SDK(credentials=token,
-                                        domain=domain,
-                                        user_agent_prefix=_user_agent_prefix())
-        else:
-            sdk_client = nebius.sdk.SDK(credentials_file_name=source_path,
-                                        domain=domain,
-                                        user_agent_prefix=_user_agent_prefix())
-        _sdk_cache[source] = _SDKCacheEntry(credential_version, sdk_client)
-    if previous is not None:
-        _close_sdk(previous.client)
-    return sdk_client
+        entry = _sdk_cache.get(source)
+        if (entry is None or entry.credential_version != credential_version):
+            if token is not None:
+                sdk_client = nebius.sdk.SDK(
+                    credentials=token,
+                    domain=domain,
+                    user_agent_prefix=_user_agent_prefix())
+            else:
+                sdk_client = nebius.sdk.SDK(
+                    credentials_file_name=source_path,
+                    domain=domain,
+                    user_agent_prefix=_user_agent_prefix())
+            entry = _SDKCacheEntry(credential_version, _SDKHandle(sdk_client))
+            _sdk_cache[source] = entry
+
+        # A source switch (e.g. adding/removing the IAM token file) must also
+        # retire the previous client, unless another workspace still selects it.
+        previous_source = _sdk_sources.get(owner)
+        _sdk_sources[owner] = source
+        if (previous_source is not None and previous_source != source and
+                previous_source not in _sdk_sources.values()):
+            _sdk_cache.pop(previous_source, None)
+        return entry.client
 
 
 def clear_sdk_cache() -> None:
-    """Close and drop cached SDKs when their callers have finished using them.
+    """Retire cached SDKs without interrupting their existing consumers.
 
-    The catalog fetcher calls this between asyncio.run() cycles. Request cache
-    clearing must not discard these process-wide clients without closing them.
+    SDKs close asynchronously after the last service client, request or
+    operation releases its handle. The catalog fetcher calls this between
+    asyncio.run() cycles; concurrent callers can safely finish on retired SDKs.
     """
     with _sdk_lock:
-        clients = list(_sdk_cache.values())
         _sdk_cache.clear()
-    for entry in clients:
-        _close_sdk(entry.client)
+        _sdk_sources.clear()
 
 
 def get_nebius_credentials(boto3_session):
