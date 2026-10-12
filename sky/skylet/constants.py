@@ -708,6 +708,7 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('api_server',),
     ('allowed_clouds',),
     ('workspaces',),
+    ('workspace_config',),
     ('db',),
     ('daemons',),
     ('metrics',),
