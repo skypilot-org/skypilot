@@ -1348,12 +1348,9 @@ class JobController:
                     'preempted or failed.')
                 status_check_window.record_failure()
             elif job_status is not None and not job_status.is_terminal():
-                # Reset only on positive evidence that the job is alive. "No
-                # transient error" also covers a skipped probe (forced
-                # recovery), a terminal status and "no job found" -- none of
-                # which is a liveness signal, and resetting on them re-opens
-                # the window every round, so neither budget can ever expire
-                # and a permanently failing refresh below never escalates.
+                # Only a live job resets the window. "No transient error" also
+                # covers a skipped probe and a terminal status, and resetting
+                # on those re-opens it every round, so no budget ever expires.
                 status_check_window.reset()
 
             if runtime_error is not None:
