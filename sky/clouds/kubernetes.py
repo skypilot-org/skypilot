@@ -870,8 +870,10 @@ class Kubernetes(clouds.Cloud):
         # This makes check_cluster_name_not_controller() (controller_utils)
         # load-bearing for a permission boundary: it is what stops a user
         # launching `sky-jobs-controller-mine` to be handed this identity.
-        # Relaxing that guard would turn into privilege escalation -- see the
-        # test in tests/unit_tests/kubernetes/.
+        # Relaxing that guard, or letting a request skip it
+        # (`_disable_controller_check` is in-process only), would turn into
+        # privilege escalation -- see test_kubernetes_ray_template_snapshot.py
+        # and test_payloads.py under tests/unit_tests/test_sky/.
         is_controller = common.is_controller_name(cluster_name.display_name)
 
         if k8s_service_account_name in (lc, sa, no_upload):

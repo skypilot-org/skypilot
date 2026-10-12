@@ -93,3 +93,24 @@ def test_create_debug_dump_body_ignores_unknown_field():
     reloaded = payloads.CreateDebugDumpBody.model_validate_json(
         body.model_dump_json())
     assert reloaded.managed_job_ids == [37]
+
+
+def test_no_request_body_can_skip_the_controller_name_check():
+    """Kubernetes picks the controller service account by name prefix, so the
+    flag that skips the name check must stay in-process only."""
+    for obj in vars(payloads).values():
+        if isinstance(obj, type) and issubclass(obj, payloads.BasePayload):
+            assert 'disable_controller_check' not in obj.model_fields, obj
+
+
+def test_launch_body_drops_disable_controller_check(monkeypatch):
+    """An old client (or a hand-written request) still sending the field."""
+    monkeypatch.setattr(payloads.common, 'process_mounts_in_task_on_api_server',
+                        lambda *args, **kwargs: 'dag')
+    body = payloads.LaunchBody(task='task-yaml',
+                               cluster_name='sky-jobs-controller-attacker',
+                               disable_controller_check=True)
+    kwargs = body.to_kwargs()
+    assert kwargs['cluster_name'] == 'sky-jobs-controller-attacker'
+    assert '_disable_controller_check' not in kwargs
+    assert 'disable_controller_check' not in kwargs

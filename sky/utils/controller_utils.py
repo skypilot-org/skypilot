@@ -103,10 +103,8 @@ class _ControllerSpec:
         return self._decline_down_when_failed_to_fetch_status_hint.format(
             cluster_name=self.cluster_name)
 
-    @property
-    def check_cluster_name_hint(self) -> str:
-        return self._check_cluster_name_hint.format(
-            cluster_name=self.cluster_name)
+    def check_cluster_name_hint(self, cluster_name: str) -> str:
+        return self._check_cluster_name_hint.format(cluster_name=cluster_name)
 
     @property
     def cluster_name(self) -> str:
@@ -463,13 +461,18 @@ def check_cluster_name_not_controller(
     Returns:
       None, if the cluster name is not a controller name.
     """
-    controller = Controllers.from_name(cluster_name, expect_exact_match=False)
-    if controller is not None:
-        msg = controller.value.check_cluster_name_hint
-        if operation_str is not None:
-            msg += f' {operation_str} is not allowed.'
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(msg)
+    # Not from_name(expect_exact_match=False): on a mismatch it records the
+    # name as the real controller's, in a process the server reuses across
+    # requests, so a rejected name would become the next controller launched.
+    if cluster_name is None or not common.is_controller_name(cluster_name):
+        return
+    controller = (Controllers.SKY_SERVE_CONTROLLER if cluster_name.startswith(
+        common.SKY_SERVE_CONTROLLER_PREFIX) else Controllers.JOBS_CONTROLLER)
+    msg = controller.value.check_cluster_name_hint(cluster_name)
+    if operation_str is not None:
+        msg += f' {operation_str} is not allowed.'
+    with ux_utils.print_exception_no_traceback():
+        raise exceptions.NotSupportedError(msg)
 
 
 # Internal only:
