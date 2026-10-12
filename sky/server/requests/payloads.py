@@ -321,7 +321,9 @@ class LaunchBody(RequestBody):
     quiet_optimizer: bool = False
     is_launched_by_jobs_controller: bool = False
     is_launched_by_sky_serve_controller: bool = False
-    disable_controller_check: bool = False
+    # No disable_controller_check here: the Kubernetes service account is
+    # chosen by the controller-name prefix, so only in-process callers may
+    # skip that check. Old clients still send it; extra='ignore' drops it.
     # When True, resize the existing cluster to the num_nodes specified in
     # the task instead of performing a normal launch.
     resize: bool = False
@@ -352,8 +354,6 @@ class LaunchBody(RequestBody):
             'is_launched_by_jobs_controller')
         kwargs['_is_launched_by_sky_serve_controller'] = kwargs.pop(
             'is_launched_by_sky_serve_controller')
-        kwargs['_disable_controller_check'] = kwargs.pop(
-            'disable_controller_check')
         kwargs['_extra_launch_context'] = kwargs.pop('extra_launch_context')
         kwargs['_include_credentials'] = kwargs.pop('include_credentials')
         return kwargs

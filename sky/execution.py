@@ -771,6 +771,8 @@ def launch(
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
+    # In-process callers only; never map it from a request body. Kubernetes
+    # gives controller-named clusters the controller service account.
     _disable_controller_check: bool = False,
     _extra_launch_context: Optional[Dict[str, Any]] = None,
     _request_name: request_names.AdminPolicyRequestName = request_names.
