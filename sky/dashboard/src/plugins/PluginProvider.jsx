@@ -30,6 +30,7 @@ const PluginContext = createContext({
   tableFilters: {},
   dataProviders: {},
   recipeTypes: [],
+  accessChecks: {},
 });
 
 const NAV_LINKS_CACHE_KEY = 'sky-plugin-nav-links-cache';
@@ -72,6 +73,7 @@ const initialState = {
   tableFilters: {}, // Map of table name → array of filter property configs
   dataProviders: {}, // Map of provider id → provider config (with useHook)
   recipeTypes: [], // Array of { id, label, fullLabel, icon, color, template }
+  accessChecks: {}, // Map of action → array of { id, action, check }
 };
 
 const actions = {
@@ -84,6 +86,7 @@ const actions = {
   REGISTER_DATA_PROVIDER: 'REGISTER_DATA_PROVIDER',
   CLEAR_CACHED_NAV_LINKS: 'CLEAR_CACHED_NAV_LINKS',
   REGISTER_RECIPE_TYPE: 'REGISTER_RECIPE_TYPE',
+  REGISTER_ACCESS_CHECK: 'REGISTER_ACCESS_CHECK',
 };
 
 function pluginReducer(state, action) {
@@ -189,6 +192,19 @@ function pluginReducer(state, action) {
         ...state,
         recipeTypes: upsertById(state.recipeTypes, action.payload),
       };
+    case actions.REGISTER_ACCESS_CHECK: {
+      const { action: checkAction } = action.payload;
+      return {
+        ...state,
+        accessChecks: {
+          ...state.accessChecks,
+          [checkAction]: upsertById(
+            state.accessChecks[checkAction] || [],
+            action.payload
+          ),
+        },
+      };
+    }
     default:
       return state;
   }
@@ -850,6 +866,33 @@ function createPluginApi(dispatch) {
       });
       return normalized.id;
     },
+    // Lets a plugin allow a non-admin to do something the dashboard otherwise
+    // reserves for admins. `check(context)` returns (a promise of) a boolean;
+    // the action is allowed if any registered check says yes. This only gates
+    // the UI: the server still authorizes every request.
+    //
+    // Actions:
+    // - `workspaces.detail.open`: open a workspace's page from the Workspaces
+    //   list. Context: { workspaceName }.
+    registerAccessCheck(config) {
+      if (!config?.id || !config.action || typeof config.check !== 'function') {
+        console.warn(
+          '[SkyDashboardPlugin] Invalid access check registration:',
+          config
+        );
+        return null;
+      }
+      const normalized = {
+        id: String(config.id),
+        action: String(config.action),
+        check: config.check,
+      };
+      dispatch({
+        type: actions.REGISTER_ACCESS_CHECK,
+        payload: normalized,
+      });
+      return normalized.id;
+    },
     registerDataProvider(config) {
       if (!config?.id) {
         console.warn(
@@ -1040,6 +1083,34 @@ export function useGroupedNavLinks() {
 export function usePluginRoutes() {
   const { routes } = usePluginState();
   return routes;
+}
+
+export function usePluginAccessChecks(action) {
+  const { accessChecks } = usePluginState();
+  return (accessChecks && accessChecks[action]) || EMPTY_ACCESS_CHECKS;
+}
+
+const EMPTY_ACCESS_CHECKS = [];
+
+/**
+ * Whether any of `checks` allows the action for `context`. A check that throws
+ * or rejects counts as a no.
+ */
+export async function anyAccessCheckAllows(checks, context) {
+  const results = await Promise.all(
+    (checks || []).map(async (entry) => {
+      try {
+        return (await entry.check(context)) === true;
+      } catch (error) {
+        console.warn(
+          `[SkyDashboardPlugin] Access check ${entry.id} failed:`,
+          error
+        );
+        return false;
+      }
+    })
+  );
+  return results.some(Boolean);
 }
 
 export function usePluginRecipeTypes() {
