@@ -1,0 +1,348 @@
+# vime GRPO post-training with SkyPilot Job Groups
+#
+# This example runs vime (https://github.com/vllm-project/vime) — an LLM RL
+# post-training framework that pairs vLLM rollout with a Megatron training
+# backend — in *disaggregated* mode, where the training GPUs and rollout GPUs
+# are separate. SkyPilot Job Groups are a natural fit: each RL component becomes
+# its own task with its own resources, wired together automatically.
+#
+# Architecture (two tasks running in parallel):
+#
+#   vime-rollout  (auxiliary, 8xGPU): joins the trainer's Ray cluster and hosts
+#                                     the vLLM rollout engines.
+#   vime-trainer  (primary, 8xGPU):   starts the Ray head and drives the GRPO
+#                                     loop. vime places Megatron actors on these
+#                                     GPUs and vLLM engines on the rollout GPUs.
+#
+# vime is built on Ray: the trainer runs `ray start --head` + `ray job submit`,
+# and the rollout task joins as a Ray worker over the Job Group network. Because
+# we launch with `--rollout-num-gpus 8` and *without* `--colocate`, vime keeps
+# training and rollout on separate GPUs — i.e. on separate tasks/pods here.
+#
+# Each task downloads its own copy of the model (no shared filesystem required):
+# the trainer reads it for Megatron, the rollout reads it to start vLLM. Trainer
+# and rollout sync policy weights over Ray/NCCL, not over disk.
+#
+# When the trainer (primary) finishes, the rollout auxiliary task is terminated
+# automatically after a short grace period.
+#
+# Usage:
+#   sky jobs launch llm/vime-jobgroup/vime-grpo-jobgroup.yaml
+#   # The default model + datasets are public. To avoid HF rate-limits (or to use
+#   # a gated model), set HF_TOKEN locally and add: --env HF_TOKEN
+#
+# Service discovery uses Job Group DNS: the trainer's Ray head is reachable at
+#   vime-trainer-0.${SKYPILOT_JOBGROUP_NAME}:6379
+
+---
+name: vime-grpo
+execution: parallel
+primary_tasks: [vime-trainer]
+termination_delay: 30s
+
+---
+# Rollout (auxiliary): contributes its GPUs to vime's Ray cluster to host the
+# vLLM rollout engines. vime's trainer driver places the engines here; this task
+# downloads the model (for vLLM to load), joins the Ray cluster, and stays alive
+# until the trainer finishes.
+name: vime-rollout
+
+envs:
+  VIME_MODEL_SCRIPT: qwen3-4B
+  HF_MODEL_REPO: Qwen/Qwen3-4B
+  MODEL_DIR: Qwen3-4B
+  HF_TOKEN: ""
+
+resources:
+  accelerators: H100:8
+  memory: 200+
+  infra: kubernetes
+  image_id: docker:inferactinc/public:vime-latest
+
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+          - volumeMounts:
+              - mountPath: /dev/shm
+                name: dshm
+              - mountPath: /models
+                name: models
+        volumes:
+          - name: dshm
+            emptyDir:
+              medium: Memory
+              sizeLimit: 64Gi
+          - name: models
+            emptyDir: {}
+
+setup: |
+  set -e
+  pip install -q -U huggingface_hub
+  export HF_TOKEN=${HF_TOKEN}
+  echo "Downloading model ${HF_MODEL_REPO} -> /models/${MODEL_DIR}"
+  hf download "${HF_MODEL_REPO}" --local-dir "/models/${MODEL_DIR}"
+
+  # Convert to Megatron torch_dist format. vime places the Megatron actor group
+  # on one of the two GPU tasks (the choice is symmetric), so BOTH tasks must
+  # have the converted checkpoint available locally.
+  cd /root/vime
+  source scripts/models/${VIME_MODEL_SCRIPT}.sh
+  echo "Converting ${MODEL_DIR} to Megatron torch_dist format ..."
+  PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
+    "${MODEL_ARGS[@]}" \
+    --hf-checkpoint /models/${MODEL_DIR} \
+    --save /models/${MODEL_DIR}_torch_dist
+
+run: |
+  set -e
+  export PYTHONUNBUFFERED=1
+  # SkyPilot's own Ray (port 6380) is exposed via RAY_ADDRESS; unset it so vime's
+  # Ray CLI/ray.init() only talk to vime's Ray cluster (port 6379).
+  unset RAY_ADDRESS
+  NUM_GPUS=${SKYPILOT_NUM_GPUS_PER_NODE}
+  HEAD_HOST="vime-trainer-0.${SKYPILOT_JOBGROUP_NAME}"
+
+  # Wait for the trainer's Ray head (port 6379) to come up, then join it.
+  echo "Waiting for Ray head at ${HEAD_HOST}:6379 ..."
+  while true; do
+    HEAD_IP=$(getent hosts "${HEAD_HOST}" | awk '{print $1}')
+    if [ -n "${HEAD_IP}" ] && (exec 3<>/dev/tcp/${HEAD_IP}/6379) 2>/dev/null; then
+      break
+    fi
+    echo "  ...waiting for Ray head"; sleep 10
+  done
+  echo "Ray head reachable at ${HEAD_IP}:6379"
+
+  MY_IP=$(hostname -i | awk '{print $1}')
+  # Join vime's Ray cluster (kept on its own temp-dir + non-default agent/metrics
+  # ports so it does not clash with the SkyPilot-managed Ray instance that runs
+  # the task — they share the node, and Ray's default agent port 52365 would
+  # otherwise collide and break job submission).
+  ray start --address "${HEAD_IP}:6379" --node-ip-address "${MY_IP}" \
+    --num-gpus ${NUM_GPUS} --temp-dir /tmp/vime-ray --disable-usage-stats \
+    --dashboard-agent-listen-port 52366 \
+    --dashboard-agent-grpc-port 52367 \
+    --runtime-env-agent-port 52368 \
+    --metrics-export-port 52369
+
+  echo "Joined Ray cluster as the rollout worker (${NUM_GPUS} GPUs)."
+  echo "Idling — the trainer (primary) drives vLLM engine placement on these GPUs."
+  sleep infinity
+
+---
+# Trainer (primary): Ray head + GRPO driver. Converts the model to Megatron
+# format, waits for the rollout worker to join, then submits the vime training
+# job in disaggregated mode (Megatron actors here, vLLM engines on vime-rollout).
+name: vime-trainer
+
+envs:
+  VIME_MODEL_SCRIPT: qwen3-4B
+  HF_MODEL_REPO: Qwen/Qwen3-4B
+  MODEL_DIR: Qwen3-4B
+  TRAIN_DATASET_REPO: zhuzilin/dapo-math-17k
+  TRAIN_DATASET_DIR: dapo-math-17k
+  EVAL_DATASET_REPO: zhuzilin/aime-2024
+  EVAL_DATASET_DIR: aime-2024
+  NUM_ROLLOUT: "30"
+  HF_TOKEN: ""
+
+resources:
+  accelerators: H100:8
+  memory: 200+
+  infra: kubernetes
+  image_id: docker:inferactinc/public:vime-latest
+
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+          - volumeMounts:
+              - mountPath: /dev/shm
+                name: dshm
+              - mountPath: /models
+                name: models
+        volumes:
+          - name: dshm
+            emptyDir:
+              medium: Memory
+              sizeLimit: 64Gi
+          - name: models
+            emptyDir: {}
+
+setup: |
+  set -e
+  pip install -q -U huggingface_hub
+  export HF_TOKEN=${HF_TOKEN}
+
+  echo "Downloading model ${HF_MODEL_REPO} -> /models/${MODEL_DIR}"
+  hf download "${HF_MODEL_REPO}" --local-dir "/models/${MODEL_DIR}"
+
+  echo "Downloading train dataset ${TRAIN_DATASET_REPO} -> /models/${TRAIN_DATASET_DIR}"
+  hf download --repo-type dataset "${TRAIN_DATASET_REPO}" --local-dir "/models/${TRAIN_DATASET_DIR}"
+
+  echo "Downloading eval dataset ${EVAL_DATASET_REPO} -> /models/${EVAL_DATASET_DIR}"
+  hf download --repo-type dataset "${EVAL_DATASET_REPO}" --local-dir "/models/${EVAL_DATASET_DIR}"
+
+  # Convert to Megatron torch_dist format. vime places the Megatron actor group
+  # on one of the two GPU tasks (the choice is symmetric), so BOTH tasks must
+  # have the converted checkpoint available locally.
+  cd /root/vime
+  source scripts/models/${VIME_MODEL_SCRIPT}.sh
+  echo "Converting ${MODEL_DIR} to Megatron torch_dist format ..."
+  PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
+    "${MODEL_ARGS[@]}" \
+    --hf-checkpoint /models/${MODEL_DIR} \
+    --save /models/${MODEL_DIR}_torch_dist
+
+run: |
+  set -e
+  export PYTHONUNBUFFERED=1
+  # SkyPilot's own Ray (port 6380) is exposed via RAY_ADDRESS; unset it so vime's
+  # Ray CLI/ray.init() only talk to vime's Ray cluster (port 6379).
+  unset RAY_ADDRESS
+  cd /root/vime
+
+  NUM_GPUS=${SKYPILOT_NUM_GPUS_PER_NODE}
+  TOTAL_GPUS=$((NUM_GPUS * 2))
+  MY_IP=$(hostname -i | awk '{print $1}')
+  echo "Trainer head IP: ${MY_IP}, GPUs per node: ${NUM_GPUS}, total expected: ${TOTAL_GPUS}"
+
+  # NVLink detection for intra-node NCCL (NVLS); cross-node weight sync uses TCP.
+  NVLINK_COUNT=$(nvidia-smi topo -m 2>/dev/null | grep -o 'NV[0-9][0-9]*' | wc -l)
+  [ "${NVLINK_COUNT}" -gt 0 ] && HAS_NVLINK=1 || HAS_NVLINK=0
+  echo "HAS_NVLINK: ${HAS_NVLINK}"
+
+  # Start vime's Ray head on port 6379 (SkyPilot's own Ray uses 6380, so the GCS
+  # ports do not collide). Use a separate temp-dir and non-default agent/metrics
+  # ports too: vime's Ray shares the node with the SkyPilot-managed Ray, and
+  # Ray's default dashboard-agent port (52365) would otherwise collide and break
+  # job submission ("No available agent to submit job").
+  ray start --head --node-ip-address "${MY_IP}" --port 6379 \
+    --num-gpus ${NUM_GPUS} --temp-dir /tmp/vime-ray \
+    --dashboard-host 0.0.0.0 --dashboard-port 8265 --disable-usage-stats \
+    --dashboard-agent-listen-port 52366 \
+    --dashboard-agent-grpc-port 52367 \
+    --runtime-env-agent-port 52368 \
+    --metrics-export-port 52369
+
+  # MODEL_ARGS (Megatron hyperparameters) for the training job below. The model
+  # was already downloaded and converted to torch_dist in setup (on both tasks).
+  source scripts/models/${VIME_MODEL_SCRIPT}.sh
+
+  # Wait for the rollout task to join the Ray cluster (2x GPUs total).
+  echo "Waiting for the Ray cluster to reach ${TOTAL_GPUS} GPUs ..."
+  until ray status --address 127.0.0.1:6379 2>/dev/null | grep -qE "/${TOTAL_GPUS}\.0 GPU"; do
+    echo "  ...waiting for the rollout worker to join"; sleep 10
+  done
+  echo "Ray cluster is ready with ${TOTAL_GPUS} GPUs."
+
+  # vime training argument groups (adapted from vime's scripts/run-qwen3-4B.sh).
+  # --load and --save point at the same dir: vime resumes from it if a prior
+  # checkpoint exists, else starts fresh from --ref-load (the first-run case).
+  CKPT_ARGS=(
+    --hf-checkpoint /models/${MODEL_DIR}
+    --ref-load /models/${MODEL_DIR}_torch_dist
+    --load /models/${MODEL_DIR}_vime
+    --save /models/${MODEL_DIR}_vime
+    --save-interval 20
+  )
+  ROLLOUT_ARGS=(
+    --prompt-data /models/${TRAIN_DATASET_DIR}/${TRAIN_DATASET_DIR}.jsonl
+    --input-key prompt
+    --label-key label
+    --apply-chat-template
+    --rollout-shuffle
+    --rm-type deepscaler
+    --num-rollout ${NUM_ROLLOUT}
+    --rollout-batch-size 32
+    --n-samples-per-prompt 8
+    --rollout-max-response-len 8192
+    --rollout-temperature 1
+    --global-batch-size 256
+    --balance-data
+  )
+  EVAL_ARGS=(
+    --eval-interval 20
+    --eval-prompt-data aime /models/${EVAL_DATASET_DIR}/${EVAL_DATASET_DIR}.jsonl
+    --n-samples-per-eval-prompt 16
+    --eval-max-response-len 16384
+    --eval-top-p 1
+  )
+  PERF_ARGS=(
+    --tensor-model-parallel-size 2
+    --sequence-parallel
+    --pipeline-model-parallel-size 1
+    --context-parallel-size 1
+    --recompute-granularity full
+    --recompute-method uniform
+    --recompute-num-layers 1
+    --use-dynamic-batch-size
+    --max-tokens-per-gpu 9216
+  )
+  GRPO_ARGS=(
+    --advantage-estimator grpo
+    --use-kl-loss
+    --kl-loss-coef 0.00
+    --kl-loss-type low_var_kl
+    --entropy-coef 0.00
+    --eps-clip 0.2
+    --eps-clip-high 0.28
+  )
+  OPTIMIZER_ARGS=(
+    --optimizer adam
+    --lr 1e-6
+    --lr-decay-style constant
+    --weight-decay 0.1
+    --adam-beta1 0.9
+    --adam-beta2 0.98
+  )
+  VLLM_ARGS=(
+    --rollout-num-gpus-per-engine 2
+    --vllm-gpu-memory-utilization 0.7
+  )
+  MISC_ARGS=(
+    --attention-dropout 0.0
+    --hidden-dropout 0.0
+    --accumulate-allreduce-grads-in-fp32
+    --attention-softmax-in-fp32
+    --attention-backend flash
+  )
+
+  RUNTIME_ENV_JSON="{
+    \"env_vars\": {
+      \"PYTHONPATH\": \"/root/vime:/root/Megatron-LM/\",
+      \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
+      \"NCCL_NVLS_ENABLE\": \"${HAS_NVLINK}\",
+      \"NCCL_SOCKET_IFNAME\": \"eth0\",
+      \"GLOO_SOCKET_IFNAME\": \"eth0\",
+      \"NCCL_IB_DISABLE\": \"1\",
+      \"HF_TOKEN\": \"${HF_TOKEN}\"
+    }
+  }"
+
+  # Wait for the Ray job agent to be ready before submitting.
+  echo "Waiting for the Ray job agent ..."
+  until ray job list --address http://127.0.0.1:8265 >/dev/null 2>&1; do sleep 5; done
+
+  echo "Submitting vime GRPO job (disaggregated: ${NUM_GPUS} actor GPUs + ${NUM_GPUS} rollout GPUs) ..."
+  ray job submit --address="http://127.0.0.1:8265" \
+    --runtime-env-json="${RUNTIME_ENV_JSON}" \
+    -- python3 train.py \
+    --train-backend megatron \
+    --actor-num-nodes 1 \
+    --actor-num-gpus-per-node ${NUM_GPUS} \
+    --rollout-num-gpus ${NUM_GPUS} \
+    "${MODEL_ARGS[@]}" \
+    "${CKPT_ARGS[@]}" \
+    "${ROLLOUT_ARGS[@]}" \
+    "${OPTIMIZER_ARGS[@]}" \
+    "${GRPO_ARGS[@]}" \
+    "${PERF_ARGS[@]}" \
+    "${EVAL_ARGS[@]}" \
+    "${VLLM_ARGS[@]}" \
+    "${MISC_ARGS[@]}"
+
+  echo "vime GRPO training complete. Checkpoints (saved every --save-interval steps) are under /models/${MODEL_DIR}_vime."
