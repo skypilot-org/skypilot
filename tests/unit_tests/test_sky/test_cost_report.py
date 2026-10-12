@@ -44,7 +44,8 @@ class TestCostReportCore(unittest.TestCase):
                 abbreviate_response=False,
                 cluster_hashes=None,
                 cluster_names=None,
-                exclude_managed_clusters=False)
+                exclude_managed_clusters=False,
+                include_deleted=False)
             self.assertEqual(result, [])
 
     def test_cost_report_custom_days(self):
@@ -61,7 +62,8 @@ class TestCostReportCore(unittest.TestCase):
                 abbreviate_response=False,
                 cluster_hashes=None,
                 cluster_names=None,
-                exclude_managed_clusters=False)
+                exclude_managed_clusters=False,
+                include_deleted=False)
             self.assertEqual(result, [])
 
     def test_cost_report_none_days(self):
@@ -78,7 +80,8 @@ class TestCostReportCore(unittest.TestCase):
                 abbreviate_response=False,
                 cluster_hashes=None,
                 cluster_names=None,
-                exclude_managed_clusters=False)
+                exclude_managed_clusters=False,
+                include_deleted=False)
             self.assertEqual(result, [])
 
     def test_cost_report_with_cluster_names_filter(self):
@@ -99,7 +102,8 @@ class TestCostReportCore(unittest.TestCase):
                 abbreviate_response=False,
                 cluster_hashes=None,
                 cluster_names=['my-cluster'],
-                exclude_managed_clusters=False)
+                exclude_managed_clusters=False,
+                include_deleted=True)
 
     def test_cost_report_with_both_hash_and_name_filters(self):
         """Test cost_report forwards both filters when both are given."""
@@ -117,7 +121,55 @@ class TestCostReportCore(unittest.TestCase):
                 abbreviate_response=False,
                 cluster_hashes=['abc'],
                 cluster_names=['my-cluster'],
-                exclude_managed_clusters=False)
+                exclude_managed_clusters=False,
+                include_deleted=True)
+
+    def test_cost_report_explicit_include_deleted_is_forwarded(self):
+        """An explicit include_deleted flag wins over the auto resolution."""
+        with mock.patch('sky.global_user_state.iter_clusters_from_history'
+                       ) as mock_get_history:
+            mock_get_history.return_value = []
+
+            core.cost_report(include_deleted=True)
+
+            mock_get_history.assert_called_once_with(
+                days=30,
+                abbreviate_response=False,
+                cluster_hashes=None,
+                cluster_names=None,
+                exclude_managed_clusters=False,
+                include_deleted=True)
+
+            core.cost_report(include_deleted=False, cluster_hashes=['abc'])
+
+            # False must win even though this is a targeted lookup: the
+            # explicit flag is how a caller opts out of the auto behavior.
+            self.assertEqual(
+                mock_get_history.call_args_list[-1].kwargs['include_deleted'],
+                False)
+
+    def test_cost_report_targeted_lookup_includes_soft_deleted_rows(self):
+        """A by-hash lookup resolves a soft-deleted row (detail page case)."""
+        launched = resources_lib.Resources(cpus='2')
+        record = _history_record(0, launched)
+        record['is_deleted'] = True
+        with mock.patch('sky.global_user_state.iter_clusters_from_history',
+                        return_value=iter([record])):
+            result = core.cost_report(cluster_hashes=['h0'])
+
+        # The row comes back (with its flag) so links to a hidden cluster's
+        # detail page keep working.
+        self.assertEqual(len(result), 1)
+        self.assertTrue(result[0]['is_deleted'])
+
+    def test_cost_report_bulk_listing_hides_soft_deleted_rows(self):
+        """The bulk listing path requests soft-deleted rows excluded."""
+        with mock.patch('sky.global_user_state.iter_clusters_from_history',
+                        return_value=iter([])) as mock_get_history:
+            core.cost_report(dashboard_summary_response=True)
+
+        self.assertEqual(mock_get_history.call_args.kwargs['include_deleted'],
+                         False)
 
     def test_cost_report_with_pickle_errors(self):
         """Test cost_report handles pickle errors gracefully when loading historical data."""
@@ -138,7 +190,8 @@ class TestCostReportCore(unittest.TestCase):
                 abbreviate_response=False,
                 cluster_hashes=None,
                 cluster_names=None,
-                exclude_managed_clusters=False)
+                exclude_managed_clusters=False,
+                include_deleted=False)
 
     def test_cost_report_encodes_resources_for_the_response(self):
         """Full reports carry each row's resources already encoded."""

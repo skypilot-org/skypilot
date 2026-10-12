@@ -32,6 +32,8 @@ import {
   getClusters,
   getClusterHistory,
   getOtherUsersClustersCount,
+  invalidateClusterHistoryCache,
+  setClusterHistoryDeleted,
   useClusterData,
 } from '@/data/connectors/clusters';
 
@@ -233,5 +235,209 @@ describe('useClusterData ownership scoping (client path)', () => {
       'mine-active',
     ]);
     expect(result.current.loading).toBe(false);
+  });
+});
+
+describe('cluster history soft delete', () => {
+  const terminatedRow = (hash, name, isDeleted) => ({
+    cluster: name,
+    cluster_hash: hash,
+    user_hash: 'u-1',
+    status: 'TERMINATED',
+    is_deleted: isDeleted,
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    apiClient.post = jest.fn();
+    delete window.__skyPaginationFetch;
+  });
+
+  describe('getClusterHistory', () => {
+    it('does not request deleted rows by default', async () => {
+      apiClient.fetch.mockResolvedValue([]);
+
+      await getClusterHistory();
+
+      const [, body] = apiClient.fetch.mock.calls[0];
+      expect(body.include_deleted).toBeUndefined();
+    });
+
+    it('requests deleted rows and carries their flag when asked', async () => {
+      apiClient.fetch.mockResolvedValue([
+        { name: 'kept', cluster_hash: 'h1', is_deleted: false },
+        { name: 'removed', cluster_hash: 'h2', is_deleted: true },
+      ]);
+
+      const history = await getClusterHistory(null, 30, null, true);
+
+      const [, body] = apiClient.fetch.mock.calls[0];
+      expect(body.include_deleted).toBe(true);
+      expect(history.map((c) => c.is_deleted)).toEqual([false, true]);
+    });
+
+    it('flags rows as not deleted when the server omits the field', async () => {
+      // Older API servers predate the flag; the table must not crash on it.
+      apiClient.fetch.mockResolvedValue([
+        { name: 'old-row', cluster_hash: 'h3' },
+      ]);
+
+      const history = await getClusterHistory();
+
+      expect(history[0].is_deleted).toBe(false);
+    });
+  });
+
+  describe('setClusterHistoryDeleted', () => {
+    it('posts the hashes and the flag to the soft delete endpoint', async () => {
+      apiClient.post.mockResolvedValue({
+        ok: true,
+        json: async () => ({ updated: 2 }),
+      });
+
+      const ok = await setClusterHistoryDeleted(['h1', 'h2'], true);
+
+      expect(ok).toBe(true);
+      expect(apiClient.post).toHaveBeenCalledWith(
+        '/cluster_history/soft_delete',
+        { cluster_hashes: ['h1', 'h2'], deleted: true }
+      );
+    });
+
+    it('reports failure when the server updated no rows', async () => {
+      apiClient.post.mockResolvedValue({
+        ok: true,
+        json: async () => ({ updated: 0 }),
+      });
+
+      const ok = await setClusterHistoryDeleted(['h1'], true);
+
+      expect(ok).toBe(false);
+    });
+
+    it('reports failure when the request errors', async () => {
+      apiClient.post.mockRejectedValue(new Error('boom'));
+
+      const ok = await setClusterHistoryDeleted(['h1'], false);
+
+      expect(ok).toBe(false);
+    });
+  });
+
+  describe('useClusterData hidden history', () => {
+    const currentUser = { id: 'u-1', name: 'alice' };
+
+    const mockHistory = (get) => {
+      get.mockImplementation((fn, args) => {
+        // getClusters (active) vs getClusterHistory (history) are told apart
+        // by their argument shapes: the history call is [null, days, ...].
+        if (args && args.length > 0 && args[0] === null) {
+          return Promise.resolve([
+            terminatedRow('h1', 'kept', false),
+            terminatedRow('h2', 'removed', true),
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+    };
+
+    it('hides soft-deleted rows and reports their count', async () => {
+      mockHistory(dashboardCache.get);
+
+      const filters = [];
+      const { result } = renderHook(() =>
+        useClusterData({ showHistory: true, currentUser, filters })
+      );
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.allData.map((c) => c.cluster)).toEqual(['kept']);
+      expect(result.current.hiddenHistoryCount).toBe(1);
+    });
+
+    it('lists soft-deleted rows when includeHiddenHistory is set', async () => {
+      mockHistory(dashboardCache.get);
+
+      const filters = [];
+      const { result } = renderHook(() =>
+        useClusterData({
+          showHistory: true,
+          currentUser,
+          filters,
+          includeHiddenHistory: true,
+        })
+      );
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.allData.map((c) => c.cluster)).toEqual([
+        'kept',
+        'removed',
+      ]);
+      // The count is the number of soft-deleted rows, regardless of whether
+      // they are currently listed: the toggle flips to "Hide N hidden
+      // clusters" while they are shown.
+      expect(result.current.hiddenHistoryCount).toBe(1);
+    });
+  });
+
+  describe('useClusterData server-side pagination hidden history', () => {
+    const currentUser = { id: 'u-1', name: 'alice' };
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      window.__skyPaginationFetch = jest.fn();
+    });
+
+    it('forwards includeHiddenHistory to the plugin and surfaces its count', async () => {
+      dashboardCache.get.mockResolvedValue({
+        total: 2,
+        items: [
+          terminatedRow('h1', 'kept', false),
+          terminatedRow('h2', 'removed', true),
+        ],
+        hasNext: false,
+        hiddenHistoryCount: 1,
+      });
+
+      const filters = [];
+      const { result } = renderHook(() =>
+        useClusterData({
+          showHistory: true,
+          currentUser,
+          filters,
+          includeHiddenHistory: true,
+        })
+      );
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      const [pluginFetch, [options]] = dashboardCache.get.mock.calls[0];
+      expect(pluginFetch).toBe(window.__skyPaginationFetch);
+      expect(options.includeHiddenHistory).toBe(true);
+      expect(result.current.hiddenHistoryCount).toBe(1);
+    });
+  });
+
+  describe('invalidateClusterHistoryCache', () => {
+    it('invalidates both the client history cache and the plugin fetch', () => {
+      const pluginFetch = jest.fn();
+      window.__skyPaginationFetch = pluginFetch;
+
+      invalidateClusterHistoryCache();
+
+      expect(dashboardCache.invalidateFunction).toHaveBeenCalledWith(
+        getClusterHistory
+      );
+      expect(dashboardCache.invalidateFunction).toHaveBeenCalledWith(
+        pluginFetch
+      );
+    });
+
+    it('invalidates only the client history cache when no plugin is present', () => {
+      invalidateClusterHistoryCache();
+
+      expect(dashboardCache.invalidateFunction).toHaveBeenCalledWith(
+        getClusterHistory
+      );
+      expect(dashboardCache.invalidateFunction).toHaveBeenCalledTimes(1);
+    });
   });
 });

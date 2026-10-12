@@ -2676,7 +2676,8 @@ class TestGetClusterDumpData:
             'events_status_change.json'
         }
         mock_get_events.assert_called_once_with('live-hash')
-        mock_get_history.assert_called_once_with(cluster_names=['test-cluster'])
+        mock_get_history.assert_called_once_with(cluster_names=['test-cluster'],
+                                                 include_deleted=True)
 
     @mock.patch('sky.utils.debug_dump_helpers.get_cluster_events_data')
     @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'

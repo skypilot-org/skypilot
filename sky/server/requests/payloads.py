@@ -25,7 +25,7 @@ sky.server.versions module for more details.
 """
 import os
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Annotated, Any, Dict, List, Optional, Tuple, Union
 
 from sky import admin_policy
 from sky import serve
@@ -1038,6 +1038,28 @@ class CostReportBody(RequestBody):
     # Used by the dashboard so that clusters backing managed jobs do not show
     # up in the cluster history view.
     exclude_managed_clusters: bool = False
+    # Whether to include clusters soft-deleted from the history view. None,
+    # the default, resolves automatically: targeted lookups (cluster_hashes
+    # or cluster_names given, e.g. the dashboard's detail page) keep
+    # resolving soft-deleted rows, while bulk listings skip them.
+    include_deleted: Optional[bool] = None
+
+
+# Each cluster hash is a short digest. Bounding the count and the per-hash
+# length keeps a single request from expanding the soft-delete UPDATE's SQL
+# IN() clause without limit; the dashboard updates one row per action, so
+# both bounds are generous.
+_ClusterHash = Annotated[str, pydantic.StringConstraints(max_length=64)]
+_SOFT_DELETE_MAX_HASHES = 100
+
+
+class ClusterHistorySoftDeleteBody(RequestBody):
+    """The request body for the cluster history soft delete endpoint."""
+    # The cluster history rows (by cluster_hash) to update.
+    cluster_hashes: List[_ClusterHash] = pydantic.Field(
+        max_length=_SOFT_DELETE_MAX_HASHES)
+    # True to hide the rows from history listings, False to restore them.
+    deleted: bool = True
 
 
 class CreateDebugDumpBody(RequestBody):
