@@ -701,7 +701,7 @@ export function RecipeDetail() {
                 </div>
                 <div>
                   <div className="text-gray-600 font-medium text-base">
-                    Last checked
+                    Last synced
                   </div>
                   <div className="text-base mt-1">
                     <TimestampWithTooltip
