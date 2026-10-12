@@ -111,6 +111,33 @@ The steps below use the following variables:
 
     RELEASE_NAME=skypilot  # Helm release name of the API server
     NAMESPACE=skypilot     # Namespace of the API server
+    FULLNAME=$RELEASE_NAME  # Set to fullnameOverride if configured
+
+First upgrade the API server on SQLite to a SkyPilot release containing the
+migration tool. Use an immutable image digest for that upgrade. Confirm the
+running container has the module, then record its resolved image digest before
+stopping it. The migration pod must use that exact image so its PostgreSQL
+schema matches the SQLite source:
+
+.. code-block:: bash
+
+    kubectl exec -n $NAMESPACE deployment/${FULLNAME}-api-server \
+      -c skypilot-api -- python -c \
+      'import sky.utils.db.migrate_sqlite_to_postgres'
+
+    IMAGE=$(kubectl get pod -n $NAMESPACE -l app=${FULLNAME}-api \
+      -o jsonpath='{.items[0].status.containerStatuses[?(@.name=="skypilot-api")].imageID}')
+    IMAGE=${IMAGE#docker-pullable://}
+
+Verify ``IMAGE`` is a pullable reference ending in ``@sha256:<digest>``.
+Save representative state while the SQLite-backed server is still available,
+so that you can compare values after migration:
+
+.. code-block:: bash
+
+    sky status > sky-status.before.txt
+    sky jobs queue > jobs-queue.before.txt
+    sky serve status > serve-status.before.txt
 
 **Step 1: Stop the API server**
 
@@ -123,13 +150,13 @@ The managed job and service controllers in the API server keep updating job, clu
       --reuse-values \
       --set apiService.replicas=0
 
-    kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api
+    kubectl get pods -n $NAMESPACE -l app=${FULLNAME}-api
 
 Wait until the API server pod is gone. If the release is managed by Argo CD with self-heal enabled, set ``apiService.replicas: 0`` in the values in Git instead, as self-healing reverts a manual scale-down.
 
 **Step 2: Back up the state volume**
 
-The migration does not modify the SQLite files, but take a backup before you start, e.g. a `volume snapshot <https://kubernetes.io/docs/concepts/storage/volume-snapshots/>`_ of the ``${RELEASE_NAME}-state`` persistent volume claim, or a snapshot with your cloud provider.
+The migration does not modify the SQLite files, but take a backup before you start, e.g. a `volume snapshot <https://kubernetes.io/docs/concepts/storage/volume-snapshots/>`_ of the ``${FULLNAME}-state`` persistent volume claim, or a snapshot with your cloud provider.
 
 **Step 3: Run the migration**
 
@@ -144,9 +171,6 @@ Store the connection URI of the new, empty database in a secret. The same secret
 Start a pod with the API server's image that mounts the API server's state volume. The volume is mounted writable because SQLite needs to create its shared-memory file to read a database in WAL mode; the migration does not write to the SQLite files.
 
 .. code-block:: bash
-
-    IMAGE=$(kubectl get deployment ${RELEASE_NAME}-api-server -n $NAMESPACE \
-      -o jsonpath='{.spec.template.spec.containers[?(@.name=="skypilot-api")].image}')
 
     kubectl apply -n $NAMESPACE -f - <<EOF
     apiVersion: v1
@@ -172,14 +196,14 @@ Start a pod with the API server's image that mounts the API server's state volum
       volumes:
       - name: state-volume
         persistentVolumeClaim:
-          claimName: ${RELEASE_NAME}-state
+          claimName: ${FULLNAME}-state
     EOF
 
     kubectl wait pod/skypilot-db-migration -n $NAMESPACE --for=condition=Ready
 
 .. note::
 
-    If you set ``storage.existingClaim``, use that claim instead of ``${RELEASE_NAME}-state``. Add the API server's ``nodeSelector``, ``tolerations``, or image pull secrets to the pod if your cluster requires them.
+    If you set ``storage.existingClaim``, use that claim instead of ``${FULLNAME}-state``. Add the API server's ``nodeSelector``, ``tolerations``, or image pull secrets to the pod if your cluster requires them.
 
 Run the migration:
 
@@ -225,6 +249,9 @@ Check that the state was carried over and that new work runs:
     sky serve status
     sky jobs launch -y 'echo hello'
 
+Compare the status and details of representative clusters, managed jobs, and
+services with the records saved before step 1. The tool
+checks row counts and sequence maxima, but does not compare every column value.
 New managed job IDs continue after the largest migrated one. Further config changes are made through the :ref:`dashboard or the API <sky-api-server-config>`.
 
 .. tip::

@@ -43,7 +43,6 @@ from sky.jobs import state as jobs_state
 from sky.recipes import db as recipes_db
 from sky.serve import serve_state
 from sky.skylet import constants
-from sky.utils import config_utils
 from sky.utils import yaml_utils
 from sky.utils.db import db_utils
 from sky.utils.db import kv_cache
@@ -54,6 +53,7 @@ if typing.TYPE_CHECKING:
 # SQLite databases of the API server, relative to ~/.sky.
 STORES = ('state.db', 'spot_jobs.db', 'serve/services.db', 'recipes.db',
           'kv_cache.db')
+OPTIONAL_STORES = ('recipes.db', 'kv_cache.db')
 _RECIPE_COLUMNS = ('name', 'description', 'content', 'recipe_type', 'pinned',
                    'user_id', 'user_name', 'is_editable', 'is_pinnable')
 _BATCH_SIZE = 1000
@@ -109,6 +109,8 @@ def remove_default_recipes(connection: Any, placeholder: str,
                                   for v in row)))
         for row in cursor.fetchall()
     ]
+    if not actual:
+        return []
     names = sorted(row['name'] for row in expected)
     if sorted(actual, key=lambda row: row['name']) != sorted(
             expected, key=lambda row: row['name']):
@@ -154,6 +156,8 @@ def freeze(sky_dir: pathlib.Path, frozen_dir: pathlib.Path) -> None:
     for relative in STORES:
         source, destination = sky_dir / relative, frozen_dir / relative
         if not source.is_file():
+            if relative in OPTIONAL_STORES:
+                continue
             raise FileNotFoundError(f'SQLite database not found: {source}')
         destination.parent.mkdir(parents=True, exist_ok=True)
         with contextlib.closing(_readonly(source)) as reader:
@@ -167,7 +171,12 @@ def source_tables(sky_dir: pathlib.Path) -> Dict[str, pathlib.Path]:
     """Maps every table to copy to the SQLite database that holds it."""
     tables: Dict[str, pathlib.Path] = {}
     for relative in STORES:
-        with contextlib.closing(_readonly(sky_dir / relative)) as source:
+        path = sky_dir / relative
+        if not path.is_file():
+            if relative in OPTIONAL_STORES:
+                continue
+            raise FileNotFoundError(f'SQLite database not found: {path}')
+        with contextlib.closing(_readonly(path)) as source:
             for (name,) in source.execute(
                     'SELECT name FROM sqlite_master WHERE type = \'table\''):
                 # Alembic version tables are written by init_target().
@@ -230,7 +239,8 @@ def _convert(value: Any, data_type: str) -> Any:
     return value
 
 
-def copy_tables(frozen_dir: pathlib.Path, dsn: str) -> Dict[str, int]:
+def copy_tables(frozen_dir: pathlib.Path, dsn: str,
+                config: Dict[str, Any]) -> Dict[str, int]:
     """Copies every table in one transaction and advances the sequences.
 
     Returns:
@@ -245,6 +255,8 @@ def copy_tables(frozen_dir: pathlib.Path, dsn: str) -> Dict[str, int]:
             for table in _fk_order(cursor, list(sources)):
                 with contextlib.closing(_readonly(sources[table])) as source:
                     rows[table] = _copy_table(source, cursor, table)
+            if config:
+                seed_config(cursor, config)
     return rows
 
 
@@ -291,15 +303,15 @@ def _copy_table(source: sqlite3.Connection, cursor: Any, table: str) -> int:
     return count
 
 
-def seed_config(dsn: str, config: Dict[str, Any]) -> None:
-    """Stores the API server config in the target and verifies it."""
-    skypilot_config.update_api_server_config_no_lock(
-        config_utils.Config(config))
-    with contextlib.closing(psycopg2.connect(dsn)) as target:
-        with target.cursor() as cursor:
-            cursor.execute('SELECT value FROM config_yaml WHERE key = %s',
-                           (skypilot_config.API_SERVER_CONFIG_KEY,))
-            row = cursor.fetchone()
+def seed_config(cursor: Any, config: Dict[str, Any]) -> None:
+    """Stores and verifies the API server config in the copy transaction."""
+    key = skypilot_config.API_SERVER_CONFIG_KEY
+    cursor.execute(
+        'INSERT INTO config_yaml (key, value) VALUES (%s, %s) '
+        'ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value',
+        (key, yaml_utils.dump_yaml_str(dict(config))))
+    cursor.execute('SELECT value FROM config_yaml WHERE key = %s', (key,))
+    row = cursor.fetchone()
     if row is None or yaml_utils.safe_load(row[0]) != config:
         raise ValueError('The stored API server config differs from '
                          'the config to migrate.')
@@ -308,16 +320,15 @@ def seed_config(dsn: str, config: Dict[str, Any]) -> None:
 def migrate(sky_dir: pathlib.Path, config: Dict[str, Any],
             dsn: str) -> Dict[str, Any]:
     """Migrates the API server state in sky_dir to the database at dsn."""
-    require_empty_target(dsn, list(source_tables(sky_dir)))
+    require_empty_target(
+        dsn, sorted(set(source_tables(sky_dir)) | {'recipes', 'kv_cache'}))
     frozen_dir = pathlib.Path(tempfile.mkdtemp())
     try:
         freeze(sky_dir, frozen_dir)
         removed = init_target()
-        rows = copy_tables(frozen_dir, dsn)
+        rows = copy_tables(frozen_dir, dsn, config)
     finally:
         shutil.rmtree(frozen_dir)
-    if config:
-        seed_config(dsn, config)
     return {'removed_default_recipes': removed, 'rows': rows}
 
 

@@ -42,6 +42,12 @@ def test_remove_default_recipes(recipes):
     assert _count(connection) == 0
 
 
+def test_remove_default_recipes_after_failed_copy(recipes):
+    connection, expected = recipes
+    migrate.remove_default_recipes(connection, '?', expected)
+    assert migrate.remove_default_recipes(connection, '?', expected) == []
+
+
 def test_remove_default_recipes_aborts_on_extra_row(recipes):
     connection, expected = recipes
     connection.execute('INSERT INTO recipes (name) VALUES (\'mine\')')
@@ -118,8 +124,15 @@ def test_freeze(sky_dir, tmp_path):
             ]
 
 
-def test_freeze_missing_store(sky_dir, tmp_path):
+def test_freeze_missing_optional_store(sky_dir, tmp_path):
     (sky_dir / 'recipes.db').unlink()
+    frozen = tmp_path / 'frozen'
+    migrate.freeze(sky_dir, frozen)
+    assert not (frozen / 'recipes.db').exists()
+
+
+def test_freeze_missing_required_store(sky_dir, tmp_path):
+    (sky_dir / 'state.db').unlink()
     with pytest.raises(FileNotFoundError):
         migrate.freeze(sky_dir, tmp_path / 'frozen')
 
@@ -127,6 +140,12 @@ def test_freeze_missing_store(sky_dir, tmp_path):
 def test_source_tables_rejects_duplicate_table(sky_dir):
     # Every store in the fixture has table t.
     with pytest.raises(ValueError, match='two databases'):
+        migrate.source_tables(sky_dir)
+
+
+def test_source_tables_requires_core_store(sky_dir):
+    (sky_dir / 'state.db').unlink()
+    with pytest.raises(FileNotFoundError, match='state.db'):
         migrate.source_tables(sky_dir)
 
 
@@ -174,14 +193,6 @@ def _sql(statement, *args):
             return cursor.fetchall() if cursor.description else []
 
 
-def _seed_config(dsn, config):
-    del dsn
-    _sql(
-        'INSERT INTO config_yaml VALUES (\'api_server_config\', %s) '
-        'ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value',
-        yaml.safe_dump(config))
-
-
 @pytest.fixture()
 def pg_source(tmp_path):
     """SQLite stores with data, and a target with the matching schema."""
@@ -202,8 +213,7 @@ def pg_source(tmp_path):
             '(5, 8, 1, \'2026-01-02 12:00:00\', ?)', (b'\x00\xff',))
         source.commit()
     _sql('DROP SCHEMA public CASCADE; CREATE SCHEMA public;' + _PG_DDL)
-    with mock.patch.object(migrate, 'init_target', return_value=[]) as init, \
-            mock.patch.object(migrate, 'seed_config', _seed_config):
+    with mock.patch.object(migrate, 'init_target', return_value=[]) as init:
         yield root, init
     _sql('DROP SCHEMA public CASCADE; CREATE SCHEMA public')
 
@@ -260,6 +270,62 @@ def test_failed_copy_rolls_back(pg_source):
         with pytest.raises(ValueError, match='boom'):
             migrate.migrate(root, _CONFIG, _PG_URL)
     assert _sql('SELECT count(*) FROM clusters') == [(0,)]
+    migrate.migrate(root, _CONFIG, _PG_URL)
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_missing_optional_stores_migrate_as_empty(pg_source):
+    root, _ = pg_source
+    (root / 'recipes.db').unlink()
+    (root / 'kv_cache.db').unlink()
+    result = migrate.migrate(root, _CONFIG, _PG_URL)
+    assert result['rows']['clusters'] == 2
+    assert _sql('SELECT count(*) FROM recipes') == [(0,)]
+    assert _sql('SELECT count(*) FROM kv_cache') == [(0,)]
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_missing_optional_source_rejects_nonempty_target(pg_source):
+    root, init = pg_source
+    (root / 'kv_cache.db').unlink()
+    _sql('INSERT INTO kv_cache VALUES (\'left-over\', \'value\')')
+    with pytest.raises(ValueError, match='kv_cache.*not empty'):
+        migrate.migrate(root, _CONFIG, _PG_URL)
+    init.assert_not_called()
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_source_config_is_updated_with_migrated_config(pg_source):
+    root, _ = pg_source
+    with contextlib.closing(sqlite3.connect(root / 'state.db')) as source:
+        source.execute('CREATE TABLE config_yaml (key TEXT PRIMARY KEY, '
+                       'value TEXT)')
+        source.execute('INSERT INTO config_yaml VALUES (?, ?)',
+                       ('api_server_config', 'old: true'))
+        source.commit()
+    migrate.migrate(root, _CONFIG, _PG_URL)
+    assert yaml.safe_load(
+        _sql('SELECT value FROM config_yaml')[0][0]) == _CONFIG
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_failed_config_write_rolls_back_copy(pg_source):
+    root, _ = pg_source
+    real_seed = migrate.seed_config
+
+    def fail_after_seed(cursor, config):
+        real_seed(cursor, config)
+        raise RuntimeError('lost config acknowledgement')
+
+    with mock.patch.object(migrate, 'seed_config', fail_after_seed):
+        with pytest.raises(RuntimeError, match='lost config acknowledgement'):
+            migrate.migrate(root, _CONFIG, _PG_URL)
+    assert _sql('SELECT count(*) FROM clusters') == [(0,)]
+    assert _sql('SELECT count(*) FROM config_yaml') == [(0,)]
     migrate.migrate(root, _CONFIG, _PG_URL)
 
 
