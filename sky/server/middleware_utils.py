@@ -356,6 +356,8 @@ class ASGIMiddleware:
 
         async def send_with_headers(message: starlette.types.Message) -> None:
             if message['type'] == 'http.response.start':
+                # `headers` is optional in this message (ASGI spec).
+                message.setdefault('headers', [])
                 self.on_response(
                     request, message['status'],
                     starlette.datastructures.MutableHeaders(scope=message))

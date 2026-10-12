@@ -266,7 +266,7 @@ class TestOriginalOAuth2ProxyMiddleware:
             # Verify no body is sent for auth check
             assert 'data' not in call_args.kwargs
 
-            assert response.status_code == 200
+            assert response is None
 
     @pytest.mark.asyncio
     async def test_authenticate_timeout_handling(self, middleware_enabled,
