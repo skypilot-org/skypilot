@@ -2,10 +2,9 @@
 import concurrent.futures
 import itertools
 import json
-import os
 import shlex
 import typing
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import colorama
 
@@ -37,8 +36,6 @@ from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
-from sky.users import permission
-from sky.users import rbac
 from sky.utils import admin_policy_utils
 from sky.utils import common
 from sky.utils import common_utils
@@ -385,23 +382,19 @@ def get_cluster_events(
         # answer: an empty type list translates to `type IN ()`, i.e. no
         # events, which a caller would read as "this cluster has no history".
         raise ValueError(f'No valid cluster event type in {event_type!r}.')
-    workspaces_filter = _history_workspaces_filter()
+    workspaces_filter = workspaces_core.get_readable_workspace_names()
     if workspaces_filter is not None:
         # Events are readable iff the cluster's history is. A denied caller
         # gets the same answer as for a cluster that does not exist.
-        resolved_hash = global_user_state._resolve_cluster_hash(  # pylint: disable=protected-access
-            cluster_hash, cluster_name)
-        readable = resolved_hash is not None and bool(
-            global_user_state.get_clusters_from_history(
-                abbreviate_response=True,
-                cluster_hashes=[resolved_hash],
-                workspaces_filter=workspaces_filter))
-        if not readable:
+        cluster_hash, workspace = (
+            global_user_state.get_cluster_history_workspace(
+                cluster_hash, cluster_name))
+        if workspace not in workspaces_filter:
             if cluster_name is not None:
                 raise ValueError(f'Hash for cluster {cluster_name} not found.')
             return []
         # Read the hash that was checked, in case the name is reused meanwhile.
-        cluster_name, cluster_hash = None, resolved_hash
+        cluster_name = None
     return global_user_state.get_cluster_events(
         cluster_name=cluster_name,
         cluster_hash=cluster_hash,
@@ -511,7 +504,7 @@ def cost_report(days: Optional[int] = None,
             cluster_hashes=cluster_hashes,
             cluster_names=cluster_names,
             exclude_managed_clusters=exclude_managed_clusters,
-            workspaces_filter=_history_workspaces_filter()))
+            workspaces_filter=workspaces_core.get_readable_workspace_names()))
 
     def _process_cluster_report(
             cluster_report: Dict[str, Any]) -> Dict[str, Any]:
@@ -562,22 +555,6 @@ def cost_report(days: Optional[int] = None,
     logger.debug(
         f'{len(cluster_reports)} clusters found from history with {days} days.')
     return cluster_reports
-
-
-def _history_workspaces_filter() -> Optional[Set[str]]:
-    """Workspaces whose cluster history the caller can read; None means all.
-
-    Admins get None rather than every configured workspace, since history
-    outlives the workspaces it was recorded in.
-    """
-    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
-        return None
-    roles = permission.permission_service.get_user_roles(
-        common_utils.get_current_user().id)
-    if rbac.RoleName.ADMIN.value in roles:
-        return None
-    return workspaces_core.get_accessible_workspace_names(
-        action=workspace_constants.WORKSPACE_ACTION_READ)
 
 
 def _update_record_with_resources(

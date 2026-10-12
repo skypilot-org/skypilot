@@ -666,13 +666,15 @@ def two_workspaces(tmp_path, monkeypatch):
             _launch(f'{user}-cluster', workspace)
 
         monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, 'true')
-        monkeypatch.setattr(
-            permission.permission_service, 'get_user_roles',
-            lambda user_id: ['admin'] if user_id == 'root' else ['user'])
         policy = [['alice', 'ws-a', '*'], ['bob', 'ws-b', '*'],
                   ['*', 'default', '*']]
-        monkeypatch.setattr(permission.permission_service, 'enforcer',
-                            mock.Mock(get_policy=lambda: policy))
+        monkeypatch.setattr(
+            permission.permission_service, 'enforcer',
+            mock.Mock(get_policy=lambda: policy,
+                      get_roles_for_user=lambda user_id: ['admin']
+                      if user_id == 'root' else ['user']))
+        monkeypatch.setattr(permission.permission_service,
+                            '_load_policy_no_lock', mock.Mock())
 
         def set_caller(user_id):
             caller['id'] = user_id
@@ -763,6 +765,42 @@ def test_history_of_read_only_workspace_is_visible(two_workspaces):
     with skypilot_config.replace_skypilot_config_in_process(config):
         annotations.clear_request_level_cache()
         assert _names() == ['alice-cluster', 'bob-cluster']
+
+
+def test_history_loads_the_policy_once(two_workspaces):
+    load_policy = permission.permission_service._load_policy_no_lock
+    core.cost_report()
+    assert load_policy.call_count == 1
+    load_policy.reset_mock()
+    core.get_cluster_events(cluster_name='alice-cluster')
+    assert load_policy.call_count == 1
+
+
+@pytest.mark.usefixtures('two_workspaces')
+def test_cluster_history_workspace():
+    alice_hash = global_user_state.get_cluster_hash('alice-cluster')
+    assert global_user_state.get_cluster_history_workspace(
+        cluster_name='alice-cluster') == (alice_hash, 'ws-a')
+    assert global_user_state.get_cluster_history_workspace(
+        cluster_hash=alice_hash) == (alice_hash, 'ws-a')
+    # The history row's workspace wins over the live cluster's...
+    _set_history_workspace(alice_hash, 'ws-b')
+    assert global_user_state.get_cluster_history_workspace(
+        cluster_hash=alice_hash) == (alice_hash, 'ws-b')
+    # ...and an empty one falls back to it.
+    _set_history_workspace(alice_hash, '')
+    assert global_user_state.get_cluster_history_workspace(
+        cluster_hash=alice_hash) == (alice_hash, 'ws-a')
+    global_user_state.remove_cluster('alice-cluster', terminate=True)
+    assert global_user_state.get_cluster_history_workspace(
+        cluster_hash=alice_hash) == (alice_hash, None)
+    assert global_user_state.get_cluster_history_workspace(
+        cluster_name='alice-cluster') == (None, None)
+    with pytest.raises(ValueError):
+        global_user_state.get_cluster_history_workspace()
+    with pytest.raises(ValueError):
+        global_user_state.get_cluster_history_workspace(
+            cluster_hash=alice_hash, cluster_name='alice-cluster')
 
 
 def test_cluster_events_of_foreign_cluster_look_nonexistent(two_workspaces):
