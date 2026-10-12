@@ -898,24 +898,6 @@ def check_cluster_write_permission(user: models.User,
     check_workspace_permission(user, workspace)
 
 
-def check_cluster_read_permission(user: models.User, cluster_name: str) -> None:
-    """Checks a user may read an existing cluster's jobs and logs.
-
-    Like ``check_cluster_write_permission``, but a workspace that is
-    read-only-visible to non-members also passes.
-
-    Raises:
-        PermissionDeniedError: If the user cannot read the cluster's
-            workspace.
-    """
-    workspace = global_user_state.get_cluster_workspace(cluster_name)
-    if workspace is None:
-        return
-    check_workspace_permission(user,
-                               workspace,
-                               action=workspace_constants.WORKSPACE_ACTION_READ)
-
-
 def is_workspace_private(workspace_config: Dict[str, Any]) -> bool:
     """Check if a workspace is private.
 

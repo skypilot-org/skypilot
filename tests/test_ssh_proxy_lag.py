@@ -559,27 +559,29 @@ async def test_endpoint_provision_logs(monitor, mock_request):
     """Test /provision_logs endpoint for blocking operations."""
     print("\n🔍 Testing: /provision_logs")
 
-    async def test_func():
-        # Mock the actual blocking DB calls
-        with mock.patch.object(global_user_state,
-                               'get_cluster_provision_log_path',
-                               side_effect=create_blocking_mock(None,
-                                                                delay=0.02)):
-            with mock.patch.object(global_user_state,
-                                   'get_cluster_history_provision_log_path',
-                                   side_effect=create_blocking_mock(
-                                       None, delay=0.02)):
-                try:
-                    body = payloads.ProvisionLogsBody(cluster_name='test')
-                    await _run_endpoint_func(server.provision_logs,
-                                             mock_request,
-                                             body,
-                                             follow=False)
-                except fastapi.HTTPException:
-                    # The cluster provision log will not be actually found
-                    pass
+    # Mock the actual blocking DB calls
+    with mock.patch.object(global_user_state,
+                           'get_cluster_provision_log_info',
+                           side_effect=create_blocking_mock(
+                               (None, None), delay=0.02)) as log_info, \
+            mock.patch.object(global_user_state,
+                              'get_cluster_history_provision_log_info',
+                              side_effect=create_blocking_mock(
+                                  (None, None), delay=0.02)) as history_info:
 
-    result = await run_endpoint_test(test_func, monitor, num_concurrent=30)
+        async def test_func():
+            try:
+                body = payloads.ProvisionLogsBody(cluster_name='test')
+                await _run_endpoint_func(server.provision_logs,
+                                         mock_request,
+                                         body,
+                                         follow=False)
+            except fastapi.HTTPException:
+                # The cluster provision log will not be actually found
+                pass
+
+        result = await run_endpoint_test(test_func, monitor, num_concurrent=30)
+    assert log_info.called and history_info.called
     assert not result[
         'blocking'], "/provision_logs should not block the event loop"
 

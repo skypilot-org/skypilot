@@ -2421,12 +2421,31 @@ async def _reject_cluster_write_for_unauthorized(
         raise fastapi.HTTPException(status_code=403, detail=str(e)) from e
 
 
+def _check_workspace_read_permission(auth_user: models.User,
+                                     workspace: str) -> None:
+    """Checks a user may read the jobs and logs of a workspace's clusters.
+
+    Raises:
+        PermissionDeniedError: If the user cannot read the workspace.
+    """
+    try:
+        # Membership does not depend on the config, so members skip the reload.
+        workspaces_core.check_workspace_permission(auth_user, workspace)
+    except exceptions.PermissionDeniedError:
+        # Read-only visibility comes from the workspace config, which this
+        # process does not reload per request.
+        common.refresh_workspace_state_for_sync_handler()
+        workspaces_core.check_workspace_permission(
+            auth_user,
+            workspace,
+            action=workspace_constants.WORKSPACE_ACTION_READ)
+
+
 def _check_cluster_read_permission(auth_user: models.User,
                                    cluster_name: str) -> None:
-    # Read-only visibility comes from the workspace config, which this
-    # process does not reload per request.
-    common.refresh_workspace_state_for_sync_handler()
-    workspaces_core.check_cluster_read_permission(auth_user, cluster_name)
+    workspace = global_user_state.get_cluster_workspace(cluster_name)
+    if workspace is not None:
+        _check_workspace_read_permission(auth_user, workspace)
 
 
 async def _reject_cluster_read_for_unauthorized(request: fastapi.Request,
@@ -2766,8 +2785,6 @@ def provision_logs(request: fastapi.Request,
     cluster_name = provision_logs_body.cluster_name
     worker = provision_logs_body.worker
     auth_user = request.state.auth_user
-    if auth_user is not None:
-        common.refresh_workspace_state_for_sync_handler()
 
     def _not_found_unless_readable(workspace: Optional[str],
                                    detail: str) -> None:
@@ -2776,10 +2793,7 @@ def provision_logs(request: fastapi.Request,
         if auth_user is None or workspace is None:
             return
         try:
-            workspaces_core.check_workspace_permission(
-                auth_user,
-                workspace,
-                action=workspace_constants.WORKSPACE_ACTION_READ)
+            _check_workspace_read_permission(auth_user, workspace)
         except exceptions.PermissionDeniedError as e:
             raise fastapi.HTTPException(status_code=404, detail=detail) from e
 
@@ -2788,9 +2802,8 @@ def provision_logs(request: fastapi.Request,
         not_recorded = ('Provision log path is not recorded for this cluster. '
                         'Please relaunch to generate provisioning logs.')
         # Prefer clusters table first, then cluster_history as fallback.
-        log_path_str = global_user_state.get_cluster_provision_log_path(
-            cluster_name)
-        workspace = global_user_state.get_cluster_workspace(cluster_name)
+        log_path_str, workspace = (
+            global_user_state.get_cluster_provision_log_info(cluster_name))
         if not log_path_str:
             # The history row may be from an earlier cluster of this name, so
             # check the workspace recorded with the log path it returns.

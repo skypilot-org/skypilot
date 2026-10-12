@@ -178,6 +178,13 @@ class TestClusterReadPermission:
         assert _status('/provision_logs', 'bob', 'a-1')[0] == 404
         assert _status('/provision_logs', 'alice', 'a-1') == (200, None)
 
+    def test_provision_logs_reads_cluster_row_once(self, monkeypatch):
+        workspace = mock.Mock(wraps=global_user_state.get_cluster_workspace)
+        monkeypatch.setattr(global_user_state, 'get_cluster_workspace',
+                            workspace)
+        assert _status('/provision_logs', 'bob', 'a-1')[0] == 404
+        workspace.assert_not_called()
+
     def test_provision_logs_worker_is_checked(self):
         denied = _status('/provision_logs', 'bob', 'a-1', worker=1)
         assert denied == _status('/provision_logs', 'bob', 'missing', worker=1)
@@ -188,7 +195,26 @@ class TestClusterReadPermission:
     @pytest.mark.parametrize('endpoint', _ALL)
     def test_read_access_change_applies_without_restart(self, endpoint,
                                                         tmp_path):
+        assert _status(endpoint, 'bob', 'a-1')[0] == _DENIED[endpoint]
+        assert _status(endpoint, 'bob', 'ro-1') == (200, None)
         config = tmp_path / 'config.yaml'
-        config.write_text(config.read_text().replace('"all"',
-                                                     '"allowed_users"'))
+        workspaces = json.loads(config.read_text())['workspaces']
+        workspaces['ws-a']['read_access'] = 'all'
+        workspaces['ws-ro']['read_access'] = 'allowed_users'
+        config.write_text(json.dumps({'workspaces': workspaces}))
+        assert _status(endpoint, 'bob', 'a-1') == (200, None)
         assert _status(endpoint, 'bob', 'ro-1')[0] == _DENIED[endpoint]
+
+    @pytest.mark.parametrize('endpoint', _ALL)
+    @pytest.mark.parametrize('user_id,cluster,reloads', [
+        ('alice', 'a-1', 0),
+        ('admin', 'a-1', 0),
+        ('bob', 'a-1', 1),
+        ('bob', 'ro-1', 1),
+    ])
+    def test_only_non_members_reload_config(self, endpoint, user_id, cluster,
+                                            reloads, monkeypatch):
+        reload = mock.Mock(wraps=skypilot_config.safe_reload_config)
+        monkeypatch.setattr(skypilot_config, 'safe_reload_config', reload)
+        _status(endpoint, user_id, cluster)
+        assert reload.call_count == reloads

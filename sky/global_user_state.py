@@ -2187,12 +2187,24 @@ def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
 @metrics_lib.time_me
 def get_cluster_provision_log_path(cluster_name: str) -> Optional[str]:
     """Returns provision_log_path from clusters table, if recorded."""
+    return get_cluster_provision_log_info(cluster_name)[0]
+
+
+@metrics_lib.time_me
+def get_cluster_provision_log_info(
+        cluster_name: str) -> Tuple[Optional[str], Optional[str]]:
+    """Returns (provision_log_path, workspace) from the clusters table.
+
+    The workspace is None if there is no such cluster; a stored NULL is the
+    default workspace.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         row = session.query(cluster_table).filter_by(name=cluster_name).first()
     if row is None:
-        return None
-    return getattr(row, 'provision_log_path', None)
+        return None, None
+    return (getattr(row, 'provision_log_path', None), row.workspace or
+            constants.SKYPILOT_DEFAULT_WORKSPACE)
 
 
 @metrics_lib.time_me
