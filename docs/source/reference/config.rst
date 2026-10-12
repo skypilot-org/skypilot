@@ -1435,7 +1435,10 @@ Example:
 
 Identity to use for GCP instances (optional).
 
-Please refer to the aws.remote_identity section above for more details.
+Please refer to the aws.remote_identity section above for more details. A
+customized service account is specified by its email, and SkyPilot attaches it
+to the instances without creating a service account or granting it roles. Other
+values use the SkyPilot service account ``skypilot-v1``.
 
 Default: ``LOCAL_CREDENTIALS``.
 

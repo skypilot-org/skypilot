@@ -1001,6 +1001,22 @@ class TestGCPSchema(unittest.TestCase):
         self.config_schema = schemas.get_config_schema()
         self.gcp_schema = self.config_schema['properties']['gcp']
 
+    def test_gcp_remote_identity_custom_service_account(self):
+        """Test that GCP accepts custom service account for remote_identity."""
+        config = {'remote_identity': 'my-sa@my-project.iam.gserviceaccount.com'}
+        jsonschema.validate(instance=config, schema=self.gcp_schema)
+
+    def test_gcp_remote_identity_cluster_pattern_list(self):
+        """Test that GCP accepts cluster-name pattern matching."""
+        config = {
+            'remote_identity': [{
+                'my-cluster-*': 'my-sa@my-project.iam.gserviceaccount.com'
+            }, {
+                '*': 'SERVICE_ACCOUNT'
+            }]
+        }
+        jsonschema.validate(instance=config, schema=self.gcp_schema)
+
     def test_gcp_subnet_names_single_string(self):
         """Test that GCP accepts a single string for subnet_names."""
         config = {'subnet_names': 'train-subnet'}
