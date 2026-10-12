@@ -229,6 +229,8 @@ def test_write_cluster_config_w_post_provision_runcmd_kubernetes(
             return_value=[])
 @mock.patch('sky.provision.kubernetes.utils.get_accelerator_label_keys',
             return_value=['skypilot.co/accelerator'])
+@mock.patch('sky.provision.kubernetes.utils.get_spot_label',
+            return_value=('cloud.google.com/gke-spot', 'true'))
 @mock.patch('sky.utils.common_utils.fill_template',
             wraps=common_utils.fill_template)
 def test_write_cluster_config_merges_pod_fields_kubernetes(
@@ -241,7 +243,8 @@ def test_write_cluster_config_merges_pod_fields_kubernetes(
 
     config_dict = backend_utils.write_cluster_config(
         to_provision=Resources(cloud=clouds.Kubernetes(),
-                               instance_type='4CPU--16GB'),
+                               instance_type='4CPU--16GB',
+                               use_spot=True),
         num_nodes=1,
         cluster_config_template='kubernetes-ray.yml.j2',
         cluster_name="display",
@@ -258,6 +261,12 @@ def test_write_cluster_config_merges_pod_fields_kubernetes(
     assert pod_spec['affinity'][
         'nodeAffinity'] == kubernetes_utils.get_node_affinity(
             None, None, ['skypilot.co/accelerator'])
+    # A spot pod is pinned to spot nodes and tolerates their taint.
+    assert pod_spec['nodeSelector'] == {'cloud.google.com/gke-spot': 'true'}
+    assert pod_spec['tolerations'] == [
+        kubernetes_utils.get_spot_toleration('cloud.google.com/gke-spot',
+                                             'true')
+    ]
     # They get there through the merge, not as a template variable.
     assert 'pod_fields' not in mock_fill_template.call_args[0][1]
 
