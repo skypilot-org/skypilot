@@ -7,6 +7,7 @@ Concepts:
   interact with a cluster.
 """
 import asyncio
+import contextlib
 import enum
 import functools
 import json
@@ -618,7 +619,8 @@ _db_manager = db_utils.DatabaseManager(
     'state', create_table, post_init_fn=lambda _: _sqlite_supports_returning())
 initialize_and_get_db = _db_manager.get_engine
 
-# Server-side bounds on the `users` upsert transaction (Postgres only).
+# Server-side bounds on the `users` upsert transaction (on SQLite, see
+# `_user_upsert_session`).
 #
 # The upsert runs on the request authentication path for every request, on
 # the API server's bounded auth thread pool, under a client-side deadline
@@ -714,6 +716,39 @@ def _bound_user_upsert_transaction(session: orm.Session) -> None:
             sqlalchemy.text(f'SET LOCAL {parameter} = \'{value_ms}ms\''))
 
 
+@contextlib.contextmanager
+def _user_upsert_session(
+        engine: sqlalchemy.engine.Engine) -> Iterator[orm.Session]:
+    """A session for the users upsert, bounded as described above.
+
+    SQLite has no `SET LOCAL`. There the lock_timeout value bounds the
+    connection's `PRAGMA busy_timeout` instead. That setting belongs to the
+    pooled connection, so the session runs on a connection checked out here,
+    which gets its previous value back before it returns to the pool.
+    """
+    if engine.dialect.name != db_utils.SQLAlchemyDialect.SQLITE.value:
+        with orm.Session(engine) as session:
+            if (engine.dialect.name ==
+                    db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+                # First statements of the transaction; see the constants above.
+                _bound_user_upsert_transaction(session)
+            yield session
+        return
+    lock_ms, _, _ = _user_upsert_timeouts_ms()
+    with engine.connect() as conn:
+        # The raw connection, so the PRAGMA neither begins a transaction nor
+        # depends on the state of a failed one.
+        dbapi_conn = conn.connection.dbapi_connection
+        assert dbapi_conn is not None
+        previous_ms = dbapi_conn.execute('PRAGMA busy_timeout').fetchone()[0]
+        dbapi_conn.execute(f'PRAGMA busy_timeout = {lock_ms}')
+        try:
+            with orm.Session(bind=conn) as session:
+                yield session
+        finally:
+            dbapi_conn.execute(f'PRAGMA busy_timeout = {previous_ms}')
+
+
 @metrics_lib.time_me
 def add_or_update_user(
     user: models.User,
@@ -733,11 +768,7 @@ def add_or_update_user(
     created_at = user.created_at
     if created_at is None:
         created_at = int(time.time())
-    with orm.Session(engine) as session:
-        if engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
-            # First statements of the transaction; see the constants above.
-            _bound_user_upsert_transaction(session)
-
+    with _user_upsert_session(engine) as session:
         # Check for duplicate names if not allowed (within the same transaction)
         if not allow_duplicate_name:
             existing_user = session.query(user_table).filter(
