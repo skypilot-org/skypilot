@@ -752,11 +752,11 @@ export function Workspaces() {
     });
   };
 
+  // Anyone can open a workspace's page; it is read-only for non-admins, and
+  // the server enforces that on every write.
   const handleEditWorkspace = (workspaceName) => {
     trackWorkspaceAction('edit');
-    checkPermissionAndAct('cannot edit workspace', () => {
-      router.push(`/workspaces/${workspaceName}`);
-    });
+    router.push(`/workspaces/${workspaceName}`);
   };
 
   const preStyle = {

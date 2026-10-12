@@ -25,9 +25,10 @@ jest.mock('@/components/elements/layout', () => ({
 }));
 jest.mock('@/components/ui/yaml-editor', () => ({
   __esModule: true,
-  YamlEditor: ({ value, onChange }) => (
+  YamlEditor: ({ value, onChange, disabled }) => (
     <textarea
       aria-label="workspace yaml"
+      readOnly={disabled}
       value={value}
       onChange={(e) => onChange(e.target.value)}
     />
@@ -44,8 +45,10 @@ jest.mock('@/data/connectors/workspaces', () => ({
   deleteWorkspace: jest.fn(),
   getEnabledClouds: jest.fn(async () => []),
 }));
+const mockGetUserRole = jest.fn(async () => ({ role: 'admin', name: 'root' }));
 jest.mock('@/data/connectors/users', () => ({
   __esModule: true,
+  getUserRole: (...args) => mockGetUserRole(...args),
   getUsers: jest.fn(async () => [
     { userId: 'u-alice', username: 'alice', role: 'user' },
     { userId: 'u-bob', username: 'bob', role: 'user' },
@@ -233,6 +236,7 @@ describe('WorkspaceEditor with a plugin that changes the workspace', () => {
   async function renderEditor() {
     render(<WorkspaceEditor workspaceName="ws" />);
     await screen.findByText('Allowed Users (1)', {}, { timeout: 3000 });
+    await screen.findByText('Apply');
   }
 
   async function pluginRefresh() {
@@ -370,5 +374,53 @@ describe('WorkspaceEditor with a plugin that changes the workspace', () => {
       { private: true, allowed_users: ['alice'], gcp: { project_id: 'mine' } },
       { private: true, allowed_users: ['alice'] }
     );
+  });
+});
+
+describe('WorkspaceEditor for a non-admin', () => {
+  beforeEach(() => {
+    mockGetWorkspaces.mockReset();
+    mockGetWorkspaces.mockImplementation(async () => ({
+      ws: { private: true, allowed_users: ['alice'] },
+    }));
+    mockGetUserRole.mockImplementation(async () => ({
+      role: 'user',
+      name: 'alice',
+    }));
+    mockComponents['workspaces.detail.allowedUsers.actions'] = [
+      {
+        id: 'actions',
+        component: () => <span>plugin controls</span>,
+      },
+    ];
+  });
+
+  afterEach(() => {
+    mockGetUserRole.mockImplementation(async () => ({
+      role: 'admin',
+      name: 'root',
+    }));
+  });
+
+  test('shows the workspace read-only, with plugin controls', async () => {
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Only admins can change this configuration.');
+    expect(screen.getByText('Allowed Users (1)')).toBeTruthy();
+    expect(screen.getByText('plugin controls')).toBeTruthy();
+    expect(screen.getByText('Workspace YAML')).toBeTruthy();
+    expect(screen.queryByText('Apply')).toBeNull();
+    expect(screen.queryByText('Delete')).toBeNull();
+    expect(screen.getByLabelText('workspace yaml').readOnly).toBe(true);
+  });
+
+  test('treats a failed role lookup as non-admin', async () => {
+    mockGetUserRole.mockImplementation(async () => {
+      throw new Error('boom');
+    });
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Only admins can change this configuration.');
+    expect(screen.queryByText('Apply')).toBeNull();
+    console.error.mockRestore();
   });
 });
