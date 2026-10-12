@@ -31,6 +31,7 @@ the helpers with no arguments, keep getting the same 503; they only lose the
 per-reason attribution until they pass the request too.
 """
 import asyncio
+import sqlite3
 from typing import Any, Callable, Optional
 
 import fastapi
@@ -99,6 +100,19 @@ def _server_timeout_pgcode(exc: BaseException) -> Optional[str]:
     return None
 
 
+def _is_sqlite_lock_timeout(exc: BaseException) -> bool:
+    """Whether ``exc`` is SQLite giving up on a lock at its busy timeout.
+
+    That is SQLite's form of lock_timeout: on SQLite the users upsert bounds
+    its busy timeout with the same value (see
+    `global_user_state._user_upsert_session`). SQLite reports it with this
+    message and no SQLSTATE.
+    """
+    orig = getattr(exc, 'orig', exc)
+    return (isinstance(orig, sqlite3.OperationalError) and
+            str(orig) == 'database is locked')
+
+
 # `cause` of a timeout the client-side deadline produced, as opposed to one
 # the database itself ended (those are named by their Postgres setting, see
 # `_SERVER_TIMEOUT_PGCODES`).
@@ -144,7 +158,13 @@ async def _run_with_deadline(pool: Any, pool_name: str,
                                       timeout=AUTH_DB_TIMEOUT_SECONDS)
     except Exception as e:  # pylint: disable=broad-except
         pgcode = _server_timeout_pgcode(e)
-        if pgcode is None:
+        if pgcode is not None:
+            reason = _SERVER_TIMEOUT_PGCODES[pgcode]
+            detail = f'pgcode {pgcode}'
+        elif _is_sqlite_lock_timeout(e):
+            reason = 'lock_timeout'
+            detail = 'SQLite busy timeout'
+        else:
             if isinstance(e, asyncio.TimeoutError):
                 # The deadline elapsed. Counted here, at the one choke point
                 # every auth-path call goes through, rather than at the call
@@ -154,11 +174,10 @@ async def _run_with_deadline(pool: Any, pool_name: str,
                 # symptom -- which are the early ones.
                 _count_timeout(func, TIMEOUT_CAUSE_DEADLINE, pool_name)
             raise
-        reason = _SERVER_TIMEOUT_PGCODES[pgcode]
         _count_timeout(func, reason, pool_name)
         logger.warning(f'Auth DB call {getattr(func, "__name__", func)} was '
                        f'cut off by the database\'s {reason} '
-                       f'(pgcode {pgcode}): '
+                       f'({detail}): '
                        f'{common_utils.format_exception(e)}')
         raise AuthDBTimeoutError(reason) from e
 

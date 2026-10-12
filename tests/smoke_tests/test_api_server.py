@@ -539,6 +539,7 @@ def test_big_file_upload_memory_usage(generic_cloud: str):
 
 
 # TODO(aylei): this case should not be retried in buildkite.
+@pytest.mark.no_remote_identity_none  # Runs sky in the pod.
 def test_api_server_start_stop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
 
