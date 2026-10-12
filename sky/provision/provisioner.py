@@ -339,9 +339,9 @@ def bulk_provision(
             # surfaces as KeyboardInterrupt). This is not a provisioning
             # failure, so it must not enter the failover teardown below, but
             # the cloud may already hold resources for this attempt: on
-            # Kubernetes, ``_create_pods`` fans pod creation out to a
-            # ThreadPool whose ``__exit__`` joins the in-flight creates before
-            # the interrupt reaches this frame, so those pods exist by now.
+            # Kubernetes, ``_create_pods`` waits for its in-flight pod creates
+            # before the interrupt reaches this frame, so those pods exist by
+            # now.
             # Nothing else cleans them up: the request is already marked
             # cancelled, and a concurrent ``sky down`` may find zero pods and
             # conclude there is nothing to delete. Tear down best-effort here,
