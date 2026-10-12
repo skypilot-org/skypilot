@@ -710,13 +710,17 @@ def request_lock_path(request_id: str) -> str:
     return os.path.join(lock_path, f'.{request_id}.lock')
 
 
-def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
+def kill_cluster_requests(cluster_name: str,
+                          exclude_request_name: str) -> List[str]:
     """Kill all pending and running requests for a cluster.
 
     Args:
         cluster_name: the name of the cluster.
         exclude_request_names: exclude requests with these names. This is to
             prevent killing the caller request.
+
+    Returns:
+        The IDs of the requests that were killed.
     """
     storage = request_storage.get_request_backend()
     request_ids = [
@@ -727,7 +731,7 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
             cluster_names=[cluster_name],
             fields=['request_id']))
     ]
-    _kill_requests(request_ids)
+    return _kill_requests(request_ids)
 
 
 def kill_requests(request_ids: Optional[List[str]] = None,

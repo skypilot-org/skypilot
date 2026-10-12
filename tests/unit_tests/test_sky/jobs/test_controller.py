@@ -924,6 +924,28 @@ class TestTaskCleanup:
         assert not mount_1.exists(), 'mount_1 should be cleaned up'
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize('cancelling', [False, True])
+    async def test_cancelled_job_cancels_requests_of_unrecorded_cluster(
+            self, cleanup_patches, cancelling):
+        """Only a cancelled job's cleanup cancels the in-flight requests of a
+        cluster that has no record yet (e.g. a launch submitted just before
+        the cancel)."""
+        task = self._make_task()
+        task.metadata = {}
+        dag = MagicMock()
+        dag.tasks = [task]
+
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag', return_value=dag):
+            await manager._cleanup(job_id=1, cancelling=cancelling)
+
+        cleanup_patches['terminate'].assert_called_once_with(
+            'test-cluster',
+            graceful=False,
+            graceful_timeout=None,
+            cancel_requests_if_missing=cancelling)
+
+    @pytest.mark.asyncio
     async def test_dag_lookup_leaves_the_loop(self, cleanup_patches):
         """_get_dag reads the DB; _cleanup must call it off the loop."""
         loop_thread = threading.get_ident()
