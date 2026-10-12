@@ -4016,7 +4016,7 @@ def test_managed_jobs_wait_success(generic_cloud: str):
 @pytest.mark.kubernetes
 @pytest.mark.remote_server
 @pytest.mark.managed_jobs
-def test_managed_jobs_api_access(generic_cloud: str):
+def test_managed_jobs_api_access():
     """Test managed jobs with api_server_access: nested job launch from a job.
 
     This test only works with kubernetes and remote server enabled. It is the
@@ -4031,9 +4031,8 @@ def test_managed_jobs_api_access(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'managed-jobs-api-access',
         [
-            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'sky jobs launch -n {name} --infra kubernetes '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
-            f'--env NESTED_INFRA={generic_cloud} '
             f'tests/test_yamls/test_api_access.yaml -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(

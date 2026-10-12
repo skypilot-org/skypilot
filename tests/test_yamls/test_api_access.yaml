@@ -4,10 +4,6 @@ resources:
 
 api_server_access: true
 
-envs:
-  # Infra for the nested job; required, set with --env by the caller.
-  NESTED_INFRA: null
-
 setup: |
   pip install "skypilot-nightly[remote]" > /dev/null 2>&1
 
@@ -21,7 +17,7 @@ run: |
   sky api info
 
   # Launch a nested job and wait for it
-  sky jobs launch --infra "$NESTED_INFRA" --cpus 2+ --memory 4+ -n nested-job -y -d "echo nested-job-success"
+  sky jobs launch --infra kubernetes --cpus 2+ --memory 4+ -n nested-job -y -d "echo nested-job-success"
 
   # Wait for nested job to complete
   for i in $(seq 1 60); do
