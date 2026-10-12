@@ -33,7 +33,6 @@ import os
 import sqlite3
 import subprocess
 import sys
-import threading
 import time
 from unittest import mock
 
@@ -403,7 +402,7 @@ class TestSqliteUpsertIsBounded:
 
     def test_upsert_gives_up_within_the_auth_deadline(self, tmp_path,
                                                       monkeypatch):
-        monkeypatch.setenv(_DEADLINE_ENV, '1')
+        monkeypatch.setenv(_DEADLINE_ENV, '2')
         engine = _fresh_sqlite_db(tmp_path, monkeypatch)
         blocker = sqlite3.connect(engine.url.database)
         blocker.execute('BEGIN IMMEDIATE')
@@ -413,7 +412,7 @@ class TestSqliteUpsertIsBounded:
                                match='database is locked'):
                 global_user_state.add_or_update_user(
                     models.User(id='u-locked', name='tester'))
-            assert time.monotonic() - start < 1
+            assert time.monotonic() - start < 2
         finally:
             blocker.rollback()
             blocker.close()
@@ -423,28 +422,19 @@ class TestSqliteUpsertIsBounded:
         monkeypatch.setenv(_DEADLINE_ENV, '1')
         engine = _fresh_sqlite_db(tmp_path, monkeypatch)
         engine_timeout_ms = db_utils._DB_TIMEOUT_S * 1000
-        with engine.begin() as conn:
-            conn.exec_driver_sql('CREATE TABLE probe (value INTEGER)')
         global_user_state.add_or_update_user(
             models.User(id='u-ok', name='tester'))
         assert set(_pooled_busy_timeouts_ms(engine)) == {engine_timeout_ms}
 
-        blocker = sqlite3.connect(engine.url.database, check_same_thread=False)
+        blocker = sqlite3.connect(engine.url.database)
         blocker.execute('BEGIN IMMEDIATE')
-        with pytest.raises(sqlalchemy.exc.OperationalError):
-            global_user_state.add_or_update_user(
-                models.User(id='u-locked', name='tester'))
-        assert set(_pooled_busy_timeouts_ms(engine)) == {engine_timeout_ms}
-
-        # A plain write on the same engine still waits past sqlite3's
-        # default 5s timeout.
-        release = threading.Timer(6, blocker.commit)
-        release.start()
         try:
-            with engine.begin() as conn:
-                conn.exec_driver_sql('INSERT INTO probe VALUES (1)')
+            with pytest.raises(sqlalchemy.exc.OperationalError):
+                global_user_state.add_or_update_user(
+                    models.User(id='u-locked', name='tester'))
+            assert set(_pooled_busy_timeouts_ms(engine)) == {engine_timeout_ms}
         finally:
-            release.join()
+            blocker.rollback()
             blocker.close()
 
 

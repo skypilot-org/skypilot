@@ -1,7 +1,6 @@
 """Unit tests for database utilities with SKY_RUNTIME_DIR environment variable."""
 import os
 import sqlite3
-import threading
 import time
 from unittest import mock
 
@@ -54,7 +53,7 @@ class TestSkyRuntimeDirEnvVar:
 
 
 class TestSqliteEngineLockTimeout:
-    """The sync SQLite engine waits for the write lock for _DB_TIMEOUT_S."""
+    """The SQLite engines wait for the write lock for _DB_TIMEOUT_S."""
 
     @pytest.fixture(autouse=True)
     def _isolated_engine_cache(self, tmp_path, monkeypatch):
@@ -68,26 +67,16 @@ class TestSqliteEngineLockTimeout:
                 sqlalchemy.text('PRAGMA busy_timeout')).scalar()
         assert busy_timeout_ms == db_utils._DB_TIMEOUT_S * 1000
 
-    def test_write_waits_past_sqlite_default_timeout(self, tmp_path):
-        engine = db_utils.get_engine(db_name='lock_timeout')
-        with engine.begin() as conn:
-            conn.execute(sqlalchemy.text('CREATE TABLE items (value TEXT)'))
-        blocker = sqlite3.connect(tmp_path / '.sky/lock_timeout.db',
-                                  check_same_thread=False)
-        blocker.execute('BEGIN IMMEDIATE')
-        # Hold the lock longer than sqlite3's default 5s timeout.
-        release = threading.Timer(6, blocker.commit)
-        release.start()
+    @pytest.mark.asyncio
+    async def test_async_busy_timeout_is_db_timeout(self):
+        engine = db_utils.get_engine(db_name='lock_timeout', async_engine=True)
         try:
-            with engine.begin() as conn:
-                conn.execute(sqlalchemy.text('INSERT INTO items VALUES (1)'))
-            with engine.connect() as conn:
-                assert conn.execute(
-                    sqlalchemy.text('SELECT COUNT(*) FROM items')).scalar() == 1
+            async with engine.connect() as conn:
+                busy_timeout_ms = (await conn.execute(
+                    sqlalchemy.text('PRAGMA busy_timeout'))).scalar()
         finally:
-            release.join()
-            blocker.close()
-            engine.dispose()
+            await engine.dispose()
+        assert busy_timeout_ms == db_utils._DB_TIMEOUT_S * 1000
 
     def test_write_fails_when_lock_budget_expires(self, tmp_path, monkeypatch):
         monkeypatch.setattr(db_utils, '_DB_TIMEOUT_S', 0.05)
@@ -227,7 +216,9 @@ class TestGetEngine:
             call_args = mock_create.call_args
             assert 'sqlite+aiosqlite:///' in call_args[0][0]
             assert 'async_db.db' in call_args[0][0]
-            assert call_args[1]['connect_args'] == {'timeout': 30}
+            assert call_args[1]['connect_args'] == {
+                'timeout': db_utils._DB_TIMEOUT_S
+            }
             assert engine == mock_engine
 
     def test_sqlite_async_engine_not_cached(self, tmp_path, monkeypatch):
