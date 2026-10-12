@@ -4033,6 +4033,7 @@ def test_managed_jobs_api_access(generic_cloud: str):
         [
             f'sky jobs launch -n {name} --infra {generic_cloud} '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--env NESTED_INFRA={generic_cloud} '
             f'tests/test_yamls/test_api_access.yaml -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(

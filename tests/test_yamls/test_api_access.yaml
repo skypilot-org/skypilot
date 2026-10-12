@@ -4,6 +4,11 @@ resources:
 
 api_server_access: true
 
+envs:
+  # Infra for the nested job. Without it, the optimizer is free to place the
+  # nested job on any enabled infra, not the one the test targets.
+  NESTED_INFRA: kubernetes
+
 setup: |
   pip install "skypilot-nightly[remote]" > /dev/null 2>&1
 
@@ -17,7 +22,7 @@ run: |
   sky api info
 
   # Launch a nested job and wait for it
-  sky jobs launch --cpus 2+ --memory 4+ -n nested-job -y -d "echo nested-job-success"
+  sky jobs launch --infra "$NESTED_INFRA" --cpus 2+ --memory 4+ -n nested-job -y -d "echo nested-job-success"
 
   # Wait for nested job to complete
   for i in $(seq 1 60); do
