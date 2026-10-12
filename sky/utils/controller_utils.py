@@ -2,8 +2,10 @@
 import copy
 import dataclasses
 import enum
+import hashlib
 import os
 import pathlib
+import re
 import tempfile
 import typing
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
@@ -72,6 +74,11 @@ CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
 # cloud as controller.
 _LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX = (
     '__skypilot:local_skypilot_config_path.yaml')
+
+# Bucket key segment for a workspace name that is not a valid name: up to
+# this many slug characters, then '.' and this many hex digits of its hash.
+_WORKSPACE_BUCKET_SLUG_MAX_LENGTH = 32
+_WORKSPACE_BUCKET_HASH_LENGTH = 8
 
 
 @dataclasses.dataclass
@@ -1011,6 +1018,43 @@ def translate_local_file_mounts_to_two_hop(
     return first_hop_file_mounts
 
 
+def _workspace_bucket_segment(workspace_name: str) -> str:
+    """Map a workspace name to a single, collision-free bucket key segment.
+
+    Names that match ``WORKSPACE_NAME_VALID_REGEX`` are used as-is. Older
+    workspaces may predate that rule (e.g. ``Research`` or ``ml/prod``) and
+    must keep working, so their names map to ``<slug>.<hash>``: a readable
+    slug plus a hash of the exact name. ``.`` never appears in a valid name,
+    so a mapped name cannot collide with a valid one, and the hash keeps
+    names that share a slug (``Research`` / ``RESEARCH``) apart.
+
+    The mapping is part of the bucket layout that IAM policies refer to, so
+    it must not change.
+    """
+    if re.fullmatch(constants.WORKSPACE_NAME_VALID_REGEX, workspace_name):
+        return workspace_name
+    slug = re.sub(r'[^a-z0-9-]+', '-', workspace_name.lower()).strip('-')
+    slug = slug[:_WORKSPACE_BUCKET_SLUG_MAX_LENGTH].strip('-') or 'ws'
+    digest = hashlib.sha256(workspace_name.encode('utf-8')).hexdigest()
+    return f'{slug}.{digest[:_WORKSPACE_BUCKET_HASH_LENGTH]}'
+
+
+def _shared_bucket_workspace_prefix(config_sub_path: Optional[str],
+                                    workspace_name: str) -> str:
+    """Prefix a shared-bucket object key with the active workspace.
+
+    Keys land under ``workspaces/<segment>/`` so bucket IAM can enforce
+    RBAC; see ``_workspace_bucket_segment`` for how the workspace name maps
+    to ``<segment>``. ``config_sub_path`` is the path already present on
+    ``jobs.bucket`` or ``serve.bucket``.
+    """
+    workspace_prefix = constants.FILE_MOUNTS_WORKSPACE_SUBPATH.format(
+        workspace=_workspace_bucket_segment(workspace_name))
+    if not config_sub_path:
+        return workspace_prefix
+    return os.path.join(config_sub_path, workspace_prefix).strip('/')
+
+
 # (maybe translate local file mounts) and (sync up)
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                                                   task_type: str) -> None:
@@ -1029,6 +1073,9 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     between jobs, because jobs might have different resources requirements, and
     sharing storage between jobs may cause egress costs or slower transfer
     speeds.
+
+    When jobs.bucket or serve.bucket is set, objects are stored under
+    ``workspaces/<active-workspace>/`` so bucket IAM can enforce RBAC.
     """
 
     # ================================================================
@@ -1098,6 +1145,9 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             store_kwargs['storage_account_name'] = storage_account_name
         if region is not None:
             store_kwargs['region'] = region
+        # Scope the shared bucket by workspace so bucket IAM can enforce RBAC.
+        sub_path = _shared_bucket_workspace_prefix(
+            sub_path, skypilot_config.get_active_workspace())
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
@@ -1378,37 +1428,68 @@ MAX_TOTAL_RUNNING_JOBS = 2000
 _CONSOLIDATION_WORKER_MEMORY_FRACTION = 0.7
 
 
+def _controller_headroom_mb(reserve_extra_for_pool: bool) -> float:
+    """Memory kept free on top of whatever the controllers themselves use."""
+    headroom = float(MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB)
+    if reserve_extra_for_pool:
+        headroom *= (1. + POOL_JOBS_RESOURCES_RATIO)
+    return headroom
+
+
+def _consolidation_worker_reserved_mb(reserve_extra_for_pool: bool) -> float:
+    """Headroom plus the share set aside for the in-process controllers.
+
+    Scales with system memory, so a machine that can run more concurrent jobs
+    also holds back more memory for their controller processes. Below
+    MIN_AVAIL_MB the controller share is skipped so workers get everything.
+    """
+    headroom = _controller_headroom_mb(reserve_extra_for_pool)
+    total_memory_mb = common_utils.get_mem_size_gb() * 1024 - headroom
+    min_avail_mb = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE * 1024)
+    controllers_reserved = min(
+        total_memory_mb * (1 - _CONSOLIDATION_WORKER_MEMORY_FRACTION),
+        max(0, total_memory_mb - min_avail_mb))
+    return headroom + controllers_reserved
+
+
 def compute_memory_reserved_for_controllers(
-        reserve_for_controllers: bool, reserve_extra_for_pool: bool) -> float:
-    reserved_memory_mb = 0.0
-    if reserve_for_controllers:
-        reserved_memory_mb = float(MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB)
-        if reserve_extra_for_pool:
-            reserved_memory_mb *= (1. + POOL_JOBS_RESOURCES_RATIO)
-    return reserved_memory_mb
+        reserve_extra_for_pool: bool) -> float:
+    """Memory (MB) to withhold from API server worker sizing.
+
+    In consolidation mode the jobs and serve/pool controllers run as processes
+    inside the API server, so their memory has to be withheld before the
+    executor pools are sized. Returns the same quantity
+    _get_total_usable_memory_mb() assumes the workers left behind, so both
+    sides of the split agree on one number. Returns 0 outside consolidation
+    mode, where the controllers run on their own cluster.
+    """
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        # A local API server started from a controller process, which inherits
+        # its env. _get_parallelism() sizes that machine assuming only the flat
+        # headroom was withheld, so withhold exactly that.
+        return _controller_headroom_mb(reserve_extra_for_pool)
+    if not env_options.Options.MEMORY_AWARE_WORKER_SIZING.get():
+        return 0.0
+    # Either kind of consolidation puts controller processes in the API
+    # server's own memory.
+    if not is_jobs_consolidation_mode() and not _is_consolidation_mode(
+            pool=False):
+        return 0.0
+    return _consolidation_worker_reserved_mb(reserve_extra_for_pool)
 
 
 def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
-    controller_reserved = compute_memory_reserved_for_controllers(
-        reserve_for_controllers=True, reserve_extra_for_pool=pool)
-    total_memory_mb = (common_utils.get_mem_size_gb() * 1024 -
-                       controller_reserved)
+    headroom = _controller_headroom_mb(reserve_extra_for_pool=pool)
+    total_memory_mb = common_utils.get_mem_size_gb() * 1024 - headroom
     if not consolidation_mode:
         return total_memory_mb
-    # Cap the memory available for server workers so that both workers and
-    # services scale with system memory. Without this cap, short workers
-    # grow linearly with memory, consuming nearly all of it and leaving a
-    # roughly fixed amount for services regardless of system memory size.
-    # In low-memory scenarios (total_memory_mb <= MIN_AVAIL_MB), skip the
-    # service reservation so workers get all available memory; otherwise
-    # guarantee workers at least MIN_AVAIL_MB and cap them at the fraction.
-    min_avail_mb = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE * 1024)
-    service_reserved = min(
-        total_memory_mb * (1 - _CONSOLIDATION_WORKER_MEMORY_FRACTION),
-        max(0, total_memory_mb - min_avail_mb))
-    worker_reserved = controller_reserved + service_reserved
+    # Size the workers against the same reservation the API server uses, then
+    # hand the controllers whatever the workers did not take.
     config = server_config.compute_server_config(
-        deploy=True, quiet=True, reserved_memory_mb=worker_reserved)
+        deploy=True,
+        quiet=True,
+        reserved_memory_mb=_consolidation_worker_reserved_mb(
+            reserve_extra_for_pool=pool))
     used = 0.0
     used += ((config.long_worker_config.garanteed_parallelism +
               config.long_worker_config.burstable_parallelism) *
@@ -1416,6 +1497,10 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
     used += ((config.short_worker_config.garanteed_parallelism +
               config.short_worker_config.burstable_parallelism) *
              server_config.SHORT_WORKER_MEM_GB * 1024)
+    if env_options.Options.MEMORY_AWARE_WORKER_SIZING.get():
+        # Server workers are resident too, and the parent process with them.
+        used += ((config.num_server_workers + 1) *
+                 server_config.SERVER_WORKER_MEM_GB * 1024)
     return total_memory_mb - used
 
 
@@ -1517,6 +1602,22 @@ def _effective_jobs_consolidation_with_warnings(
     return effective, arg
 
 
+def effective_jobs_consolidation_mode() -> bool:
+    """Whether jobs run consolidated, without emitting operator guidance.
+
+    Same answer as `is_jobs_consolidation_mode`, minus the warning path: that
+    one queries the cluster table, scans the managed-jobs tables when
+    consolidation is off, and resolves through a `scope='request'` cache --
+    which is process-global, so a background thread that asks before the API
+    server has written the signal file pins the wrong answer for the whole
+    process. Readers on a polling path want the fact, not the guidance.
+    """
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        # Inside the controller process, which is consolidated by definition.
+        return True
+    return _read_jobs_consolidation_signal()
+
+
 def is_jobs_consolidation_mode(
         extra_validator: Optional[Callable[[bool], None]] = None) -> bool:
     """Return effective jobs-controller consolidation state.
@@ -1592,7 +1693,22 @@ def _get_parallelism(pool: bool, raw_resource_per_unit: float) -> int:
     return max(int(total_memory_mb / resource_per_unit), 1)
 
 
+def explicit_jobs_controllers() -> Optional[int]:
+    """The controller pool size set in the environment, None when unset.
+
+    Raises:
+        ValueError: if set but not an integer in [1, MAX_CONTROLLERS].
+    """
+    return server_config.explicit_process_count(
+        constants.ENV_VAR_SERVER_JOBS_CONTROLLERS,
+        minimum=1,
+        maximum=MAX_CONTROLLERS)
+
+
 def get_number_of_jobs_controllers() -> int:
+    explicit = explicit_jobs_controllers()
+    if explicit is not None:
+        return explicit
     return min(
         MAX_CONTROLLERS,
         _get_parallelism(pool=True, raw_resource_per_unit=JOB_WORKER_MEMORY_MB))

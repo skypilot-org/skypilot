@@ -182,8 +182,15 @@ export const FilterDropdown = ({
   propertyList = [],
   valueList,
   setFilters,
+  // Optional: pages that mirror filter state into the URL themselves (via
+  // useUrlFilterState) pass neither of these.
   updateURLParams,
   onFilterAdd,
+  // Optional: how a chip joins the existing ones. Defaults to appending, which
+  // is what pages without a filter schema expect. A page whose URL can only
+  // carry one value per property passes a helper that replaces instead, so the
+  // chips and the address bar cannot disagree.
+  addFilter,
   placeholder = 'Filter items',
 }) => {
   const inputRef = useRef(null);
@@ -271,16 +278,11 @@ export const FilterDropdown = ({
   const handleOptionSelect = (option) => {
     const property = getPropertyLabel(propertyValue);
     setFilters((prevFilters) => {
-      const updatedFilters = [
-        ...prevFilters,
-        {
-          property,
-          operator: ':',
-          value: option,
-        },
-      ];
+      const updatedFilters = addFilter
+        ? addFilter(prevFilters, property, option)
+        : [...prevFilters, { property, operator: ':', value: option }];
 
-      updateURLParams(updatedFilters);
+      updateURLParams?.(updatedFilters);
       return updatedFilters;
     });
     if (onFilterAdd) onFilterAdd(property, option);
@@ -293,16 +295,11 @@ export const FilterDropdown = ({
     if (e.key === 'Enter' && value.trim() !== '') {
       const property = getPropertyLabel(propertyValue);
       setFilters((prevFilters) => {
-        const updatedFilters = [
-          ...prevFilters,
-          {
-            property,
-            operator: ':',
-            value: value,
-          },
-        ];
+        const updatedFilters = addFilter
+          ? addFilter(prevFilters, property, value)
+          : [...prevFilters, { property, operator: ':', value }];
 
-        updateURLParams(updatedFilters);
+        updateURLParams?.(updatedFilters);
         return updatedFilters;
       });
       if (onFilterAdd) onFilterAdd(property, value);
@@ -410,14 +407,14 @@ export const Filters = ({ filters = [], setFilters, updateURLParams }) => {
         (_, _index) => _index !== index
       );
 
-      updateURLParams(updatedFilters);
+      updateURLParams?.(updatedFilters);
 
       return updatedFilters;
     });
   };
 
   const clearFilters = () => {
-    updateURLParams([]);
+    updateURLParams?.([]);
     setFilters([]);
   };
 

@@ -288,6 +288,21 @@ above, then set the following in :ref:`~/.sky/config.yaml <config-yaml>`:
     broader permissions similar to the `Minimum Permissions Required for SkyPilot`_.
 
 
+Controller clusters use a separate service account
+--------------------------------------------------
+
+A jobs or serve controller running as its own cluster provisions the clusters it
+launches, so its pod needs cluster-scoped permissions no pod running user code
+should hold. SkyPilot gives those clusters a separate account,
+``skypilot-controller-service-account``, and leaves
+``skypilot-service-account`` to workload pods. Under
+:ref:`consolidation mode <jobs-consolidation-mode>` the controllers
+run inside the API server and no pod holds these permissions at all.
+
+If you set ``remote_identity`` to a service account of your own, SkyPilot
+creates and reconciles nothing — you own that account's permissions for
+controllers and workloads alike.
+
 .. _k8s-sa-example:
 
 Example using custom service account

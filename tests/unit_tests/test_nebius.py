@@ -4,10 +4,13 @@ import os
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
+import pytest
+
 from sky import clouds
 from sky import resources as resources_lib
 from sky.adaptors import nebius as nebius_adaptor
 from sky.clouds import nebius
+from sky.provision.nebius import constants as nebius_constants
 from sky.utils import resources_utils
 
 
@@ -80,6 +83,35 @@ class TestNebiusNetworkTier:
 
         # Should NOT have CUSTOM_NETWORK_TIER as unsupported
         assert clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER not in unsupported_features
+
+    def test_network_tier_supported_for_blackwell_8gpu(self):
+        """Test that network_tier=best is supported for B200:8 and B300:8.
+
+        The Blackwell platforms are InfiniBand-capable but were rejected
+        because the accelerator check only listed H100/H200.
+        """
+        for acc in ['B200', 'B300']:
+            resources = resources_lib.Resources(cloud=nebius.Nebius(),
+                                                accelerators={acc: 8},
+                                                network_tier='best')
+
+            unsupported_features = (
+                nebius.Nebius._unsupported_features_for_resources(resources))
+
+            assert (clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER
+                    not in unsupported_features), acc
+
+    def test_network_tier_unsupported_for_blackwell_partial_node(self):
+        """Only 8-GPU instances can join an InfiniBand GPU cluster."""
+        resources = resources_lib.Resources(cloud=nebius.Nebius(),
+                                            accelerators={'B300': 1},
+                                            network_tier='best')
+
+        unsupported_features = nebius.Nebius._unsupported_features_for_resources(
+            resources)
+
+        assert (clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER
+                in unsupported_features)
 
     @patch('sky.provision.nebius.utils.get_project_by_region',
            return_value='test-project-id')
@@ -218,3 +250,53 @@ class TestNebiusAdaptorLogging:
         other_path = os.path.join('site-packages', 'otherlib', 'client.py')
         assert not log_filter.filter(_record(nebius_path))
         assert log_filter.filter(_record(other_path))
+
+
+class TestNebiusInfinibandFabrics:
+    """Tests for InfiniBand fabric selection per platform and region."""
+
+    def test_default_fabric_for_known_platforms(self):
+        """Every fabric is looked up by both platform and region."""
+        expected = {
+            ('gpu-h100-sxm', 'eu-north1'): 'fabric-2',
+            ('gpu-h200-sxm', 'eu-west1'): 'fabric-5',
+            ('gpu-h200-sxm', 'us-central1'): 'us-central1-a',
+            ('gpu-b200-sxm', 'us-central1'): 'us-central1-b',
+            ('gpu-b200-sxm-a', 'me-west1'): 'me-west1-a',
+            ('gpu-b300-sxm', 'uk-south1'): 'uk-south1-a',
+        }
+        for (platform, region), fabric in expected.items():
+            assert nebius_constants.get_default_fabric(platform,
+                                                       region) == fabric
+
+    def test_default_fabric_rejects_unavailable_combination(self):
+        """An unknown platform/region must not fall back to another region.
+
+        A fabric belongs to one platform in one region, so returning a default
+        from elsewhere (previously eu-north1's H100 fabric) would attach the
+        GPU cluster to a fabric that does not exist for the request.
+        """
+        with pytest.raises(ValueError, match='No InfiniBand fabric'):
+            nebius_constants.get_default_fabric('gpu-b300-sxm', 'eu-north1')
+        with pytest.raises(ValueError, match='No InfiniBand fabric'):
+            nebius_constants.get_default_fabric('gpu-l40s', 'uk-south1')
+
+    def test_infiniband_platforms_cover_mapped_fabrics(self):
+        """Every platform with a fabric must be treated as InfiniBand-capable."""
+        for platform, _ in nebius_constants.INFINIBAND_FABRIC_MAPPING:
+            assert platform in nebius_constants.INFINIBAND_INSTANCE_PLATFORMS
+
+    def test_preset_prefix_matches_8gpu_presets(self):
+        """The GPU-cluster preset check must cover every 8-GPU shape.
+
+        The vCPU/memory portion differs per platform, so an exact-match check
+        silently skipped GPU cluster creation on B200 and B300.
+        """
+        prefix = nebius_constants.INFINIBAND_PRESET_PREFIX
+        for preset in [
+                '8gpu-128vcpu-1600gb',  # H100, H200
+                '8gpu-160vcpu-1792gb',  # B200
+                '8gpu-192vcpu-2768gb',  # B300
+        ]:
+            assert preset.startswith(prefix)
+        assert not '1gpu-16vcpu-200gb'.startswith(prefix)

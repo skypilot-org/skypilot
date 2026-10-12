@@ -1212,3 +1212,153 @@ def test_merge_k8s_configs_claims_merged_by_name():
     assert len(claims) == 3
     assert names == ['roce-claim', 'cd', 'extra-claim']
     assert len(names) == len(set(names))
+
+
+def test_redact_sensitive_values() -> None:
+    """Secret values are hidden from a config that is about to be logged."""
+    token = 'sky_eyJhbGciOiJIUzI1NiJ9.payload.signature'
+    config = {
+        'api_server': {
+            'endpoint': 'https://api.example.com',
+            'service_account_token': token,
+        },
+        'db': 'postgresql://user:hunter2@host:5432/state',
+        'active_workspace': 'default',
+        'logs': {
+            'aws': {
+                'credentials_file': '~/.aws/credentials'
+            }
+        },
+    }
+    original = copy.deepcopy(config)
+
+    redacted = config_utils.redact_sensitive_values(config)
+
+    assert redacted['api_server'][
+        'service_account_token'] == config_utils.REDACTED_VALUE
+    assert redacted['db'] == config_utils.REDACTED_VALUE
+    # Non-secrets survive, including a field that merely names a credential
+    # file rather than holding one.
+    assert redacted['api_server']['endpoint'] == 'https://api.example.com'
+    assert redacted['active_workspace'] == 'default'
+    assert redacted['logs']['aws']['credentials_file'] == '~/.aws/credentials'
+    # The caller still needs the real values, so the input is untouched.
+    assert config == original
+
+
+def test_redact_sensitive_values_docker_login_lists() -> None:
+    """A docker login password is hidden inside any_of / ordered entries."""
+    config = {
+        'jobs': {
+            'controller': {
+                'resources': {
+                    '_docker_login_config': {
+                        'username': 'u',
+                        'password': 'direct',
+                    },
+                    'any_of': [
+                        {
+                            '_docker_login_config': {
+                                'password': 'in-any-of'
+                            }
+                        },
+                        {
+                            'infra': 'aws'
+                        },
+                    ],
+                    'ordered': [{
+                        '_docker_login_config': {
+                            'password': 'in-ordered'
+                        }
+                    }],
+                }
+            }
+        }
+    }
+
+    redacted = config_utils.redact_sensitive_values(config)
+
+    resources = redacted['jobs']['controller']['resources']
+    assert resources['_docker_login_config'][
+        'password'] == config_utils.REDACTED_VALUE
+    assert resources['any_of'][0]['_docker_login_config'][
+        'password'] == config_utils.REDACTED_VALUE
+    assert resources['ordered'][0]['_docker_login_config'][
+        'password'] == config_utils.REDACTED_VALUE
+    # The username is not a secret and identifies which login was used.
+    assert resources['_docker_login_config']['username'] == 'u'
+    # An entry without a docker login is left alone.
+    assert resources['any_of'][1] == {'infra': 'aws'}
+
+
+def test_redact_sensitive_values_absent_and_empty() -> None:
+    """Redaction neither invents keys nor trips over missing ones."""
+    assert config_utils.redact_sensitive_values(None) == {}
+    assert config_utils.redact_sensitive_values({}) == {}
+
+    # An unset secret stays unset, so a redaction marker never implies that a
+    # value was configured.
+    config = {'api_server': {'service_account_token': None}}
+    assert config_utils.redact_sensitive_values(config) == {
+        'api_server': {
+            'service_account_token': None
+        }
+    }
+
+    # Paths that do not exist are simply skipped.
+    assert config_utils.redact_sensitive_values(
+        {'kubernetes': {
+            'autoscaler': 'karpenter'
+        }}) == {
+            'kubernetes': {
+                'autoscaler': 'karpenter'
+            }
+        }
+
+
+def test_register_sensitive_config_paths() -> None:
+    """A plugin-registered path is redacted like a built-in one."""
+    original = list(config_utils.SENSITIVE_CONFIG_PATHS)
+    try:
+        config_utils.register_sensitive_config_paths([
+            ('my_plugin', 'api_key'),
+            ('my_plugin', 'endpoints', '*', 'token'),
+        ])
+        config = {
+            'my_plugin': {
+                'api_key': 'plugin-secret',
+                'name': 'keep-me',
+                'endpoints': {
+                    'east': {
+                        'token': 'east-secret',
+                        'url': 'https://east.example.com',
+                    },
+                },
+            },
+        }
+
+        redacted = config_utils.redact_sensitive_values(config)
+
+        plugin = redacted['my_plugin']
+        assert plugin['api_key'] == config_utils.REDACTED_VALUE
+        assert plugin['endpoints']['east'][
+            'token'] == config_utils.REDACTED_VALUE
+        assert plugin['name'] == 'keep-me'
+        assert plugin['endpoints']['east']['url'] == 'https://east.example.com'
+    finally:
+        config_utils.SENSITIVE_CONFIG_PATHS[:] = original
+
+
+def test_dump_redacted_yaml() -> None:
+    """The log-facing serializer hides secrets and keeps the rest readable."""
+    dumped = config_utils.dump_redacted_yaml({
+        'api_server': {
+            'endpoint': 'https://api.example.com',
+            'service_account_token': 'sky_eyJhbGciOiJIUzI1NiJ9.canary.sig',
+        },
+    })
+
+    assert 'canary' not in dumped
+    assert 'service_account_token: <redacted>' in dumped
+    assert 'endpoint: https://api.example.com' in dumped
+    assert config_utils.dump_redacted_yaml(None) == '{}\n'

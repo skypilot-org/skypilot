@@ -3,6 +3,7 @@ import concurrent.futures
 import contextlib
 import datetime
 import json
+import logging
 import os
 import posixpath
 import subprocess
@@ -203,7 +204,7 @@ class TestGetRequestsFromManagedJobs:
 
     MOCK_QUEUE_V2 = 'sky.jobs.server.core.queue_v2'
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_finds_requests_by_job_id(self, mock_get_tasks, _mock_queue):
         """Should find requests whose body has a matching job_id."""
@@ -219,7 +220,7 @@ class TestGetRequestsFromManagedJobs:
 
         assert 'req-j1' in ctx['request_ids']
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_finds_requests_by_job_ids_list(self, mock_get_tasks, _mock_queue):
         """Should find requests whose body has matching job_ids list."""
@@ -235,7 +236,7 @@ class TestGetRequestsFromManagedJobs:
 
         assert 'req-j2' in ctx['request_ids']
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_skips_non_matching_job_ids(self, mock_get_tasks, _mock_queue):
         """Requests with unrelated job IDs should not be collected."""
@@ -261,7 +262,7 @@ class TestGetRequestsFromManagedJobs:
         mock_get_tasks.assert_not_called()
         assert ctx['request_ids'] == set()
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_none_body_is_skipped(self, mock_get_tasks, _mock_queue):
         """Requests with None body should be silently skipped."""
@@ -276,7 +277,7 @@ class TestGetRequestsFromManagedJobs:
 
         assert ctx['request_ids'] == set()
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_db_failure_logs_warning(self, mock_get_tasks, _mock_queue):
         """DB failure should log warning but not crash."""
@@ -288,7 +289,7 @@ class TestGetRequestsFromManagedJobs:
 
         assert ctx['request_ids'] == set()
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_filters_by_managed_job_request_names(self, mock_get_tasks,
                                                   _mock_queue):
@@ -315,7 +316,7 @@ class TestGetRequestsFromManagedJobs:
             'job_id': 42,
             'job_name': 'my-training',
             'user_hash': 'user-abc'
-        }], 1, {}, 1)
+        }], 1, {}, 1, [])
         body = SimpleNamespace(job_id=None,
                                job_ids=None,
                                name='my-training',
@@ -340,7 +341,7 @@ class TestGetRequestsFromManagedJobs:
             'job_id': 42,
             'job_name': 'my-job',
             'user_hash': 'user-abc'
-        }], 1, {}, 1)
+        }], 1, {}, 1, [])
         body = SimpleNamespace(job_id=None,
                                job_ids=None,
                                name=None,
@@ -365,7 +366,7 @@ class TestGetRequestsFromManagedJobs:
             'job_id': 42,
             'job_name': 'my-job',
             'user_hash': 'user-abc'
-        }], 1, {}, 1)
+        }], 1, {}, 1, [])
         body = SimpleNamespace(job_id=None,
                                job_ids=None,
                                name=None,
@@ -391,7 +392,7 @@ class TestGetRequestsFromManagedJobs:
             'job_id': 42,
             'job_name': 'my-job',
             'user_hash': 'user-abc'
-        }], 1, {}, 1)
+        }], 1, {}, 1, [])
         body = SimpleNamespace(job_id=None,
                                job_ids=None,
                                name=None,
@@ -409,7 +410,7 @@ class TestGetRequestsFromManagedJobs:
 
         assert 'req-cancel-other' not in ctx['request_ids']
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_matches_launch_by_return_value(self, mock_get_tasks, _mock_queue):
         """Should match jobs.launch request via return_value.job_id."""
@@ -426,7 +427,7 @@ class TestGetRequestsFromManagedJobs:
 
         assert 'req-rv' in ctx['request_ids']
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_matches_launch_by_return_value_list(self, mock_get_tasks,
                                                  _mock_queue):
@@ -620,7 +621,7 @@ class TestGetManagedJobsFromClusters:
             'task_name': 'train',
             'current_cluster_name': None,
             'pool': None,
-        }], 0, {}, 0)
+        }], 0, {}, 0, [])
         name = managed_job_utils.generate_managed_job_cluster_name('train', 7)
         ctx = _make_context(cluster_names={name})
 
@@ -651,7 +652,7 @@ class TestGetManagedJobsFromClusters:
                 'current_cluster_name': 'worker-2',
                 'pool': 'p',
             },
-        ], 0, {}, 0)
+        ], 0, {}, 0, [])
         ctx = _make_context(cluster_names={'worker-1'})
 
         debug_utils._get_managed_jobs_from_clusters(ctx, _StubReachability())
@@ -713,7 +714,7 @@ class TestGetJobClustersFromManagedJobs:
                 'current_cluster_name': None,
                 'pool': None,
             },
-        ], 0, {}, 0)
+        ], 0, {}, 0, [])
         ctx = _make_context(managed_job_ids={5})
 
         debug_utils._get_job_clusters_from_managed_jobs(ctx)
@@ -737,7 +738,7 @@ class TestGetJobClustersFromManagedJobs:
             'task_name': 'train',
             'current_cluster_name': 'worker-9',
             'pool': 'p',
-        }], 0, {}, 0)
+        }], 0, {}, 0, [])
         ctx = _make_context(managed_job_ids={6})
 
         debug_utils._get_job_clusters_from_managed_jobs(ctx)
@@ -949,7 +950,7 @@ class TestPopulateRecentContext:
         recent_request = _make_request(request_id='req-recent')
         mock_get_tasks.return_value = [recent_request]
         mock_get_clusters.return_value = []
-        mock_queue_v2.return_value = ([], 0, {}, 0)
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -966,7 +967,7 @@ class TestPopulateRecentContext:
         """Should push time filtering to the DB via finished_after."""
         mock_get_tasks.return_value = []
         mock_get_clusters.return_value = []
-        mock_queue_v2.return_value = ([], 0, {}, 0)
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -1000,7 +1001,7 @@ class TestPopulateRecentContext:
                 'launched_at': now - 200000,
             },
         ]
-        mock_queue_v2.return_value = ([], 0, {}, 0)
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -1039,7 +1040,7 @@ class TestPopulateRecentContext:
                 'launched_at': now - 60,
             },
         ]
-        mock_queue_v2.return_value = ([], 0, {}, 0)
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -1068,7 +1069,7 @@ class TestPopulateRecentContext:
                 'submitted_at': now - 100000,
                 'end_at': now - 90000,
             },
-        ], 2, {}, 2)
+        ], 2, {}, 2, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -1089,7 +1090,7 @@ class TestPopulateRecentContext:
                                         finished_at=None)
         mock_get_tasks.return_value = [running_request]
         mock_get_clusters.return_value = []
-        mock_queue_v2.return_value = ([], 0, {}, 0)
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -1133,7 +1134,7 @@ class TestPopulateRecentContext:
             'status_updated_at': now - 100000,
             'launched_at': now - 1800,
         }]
-        mock_queue_v2.return_value = ([], 0, {}, 0)
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -1241,7 +1242,7 @@ class TestCrossLinkCycleBreak:
         ]
         # queue_v2 must not raise — patch it as a no-op.
         with mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2',
-                        return_value=([], 0, {}, 0)):
+                        return_value=([], 0, {}, 0, [])):
             ctx = _make_context(managed_job_ids={42})
             debug_utils._get_requests_from_managed_jobs(ctx,
                                                         _StubReachability())
@@ -1300,7 +1301,7 @@ class TestCrossLinkCycleBreak:
                           name='sky.jobs.launch'),
         ]
         with mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2',
-                        return_value=([], 0, {}, 0)):
+                        return_value=([], 0, {}, 0, [])):
             # 'user-seeded' was already in request_ids before the helper ran.
             ctx = _make_context(managed_job_ids={42},
                                 request_ids={'user-seeded'})
@@ -1336,7 +1337,7 @@ class TestCrossLinkCycleBreak:
                           name='sky.jobs.cancel'),
         ]
         with mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2',
-                        return_value=([], 0, {}, 0)):
+                        return_value=([], 0, {}, 0, [])):
             ctx = _make_context(managed_job_ids={1})
             debug_utils._get_requests_from_managed_jobs(ctx,
                                                         _StubReachability())
@@ -1483,10 +1484,14 @@ class TestCreateDebugDump:
                                   mock_clusters_from_jobs, mock_dump_server,
                                   mock_dump_requests, mock_dump_clusters,
                                   mock_dump_jobs, tmp_path):
-        """Client info should be written when provided."""
+        """Client info should be written when provided, with credentials in
+        its env redacted."""
         client_info = {
             'client_version': '0.10.0',
             'platform': 'linux',
+            'environment': {
+                'SKYPILOT_SERVICE_ACCOUNT_TOKEN': 'real_token',
+            },
         }
         with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
                         str(tmp_path / 'debug_dumps')):
@@ -1501,6 +1506,8 @@ class TestCreateDebugDump:
             data = json.loads(zf.read(client_info_files[0]))
             assert data['client_version'] == '0.10.0'
             assert data['platform'] == 'linux'
+            assert (data['environment']['SKYPILOT_SERVICE_ACCOUNT_TOKEN'] ==
+                    '<redacted>')
 
     @mock.patch('sky.utils.debug_utils._dump_managed_job_info')
     @mock.patch('sky.utils.debug_utils._dump_cluster_info')
@@ -1843,7 +1850,7 @@ class TestDumpManagedJobQueueInfo:
             'job_id': 1,
             'job_name': 'test-job',
             'status': 'RUNNING',
-        }], 1, {}, 1)
+        }], 1, {}, 1, [])
 
         jobs_dir = str(tmp_path / 'managed_jobs')
         os.makedirs(jobs_dir, exist_ok=True)
@@ -1872,7 +1879,7 @@ class TestDumpManagedJobQueueInfo:
                 'task_name': 'task-b',
                 'status': 'RUNNING'
             },
-        ], 1, {}, 1)
+        ], 1, {}, 1, [])
 
         jobs_dir = str(tmp_path / 'managed_jobs')
         os.makedirs(jobs_dir, exist_ok=True)
@@ -1882,6 +1889,30 @@ class TestDumpManagedJobQueueInfo:
                                            'job_info_task0.json'))
         assert os.path.exists(os.path.join(jobs_dir, '1',
                                            'job_info_task1.json'))
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    def test_redacts_task_yaml_fields(self, mock_queue_v2, tmp_path):
+        """Task YAML fields in job_info.json should be redacted."""
+        task_yaml = ('name: my-task\n'
+                     'envs:\n'
+                     '  SKYPILOT_API_SERVER_ENDPOINT: '
+                     'https://alice:real_pass@example.com\n'
+                     'secrets:\n'
+                     '  SKYPILOT_SERVICE_ACCOUNT_TOKEN: real_token\n')
+        mock_queue_v2.return_value = ([{
+            'job_id': 1,
+            'user_yaml': task_yaml,
+            'original_user_yaml_content': task_yaml,
+        }], 1, {}, 1, [])
+
+        jobs_dir = str(tmp_path / 'managed_jobs')
+        os.makedirs(jobs_dir, exist_ok=True)
+        debug_utils._dump_managed_job_queue_info({1}, jobs_dir, [])
+
+        with open(os.path.join(jobs_dir, '1', 'job_info.json')) as f:
+            content = f.read()
+        assert 'real_pass' not in content
+        assert 'real_token' not in content
 
     @mock.patch('sky.jobs.server.core.queue_v2')
     def test_error_handling(self, mock_queue_v2, tmp_path):
@@ -2297,15 +2328,15 @@ class TestManifestPathTraversal:
 
 
 # ---------------------------------------------------------------------------
-# Tests for _SENSITIVE_ENV_VARS redaction
+# Tests for SENSITIVE_ENV_VARS redaction
 # ---------------------------------------------------------------------------
 class TestSensitiveEnvVarRedaction:
     """Tests for sensitive environment variable redaction."""
 
     def test_sensitive_env_vars_redacted(self):
         """Sensitive env vars should have their values replaced with bool."""
-        assert 'SKYPILOT_DB_CONNECTION_URI' in debug_utils._SENSITIVE_ENV_VARS
-        assert 'SKYPILOT_INITIAL_BASIC_AUTH' in debug_utils._SENSITIVE_ENV_VARS
+        assert 'SKYPILOT_DB_CONNECTION_URI' in debug_dump_helpers.SENSITIVE_ENV_VARS
+        assert 'SKYPILOT_INITIAL_BASIC_AUTH' in debug_dump_helpers.SENSITIVE_ENV_VARS
 
     @mock.patch('sky.utils.debug_utils.sky_check.check', return_value={})
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request',
@@ -2982,6 +3013,35 @@ class TestSanitizeRequestBody:
         assert result['env_vars']['AWS_SECRET_ACCESS_KEY'] == '<redacted>'
         assert result['env_vars']['SKYPILOT_DB_CONNECTION_URI'] == '<redacted>'
 
+    def test_debug_dump_client_credentials_redacted(self):
+        """Credentials in a debug dump request's env and client info should
+        be redacted."""
+
+        class FakeBody:
+
+            def model_dump(self):
+                return {
+                    'env_vars': {
+                        'SKYPILOT_API_SERVER_ENDPOINT': 'https://alice:real_pass@example.com',
+                    },
+                    'client_info': {
+                        'environment': {
+                            'SKYPILOT_SERVICE_ACCOUNT_TOKEN': 'real_token',
+                            'SKYPILOT_DEBUG': '1',
+                        },
+                    },
+                }
+
+        request = _make_request(name='sky.create_debug_dump',
+                                request_body=FakeBody())
+        result = debug_utils._sanitize_request_body(request)
+        assert result is not None
+        assert (result['env_vars']['SKYPILOT_API_SERVER_ENDPOINT'] ==
+                'https://alice:<redacted>@example.com')
+        environment = result['client_info']['environment']
+        assert environment['SKYPILOT_SERVICE_ACCOUNT_TOKEN'] == '<redacted>'
+        assert environment['SKYPILOT_DEBUG'] == '1'
+
     def test_task_yaml_field_redacted(self):
         """Task YAML fields should have secrets redacted."""
         task_yaml = ('name: my-task\n'
@@ -3063,6 +3123,28 @@ class TestRedactTaskYaml:
         result = debug_dump_helpers.redact_task_yaml(yaml_str)
         assert 'val1' not in result
         assert 'val2' not in result
+
+    def test_redacts_embedded_user_specified_yaml(self):
+        """The raw user YAML embedded in a dumped task should be redacted."""
+        yaml_str = ('name: my-task\n'
+                    '_user_specified_yaml: |\n'
+                    '  name: my-task\n'
+                    '  secrets:\n'
+                    '    API_KEY: real_api_key\n')
+        result = debug_dump_helpers.redact_task_yaml(yaml_str)
+        assert 'real_api_key' not in result
+        assert 'API_KEY' in result
+
+    def test_masks_api_server_endpoint_password(self):
+        """The basic-auth password in the API server endpoint env var should
+        be masked."""
+        yaml_str = ('name: my-task\n'
+                    'envs:\n'
+                    '  SKYPILOT_API_SERVER_ENDPOINT: '
+                    'https://alice:real_pass@example.com\n')
+        result = debug_dump_helpers.redact_task_yaml(yaml_str)
+        assert 'real_pass' not in result
+        assert 'alice:<redacted>@example.com' in result
 
 
 # ---------------------------------------------------------------------------
@@ -3781,7 +3863,7 @@ class TestCollectClusterSkyletLog:
         assert not errors
 
     def test_uses_relocated_runtime_dir(self, tmp_path):
-        """A relocated SKY_RUNTIME_DIR (Slurm/devspaces) is honored because the
+        """A relocated SKY_RUNTIME_DIR (e.g. on Slurm) is honored because the
         path is resolved on the remote node, not from a Python attribute."""
         runner = mock.Mock()
         runner.run.return_value = (0, '/scratch/rt/.sky/skylet.log\n', '')
@@ -4493,3 +4575,32 @@ class TestOverallDeadlineDump:
         assert result.exists()
         for fn, m in section_mocks.items():
             assert m.call_count == 1, f'{fn} should have run exactly once'
+
+
+def test_debug_dump_log_writes_provision_records_once(tmp_path):
+    """The dump's handler sits on both `sky` and `sky.provision`.
+
+    Outside a provision `sky.provision` propagates, so without dedupe a
+    sky.provision.* record would land in debug_dump.log twice. Only the
+    handler wiring runs: the dump body is replaced, so nothing is collected.
+    """
+
+    def build(*args, **kwargs):
+        del args, kwargs
+        logging.getLogger('sky.provision.test').warning('dump-marker-6414')
+
+    provision_logger = logging.getLogger('sky.provision')
+    original = provision_logger.propagate
+    provision_logger.propagate = True
+    try:
+        with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
+                        str(tmp_path / 'debug_dumps')), \
+             mock.patch('sky.utils.debug_utils._build_debug_dump',
+                        side_effect=build):
+            result = debug_utils.create_debug_dump()
+    finally:
+        provision_logger.propagate = original
+    with zipfile.ZipFile(result, 'r') as zf:
+        log_name = next(
+            n for n in zf.namelist() if n.endswith('debug_dump.log'))
+        assert zf.read(log_name).decode().count('dump-marker-6414') == 1

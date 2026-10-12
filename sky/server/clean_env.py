@@ -12,12 +12,23 @@ subprocesses (consolidation-mode controllers) so they don't inherit
 per-request env pollution from `override_request_env_and_config`.
 """
 import os
-from typing import Dict, Optional
+from typing import Dict, Mapping, Optional
 
 # Set once via capture_clean_server_env() in the main API server process, and
 # once per worker via executor_initializer (forwarded from the main process's
 # snapshot through initargs). Reads happen via get_clean_server_env().
 _clean_server_env: Optional[Dict[str, str]] = None
+
+# Never forwarded to a spawned subprocess: prometheus_client reads
+# PROMETHEUS_MULTIPROC_DIR as "join the parent's multiprocess registry", and
+# the per-pid files a child writes outlive it -- mark_process_dead() reclaims
+# only the gauge_live* ones -- so every short-lived subprocess permanently
+# grows the directory /metrics merges on each scrape.
+_DROP_FOR_SUBPROCESSES = frozenset({'PROMETHEUS_MULTIPROC_DIR'})
+
+
+def _for_subprocesses(env: Mapping[str, str]) -> Dict[str, str]:
+    return {k: v for k, v in env.items() if k not in _DROP_FOR_SUBPROCESSES}
 
 
 def capture_clean_server_env() -> None:
@@ -30,7 +41,7 @@ def capture_clean_server_env() -> None:
     """
     global _clean_server_env
     if _clean_server_env is None:
-        _clean_server_env = dict(os.environ)
+        _clean_server_env = _for_subprocesses(os.environ)
 
 
 def set_clean_server_env(env: Dict[str, str]) -> None:
@@ -41,7 +52,7 @@ def set_clean_server_env(env: Dict[str, str]) -> None:
     """
     global _clean_server_env
     if _clean_server_env is None:
-        _clean_server_env = dict(env)
+        _clean_server_env = _for_subprocesses(env)
 
 
 def get_clean_server_env() -> Optional[Dict[str, str]]:

@@ -4,9 +4,11 @@ from concurrent import futures
 import functools
 import gzip
 import hashlib
+import io
 import json
 import os
 import shlex
+import tarfile
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -102,8 +104,90 @@ DUMP_RAY_PORTS = (f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
                   f'"{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", '
                   'encoding="utf-8"))\';')
 
-_HOST_NETWORK_ENV_FILE = '/tmp/sky_host_network_ports.env'
 _HOST_NETWORK_PROBE_TARGET = '/tmp/sky_host_network_probe.py'
+# A pod created before the server assigned ports has none in its env; its
+# own probe wrote them here at boot, so a re-run on it reads them back. A
+# worker keeps the head port the provisioner exported: the saved one is stale
+# once the head is replaced.
+_LEGACY_HOST_NETWORK_PORTS_ENV = '/tmp/sky_host_network_ports.env'
+_SOURCE_LEGACY_HOST_NETWORK_PORTS = (
+    'if [ -z "${SKYPILOT_SSHD_PORT:-}" ] && '
+    f'[ -f {_LEGACY_HOST_NETWORK_PORTS_ENV} ]; then '
+    '_sky_head_gcs="${SKYPILOT_RAY_PORT:-}"; '
+    f'. {_LEGACY_HOST_NETWORK_PORTS_ENV}; '
+    '[ -z "$_sky_head_gcs" ] || export SKYPILOT_RAY_PORT="$_sky_head_gcs"; '
+    'fi; ')
+
+_RAY_PATCHES_TARGET_DIR = '/tmp/sky_ray_patches'
+
+
+@functools.lru_cache(maxsize=1)
+def _ray_patches_b64() -> str:
+    """The ray_patches directory as a base64 gzipped tar.
+
+    Cached rather than module-level for the same reason as the host-network
+    probe: it is only needed when building a launch command.
+
+    Every timestamp is pinned to 0 so the payload is byte-identical across
+    renders -- it lands in the cluster YAML, and a payload that changed per
+    launch would change the config hash and force needless re-provisioning.
+    """
+    src_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'skylet',
+        'ray_patches')
+    names = sorted(
+        n for n in os.listdir(src_dir)
+        if n == 'apply_patches.py' or n.endswith(('.patch', '.diff')))
+    buf = io.BytesIO()
+    # mtime=0 on the GzipFile, a fixed TarInfo per member, and an explicit tar
+    # format, so nothing in the archive varies with the filesystem or with the
+    # Python version rendering it (tarfile.DEFAULT_FORMAT has changed before).
+    with gzip.GzipFile(fileobj=buf, mode='wb', mtime=0) as gz:
+        with tarfile.open(fileobj=gz, mode='w',
+                          format=tarfile.GNU_FORMAT) as tar:
+            for name in names:
+                with open(os.path.join(src_dir, name), 'rb') as f:
+                    data = f.read()
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                info.mtime = 0
+                info.mode = 0o644
+                info.uid = info.gid = 0
+                info.uname = info.gname = ''
+                tar.addfile(info, io.BytesIO(data))
+    return base64.b64encode(buf.getvalue()).decode('ascii')
+
+
+def ray_patches_cmd(ray_version: str) -> str:
+    """Shell snippet that patches Ray from a payload carried in the pod spec.
+
+    Kubernetes patches Ray from the pod's own args, which run before the
+    SkyPilot wheel is uploaded. Reading the patches out of whatever
+    `pip install skypilot` resolved to would take them from an unrelated
+    release, whose patches target an unrelated Ray version.
+
+    The version check is part of this command rather than a separate guard in
+    the template, so the version the patches are applied *against* and the
+    version they were *generated for* cannot drift apart. A node running some
+    other Ray is skipped without failing -- patching it with files generated
+    for a different Ray is what corrupts it -- but it says so: an image with a
+    baked Ray at another version gets no patches, and silence there leaves
+    "why are my Ray patches missing" with nothing to go on.
+    """
+    apply = (f'mkdir -p {_RAY_PATCHES_TARGET_DIR} && '
+             f'echo \'{_ray_patches_b64()}\' | base64 -d | '
+             f'tar xzf - -C {_RAY_PATCHES_TARGET_DIR} && '
+             f'{constants.SKY_PYTHON_CMD} '
+             f'{_RAY_PATCHES_TARGET_DIR}/apply_patches.py '
+             f'--ray-version {ray_version}')
+    # "not found" rather than "is not installed": the guard also comes out
+    # false when uv itself fails, and that must not read as a claim about
+    # which Ray is installed.
+    skipped = (f'echo "Ray {ray_version} not found in the SkyPilot runtime '
+               'env; skipping SkyPilot\'s Ray patches."')
+    return (f'if {constants.SKY_UV_PIP_CMD} list | grep "ray " | '
+            f'grep {ray_version} > /dev/null 2>&1; then {apply}; '
+            f'else {skipped}; fi')
 
 
 @functools.lru_cache(maxsize=1)
@@ -123,18 +207,20 @@ def _host_network_probe_b64() -> str:
 
 
 def _host_network_probe_cmd(mode: str) -> str:
-    """Bash snippet that probes Ray + sshd ports when running with hostNetwork.
+    """Bash snippet verifying the assigned host ports under hostNetwork.
 
     Returns a runtime-gated snippet: a no-op shell branch unless
-    SKYPILOT_HOST_NETWORK=1 and SKYPILOT_RAY_PORTS_CONFIGMAP_NAME are
-    set in the pod env. Non-hostNetwork bootstraps see no change — env
-    vars stay unset and ``${VAR:-default}`` in the ray flags falls back
-    to the constants.
+    SKYPILOT_HOST_NETWORK=1 is set in the pod env. Non-hostNetwork
+    bootstraps see no change — env vars stay unset and ``${VAR:-default}``
+    in the ray flags falls back to the constants.
 
-    Also rebinds the pod's sshd to the probed SKYPILOT_SSHD_PORT. Under
+    The ports themselves arrive in the pod env, written into the spec by
+    the server; this only proves they are free before ray takes them.
+
+    Also rebinds the pod's sshd to the assigned SKYPILOT_SSHD_PORT. Under
     hostNetwork the node's own sshd already owns host:22 so the pod's
     sshd silently failed to bind in apt-ssh-setup; rewriting Port in
-    sshd_config and restarting picks up the probed port instead.
+    sshd_config and restarting picks up the assigned port instead.
 
     The probe is shipped gzip+base64-inline rather than invoked as a
     module because the K8s template installs stable skypilot from PyPI
@@ -147,17 +233,16 @@ def _host_network_probe_cmd(mode: str) -> str:
     """
     assert mode in ('head', 'worker'), mode
     return (
-        'if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ] && '
-        '[ -n "${SKYPILOT_RAY_PORTS_CONFIGMAP_NAME:-}" ]; then '
+        # Gated on SKYPILOT_HOST_NETWORK alone. It used to also require
+        # SKYPILOT_RAY_PORTS_CONFIGMAP_NAME, and the sshd_config rewrite below
+        # is inside this same `fi` -- so dropping that env var without
+        # rewriting the gate would silently no-op the whole branch and leave
+        # sshd on 22, where the K8s node's own sshd listens.
+        'if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ]; then '
         f'echo \'{_host_network_probe_b64()}\' | base64 -d | gunzip > '
-        f'{_HOST_NETWORK_PROBE_TARGET}; '
+        f'{_HOST_NETWORK_PROBE_TARGET}; ' + _SOURCE_LEGACY_HOST_NETWORK_PORTS +
         f'{constants.SKY_PYTHON_CMD} {_HOST_NETWORK_PROBE_TARGET} '
-        f'--mode {mode} '
-        f'--env-file {_HOST_NETWORK_ENV_FILE} '
-        '--configmap-name "$SKYPILOT_RAY_PORTS_CONFIGMAP_NAME" '
-        '--configmap-namespace '
-        '"$SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE" || exit 1; '
-        f'set -a; . {_HOST_NETWORK_ENV_FILE}; set +a; '
+        f'--mode {mode} || exit 1; '
         # Delete-then-append rather than sed-in-place: sshd_config files
         # without an existing Port directive would otherwise keep the
         # default 22 (where the K8s node's own sshd already listens).
@@ -521,12 +606,21 @@ def ray_worker_start_command(custom_resource: Optional[str],
         # will return 0, i.e., we don't know skypilot's ray cluster is running.
         # Instead, we check whether the raylet process is running on gcs address
         # that is connected to the head with the correct port.
+        #
+        # The probe goes INSIDE this guard. It asserts the assigned host ports
+        # are free before ray binds them, so it only has something to assert
+        # when we are about to start ray: on a retry where ray is already up,
+        # those ports are held by our own raylet and the assertion fails
+        # against itself. Seen on the recovery path -- the worker rejoined and
+        # the cluster was healthy, but the launch reported failure.
         cmd = (
             f'ps aux | grep "ray/raylet/raylet" | '
             'grep "gcs-address=${SKYPILOT_RAY_HEAD_IP}:${SKYPILOT_RAY_PORT}" '
-            f'|| {{ {cmd} }}')
-    else:
-        cmd = f'{constants.SKY_RAY_CMD} stop; ' + cmd
+            f'|| {{ {_host_network_probe_cmd("worker")}{cmd} }}')
+        return cmd
+    # `ray stop` first, so the ports really are free by the time the probe
+    # runs and the assertion means what it says.
+    cmd = f'{constants.SKY_RAY_CMD} stop; ' + cmd
     return _host_network_probe_cmd('worker') + cmd
 
 

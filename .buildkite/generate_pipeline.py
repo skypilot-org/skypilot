@@ -241,7 +241,6 @@ def _extract_marked_tests(
     file_path: str,
     args: str,
     default_clouds_to_run: List[str],
-    k_value: Optional[str],
     extra_args: List[str],
     exclusive_run: bool = False
 ) -> Dict[str, Tuple[List[str], List[str], List[Optional[str]], List[List[str]],
@@ -293,10 +292,6 @@ def _extract_marked_tests(
         # conftest.py
         if 'skip' in marks:
             continue
-        if k_value is not None and k_value not in function_name and k_value not in file_path:
-            # TODO(zpoint): support and/or in k_value
-            continue
-
         marks = marks.replace('\'', '').split(',')
         marks = [i.strip() for i in marks]
 
@@ -405,9 +400,21 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
     # --submodule-base-branch, --dependency, --generic-cloud, --base-branch)
     # that are not in older pinned conftests and would cause
     # `pytest --collect-only` to exit with code 4, silently collecting 0 tests.
-    pytest_collect_args = shlex.join(extra_args + list(pytest_native))
+    # `-k` is forwarded to the collection rather than re-implemented here, so
+    # the selection is pytest's own: the full expression grammar (`or`, `and`,
+    # `not`, parentheses), matched against each test's name and its parents'
+    # -- which includes the module, so `-k cli` still takes all of
+    # test_cli.py. Unlike the generate_pipeline-only flags excluded above,
+    # `-k` is a pytest builtin, so every pinned conftest understands it.
+    # It is kept out of `extra_args` deliberately: that list is also appended
+    # to each generated step's command, where a second `-k` would clobber the
+    # per-parameter one added below.
+    collect_args = extra_args + list(pytest_native)
+    if k_value is not None:
+        collect_args += ['-k', k_value]
+    pytest_collect_args = shlex.join(collect_args)
     function_cloud_map = _extract_marked_tests(test_file, pytest_collect_args,
-                                               default_clouds_to_run, k_value,
+                                               default_clouds_to_run,
                                                extra_args, exclusive)
     concurrency_limit = None
     build_id = None
@@ -436,6 +443,15 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
             if param:
                 label += f' with param {param}'
                 command += f' -k {param}'
+            elif k_value is not None:
+                # No per-parameter step was generated for this function, so
+                # the node id alone does not say which items were selected:
+                # pytest would re-collect every parameter of the function and
+                # run them all. Carry the caller's expression so the step runs
+                # what `pytest -k` would. Functions that DID get split already
+                # name a single parameter above, and a second -k would
+                # override the first.
+                command += f' -k {shlex.quote(k_value)}'
             if extra_args:
                 command += f' {" ".join(extra_args)}'
             if label in generated_steps_set:

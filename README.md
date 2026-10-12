@@ -1,8 +1,10 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-dark-1k.png">
-    <img alt="SkyPilot" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-light-1k.png" width=55%>
-  </picture>
+  <a href="https://skypilot.ai/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-dark-1k.png">
+      <img alt="SkyPilot" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-light-1k.png" width=55%>
+    </picture>
+  </a>
 </p>
 
 <p align="center">
@@ -41,9 +43,11 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 -----
 
 :fire: *News* :fire:
-- [Aug 2026] **RL is bottlenecked by inference**: scale it independently with SkyPilot: [**blog**](https://skypilot.ai/blog/slime-agentic-rl)
+- [Oct 2026] **SkyPilot AI Infra Meetup** with H Company in SF on Oct 8: [**register now**](https://partiful.com/e/kazBr6qiMhabcqdVm4nf)
+- [Sep 2026] **RL is Everything, Everywhere, All at Once**: [**blog**](https://skypilot.ai/blog/rl-everything)
+- [Sep 2026] **SkyPilot Agent Sessions**: Mission Control for Coding Agents, on Your Infrastructure: [**blog**](https://skypilot.ai/blog/agent-sessions)
 - [Jul 2026] **Serving Kimi K3 on your own GPUs with SkyPilot**: [**blog**](https://skypilot.ai/blog/kimi-k3)
-- [Jul 2026] **SkyPilot v0.13.0** released: Hugging Face storage, batch inference abstractions, lifecycle hooks, governance & robustness on API server: [**Release notes**](https://github.com/skypilot-org/skypilot/releases#release-v0.13.0)
+- [Jul 2026] **Run AI workloads on any cloud, store on Hugging Face**, no egress fees to worry about: [**Hugging Face blog**](https://huggingface.co/blog/skypilot-hf-storage)
 - [Jun 2026] **SkyPilot Endpoints**: production-ready inference on every cluster you own: [**blog**](https://skypilot.ai/blog/skypilot-endpoints)
 - [Jun 2026] **Announcing SkyPilot Sandboxes**: run untrusted, LLM-generated code on the Kubernetes clusters you already own. [**Learn more**](https://skypilot.ai/blog/sandboxes), [**join early access**](https://forms.gle/o4keAryXsVazNjyGA)
 - [May 2026] **How Multiverse doubled their GPU utilization with SkyPilot**: [**case study**](https://multiversecomputing.com/papers/2x-gpu-utilization-same-hardware-discover-our-efficiency-playbook)

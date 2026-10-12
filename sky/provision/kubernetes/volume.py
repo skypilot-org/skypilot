@@ -1,9 +1,11 @@
 """Kubernetes volume provisioning (PVC and hostPath)."""
+import decimal
 import enum
 import re
 import time as time_module
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from sky import clouds
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
@@ -12,10 +14,13 @@ from sky.provision import constants
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
-from sky.utils import resources_utils
 from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
+
+# A volume's size is recorded in gibibytes, which is also the unit the PVC
+# spec is written in.
+_BYTES_PER_GIB = 1024**3
 
 PVC_FAILING_EVENT_REASONS = ('ProvisioningFailed',)
 WARNING_EVENT_TYPE = 'Warning'
@@ -55,6 +60,21 @@ _TERMINAL_GRPC_CODES = ('InvalidArgument', 'AlreadyExists', 'OutOfRange',
 # never fail a launch.
 _IN_PROGRESS_GRPC_CODES = ('Canceled', 'DeadlineExceeded', 'Unavailable',
                            'Aborted')
+
+# Every resize state a claim reports on its conditions, and what each means
+# for the volume. This is the only place the claim explains itself in words,
+# so it is also where the state is read from -- see `_pvc_resize_state`.
+#
+# Ordered, because a claim holds several at once: one waiting to be mounted is
+# still `Resizing` too. Reading them in list order would report the wrong one,
+# so they are read worst-first: a failure to look at, then work that cannot
+# proceed, then work that is proceeding.
+_RESIZE_CONDITIONS = (
+    ('ControllerResizeError', models.VolumeResizeStatus.FAILED),
+    ('NodeResizeError', models.VolumeResizeStatus.FAILED),
+    ('FileSystemResizePending', models.VolumeResizeStatus.PENDING_ON_NODE),
+    ('Resizing', models.VolumeResizeStatus.IN_PROGRESS),
+)
 
 
 class PvcFailure(enum.Enum):
@@ -107,10 +127,64 @@ def _is_rbac_permission_error(e: Exception) -> bool:
     return getattr(e, 'status', None) in (401, 403)
 
 
-def _get_context_namespace(config: models.VolumeConfig) -> Tuple[str, str]:
-    """Gets the context and namespace of a volume."""
+def _resolve_context_for_new_volume() -> Optional[str]:
+    """The context to create a volume on when its config names none.
+
+    A Kubernetes volume's `region` is its kubeconfig context. When the user
+    leaves it unset (e.g. `sky volumes apply --infra k8s`), the context has to
+    be chosen -- and the choice has to agree with where workloads actually
+    run, or the PVC is created on a cluster no pod can ever mount it from.
+
+    The kubeconfig's `current-context` alone is not that answer on a server
+    with several contexts: `allowed_contexts` may exclude it entirely, in
+    which case every pod lands somewhere else. So resolve through
+    `Kubernetes.existing_allowed_contexts()`, the same list the scheduling
+    path uses, and keep `current-context` only when it is actually allowed --
+    which preserves the existing behavior for the ordinary single-cluster
+    case.
+
+    Only for volumes being created. Looking up a volume that already exists
+    is a different question -- see `_get_context_namespace`.
+    """
+    current_context = kubernetes_utils.get_current_kube_config_context_name()
+    allowed_contexts = clouds.Kubernetes.existing_allowed_contexts(silent=True)
+    if not allowed_contexts:
+        # Nothing to cross-check against: no kubeconfig, or Kubernetes is not
+        # enabled. Fall back to the previous behavior rather than failing
+        # here -- the K8s API call that follows raises a clearer error.
+        return current_context
+    if current_context in allowed_contexts:
+        return current_context
+    context = allowed_contexts[0]
+    logger.info(
+        f'Volume does not specify a context and the kubeconfig\'s current '
+        f'context {current_context!r} is not in allowed_contexts; using '
+        f'{context!r}. Set the volume\'s infra to a specific context '
+        f'(e.g. `--infra k8s/<context>`) to choose explicitly.')
+    return context
+
+
+def _get_context_namespace(config: models.VolumeConfig,
+                           creating: bool = False) -> Tuple[Optional[str], str]:
+    """Gets the context and namespace of a volume.
+
+    `creating` separates the two questions this answers for a config with no
+    `region`. Creating a volume *chooses* a context, and the choice has to
+    agree with where workloads run. Every other caller is *looking up* a
+    volume that already exists somewhere -- and for a volume predating the
+    region pinning below (`refresh_volume_config` repairs those only under
+    in-cluster auth, so elsewhere they stay region-less), the only honest
+    guess is the one its own creation made: the kubeconfig's current context.
+    Re-deciding that on a lookup would point at a different cluster and
+    report a perfectly healthy volume as deleted.
+
+    The context is None only when no context could be resolved at all (no
+    kubeconfig and no in-cluster auth); the K8s adaptor treats that as "use
+    whatever config loading finds", which is the pre-existing behavior.
+    """
     if config.region is None:
-        context = kubernetes_utils.get_current_kube_config_context_name()
+        context = (_resolve_context_for_new_volume() if creating else
+                   kubernetes_utils.get_current_kube_config_context_name())
         config.region = context
     else:
         context = config.region
@@ -221,7 +295,7 @@ def _validate_explicit_storage_class(context: Optional[str],
 
 def _apply_pvc_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     """Creates or registers a PVC volume."""
-    context, namespace = _get_context_namespace(config)
+    context, namespace = _get_context_namespace(config, creating=True)
     pvc_spec = _get_pvc_spec(namespace, config)
     # use_existing volumes look up an existing PVC; no new provisioning
     # happens. Storage-class validation (either the explicit-name check
@@ -536,7 +610,7 @@ def refresh_volume_config(
 
 def get_all_volumes_usedby(
     configs: List[models.VolumeConfig],
-) -> Tuple[Dict[str, Any], Dict[str, Any], Set[str]]:
+) -> Tuple[Dict[Optional[str], Any], Dict[Optional[str], Any], Set[str]]:
     """Gets the usedby resources of all volumes.
 
     Args:
@@ -556,9 +630,9 @@ def get_all_volumes_usedby(
         for phase in k8s_constants.PVC_NOT_HOLD_POD_PHASES
     ])
     label_selector = 'parent=skypilot'
-    context_to_namespaces: Dict[str, Set[str]] = {}
+    context_to_namespaces: Dict[Optional[str], Set[str]] = {}
     pvc_names = set()
-    original_volume_names: Dict[str, Dict[str, List[str]]] = {}
+    original_volume_names: Dict[Optional[str], Dict[str, List[str]]] = {}
     for config in configs:
         # Skip hostPath volumes — they have no PVC to track
         if config.type == volume_lib.VolumeType.HOSTPATH.value:
@@ -571,8 +645,8 @@ def get_all_volumes_usedby(
         pvc_names.add(config.name_on_cloud)
     cloud_to_name_map = _get_cluster_name_on_cloud_to_cluster_name_map()
     # Get all pods in the namespace
-    used_by_pods: Dict[str, Dict[str, Dict[str, List[str]]]] = {}
-    used_by_clusters: Dict[str, Dict[str, Dict[str, List[str]]]] = {}
+    used_by_pods: Dict[Optional[str], Dict[str, Dict[str, List[str]]]] = {}
+    used_by_clusters: Dict[Optional[str], Dict[str, Dict[str, List[str]]]] = {}
     failed_volume_names: Set[str] = set()
     for context, namespaces in context_to_namespaces.items():
         used_by_pods[context] = {}
@@ -624,7 +698,8 @@ def get_all_volumes_usedby(
 
 
 def map_all_volumes_usedby(
-        used_by_pods: Dict[str, Any], used_by_clusters: Dict[str, Any],
+        used_by_pods: Dict[Optional[str],
+                           Any], used_by_clusters: Dict[Optional[str], Any],
         config: models.VolumeConfig) -> Tuple[List[str], List[str]]:
     """Maps the usedby resources of a volume."""
     context, namespace = _get_context_namespace(config)
@@ -706,32 +781,42 @@ def _get_pvc_error(context: Optional[str], namespace: str,
     return None
 
 
-def get_all_volumes_errors(
+def get_all_volumes_state(
     configs: List[models.VolumeConfig],
-) -> Tuple[Dict[str, Optional[str]], Set[str]]:
-    """Gets error messages for all Kubernetes PVC volumes.
+) -> Tuple[Dict[str, Optional[str]], Dict[str, models.ObservedVolumeState],
+           Set[str]]:
+    """Gets the cluster's view of all Kubernetes PVC volumes.
+
+    Both the error check and the cloud-owned fields come out of the same PVC
+    objects, so they are read in one pass: no volume can be judged against one
+    version of a PVC and described from another, and the listing is not paid
+    for twice.
 
     Args:
         configs: List of VolumeConfig objects.
 
     Returns:
-        A tuple of (errors, failed_volume_names):
+        A tuple of (errors, observed, failed_volume_names):
         - errors maps volume name to an error message, or to None when the
           volume is healthy.
+        - observed maps volume name to what the PVC reports about the fields
+          the cluster owns. Absent for a volume whose PVC could not be read.
         - failed_volume_names holds volumes whose status could not be
           determined because the cluster could not be queried. Callers must
           leave the recorded status of these volumes untouched rather than
           reading their absence from ``errors`` as "healthy".
 
-        Every input config lands in exactly one of the two, so a caller never
-        has to guess what an absent volume means.
+        Every input config lands in exactly one of errors and
+        failed_volume_names, so a caller never has to guess what an absent
+        volume means.
     """
     # Keyed by (context, namespace): the same PVC name may exist in several
     # namespaces, and resolving it against the wrong one would mismatch.
-    configs_by_location: Dict[Tuple[str, str], Dict[str,
-                                                    models.VolumeConfig]] = {}
+    configs_by_location: Dict[Tuple[Optional[str], str],
+                              Dict[str, models.VolumeConfig]] = {}
 
     volume_errors: Dict[str, Optional[str]] = {}
+    observed: Dict[str, models.ObservedVolumeState] = {}
     failed_volume_names: Set[str] = set()
 
     for config in configs:
@@ -768,6 +853,7 @@ def get_all_volumes_errors(
             seen_pvc_names.add(pvc.metadata.name)
             volume_errors[vol_config.name] = _get_pvc_error(
                 context, namespace, pvc)
+            observed[vol_config.name] = _observed_volume_state(pvc)
 
         # A registered PVC missing from the labelled listing is either a
         # use_existing volume (adopted as-is, so it never got the skypilot
@@ -802,8 +888,9 @@ def get_all_volumes_errors(
                 continue
             volume_errors[vol_config.name] = _get_pvc_error(
                 context, namespace, pvc)
+            observed[vol_config.name] = _observed_volume_state(pvc)
 
-    return volume_errors, failed_volume_names
+    return volume_errors, observed, failed_volume_names
 
 
 def _check_storage_class_volume_binding_mode(context: Optional[str],
@@ -891,6 +978,138 @@ def _check_pvc_access_mode_error(context: Optional[str],
             f'kubectl describe pvc {pvc_name} -n {namespace}')
 
 
+def _pvc_capacity(pvc_obj: Any) -> Optional[str]:
+    """Returns the capacity the PVC's bound volume actually has, if any.
+
+    ``status.capacity`` is the real size of the underlying volume, while
+    ``spec.resources.requests`` is only what was asked for: a request can be
+    rounded up by the provisioner, expanded later, or not yet fulfilled. A
+    claim that is not bound reports nothing here.
+    """
+    capacity = getattr(getattr(pvc_obj, 'status', None), 'capacity', None)
+    if isinstance(capacity, dict):
+        return capacity.get('storage')
+    return None
+
+
+def _parse_pvc_size(size_quantity: Optional[str],
+                    pvc_name: str) -> Optional[str]:
+    """Normalizes a Kubernetes storage quantity to a volume size in GiB.
+
+    Shared by the create and refresh paths so the two cannot record the same
+    PVC differently.
+
+    Parsed by the Kubernetes client rather than `resources_utils`, which reads
+    a quantity by SkyPilot's rules rather than Kubernetes': a bare number is
+    bytes to Kubernetes and gigabytes to SkyPilot, and the decimal suffixes a
+    claim can perfectly well be written with (`2G`, `500M`) are not units it
+    knows at all. A claim SkyPilot did not create -- which is every
+    `use_existing` volume -- is written however its author wrote it.
+
+    Rounds to the nearest GiB, since that is the only unit a volume's size is
+    recorded in: a claim written `2G` is 1.86GiB, and reporting 1Gi for it
+    would look like half the volume went missing.
+    """
+    if not size_quantity:
+        return None
+    try:
+        size_bytes = kubernetes.parse_quantity(size_quantity)
+        size = int(
+            decimal.Decimal(size_bytes / _BYTES_PER_GIB).quantize(
+                decimal.Decimal('1'), rounding=decimal.ROUND_HALF_UP))
+    except Exception as e:  # pylint: disable=broad-except
+        # Just log the error since it is not critical: a volume whose size
+        # cannot be read keeps the one already recorded.
+        logger.warning(f'Failed to parse PVC size {size_quantity!r} '
+                       f'for PVC {pvc_name}: {e}')
+        return None
+    if size <= 0:
+        # Under half a gibibyte. Volume creation rejects '0' as a size, so
+        # recording it here would put a value in the database that the same
+        # volume could not have been created with.
+        logger.warning(f'Ignoring PVC size {size_quantity!r} for PVC '
+                       f'{pvc_name}: rounds to less than 1Gi.')
+        return None
+    return str(size)
+
+
+def _true_resize_conditions(status: Any) -> Dict[str, Optional[str]]:
+    """The claim's resize conditions that currently hold, and what they say."""
+    conditions = getattr(status, 'conditions', None)
+    held: Dict[str, Optional[str]] = {}
+    for condition in conditions if isinstance(conditions, list) else []:
+        if getattr(condition, 'status', None) != 'True':
+            continue
+        condition_type = getattr(condition, 'type', None)
+        if condition_type is not None:
+            held[condition_type] = getattr(condition, 'message', None)
+    return held
+
+
+def _pvc_resize_state(
+    pvc_obj: Any, pvc_name: str
+) -> Tuple[Optional[models.VolumeResizeStatus], Optional[str], Optional[str]]:
+    """Returns how far a resize of this claim has got, what it is heading for,
+    and how the claim explains itself.
+
+    All three are None when no resize is in flight, which is the normal case.
+
+    A claim's capacity only moves once the new space exists, so an expansion
+    that is still running -- or that is waiting to be mounted before the
+    filesystem can grow -- looks like nothing happened at all.
+
+    Read from the conditions rather than `status.allocatedResourceStatuses`,
+    even though the latter is the purpose-built field: the state and the words
+    describing it then come from the same place and cannot disagree, and every
+    cluster has conditions while only recent ones have that field. What it
+    would add -- telling a controller-stage resize from a node-stage one -- is
+    collapsed by VolumeResizeStatus anyway.
+    """
+    status = getattr(pvc_obj, 'status', None)
+    conditions = _true_resize_conditions(status)
+    resize_status = None
+    message = None
+    for condition_type, mapped in _RESIZE_CONDITIONS:
+        if condition_type in conditions:
+            resize_status = mapped
+            message = conditions[condition_type]
+            break
+    if resize_status is None:
+        return None, None, None
+
+    # What the resize is heading for: the capacity being allocated, or, before
+    # the backend has acknowledged anything, the request itself.
+    allocated = getattr(status, 'allocated_resources', None)
+    target = allocated.get('storage') if isinstance(allocated, dict) else None
+    if target is None:
+        requests = getattr(getattr(pvc_obj.spec, 'resources', None), 'requests',
+                           None)
+        if isinstance(requests, dict):
+            target = requests.get('storage')
+    return resize_status, _parse_pvc_size(target, pvc_name), message
+
+
+def _observed_volume_state(pvc_obj: Any) -> models.ObservedVolumeState:
+    """Reads the fields of a PVC that the cluster, not our config, owns.
+
+    Only reports what the PVC actually says, so that a caller merging this into
+    a recorded config never clears a value it cannot see.
+    """
+    pvc_name = pvc_obj.metadata.name
+    resize_status, resize_target_size, resize_message = _pvc_resize_state(
+        pvc_obj, pvc_name)
+    return models.ObservedVolumeState(
+        size=_parse_pvc_size(_pvc_capacity(pvc_obj), pvc_name),
+        # An empty storageClassName is the Kubernetes way of opting out of
+        # dynamic provisioning, not a class name to record.
+        storage_class_name=(getattr(pvc_obj.spec, 'storage_class_name', None) or
+                            None),
+        resize_status=resize_status,
+        resize_target_size=resize_target_size,
+        resize_message=resize_message,
+    )
+
+
 def _populate_config_from_pvc(config: models.VolumeConfig,
                               pvc_obj: Any) -> None:
     """Populate missing fields in config from a PVC object.
@@ -923,28 +1142,14 @@ def _populate_config_from_pvc(config: models.VolumeConfig,
             config.config['access_mode'] = pvc_access_mode
 
     # Populate size if not set (prefer bound capacity, fallback to requested)
-    pvc_size = None
-    size_quantity = None
-    # Try status.capacity (dict) - actual bound size
-    capacity = getattr(getattr(pvc_obj, 'status', None), 'capacity', None)
-    if isinstance(capacity, dict) and 'storage' in capacity:
-        size_quantity = capacity['storage']
+    size_quantity = _pvc_capacity(pvc_obj)
     # Fallback to spec.resources.requests (dict) - requested size
     if size_quantity is None:
         requests = getattr(getattr(pvc_obj.spec, 'resources', None), 'requests',
                            None)
         if isinstance(requests, dict):
             size_quantity = requests.get('storage')
-    # Parse and normalize the size if found
-    if size_quantity:
-        try:
-            # Normalize to GB string (e.g., '20')
-            pvc_size = resources_utils.parse_memory_resource(
-                size_quantity, 'size', allow_rounding=True)
-        except ValueError as e:
-            # Just log the error since it is not critical.
-            logger.warning(f'Failed to parse PVC size {size_quantity!r} '
-                           f'for PVC {pvc_name}: {e}')
+    pvc_size = _parse_pvc_size(size_quantity, pvc_name)
     if pvc_size is not None:
         if config.size is not None and config.size != pvc_size:
             logger.warning(f'PVC {pvc_name} has size {pvc_size} but config '
@@ -1028,9 +1233,16 @@ def create_persistent_volume_claim(
             logger.debug(f'Found existing PVC {pvc.metadata.name} for volume '
                          f'{volume_name}')
             return
+        # Name the context and namespace searched. When the volume config
+        # carried no context of its own, `_resolve_context_for_new_volume`
+        # chose one, and "does not exist" on its own reads as "your PVC is
+        # gone" when the truth may be that it lives on a context
+        # `allowed_contexts` excludes.
         raise ValueError(
             f'PVC with name or label skypilot-name={volume_name} does not '
-            f'exist while use_existing is True.')
+            f'exist in namespace {namespace!r} on context {context!r} while '
+            f'use_existing is True. If the PVC lives on another cluster, '
+            f'name it explicitly with `--infra k8s/<context>`.')
 
     # Try to read PVC by name_on_cloud (for non-use_existing case)
     try:
