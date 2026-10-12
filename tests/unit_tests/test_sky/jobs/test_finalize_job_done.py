@@ -280,6 +280,26 @@ class TestFailJobControllerInitialization:
                         job_id)).fetchone()[0]
         assert cluster_name == 'live-cluster'
 
+    def test_retry_after_committed_failure_is_success(
+            self, _mock_managed_jobs_db_conn):
+        job_id = _seed_job([(ManagedJobStatus.PENDING, None)],
+                           ManagedJobScheduleState.LAUNCHING)
+        _set_job_info(job_id,
+                      controller_pid=1234,
+                      controller_pid_started_at=1000.0)
+        claim = self._claim(job_id)
+        reason = 'context restore failed; manual cleanup'
+
+        assert state.fail_job_controller_initialization(claim, reason)
+        assert state.fail_job_controller_initialization(claim, reason)
+        assert not state.fail_job_controller_initialization(
+            claim, 'another failure')
+        assert not state.fail_job_controller_initialization(
+            {
+                **claim, 'controller_pid': 5678
+            }, reason)
+        assert _event_statuses(job_id) == [ManagedJobStatus.FAILED_CONTROLLER]
+
     def test_changed_owner_is_untouched(self, _mock_managed_jobs_db_conn):
         job_id = _seed_job([(ManagedJobStatus.PENDING, None)],
                            ManagedJobScheduleState.LAUNCHING)
