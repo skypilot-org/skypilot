@@ -3,7 +3,8 @@ import asyncio
 import logging
 import os
 import threading
-from typing import Any, Awaitable, Dict, List, Optional
+from typing import (Any, Awaitable, Dict, List, NamedTuple, Optional, Tuple,
+                    Union)
 
 from sky import sky_logging
 from sky import skypilot_config
@@ -321,33 +322,79 @@ def _user_agent_prefix() -> str:
     return f'skypilot/{__version__}'
 
 
-@annotations.lru_cache(scope='request')
+# SDKs own a loop thread, channel pool and token-renewal task. Dropping a
+# request-scoped cache entry does not release those resources. Reuse clients
+# across requests, serializing construction to avoid concurrent cache misses.
+_SDK_CLOSE_TIMEOUT = 30
+_sdk_lock = threading.Lock()
+
+
+class _SDKCacheEntry(NamedTuple):
+    credential_version: Union[str, Tuple[int, int, int, int]]
+    client: Any
+
+
+_sdk_cache: Dict[Tuple[bool, str, Optional[str]], _SDKCacheEntry] = {}
+
+
+def _close_sdk(sdk_client: Any) -> None:
+    # sdk() can also be called from an asyncio.run() loop (catalog fetching).
+    # SDK.sync_close() rejects asynchronous callers, so close on our own loop.
+    try:
+        sync_call(
+            asyncio.wait_for(sdk_client.close(), timeout=_SDK_CLOSE_TIMEOUT))
+    except Exception:  # pylint: disable=broad-except
+        # Try every client during cache clearing, even if one fails to close.
+        logger.warning('Failed to close a cached Nebius SDK.', exc_info=True)
+
+
 def _sdk(token: Optional[str], cred_path: Optional[str]):
-    # Exactly one of token or cred_path must be provided
+    # Exactly one of token or cred_path must be provided.
     assert (token is None) != (cred_path is None), (token, cred_path)
-    if token is not None:
-        return nebius.sdk.SDK(credentials=token,
-                              domain=api_domain(),
-                              user_agent_prefix=_user_agent_prefix())
-    if cred_path is not None:
-        return nebius.sdk.SDK(
-            credentials_file_name=os.path.expanduser(cred_path),
-            domain=api_domain(),
-            user_agent_prefix=_user_agent_prefix(),
-        )
-    raise ValueError('Either token or credentials file path must be provided')
+    domain = api_domain()
+    source_path = os.path.abspath(
+        os.path.expanduser(
+            cred_path if cred_path is not None else iam_token_path()))
+    source = (token is not None, source_path, domain)
+    with _sdk_lock:
+        credential_version: Union[str, Tuple[int, int, int, int]]
+        if token is not None:
+            credential_version = token
+        else:
+            # The SDK reads service-account credentials only at construction.
+            # Preserve credential refresh when a file is edited or replaced.
+            stat = os.stat(source_path)
+            credential_version = (stat.st_ino, stat.st_size, stat.st_mtime_ns,
+                                  stat.st_ctime_ns)
+        previous = _sdk_cache.get(source)
+        if (previous is not None and
+                previous.credential_version == credential_version):
+            return previous.client
+        if token is not None:
+            sdk_client = nebius.sdk.SDK(credentials=token,
+                                        domain=domain,
+                                        user_agent_prefix=_user_agent_prefix())
+        else:
+            sdk_client = nebius.sdk.SDK(credentials_file_name=source_path,
+                                        domain=domain,
+                                        user_agent_prefix=_user_agent_prefix())
+        _sdk_cache[source] = _SDKCacheEntry(credential_version, sdk_client)
+    if previous is not None:
+        _close_sdk(previous.client)
+    return sdk_client
 
 
 def clear_sdk_cache() -> None:
-    """Drops the cached SDK client.
+    """Close and drop cached SDKs when their callers have finished using them.
 
-    The SDK is cached per credentials and holds grpc.aio channels bound to the
-    event loop that first used them. `asyncio.run()` closes the loop it
-    creates, and once a request has failed on such a channel, later calls from
-    a fresh loop raise "Event loop is closed". Callers that drive more than one
-    `asyncio.run()` cycle in a single process must reset the client in between.
+    The catalog fetcher calls this between asyncio.run() cycles. Request cache
+    clearing must not discard these process-wide clients without closing them.
     """
-    _sdk.cache_clear()
+    with _sdk_lock:
+        clients = list(_sdk_cache.values())
+        _sdk_cache.clear()
+    for entry in clients:
+        _close_sdk(entry.client)
 
 
 def get_nebius_credentials(boto3_session):
