@@ -254,14 +254,13 @@ class PostgresLock(DistributedLock):
                         f'Failed to acquire postgres lock {self.lock_id}: '
                         'lock connection pool is full') from e
                 time.sleep(self.poll_interval)
-        cursor = self._connection.cursor()
-
         if self._shared_lock:
             lock_func = 'pg_try_advisory_lock_shared'
         else:
             lock_func = 'pg_try_advisory_lock'
 
         try:
+            cursor = self._connection.cursor()
             while True:
                 cursor.execute(f'SELECT {lock_func}(%s)', (self._lock_key,))
                 result = cursor.fetchone()[0]

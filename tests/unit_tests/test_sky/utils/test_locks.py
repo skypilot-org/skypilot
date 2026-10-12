@@ -429,6 +429,25 @@ class TestPostgresLock:
         connection.close.assert_called_once()
         assert lock._connection is None
 
+    @mock.patch.object(locks.PostgresLock, '_get_connection')
+    def test_postgres_lock_cursor_failure_cleanup(self, mock_get_connection,
+                                                  mock_connection):
+        connection, _ = mock_connection
+        connection.cursor.side_effect = RuntimeError('cursor unavailable')
+        healthy = mock.Mock()
+        healthy.cursor.return_value.fetchone.return_value = [True]
+        mock_get_connection.side_effect = [connection, healthy]
+        lock = locks.PostgresLock('test_lock')
+
+        with pytest.raises(RuntimeError, match='cursor unavailable'):
+            lock.acquire()
+        connection.close.assert_called_once()
+        assert lock._connection is None
+
+        lock.acquire(blocking=False)
+        assert lock.is_locked()
+        lock.release()
+
     def test_postgres_lock_release_not_acquired(self):
         """Test postgres lock release when not acquired."""
         lock = locks.PostgresLock('test_lock')
