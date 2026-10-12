@@ -1626,16 +1626,28 @@ function JobDetailsContent({
     );
   }
 
-  // Collapsible SkyPilot YAML row at the bottom of the info card.
+  const copyButton = (copied, onClick, title) => (
+    <button
+      onClick={onClick}
+      title={title}
+      className="ml-2 inline-flex items-center align-middle text-gray-400 hover:text-gray-700 focus:outline-none"
+    >
+      {copied ? (
+        <CheckIcon className="w-3.5 h-3.5 text-green-600" />
+      ) : (
+        <CopyIcon className="w-3.5 h-3.5" />
+      )}
+    </button>
+  );
+  // Collapsible SkyPilot YAML row, under the entrypoint it was launched with.
   const yamlBlock =
     jobData.dag_yaml && jobData.dag_yaml !== '{}' ? (
-      <div>
-        {/* Full-width collapsible row; -mx-4 lets its border reach the card edges. */}
-        <div className="flex items-center gap-2 -mx-4 px-4 border-t border-gray-200 pt-4">
+      <div className="mt-3">
+        <div className="flex items-center">
           <button
             onClick={toggleYamlExpanded}
             aria-expanded={isYamlExpanded}
-            className="flex items-center gap-3 text-left focus:outline-none text-gray-900 hover:text-gray-700 transition-colors duration-200"
+            className="flex items-center gap-1 text-left focus:outline-none text-gray-900 hover:text-gray-700 transition-colors duration-200"
           >
             {isYamlExpanded ? (
               <ChevronDownIcon className="w-4 h-4 text-gray-500" />
@@ -1645,21 +1657,7 @@ function JobDetailsContent({
             <span className="text-base">SkyPilot YAML</span>
           </button>
 
-          <Tooltip
-            content={isCopied ? 'Copied!' : 'Copy YAML'}
-            className="text-muted-foreground"
-          >
-            <button
-              onClick={copyYamlToClipboard}
-              className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
-            >
-              {isCopied ? (
-                <CheckIcon className="w-4 h-4 text-green-600" />
-              ) : (
-                <CopyIcon className="w-4 h-4" />
-              )}
-            </button>
-          </Tooltip>
+          {copyButton(isCopied, copyYamlToClipboard, 'Copy YAML')}
         </div>
 
         {isYamlExpanded && (
@@ -1838,19 +1836,6 @@ function JobDetailsContent({
     </NonCapitalizedTooltip>
   );
   // Copy icon centered on the text line it follows (vertical-align: middle).
-  const copyButton = (copied, onClick, title) => (
-    <button
-      onClick={onClick}
-      title={title}
-      className="ml-2 inline-flex items-center align-middle text-gray-400 hover:text-gray-700 focus:outline-none"
-    >
-      {copied ? (
-        <CheckIcon className="w-3.5 h-3.5 text-green-600" />
-      ) : (
-        <CopyIcon className="w-3.5 h-3.5" />
-      )}
-    </button>
-  );
   const batchTotal = jobData.batch_total_batches;
   // Batch progress bar, with a note on incomplete batches once the job ends.
   const batchBar = () => {
@@ -2132,26 +2117,23 @@ function JobDetailsContent({
           />
         </div>
       )}
-      {jobData.entrypoint ? (
-        <div key="Entrypoint" className="col-span-full min-w-0">
-          <div className="text-sm text-gray-500">
-            Entrypoint
-            {copyButton(
-              isCommandCopied,
-              copyCommandToClipboard,
-              'Copy command'
-            )}
-          </div>
+      <div key="Entrypoint" className="col-span-full min-w-0">
+        <div className="text-sm text-gray-500">
+          Entrypoint
+          {jobData.entrypoint &&
+            copyButton(isCommandCopied, copyCommandToClipboard, 'Copy command')}
+        </div>
+        {jobData.entrypoint ? (
           <div className="mt-1 bg-gray-50 border border-gray-200 rounded-md p-3">
             <code className="text-sm text-gray-800 font-mono break-all">
               {jobData.entrypoint}
             </code>
           </div>
-        </div>
-      ) : (
-        field('Entrypoint', dash, { wide: true })
-      )}
-      {yamlBlock && <div className="col-span-full min-w-0">{yamlBlock}</div>}
+        ) : (
+          <div className="text-base text-gray-900 mt-1 break-words">{dash}</div>
+        )}
+        {yamlBlock}
+      </div>
     </div>
   );
 }
