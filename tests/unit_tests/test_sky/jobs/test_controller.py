@@ -1408,6 +1408,89 @@ class TestJobGroupResumeDoesNotReissueStarting:
         set_starting_async.assert_awaited_once()
 
 
+class _ReachedPhase3(Exception):
+    pass
+
+
+class TestJobGroupReleasesLaunchSlot:
+    """A job group frees the launch slot start_job reserved once it started.
+
+    Groups bypass scheduled_launch, so without an explicit release the slot
+    stays in ``starting`` for the group's whole runtime and starves admission
+    and other jobs' recovery launches on that controller process.
+    """
+
+    async def _run_until_phase3(self, task_status):
+        jc = object.__new__(JobController)
+        jc._job_id = 1
+        jc._pool = None
+        tasks = []
+        for name in ('a', 'b'):
+            task = MagicMock()
+            task.name = name
+            task.envs = {}
+            tasks.append(task)
+        jc._dag = MagicMock()
+        jc._dag.name = 'group'
+        jc._dag.tasks = tasks
+        jc._dag.inter_connection_enabled.return_value = False
+        # Job 2 holds its own slot, which must survive.
+        jc.starting = {1, 2}
+        jc.starting_lock = asyncio.Lock()
+        jc.starting_signal = asyncio.Condition(jc.starting_lock)
+
+        held_during_launch = []
+
+        async def launch():
+            held_during_launch.append(1 in jc.starting)
+
+        executor = MagicMock()
+        executor.launch = launch
+        jc._prepare_job_group_task_for_launch = AsyncMock(
+            side_effect=lambda task, *_, **__: (f'{task.name}-1', executor))
+        jc._cleanup_job_group_clusters = AsyncMock()
+
+        at_phase3 = {}
+
+        def stop_at_phase3(*_):
+            at_phase3['starting'] = set(jc.starting)
+            raise _ReachedPhase3()
+
+        with patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=False), \
+             patch.object(controller_module.managed_job_state,
+                          'get_job_status_with_task_id_async',
+                          AsyncMock(return_value=task_status)), \
+             patch.object(controller_module.managed_job_state,
+                          'set_started_async', AsyncMock()), \
+             patch.object(controller_module.managed_job_utils,
+                          'event_callback_func'), \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name',
+                          return_value=MagicMock()), \
+             patch.object(controller_module.job_group_networking,
+                          'dns_addresses_for_task',
+                          side_effect=stop_at_phase3):
+            with pytest.raises(_ReachedPhase3):
+                await jc._run_job_group()
+        return held_during_launch, at_phase3['starting']
+
+    @pytest.mark.asyncio
+    async def test_fresh_launch_releases_slot_after_start(self):
+        held_during_launch, starting = await self._run_until_phase3(
+            managed_job_state.ManagedJobStatus.PENDING)
+        # The slot covers the group's own launches, then is released.
+        assert held_during_launch == [True, True]
+        assert starting == {2}
+
+    @pytest.mark.asyncio
+    async def test_resume_releases_slot(self):
+        held_during_launch, starting = await self._run_until_phase3(
+            managed_job_state.ManagedJobStatus.RUNNING)
+        assert held_during_launch == []
+        assert starting == {2}
+
+
 class TestRootJobIdEnvMarker:
     """SKYPILOT_ROOT_JOB_ID is set on every task of a job tree and on
     nothing else; the controller decides, not the task YAML."""

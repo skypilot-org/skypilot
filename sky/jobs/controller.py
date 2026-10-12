@@ -2440,6 +2440,11 @@ class JobController:
                 (err for _, err in failed_syncs if isinstance(err, Exception)),
                 failed_syncs[0][1])
 
+        # All tasks have started (fresh or resumed): free the launch slot
+        # start_job reserved, as _run_one_task does after set_started. Groups
+        # bypass scheduled_launch, so nothing else frees it before job end.
+        await self._release_launch_slot()
+
         # Phase 3: Set up networking
         # Build list of (task, handle) for non-terminal tasks with valid
         # handles. Skip tasks that inline the DNS mapping — they already
@@ -3063,7 +3068,9 @@ class JobController:
                 'bookkeeping failed repeatedly.)')
 
     async def _release_launch_slot(self) -> None:
-        """Free this job's shared launching slot for the backoff.
+        """Free this job's shared launching slot.
+
+        Used once a job group has started, and before the emergency backoff.
 
         The launching slots are the in-memory ``starting`` set
         (LAUNCHES_PER_WORKER per worker). A job added at start_job time (or,
