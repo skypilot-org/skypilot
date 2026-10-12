@@ -555,7 +555,7 @@ async def test_endpoint_completion_storage(monitor):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_provision_logs(monitor):
+async def test_endpoint_provision_logs(monitor, mock_request):
     """Test /provision_logs endpoint for blocking operations."""
     print("\n🔍 Testing: /provision_logs")
 
@@ -572,6 +572,7 @@ async def test_endpoint_provision_logs(monitor):
                 try:
                     body = payloads.ProvisionLogsBody(cluster_name='test')
                     await _run_endpoint_func(server.provision_logs,
+                                             mock_request,
                                              body,
                                              follow=False)
                 except fastapi.HTTPException:
