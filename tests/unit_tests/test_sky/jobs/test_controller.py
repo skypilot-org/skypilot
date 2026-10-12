@@ -43,6 +43,7 @@ from sky.jobs.controller import ControllerManager
 from sky.jobs.controller import JobController
 from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.utils import cloud_api_retries
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import status_lib
@@ -2263,6 +2264,123 @@ class TestTransientJobStatusRecoveryWindow:
                 executor=MagicMock())
 
         status_logger.flush.assert_called_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        'case,forced,probe,num_nodes,escalates',
+        [
+            # The probe is skipped entirely, so there is no liveness signal at
+            # all. This is the resume path: a previous status other than
+            # RUNNING sets force_transit_to_recovering.
+            ('probe_skipped', True, (None, None), 1, True),
+            # A terminal status is not a live job. Single-node FAILED falls
+            # past the `num_nodes == 1` continue and reaches the refresh, to
+            # tell a preemption apart from a user-code failure.
+            ('probe_terminal', False,
+             (job_lib.JobStatus.FAILED, None), 1, True),
+            # "No job found": a handle, but nothing in the job table.
+            ('probe_no_job', False, (None, None), 1, True),
+            # The over-correction guard, and the case the shared window exists
+            # for: the job is demonstrably alive, so the loop must keep
+            # retrying however long the refresh stays broken.
+            ('probe_alive', False, (job_lib.JobStatus.RUNNING, None), 2, False),
+        ])
+    async def test_refresh_failures_accumulate_unless_the_job_is_alive(
+            self, monkeypatch, case, forced, probe, num_nodes, escalates):
+        """A permanently failing cluster-status refresh escalates.
+
+        The window is shared with the job-status probe, so only a *live* job
+        may reset it. Resetting on anything else -- a skipped probe, a terminal
+        status, "no job found" -- re-opens it on every iteration, no budget can
+        ever expire, and the loop below retries forever: observed in production
+        as a task that stayed LAUNCHING for six days.
+        """
+        monkeypatch.setattr(managed_job_utils,
+                            'JOB_STATUS_FETCH_MIN_ELAPSED_SECONDS', 60)
+        monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_FETCH_MIN_RETRIES',
+                            5)
+        monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_CHECK_GAP_SECONDS',
+                            0)
+
+        # Enough rounds to spend both budgets several times over, so a loop
+        # that has not escalated by here never will.
+        max_refreshes = 40
+        # Each round advances the clock past the time budget on its own, so the
+        # retry budget is what decides when the window is spent.
+        clock = {'t': 1000.0}
+        refreshes = {'n': 0}
+
+        def fake_refresh(*args, **kwargs):
+            refreshes['n'] += 1
+            if refreshes['n'] > max_refreshes:
+                raise TestTransientJobStatusRecoveryWindow._StopLoop()
+            clock['t'] += 31.0
+            raise exceptions.ClusterStatusFetchingError('provider unreachable')
+
+        async def fake_get_job_status(*args, **kwargs):
+            return probe
+
+        handle = MagicMock()
+        handle.launched_resources.need_cleanup_after_preemption_or_failure.\
+            return_value = False
+
+        task = MagicMock(name='task')
+        task.num_nodes = num_nodes
+
+        mock_self = MagicMock()
+        mock_self._job_id = 1
+        mock_self._pool = None
+        # Reached only by the still-running multi-node case.
+        mock_self._update_live_log_links = AsyncMock(return_value=True)
+
+        executor = MagicMock()
+        executor.recover = AsyncMock(return_value=clock['t'])
+
+        state = controller_module.managed_job_state
+        with patch.object(controller_module.time, 'time',
+                          side_effect=lambda: clock['t']), \
+             patch.object(cloud_api_retries.time, 'sleep',
+                          new=lambda s: None), \
+             patch.object(managed_job_utils, 'get_job_status',
+                          side_effect=fake_get_job_status), \
+             patch.object(controller_module.backend_utils,
+                          'refresh_cluster_status_handle',
+                          side_effect=fake_refresh), \
+             patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=False), \
+             patch.object(managed_job_state, 'get_runtime_cursor_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name',
+                          return_value=handle), \
+             patch.object(state, 'set_recovering_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(state, 'set_recovered_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(state, 'set_started_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.asyncio, 'sleep',
+                          new=AsyncMock(return_value=None)):
+            expected = (exceptions.ClusterStatusFetchingError if escalates else
+                        TestTransientJobStatusRecoveryWindow._StopLoop)
+            with pytest.raises(expected):
+                await controller_module.JobController._monitor_one_task_impl(
+                    mock_self,
+                    task_id=0,
+                    task=task,
+                    cluster_name='cluster',
+                    executor=executor,
+                    status_logger=managed_job_utils.JobStatusLogger(),
+                    callback_func=MagicMock(),
+                    force_transit_to_recovering=forced)
+
+        if escalates:
+            assert refreshes['n'] <= max_refreshes, (
+                f'{case}: the refresh handler never escalated; its failures '
+                'are not accumulating in the retry window')
 
 
 class TestStatusCheckGapJitter:
