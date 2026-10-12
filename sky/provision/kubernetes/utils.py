@@ -3096,12 +3096,8 @@ def get_pod_affinity(
     * A weight-1 preferred term toward pods carrying the get_binpack_label()
       label on the same node, so accelerator pods fill partly used
       accelerator nodes before spreading onto free ones.
-    * When ``efa_same_az`` is set, a required term toward pods of the same
-      cluster in the same zone. An AWS EFA placement group is single-AZ: the
-      first pod fixes the zone and the rest follow it, and the user names no
-      zone. Required rather than preferred because cross-AZ EFA cannot form
-      a fabric, so a pod that cannot join the zone pends instead of silently
-      falling back to TCP.
+    * When ``efa_same_az`` is set, the required same-zone term of a
+      multi-node EFA job.
 
     Args:
         acc_label_key: See get_node_affinity().
@@ -3131,6 +3127,14 @@ def get_pod_affinity(
         }],
     }
     if efa_same_az:
+        # Multi-node EFA co-location: an AWS EFA placement group is
+        # single-AZ, so every replica of this job must schedule into one
+        # zone or the fabric cannot form. Attract each pod to the zone of
+        # the other pods of the same SkyPilot cluster -- the first pod fixes
+        # the AZ (Karpenter provisions an EFA node wherever it has
+        # capacity) and the rest follow; the user names no zone. required
+        # (not preferred): cross-AZ EFA is broken, so pend loudly rather
+        # than silently fall back to TCP.
         pod_affinity['requiredDuringSchedulingIgnoredDuringExecution'] = [{
             'labelSelector': {
                 'matchLabels': {
