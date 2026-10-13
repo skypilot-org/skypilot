@@ -23,8 +23,20 @@ export function SSHInstructionsModal({ isOpen, onClose, cluster }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const sshCommands = [`sky status ${cluster}`, `ssh ${cluster}`];
-  const sshCommandText = sshCommands.join('\n');
+  // urun: this dashboard fronts a CONTROLLER-managed fleet — the user's
+  // machine has no ~/.sky state for these clusters, so upstream's
+  // `ssh <cluster>` hint cannot work. The fleet's credentials live on the
+  // controller pod (per-cluster key + HostName under the runner's HOME);
+  // this one paste-able kubectl exec runs ssh INSIDE the manager container
+  // and resolves the IP from sky's own generated per-cluster config.
+  const home = '/var/lib/urun-skypilot-runner/home';
+  const key = `${home}/.sky/generated/ssh-keys/${cluster}.key`;
+  const cfg = `${home}/.sky/generated/ssh/${cluster}`;
+  const sshCommand =
+    `kubectl -n urun exec deploy/skypilot-controller -c manager -- sh -c ` +
+    `'ssh -i ${key} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no ` +
+    `-o UserKnownHostsFile=/dev/null gcpuser@$(grep -oE "HostName [0-9.]+" ` +
+    `${cfg} | cut -d" " -f2)'`;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -34,7 +46,8 @@ export function SSHInstructionsModal({ isOpen, onClose, cluster }) {
             Connect to: <span className="font-light">{cluster}</span>
           </DialogTitle>
           <DialogDescription>
-            Use these instructions to connect to your cluster via SSH.
+            SSH into this cluster from your machine (kubectl exec into the
+            controller, which holds the fleet's per-cluster credentials).
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col space-y-4">
@@ -42,18 +55,14 @@ export function SSHInstructionsModal({ isOpen, onClose, cluster }) {
             <h3 className="text-sm font-medium mb-2">SSH Command</h3>
             <Card className="p-3 bg-gray-50">
               <div className="flex items-center justify-between">
-                <pre className="text-sm w-full whitespace-pre-wrap">
-                  {sshCommands.map((cmd, index) => (
-                    <code key={index} className="block">
-                      {cmd}
-                    </code>
-                  ))}
+                <pre className="text-sm w-full whitespace-pre-wrap break-all">
+                  <code className="block">{sshCommand}</code>
                 </pre>
                 <Tooltip content={copied ? 'Copied!' : 'Copy command'}>
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => handleCopy(sshCommandText)}
+                    onClick={() => handleCopy(sshCommand)}
                     className="h-8 w-8 rounded-full"
                   >
                     <CopyIcon className="h-4 w-4" />
@@ -66,9 +75,10 @@ export function SSHInstructionsModal({ isOpen, onClose, cluster }) {
           <div>
             <h3 className="text-sm font-medium mb-2">Additional Information</h3>
             <p className="text-sm text-secondary-foreground">
-              Make sure to run{' '}
-              <code className="text-sm">sky status {cluster}</code> first to
-              have SkyPilot set up the SSH access.
+              Requires kubectl access to the prod cluster. The command runs ssh
+              inside the skypilot-controller manager container, which holds the
+              per-cluster key, and resolves the cluster's IP from sky's
+              generated ssh config.
             </p>
           </div>
         </div>
