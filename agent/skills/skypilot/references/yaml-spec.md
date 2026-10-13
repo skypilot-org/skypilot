@@ -224,8 +224,9 @@ a later recovery does not re-arm it. In a pipeline or job group, each task has
 its own clock, and any task exceeding its timeout cancels the whole job.
 
 The job then ends `CANCELLED`, as with `sky jobs cancel`, and the
-reason is shown in `sky jobs queue`. The timeout is enforced within
-about 30 seconds of the deadline, including across controller restarts. See
+reason is shown in `sky jobs queue`. The timeout is checked every 30
+seconds, including across controller restarts; when many jobs time out
+together, they are cancelled a few at a time over the next checks. See
 jobs-wait-for-scheduling-timeout for an example.
 
 ```yaml

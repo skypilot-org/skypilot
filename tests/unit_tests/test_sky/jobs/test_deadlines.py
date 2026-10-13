@@ -11,8 +11,8 @@ validation, YAML round trips for single tasks, pipelines and job groups, the
 pipeline header detection, the persisted task specs), the pure breach check,
 and the loop itself against a real (temp SQLite) managed-jobs state DB,
 including a job whose coroutine never returns from ``launch()``, the races
-with the task starting and with a pending user cancel, and the client
-dropping the ``job:`` block for an older server.
+with the task starting and with a pending user cancel, the cap on cancels per
+check, and the client dropping the ``job:`` block for an older server.
 """
 import asyncio
 import contextlib
@@ -1043,6 +1043,126 @@ async def test_overdue_job_adopted_after_restart_is_cancelled_first_tick(
     await fresh_manager._check_deadlines(time.time())
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(job_task, timeout=10)
+
+
+def _recorded(job_ids: List[int]) -> List[int]:
+    """The jobs whose deadline cancel has been recorded."""
+    return [j for j in job_ids if _task_row(j, 0)['failure_reason']]
+
+
+@pytest.mark.asyncio
+async def test_cancels_per_check_are_capped(_mock_managed_jobs_db_conn,
+                                            monkeypatch):
+    """A wave of overdue jobs drains over several checks, at most
+    _DEADLINE_CANCELS_PER_CHECK per check, and every job ends CANCELLED."""
+    monkeypatch.setattr(controller_module, '_DEADLINE_CANCELS_PER_CHECK', 2)
+    job_ids = [_create_job() for _ in range(5)]
+    for job_id in job_ids:
+        await _start_task(job_id, 0, time.time() - 120, timeout_seconds=60)
+    job_controller = mock.MagicMock()
+    job_controller.load_dag = mock.AsyncMock()
+    job_controller.run = _RunningJob().run
+    _patch_run_job_loop_deps(monkeypatch, job_controller)
+    manager = _manager()
+    manager._cleanup = mock.AsyncMock()
+    manager._download_logs_for_cancelled_job = mock.AsyncMock()
+    loops = {
+        job_id: asyncio.create_task(
+            manager.run_job_loop.__wrapped__(manager, job_id, 'job.log'))
+        for job_id in job_ids
+    }
+    for _ in range(100):
+        if all(job_id in manager.job_tasks for job_id in job_ids):
+            break
+        await asyncio.sleep(0.01)
+    assert all(job_id in manager.job_tasks for job_id in job_ids)
+
+    recorded_after_each_check = []
+    for _ in range(4):
+        before = set(_recorded(job_ids))
+        await manager._check_deadlines(time.time())
+        recorded = _recorded(job_ids)
+        recorded_after_each_check.append(len(recorded))
+        new = [loops[j] for j in recorded if j not in before]
+        await asyncio.wait_for(asyncio.gather(*new, return_exceptions=True),
+                               timeout=10)
+        for job_id in job_ids:
+            assert loops[job_id].done() == (job_id in recorded), job_id
+    assert recorded_after_each_check == [2, 4, 5, 5]
+    for job_id in job_ids:
+        assert _task_row(job_id, 0)['status'] == ManagedJobStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_capped_cancels_go_earliest_deadline_first(
+        _mock_managed_jobs_db_conn, monkeypatch):
+    """Overdue jobs are cancelled by deadline (submitted_at + timeout), ties
+    by job ID, so a job left for a later check is ahead of any that become
+    overdue after it."""
+    monkeypatch.setattr(controller_module, '_DEADLINE_CANCELS_PER_CHECK', 1)
+    now = time.time()
+    # (submitted ago, timeout): deadlines now-100, now-440, now-140,
+    # now-140 and now+10.
+    clocks = [(1000, 900), (500, 60), (200, 60), (240, 100), (50, 60)]
+    job_ids = []
+    for ago, timeout in clocks:
+        job_id = _create_job()
+        await _start_task(job_id, 0, now - ago, timeout_seconds=timeout)
+        job_ids.append(job_id)
+    manager = _manager()
+    tasks = {}
+    # Registered in reverse, so the order is not the job_tasks order.
+    for job_id in reversed(job_ids):
+        tasks[job_id] = asyncio.create_task(_RunningJob().run())
+        manager.job_tasks[job_id] = tasks[job_id]
+
+    order = []
+    for check in range(6):
+        await manager._check_deadlines(now + 30 * check)
+        order.extend(j for j in _recorded(job_ids) if j not in order)
+    assert order == [job_ids[i] for i in (1, 2, 3, 0, 4)]
+    for job_task in tasks.values():
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(job_task, timeout=10)
+
+
+@pytest.mark.asyncio
+async def test_job_starting_during_a_capped_check_is_not_cancelled(
+        _mock_managed_jobs_db_conn, monkeypatch):
+    """The earliest overdue job starts after the read: it is not cancelled,
+    and the next job gets its place within the cap."""
+    monkeypatch.setattr(controller_module, '_DEADLINE_CANCELS_PER_CHECK', 1)
+    now = time.time()
+    started = _create_job()
+    await _start_task(started, 0, now - 300, timeout_seconds=60)
+    overdue = _create_job()
+    await _start_task(overdue, 0, now - 120, timeout_seconds=60)
+    real_read = managed_job_state.get_unfinished_task_deadline_rows_async
+
+    async def _read_then_start(job_ids):
+        rows = await real_read(job_ids)
+        await managed_job_state.set_started_async(started, 0, time.time(),
+                                                  _noop_callback)
+        return rows
+
+    monkeypatch.setattr(managed_job_state,
+                        'get_unfinished_task_deadline_rows_async',
+                        _read_then_start)
+    manager = _manager()
+    tasks = {}
+    for job_id in (started, overdue):
+        tasks[job_id] = asyncio.create_task(_RunningJob().run())
+        manager.job_tasks[job_id] = tasks[job_id]
+
+    await manager._check_deadlines(now)
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(tasks[overdue], timeout=10)
+    assert not tasks[started].done()
+    row = _task_row(started, 0)
+    assert row['status'] == ManagedJobStatus.RUNNING
+    assert row['failure_reason'] is None
+    tasks[started].cancel()
 
 
 def test_main_starts_the_deadline_loop(monkeypatch):

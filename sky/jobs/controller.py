@@ -199,6 +199,9 @@ async def check_network_connection() -> None:
 # How often each controller process checks its jobs' deadlines
 # (job.wait_for_scheduling_timeout).
 _DEADLINE_CHECK_INTERVAL_SECONDS = 30
+# How many overdue jobs one deadline check cancels; later checks take the rest.
+# Each cancel is a cluster teardown, so as many as a process launches at once.
+_DEADLINE_CANCELS_PER_CHECK = controller_utils.LAUNCHES_PER_WORKER
 
 
 async def create_background_task(coro: typing.Coroutine) -> None:
@@ -4057,6 +4060,7 @@ class ControllerManager:
             return
         rows_by_job = await (
             managed_job_state.get_unfinished_task_deadline_rows_async(job_ids))
+        overdue: List[Tuple[float, int, int, _DeadlineBreach]] = []
         for job_id in job_ids:
             rows = rows_by_job.get(job_id)
             if not rows:
@@ -4072,24 +4076,44 @@ class ControllerManager:
                     # that is exceeded cancels the whole job.
                     breach = _deadline_breach(row['specs'], row, now)
                     if breach is not None:
-                        await self._cancel_for_deadline(job_id, row['task_id'],
-                                                        breach, now)
+                        deadline = row['submitted_at'] + breach.limit_seconds
+                        overdue.append(
+                            (deadline, job_id, row['task_id'], breach))
                         break
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Failed to check the deadlines of job {job_id}: '
                              f'{common_utils.format_exception(e)}')
+        # Earliest deadline first, then by job ID, so a job left for a later
+        # check is ahead of any that become overdue after it.
+        overdue.sort(key=lambda item: item[:2])
+        cancelled = 0
+        for i, (_, job_id, task_id, breach) in enumerate(overdue):
+            if cancelled >= _DEADLINE_CANCELS_PER_CHECK:
+                logger.info(f'{len(overdue) - i} overdue job(s) left for the '
+                            'next deadline check.')
+                break
+            try:
+                if await self._cancel_for_deadline(job_id, task_id, breach,
+                                                   now):
+                    cancelled += 1
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Failed to cancel job {job_id} for its deadline: '
+                             f'{common_utils.format_exception(e)}')
 
     async def _cancel_for_deadline(self, job_id: int, task_id: int,
-                                   breach: _DeadlineBreach, now: float) -> None:
+                                   breach: _DeadlineBreach, now: float) -> bool:
         """Cancel a job that exceeded a deadline, as cancel_job() would.
 
         The reason is recorded only if the deadline still holds in the DB
         (see set_deadline_exceeded_async), so a task that started after its
         row was read is not cancelled. A pending user cancel takes
         precedence, so its graceful settings apply.
+
+        Returns:
+            Whether the job was cancelled.
         """
         if not await self._can_cancel_for_deadline(job_id):
-            return
+            return False
         reason = breach.reason
         logger.info(f'Cancelling job {job_id}: {reason}')
         # Recorded like a cancel request (see CancelRequestInfo), so the
@@ -4108,27 +4132,28 @@ class ControllerManager:
         if not recorded:
             logger.info(f'Job {job_id} started, finished or is being '
                         'cancelled; not cancelling it for its deadline.')
-            return
+            return False
         async with self._job_tasks_lock:
             task = self.job_tasks.get(job_id)
             if task is None or task.done():
-                return
+                return False
             async with self._cancel_info_lock:
                 if job_id in self._cancel_info:
                     # A cancel signal arrived meanwhile and already cancelled
                     # the task.
-                    return
+                    return False
                 if _has_pending_cancel_signal(job_id):
                     # A user cancel arrived while the reason was recorded.
                     # cancel_job() holds _job_tasks_lock while it applies a
                     # signal, so it cannot be halfway through one here.
                     logger.info(f'Job {job_id} has a pending cancel request; '
                                 'leaving it to that request.')
-                    return
+                    return False
                 # A deadline is a hard limit: not graceful.
                 self._cancel_info[job_id] = (False, None)
             task.cancel()
             self._deadline_cancelled.add(job_id)
+            return True
 
     async def _can_cancel_for_deadline(self, job_id: int) -> bool:
         """Whether the job runs here and no cancel is applied or pending."""
