@@ -123,6 +123,7 @@ class TestGuardIntegration(unittest.TestCase):
         config = _build_guard_config()
         self.assertFalse(config.enable_redis)
 
+    @unittest.skipUnless(_GUARD_AVAILABLE, 'fastapi-guard not installed')
     def test_zero_trust_proxy_default(self):
         from sky.server.guard_integration import _build_guard_config
 

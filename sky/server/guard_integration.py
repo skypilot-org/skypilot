@@ -10,10 +10,10 @@ attach_guard is a no-op and the server behaves exactly as before. The
 dependency carries a python_version >= 3.10 marker, so on 3.9 the flag
 raises an actionable error instead of installing.
 
-The screening pass runs outside the auth middlewares, so blocked requests
-never reach the bcrypt/DB auth path. It does not touch
-request.state.auth_user; whichever auth middleware authenticates still
-runs for everything that passes.
+The screening pass wraps the auth middlewares, so blocked requests never
+reach the bcrypt/DB auth path. It does not touch request.state.auth_user;
+whichever auth middleware authenticates still runs for everything that
+passes.
 """
 
 import os

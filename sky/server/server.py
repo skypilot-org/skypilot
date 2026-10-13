@@ -1326,14 +1326,6 @@ app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(GracefulShutdownMiddleware)
 app.add_middleware(PathCleanMiddleware)
 app.add_middleware(CacheControlStaticMiddleware)
-# Optional fastapi-guard security middleware (off unless
-# SKYPILOT_GUARD_ENABLED is set). Added before CORSMiddleware so the guard
-# nests inside it (last-added is outermost) and guard-generated 403/429
-# responses still leave with CORS headers, and outside the auth middlewares
-# below so blocked requests never reach the bcrypt/DB auth path. The
-# security-headers middleware added later still wraps it, so screened
-# responses keep those headers too.
-attach_guard(app)
 app.add_middleware(
     cors.CORSMiddleware,
     # TODO(zhwu): in production deployment, we should restrict the allowed
@@ -1362,6 +1354,15 @@ app.add_middleware(BearerTokenMiddleware)
 # request.state.auth_user is always set, but can be overridden by the auth
 # middleware above.
 app.add_middleware(InitializeRequestAuthUserMiddleware)
+# Optional fastapi-guard security middleware (off unless
+# SKYPILOT_GUARD_ENABLED is set). Added after the auth middlewares, so it
+# wraps them (last-added is outermost): blocked or rate-limited requests are
+# rejected before they reach the bcrypt/DB auth path, and failed logins count
+# toward the rate limit. RequestIDMiddleware and SecurityHeadersMiddleware
+# are added after it, so guard 403/429 responses still carry the request ID
+# and security headers. Like the auth middlewares' 401s, they are outside
+# CORSMiddleware.
+attach_guard(app)
 app.add_middleware(RequestIDMiddleware)
 # SecurityHeadersMiddleware is the outermost middleware that touches a
 # response, so its security headers (CSP, X-Content-Type-Options, etc.) are
