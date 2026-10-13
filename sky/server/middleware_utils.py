@@ -3,10 +3,10 @@ import enum
 import http
 import threading
 import time
-from typing import Any, Callable, Optional, Tuple, Type
+from typing import Any, Awaitable, Callable, Optional, Tuple, Type
 
 import fastapi
-import starlette.middleware.base
+import starlette.datastructures
 import starlette.types
 
 from sky import sky_logging
@@ -141,6 +141,13 @@ REJECT_REASON_UNHANDLED_EXCEPTION = 'unhandled_exception'
 # Key in `scope['state']` (i.e. `request.state`) the reason is stored under.
 REJECT_REASON_STATE_KEY = 'reject_reason'
 
+# Keys in `scope['state']` describing a presented credential that an auth
+# middleware rejected, for an audit trail to read back: the human-readable
+# reason, and the verified identity it belonged to. Free text, so kept apart
+# from `reject_reason`, which is a metric label.
+AUTH_REJECT_DETAIL_STATE_KEY = 'auth_reject_detail'
+AUTH_REJECT_SUBJECT_STATE_KEY = 'auth_reject_subject'
+
 # `kind` label values of the rejection counter.
 REJECTION_KIND_HTTP = 'http'
 REJECTION_KIND_WEBSOCKET = 'websocket'
@@ -189,6 +196,20 @@ def mark_rejection(request: fastapi.Request, reason: str) -> None:
     value. Explicit parameter on purpose: no contextvars.
     """
     setattr(request.state, REJECT_REASON_STATE_KEY, reason)
+
+
+def mark_auth_rejection(request: fastapi.Request,
+                        detail: str,
+                        subject: Optional[str] = None) -> None:
+    """Record why a presented credential was rejected, and whose it was.
+
+    Pass `subject` only once the credential itself has been verified (e.g. a
+    JWT whose signature checked out but whose row was revoked), so the value
+    is never something the client chose.
+    """
+    setattr(request.state, AUTH_REJECT_DETAIL_STATE_KEY, detail)
+    if subject is not None:
+        setattr(request.state, AUTH_REJECT_SUBJECT_STATE_KEY, subject)
 
 
 def get_rejection_reason(scope: starlette.types.Scope) -> Optional[str]:
@@ -279,9 +300,86 @@ class WebSocketDecision(enum.Enum):
     ERROR = 'error'
 
 
-def websocket_aware(
-        middleware_cls: Type[starlette.middleware.base.BaseHTTPMiddleware]):
-    """Decorator to adapt BaseHTTPMiddleware to handle WebSockets.
+CallNext = Callable[[fastapi.Request], Awaitable[fastapi.Response]]
+
+
+class ASGIMiddleware:
+    """Base class for an HTTP middleware written as pure ASGI.
+
+    Subclasses override `on_request`, `on_response`, or both. Both run inline
+    in the request's own task, so a layer costs a function call: unlike
+    `starlette.middleware.base.BaseHTTPMiddleware`, no task group or memory
+    stream is created per request, and response bodies, streaming ones
+    included, pass through unbuffered.
+
+    Non-HTTP scopes pass through untouched. Wrap the class with
+    `websocket_aware` to judge WebSocket handshakes with `on_request` too.
+    """
+
+    def __init__(self, app: starlette.types.ASGIApp) -> None:
+        self.app = app
+
+    async def on_request(
+            self, request: fastapi.Request) -> Optional[fastapi.Response]:
+        """Return a response to answer the request without the next layer.
+
+        Must not read the request body unless it answers the request: the
+        body is consumed from the ASGI channel and not replayed downstream.
+        """
+        del request
+        return None
+
+    def on_response(self, request: fastapi.Request, status_code: int,
+                    headers: starlette.datastructures.MutableHeaders) -> None:
+        """Adjust the response headers before they are sent.
+
+        Called for every response that leaves this layer: the one its own
+        `on_request` returns, and every one the inner layers send, including
+        the ones an inner middleware answers itself.
+        """
+        del request, status_code, headers
+
+    async def __call__(self, scope: starlette.types.Scope,
+                       receive: starlette.types.Receive,
+                       send: starlette.types.Send) -> None:
+        if scope['type'] != 'http':
+            await self.app(scope, receive, send)
+            return
+        request = fastapi.Request(scope, receive)
+        if type(self).on_response is not ASGIMiddleware.on_response:
+            send = self._send_with_headers(request, send)
+        response = await self.on_request(request)
+        if response is None:
+            await self.app(scope, receive, send)
+        else:
+            await response(scope, receive, send)
+
+    def _send_with_headers(self, request: fastapi.Request,
+                           send: starlette.types.Send) -> starlette.types.Send:
+
+        async def send_with_headers(message: starlette.types.Message) -> None:
+            if message['type'] == 'http.response.start':
+                # `headers` is optional in this message (ASGI spec).
+                message.setdefault('headers', [])
+                self.on_response(
+                    request, message['status'],
+                    starlette.datastructures.MutableHeaders(scope=message))
+            await send(message)
+
+        return send_with_headers
+
+    async def dispatch(self, request: fastapi.Request,
+                       call_next: CallNext) -> fastapi.Response:
+        """Runs the hooks around `call_next`; used by `websocket_aware`."""
+        response = await self.on_request(request)
+        if response is None:
+            response = await call_next(request)
+        self.on_response(request, response.status_code, response.headers)
+        return response
+
+
+def websocket_aware(middleware_cls: Type[ASGIMiddleware]):
+    """Decorator to adapt an `ASGIMiddleware` to handle WebSockets.
 
     It assembles an HTTP-style request like the HTTP upgrade request during
     websocket handshake and then delegates it to the real HTTP middleware.
@@ -309,8 +407,8 @@ def websocket_aware(
     rejection -- so attempts is the denominator and the outcomes are each
     counted rather than subtracted; see the comment on the attempt counter
     for why subtraction would over-count accepts. (The metrics middleware
-    cannot count these scopes itself: `BaseHTTPMiddleware` passes non-HTTP
-    scopes straight through.) A middleware exception while judging a
+    does not count these scopes: it passes non-HTTP scopes straight
+    through.) A middleware exception while judging a
     handshake is stamped `unhandled_exception` and counted with a 500.
 
     Note: for websocket connection, the mutation made by the underlying HTTP
@@ -334,9 +432,7 @@ def websocket_aware(
                 # Delegate other scopes to the underlying HTTP middleware.
                 await self.middleware(scope, receive, send)
 
-        async def dispatch(
-                self, request: fastapi.Request,
-                call_next: starlette.middleware.base.RequestResponseEndpoint):
+        async def dispatch(self, request: fastapi.Request, call_next: CallNext):
             """Implement dispatch method to keep compatibility."""
             return await self.middleware.dispatch(request, call_next)
 

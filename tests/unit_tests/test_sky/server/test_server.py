@@ -22,6 +22,7 @@ from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import server
 from sky.server.requests import executor
+from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.users import token_service
 from sky.utils import common_utils
@@ -480,8 +481,6 @@ async def test_hook_logs_keeps_its_request_log(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_launch_endpoint_passes_auth_user():
     """Test that launch endpoint passes auth_user to schedule_request_async."""
-    from sky.server.requests import payloads
-
     auth_user = models.User(id='launch-user-id', name='Launch User')
     request = mock.MagicMock()
     request.state = mock.MagicMock()
@@ -501,6 +500,81 @@ async def test_launch_endpoint_passes_auth_user():
         assert kwargs['auth_user'] == auth_user
         # request_id is passed as first positional argument
         assert args[0] == 'launch-request-id'
+
+
+def _launch_request(client_host, headers=None):
+    """A real request, so the loopback check runs unmocked."""
+    request = fastapi.Request({
+        'type': 'http',
+        'client': (client_host, 12345),
+        'headers': [(k.lower().encode(), v.encode())
+                    for k, v in (headers or {}).items()],
+    })
+    request.state.request_id = 'launch-request-id'
+    request.state.auth_user = None
+    return request
+
+
+_CONTROLLER_FIELDS = [
+    {
+        'is_launched_by_jobs_controller': True
+    },
+    {
+        'is_launched_by_sky_serve_controller': True
+    },
+    {
+        'extra_launch_context': {
+            'managed_job_v1': {
+                'min_nodes': 1
+            }
+        }
+    },
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('fields', _CONTROLLER_FIELDS)
+@pytest.mark.parametrize('client_host,headers', [
+    ('10.0.0.5', None),
+    ('127.0.0.1', {
+        'X-Forwarded-For': '203.0.113.7'
+    }),
+])
+async def test_launch_rejects_controller_fields_from_remote(
+        fields, client_host, headers):
+    launch_body = payloads.LaunchBody(task='t', cluster_name='c', **fields)
+    with mock.patch('sky.server.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.launch(launch_body,
+                                _launch_request(client_host, headers))
+    assert exc_info.value.status_code == 403
+    mock_schedule.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_launch_accepts_controller_fields_from_loopback():
+    launch_body = payloads.LaunchBody(task='t',
+                                      cluster_name='c',
+                                      is_launched_by_jobs_controller=True,
+                                      is_launched_by_sky_serve_controller=True,
+                                      extra_launch_context={'k': 'v'})
+    with mock.patch('sky.server.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
+        await server.launch(launch_body, _launch_request('127.0.0.1'))
+    body = mock_schedule.call_args.kwargs['request_body']
+    assert body.is_launched_by_jobs_controller
+    assert body.is_launched_by_sky_serve_controller
+    assert body.extra_launch_context == {'k': 'v'}
+
+
+@pytest.mark.asyncio
+async def test_launch_accepts_plain_remote_launch():
+    launch_body = payloads.LaunchBody(task='t', cluster_name='c')
+    with mock.patch('sky.server.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
+        await server.launch(launch_body, _launch_request('10.0.0.5'))
+    mock_schedule.assert_awaited_once()
 
 
 # --- Tests for cleanup_unreferenced_file_mounts ---
@@ -1476,7 +1550,7 @@ async def test_get_expanded_request_id_admin_unscoped(monkeypatch):
     assert exc.value.status_code == 400
 
 
-# --- SKY-6429: cross-user request-API access control (integration) ----------
+# --- Cross-user request-API access control (integration) --------------------
 
 
 def _seed_request(rid, user_id, status=None):

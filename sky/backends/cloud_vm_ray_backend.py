@@ -1209,6 +1209,13 @@ class RetryingVmProvisioner(object):
                 if zones and len(zones) == 1:
                     launched_resources = launched_resources.copy(
                         zone=zones[0].name)
+                if isinstance(to_provision.cloud, clouds.Kubernetes):
+                    # What the pods actually got, so later autodown checks on
+                    # this cluster do not depend on today's config.
+                    provider = global_user_state.get_cluster_yaml_dict(
+                        cluster_config_file).get('provider', {})
+                    launched_resources.set_remote_identity_none_at_launch(
+                        bool(provider.get('remote_identity_none', False)))
 
                 prev_cluster_ips, prev_ssh_ports, prev_cluster_info = (None,
                                                                        None,
@@ -1856,6 +1863,16 @@ class RetryingVmProvisioner(object):
                     # requested, so use discard() instead of remove().
                     requested_features.discard(
                         clouds.CloudImplementationFeatures.AUTOSTOP)
+                # The jobs controller's autodown is a leak guard, not the
+                # user's ask. A NONE pod cannot delete itself, so the job runs
+                # without the guard (execution skips setting it) rather than
+                # being refused.
+                if (self._is_launched_by_jobs_controller and
+                        isinstance(to_provision.cloud, clouds.Kubernetes) and
+                        clouds.Kubernetes.remote_identity_is_none(
+                            to_provision.region, to_provision)):
+                    requested_features.discard(
+                        clouds.CloudImplementationFeatures.AUTODOWN)
 
                 # Skip if to_provision.cloud does not support requested features
                 to_provision.cloud.check_features_are_supported(
@@ -1943,13 +1960,17 @@ class RetryingVmProvisioner(object):
                 assert len(failover_history) > 0
                 resource_exceptions[to_provision] = failover_history[-1]
             else:
-                # If we reach here, it means that the existing cluster must have
-                # a previous status of INIT, because other statuses (UP,
-                # STOPPED) will not trigger the failover due to `no_failover`
-                # flag; see _yield_zones(). Also, the cluster should have been
-                # terminated by _retry_zones().
-                assert (prev_cluster_status == status_lib.ClusterStatus.INIT
-                       ), prev_cluster_status
+                if prev_cluster_status != status_lib.ClusterStatus.INIT:
+                    # An UP or STOPPED cluster is never failed over for (see
+                    # _yield_zones). Errors raised without `no_failover`, e.g.
+                    # invalid credentials or config, are reported as is.
+                    last_error = failover_history[-1]
+                    raise exceptions.ResourcesUnavailableError(
+                        common_utils.format_exception(last_error),
+                        no_failover=True,
+                        failover_history=failover_history) from last_error
+                # An INIT cluster should have been terminated by
+                # _retry_zones(), so it can be retried on other resources.
                 logger.info(
                     ux_utils.retry_message(
                         f'Retrying provisioning with requested resources: '
@@ -2649,7 +2670,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             local_port = random.randint(10000, 65535)
             try:
                 ssh_tunnel_proc = backend_utils.open_ssh_tunnel(
-                    head_runner, (local_port, constants.SKYLET_GRPC_PORT))
+                    head_runner, (local_port, self.skylet_port))
             except exceptions.CommandError as e:
                 # Don't retry if the error is due to timeout,
                 # connection refused, Kubernetes pods not found,
@@ -2728,6 +2749,19 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if external_ssh_ports:
             return external_ssh_ports[0]
         return None
+
+    @property
+    def skylet_port(self) -> int:
+        """The port the head's skylet listens on.
+
+        The default, except on a Kubernetes hostNetwork head, which shares its
+        node's ports with other clusters' heads and so is assigned one.
+        """
+        info = self.cached_cluster_info
+        head = info.get_head_instance() if info is not None else None
+        # getattr: an InstanceInfo pickled before the field existed.
+        return (getattr(head, 'skylet_port', None) or
+                constants.SKYLET_GRPC_PORT)
 
     @property
     def num_ips_per_node(self) -> int:
@@ -3460,11 +3494,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # on a dedicated controller, it is the controller's local API
                 # server, where parking is equally safe -- the controller
                 # explicitly supports parked launch requests (see
-                # _wait_for_parked_request in recovery_strategy), since
-                # admission-wait pauses already park its launches via this
-                # same mechanism. Only callers with no request context (no
-                # scheduler to hand the pause to) keep the blocking behavior
-                # below.
+                # _wait_for_parked_request in recovery_strategy). Only callers
+                # with no request context (no scheduler to hand the pause to)
+                # keep the blocking behavior below.
                 #
                 # Note on expected impact: in a healthy system controller
                 # launches should rarely contend on their own cluster lock at
@@ -6468,6 +6500,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 if grace_warning is not None:
                     logger.warning(grace_warning)
                 to_provision = to_provision.copy(hooks=one_task_resource.hooks)
+
+            # An in-process caller's account (execution.launch) also applies to
+            # a cluster launched before it passed one.
+            if one_task_resource.kubernetes_identity is not None:
+                to_provision = to_provision.copy()
+                to_provision.set_kubernetes_identity(
+                    one_task_resource.kubernetes_identity)
 
             # cluster_config_overrides should be the same for all resources.
             for resource in task.resources:

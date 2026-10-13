@@ -210,6 +210,9 @@ SKYLET_PORT_FILE = '.sky/skylet_port'
 # The Slurm skylet keeper consumes this start spec.
 SKYLET_START_FILE = '.sky/skylet_start'
 SKYLET_GRPC_PORT = 46590
+# Set on a Kubernetes hostNetwork pod: the port the server assigned to skylet
+# (host_network_probe's 'skylet' slot) and will dial.
+SKYLET_PORT_ENV_VAR = 'SKYPILOT_SKYLET_PORT'
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
 # TODO(zpoint): legacy autostop-hook log path, kept so the new
 # tail_hook_logs(event='stop') can fall back to it on clusters
@@ -604,6 +607,9 @@ CONTROLLER_K8S_MEMORY_FILE = '~/.sky/_internal_k8s_pod_memory'
 
 # Used when an managed jobs are created and
 # files are synced up to the cloud.
+# Shared jobs.bucket / serve.bucket uploads. Lets bucket IAM enforce RBAC
+# per workspace. Per-job buckets (config bucket unset) do not use this.
+FILE_MOUNTS_WORKSPACE_SUBPATH = 'workspaces/{workspace}'
 FILE_MOUNTS_WORKDIR_SUBPATH = 'job-{run_id}/workdir'
 FILE_MOUNTS_SUBPATH = 'job-{run_id}/local-file-mounts/{i}'
 FILE_MOUNTS_TMP_SUBPATH = 'job-{run_id}/tmp-files'
@@ -655,6 +661,12 @@ RCLONE_CONFIG_PATH = f'{RCLONE_CONFIG_DIR}/rclone.conf'
 RCLONE_MOUNT_CACHED_LOG_DIR = '~/.sky/rclone_log'
 RCLONE_CACHE_DIR = '~/.cache/rclone'
 RCLONE_CACHE_REFRESH_INTERVAL = 10
+
+# Heads the container output that a terminated-pod diagnosis appends. What
+# follows is the workload's own free text, so classifiers that grep a failure
+# message for its cause (e.g. OOM detection in managed-job recovery) must stop
+# here, or a program that merely prints "out of memory" reads as OOM-killed.
+CONTAINER_OUTPUT_MARKER = 'Last output from container'
 
 # The keys that can be overridden in the `~/.sky/config.yaml` file. The
 # overrides are specified in task YAMLs.
@@ -829,7 +841,7 @@ ENV_VAR_DB_POOL_HOSTPORT = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_POOL_HOSTPORT')
 # Why an override exists: the derived budget compares the server's worker count
 # against the database's own `max_connections`, which is a property of the
 # database, not of this server's share of it -- the same database may serve
-# other replicas, other tenants and ad-hoc clients, so that number is neither
+# other servers, other apps and ad-hoc clients, so that number is neither
 # an upper bound this server may take nor, behind a connection pooler, the
 # number of backends a pool would actually hold. A deployment that knows its
 # own share states it here instead.

@@ -12,8 +12,9 @@ caller verify leadership atomically inside its own write transaction.
 
 The backend is chosen by the ``SKYPILOT_LEADER_ELECTION_BACKEND`` environment
 variable (``advisory`` -- the default -- or ``lease``) so the lease path is
-opt-in and instantly revertible. On SQLite (single-node) there is no fleet to
-coordinate, and both backends fall back to the local advisory/file lock path.
+opt-in and instantly revertible. On SQLite (single-node) there are no other
+server instances to coordinate with, and both backends fall back to the local
+advisory/file lock path.
 """
 import abc
 import logging
@@ -30,7 +31,7 @@ from sky.utils.db import db_utils
 
 logger = logging.getLogger(__name__)
 
-# Environment variable selecting the fleet-wide leader-election backend.
+# Environment variable selecting the leader-election backend.
 ENV_VAR_BACKEND = 'SKYPILOT_LEADER_ELECTION_BACKEND'
 BACKEND_ADVISORY = 'advisory'
 BACKEND_LEASE = 'lease'
@@ -38,7 +39,7 @@ BACKEND_LEASE = 'lease'
 # Default lease timing. These are three independent knobs (not derived from one
 # another) so the retry budget and the safety margin can be tuned separately:
 #   - ttl: a follower can grab the lease ``ttl`` after the leader's last
-#     successful renew; this bounds hard-crash failover latency (a leader that
+#     successful renew; this bounds hard-crash takeover latency (a leader that
 #     dies without releasing holds the lease for the full ttl).
 #   - interval: how often the leader renews while healthy.
 #   - deadline: the leader stops acting if it has not renewed within this long.
@@ -84,7 +85,7 @@ _HOLDER_ID = f'{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}'
 
 
 class LeaderElector(abc.ABC):
-    """A single-winner election for one ``lock_id`` across the fleet.
+    """A single-winner election for one ``lock_id`` across server processes.
 
     Lifecycle: call :meth:`try_acquire` to bid for leadership; while leading,
     call :meth:`renew` periodically to confirm/extend the role (a ``False``
@@ -202,7 +203,7 @@ class PgLeaseElector(LeaderElector):
     """
 
     # Insert-or-take-over in one statement, used only by ``try_acquire``. All
-    # time math is server-side (``now()``) so replicas never compare against
+    # time math is server-side (``now()``) so candidates never compare against
     # their own wall clocks. ``RETURNING`` yields a row iff we hold the lease
     # after the statement: on first insert, on a redundant acquire while we
     # still hold it, or on takeover of an expired lease. When another holder's
@@ -244,7 +245,7 @@ class PgLeaseElector(LeaderElector):
 
     # Immediate handoff: expire our own lease now so a follower can take over
     # without waiting out the TTL. Scoped to our holder so we never expire a
-    # lease another replica has already taken from us.
+    # lease another candidate has already taken from us.
     _RELEASE_SQL = sqlalchemy.text(f"""
         UPDATE {_LEASE_TABLE} SET expires_at = now()
         WHERE lock_id = :lock_id AND holder = :holder

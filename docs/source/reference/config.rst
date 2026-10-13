@@ -1697,9 +1697,21 @@ Default: ``loadbalancer``.
 ``kubernetes.remote_identity``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Service account for remote authentication (optional).
+Identity for the pods SkyPilot launches (optional).
 
-Name of the service account to use for remote authentication.
+One of:
+
+- ``SERVICE_ACCOUNT`` (default): pods run as ``skypilot-service-account``,
+  which SkyPilot creates and grants permissions.
+- The name of your own service account: pods run as that account. SkyPilot
+  creates nothing for it, and you own its permissions.
+- ``LOCAL_CREDENTIALS``: like ``SERVICE_ACCOUNT``, and your local kubeconfig is
+  also uploaded to the pods.
+- ``NO_UPLOAD``: like ``SERVICE_ACCOUNT``, and your local kubeconfig is not
+  uploaded. The pods still have the service account's token.
+- ``NONE`` (case-insensitive, so ``none`` too): the pods get no Kubernetes
+  identity: no token is mounted and no roles are granted. Autodown is not
+  available. See :ref:`kubernetes-remote-identity-none`.
 
 .. _config-yaml-kubernetes-allowed-contexts:
 
@@ -2035,8 +2047,11 @@ Default: ``86400`` (24 hours).
 
 SkyServe replicas and pool workers are standing requests for capacity, so
 when this field is not set they wait for admission indefinitely instead of
-failing after 24 hours and re-entering the queue at the back. Set the field
-explicitly to bound their wait as well.
+failing after 24 hours and re-entering the queue at the back. So do managed
+jobs that set
+:ref:`job.wait_for_scheduling_timeout <yaml-spec-job-wait-for-scheduling-timeout>`,
+which bounds their wait instead. Set the field explicitly to bound their wait
+as well.
 
 .. _config-yaml-kubernetes-dws:
 

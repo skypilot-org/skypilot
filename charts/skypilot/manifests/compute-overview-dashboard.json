@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Fleet-level GPU utilization and allocation metrics aggregated across clusters. Used by the Compute Overview section in the GPU Manager plugin. DO NOT EDIT.",
+  "description": "Fleet-level GPU utilization and allocation metrics aggregated across clusters. DO NOT EDIT.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,

@@ -473,8 +473,8 @@ async def _tail_log_file(
                     # loop below dereferences it more than once.
                     break
                 if req_status.status == requests_lib.RequestStatus.WAITING:
-                    # The request parked mid-execution (e.g. waiting on queue
-                    # admission or a cluster lock): it stops writing to the log,
+                    # The request parked mid-execution (e.g. waiting on a
+                    # cluster lock): it stops writing to the log,
                     # so without this the client keeps showing the last line it
                     # streamed -- frozen for as long as the wait lasts, and
                     # stale as soon as the reason changes. Push the parked
