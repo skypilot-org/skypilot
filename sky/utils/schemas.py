@@ -2970,6 +2970,10 @@ def get_config_schema():
             'file_mount_timeout': {
                 'type': 'integer',
             },
+            'health_check_timeout': {
+                'type': 'number',
+                'minimum': 0,
+            },
         }
     }
 

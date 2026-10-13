@@ -71,6 +71,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`install_conda <config-yaml-provision-install-conda>`: false
     :ref:`setup_command_timeout <config-yaml-provision-setup-command-timeout>`: 1800
     :ref:`file_mount_timeout <config-yaml-provision-file-mount-timeout>`: 600
+    :ref:`health_check_timeout <config-yaml-provision-health-check-timeout>`: 5
 
   :ref:`kubernetes <config-yaml-kubernetes>`:
     :ref:`ports <config-yaml-kubernetes-ports>`: loadbalancer
@@ -835,6 +836,31 @@ Example:
   provision:
     setup_command_timeout: 3600
     file_mount_timeout: 1200
+
+.. _config-yaml-provision-health-check-timeout:
+
+``provision.health_check_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+How long, in seconds, SkyPilot keeps retrying the health probe of a cluster's
+head node after its first failure when refreshing the cluster's status
+(optional). Retries run every second. If the probe still fails, the cluster is
+marked ``INIT``, which a :ref:`managed job <managed-jobs>` treats as a
+preemption. ``0`` disables retries.
+
+Raise it if the head node is reached over a flaky link, e.g. SSH through
+:ref:`aws.use_ssm <config-yaml-aws-use-ssm>`. If the retries take longer than
+about 20 seconds, concurrent status refreshes of the cluster return its cached
+status.
+
+Default: ``5``.
+
+Example:
+
+.. code-block:: yaml
+
+  provision:
+    health_check_timeout: 30
 
 .. _config-yaml-aws:
 
