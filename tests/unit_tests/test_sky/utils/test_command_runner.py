@@ -1147,6 +1147,119 @@ class TestRsyncTimeout:
         assert len(calls) == 1
 
 
+class TestRemoteHomeDirLookup:
+    """Tests for resolving a `~` rsync path through get_remote_home_dir."""
+
+    @staticmethod
+    def _capture_rsync_commands():
+        commands = []
+
+        def fake_run_with_log(command, *args, **kwargs):
+            del args, kwargs  # Unused.
+            commands.append(command)
+            return 0, '', ''
+
+        return commands, fake_run_with_log
+
+    @pytest.mark.parametrize('timeout', [None, 60])
+    def test_ssh_default_home_dir_resolves_tilde_target(self, timeout) -> None:
+        """The SSH default callable must accept the per-attempt timeout."""
+        commands, fake_run_with_log = self._capture_rsync_commands()
+        runner = command_runner.SSHCommandRunner(('1.2.3.4', 22), 'ubuntu',
+                                                 '/dev/null')
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log), \
+             mock.patch.object(command_runner.time, 'sleep') as mock_sleep:
+            runner.rsync('/tmp',
+                         '~/sky_workdir',
+                         up=True,
+                         stream_logs=False,
+                         timeout=timeout)
+
+        assert len(commands) == 1
+        assert "ubuntu@1.2.3.4:'~/sky_workdir'" in commands[0]
+        mock_sleep.assert_not_called()
+
+    @pytest.mark.parametrize('timeout', [None, 60])
+    def test_slurm_runner_resolves_tilde_target(self, timeout) -> None:
+        """Slurm passes its own home-dir callable; it must take the timeout."""
+        commands, fake_run_with_log = self._capture_rsync_commands()
+        runner = command_runner.SlurmCommandRunner(
+            node=('login.example.com', 22),
+            ssh_user='root',
+            ssh_private_key=None,
+            sky_dir='/home/alice/.sky_clusters/test',
+            skypilot_runtime_dir='/tmp/test',
+            job_id='123',
+            slurm_node='node-1',
+            container_args=None)
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log), \
+             mock.patch.object(command_runner.time, 'sleep') as mock_sleep:
+            runner.rsync('/tmp',
+                         '~/.sky/.runtime_files',
+                         up=True,
+                         stream_logs=False,
+                         timeout=timeout)
+
+        assert len(commands) == 1
+        assert '/home/alice/.sky_clusters/test/.sky/.runtime_files' in commands[
+            0]
+        mock_sleep.assert_not_called()
+
+    def test_lookup_retries_share_the_rsync_deadline(self) -> None:
+        """A wedged lookup cannot overshoot the rsync's total timeout.
+
+        Each lookup attempt gets only the remaining budget, and no new attempt
+        starts once the budget is spent, however large max_retry is.
+        """
+        lookup_timeouts = []
+
+        def wedged_lookup(timeout):
+            lookup_timeouts.append(timeout)
+            clock[0] += timeout  # The attempt burns its whole budget.
+            raise exceptions.CommandError(124, 'echo ~', 'timed out', None)
+
+        clock = [1000.0]
+        rsync_calls = []
+
+        def fake_run_with_log(command, *args, **kwargs):
+            del args, kwargs  # Unused.
+            rsync_calls.append(command)
+            return 0, '', ''
+
+        def fake_sleep(seconds):
+            clock[0] += seconds
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log), \
+             mock.patch.object(command_runner.time,
+                               'sleep',
+                               side_effect=fake_sleep), \
+             mock.patch.object(command_runner.time,
+                               'monotonic',
+                               side_effect=lambda: clock[0]):
+            runner = command_runner.SSHCommandRunner(('1.2.3.4', 22), 'ubuntu',
+                                                     '/dev/null')
+            with pytest.raises(exceptions.CommandError):
+                runner.rsync('/tmp',
+                             '~/sky_workdir',
+                             up=True,
+                             stream_logs=False,
+                             max_retry=5,
+                             get_remote_home_dir=wedged_lookup,
+                             timeout=30)
+
+        # The first attempt used the whole 30s budget, so no retry started,
+        # and the rsync itself never ran.
+        assert lookup_timeouts == [30]
+        assert clock[0] - 1000.0 <= 30
+        assert not rsync_calls
+
+
 class TestInlineCommandLimit:
     """Inline-vs-upload decision, per runner transport."""
 

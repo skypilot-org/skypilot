@@ -69,6 +69,8 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`provision <config-yaml-provision>`:
     :ref:`ssh_timeout <config-yaml-provision-ssh-timeout>`: 10
     :ref:`install_conda <config-yaml-provision-install-conda>`: false
+    :ref:`setup_command_timeout <config-yaml-provision-setup-command-timeout>`: 1800
+    :ref:`file_mount_timeout <config-yaml-provision-file-mount-timeout>`: 600
 
   :ref:`kubernetes <config-yaml-kubernetes>`:
     :ref:`ports <config-yaml-kubernetes-ports>`: loadbalancer
@@ -789,6 +791,50 @@ Example:
   The default SkyPilot Kubernetes images no longer bundle conda. If your tasks
   rely on a conda environment, either set ``install_conda: true`` or use a
   custom image that ships conda.
+
+.. _config-yaml-provision-setup-command-timeout:
+
+``provision.setup_command_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Timeout in seconds for each remote command SkyPilot runs while setting up its
+runtime on a new cluster: setup commands, starting Ray, starting the skylet and
+setting up logging (optional).
+
+A command that exceeds the timeout is treated as failed, and the step is
+retried. This keeps a stalled connection from hanging the launch forever. The
+timeout bounds elapsed time, not progress, so set it well above how long
+runtime setup legitimately takes on your nodes. Stopping a timed-out command
+only stops SkyPilot's local client; the remote command may keep running while
+the retry starts.
+
+Set it to ``0`` or a negative value to disable the timeout.
+
+Default: ``1800``.
+
+.. _config-yaml-provision-file-mount-timeout:
+
+``provision.file_mount_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Timeout in seconds for each remote operation of SkyPilot's internal file
+mounts during runtime setup (optional).
+
+The directory creation and the file sync are bounded separately, so one mount
+can take up to twice this value. As with ``setup_command_timeout``, an operation
+that exceeds it is treated as failed and retried.
+
+Set it to ``0`` or a negative value to disable the timeout.
+
+Default: ``600``.
+
+Example:
+
+.. code-block:: yaml
+
+  provision:
+    setup_command_timeout: 3600
+    file_mount_timeout: 1200
 
 .. _config-yaml-aws:
 

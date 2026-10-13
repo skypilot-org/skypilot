@@ -329,7 +329,7 @@ class SSHCommandRunner(CommandRunner):
         log_path: str = ...,
         stream_logs: bool = ...,
         max_retry: int = ...,
-        get_remote_home_dir: Callable[[], str] = ...,
+        get_remote_home_dir: Callable[..., str] = ...,
         timeout: Optional[int] = ...,
         remote_rsync_command: Optional[str] = ...,
     ) -> None:

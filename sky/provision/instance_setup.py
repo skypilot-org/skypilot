@@ -52,6 +52,15 @@ _MAX_RETRY = 6
 # take many minutes. Their job is to turn "hangs forever, silently" into
 # "fails, then retries" so the existing _auto_retry can recover -- not to
 # police slowness.
+#
+# Trade-off: a timeout kills only the local `ssh` / `kubectl exec` client. The
+# remote command runs without a pty/tty, so it is not signalled and keeps
+# running. For the wedged-stream case that is harmless (the remote side has
+# already finished; only EOF is lost), but if a command is genuinely slower
+# than the bound, the retry starts it again while the first copy is still
+# running on the node. The generous defaults are what keep that path rare;
+# raise the bound (or set it non-positive) for setups that legitimately take
+# longer.
 _DEFAULT_SETUP_COMMAND_TIMEOUT = 1800
 _DEFAULT_FILE_MOUNT_TIMEOUT = 600
 

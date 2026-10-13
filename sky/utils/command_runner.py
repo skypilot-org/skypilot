@@ -107,7 +107,8 @@ def _timed_out_result(
     stderr = (f'Command timed out after {timeout} seconds: {cmd_str}\n'
               'The timer bounds elapsed wall-clock time, not progress, so this '
               'is either a genuinely slow command or a wedged connection; see '
-              'the log above for how far it got.')
+              'the log above for how far it got. Only the local client was '
+              'stopped: the remote command may still be running.')
     logger.warning(f'Command timed out after {timeout} seconds.')
     if require_outputs:
         return TIMEOUT_RETURNCODE, '', stderr
@@ -546,23 +547,36 @@ class CommandRunner:
         self,
         max_retry: int,
         get_remote_home_dir: Callable[..., str],
-        timeout: Optional[int] = None,
+        deadline: Optional[float] = None,
     ) -> str:
         """Returns the remote home directory with retry.
 
-        `timeout`, when set, bounds each lookup attempt so a wedged transport
-        cannot hang here indefinitely.
+        `get_remote_home_dir` is called with one argument: the timeout (or
+        None) for that attempt.
+
+        `deadline`, when set, is a `time.monotonic()` value bounding the whole
+        lookup, retries and backoff included: each attempt gets only the
+        budget that is left, and no new attempt starts once it is spent. This
+        keeps a wedged transport from hanging here, and keeps the lookup from
+        overshooting the caller's own deadline.
         """
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=5)
         retries_left = max_retry
         assert retries_left > 0, f'max_retry {max_retry} must be positive.'
         while retries_left >= 0:
+            attempt_timeout: Optional[int] = None
+            if deadline is not None:
+                # >=1s so we never pass 0, which would disable the timeout.
+                attempt_timeout = max(1, int(deadline - time.monotonic()))
             try:
-                return get_remote_home_dir(timeout)
+                return get_remote_home_dir(attempt_timeout)
             except Exception:  # pylint: disable=broad-except
                 if retries_left == 0:
                     raise
                 sleep_time = backoff.current_backoff()
+                if (deadline is not None and
+                        time.monotonic() + sleep_time >= deadline):
+                    raise
                 logger.warning(f'Failed to get remote home dir '
                                f'- retrying in {sleep_time} seconds.')
                 retries_left -= 1
@@ -630,12 +644,6 @@ class CommandRunner:
         # never reach its timer at all.
         deadline = (time.monotonic() + timeout) if timeout is not None else None
 
-        def _remaining_timeout() -> Optional[int]:
-            """Budget left for a sub-command, >=1s so it never disables it."""
-            if deadline is None:
-                return None
-            return max(1, int(deadline - time.monotonic()))
-
         if up:
             resolved_target = target
             if node_destination is None:
@@ -647,7 +655,7 @@ class CommandRunner:
                     remote_home_dir = self.get_remote_home_dir_with_retry(
                         max_retry=max_retry,
                         get_remote_home_dir=get_remote_home_dir,
-                        timeout=_remaining_timeout())
+                        deadline=deadline)
                     resolved_target = target.replace('~', remote_home_dir)
             full_source_str = str(resolved_source)
             if resolved_source.is_dir():
@@ -669,7 +677,7 @@ class CommandRunner:
                     remote_home_dir = self.get_remote_home_dir_with_retry(
                         max_retry=max_retry,
                         get_remote_home_dir=get_remote_home_dir,
-                        timeout=_remaining_timeout())
+                        deadline=deadline)
                     resolved_source = source.replace('~', remote_home_dir)
             rsync_command.extend([
                 f'{maybe_dest_prefix}{resolved_source!r}',
@@ -1594,7 +1602,7 @@ class SSHCommandRunner(CommandRunner):
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
-        get_remote_home_dir: Callable[[], str] = lambda: '~',
+        get_remote_home_dir: Callable[..., str] = lambda _=None: '~',
         timeout: Optional[int] = None,
         remote_rsync_command: Optional[str] = None,
     ) -> None:
@@ -1610,7 +1618,8 @@ class SSHCommandRunner(CommandRunner):
             max_retry: The maximum number of retries for the rsync command.
               This value should be non-negative.
             get_remote_home_dir: A callable that returns the remote home
-              directory. Defaults to '~'.
+              directory. It is called with one argument, the timeout (or
+              None) for that lookup. Defaults to '~'.
             timeout: Optional total timeout in seconds for the rsync, including
               all retries and backoff waits. None means no timeout (default).
             remote_rsync_command: Command used to start rsync on the remote.
@@ -2338,7 +2347,7 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                             log_path=log_path,
                             stream_logs=stream_logs,
                             max_retry=max_retry,
-                            get_remote_home_dir=lambda: remote_home_dir,
+                            get_remote_home_dir=lambda _=None: remote_home_dir,
                             timeout=timeout)
             finally:
                 try:
@@ -2358,16 +2367,17 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                                                     self.slurm_user,
                                                     shell_argv0='rsync',
                                                     use_sudo=self._use_sudo)
-        SSHCommandRunner.rsync(self,
-                               source,
-                               target,
-                               up=up,
-                               log_path=log_path,
-                               stream_logs=stream_logs,
-                               max_retry=max_retry,
-                               get_remote_home_dir=lambda: remote_home_dir,
-                               timeout=timeout,
-                               remote_rsync_command=remote_rsync_command)
+        SSHCommandRunner.rsync(
+            self,
+            source,
+            target,
+            up=up,
+            log_path=log_path,
+            stream_logs=stream_logs,
+            max_retry=max_retry,
+            get_remote_home_dir=lambda _=None: remote_home_dir,
+            timeout=timeout,
+            remote_rsync_command=remote_rsync_command)
 
     def _inline_command_quote_levels(self) -> int:
         # _run_via_srun adds an `srun ... bash -c` shell.
