@@ -217,9 +217,11 @@ Format: a positive duration with an optional unit suffix: `s` (seconds),
 
 The clock starts at the task's `SUBMITTED` time and covers launch
 retries, backoff and waiting in a Kubernetes scheduler's queue (e.g., Kueue).
-It covers only the initial wait: once the task has started, a later recovery
-does not re-arm it. In a pipeline or job group, each task has its own clock,
-and any task exceeding its timeout cancels the whole job.
+It is the only bound on a wait for Kueue admission, unless
+kubernetes.kueue.admission_timeout
+is set explicitly. It covers only the initial wait: once the task has started,
+a later recovery does not re-arm it. In a pipeline or job group, each task has
+its own clock, and any task exceeding its timeout cancels the whole job.
 
 The job then ends `CANCELLED`, as with `sky jobs cancel`, and the
 reason is shown in `sky jobs queue`. The timeout is enforced within
