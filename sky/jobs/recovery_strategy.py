@@ -750,6 +750,35 @@ class StrategyExecutor:
             # we must still propagate the cancellation
             logger.error(f'Failed to cancel the request: {e}')
 
+    async def _submit_request(self, submit: Callable[..., Any], *args,
+                              **kwargs) -> Any:
+        """Submit an inner request of this job and return its request ID.
+
+        ``submit`` (e.g. ``sdk.launch``) runs in a thread, which cannot be
+        interrupted. If the job is cancelled while the submission is in
+        flight, the request may already exist on the API server, but the
+        caller has no ID to cancel it with, so it would run on after the job
+        is cancelled (e.g. bring up a cluster that nothing tears down). In
+        that case, wait for the submission to return and cancel the request
+        it created before propagating the cancellation.
+        """
+        submission = asyncio.ensure_future(
+            asyncio.to_thread(submit, *args, **kwargs))
+        try:
+            return await asyncio.shield(submission)
+        except asyncio.CancelledError:
+            try:
+                request_id = await asyncio.shield(submission)
+            except Exception as e:  # pylint: disable=broad-except
+                # The submission failed, so there is no request to cancel.
+                logger.info('Request submission failed after the job was '
+                            f'cancelled: {common_utils.format_exception(e)}')
+            else:
+                logger.info(f'Cancelling request {request_id}, which was '
+                            'submitted while the job was being cancelled.')
+                await self._cancel_launch_request(request_id)
+            raise
+
     async def _get_request_payload(self, request_id: str) -> Optional[Any]:
         """Fetch the status and status_msg of a request.
 
@@ -1123,7 +1152,7 @@ class StrategyExecutor:
                                         'recover_on_exit_codes':
                                             self.recover_on_exit_codes,
                                     }
-                                    request_id = await asyncio.to_thread(
+                                    request_id = await self._submit_request(
                                         sdk.launch,
                                         self.dag,
                                         cluster_name=self.cluster_name,
@@ -1238,7 +1267,7 @@ class StrategyExecutor:
                                     'No cluster name found in the pool.')
                             request_id = None
                             try:
-                                request_id = await asyncio.to_thread(
+                                request_id = await self._submit_request(
                                     sdk.exec,
                                     self.dag,
                                     cluster_name=self.cluster_name,

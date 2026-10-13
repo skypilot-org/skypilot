@@ -206,8 +206,22 @@ def terminate_cluster(
     max_retry: int = 6,
     graceful: bool = False,
     graceful_timeout: Optional[int] = None,
+    cancel_requests_if_missing: bool = False,
 ) -> None:
-    """Terminate the cluster."""
+    """Terminate the cluster.
+
+    Args:
+        cluster_name: The name of the cluster.
+        max_retry: The number of attempts to terminate the cluster.
+        graceful: See `core.down`.
+        graceful_timeout: See `core.down`.
+        cancel_requests_if_missing: If the cluster has no record, cancel the
+            requests still in flight for it. A launch records the cluster only
+            once it starts provisioning, so without this, a launch that was
+            submitted but has not reached that point would bring the cluster
+            up after this returns. Teardown of a recorded cluster always
+            cancels its requests.
+    """
     from sky import core  # pylint: disable=import-outside-toplevel
 
     # Pin the active workspace to the cluster's recorded workspace before
@@ -254,6 +268,17 @@ def terminate_cluster(
                           graceful_timeout=graceful_timeout)
             return
         except exceptions.ClusterDoesNotExist:
+            if cancel_requests_if_missing:
+                cancel_requests_if_missing = False
+                if _cancel_requests_of_unrecorded_cluster(cluster_name):
+                    # A cancelled launch may have recorded the cluster
+                    # before it stopped. If so, tear down whatever it left
+                    # behind.
+                    record = global_user_state.get_cluster_from_name(
+                        cluster_name)
+                    if record is not None:
+                        cluster_workspace = record.get('workspace')
+                        continue
             # The cluster is already down.
             logger.debug(f'The cluster {cluster_name} is already down.')
             return
@@ -268,6 +293,26 @@ def terminate_cluster(
             with ux_utils.enable_traceback():
                 logger.error(f'  Traceback: {traceback.format_exc()}')
             time.sleep(backoff.current_backoff())
+
+
+def _cancel_requests_of_unrecorded_cluster(cluster_name: str) -> bool:
+    """Cancel the in-flight requests of a cluster that has no record.
+
+    Returns:
+        True if any request was cancelled.
+    """
+    try:
+        # Exclude sky.down, as the cluster teardown does.
+        cancelled = requests_lib.kill_cluster_requests(cluster_name, 'sky.down')
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning('Failed to cancel the in-flight requests for cluster '
+                       f'{cluster_name}: {common_utils.format_exception(e)}')
+        return False
+    if cancelled:
+        logger.info(f'Cancelled {len(cancelled)} in-flight request(s) for '
+                    f'cluster {cluster_name}, which has no record yet: '
+                    f'{", ".join(cancelled)}')
+    return bool(cancelled)
 
 
 def setup_consolidation_mode_on_startup(deploy: bool) -> None:

@@ -362,6 +362,95 @@ def test_job_recovery_skips_autostopping():
     assert stopped_status not in recovery_skip_statuses
 
 
+@mock.patch('sky.jobs.utils.requests_lib.kill_cluster_requests')
+@mock.patch('sky.jobs.utils.global_user_state.get_cluster_from_name',
+            return_value=None)
+@mock.patch('sky.core.down')
+@mock.patch('sky.usage.usage_lib.messages.usage.set_internal')
+def test_terminate_cluster_cancels_requests_of_unrecorded_cluster(
+        mock_set_internal, mock_sky_down, mock_get_cluster, mock_kill) -> None:
+    """A launch that was submitted but has not recorded the cluster yet must
+    be cancelled, or it brings the cluster up after the job is gone."""
+    del mock_set_internal, mock_get_cluster
+    mock_sky_down.side_effect = ClusterDoesNotExist('test-cluster')
+    mock_kill.return_value = ['launch-req']
+
+    utils.terminate_cluster('test-cluster', cancel_requests_if_missing=True)
+
+    mock_kill.assert_called_once_with('test-cluster', 'sky.down')
+    # The cancelled launch recorded nothing, so there is nothing to tear down.
+    mock_sky_down.assert_called_once()
+
+
+@mock.patch('sky.jobs.utils.requests_lib.kill_cluster_requests')
+@mock.patch('sky.jobs.utils.global_user_state.get_cluster_from_name')
+@mock.patch('sky.core.down')
+@mock.patch('sky.usage.usage_lib.messages.usage.set_internal')
+def test_terminate_cluster_tears_down_cluster_recorded_by_cancelled_launch(
+        mock_set_internal, mock_sky_down, mock_get_cluster, mock_kill) -> None:
+    """If the cancelled launch recorded the cluster before it stopped, the
+    cluster is torn down, in the workspace of its record."""
+    del mock_set_internal
+    from sky import skypilot_config
+    mock_get_cluster.side_effect = [
+        None,
+        {
+            'name': 'test-cluster',
+            'workspace': 'team-a'
+        },
+    ]
+    mock_kill.return_value = ['launch-req']
+    observed_workspace = []
+
+    def _down(*args, **kwargs):
+        del args, kwargs
+        if not observed_workspace:
+            observed_workspace.append(None)
+            raise ClusterDoesNotExist('test-cluster')
+        observed_workspace.append(skypilot_config.get_active_workspace())
+
+    mock_sky_down.side_effect = _down
+
+    utils.terminate_cluster('test-cluster', cancel_requests_if_missing=True)
+
+    assert mock_sky_down.call_count == 2
+    assert observed_workspace == [None, 'team-a']
+    mock_kill.assert_called_once()
+
+
+@mock.patch('sky.jobs.utils.requests_lib.kill_cluster_requests')
+@mock.patch('sky.jobs.utils.global_user_state.get_cluster_from_name',
+            return_value=None)
+@mock.patch('sky.core.down')
+@mock.patch('sky.usage.usage_lib.messages.usage.set_internal')
+def test_terminate_cluster_keeps_requests_of_unrecorded_cluster_by_default(
+        mock_set_internal, mock_sky_down, mock_get_cluster, mock_kill) -> None:
+    del mock_set_internal, mock_get_cluster
+    mock_sky_down.side_effect = ClusterDoesNotExist('test-cluster')
+
+    utils.terminate_cluster('test-cluster')
+
+    mock_kill.assert_not_called()
+
+
+@mock.patch('sky.jobs.utils.requests_lib.kill_cluster_requests',
+            side_effect=RuntimeError('requests DB unavailable'))
+@mock.patch('sky.jobs.utils.global_user_state.get_cluster_from_name',
+            return_value=None)
+@mock.patch('sky.core.down')
+@mock.patch('sky.usage.usage_lib.messages.usage.set_internal')
+def test_terminate_cluster_tolerates_request_cancel_failure(
+        mock_set_internal, mock_sky_down, mock_get_cluster, mock_kill) -> None:
+    del mock_set_internal, mock_get_cluster
+    mock_sky_down.side_effect = ClusterDoesNotExist('test-cluster')
+
+    # Must not raise: the cluster itself is already down.
+    utils.terminate_cluster('test-cluster', cancel_requests_if_missing=True)
+
+    mock_kill.assert_called_once()
+    mock_sky_down.assert_called_once()
+
+
 # ======== Graceful cancel tests ========
 
 

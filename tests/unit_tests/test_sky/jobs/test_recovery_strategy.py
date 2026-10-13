@@ -2,6 +2,7 @@
 import ast
 import asyncio
 import inspect
+import threading
 import types
 from unittest import mock
 
@@ -595,6 +596,102 @@ async def test_launch_cancels_parked_request_when_poll_persistently_fails(
 
     executor._cancel_launch_request.assert_awaited_once_with('req-123')
     assert patches.sdk_launch.call_count == 1
+
+
+def _blocking_submission(request_id, error=None):
+    """A request submission (sdk.launch/sdk.exec) that blocks until released.
+
+    Returns the mock and two threading events: ``entered`` is set once the
+    submission is running, and setting ``release`` lets it return.
+    """
+    entered = threading.Event()
+    release = threading.Event()
+
+    def submit(*args, **kwargs):
+        del args, kwargs
+        entered.set()
+        assert release.wait(timeout=10)
+        if error is not None:
+            raise error
+        return request_id
+
+    return mock.MagicMock(side_effect=submit), entered, release
+
+
+async def _cancel_during_submission(task, entered, release):
+    """Cancel ``task`` while its submission is in flight, then release it."""
+    assert await asyncio.to_thread(entered.wait, 10)
+    task.cancel()
+    # Give the cancellation time to land before the submission returns.
+    await asyncio.sleep(0.05)
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_launch_cancelled_during_submission_cancels_the_request(
+        monkeypatch):
+    """A cancel that lands while sdk.launch is still submitting the request
+    must cancel the request once its ID is known. Otherwise the launch runs
+    on after the job is cancelled and nothing tears its cluster down."""
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    sdk_launch, entered, release = _blocking_submission('req-123')
+    monkeypatch.setattr(recovery_strategy.sdk, 'launch', sdk_launch)
+    executor._cancel_launch_request = mock.AsyncMock()
+    executor._await_launch_request = mock.AsyncMock()
+
+    task = asyncio.create_task(
+        executor._launch(max_retry=1, raise_on_failure=True))
+    await _cancel_during_submission(task, entered, release)
+
+    executor._cancel_launch_request.assert_awaited_once_with('req-123')
+    # The job was cancelled before the request ID was known: nothing may wait
+    # on the request.
+    executor._await_launch_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_launch_cancelled_during_failed_submission(monkeypatch):
+    """If the in-flight submission fails, there is no request to cancel, and
+    the job's cancellation still propagates."""
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    sdk_launch, entered, release = _blocking_submission(
+        None, error=RuntimeError('server unreachable'))
+    monkeypatch.setattr(recovery_strategy.sdk, 'launch', sdk_launch)
+    executor._cancel_launch_request = mock.AsyncMock()
+
+    task = asyncio.create_task(
+        executor._launch(max_retry=1, raise_on_failure=True))
+    await _cancel_during_submission(task, entered, release)
+
+    executor._cancel_launch_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pool_exec_cancelled_during_submission_cancels_the_request(
+        monkeypatch):
+    """Same as for sdk.launch, for the sdk.exec that submits a pool job."""
+    executor = _make_launch_executor()
+    executor.pool = 'my-pool'
+    executor.job_id_on_pool_cluster = None
+    _patch_launch_environment(monkeypatch)
+    monkeypatch.setattr(recovery_strategy.serve_utils, 'get_next_cluster_name',
+                        lambda *a, **k: 'pool-cluster')
+    sdk_exec, entered, release = _blocking_submission('exec-req')
+    monkeypatch.setattr(recovery_strategy.sdk, 'exec', sdk_exec)
+    sdk_get = mock.MagicMock()
+    monkeypatch.setattr(recovery_strategy.sdk, 'get', sdk_get)
+    executor._cancel_launch_request = mock.AsyncMock()
+
+    task = asyncio.create_task(
+        executor._launch(max_retry=1, raise_on_failure=True))
+    await _cancel_during_submission(task, entered, release)
+
+    executor._cancel_launch_request.assert_awaited_once_with('exec-req')
+    sdk_get.assert_not_called()
 
 
 @pytest.mark.asyncio

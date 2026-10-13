@@ -3491,7 +3491,8 @@ class ControllerManager:
                        job_id: int,
                        pool: Optional[str] = None,
                        graceful: bool = False,
-                       graceful_timeout: Optional[int] = None):
+                       graceful_timeout: Optional[int] = None,
+                       cancelling: bool = False):
         """Clean up the cluster(s) and storages.
 
         (1) Clean up the succeeded task(s)' ephemeral storage. The storage has
@@ -3500,7 +3501,9 @@ class ControllerManager:
         (2) Clean up the cluster(s) that are not cleaned up yet, which can
             happen when the task failed or cancelled. At most one cluster
             should be left when reaching here, as we currently only support
-            chain DAGs, and only one task is executed at a time.
+            chain DAGs, and only one task is executed at a time. If the job
+            is being cancelled, this also cancels the in-flight requests of a
+            cluster that has no record yet.
         """
         # Cleanup the HA recovery script first as it is possible that some error
         # was raised when we construct the task object (e.g.,
@@ -3525,7 +3528,8 @@ class ControllerManager:
                     managed_job_utils.terminate_cluster(
                         cluster_name,
                         graceful=graceful,
-                        graceful_timeout=graceful_timeout)
+                        graceful_timeout=graceful_timeout,
+                        cancel_requests_if_missing=cancelling)
                     status = core.status(cluster_names=[cluster_name],
                                          all_users=True)
                     assert (len(status) == 0 or
@@ -3907,7 +3911,8 @@ class ControllerManager:
                     lambda _: self._cleanup(job_id,
                                             pool=pool,
                                             graceful=graceful,
-                                            graceful_timeout=graceful_timeout))
+                                            graceful_timeout=graceful_timeout,
+                                            cancelling=cancelling))
                 logger.info(f'Cluster of managed job {job_id} has been cleaned '
                             'up.')
             except Exception as e:  # pylint: disable=broad-except
