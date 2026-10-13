@@ -17,6 +17,7 @@ from sky.provision import common as provision_common
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import instance
+from sky.provision.kubernetes import kai
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.instance import logger
 from sky.utils import subprocess_utils
@@ -131,6 +132,38 @@ def test_create_pods_raises_on_more_pods_than_requested(monkeypatch):
     config = _make_provision_config(count=2)
     with pytest.raises(RuntimeError, match='resource leak'):
         instance._create_pods('us', cluster_on_cloud, cluster_on_cloud, config)
+
+
+@pytest.mark.parametrize('kai_queue', ['team-queue', None])
+def test_create_pods_gangs_a_kai_cluster_only(monkeypatch, kai_queue):
+    """A KAI queue creates the PodGroup and checks KAI while pods wait."""
+    cluster_on_cloud = 'test-cluster-kai'
+    head_name = f'{cluster_on_cloud}-head'
+    existing = {head_name: _fake_pod(head_name)}
+    _patch_create_pods_k8s_boundary(monkeypatch, existing, head_name)
+    monkeypatch.setattr(subprocess_utils, 'run_in_parallel',
+                        lambda fn, items, *a, **k: [fn(i) for i in items])
+    gangs = []
+    monkeypatch.setattr(kai, 'ensure_pod_group',
+                        lambda *args: gangs.append(args))
+    callbacks = []
+    checker = object()
+    monkeypatch.setattr(kai, 'scheduling_wait_checker', lambda: checker)
+    monkeypatch.setattr(
+        instance, '_wait_for_pods_to_schedule',
+        lambda *a, **k: callbacks.append(k.get('scheduling_callback')))
+    config = _make_provision_config(count=1)
+    if kai_queue is not None:
+        config.provider_config['kai_queue'] = kai_queue
+
+    instance._create_pods('us', cluster_on_cloud, cluster_on_cloud, config)
+
+    if kai_queue is None:
+        assert gangs == []
+        assert callbacks == [None]
+    else:
+        assert gangs == [('ctx', 'ns', cluster_on_cloud, config.node_config, 1)]
+        assert callbacks == [checker]
 
 
 def test_inject_ephemeral_volumes():

@@ -1748,6 +1748,20 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             },
         },
     },
+    'kai': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'queue': {
+                'type': 'string',
+            },
+            'preemptibility': {
+                'type': 'string',
+                'enum': ['preemptible', 'non-preemptible'],
+            },
+        },
+    },
     # Alias of `kueue.local_queue_name`; `quota.queue` takes precedence
     # when both are set. Permissive so plugins can layer their own
     # sub-fields under `quota` without requiring per-key OSS schema
@@ -2786,6 +2800,20 @@ def get_config_schema():
                                 },
                             },
                         },
+                        'kai': {
+                            'type': 'object',
+                            'required': [],
+                            'additionalProperties': False,
+                            'properties': {
+                                'queue': {
+                                    'type': 'string',
+                                },
+                                'preemptibility': {
+                                    'type': 'string',
+                                    'enum': ['preemptible', 'non-preemptible'],
+                                },
+                            },
+                        },
                         'quota': {
                             'type': 'object',
                             'required': [],
@@ -2826,6 +2854,23 @@ def get_config_schema():
                                         'properties': {
                                             'local_queue_name': {
                                                 'type': 'string',
+                                            },
+                                        },
+                                    },
+                                    'kai': {
+                                        'type': 'object',
+                                        'required': [],
+                                        'additionalProperties': False,
+                                        'properties': {
+                                            'queue': {
+                                                'type': 'string',
+                                            },
+                                            'preemptibility': {
+                                                'type': 'string',
+                                                'enum': [
+                                                    'preemptible',
+                                                    'non-preemptible'
+                                                ],
                                             },
                                         },
                                     },

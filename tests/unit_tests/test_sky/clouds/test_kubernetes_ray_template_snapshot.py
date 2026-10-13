@@ -119,6 +119,9 @@ def base_variables() -> Dict[str, Any]:
         'k8s_automount_sa_token': 'true',
         'k8s_fuse_device_required': False,
         'k8s_kueue_local_queue_name': None,
+        'k8s_kai_queue_name': None,
+        'k8s_kai_preemptibility': None,
+        'k8s_kai_scheduler_name': 'kai-scheduler',
         'k8s_skypilot_system_namespace': 'skypilot-system',
         'k8s_fusermount_shared_dir': '/var/run/fusermount',
         'k8s_fusermount_setup_command': 'FUSERMOUNT_SETUP_COMMAND',
@@ -310,6 +313,12 @@ CASES: Dict[str, Dict[str, Any]] = {
     'kueue': {
         'k8s_kueue_local_queue_name': 'user-queue',
         'k8s_max_run_duration_seconds': 3600,
+    },
+    'kai': {
+        'k8s_kai_queue_name': 'team-queue',
+        'k8s_kai_preemptibility': 'preemptible',
+        'priority_class': 'low-priority',
+        'num_nodes': 2,
     },
     'docker_all': {
         'k8s_enable_docker_all': True,

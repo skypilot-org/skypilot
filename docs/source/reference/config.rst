@@ -97,6 +97,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`enable_docker <config-yaml-kubernetes-enable-docker>`: true  # or ALL / BUILD
     :ref:`kueue <config-yaml-kubernetes-kueue>`:
       :ref:`local_queue_name <config-yaml-kubernetes-kueue-local-queue-name>`: skypilot-local-queue
+    :ref:`kai <config-yaml-kubernetes-kai>`:
+      :ref:`queue <config-yaml-kubernetes-kai-queue>`: team-queue
+      :ref:`preemptibility <config-yaml-kubernetes-kai-preemptibility>`: preemptible
     :ref:`dws <config-yaml-kubernetes-dws>`:
       enabled: true
       max_run_duration: 10m
@@ -2049,6 +2052,30 @@ SkyServe replicas and pool workers are standing requests for capacity, so
 when this field is not set they wait for admission indefinitely instead of
 failing after 24 hours and re-entering the queue at the back. Set the field
 explicitly to bound their wait as well.
+
+.. _config-yaml-kubernetes-kai:
+
+``kubernetes.kai``
+~~~~~~~~~~~~~~~~~~
+
+`KAI Scheduler <https://github.com/kai-scheduler/KAI-Scheduler>`_ configuration
+(optional). See :ref:`kubernetes-example-kai`. Cannot be combined with
+:ref:`kubernetes.kueue <config-yaml-kubernetes-kueue>`.
+
+.. _config-yaml-kubernetes-kai-queue:
+
+``kubernetes.kai.queue``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Name of the KAI ``Queue`` to submit clusters to.
+
+.. _config-yaml-kubernetes-kai-preemptibility:
+
+``kubernetes.kai.preemptibility``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``preemptible`` or ``non-preemptible`` (optional). If not set, KAI derives it
+from the priority.
 
 .. _config-yaml-kubernetes-dws:
 
