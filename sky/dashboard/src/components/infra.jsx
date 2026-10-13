@@ -604,7 +604,7 @@ export function InfrastructureSection({
     return (
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-4 max-sm:flex-wrap max-sm:gap-y-3">
             <div className="flex items-center">
               <h3 className="text-lg font-semibold">{title}</h3>
               <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
@@ -617,13 +617,12 @@ export function InfrastructureSection({
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 max-sm:w-full">
               {actionButton}
-              {/* Color key for the Utilization bars, pinned to the right end;
-                  only meaningful when the table has GPU rows to explain. */}
-              {gpus && gpus.length > 0 && (
-                <UtilizationLegend className="hidden sm:flex" />
-              )}
+              {/* Color key for the Utilization bars, pinned to the right end
+                  (own line on phones); only meaningful when the table has
+                  GPU rows to explain. */}
+              {gpus && gpus.length > 0 && <UtilizationLegend />}
             </div>
           </div>
           <GpuTypeSummaryStrip gpus={gpus} />
@@ -4259,19 +4258,26 @@ export function GPUs() {
           the back link above already serves as the leaf navigation,
           and the page-level Refresh / Add Infra controls don't apply
           when viewing one infra. Hiding the whole row also closes the
-          ~36px gap (h-5 + mb-4) between the back link and the h1. */}
+          ~36px gap (h-5 + mb-4) between the back link and the h1.
+          Below lg it is two rows: title + plugin actions, then workspace
+          + refresh. Narrow-only rules use max-lg: so plugin stylesheets,
+          which load later, cannot override them. */}
       {!selectedContext && (
-        <div className="flex items-center justify-between mb-4 h-5">
-          <div className="text-base flex items-center">
+        <div className="flex items-center mb-4 max-lg:flex-wrap max-lg:gap-y-3 lg:h-5">
+          <div className="flex-1 text-base flex items-center">
             <Link href="/infra" className="text-sky-blue cursor-default">
               Infrastructure
             </Link>
           </div>
-          <div className="flex items-center">
+          <PluginSlot
+            name="infra.headerActions"
+            wrapperClassName="max-lg:order-2 lg:order-3 lg:ml-3"
+          />
+          <div className="max-lg:order-3 lg:order-2 max-lg:w-full flex items-center">
             {/* Workspace Selector */}
             {availableWorkspaces.length > 0 && (
               <div className="flex items-center mr-4">
-                <label className="text-sm font-medium text-gray-700 mr-2">
+                <label className="max-lg:hidden text-sm font-medium text-gray-700 mr-2">
                   Workspace:
                 </label>
                 <Select
@@ -4293,27 +4299,35 @@ export function GPUs() {
               </div>
             )}
 
-            {isAnyLoading && (
-              <div className="flex items-center mr-2">
-                <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500">Loading...</span>
-              </div>
-            )}
-            {!isAnyLoading && lastFetchedTime && (
-              <LastUpdatedTimestamp
-                timestamp={lastFetchedTime}
-                className="mr-2"
-              />
-            )}
-            <button
-              onClick={handleRefresh}
-              disabled={isAnyLoading}
-              className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-            >
-              <RotateCwIcon className="h-4 w-4 mr-1.5" />
-              {!isMobile && 'Refresh'}
-            </button>
-            <PluginSlot name="infra.headerActions" wrapperClassName="ml-3" />
+            <div className="ml-auto flex items-center">
+              {isAnyLoading && (
+                <div className="flex items-center mr-2">
+                  <CircularProgress size={15} className="mt-0" />
+                  <span className="max-lg:hidden ml-2 text-gray-500">
+                    Loading...
+                  </span>
+                </div>
+              )}
+              {!isAnyLoading && lastFetchedTime && (
+                <div className="max-lg:hidden lg:flex lg:items-center">
+                  <LastUpdatedTimestamp
+                    timestamp={lastFetchedTime}
+                    className="mr-2"
+                  />
+                </div>
+              )}
+              <button
+                onClick={handleRefresh}
+                disabled={isAnyLoading}
+                title="Refresh"
+                className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+              >
+                <RotateCwIcon
+                  className={`h-4 w-4 ${isMobile ? '' : 'mr-1.5'}`}
+                />
+                {!isMobile && 'Refresh'}
+              </button>
+            </div>
           </div>
         </div>
       )}

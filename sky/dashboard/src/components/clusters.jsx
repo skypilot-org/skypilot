@@ -571,8 +571,10 @@ export function Clusters() {
 
       {/* Toggles live on their own row (mirrors the Managed Jobs layout) so
           they read consistently across pages and stay clear of the search
-          box. Refresh/last-updated sit on the right of the same row. */}
-      <div className="flex items-center justify-between mb-4">
+          box. Refresh/last-updated sit on the right of the same row; below
+          lg the timestamp hides and Refresh stays level with the first
+          toggle row when the toggles wrap. */}
+      <div className="flex justify-between mb-4 max-lg:items-start lg:items-center">
         <div className="flex flex-wrap items-center gap-2">
           <SegmentedToggle
             ariaLabel="Filter clusters by activity"
@@ -624,7 +626,7 @@ export function Clusters() {
               </div>
             )}
         </div>
-        <div className="flex items-center gap-2 shrink-0 ml-2">
+        <div className="flex items-center gap-2 shrink-0 ml-2 h-8">
           {showHistory && (
             <Select
               value={historyDays.toString()}
@@ -644,18 +646,23 @@ export function Clusters() {
           {loading && (
             <div className="flex items-center">
               <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+              <span className="max-lg:hidden ml-2 text-gray-500 text-sm">
+                Loading...
+              </span>
             </div>
           )}
           {!loading && lastFetchedTime && (
-            <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+            <div className="max-lg:hidden lg:flex lg:items-center">
+              <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+            </div>
           )}
           <button
             onClick={handleRefresh}
             disabled={loading}
+            title="Refresh"
             className="text-sky-blue hover:text-sky-blue-bright flex items-center"
           >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
+            <RotateCwIcon className={`h-4 w-4 ${isMobile ? '' : 'mr-1.5'}`} />
             {!isMobile && <span>Refresh</span>}
           </button>
         </div>
