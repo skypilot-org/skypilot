@@ -779,6 +779,68 @@ class AuthProxyMiddleware(middleware_utils.ASGIMiddleware):
         return None
 
 
+# SkyPilot runs a request that no middleware identified as the server's
+# own root account, an admin, and does not check websockets at all. With
+# SKYPILOT_REQUIRE_IDENTITY=true and the external auth proxy
+# enabled, such a request is refused instead.
+_REQUIRE_IDENTITY_ENV_VAR = 'SKYPILOT_REQUIRE_IDENTITY'
+
+
+@middleware_utils.websocket_aware
+class RequireIdentityMiddleware(middleware_utils.ASGIMiddleware):
+    """Refuses a request that carries no identity.
+
+    Runs after every authentication middleware. A request passes when one
+    of them set the user, when it carries the external proxy's identity
+    header, or when it carries a `sky_` bearer token. Loopback requests
+    and /api/health pass, as BasicAuthMiddleware lets them.
+
+    The header and token rules do not read request.state, so they hold
+    however the authentication middlewares are ordered and whether or not
+    they handle websockets; that keeps this middleware a backstop rather
+    than a dependency on the stack's shape. They are not identity checks.
+    AuthProxyMiddleware resolves the header into a user, and a request
+    whose header it could not decode still passes here, since it did come
+    through the proxy; BearerTokenMiddleware has validated or refused a
+    `sky_` token before this runs. The deployment is expected to make the
+    proxy the only path to the server and to strip a caller's own copy of
+    the header.
+    """
+
+    # pylint: disable=redefined-outer-name
+    def __init__(self, app: starlette.types.ASGIApp) -> None:
+        super().__init__(app)
+        proxy_config = server_config.load_external_proxy_config()
+        self.enabled = (os.environ.get(_REQUIRE_IDENTITY_ENV_VAR,
+                                       'false').lower() == 'true' and
+                        proxy_config.enabled)
+        self.header_name = proxy_config.header_name if self.enabled else None
+        if os.environ.get(_REQUIRE_IDENTITY_ENV_VAR,
+                          'false').lower() == 'true' and not self.enabled:
+            logger.warning(f'{_REQUIRE_IDENTITY_ENV_VAR} is set but '
+                           'the external auth proxy is disabled; not '
+                           'enforced')
+
+    async def on_request(
+            self, request: fastapi.Request) -> Optional[fastapi.Response]:
+        if not self.enabled:
+            return None
+        if getattr(request.state, 'auth_user', None) is not None:
+            return None
+        if request.headers.get(self.header_name):
+            return None
+        auth_header = request.headers.get('authorization') or ''
+        if (auth_header.lower().startswith('bearer ') and
+                auth_header.split(' ', 1)[1].startswith('sky_')):
+            return None
+        if loopback.is_loopback_request(request):
+            return None
+        if request.url.path.startswith('/api/health'):
+            return None
+        return _bearer_auth_401_response(request,
+                                         {'detail': 'Authentication required'})
+
+
 # Default expiration time for upload ids before cleanup.
 _DEFAULT_UPLOAD_EXPIRATION_TIME = datetime.timedelta(hours=1)
 # Key: (upload_id, user_hash), Value: the time when the upload id needs to be
@@ -1341,6 +1403,9 @@ app.add_middleware(
     allow_methods=['*'],
     allow_headers=['*'],
     expose_headers=['X-Skypilot-Request-ID'])
+# Insert require-identity before the authentication middleware so that it
+# runs after all of them had their chance to set request.state.auth_user.
+app.add_middleware(RequireIdentityMiddleware)
 # Authentication based on oauth2-proxy.
 app.add_middleware(oauth2_proxy.OAuth2ProxyMiddleware)
 # AuthProxyMiddleware should precede BasicAuthMiddleware and
