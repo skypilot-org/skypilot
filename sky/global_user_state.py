@@ -2459,6 +2459,41 @@ def _resolve_cluster_hash(cluster_hash: Optional[str] = None,
     return cluster_hash
 
 
+# The workspace a history record reports: the history row's, else the live
+# cluster's. NULL when neither is set.
+_HISTORY_WORKSPACE = sqlalchemy.func.coalesce(
+    sqlalchemy.func.nullif(cluster_history_table.c.workspace, ''),
+    cluster_table.c.workspace)
+
+
+@db_retries.retry
+@metrics_lib.time_me
+def get_cluster_history_workspace(
+        cluster_hash: Optional[str] = None,
+        cluster_name: Optional[str] = None
+) -> Tuple[Optional[str], Optional[str]]:
+    """Returns the cluster's hash and the workspace of its history row.
+
+    Takes exactly one of cluster_hash or cluster_name, as
+    `_resolve_cluster_hash` does. The workspace is the one
+    `iter_clusters_from_history` reports, or None if the cluster or its
+    workspace is not found.
+    """
+    cluster_hash = _resolve_cluster_hash(cluster_hash, cluster_name)
+    if cluster_hash is None:
+        return None, None
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        workspace = session.query(_HISTORY_WORKSPACE).select_from(
+            cluster_history_table.join(
+                cluster_table,
+                cluster_history_table.c.cluster_hash ==
+                cluster_table.c.cluster_hash,
+                isouter=True)).filter(cluster_history_table.c.cluster_hash ==
+                                      cluster_hash).scalar()
+    return cluster_hash, workspace
+
+
 @metrics_lib.time_me
 def get_launched_resources_from_cluster_hash(
         cluster_hash: str) -> Optional[Tuple[int, Any]]:
@@ -2872,7 +2907,8 @@ def get_clusters_from_history(
         abbreviate_response: bool = False,
         cluster_hashes: Optional[List[str]] = None,
         cluster_names: Optional[List[str]] = None,
-        exclude_managed_clusters: bool = False) -> List[Dict[str, Any]]:
+        exclude_managed_clusters: bool = False,
+        workspaces_filter: Optional[Set[str]] = None) -> List[Dict[str, Any]]:
     """Get cluster reports from history.
 
     See iter_clusters_from_history for the arguments.
@@ -2887,7 +2923,8 @@ def get_clusters_from_history(
             abbreviate_response=abbreviate_response,
             cluster_hashes=cluster_hashes,
             cluster_names=cluster_names,
-            exclude_managed_clusters=exclude_managed_clusters))
+            exclude_managed_clusters=exclude_managed_clusters,
+            workspaces_filter=workspaces_filter))
 
 
 def iter_clusters_from_history(
@@ -2895,7 +2932,9 @@ def iter_clusters_from_history(
         abbreviate_response: bool = False,
         cluster_hashes: Optional[List[str]] = None,
         cluster_names: Optional[List[str]] = None,
-        exclude_managed_clusters: bool = False) -> Iterator[Dict[str, Any]]:
+        exclude_managed_clusters: bool = False,
+        workspaces_filter: Optional[Set[str]] = None
+) -> Iterator[Dict[str, Any]]:
     """Yield cluster reports from history, most recently launched first.
 
     All matching rows are fetched, and their usage intervals unpickled, before
@@ -2918,6 +2957,9 @@ def iter_clusters_from_history(
         exclude_managed_clusters: If True, exclude clusters launched by a
               controller (managed jobs and services). Rows recorded before the
               is_managed column existed are treated as not managed.
+        workspaces_filter: If specified, only include clusters whose
+              workspace is in this set. Rows with no recorded workspace are
+              excluded.
 
     Yields:
         Cluster records with history information.
@@ -2998,6 +3040,10 @@ def iter_clusters_from_history(
                 sqlalchemy.or_(
                     cluster_history_table.c.is_managed.is_(None),
                     cluster_history_table.c.is_managed == int(False)))
+        if workspaces_filter is not None:
+            # Same fallback as the record's 'workspace' below: the history
+            # row's workspace if set, else the live cluster's.
+            query = query.filter(_HISTORY_WORKSPACE.in_(workspaces_filter))
         rows = query.all()
 
     usage_intervals_dict = {}
