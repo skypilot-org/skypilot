@@ -13,6 +13,7 @@ order onto a small FastAPI app, stub the auth DB calls, and check what a
 client sees for each pass rule and for the refusal, over HTTP and over a
 websocket handshake.
 """
+import os
 from typing import Optional, Tuple
 from unittest import mock
 
@@ -24,7 +25,9 @@ from starlette.websockets import WebSocketDisconnect
 from sky.server import config as server_config
 from sky.server import server
 from sky.server.auth import db_lookup
+from sky.skylet import constants
 from sky.users import permission
+from sky.users import token_service
 
 _HEADER = 'X-Auth-Request-Email'
 _IDENTITY = {_HEADER: 'bob@example.com'}
@@ -66,7 +69,8 @@ def _routes(app: fastapi.FastAPI) -> None:
 def _app(require: bool = True,
          proxy_enabled: bool = True,
          header_name: str = _HEADER,
-         rbac: bool = False) -> fastapi.FastAPI:
+         rbac: bool = False,
+         bearer: bool = False) -> fastapi.FastAPI:
     """A small app with the production middleware order.
 
     server.py adds ``RequireIdentityMiddleware`` before the authentication
@@ -74,7 +78,8 @@ def _app(require: bool = True,
     of them had its chance to set ``request.state.auth_user``. The proxy
     config is read when the stack is built. With ``rbac``
     the real ``RBACMiddleware`` is added first, i.e. innermost, as in
-    server.py.
+    server.py; with ``bearer`` the real ``BearerTokenMiddleware`` is added
+    outside the auth-proxy one, also as in server.py.
     """
     app = fastapi.FastAPI()
     _routes(app)
@@ -86,6 +91,8 @@ def _app(require: bool = True,
             app.add_middleware(server.RBACMiddleware)
         app.add_middleware(server.RequireIdentityMiddleware)
         app.add_middleware(server.AuthProxyMiddleware)
+        if bearer:
+            app.add_middleware(server.BearerTokenMiddleware)
         app.add_middleware(server.InitializeRequestAuthUserMiddleware)
         # Middleware classes are instantiated when the stack is built, which
         # Starlette defers to the first request; build and keep it now, while
@@ -149,6 +156,24 @@ def test_a_service_account_token_is_left_to_the_bearer_middleware():
     _assert_refused(
         _client(app).get('/status',
                          headers={'Authorization': 'Bearer not-a-sa-token'}))
+
+
+def test_an_invalid_service_account_token_is_refused_by_the_stack():
+    """The ``sky_`` rule above is not a bypass. In the production order
+    ``BearerTokenMiddleware`` sits outside this middleware and refuses a
+    ``sky_`` token that does not verify, so the request never gets here."""
+    app = _app(bearer=True)
+    service = token_service.token_service
+    with mock.patch.dict(os.environ,
+                         {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+            mock.patch.object(service, 'secret_loaded', return_value=True), \
+            mock.patch.object(service, 'verify_token', return_value=None):
+        response = _client(app).get(
+            '/status', headers={'Authorization': 'Bearer sky_forged'})
+    assert response.status_code == 401
+    assert response.json() == {
+        'detail': 'Invalid or expired service account token'
+    }
 
 
 def test_loopback_passes_unless_it_came_through_a_proxy():
