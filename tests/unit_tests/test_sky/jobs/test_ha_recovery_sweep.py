@@ -380,6 +380,22 @@ def test_sweep_recovers_every_job_without_a_live_controller(sweep_env):
     }
 
 
+def test_sweep_skipped_once_leadership_is_lost(sweep_env):
+    """Another server may already be recovering these jobs; resetting them
+    from here would put a second controller on each."""
+    _add_job(sweep_env.engine,
+             1,
+             ScheduleState.ALIVE,
+             task_statuses=(Status.RUNNING,))
+
+    managed_job_utils.ha_recovery_for_consolidation_mode(still_leader=mock.Mock(
+        return_value=False))
+
+    assert _schedule_states(sweep_env.engine, [1]) == {
+        1: (ScheduleState.ALIVE.value, None)
+    }
+
+
 def test_sweep_resets_a_multi_task_job_once(sweep_env, monkeypatch):
     """A multi-task job is one candidate, so it is reset once. Each extra
     reset could undo a claim that landed after the first one."""
