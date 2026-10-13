@@ -79,6 +79,11 @@ def register_managed_job_submitted_hook(hook_id: str,
     _MANAGED_JOB_SUBMITTED_HOOKS[hook_id] = fn
 
 
+def has_managed_job_submitted_hooks() -> bool:
+    """Whether any managed job submission callbacks are registered."""
+    return bool(_MANAGED_JOB_SUBMITTED_HOOKS)
+
+
 def fire_managed_job_submitted(job_ids: List[int], dag: 'dag_lib.Dag',
                                file_mounts_blob_id: Optional[str],
                                user_hash: str) -> None:
@@ -86,7 +91,7 @@ def fire_managed_job_submitted(job_ids: List[int], dag: 'dag_lib.Dag',
     # Snapshot the registry so callbacks can register hooks during dispatch.
     for hook_id, fn in list(_MANAGED_JOB_SUBMITTED_HOOKS.items()):
         try:
-            fn(job_ids, dag, file_mounts_blob_id, user_hash)
+            fn(list(job_ids), dag, file_mounts_blob_id, user_hash)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'managed-job-submitted hook {hook_id!r} raised '
                            f'for jobs {job_ids!r}: {e}')

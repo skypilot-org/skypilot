@@ -40,12 +40,32 @@ def test_registration_during_dispatch():
     added.assert_called_once_with([2], dag, None, 'user')
 
 
+@pytest.mark.parametrize('raises', [False, True])
+def test_hook_mutation_preserves_job_ids(raises):
+
+    def mutate(job_ids, *_args):
+        job_ids.clear()
+        if raises:
+            raise RuntimeError('hook failed')
+
+    following = mock.Mock()
+    plugin_hooks.register_managed_job_submitted_hook('mutate', mutate)
+    plugin_hooks.register_managed_job_submitted_hook('following', following)
+    job_ids = [41, 42]
+    dag = dag_lib.Dag()
+    plugin_hooks.fire_managed_job_submitted(job_ids, dag, None, 'user')
+    assert job_ids == [41, 42]
+    following.assert_called_once_with([41, 42], dag, None, 'user')
+    assert following.call_args.args[0] is not job_ids
+
+
 @pytest.mark.parametrize('consolidation', [True, False])
 @pytest.mark.parametrize('blob_id', ['uploaded-blob', None])
 @pytest.mark.parametrize('raises', [False, True])
 @pytest.mark.parametrize('translate_workdir', [False, True])
+@pytest.mark.parametrize('registered', [False, True])
 def test_launch_fires_submission_hooks(consolidation, blob_id, raises, tmp_path,
-                                       translate_workdir):
+                                       translate_workdir, registered):
     task = task_lib.Task(name='train', run='echo hello')
     task.workdir = str(tmp_path)
     dag = mock.Mock(spec=dag_lib.Dag)
@@ -57,11 +77,16 @@ def test_launch_fires_submission_hooks(consolidation, blob_id, raises, tmp_path,
     hook = mock.Mock(
         side_effect=RuntimeError('hook failed') if raises else None)
     following_hook = mock.Mock()
-    plugin_hooks.register_managed_job_submitted_hook('test', hook)
-    plugin_hooks.register_managed_job_submitted_hook('following',
-                                                     following_hook)
+    if registered:
+        plugin_hooks.register_managed_job_submitted_hook('test', hook)
+        plugin_hooks.register_managed_job_submitted_hook(
+            'following', following_hook)
 
     def finish(*_args, **_kwargs):
+        if not registered:
+            hook.assert_not_called()
+            following_hook.assert_not_called()
+            return job_ids, None
         # Hooks run before controller startup, once for the entire sweep.
         hook.assert_called_once()
         submitted_dag = hook.call_args.args[1]
@@ -80,6 +105,15 @@ def test_launch_fires_submission_hooks(consolidation, blob_id, raises, tmp_path,
 
         def patch(obj, name, **kwargs):
             return stack.enter_context(mock.patch.object(obj, name, **kwargs))
+
+        if not registered:
+            deepcopy = jobs_core.copy.deepcopy
+
+            def copy_other(value, *args, **kwargs):
+                assert value is not dag, 'DAG copied without registered hooks'
+                return deepcopy(value, *args, **kwargs)
+
+            patch(jobs_core.copy, 'deepcopy', side_effect=copy_other)
 
         patch(jobs_core.dag_utils,
               'convert_entrypoint_to_dag',
@@ -151,7 +185,7 @@ def test_launch_fires_submission_hooks(consolidation, blob_id, raises, tmp_path,
     assert result == (job_ids, None)
     assert submit.call_args.kwargs['file_mounts_blob_id'] == blob_id
     assert remote.call_count == (0 if consolidation else 1)
-    if raises:
+    if raises and registered:
         warning.assert_called_once()
         assert 'hook failed' in warning.call_args.args[0]
     else:
