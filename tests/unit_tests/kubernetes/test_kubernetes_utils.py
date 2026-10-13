@@ -5893,7 +5893,9 @@ def _pod_fields(acc_label_key=None,
                 topology_label_value=None,
                 spot_label_key=None,
                 spot_label_value=None,
-                enable_flex_start=False):
+                enable_flex_start=False,
+                efa_same_az=False,
+                cluster_name_on_cloud='sky-cluster-abc123'):
     return utils.get_pod_fields(acc_label_key=acc_label_key,
                                 acc_label_values=acc_label_values,
                                 avoid_label_keys=avoid_label_keys,
@@ -5901,7 +5903,79 @@ def _pod_fields(acc_label_key=None,
                                 topology_label_value=topology_label_value,
                                 spot_label_key=spot_label_key,
                                 spot_label_value=spot_label_value,
-                                enable_flex_start=enable_flex_start)
+                                enable_flex_start=enable_flex_start,
+                                efa_same_az=efa_same_az,
+                                cluster_name_on_cloud=cluster_name_on_cloud)
+
+
+class TestGetBinpackLabel:
+    """Tests for utils.get_binpack_label."""
+
+    def test_none_without_an_accelerator(self):
+        assert utils.get_binpack_label(None, None) is None
+        assert utils.get_binpack_label('skypilot.co/accelerator', None) is None
+
+    def test_accelerator_pods_carry_it(self):
+        assert utils.get_binpack_label('skypilot.co/accelerator', ['H100']) == {
+            'skypilot-binpack': 'gpu'
+        }
+
+
+class TestGetPodAffinity:
+    """Tests for utils.get_pod_affinity."""
+
+    _BINPACK_TERM = {
+        'weight': 1,
+        'podAffinityTerm': {
+            'labelSelector': {
+                'matchExpressions': [{
+                    'key': 'skypilot-binpack',
+                    'operator': 'In',
+                    'values': ['gpu'],
+                }],
+            },
+            'topologyKey': 'kubernetes.io/hostname',
+        },
+    }
+
+    def test_none_without_an_accelerator(self):
+        assert utils.get_pod_affinity(None, None, False, 'c') is None
+        assert utils.get_pod_affinity('skypilot.co/accelerator', None, False,
+                                      'c') is None
+
+    def test_no_pod_affinity_for_a_cpu_pod_even_with_efa_same_az(self):
+        assert utils.get_pod_affinity(None, None, True, 'c') is None
+
+    def test_binpack_term_selects_the_binpack_label(self):
+        pod_affinity = utils.get_pod_affinity('skypilot.co/accelerator',
+                                              ['H100'], False, 'c')
+        assert pod_affinity == {
+            'preferredDuringSchedulingIgnoredDuringExecution': [
+                self._BINPACK_TERM
+            ],
+        }
+        term = pod_affinity['preferredDuringSchedulingIgnoredDuringExecution'][
+            0]['podAffinityTerm']['labelSelector']['matchExpressions'][0]
+        assert {
+            term['key']: term['values'][0]
+        } == utils.get_binpack_label('skypilot.co/accelerator', ['H100'])
+
+    def test_efa_same_az_requires_one_zone_per_cluster(self):
+        pod_affinity = utils.get_pod_affinity('skypilot.co/accelerator',
+                                              ['H100'], True, 'my-cluster')
+        assert pod_affinity == {
+            'preferredDuringSchedulingIgnoredDuringExecution': [
+                self._BINPACK_TERM
+            ],
+            'requiredDuringSchedulingIgnoredDuringExecution': [{
+                'labelSelector': {
+                    'matchLabels': {
+                        'skypilot-cluster-name': 'my-cluster'
+                    },
+                },
+                'topologyKey': 'topology.kubernetes.io/zone',
+            }],
+        }
 
 
 class TestGetNodeSelector:
@@ -5984,23 +6058,40 @@ class TestPodFields:
     def test_empty_when_no_field_applies(self):
         assert _pod_fields() == {}
 
-    def test_node_affinity_is_a_pod_spec_field(self):
-        pod_fields = _pod_fields('skypilot.co/accelerator', ['H100'],
-                                 ['some-other-key'])
+    def test_cpu_pod_gets_only_the_node_affinity(self):
+        pod_fields = _pod_fields(avoid_label_keys=['some-other-key'])
         assert pod_fields == {
             'spec': {
                 'affinity': {
                     'nodeAffinity': utils.get_node_affinity(
-                        'skypilot.co/accelerator', ['H100'], ['some-other-key'])
+                        None, None, ['some-other-key'])
                 }
             }
         }
 
+    def test_accelerator_pod_is_labeled_pinned_and_binpacked(self):
+        pod_fields = _pod_fields('skypilot.co/accelerator', ['H100'])
+        assert pod_fields == {
+            'metadata': {
+                'labels': utils.get_binpack_label('skypilot.co/accelerator',
+                                                  ['H100']),
+            },
+            'spec': {
+                'affinity': {
+                    'nodeAffinity': utils.get_node_affinity(
+                        'skypilot.co/accelerator', ['H100'], None),
+                    'podAffinity': utils.get_pod_affinity(
+                        'skypilot.co/accelerator', ['H100'], False,
+                        'sky-cluster-abc123'),
+                },
+            },
+        }
+
     def test_combine_keeps_what_the_template_rendered(self):
         """The merge adds to an affinity the template already rendered."""
-        pod_affinity = {
-            'preferredDuringSchedulingIgnoredDuringExecution': [{
-                'weight': 1
+        pod_anti_affinity = {
+            'requiredDuringSchedulingIgnoredDuringExecution': [{
+                'topologyKey': 'kubernetes.io/hostname'
             }]
         }
         cluster_yaml = self._cluster_yaml({
@@ -6008,7 +6099,7 @@ class TestPodFields:
                 'name': 'ray-node'
             }],
             'affinity': {
-                'podAffinity': pod_affinity
+                'podAntiAffinity': pod_anti_affinity
             },
         })
         pod_fields = _pod_fields('skypilot.co/accelerator', ['H100'])
@@ -6020,10 +6111,37 @@ class TestPodFields:
                 'name': 'ray-node'
             }],
             'affinity': {
-                'podAffinity': pod_affinity,
+                'podAntiAffinity': pod_anti_affinity,
                 'nodeAffinity': pod_fields['spec']['affinity']['nodeAffinity'],
+                'podAffinity': pod_fields['spec']['affinity']['podAffinity'],
             },
         }
+
+    def test_combine_adds_the_binpack_label_to_the_rendered_labels(self):
+        cluster_yaml = self._cluster_yaml(
+            {'containers': [{
+                'name': 'ray-node'
+            }]})
+        node_config = cluster_yaml['available_node_types']['ray_head_default'][
+            'node_config']
+        node_config['metadata'] = {
+            'labels': {
+                'parent': 'skypilot',
+                'skypilot-cluster-name': 'sky-cluster-abc123',
+            }
+        }
+        pod_fields = _pod_fields('skypilot.co/accelerator', ['H100'])
+
+        combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
+
+        assert combined['available_node_types']['ray_head_default'][
+            'node_config']['metadata'] == {
+                'labels': {
+                    'parent': 'skypilot',
+                    'skypilot-cluster-name': 'sky-cluster-abc123',
+                    'skypilot-binpack': 'gpu',
+                }
+            }
 
     def test_combine_adds_an_affinity_the_template_did_not_render(self):
         cluster_yaml = self._cluster_yaml(
@@ -6078,21 +6196,34 @@ class TestPodFields:
             topology_label_value='2x4',
             spot_label_key='cloud.google.com/gke-spot',
             spot_label_value='true',
-            enable_flex_start=True)
-        assert pod_fields['spec'] == {
-            'nodeSelector': {
-                'cloud.google.com/gke-tpu-topology': '2x4',
-                'cloud.google.com/gke-spot': 'true',
-                'cloud.google.com/gke-flex-start': 'true',
+            enable_flex_start=True,
+            efa_same_az=True,
+            cluster_name_on_cloud='my-cluster')
+        assert pod_fields == {
+            'metadata': {
+                'labels': {
+                    'skypilot-binpack': 'gpu'
+                },
             },
-            'affinity': {
-                'nodeAffinity': utils.get_node_affinity(
-                    'cloud.google.com/gke-tpu-accelerator',
-                    ['tpu-v5-lite-podslice'], None)
+            'spec': {
+                'nodeSelector': {
+                    'cloud.google.com/gke-tpu-topology': '2x4',
+                    'cloud.google.com/gke-spot': 'true',
+                    'cloud.google.com/gke-flex-start': 'true',
+                },
+                'affinity': {
+                    'nodeAffinity': utils.get_node_affinity(
+                        'cloud.google.com/gke-tpu-accelerator',
+                        ['tpu-v5-lite-podslice'], None),
+                    'podAffinity': utils.get_pod_affinity(
+                        'cloud.google.com/gke-tpu-accelerator',
+                        ['tpu-v5-lite-podslice'], True, 'my-cluster'),
+                },
+                'tolerations': [
+                    utils.get_spot_toleration('cloud.google.com/gke-spot',
+                                              'true')
+                ],
             },
-            'tolerations': [
-                utils.get_spot_toleration('cloud.google.com/gke-spot', 'true')
-            ],
         }
 
     def test_combine_appends_the_user_tolerations_after(self):

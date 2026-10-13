@@ -294,6 +294,9 @@ POD_STATUSES = {
 AUTODOWN_ANNOTATION_KEY = 'skypilot.co/autodown'
 IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY = (
     'skypilot.co/idle_minutes_to_autostop')
+# Label on every accelerator pod; see get_binpack_label().
+GPU_BINPACK_LABEL_KEY = 'skypilot-binpack'
+GPU_BINPACK_LABEL_VALUE = 'gpu'
 ANNOTATIONS_POD_NOT_FOUND_ERROR_MSG = ('Pod {pod_name} not found in namespace '
                                        '{namespace} while trying to {action} '
                                        'an annotation {annotation}.')
@@ -3058,6 +3061,91 @@ def get_spot_toleration(
     }
 
 
+def get_binpack_label(
+    acc_label_key: Optional[str],
+    acc_label_values: Optional[List[str]],
+) -> Optional[Dict[str, str]]:
+    """Builds the label that marks a pod as an accelerator pod.
+
+    The bin-packing term of get_pod_affinity() selects on this label, so an
+    accelerator pod both carries it and is attracted to pods that carry it.
+
+    Args:
+        acc_label_key: See get_node_affinity().
+        acc_label_values: See get_node_affinity().
+
+    Returns:
+        The label as a one-entry dict, or None when the pod requests no
+        accelerator.
+    """
+    if acc_label_key is None or acc_label_values is None:
+        return None
+    return {GPU_BINPACK_LABEL_KEY: GPU_BINPACK_LABEL_VALUE}
+
+
+def get_pod_affinity(
+    acc_label_key: Optional[str],
+    acc_label_values: Optional[List[str]],
+    efa_same_az: bool,
+    cluster_name_on_cloud: str,
+) -> Optional[Dict[str, Any]]:
+    """Builds the pod ``podAffinity`` of an accelerator pod.
+
+    Two terms, both only for pods that request an accelerator:
+
+    * A weight-1 preferred term toward pods carrying the get_binpack_label()
+      label on the same node, so accelerator pods fill partly used
+      accelerator nodes before spreading onto free ones.
+    * When ``efa_same_az`` is set, the required same-zone term of a
+      multi-node EFA job.
+
+    Args:
+        acc_label_key: See get_node_affinity().
+        acc_label_values: See get_node_affinity().
+        efa_same_az: Whether every pod of the cluster must land in one zone.
+        cluster_name_on_cloud: The cluster's ``skypilot-cluster-name`` label
+            value, which the same-zone term selects on.
+
+    Returns:
+        A ``podAffinity`` dict, or None when the pod requests no accelerator.
+    """
+    if acc_label_key is None or acc_label_values is None:
+        return None
+    pod_affinity: Dict[str, Any] = {
+        'preferredDuringSchedulingIgnoredDuringExecution': [{
+            'weight': 1,
+            'podAffinityTerm': {
+                'labelSelector': {
+                    'matchExpressions': [{
+                        'key': GPU_BINPACK_LABEL_KEY,
+                        'operator': 'In',
+                        'values': [GPU_BINPACK_LABEL_VALUE],
+                    }],
+                },
+                'topologyKey': 'kubernetes.io/hostname',
+            },
+        }],
+    }
+    if efa_same_az:
+        # Multi-node EFA co-location: an AWS EFA placement group is
+        # single-AZ, so every replica of this job must schedule into one
+        # zone or the fabric cannot form. Attract each pod to the zone of
+        # the other pods of the same SkyPilot cluster -- the first pod fixes
+        # the AZ (Karpenter provisions an EFA node wherever it has
+        # capacity) and the rest follow; the user names no zone. required
+        # (not preferred): cross-AZ EFA is broken, so pend loudly rather
+        # than silently fall back to TCP.
+        pod_affinity['requiredDuringSchedulingIgnoredDuringExecution'] = [{
+            'labelSelector': {
+                'matchLabels': {
+                    'skypilot-cluster-name': cluster_name_on_cloud,
+                },
+            },
+            'topologyKey': 'topology.kubernetes.io/zone',
+        }]
+    return pod_affinity
+
+
 def get_pod_fields(
     *,
     acc_label_key: Optional[str],
@@ -3068,6 +3156,8 @@ def get_pod_fields(
     spot_label_key: Optional[str],
     spot_label_value: Optional[str],
     enable_flex_start: bool,
+    efa_same_az: bool,
+    cluster_name_on_cloud: str,
 ) -> Dict[str, Any]:
     """Builds the pod fields that SkyPilot computes in Python.
 
@@ -3075,32 +3165,49 @@ def get_pod_fields(
     pod the cluster template renders.
 
     Args:
-        acc_label_key: See get_node_affinity().
-        acc_label_values: See get_node_affinity().
+        acc_label_key: See get_node_affinity(), get_pod_affinity() and
+            get_binpack_label().
+        acc_label_values: See get_node_affinity(), get_pod_affinity() and
+            get_binpack_label().
         avoid_label_keys: See get_node_affinity().
         topology_label_key: See get_node_selector().
         topology_label_value: See get_node_selector().
         spot_label_key: See get_node_selector() and get_spot_toleration().
         spot_label_value: See get_node_selector() and get_spot_toleration().
         enable_flex_start: See get_node_selector().
+        efa_same_az: See get_pod_affinity().
+        cluster_name_on_cloud: See get_pod_affinity().
 
     Returns:
         A partial pod manifest, empty when no field applies.
     """
+    pod_fields: Dict[str, Any] = {}
+    binpack_label = get_binpack_label(acc_label_key, acc_label_values)
+    if binpack_label is not None:
+        pod_fields['metadata'] = {'labels': binpack_label}
     spec: Dict[str, Any] = {}
     node_selector = get_node_selector(topology_label_key, topology_label_value,
                                       spot_label_key, spot_label_value,
                                       enable_flex_start)
     if node_selector is not None:
         spec['nodeSelector'] = node_selector
+    affinity: Dict[str, Any] = {}
     node_affinity = get_node_affinity(acc_label_key, acc_label_values,
                                       avoid_label_keys)
     if node_affinity is not None:
-        spec['affinity'] = {'nodeAffinity': node_affinity}
+        affinity['nodeAffinity'] = node_affinity
+    pod_affinity = get_pod_affinity(acc_label_key, acc_label_values,
+                                    efa_same_az, cluster_name_on_cloud)
+    if pod_affinity is not None:
+        affinity['podAffinity'] = pod_affinity
+    if affinity:
+        spec['affinity'] = affinity
     spot_toleration = get_spot_toleration(spot_label_key, spot_label_value)
     if spot_toleration is not None:
         spec['tolerations'] = [spot_toleration]
-    return {'spec': spec} if spec else {}
+    if spec:
+        pod_fields['spec'] = spec
+    return pod_fields
 
 
 def get_accelerator_label_keys(context: Optional[str],) -> List[str]:

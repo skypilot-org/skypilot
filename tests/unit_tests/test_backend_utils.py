@@ -273,6 +273,52 @@ def test_write_cluster_config_merges_pod_fields_kubernetes(
 
 @mock.patch.object(skypilot_config, '_global_config_context',
                    skypilot_config.ConfigContext())
+@mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+            return_value=[])
+@mock.patch('sky.provision.kubernetes.utils.get_accelerator_label_keys',
+            return_value=['skypilot.co/accelerator'])
+@mock.patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values',
+            return_value=('skypilot.co/accelerator', ['H100'], None, None))
+@mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+            return_value='nvidia.com/gpu')
+@mock.patch('sky.provision.kubernetes.utils.get_spot_label',
+            return_value=(None, None))
+def test_write_cluster_config_labels_and_binpacks_accelerator_pods(*mocks):
+    """An accelerator pod is labeled for bin-packing and attracted to pods
+    carrying that label, through the same merge as the other pod fields."""
+    os.environ[
+        skypilot_config.
+        ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_k8s_config_runcmd.yaml'
+    skypilot_config.reload_config()
+
+    config_dict = backend_utils.write_cluster_config(
+        to_provision=Resources(cloud=clouds.Kubernetes(),
+                               instance_type='4CPU--16GB--H100:1',
+                               accelerators='H100:1'),
+        num_nodes=1,
+        cluster_config_template='kubernetes-ray.yml.j2',
+        cluster_name="display",
+        local_wheel_path=pathlib.Path('/tmp/fake'),
+        wheel_hash='b1bd84059bc0342f7843fcbe04ab563e',
+        region=clouds.Region(name='fake-context'),
+        dryrun=True,
+        keep_launch_fields_in_existing_config=True)
+
+    node_config = yaml_utils.read_yaml(
+        config_dict['ray']
+    )['available_node_types']['ray_head_default']['node_config']
+    labels = node_config['metadata']['labels']
+    # The label joins the ones the template renders.
+    assert labels['parent'] == 'skypilot'
+    assert labels['skypilot-binpack'] == 'gpu'
+    assert node_config['spec']['affinity'][
+        'podAffinity'] == kubernetes_utils.get_pod_affinity(
+            'skypilot.co/accelerator', ['H100'], False,
+            labels['skypilot-cluster'])
+
+
+@mock.patch.object(skypilot_config, '_global_config_context',
+                   skypilot_config.ConfigContext())
 def test_aws_template_applies_labels_to_volume_tags() -> None:
     template_path = pathlib.Path('sky/templates/aws-ray.yml.j2')
     template = template_path.read_text(encoding='utf-8')
