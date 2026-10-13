@@ -559,6 +559,20 @@ When `recover_on_exit_codes` is set, any job failure with a matching exit code
 triggers recovery without counting against `max_restarts_on_errors`. This is
 useful for known transient failures.
 
+To give up on a job that cannot get resources, set the top-level
+`job.wait_for_scheduling_timeout` (not part of `job_recovery`). The job ends
+`CANCELLED` if it has not started within that long of being submitted, whether
+it is retrying cloud VM launches or waiting in a Kubernetes queue such as
+Kueue. Later recoveries do not re-arm it.
+
+```yaml
+job:
+  wait_for_scheduling_timeout: 2h   # duration (e.g. 90s, 30m, 2h) or int seconds
+resources:
+  accelerators: A100:8
+  job_recovery: FAILOVER
+```
+
 ### 3.2 Checkpointing Patterns
 
 For spot instances, checkpointing to cloud storage is essential. The pattern

@@ -607,6 +607,9 @@ CONTROLLER_K8S_MEMORY_FILE = '~/.sky/_internal_k8s_pod_memory'
 
 # Used when an managed jobs are created and
 # files are synced up to the cloud.
+# Shared jobs.bucket / serve.bucket uploads. Lets bucket IAM enforce RBAC
+# per workspace. Per-job buckets (config bucket unset) do not use this.
+FILE_MOUNTS_WORKSPACE_SUBPATH = 'workspaces/{workspace}'
 FILE_MOUNTS_WORKDIR_SUBPATH = 'job-{run_id}/workdir'
 FILE_MOUNTS_SUBPATH = 'job-{run_id}/local-file-mounts/{i}'
 FILE_MOUNTS_TMP_SUBPATH = 'job-{run_id}/tmp-files'
@@ -838,7 +841,7 @@ ENV_VAR_DB_POOL_HOSTPORT = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_POOL_HOSTPORT')
 # Why an override exists: the derived budget compares the server's worker count
 # against the database's own `max_connections`, which is a property of the
 # database, not of this server's share of it -- the same database may serve
-# other replicas, other tenants and ad-hoc clients, so that number is neither
+# other servers, other apps and ad-hoc clients, so that number is neither
 # an upper bound this server may take nor, behind a connection pooler, the
 # number of backends a pool would actually hold. A deployment that knows its
 # own share states it here instead.

@@ -162,9 +162,8 @@ async def run_websocket_proxy(
         timestamps_supported: Whether to use message type framing
         path: How this session reaches the backend, used as the `path` label
             on sky_apiserver_ssh_backend_turnaround_seconds. Callers that
-            reach the pod some other way (a plugin connecting in-cluster,
-            say) should pass their own value so the two are not averaged
-            together.
+            reach the pod some other way should pass their own value so the
+            two are not averaged together.
 
     Returns:
         True if SSH failed, False otherwise

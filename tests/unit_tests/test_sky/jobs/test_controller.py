@@ -11,7 +11,9 @@ and file mount cleanup in task_cleanup().
 import asyncio
 import contextlib
 import copy
+import random
 import runpy
+import statistics
 import sys
 import threading
 import time
@@ -28,6 +30,7 @@ import sqlalchemy.exc
 from sqlalchemy.ext.asyncio import create_async_engine
 
 import sky
+from sky import exceptions
 from sky import task as task_lib
 from sky.jobs import constants as jobs_constants
 from sky.jobs import controller as controller_module
@@ -939,6 +942,138 @@ class TestTaskCleanup:
 
         assert seen_threads and loop_thread not in seen_threads
 
+    @pytest.mark.asyncio
+    async def test_record_gone_falls_back_to_the_loaded_dag(
+            self, cleanup_patches):
+        """With the job's record gone, the stored YAML cannot be read; the
+        cluster named by the DAG loaded at controller start is still torn
+        down instead of leaked."""
+        task = self._make_task()
+        task.metadata = {}
+        dag = MagicMock()
+        dag.tasks = [task]
+
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag',
+                   side_effect=RuntimeError('DAG YAML content is unavailable')):
+            await manager._cleanup(job_id=1, fallback_dag=dag)
+
+        cleanup_patches['terminate'].assert_called_once()
+        assert cleanup_patches['terminate'].call_args.args[0] == 'test-cluster'
+
+    @pytest.mark.asyncio
+    async def test_record_gone_pool_job_cancels_the_known_submission(
+            self, cleanup_patches):
+        """A pool job's worker and pool-side job ID live in the missing
+        record too; the controller's in-memory copy stands in for them."""
+        task = self._make_task()
+        task.metadata = {}
+        dag = MagicMock()
+        dag.tasks = [task]
+
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag',
+                   side_effect=RuntimeError('DAG YAML content is unavailable')), \
+             patch('sky.jobs.state.get_pool_submit_info',
+                   return_value=(None, None)), \
+             patch('sky.core.cancel') as cancel:
+            await manager._cleanup(job_id=1,
+                                   pool='p',
+                                   fallback_dag=dag,
+                                   fallback_pool_submission=('worker-1', 7))
+
+        cancel.assert_called_once()
+        assert cancel.call_args.kwargs['cluster_name'] == 'worker-1'
+        assert cancel.call_args.kwargs['job_ids'] == [7]
+
+    @pytest.mark.asyncio
+    async def test_record_gone_pool_job_unknown_submission_is_a_failure(
+            self, cleanup_patches):
+        """With neither the record nor an in-memory submission, cleanup
+        must not report a pool-side job it could not find as cancelled."""
+        task = self._make_task()
+        task.metadata = {}
+        dag = MagicMock()
+        dag.tasks = [task]
+
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag',
+                   side_effect=RuntimeError('DAG YAML content is unavailable')), \
+             patch('sky.jobs.state.get_pool_submit_info',
+                   return_value=(None, None)), \
+             patch('sky.core.cancel') as cancel:
+            with pytest.raises(RuntimeError, match='pool submission'):
+                await manager._cleanup(job_id=1, pool='p', fallback_dag=dag)
+
+        cancel.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_record_gone_without_fallback_still_raises(
+            self, cleanup_patches):
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag',
+                   side_effect=RuntimeError('DAG YAML content is unavailable')):
+            with pytest.raises(RuntimeError):
+                await manager._cleanup(job_id=1)
+
+        cleanup_patches['terminate'].assert_not_called()
+
+
+class TestPoolSubmissionKeptInMemory:
+    """A resumed pool task's executor carries the persisted submission, so
+    cleanup can still cancel it if the job's record goes away."""
+
+    @pytest.mark.asyncio
+    async def test_resume_copies_the_submission_into_the_executor(
+            self, monkeypatch):
+        jc = JobController.__new__(JobController)
+        jc._job_id = 1
+        jc._dag = MagicMock()
+        jc._pool = 'p'
+        jc._backend = MagicMock()
+        jc._backend.run_timestamp = 'sky-2026-01-01-00-00-00-000000'
+        jc.starting = set()
+        jc.starting_lock = asyncio.Lock()
+        jc.starting_signal = MagicMock()
+        task = MagicMock()
+        task.name = 'task0'
+        task.metadata = {}
+        task.run = 'echo hi'
+        task.envs = {constants.TASK_ID_ENV_VAR: 'tid'}
+        task.resources = None
+        executor = MagicMock()
+        executor.cluster_name = None
+        executor.job_id_on_pool_cluster = None
+        executor.on_resume = AsyncMock()
+        executor.monitor_task = AsyncMock(return_value=None)
+        jc._monitor_one_task = AsyncMock(return_value=True)
+
+        mjs = 'sky.jobs.controller.managed_job_state'
+        monkeypatch.setattr(
+            f'{mjs}.get_job_status_with_task_id_async',
+            AsyncMock(return_value=managed_job_state.ManagedJobStatus.RUNNING))
+        monkeypatch.setattr(f'{mjs}.get_pool_submit_info_async',
+                            AsyncMock(return_value=('worker-1', 7)))
+        monkeypatch.setattr(f'{mjs}.get_file_mounts_blob_id',
+                            lambda job_id: None)
+        monkeypatch.setattr('sky.jobs.controller._add_k8s_annotations',
+                            lambda task, job_id: None)
+        monkeypatch.setattr(
+            'sky.jobs.controller.recovery_strategy.StrategyExecutor.make',
+            MagicMock(return_value=executor))
+        monkeypatch.setattr(
+            'sky.jobs.controller.managed_job_utils.event_callback_func',
+            MagicMock(return_value=AsyncMock()))
+        monkeypatch.setattr(
+            'sky.jobs.controller.usage_lib.messages.usage.update_task_id',
+            lambda *args, **kwargs: None)
+
+        assert await jc._run_one_task(0, task) is True
+
+        assert executor.cluster_name == 'worker-1'
+        assert executor.job_id_on_pool_cluster == 7
+        assert jc.pool_submission == ('worker-1', 7)
+
 
 class TestDownloadLogsForCancelledJob:
     """Tests for ControllerManager._download_logs_for_cancelled_job.
@@ -1405,6 +1540,89 @@ class TestJobGroupResumeDoesNotReissueStarting:
         set_starting_async.assert_awaited_once()
 
 
+class _ReachedPhase3(Exception):
+    pass
+
+
+class TestJobGroupReleasesLaunchSlot:
+    """A job group frees the launch slot start_job reserved once it started.
+
+    Groups bypass scheduled_launch, so without an explicit release the slot
+    stays in ``starting`` for the group's whole runtime and starves admission
+    and other jobs' recovery launches on that controller process.
+    """
+
+    async def _run_until_phase3(self, task_status):
+        jc = object.__new__(JobController)
+        jc._job_id = 1
+        jc._pool = None
+        tasks = []
+        for name in ('a', 'b'):
+            task = MagicMock()
+            task.name = name
+            task.envs = {}
+            tasks.append(task)
+        jc._dag = MagicMock()
+        jc._dag.name = 'group'
+        jc._dag.tasks = tasks
+        jc._dag.inter_connection_enabled.return_value = False
+        # Job 2 holds its own slot, which must survive.
+        jc.starting = {1, 2}
+        jc.starting_lock = asyncio.Lock()
+        jc.starting_signal = asyncio.Condition(jc.starting_lock)
+
+        held_during_launch = []
+
+        async def launch():
+            held_during_launch.append(1 in jc.starting)
+
+        executor = MagicMock()
+        executor.launch = launch
+        jc._prepare_job_group_task_for_launch = AsyncMock(
+            side_effect=lambda task, *_, **__: (f'{task.name}-1', executor))
+        jc._cleanup_job_group_clusters = AsyncMock()
+
+        at_phase3 = {}
+
+        def stop_at_phase3(*_):
+            at_phase3['starting'] = set(jc.starting)
+            raise _ReachedPhase3()
+
+        with patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=False), \
+             patch.object(controller_module.managed_job_state,
+                          'get_job_status_with_task_id_async',
+                          AsyncMock(return_value=task_status)), \
+             patch.object(controller_module.managed_job_state,
+                          'set_started_async', AsyncMock()), \
+             patch.object(controller_module.managed_job_utils,
+                          'event_callback_func'), \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name',
+                          return_value=MagicMock()), \
+             patch.object(controller_module.job_group_networking,
+                          'dns_addresses_for_task',
+                          side_effect=stop_at_phase3):
+            with pytest.raises(_ReachedPhase3):
+                await jc._run_job_group()
+        return held_during_launch, at_phase3['starting']
+
+    @pytest.mark.asyncio
+    async def test_fresh_launch_releases_slot_after_start(self):
+        held_during_launch, starting = await self._run_until_phase3(
+            managed_job_state.ManagedJobStatus.PENDING)
+        # The slot covers the group's own launches, then is released.
+        assert held_during_launch == [True, True]
+        assert starting == {2}
+
+    @pytest.mark.asyncio
+    async def test_resume_releases_slot(self):
+        held_during_launch, starting = await self._run_until_phase3(
+            managed_job_state.ManagedJobStatus.RUNNING)
+        assert held_during_launch == []
+        assert starting == {2}
+
+
 class TestRootJobIdEnvMarker:
     """SKYPILOT_ROOT_JOB_ID is set on every task of a job tree and on
     nothing else; the controller decides, not the task YAML."""
@@ -1534,7 +1752,7 @@ class TestUserJobStatusClassification:
     """Tests for how a terminal *user-job* status (on the worker cluster) is
     classified into a ManagedJobStatus by the controller monitoring loop.
 
-    Regression coverage for SKY-5941: a user job that ends in
+    Regression coverage: a user job that ends in
     JobStatus.FAILED_DRIVER (e.g. the user workload OOM'd and the Ray driver
     crashed) must be classified as ManagedJobStatus.FAILED, NOT
     FAILED_CONTROLLER -- the controller is healthy, the user workload failed.
@@ -1626,7 +1844,7 @@ class TestUserJobStatusClassification:
     async def test_terminal_failure_reason_includes_exit_code(self):
         """A non-retried user failure surfaces the exit code and user-error
         attribution in failure_reason, which feeds the dashboard details
-        and the FAILED job event (SKY-6411)."""
+        and the FAILED job event."""
 
         controller = self._make_controller()
         controller._get_cluster_job_exit_codes = AsyncMock(return_value=[7])
@@ -1655,7 +1873,7 @@ class TestUserJobStatusClassification:
 
 
 class TestUserJobFailureRecoveryEventReason:
-    """The RECOVERING job event must state the real trigger (SKY-6411).
+    """The RECOVERING job event must state the real trigger.
 
     When recovery is triggered by the user job exiting non-zero on a healthy
     cluster (max_restarts_on_errors / recover_on_exit_codes), the RECOVERING
@@ -2260,6 +2478,513 @@ class TestTransientJobStatusRecoveryWindow:
                 executor=MagicMock())
 
         status_logger.flush.assert_called_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        'case,forced,probe,num_nodes,escalates',
+        [
+            # The probe is skipped entirely, so there is no liveness signal at
+            # all. This is the resume path: a previous status other than
+            # RUNNING sets force_transit_to_recovering.
+            ('probe_skipped', True, (None, None), 1, True),
+            # A terminal status is not a live job. Single-node FAILED falls
+            # past the `num_nodes == 1` continue and reaches the refresh, to
+            # tell a preemption apart from a user-code failure.
+            ('probe_terminal', False,
+             (job_lib.JobStatus.FAILED, None), 1, True),
+            # "No job found": a handle, but nothing in the job table.
+            ('probe_no_job', False, (None, None), 1, True),
+            # The over-correction guard, and the case the shared window exists
+            # for: the job is demonstrably alive, so the loop must keep
+            # retrying however long the refresh stays broken.
+            ('probe_alive', False, (job_lib.JobStatus.RUNNING, None), 2, False),
+        ])
+    async def test_refresh_failures_accumulate_unless_the_job_is_alive(
+            self, monkeypatch, case, forced, probe, num_nodes, escalates):
+        """A permanently failing cluster-status refresh escalates.
+
+        The window is shared with the job-status probe, so only a *live* job
+        may reset it. Resetting on anything else -- a skipped probe, a terminal
+        status, "no job found" -- re-opens it on every iteration, no budget can
+        ever expire, and the loop below retries forever: observed in production
+        as a task that stayed LAUNCHING for six days.
+        """
+        monkeypatch.setattr(managed_job_utils,
+                            'JOB_STATUS_FETCH_MIN_ELAPSED_SECONDS', 60)
+        monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_FETCH_MIN_RETRIES',
+                            5)
+        monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_CHECK_GAP_SECONDS',
+                            0)
+
+        # Enough rounds to spend both budgets several times over, so a loop
+        # that has not escalated by here never will. Counted in loop
+        # iterations: the inner retry wrapper is stubbed out below, so this
+        # does not silently shrink if its own attempt budget changes.
+        max_rounds = 10
+        # 31s per round: two rounds clear the 60s time budget, so the 5-retry
+        # budget is what decides when the window is spent.
+        clock = {'t': 1000.0}
+        rounds = {'n': 0}
+
+        def fake_refresh(*args, **kwargs):
+            rounds['n'] += 1
+            if rounds['n'] > max_rounds:
+                raise TestTransientJobStatusRecoveryWindow._StopLoop()
+            clock['t'] += 31.0
+            raise exceptions.ClusterStatusFetchingError('provider unreachable')
+
+        async def fake_get_job_status(*args, **kwargs):
+            return probe
+
+        handle = MagicMock()
+        handle.launched_resources.need_cleanup_after_preemption_or_failure.\
+            return_value = False
+
+        task = MagicMock(name='task')
+        task.num_nodes = num_nodes
+
+        mock_self = MagicMock()
+        mock_self._job_id = 1
+        mock_self._pool = None
+        # Reached only by the still-running multi-node case.
+        mock_self._update_live_log_links = AsyncMock(return_value=True)
+
+        executor = MagicMock()
+        executor.recover = AsyncMock(return_value=clock['t'])
+
+        state = controller_module.managed_job_state
+        with patch.object(controller_module.time, 'time',
+                          side_effect=lambda: clock['t']), \
+             patch.object(controller_module.cloud_api_retries,
+                          'with_cloud_api_retries', new=lambda fn: fn()), \
+             patch.object(managed_job_utils, 'get_job_status',
+                          side_effect=fake_get_job_status), \
+             patch.object(controller_module.backend_utils,
+                          'refresh_cluster_status_handle',
+                          side_effect=fake_refresh), \
+             patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=False), \
+             patch.object(managed_job_state, 'get_runtime_cursor_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name',
+                          return_value=handle), \
+             patch.object(state, 'set_recovering_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(state, 'set_recovered_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(state, 'set_started_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.asyncio, 'sleep',
+                          new=AsyncMock(return_value=None)):
+            expected = (exceptions.ClusterStatusFetchingError if escalates else
+                        TestTransientJobStatusRecoveryWindow._StopLoop)
+            with pytest.raises(expected):
+                await controller_module.JobController._monitor_one_task_impl(
+                    mock_self,
+                    task_id=0,
+                    task=task,
+                    cluster_name='cluster',
+                    executor=executor,
+                    status_logger=managed_job_utils.JobStatusLogger(),
+                    callback_func=MagicMock(),
+                    force_transit_to_recovering=forced)
+
+
+class TestStatusCheckGapJitter:
+    """Tests for the random spread of the monitor loop's status-check gap.
+
+    Monitor loops that start together (e.g. every job resumed after a
+    controller restart) must not check their jobs at the same moment in every
+    cycle. The first gap of a loop is spread over a whole gap; later gaps vary
+    around JOB_STATUS_CHECK_GAP_SECONDS without changing the mean.
+    """
+
+    _GAP = managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS
+    _LOW = _GAP * (1 - controller_module._STATUS_CHECK_GAP_JITTER)
+    _HIGH = _GAP * (1 + controller_module._STATUS_CHECK_GAP_JITTER)
+
+    class _StopLoop(Exception):
+        pass
+
+    def test_later_gaps_bounded_and_mean_preserved(self):
+        with patch.object(controller_module, 'random', random.Random(0)):
+            gaps = [
+                controller_module._status_check_gap_seconds(first_check=False)
+                for _ in range(10000)
+            ]
+        assert all(self._LOW <= g <= self._HIGH for g in gaps)
+        assert abs(statistics.mean(gaps) - self._GAP) < 0.1
+        # The gaps must actually vary, or loops that start together stay
+        # together.
+        assert max(gaps) - min(gaps) > self._GAP * 0.3
+
+    def test_first_gaps_spread_loops_that_start_together(self):
+        """Loops started at the same moment have their first checks spread
+        evenly over one gap, rather than bunched together."""
+        num_loops = 1000
+        num_bins = 5
+        with patch.object(controller_module, 'random', random.Random(0)):
+            first_gaps = [
+                controller_module._status_check_gap_seconds(first_check=True)
+                for _ in range(num_loops)
+            ]
+        assert all(0 <= g <= self._GAP for g in first_gaps)
+        bins = [0] * num_bins
+        for g in first_gaps:
+            bins[min(int(g / self._GAP * num_bins), num_bins - 1)] += 1
+        # An even spread puts 20% of the loops in each fifth of the gap.
+        assert max(bins) < num_loops * 0.25, bins
+        assert min(bins) > num_loops * 0.15, bins
+
+    @pytest.mark.asyncio
+    async def test_monitor_loop_sleeps_are_jittered(self):
+        """Drives the monitor loop through healthy status checks, including
+        one failed network check, and checks every sleep it takes."""
+        num_checks = 500
+        checks = 0
+        network_checks = 0
+
+        async def fake_get_job_status(*args, **kwargs):
+            nonlocal checks
+            if checks >= num_checks:
+                raise self._StopLoop()
+            checks += 1
+            return job_lib.JobStatus.RUNNING, None
+
+        async def fake_check_network_connection():
+            nonlocal network_checks
+            network_checks += 1
+            if network_checks == 3:
+                raise exceptions.NetworkError('network is down')
+
+        task = MagicMock()
+        task.num_nodes = 1
+        instance = MagicMock()
+        instance._job_id = 1
+        instance._pool = None
+        instance._update_live_log_links = AsyncMock(return_value=True)
+        sleep = AsyncMock(return_value=None)
+        # No time passes between the mocked sleeps, so without the
+        # _network_check_is_fresh patch below every network check after the
+        # first would reuse the first.
+        with patch.object(controller_module, 'random', random.Random(0)), \
+             patch.object(controller_module, '_status_check_gap_seconds',
+                          wraps=controller_module._status_check_gap_seconds
+                         ) as gap_seconds, \
+             patch.object(managed_job_utils, 'get_job_status',
+                          new=AsyncMock(side_effect=fake_get_job_status)), \
+             patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=AsyncMock(
+                              side_effect=fake_check_network_connection)), \
+             patch.object(controller_module, '_network_check_is_fresh',
+                          return_value=False), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=False), \
+             patch.object(controller_module.asyncio, 'sleep', new=sleep):
+            with pytest.raises(self._StopLoop):
+                await JobController._monitor_one_task_impl(
+                    instance,
+                    task_id=0,
+                    task=task,
+                    cluster_name='cluster',
+                    executor=MagicMock(),
+                    status_logger=managed_job_utils.JobStatusLogger(),
+                    callback_func=AsyncMock())
+
+        sleeps = [call.args[0] for call in sleep.call_args_list]
+        # One sleep per status check, one for the retry after the failed
+        # network check, and one before the check that stopped the loop.
+        assert len(sleeps) == num_checks + 2
+        # Only the first gap is widened. The failed network check retries
+        # after a normal jittered gap, not a second widened first gap.
+        assert [
+            call.kwargs['first_check'] for call in gap_seconds.call_args_list
+        ] == [True] + [False] * (len(sleeps) - 1)
+        assert 0 <= sleeps[0] <= self._GAP
+        assert all(self._LOW <= s <= self._HIGH for s in sleeps[1:]), sleeps
+        assert abs(statistics.mean(sleeps[1:]) - self._GAP) < 0.3
+        assert len(set(sleeps[1:])) == len(sleeps) - 1
+
+
+@pytest.fixture(autouse=True)
+def _fresh_network_check_cache(monkeypatch):
+    """Isolate the process-wide network-check cache between tests.
+
+    The monitor loop reuses one successful network check across every loop in
+    the process. A check recorded by one test must not skip the check in the
+    next, and a check task created in one test's event loop must not reach
+    another: each test starts as the controller does, with no check in
+    flight.
+    """
+    monkeypatch.setattr(controller_module, '_network_check_ok_at', None)
+    monkeypatch.setattr(controller_module, '_network_check_in_flight', None)
+
+
+class TestNetworkCheckOncePerGap:
+    """Tests for sharing one network check across the monitor loops of a
+    process.
+
+    Every monitor loop checks the network before polling its job. A process
+    monitoring thousands of jobs would make thousands of HTTPS requests per
+    status-check gap, all to the same destination, so one check that succeeded
+    within the gap answers for every loop. Only successes are reused; a loop
+    that sees the network down retries as before.
+    """
+
+    _GAP = 10
+
+    @pytest.fixture(autouse=True)
+    def _gap(self, monkeypatch):
+        monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_CHECK_GAP_SECONDS',
+                            self._GAP)
+
+    def _shortest_sleep(self):
+        """The least a loop sleeps between two polls (see
+        ``_status_check_gap_seconds``)."""
+        return self._GAP * (1 - controller_module._STATUS_CHECK_GAP_JITTER)
+
+    @pytest.mark.asyncio
+    async def test_recent_success_is_reused(self):
+        check = AsyncMock()
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=check):
+            await controller_module.check_network_connection()
+            await controller_module.check_network_connection()
+        assert check.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_check_runs_again_after_the_shortest_sleep(self):
+        """A lone loop sleeps at least gap * (1 - jitter) between polls, so
+        its own last check is never reused: it checks before every poll just
+        as it did before the cache."""
+        check = AsyncMock()
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=check):
+            await controller_module.check_network_connection()
+            controller_module._network_check_ok_at = (time.monotonic() -
+                                                      self._shortest_sleep() +
+                                                      1)
+            await controller_module.check_network_connection()
+            assert check.await_count == 1
+            controller_module._network_check_ok_at = (time.monotonic() -
+                                                      self._shortest_sleep())
+            await controller_module.check_network_connection()
+        assert check.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_gap_is_read_at_call_time(self, monkeypatch):
+        """The reuse window follows JOB_STATUS_CHECK_GAP_SECONDS as it is at
+        the time of the check, not as it was when the module loaded."""
+        check = AsyncMock()
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=check):
+            await controller_module.check_network_connection()
+            monkeypatch.setattr(managed_job_utils,
+                                'JOB_STATUS_CHECK_GAP_SECONDS', 0)
+            await controller_module.check_network_connection()
+        assert check.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_failure_is_not_reused(self):
+        check = AsyncMock(side_effect=exceptions.NetworkError('down'))
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=check):
+            for _ in range(2):
+                with pytest.raises(exceptions.NetworkError):
+                    await controller_module.check_network_connection()
+        assert check.await_count == 2
+        assert controller_module._network_check_ok_at is None
+
+    @pytest.mark.asyncio
+    async def test_concurrent_loops_share_one_check(self):
+        """Loops that all find the cache stale wait for one check rather than
+        each starting their own."""
+        started = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def slow_check():
+            started.set()
+            await finish.wait()
+
+        check = AsyncMock(side_effect=slow_check)
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=check):
+            loops = [
+                asyncio.create_task(
+                    controller_module.check_network_connection())
+                for _ in range(5)
+            ]
+            await started.wait()
+            # Let every other loop reach the lock before the check finishes.
+            for _ in range(5):
+                await asyncio.sleep(0)
+            finish.set()
+            await asyncio.gather(*loops)
+        assert check.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_waiting_loops_share_a_failed_check(self):
+        """Loops waiting on a check that fails all get its NetworkError, so
+        each retries on its own timer instead of queueing behind another
+        check. A check started after the failure runs afresh."""
+        finish = asyncio.Event()
+        calls = 0
+
+        async def gated_check():
+            nonlocal calls
+            calls += 1
+            await finish.wait()
+            if calls == 1:
+                raise exceptions.NetworkError('down')
+
+        check = AsyncMock(side_effect=gated_check)
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=check):
+            loops = [
+                asyncio.create_task(
+                    controller_module.check_network_connection())
+                for _ in range(3)
+            ]
+            for _ in range(5):
+                await asyncio.sleep(0)
+            finish.set()
+            results = await asyncio.gather(*loops, return_exceptions=True)
+            assert all(isinstance(r, exceptions.NetworkError) for r in results)
+            assert check.await_count == 1
+            # The failure is not reused by a loop that checks afterwards.
+            await controller_module.check_network_connection()
+        assert check.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_cancelled_waiter_leaves_the_shared_check_running(self):
+        """Cancelling one waiting loop (its job was cancelled) must not
+        cancel the check the other loops wait on."""
+        started = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def gated_check():
+            started.set()
+            await finish.wait()
+
+        check = AsyncMock(side_effect=gated_check)
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=check):
+            first = asyncio.create_task(
+                controller_module.check_network_connection())
+            await started.wait()
+            second = asyncio.create_task(
+                controller_module.check_network_connection())
+            await asyncio.sleep(0)
+            first.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await first
+            finish.set()
+            await second
+        assert check.await_count == 1
+        assert controller_module._network_check_is_fresh()
+
+    class _RecordingRandom:
+        """Stands in for the module's random: records each uniform() range
+        and returns its low end, so the release delays cost nothing."""
+
+        def __init__(self):
+            self.ranges = []
+
+        def uniform(self, low, high):
+            self.ranges.append((low, high))
+            return low
+
+    async def _release_waiters_after(self, wait_seconds):
+        """Starts a check, lets two more loops wait on it for about
+        wait_seconds, then lets it succeed. Returns the delay ranges drawn."""
+        started = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def gated_check():
+            started.set()
+            await finish.wait()
+
+        recorder = self._RecordingRandom()
+        check = AsyncMock(side_effect=gated_check)
+        with patch.object(controller_module, 'random', recorder), \
+             patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=check):
+            starter = asyncio.create_task(
+                controller_module.check_network_connection())
+            await started.wait()
+            waiters = [
+                asyncio.create_task(
+                    controller_module.check_network_connection())
+                for _ in range(2)
+            ]
+            await asyncio.sleep(wait_seconds)
+            finish.set()
+            await asyncio.gather(starter, *waiters)
+        assert check.await_count == 1
+        return recorder.ranges
+
+    @pytest.mark.asyncio
+    async def test_loops_released_by_a_success_spread_out(self):
+        """A success releases every loop waiting on it at once; after an
+        outage that is every loop in the process. Each loop that waited on
+        another loop's check returns after a random delay of up to as long as
+        it waited, so they do not all poll at the same moment. The loop that
+        ran the check returns at once."""
+        ranges = await self._release_waiters_after(0.05)
+        # One delay per waiting loop, none for the loop that ran the check.
+        assert len(ranges) == 2
+        for low, high in ranges:
+            assert low == 0
+            assert 0.03 <= high < self._shortest_sleep()
+
+    @pytest.mark.asyncio
+    async def test_release_delay_is_capped_at_the_reuse_window(
+            self, monkeypatch):
+        monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_CHECK_GAP_SECONDS',
+                            0.05)
+        ranges = await self._release_waiters_after(0.2)
+        assert len(ranges) == 2
+        for low, high in ranges:
+            assert low == 0
+            assert high == pytest.approx(
+                0.05 * (1 - controller_module._STATUS_CHECK_GAP_JITTER))
+
+    def test_concurrent_loops_in_the_loop_asyncio_run_creates(self):
+        """The controller imports this module and only then starts its event
+        loop with asyncio.run(). Loops that wait on the check in that loop
+        must share it, not fail. On Python 3.9 a lock created at import is
+        bound to a different loop, and every waiting loop raised
+        RuntimeError."""
+
+        async def slow_check():
+            await asyncio.sleep(0.01)
+
+        async def run_loops():
+            return await asyncio.gather(*[
+                controller_module.check_network_connection() for _ in range(3)
+            ],
+                                        return_exceptions=True)
+
+        check = AsyncMock(side_effect=slow_check)
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=check):
+            results = asyncio.run(run_loops())
+        assert results == [None, None, None]
+        assert check.await_count == 1
 
 
 class TestAddK8sAnnotations:

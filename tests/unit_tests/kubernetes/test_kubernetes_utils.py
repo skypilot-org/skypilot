@@ -629,6 +629,56 @@ def test_detect_gpu_label_formatter_invalid_label_skip():
         utils.detect_gpu_label_formatter.cache_clear()
 
 
+@pytest.mark.parametrize('accelerator', ['RTX-PRO-6000', 'RTXPRO6000'])
+def test_gke_label_formatter_rtx_pro_6000(accelerator):
+    """RTX PRO 6000 is labeled nvidia-rtx-pro-6000 in GKE, not
+    nvidia-tesla-rtx-pro-6000."""
+    assert utils.GKELabelFormatter.get_label_values(accelerator) == [
+        'nvidia-rtx-pro-6000'
+    ]
+    assert utils.GKELabelFormatter.get_accelerator_from_label_value(
+        'nvidia-rtx-pro-6000') == 'RTX-PRO-6000'
+
+
+@pytest.mark.parametrize('accelerator', ['RTX-PRO-6000', 'RTXPRO6000'])
+def test_get_accelerator_label_key_values_gke_rtx_pro_6000(accelerator):
+    """Without an autoscaler, both RTX PRO 6000 names find a GKE node
+    labeled nvidia-rtx-pro-6000."""
+    label_key = utils.GKELabelFormatter.GPU_LABEL_KEY
+    node_labels = {'gpu-node': [(label_key, 'nvidia-rtx-pro-6000')]}
+    with mock.patch('sky.skypilot_config.get_effective_region_config',
+                    return_value=None), \
+         mock.patch('sky.provision.kubernetes.utils.detect_accelerator_resource',
+                    return_value=(True, set())), \
+         mock.patch('sky.provision.kubernetes.utils.detect_gpu_label_formatter',
+                    return_value=(utils.GKELabelFormatter(), node_labels)):
+        assert utils.get_accelerator_label_key_values(
+            'gke_project_us-central1_cluster', accelerator,
+            1) == (label_key, ['nvidia-rtx-pro-6000'], None, None)
+
+
+@pytest.mark.parametrize('accelerator', ['RTX-PRO-6000', 'RTXPRO6000'])
+def test_gke_autoscaler_node_pool_rtx_pro_6000(accelerator):
+    """A GKE autoscaling node pool of nvidia-rtx-pro-6000 GPUs, which may
+    have no nodes yet, can create a node for both RTX PRO 6000 names."""
+    node_pool = {
+        'name': 'g4-pool',
+        'config': {
+            'machineType': 'g4-standard-48',
+            'accelerators': [{
+                'acceleratorType': 'nvidia-rtx-pro-6000',
+                'acceleratorCount': '1'
+            }]
+        }
+    }
+    # pylint: disable=protected-access
+    fits = utils.GKEAutoscaler._check_instance_fits_gke_autoscaler_node_pool
+    with mock.patch('sky.clouds.GCP.get_vcpus_mem_from_instance_type',
+                    return_value=(48, 180.0)):
+        assert fits(f'4CPU--16GB--{accelerator}:1', node_pool)
+        assert not fits(f'4CPU--16GB--{accelerator}:2', node_pool)
+
+
 def test_detect_gpu_label_formatter_suppresses_warning_for_coreweave_format():
     """Tests that warnings are not logged when GKE label keys have
     CoreWeave-formatted values (e.g., cloud.google.com/gke-accelerator=H100_NVLINK_80GB).
@@ -5834,6 +5884,237 @@ class TestGetNodeAffinity:
             'requiredDuringSchedulingIgnoredDuringExecution',
             'preferredDuringSchedulingIgnoredDuringExecution',
         }
+
+
+def _pod_fields(acc_label_key=None,
+                acc_label_values=None,
+                avoid_label_keys=None,
+                topology_label_key=None,
+                topology_label_value=None,
+                spot_label_key=None,
+                spot_label_value=None,
+                enable_flex_start=False):
+    return utils.get_pod_fields(acc_label_key=acc_label_key,
+                                acc_label_values=acc_label_values,
+                                avoid_label_keys=avoid_label_keys,
+                                topology_label_key=topology_label_key,
+                                topology_label_value=topology_label_value,
+                                spot_label_key=spot_label_key,
+                                spot_label_value=spot_label_value,
+                                enable_flex_start=enable_flex_start)
+
+
+class TestGetNodeSelector:
+    """Tests for utils.get_node_selector."""
+
+    def test_none_when_no_entries(self):
+        assert utils.get_node_selector(None, None, None, None, False) is None
+
+    def test_none_when_key_without_value(self):
+        """A key with a None value does not produce an entry."""
+        assert utils.get_node_selector('cloud.google.com/gke-tpu-topology',
+                                       None, 'cloud.google.com/gke-spot', None,
+                                       False) is None
+
+    def test_topology_only(self):
+        assert utils.get_node_selector(
+            'cloud.google.com/gke-tpu-topology', '2x2', None, None, False) == {
+                'cloud.google.com/gke-tpu-topology': '2x2',
+            }
+
+    def test_spot_only(self):
+        assert utils.get_node_selector(None, None, 'cloud.google.com/gke-spot',
+                                       'true', False) == {
+                                           'cloud.google.com/gke-spot': 'true',
+                                       }
+
+    def test_flex_start_only(self):
+        assert utils.get_node_selector(None, None, None, None, True) == {
+            'cloud.google.com/gke-flex-start': 'true',
+        }
+
+    def test_all_entries(self):
+        assert utils.get_node_selector(
+            'cloud.google.com/gke-tpu-topology', '2x2',
+            'cloud.google.com/gke-spot', 'true', True) == {
+                'cloud.google.com/gke-tpu-topology': '2x2',
+                'cloud.google.com/gke-spot': 'true',
+                'cloud.google.com/gke-flex-start': 'true',
+            }
+
+
+class TestGetSpotToleration:
+    """Tests for utils.get_spot_toleration."""
+
+    def test_none_without_a_spot_label(self):
+        assert utils.get_spot_toleration(None, None) is None
+        assert utils.get_spot_toleration('cloud.google.com/gke-spot',
+                                         None) is None
+
+    def test_tolerates_the_spot_taint(self):
+        assert utils.get_spot_toleration(
+            'karpenter.sh/capacity-type', 'spot') == {
+                'key': 'karpenter.sh/capacity-type',
+                'operator': 'Equal',
+                'value': 'spot',
+                'effect': 'NoSchedule',
+            }
+
+
+class TestPodFields:
+    """Tests for utils.get_pod_fields and utils.combine_pod_fields."""
+
+    @staticmethod
+    def _cluster_yaml(pod_spec):
+        return {
+            'available_node_types': {
+                'ray_head_default': {
+                    'node_config': {
+                        'spec': pod_spec
+                    }
+                }
+            }
+        }
+
+    @staticmethod
+    def _pod_spec(cluster_yaml):
+        return cluster_yaml['available_node_types']['ray_head_default'][
+            'node_config']['spec']
+
+    def test_empty_when_no_field_applies(self):
+        assert _pod_fields() == {}
+
+    def test_node_affinity_is_a_pod_spec_field(self):
+        pod_fields = _pod_fields('skypilot.co/accelerator', ['H100'],
+                                 ['some-other-key'])
+        assert pod_fields == {
+            'spec': {
+                'affinity': {
+                    'nodeAffinity': utils.get_node_affinity(
+                        'skypilot.co/accelerator', ['H100'], ['some-other-key'])
+                }
+            }
+        }
+
+    def test_combine_keeps_what_the_template_rendered(self):
+        """The merge adds to an affinity the template already rendered."""
+        pod_affinity = {
+            'preferredDuringSchedulingIgnoredDuringExecution': [{
+                'weight': 1
+            }]
+        }
+        cluster_yaml = self._cluster_yaml({
+            'containers': [{
+                'name': 'ray-node'
+            }],
+            'affinity': {
+                'podAffinity': pod_affinity
+            },
+        })
+        pod_fields = _pod_fields('skypilot.co/accelerator', ['H100'])
+
+        combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
+
+        assert self._pod_spec(combined) == {
+            'containers': [{
+                'name': 'ray-node'
+            }],
+            'affinity': {
+                'podAffinity': pod_affinity,
+                'nodeAffinity': pod_fields['spec']['affinity']['nodeAffinity'],
+            },
+        }
+
+    def test_combine_adds_an_affinity_the_template_did_not_render(self):
+        cluster_yaml = self._cluster_yaml(
+            {'containers': [{
+                'name': 'ray-node'
+            }]})
+        pod_fields = _pod_fields(avoid_label_keys=['some-other-key'])
+
+        combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
+
+        assert self._pod_spec(
+            combined)['affinity'] == pod_fields['spec']['affinity']
+
+    def test_combine_leaves_its_inputs_untouched(self):
+        cluster_yaml = self._cluster_yaml(
+            {'containers': [{
+                'name': 'ray-node'
+            }]})
+        pod_fields = _pod_fields('skypilot.co/accelerator', ['H100'])
+        expected_pod_fields = copy.deepcopy(pod_fields)
+
+        combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
+        self._pod_spec(combined)['affinity']['nodeAffinity'].clear()
+
+        assert 'affinity' not in self._pod_spec(cluster_yaml)
+        assert pod_fields == expected_pod_fields
+
+    def test_spot_pins_and_tolerates(self):
+        """A spot request gives the pod the spot node selector and the
+        toleration for the taint those nodes carry."""
+        pod_fields = _pod_fields(spot_label_key='cloud.google.com/gke-spot',
+                                 spot_label_value='true')
+        assert pod_fields == {
+            'spec': {
+                'nodeSelector': {
+                    'cloud.google.com/gke-spot': 'true'
+                },
+                'tolerations': [{
+                    'key': 'cloud.google.com/gke-spot',
+                    'operator': 'Equal',
+                    'value': 'true',
+                    'effect': 'NoSchedule',
+                }],
+            }
+        }
+
+    def test_every_field_together(self):
+        pod_fields = _pod_fields(
+            acc_label_key='cloud.google.com/gke-tpu-accelerator',
+            acc_label_values=['tpu-v5-lite-podslice'],
+            topology_label_key='cloud.google.com/gke-tpu-topology',
+            topology_label_value='2x4',
+            spot_label_key='cloud.google.com/gke-spot',
+            spot_label_value='true',
+            enable_flex_start=True)
+        assert pod_fields['spec'] == {
+            'nodeSelector': {
+                'cloud.google.com/gke-tpu-topology': '2x4',
+                'cloud.google.com/gke-spot': 'true',
+                'cloud.google.com/gke-flex-start': 'true',
+            },
+            'affinity': {
+                'nodeAffinity': utils.get_node_affinity(
+                    'cloud.google.com/gke-tpu-accelerator',
+                    ['tpu-v5-lite-podslice'], None)
+            },
+            'tolerations': [
+                utils.get_spot_toleration('cloud.google.com/gke-spot', 'true')
+            ],
+        }
+
+    def test_combine_appends_the_user_tolerations_after(self):
+        """The spot toleration is in place before the user's pod_config is
+        merged, so merge_k8s_configs appends the user's tolerations to it."""
+        from sky.utils import config_utils
+
+        cluster_yaml = self._cluster_yaml(
+            {'containers': [{
+                'name': 'ray-node'
+            }]})
+        pod_fields = _pod_fields(spot_label_key='cloud.google.com/gke-spot',
+                                 spot_label_value='true')
+        combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
+        user_toleration = {'key': 'dedicated', 'operator': 'Exists'}
+        config_utils.merge_k8s_configs(self._pod_spec(combined),
+                                       {'tolerations': [user_toleration]})
+
+        assert self._pod_spec(combined)['tolerations'] == [
+            utils.get_spot_toleration('cloud.google.com/gke-spot', 'true'),
+            user_toleration,
+        ]
 
 
 def _make_pod_with_spec(*,

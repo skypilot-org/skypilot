@@ -568,6 +568,10 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     elif accelerator == 'H200':
         # H200s on GCP use this label format
         return 'nvidia-h200-141gb'
+    elif accelerator in ('RTX-PRO-6000', 'RTXPRO6000'):
+        # RTX PRO 6000 (G4) is labeled nvidia-rtx-pro-6000 in GKE, and is
+        # named RTXPRO6000 in the GCP catalog.
+        return 'nvidia-rtx-pro-6000'
     elif accelerator.startswith('tpu-'):
         return accelerator
     elif accelerator.startswith('amd-'):
@@ -829,6 +833,15 @@ class GFDLabelFormatter(GPULabelFormatter):
                                                  '').replace('RTX-', 'RTX')
 
 
+# Lowercase names of one accelerator that the prefix match in
+# _accelerator_name_matches cannot pair, mapped to a shared name. RTX PRO 6000
+# is 'RTXPRO6000' in the GCP catalog, while GKE labels it
+# 'nvidia-rtx-pro-6000', which GKELabelFormatter decodes to 'RTX-PRO-6000'.
+_ACCELERATOR_NAME_ALIASES = {
+    'rtxpro6000': 'rtx-pro-6000',
+}
+
+
 def _accelerator_name_matches(requested_acc: str,
                               viable_names: List[str]) -> bool:
     """Check if requested accelerator matches any viable name.
@@ -842,6 +855,9 @@ def _accelerator_name_matches(requested_acc: str,
       after upgrading, the same label now maps to canonical name (e.g., 'H200').
     - Users specify canonical names but the cluster uses fallback names.
 
+    Names listed in _ACCELERATOR_NAME_ALIASES also match their alias exactly
+    (e.g., 'RTXPRO6000' matches 'RTX-PRO-6000').
+
     Args:
         requested_acc: The accelerator type requested (e.g., from launched_resources).
         viable_names: List of viable accelerator names from node labels.
@@ -850,9 +866,14 @@ def _accelerator_name_matches(requested_acc: str,
         True if the requested accelerator matches any viable name.
     """
     requested_lower = requested_acc.lower()
+    requested_alias = _ACCELERATOR_NAME_ALIASES.get(requested_lower,
+                                                    requested_lower)
     for viable in viable_names:
         viable_lower = viable.lower()
         if requested_lower == viable_lower:
+            return True
+        if requested_alias == _ACCELERATOR_NAME_ALIASES.get(
+                viable_lower, viable_lower):
             return True
         # Check prefix match with '-' separator for backward compatibility.
         # E.g., 'H200' matches 'H200-SXM-80GB' and vice versa.
@@ -2973,6 +2994,115 @@ def get_node_affinity(
     return node_affinity or None
 
 
+def get_node_selector(
+    topology_label_key: Optional[str],
+    topology_label_value: Optional[str],
+    spot_label_key: Optional[str],
+    spot_label_value: Optional[str],
+    enable_flex_start: bool,
+) -> Optional[Dict[str, str]]:
+    """Builds the pod ``nodeSelector``.
+
+    Three independent entries, any of which may be absent:
+
+    * An accelerator topology label, pinning the pod to nodes of the requested
+      slice shape (e.g. ``cloud.google.com/gke-tpu-topology: 2x2``).
+    * The spot label, pinning the pod to preemptible nodes. The pod also
+      tolerates the matching taint; see get_spot_toleration().
+    * ``cloud.google.com/gke-flex-start``, selecting GKE nodes provisioned
+      through flex-start.
+
+    Args:
+        topology_label_key: Node label key of the accelerator slice topology,
+            or None.
+        topology_label_value: Requested value for ``topology_label_key``, or
+            None.
+        spot_label_key: Node label key of preemptible nodes, or None.
+        spot_label_value: Value ``spot_label_key`` carries on preemptible
+            nodes, or None.
+        enable_flex_start: Whether the pod schedules onto flex-start nodes.
+
+    Returns:
+        A ``nodeSelector`` dict, or None when no entry applies.
+    """
+    node_selector: Dict[str, str] = {}
+    if topology_label_key is not None and topology_label_value is not None:
+        node_selector[topology_label_key] = topology_label_value
+    if spot_label_key is not None and spot_label_value is not None:
+        node_selector[spot_label_key] = spot_label_value
+    if enable_flex_start:
+        node_selector['cloud.google.com/gke-flex-start'] = 'true'
+    return node_selector or None
+
+
+def get_spot_toleration(
+    spot_label_key: Optional[str],
+    spot_label_value: Optional[str],
+) -> Optional[Dict[str, str]]:
+    """Builds the toleration for the taint preemptible nodes carry.
+
+    Args:
+        spot_label_key: See get_node_selector().
+        spot_label_value: See get_node_selector().
+
+    Returns:
+        A toleration dict, or None when the cluster has no spot label.
+    """
+    if spot_label_key is None or spot_label_value is None:
+        return None
+    return {
+        'key': spot_label_key,
+        'operator': 'Equal',
+        'value': spot_label_value,
+        'effect': 'NoSchedule',
+    }
+
+
+def get_pod_fields(
+    *,
+    acc_label_key: Optional[str],
+    acc_label_values: Optional[List[str]],
+    avoid_label_keys: Optional[List[str]],
+    topology_label_key: Optional[str],
+    topology_label_value: Optional[str],
+    spot_label_key: Optional[str],
+    spot_label_value: Optional[str],
+    enable_flex_start: bool,
+) -> Dict[str, Any]:
+    """Builds the pod fields that SkyPilot computes in Python.
+
+    combine_pod_fields() merges the result, a partial pod manifest, into the
+    pod the cluster template renders.
+
+    Args:
+        acc_label_key: See get_node_affinity().
+        acc_label_values: See get_node_affinity().
+        avoid_label_keys: See get_node_affinity().
+        topology_label_key: See get_node_selector().
+        topology_label_value: See get_node_selector().
+        spot_label_key: See get_node_selector() and get_spot_toleration().
+        spot_label_value: See get_node_selector() and get_spot_toleration().
+        enable_flex_start: See get_node_selector().
+
+    Returns:
+        A partial pod manifest, empty when no field applies.
+    """
+    spec: Dict[str, Any] = {}
+    node_selector = get_node_selector(topology_label_key, topology_label_value,
+                                      spot_label_key, spot_label_value,
+                                      enable_flex_start)
+    if node_selector is not None:
+        spec['nodeSelector'] = node_selector
+    node_affinity = get_node_affinity(acc_label_key, acc_label_values,
+                                      avoid_label_keys)
+    if node_affinity is not None:
+        spec['affinity'] = {'nodeAffinity': node_affinity}
+    spot_toleration = get_spot_toleration(spot_label_key, spot_label_value)
+    if spot_toleration is not None:
+        spec['tolerations'] = [spot_toleration]
+    return {'spec': spec} if spec else {}
+
+
 def get_accelerator_label_keys(context: Optional[str],) -> List[str]:
     """Returns the label keys that should be avoided for scheduling
     CPU-only tasks.
@@ -4370,6 +4500,19 @@ def resolve_effective_pod_config(
     return kubernetes_config
 
 
+def combine_pod_fields(cluster_yaml_obj: Dict[str, Any],
+                       pod_fields: Dict[str, Any]) -> Dict[str, Any]:
+    """Adds the pod fields from get_pod_fields() to the rendered pod.
+
+    Obeys the same add or update semantics as combine_pod_config_fields().
+    """
+    merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
+    config_utils.merge_k8s_configs(
+        merged_cluster_yaml_obj['available_node_types']['ray_head_default']
+        ['node_config'], copy.deepcopy(pod_fields))
+    return merged_cluster_yaml_obj
+
+
 def combine_pod_config_fields(
     cluster_yaml_obj: Dict[str, Any],
     cluster_config_overrides: Dict[str, Any],
@@ -4808,10 +4951,9 @@ def _get_kubernetes_node_info(
         KubernetesNodesInfo: A model that contains the node info map and other
             information.
     """
-    # Try external node info source first (e.g., node-info-service cache).
-    # This allows plugins to provide cached node info for faster queries.
+    # Try the external node info source first, if one is registered.
     if plugin_extensions.NodeInfoSource.is_registered():
-        # Resolve context before calling the provider so it can be cached
+        # Resolve context before calling the provider.
         resolved_context = (context if context is not None else
                             get_current_kube_config_context_name())
         if resolved_context is not None:
@@ -5333,7 +5475,7 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
     if context is None:
         context = get_current_kube_config_context_name()
 
-    # Try external pod info source first (e.g., node-info-service cache).
+    # Try the external pod info source first, if one is registered.
     if plugin_extensions.PodInfoSource.is_registered():
         if context is not None:
             result = plugin_extensions.PodInfoSource.get(context)

@@ -30,6 +30,9 @@ provider:
     # The networking mode used to ssh to pods. One of KubernetesNetworkingMode.
     networking_mode: {{k8s_networking_mode}}
 
+    # remote_identity: NONE -- the account is created, no roles are bound.
+    remote_identity_none: {{k8s_remote_identity_none | default(false)}}
+
     # We use internal IPs since we set up a port-forward between the kubernetes
     # cluster and the local machine.
     use_internal_ips: true
@@ -464,23 +467,8 @@ available_node_types:
           fsGroupChangePolicy: OnRootMismatch
         {% endif %}
 
-        # Add node selector if GPU/TPUs are requested:
-        {% if (k8s_topology_label_key is not none and k8s_topology_label_value is not none) or (k8s_spot_label_key is not none) or (k8s_enable_flex_start) %}
-        nodeSelector:
-            {% if k8s_topology_label_key is not none and k8s_topology_label_value is not none %}
-            {{k8s_topology_label_key}}: {{k8s_topology_label_value}}
-            {% endif %}
-            {% if k8s_spot_label_key is not none %}
-            {{k8s_spot_label_key}}: {{k8s_spot_label_value|tojson}}
-            {% endif %}
-            {% if k8s_enable_flex_start %}
-            cloud.google.com/gke-flex-start: "true"
-            {% endif %}
-        {% endif %}
-        {% if k8s_node_affinity or k8s_host_network %}
+        {% if (k8s_acc_label_key is not none and k8s_acc_label_values is not none) or k8s_host_network %}
         affinity:
-          {% if k8s_node_affinity %}
-          nodeAffinity: {{k8s_node_affinity | tojson}}
           {% if k8s_acc_label_key is not none and k8s_acc_label_values is not none %}
           podAffinity:
             preferredDuringSchedulingIgnoredDuringExecution:
@@ -509,7 +497,6 @@ available_node_types:
                 topologyKey: topology.kubernetes.io/zone
             {% endif %}
           {% endif %}
-          {% endif %}
           {% if k8s_host_network %}
           # Mode b: one cluster pod per K8s node. Under hostNetwork a pod
           # shares the node's net namespace, so two pods of the SAME SkyPilot
@@ -531,14 +518,6 @@ available_node_types:
               topologyKey: kubernetes.io/hostname
           {% endif %}
         {% endif %}
-        {% if k8s_spot_label_key is not none %}
-        tolerations:
-          - key: {{k8s_spot_label_key}}
-            operator: Equal
-            value: {{k8s_spot_label_value|tojson}}
-            effect: NoSchedule
-        {% endif %}
-
         # This volume allocates shared memory for Ray to use for its plasma
         # object store. If you do not provide this, Ray will fall back to
         # /tmp which cause slowdowns if is not a shared memory volume.

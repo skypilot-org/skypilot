@@ -160,8 +160,8 @@ T = TypeVar('T')
 def _get_ws_proxy_command() -> str:
     """Returns the ws-proxy command string.
 
-    Defaults to the Python websocket_proxy.py script. Plugins can
-    replace this function to prefer a native binary.
+    Defaults to the Python websocket_proxy.py script. Plugins may
+    replace this function.
     """
     escaped_executable_path = shlex.quote(sys.executable)
     escaped_websocket_proxy_path = shlex.quote(
@@ -1792,7 +1792,7 @@ def _handle_jobs_queue_request(
         msg contains the error message. Otherwise, msg contains the formatted
         managed job table.
     """
-    # TODO(SKY-980): remove unnecessary fallbacks on the client side.
+    # TODO: remove unnecessary fallbacks on the client side.
     num_in_progress_jobs = None
     msg = ''
     status_counts: Optional[Dict[str, int]] = None
@@ -3105,8 +3105,7 @@ def cancel(
                                     job_ids=job_ids_to_cancel)
             _async_call_or_wait(request_id, async_call, 'sky.cancel')
         except exceptions.NotSupportedError as e:
-            controller = controller_utils.Controllers.from_name(
-                cluster, expect_exact_match=False)
+            controller = controller_utils.Controllers.from_prefix(cluster)
             assert controller is not None, cluster
             with ux_utils.print_exception_no_traceback():
                 raise click.UsageError(

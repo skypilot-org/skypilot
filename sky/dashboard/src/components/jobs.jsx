@@ -426,9 +426,8 @@ export function ManagedJobs() {
   const jobsRefreshRef = React.useRef(null);
   const poolsRefreshRef = React.useRef(null);
   const [poolsData, setPoolsData] = useState([]);
-  // Plugins may register extra filter properties for this table (e.g. the
-  // pagination plugin's Slurm Account/QOS filters) — registration is
-  // reactive, typically arriving with the plugin's first data response.
+  // Plugins may register extra filter properties for this table —
+  // registration is reactive and may arrive after the first render.
   const pluginFilterProps = usePluginTableFilters('jobs');
   const filterSchema = React.useMemo(
     () => [...JOB_FILTER_SCHEMA, ...pluginFilterProps],
@@ -617,9 +616,8 @@ export function ManagedJobs() {
         />
       </div>
 
-      {/* Extension point for jobs not managed by SkyPilot (e.g. foreign
-          Slurm jobs surfaced by the GPU Manager plugin). Renders nothing
-          when no plugin fills it. */}
+      {/* Extension point for an extra section below the jobs table.
+          Renders nothing when no plugin fills it. */}
       <PluginSlot name="jobs.page.external-section" />
     </>
   );
@@ -685,9 +683,8 @@ function ExternalJobId({ item, href }) {
 function JobNameLink({ href, name, id, tooltip, muted }) {
   // A job with no name still has a detail page. Render the same dash the
   // other missing fields use, gray so it does not read as a name, and say
-  // why in the tooltip. Rows that know more about themselves (external
-  // Slurm rows from the pagination plugin) pass their own tooltip and
-  // muted flag instead; this component only renders what it is given.
+  // why in the tooltip. Callers may pass their own tooltip and muted flag
+  // instead; this component only renders what it is given.
   if (!name) {
     return (
       <NonCapitalizedTooltip content={tooltip || `Job ${id} has no name`}>

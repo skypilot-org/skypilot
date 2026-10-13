@@ -916,9 +916,7 @@ export function InfrastructureSection({
                             <AllowedNodesRowBadge id={rowId} kind={rowKind} />
                             {contextErrors[context] && !statusByKey && (
                               // Hidden when a plugin is contributing status data
-                              // via the infra.row.namePrefix slot — the plugin's
-                              // status dot + per-context detail page cover this
-                              // information already.
+                              // via the infra.row.namePrefix slot.
                               <NonCapitalizedTooltip
                                 content={`Context unreachable: ${contextErrors[context]}`}
                                 className="text-sm text-muted-foreground"
@@ -1598,8 +1596,7 @@ export function ContextDetails({
                       // Build taint info separately. Taints whose
                       // `tolerated` flag is set by the backend (i.e. matched
                       // by `kubernetes.pod_config.spec.tolerations`) do not
-                      // count against node health on the Infra page — they're
-                      // surfaced in the GPU Manager drawer instead.
+                      // count against node health on the Infra page.
                       const taints = node.taints || [];
                       const untoleratedTaints = taints.filter(
                         (t) => t && t.tolerated !== true
@@ -3447,9 +3444,8 @@ export function GPUs() {
     };
   }, [handleRefresh]);
 
-  // Listen for plugin-emitted refresh requests, e.g. when a plugin's
-  // "Add infra" / "Remove infra" flow finishes, so the host page picks up
-  // the new state without the user having to click Refresh manually.
+  // Listen for plugin-emitted refresh requests, so the host page picks up
+  // new state without the user having to click Refresh manually.
   useEffect(() => {
     const onRefreshEvent = () => handleRefresh();
     window.addEventListener('skydashboard:infra:refresh', onRefreshEvent);
@@ -3533,8 +3529,7 @@ export function GPUs() {
   }, [selectedWorkspace, workspaceInfrastructure, kubeLoading]);
 
   // Filter cloud infrastructure data based on selected workspace, then merge
-  // in any plugin-contributed cloud rows (e.g. misconfigured clouds that have
-  // credentials registered but didn't show up in workspace-enabled clouds).
+  // in any plugin-contributed cloud rows not already present.
   const filteredCloudInfraData = React.useMemo(() => {
     const base = (() => {
       if (!cloudInfraData || cloudInfraData.length === 0) return [];
@@ -4125,8 +4120,7 @@ export function GPUs() {
 
     // If all infrastructure is disabled, show ONLY the empty-state hint —
     // hide the per-type cards (which would all be empty anyway). Plugins can
-    // replace the default OSS hint via the `infra.emptyState` slot (e.g. to
-    // show a richer "Connect your first infrastructure" CTA).
+    // replace the default OSS hint via the `infra.emptyState` slot.
     if (allInfrastructureDisabled) {
       sections.push({
         name: 'Infrastructure Hint',
@@ -4327,8 +4321,7 @@ export function GPUs() {
       <PluginSlot name="infra.attentionBanner" />
 
       {selectedContext && (
-        // Large h1 title + plugin-injected header actions (e.g. Remove)
-        // on a single row.
+        // Large h1 title + plugin-injected header actions on a single row.
         <div className="flex items-center justify-between gap-3 mb-5">
           <h1
             className={`text-2xl font-semibold text-gray-900 leading-tight tracking-tight ${
