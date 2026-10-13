@@ -208,7 +208,6 @@ _DEADLINE_CANCELS_PER_CHECK = controller_utils.LAUNCHES_PER_WORKER
 _STORAGE_TEARDOWN_ATTEMPTS = 4
 _STORAGE_TEARDOWN_INITIAL_BACKOFF_SECONDS = 15
 
-
 async def create_background_task(coro: typing.Coroutine) -> asyncio.Task:
     """Create a background task and add it to the set of background tasks.
 
@@ -4845,7 +4844,9 @@ class ControllerManager:
                         await callback('CANCELLED')
                         continue
 
-            await self.start_job(job_id, pool)
+            await create_background_task(self.start_job(job_id, pool))
+            # Let start_job reserve its launch slot before claiming another.
+            await asyncio.sleep(0)
 
 
 async def main(controller_uuid: str):
