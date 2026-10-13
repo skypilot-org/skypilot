@@ -52,6 +52,7 @@ def _build_driver_exceptions() -> Tuple[Type[BaseException], ...]:
 
 
 _DRIVER_EXCEPTIONS = _build_driver_exceptions()
+_POOL_EXCEPTIONS = (sqlalchemy.exc.TimeoutError,)
 
 
 def _asyncpg_exceptions() -> Tuple[Type[BaseException], ...]:
@@ -92,7 +93,8 @@ _NETWORK_EXCEPTIONS: Tuple[Type[BaseException], ...] = (
     asyncio.TimeoutError,
 )
 
-RETRYABLE_EXCEPTIONS = _DRIVER_EXCEPTIONS + _NETWORK_EXCEPTIONS
+RETRYABLE_EXCEPTIONS = (_POOL_EXCEPTIONS + _DRIVER_EXCEPTIONS +
+                        _NETWORK_EXCEPTIONS)
 
 
 def is_transient(error: BaseException) -> bool:
@@ -102,7 +104,7 @@ def is_transient(error: BaseException) -> bool:
     builtins are retryable only when raised at the top level.
     """
     driver_excs = _DRIVER_EXCEPTIONS + _asyncpg_exceptions()
-    if isinstance(error, driver_excs + _NETWORK_EXCEPTIONS):
+    if isinstance(error, _POOL_EXCEPTIONS + driver_excs + _NETWORK_EXCEPTIONS):
         return True
     seen: Set[int] = set()
     current = error.__cause__

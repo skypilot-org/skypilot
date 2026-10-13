@@ -211,6 +211,10 @@ async def _coro_raising(exc):
 
 class TestIsTransient:
 
+    def test_sqlalchemy_pool_timeout_is_transient(self):
+        assert retries.is_transient(
+            sqlalchemy.exc.TimeoutError('connection pool exhausted'))
+
     def test_direct_retryable_exception(self):
         assert retries.is_transient(_make_op_error())
 

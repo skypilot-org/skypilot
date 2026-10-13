@@ -6,6 +6,7 @@ import types
 from unittest import mock
 
 import pytest
+import sqlalchemy.exc
 
 from sky import exceptions
 from sky.jobs import recovery_strategy
@@ -65,6 +66,77 @@ def _make_bare_executor():
     executor = recovery_strategy.StrategyExecutor.__new__(
         recovery_strategy.StrategyExecutor)
     return executor
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure_stage', ['refresh', 'status', 'timestamp'])
+async def test_start_confirmation_preserves_launched_job_during_db_timeout(
+        monkeypatch, failure_stage):
+    executor = _make_bare_executor()
+    executor.cluster_name = 'test-cluster'
+    executor.backend = mock.MagicMock()
+    executor.job_id_on_pool_cluster = None
+
+    pool_timeout = sqlalchemy.exc.TimeoutError('connection pool exhausted')
+    timeout_count = recovery_strategy.MAX_JOB_CHECKING_RETRY
+    refresh = mock.MagicMock(
+        return_value=(recovery_strategy.status_lib.ClusterStatus.UP,
+                      mock.MagicMock()))
+    get_status = mock.AsyncMock(
+        return_value=(recovery_strategy.job_lib.JobStatus.RUNNING, None))
+    get_timestamp = mock.MagicMock(return_value=123.45)
+    if failure_stage == 'refresh':
+        refresh.side_effect = [
+            *([pool_timeout] * timeout_count),
+            (recovery_strategy.status_lib.ClusterStatus.UP, mock.MagicMock())
+        ]
+    elif failure_stage == 'status':
+        get_status.side_effect = [
+            *([pool_timeout] * timeout_count),
+            (recovery_strategy.job_lib.JobStatus.RUNNING, None)
+        ]
+    else:
+        get_status.side_effect = [
+            (recovery_strategy.job_lib.JobStatus.SUCCEEDED, None), (None, None)
+        ]
+        get_timestamp.side_effect = [*([pool_timeout] * timeout_count), 123.45]
+
+    monkeypatch.setattr(recovery_strategy.backend_utils,
+                        'refresh_cluster_status_handle', refresh)
+    monkeypatch.setattr(recovery_strategy.managed_job_utils, 'get_job_status',
+                        get_status)
+    monkeypatch.setattr(recovery_strategy.managed_job_utils,
+                        'get_job_timestamp', get_timestamp)
+    monkeypatch.setattr(recovery_strategy.managed_job_runtime, 'is_registered',
+                        mock.MagicMock(return_value=False))
+    sleep = mock.AsyncMock()
+    monkeypatch.setattr(recovery_strategy.asyncio, 'sleep', sleep)
+
+    submitted_at, reason = await executor._wait_until_job_starts_on_cluster()
+
+    assert submitted_at == 123.45
+    assert reason is None
+    assert sleep.await_count == timeout_count
+    if failure_stage == 'timestamp':
+        # Once success is observed, a vanished worker must not be polled again.
+        assert get_status.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_start_confirmation_db_wait_is_cancellable(monkeypatch):
+    executor = _make_bare_executor()
+    executor.cluster_name = 'test-cluster'
+    executor.backend = mock.MagicMock()
+    executor.job_id_on_pool_cluster = None
+    monkeypatch.setattr(
+        recovery_strategy.backend_utils, 'refresh_cluster_status_handle',
+        mock.MagicMock(
+            side_effect=sqlalchemy.exc.TimeoutError('pool still exhausted')))
+    monkeypatch.setattr(recovery_strategy.asyncio, 'sleep',
+                        mock.AsyncMock(side_effect=asyncio.CancelledError()))
+
+    with pytest.raises(asyncio.CancelledError):
+        await executor._wait_until_job_starts_on_cluster()
 
 
 def _request_payload(status: str, status_msg=None):
@@ -301,6 +373,61 @@ def _patch_launch_environment(monkeypatch):
     return types.SimpleNamespace(sdk_launch=sdk_launch,
                                  set_restarting=set_restarting,
                                  set_backoff_pending=set_backoff_pending)
+
+
+@pytest.mark.asyncio
+async def test_pool_submission_db_timeout_does_not_submit_twice(monkeypatch):
+    executor = _make_launch_executor()
+    executor.pool = 'test-pool'
+    executor.dag.tasks = []
+    _patch_launch_environment(monkeypatch)
+    monkeypatch.setattr(recovery_strategy.serve_utils, 'get_next_cluster_name',
+                        mock.MagicMock(return_value='pool-worker'))
+    sdk_exec = mock.MagicMock(return_value='exec-request')
+    monkeypatch.setattr(recovery_strategy.sdk, 'exec', sdk_exec)
+    monkeypatch.setattr(recovery_strategy.sdk, 'get',
+                        mock.MagicMock(return_value=(7, None)))
+    set_pool_job = mock.AsyncMock(side_effect=[
+        sqlalchemy.exc.TimeoutError('connection pool exhausted'), None
+    ])
+    monkeypatch.setattr(recovery_strategy.state,
+                        'set_job_id_on_pool_cluster_async', set_pool_job)
+    monkeypatch.setattr(recovery_strategy.asyncio, 'sleep', mock.AsyncMock())
+
+    assert await executor._launch(max_retry=1) == 123.45
+    assert sdk_exec.call_count == 1
+    assert set_pool_job.await_count == 2
+    executor._cleanup_cluster.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pool_submission_db_wait_is_cancellable(monkeypatch):
+    from sky import core
+    executor = _make_launch_executor()
+    executor.pool = 'test-pool'
+    executor.dag.tasks = []
+    _patch_launch_environment(monkeypatch)
+    monkeypatch.setattr(recovery_strategy.serve_utils, 'get_next_cluster_name',
+                        mock.MagicMock(return_value='pool-worker'))
+    sdk_exec = mock.MagicMock(return_value='exec-request')
+    monkeypatch.setattr(recovery_strategy.sdk, 'exec', sdk_exec)
+    monkeypatch.setattr(recovery_strategy.sdk, 'get',
+                        mock.MagicMock(return_value=(7, None)))
+    monkeypatch.setattr(
+        recovery_strategy.state, 'set_job_id_on_pool_cluster_async',
+        mock.AsyncMock(
+            side_effect=sqlalchemy.exc.TimeoutError('pool still exhausted')))
+    monkeypatch.setattr(recovery_strategy.asyncio, 'sleep',
+                        mock.AsyncMock(side_effect=asyncio.CancelledError()))
+    cancel = mock.Mock()
+    monkeypatch.setattr(core, 'cancel', cancel)
+
+    with pytest.raises(asyncio.CancelledError):
+        await executor._launch(max_retry=1)
+    assert sdk_exec.call_count == 1
+    cancel.assert_called_once_with(cluster_name='pool-worker',
+                                   job_ids=[7],
+                                   _try_cancel_if_cluster_is_init=True)
 
 
 @pytest.mark.asyncio
@@ -707,6 +834,46 @@ async def test_start_wait_uses_runtime_before_cluster_refresh(
                         'refresh_cluster_status_handle', refresh)
     assert await executor._wait_until_job_starts_on_cluster() == (123.45, None)
     refresh.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_start_wait_runtime_db_timeout_does_not_spend_budget(monkeypatch):
+    executor = _make_submit_wait_executor(monkeypatch)
+    runtime = recovery_strategy.managed_job_runtime
+    monkeypatch.setattr(runtime, 'is_registered', lambda: True)
+    timeout = sqlalchemy.exc.TimeoutError('connection pool exhausted')
+    handle = object()
+    get_handle = mock.Mock(side_effect=[timeout, handle])
+    get_status = mock.Mock(
+        return_value=(recovery_strategy.job_lib.JobStatus.RUNNING, None))
+    monkeypatch.setattr(recovery_strategy.global_user_state,
+                        'get_handle_from_cluster_name', get_handle)
+    monkeypatch.setattr(runtime, 'get_job_status', get_status)
+    monkeypatch.setattr(runtime, 'get_job_submitted_at', lambda *_: 123.45)
+    monkeypatch.setattr(recovery_strategy, 'MAX_JOB_CHECKING_RETRY', 1)
+    refresh = mock.Mock(side_effect=AssertionError('must retain allocation'))
+    monkeypatch.setattr(recovery_strategy.backend_utils,
+                        'refresh_cluster_status_handle', refresh)
+
+    assert await executor._wait_until_job_starts_on_cluster() == (123.45, None)
+    assert get_handle.call_count == 2
+    assert get_status.call_count == 1
+    refresh.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_start_wait_runtime_timeout_spends_budget(monkeypatch):
+    executor = _make_submit_wait_executor(monkeypatch)
+    runtime = recovery_strategy.managed_job_runtime
+    monkeypatch.setattr(runtime, 'is_registered', lambda: True)
+    monkeypatch.setattr(recovery_strategy.global_user_state,
+                        'get_handle_from_cluster_name', lambda _: object())
+    get_status = mock.Mock(side_effect=TimeoutError('runtime unavailable'))
+    monkeypatch.setattr(runtime, 'get_job_status', get_status)
+
+    assert await executor._wait_until_job_starts_on_cluster() == (
+        None, ':TimeoutError')
+    assert get_status.call_count == 2
 
 
 # ---------------------------------------------------------------------------
