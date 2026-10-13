@@ -23,7 +23,7 @@ def _job_state(monkeypatch):
         (1, 'evaluate', state.ManagedJobStatus.RUNNING, None, None),
     ]
     monkeypatch.setattr(utils, 'managed_job_state', mock_state)
-    monkeypatch.setattr(utils.threading, 'Thread', mock.MagicMock())
+    monkeypatch.setattr(log_lib, 'start_orphan_watchdog', mock.MagicMock())
     monkeypatch.setattr(utils.rich_utils, 'safe_status', mock.MagicMock())
     return mock_state
 

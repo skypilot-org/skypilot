@@ -129,10 +129,11 @@ def _render(tmp_path,
 def _run(config, monkeypatch):
     monkeypatch.setattr(
         instance, '_filter_instances',
-        mock.Mock(side_effect=[{}, {}, {
+        mock.Mock(side_effect=[{}, {}, {}, {
             'pod-test': {
                 'name': 'test-head',
-                'ssh_port': 22
+                'ssh_port': 22,
+                'status': 'RUNNING',
             }
         }]))
     return instance.run_instances('US', 'test', 'test', config)
@@ -147,22 +148,33 @@ def test_render_to_provider_preserves_selected_shape(tmp_path, monkeypatch,
                                                      spot, cpus, memory):
     config = _render(tmp_path, cpus=cpus, memory=memory, spot=spot)
     provider = mock.Mock(return_value={'id': 'pod-test'})
-    sdk = mock.Mock(create_pod=provider)
-    monkeypatch.setattr(adaptor, 'runpod', sdk)
+    monkeypatch.setattr(adaptor, 'rest_request', provider)
     monkeypatch.setattr(commands, 'create_spot_pod', provider)
     assert _run(config, monkeypatch).created_instance_ids == ['pod-test']
     provider.assert_called_once()
     args = provider.call_args.kwargs
-    assert args['gpu_type_id'] == 'NVIDIA H200'
-    assert args['gpu_count'] == 4
-    assert args['min_vcpu_count'] == 48
-    assert args['min_memory_in_gb'] == 752
-    assert args['allowed_cuda_versions'] == ['13.0']
-    assert args['image_name'] == 'example/pinned:cuda13'
-    assert args['data_center_id'] == 'US-TEST-1'
-    assert args['container_disk_in_gb'] == 256
-    assert ('bid_per_gpu' in args) is spot
-    sdk.get_gpu.assert_not_called()  # GPU VRAM is not host RAM.
+    if spot:
+        assert args['gpu_type_id'] == 'NVIDIA H200'
+        assert args['gpu_count'] == 4
+        assert args['min_vcpu_count'] == 48
+        assert args['min_memory_in_gb'] == 752
+        assert args['allowed_cuda_versions'] == ['13.0']
+        assert args['image_name'] == 'example/pinned:cuda13'
+        assert args['data_center_id'] == 'US-TEST-1'
+        assert args['container_disk_in_gb'] == 256
+    else:
+        assert provider.call_args.args == ('POST', '/pods')
+        body = args['json']
+        assert body['gpu'] == {
+            'id': 'NVIDIA H200',
+            'count': 4,
+            'minVcpuCountPerGpu': 12,
+            'minRamPerGpu': 188,
+            'allowedCudaVersions': ['13.0'],
+        }
+        assert body['image'] == 'example/pinned:cuda13'
+        assert body['dataCenterIds'] == ['US-TEST-1']
+        assert body['disk'] == 256
 
 
 @pytest.mark.parametrize('column', ['vCPUs', 'MemoryGiB'])
@@ -184,7 +196,7 @@ def test_missing_or_invalid_handoff_fails_before_provider_effects(
     else:
         config.node_config[key] = value
     sdk = mock.Mock()
-    monkeypatch.setattr(adaptor, 'runpod', sdk)
+    monkeypatch.setattr(adaptor, 'rest_request', sdk)
     with pytest.raises(ValueError, match='host CPU and RAM minima'):
         _run(config, monkeypatch)
     assert not sdk.mock_calls
@@ -205,23 +217,27 @@ def test_no_eligible_cuda_keeps_filters_and_propagates_failure(
         tmp_path, monkeypatch, spot):
     config = _render(tmp_path, spot=spot)
     provider = mock.Mock(side_effect=RuntimeError('No eligible CUDA host'))
-    monkeypatch.setattr(adaptor, 'runpod', mock.Mock(create_pod=provider))
+    monkeypatch.setattr(adaptor, 'rest_request', provider)
     monkeypatch.setattr(commands, 'create_spot_pod', provider)
     with pytest.raises(RuntimeError, match='No eligible CUDA host'):
         _run(config, monkeypatch)
     provider.assert_called_once()
-    assert provider.call_args.kwargs['allowed_cuda_versions'] == ['13.0']
-    assert provider.call_args.kwargs['min_memory_in_gb'] == 752
+    args = provider.call_args.kwargs
+    if spot:
+        assert args['allowed_cuda_versions'] == ['13.0']
+        assert args['min_memory_in_gb'] == 752
+    else:
+        assert args['json']['gpu']['allowedCudaVersions'] == ['13.0']
+        assert args['json']['gpu']['minRamPerGpu'] == 188
 
 
 def test_unset_cuda_adds_no_filter(tmp_path, monkeypatch):
     config = _render(tmp_path, cuda=None)
-    sdk = mock.Mock()
-    sdk.create_pod.return_value = {'id': 'pod-test'}
-    monkeypatch.setattr(adaptor, 'runpod', sdk)
+    provider = mock.Mock(return_value={'id': 'pod-test'})
+    monkeypatch.setattr(adaptor, 'rest_request', provider)
     _run(config, monkeypatch)
     assert 'AllowedCUDAVersions' not in config.node_config
-    assert 'allowed_cuda_versions' not in sdk.create_pod.call_args.kwargs
+    assert 'allowedCudaVersions' not in provider.call_args.kwargs['json']['gpu']
 
 
 def test_fractional_shape_rounds_up_in_provider_units(tmp_path, offline):
@@ -232,13 +248,25 @@ def test_fractional_shape_rounds_up_in_provider_units(tmp_path, offline):
     assert config.node_config['MinMemoryInGB'] == 2
 
 
+def test_rest_per_gpu_floors_round_up(tmp_path, monkeypatch, offline):
+    offline['vCPUs'] = 49
+    offline['MemoryGiB'] = 753
+    config = _render(tmp_path, cpus=None, memory=None)
+    provider = mock.Mock(return_value={'id': 'pod-test'})
+    monkeypatch.setattr(adaptor, 'rest_request', provider)
+    _run(config, monkeypatch)
+    gpu = provider.call_args.kwargs['json']['gpu']
+    assert gpu['minVcpuCountPerGpu'] == 13
+    assert gpu['minRamPerGpu'] == 189
+
+
 @pytest.mark.parametrize('versions', [[], '13.0', ['13.0\n'], [13.0]])
 def test_invalid_rendered_cuda_fails_before_provider_effects(
         tmp_path, monkeypatch, versions):
     config = _render(tmp_path)
     config.node_config['AllowedCUDAVersions'] = versions
     sdk = mock.Mock()
-    monkeypatch.setattr(adaptor, 'runpod', sdk)
+    monkeypatch.setattr(adaptor, 'rest_request', sdk)
     with pytest.raises(ValueError, match='allowed_cuda_versions'):
         _run(config, monkeypatch)
     assert not sdk.mock_calls
@@ -264,21 +292,17 @@ def test_cpu_instance_path_unchanged(tmp_path, monkeypatch):
     monkeypatch.setattr(clouds.RunPod, 'instance_type_to_hourly_cost',
                         lambda *args, **kwargs: 0.1)
     config = _render(tmp_path, cpu_only=True)
-    sdk = mock.Mock()
-    sdk.create_pod.return_value = {'id': 'pod-test'}
-    monkeypatch.setattr(adaptor, 'runpod', sdk)
+    provider = mock.Mock(return_value={'id': 'pod-test'})
+    monkeypatch.setattr(adaptor, 'rest_request', provider)
     _run(config, monkeypatch)
-    args = sdk.create_pod.call_args.kwargs
-    assert args['instance_id'] == 'cpu3c-2-4'
-    assert all(key not in args for key in [
-        'gpu_count', 'min_vcpu_count', 'min_memory_in_gb',
-        'allowed_cuda_versions'
-    ])
+    body = provider.call_args.kwargs['json']
+    assert body['cpu'] == {'id': 'cpu3c', 'vcpuCount': 2}
+    assert 'gpu' not in body
 
 
 @pytest.mark.parametrize('spot', [False, True])
 @pytest.mark.parametrize('native_memory', [591, 752])
-def test_actual_sdk_and_spot_graphql_preserve_total_requirements(
+def test_rest_and_spot_graphql_preserve_total_requirements(
         tmp_path, monkeypatch, offline, spot, native_memory):
     sdk = pytest.importorskip('runpod')
     fetcher = importlib.import_module('sky.catalog.data_fetchers.fetch_runpod')
@@ -293,7 +317,6 @@ def test_actual_sdk_and_spot_graphql_preserve_total_requirements(
     assert shape['MemoryGiB'] == 752
     offline['vCPUs'] = shape['vCPUs']
     offline['MemoryGiB'] = native_memory
-    ctl = importlib.import_module('runpod.api.ctl_commands')
     graphql = importlib.import_module('runpod.api.graphql')
     calls = []
 
@@ -317,15 +340,31 @@ def test_actual_sdk_and_spot_graphql_preserve_total_requirements(
 
     monkeypatch.setattr(adaptor, 'runpod', sdk)
     monkeypatch.setattr(sdk, 'get_gpu', lambda *args, **kwargs: {})
-    monkeypatch.setattr(ctl, 'get_gpu', lambda *args, **kwargs: {})
-    monkeypatch.setattr(ctl, 'run_graphql_query', query)
     monkeypatch.setattr(graphql, 'run_graphql_query', query)
+
+    def request(method, url, **kwargs):
+        assert method == 'POST'
+        assert url == 'https://api.runpod.io/v2/pods'
+        calls.append(kwargs['json'])
+        return mock.Mock(status_code=200,
+                         text='{"id": "pod-test"}',
+                         json=lambda: {'id': 'pod-test'})
+
+    monkeypatch.setattr(adaptor, '_get_api_key', lambda: 'test-key')
+    monkeypatch.setattr(adaptor.requests, 'request', request)
     _run(_render(tmp_path, spot=spot), monkeypatch)
     assert len(calls) == 1
-    assert 'minVcpuCount: 48' in calls[0]
-    assert f'minMemoryInGb: {native_memory}' in calls[0]
-    assert 'gpuCount: 4' in calls[0]
-    assert 'allowedCudaVersions: ["13.0"]' in calls[0]
+    if spot:
+        assert 'minVcpuCount: 48' in calls[0]
+        assert f'minMemoryInGb: {native_memory}' in calls[0]
+        assert 'gpuCount: 4' in calls[0]
+        assert 'allowedCudaVersions: ["13.0"]' in calls[0]
+    else:
+        gpu = calls[0]['gpu']
+        assert gpu['count'] == 4
+        assert gpu['minVcpuCountPerGpu'] == 12
+        assert gpu['minRamPerGpu'] == math.ceil(native_memory / 4)
+        assert gpu['allowedCudaVersions'] == ['13.0']
 
 
 @pytest.mark.parametrize('spot', [False, True])
@@ -385,10 +424,9 @@ def _host_quote(**overrides):
 
 @pytest.mark.parametrize('offer_cpu,offer_gb', [(20, 251), (24, 377)])
 @pytest.mark.parametrize('accelerators', ['H200-SXM:1', 'H200:1'])
-def test_stronger_singleton_survives_yaml_and_actual_sdk(
-        tmp_path, monkeypatch, offline, offer_cpu, offer_gb, accelerators):
-    sdk = pytest.importorskip('runpod')
-    ctl = importlib.import_module('runpod.api.ctl_commands')
+def test_stronger_singleton_survives_yaml_and_rest(tmp_path, monkeypatch,
+                                                   offline, offer_cpu, offer_gb,
+                                                   accelerators):
     catalog = importlib.import_module('sky.catalog.runpod_catalog')
     monkeypatch.setattr(
         accelerator_registry, '_accelerator_df',
@@ -402,26 +440,18 @@ def test_stronger_singleton_survives_yaml_and_actual_sdk(
     quote.update(minVcpu=offer_cpu, minMemory=offer_gb)
     lookup = mock.Mock(return_value=quote)
     monkeypatch.setattr(adaptor, '_get_gpu_host_quote', lookup)
-    calls = []
-    monkeypatch.setattr(adaptor, 'runpod', sdk)
-    monkeypatch.setattr(ctl, 'get_gpu', lambda *args, **kwargs: {})
-    monkeypatch.setattr(
-        ctl, 'run_graphql_query', lambda body: (calls.append(body) or {
-            'data': {
-                'podFindAndDeployOnDemand': {
-                    'id': 'pod-test'
-                }
-            }
-        }))
+    provider = mock.Mock(return_value={'id': 'pod-test'})
+    monkeypatch.setattr(adaptor, 'rest_request', provider)
     config = _render(tmp_path, memory='192+', accelerators=accelerators)
     assert config.node_config['InstanceType'] == '1x_H200-SXM_SECURE'
     assert config.node_config['MinVCPUCount'] == 16
     assert config.node_config['MinMemoryInGB'] == 207
     _run(config, monkeypatch)
-    assert len(calls) == 1
-    assert 'gpuCount: 1' in calls[0]
-    assert 'minVcpuCount: 16' in calls[0]
-    assert 'minMemoryInGb: 207' in calls[0]
+    provider.assert_called_once()
+    gpu = provider.call_args.kwargs['json']['gpu']
+    assert gpu['count'] == 1
+    assert gpu['minVcpuCountPerGpu'] == 16
+    assert gpu['minRamPerGpu'] == 207
     assert lookup.call_args.args[:5] == ('NVIDIA H200', 1, True, 16, 207)
     pd.testing.assert_frame_equal(offline, before)
     assert catalog.get_native_gpu_host_resources('1x_H200-SXM_SECURE') == (12,

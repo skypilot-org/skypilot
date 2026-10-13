@@ -489,6 +489,11 @@ class InvalidWorkspaceNameError(Exception):
     pass
 
 
+class InvalidUserIdError(Exception):
+    """Raised when a user id does not have the expected form."""
+    pass
+
+
 class WorkspaceConfigConflictError(Exception):
     """Raised when a workspace update was based on an outdated config.
 
@@ -766,8 +771,9 @@ class ExecutionPausedError(ExecutionRetryableError):
     """Pause execution mid-attempt while keeping provisioned resources.
 
     Raised from inside an in-progress attempt waiting on an external condition
-    (e.g. admission or quota). The partially provisioned resources are kept so
-    the request can resume, so teardown layers must not clean up the resources.
+    (e.g. a cluster lock held by another operation). Any partially provisioned
+    resources are kept so the request can resume, so teardown layers must not
+    clean up the resources.
 
     ``continue_condition`` optionally says how to wait for the resume signal
     (see ``continue_condition.py``); it must be picklable, as the error crosses

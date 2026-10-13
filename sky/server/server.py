@@ -37,7 +37,9 @@ import fastapi
 from fastapi.middleware import cors
 import jwt as pyjwt
 import starlette.background
-import starlette.middleware.base
+import starlette.datastructures
+import starlette.requests
+import starlette.types
 import uvloop
 
 import sky
@@ -165,6 +167,7 @@ def _basic_auth_401_response(request: fastapi.Request, content: str):
     """Return a 401 response with basic auth realm."""
     middleware_utils.mark_rejection(request,
                                     middleware_utils.REJECT_REASON_UNAUTHORIZED)
+    middleware_utils.mark_auth_rejection(request, content)
     return fastapi.responses.JSONResponse(
         status_code=401,
         headers={
@@ -177,10 +180,21 @@ def _basic_auth_401_response(request: fastapi.Request, content: str):
         content=content)
 
 
-def _bearer_auth_401_response(request: fastapi.Request, content):
-    """Return a 401 response for bearer token authentication failures."""
+def _bearer_auth_401_response(request: fastapi.Request,
+                              content: Dict[str, str],
+                              subject: Optional[str] = None,
+                              audit_detail: Optional[str] = None):
+    """Return a 401 response for bearer token authentication failures.
+
+    `subject` is the service account the token was verified to belong to,
+    when it was rejected after verification (revoked, expired, user gone).
+    `audit_detail` replaces the response detail in the audit stamp when the
+    detail carries variable text (an exception message).
+    """
     middleware_utils.mark_rejection(request,
                                     middleware_utils.REJECT_REASON_UNAUTHORIZED)
+    middleware_utils.mark_auth_rejection(request, audit_detail or
+                                         content['detail'], subject)
     return fastapi.responses.JSONResponse(
         status_code=401,
         headers={
@@ -240,19 +254,19 @@ async def _try_set_basic_auth_user(request: fastapi.Request):
 
 
 @middleware_utils.websocket_aware
-class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class RBACMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to handle RBAC."""
 
-    async def dispatch(self, request: fastapi.Request, call_next):
+    async def on_request(self, request: fastapi.Request):
         # TODO(hailong): should have a list of paths
         # that are not checked for RBAC
         if (request.url.path.startswith('/dashboard/') or
                 request.url.path.startswith('/api/')):
-            return await call_next(request)
+            return None
 
         auth_user = request.state.auth_user
         if auth_user is None:
-            return await call_next(request)
+            return None
 
         permission_service = permission.permission_service
         # Check the role permission. Offload to the bounded auth thread
@@ -277,18 +291,19 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             return fastapi.responses.JSONResponse(
                 status_code=403, content={'detail': 'Forbidden'})
 
-        return await call_next(request)
+        return None
 
 
-class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class RequestIDMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to add a request ID to each request."""
 
-    async def dispatch(self, request: fastapi.Request, call_next):
-        request_id = requests_lib.get_new_request_id()
-        request.state.request_id = request_id
-        response = await call_next(request)
-        response.headers['X-Skypilot-Request-ID'] = request_id
-        return response
+    async def on_request(self, request: fastapi.Request):
+        request.state.request_id = requests_lib.get_new_request_id()
+        return None
+
+    def on_response(self, request: fastapi.Request, status_code: int,
+                    headers: starlette.datastructures.MutableHeaders) -> None:
+        headers['X-Skypilot-Request-ID'] = request.state.request_id
 
 
 def _strip_jwt_padding(jwt_token: str) -> str:
@@ -407,32 +422,31 @@ def _generate_auth_token(request: fastapi.Request) -> str:
 
 
 @middleware_utils.websocket_aware
-class InitializeRequestAuthUserMiddleware(
-        starlette.middleware.base.BaseHTTPMiddleware):
+class InitializeRequestAuthUserMiddleware(middleware_utils.ASGIMiddleware):
 
-    async def dispatch(self, request: fastapi.Request, call_next):
+    async def on_request(self, request: fastapi.Request):
         # Make sure that request.state.auth_user is set. Otherwise, we may get a
         # KeyError while trying to read it.
         request.state.auth_user = None
-        return await call_next(request)
+        return None
 
 
 @middleware_utils.websocket_aware
-class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class BasicAuthMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to handle HTTP Basic Auth."""
 
-    async def dispatch(self, request: fastapi.Request, call_next):
+    async def on_request(self, request: fastapi.Request):
         # If a previous middleware already authenticated the user, pass through
         if request.state.auth_user is not None:
-            return await call_next(request)
+            return None
 
         if loopback.is_loopback_request(request):
-            return await call_next(request)
+            return None
 
         if request.url.path.startswith('/api/health'):
             # Try to set the auth user from basic auth
             await _try_set_basic_auth_user(request)
-            return await call_next(request)
+            return None
 
         auth_header = request.headers.get('authorization')
         if not auth_header:
@@ -472,7 +486,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             return _basic_auth_401_response(request, 'Invalid credentials')
         request.state.auth_user = user
 
-        return await call_next(request)
+        return None
 
 
 # Minimum seconds between persisted last_used_at updates per service-account
@@ -488,10 +502,10 @@ _SA_LAST_USED_UPDATE_INTERVAL_SECONDS = 60
 
 
 @middleware_utils.websocket_aware
-class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to handle Bearer Token Auth (Service Accounts)."""
 
-    async def dispatch(self, request: fastapi.Request, call_next):
+    async def on_request(self, request: fastapi.Request):
         """Make sure correct bearer token auth is present.
 
         1. If the request has the X-Skypilot-Auth-Mode: token header, it must
@@ -509,7 +523,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         """
         # If a previous middleware already authenticated the user, pass through
         if request.state.auth_user is not None:
-            return await call_next(request)
+            return None
 
         has_skypilot_auth_header = (
             request.headers.get('X-Skypilot-Auth-Mode') == 'token')
@@ -523,7 +537,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # This is case #3 above. We do not need to validate the request.
             # No Bearer token, continue with normal processing (OAuth2 cookies,
             # etc.)
-            return await call_next(request)
+            return None
         # After this point, all requests must be validated.
 
         if auth_header is None:
@@ -538,11 +552,11 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         sa_token = split_header[1]
 
         # Handle SkyPilot service account tokens
-        return await self._handle_service_account_token(request, sa_token,
-                                                        call_next)
+        return await self._handle_service_account_token(request, sa_token)
 
-    async def _handle_service_account_token(self, request: fastapi.Request,
-                                            sa_token: str, call_next):
+    async def _handle_service_account_token(
+            self, request: fastapi.Request,
+            sa_token: str) -> Optional[fastapi.Response]:
         """Handle SkyPilot service account tokens."""
         # Check if service account tokens are enabled
         sa_enabled = os.environ.get(constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
@@ -615,13 +629,15 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     '(revoked or rotated)')
                 return _bearer_auth_401_response(
                     request,
-                    {'detail': 'Service account token revoked or rotated'})
+                    {'detail': 'Service account token revoked or rotated'},
+                    subject=user_id)
 
             if (token_row['expires_at'] is not None and
                     token_row['expires_at'] < int(time.time())):
                 logger.warning(f'Service account token {token_id} has expired')
                 return _bearer_auth_401_response(
-                    request, {'detail': 'Service account token has expired'})
+                    request, {'detail': 'Service account token has expired'},
+                    subject=user_id)
 
             # Verify user still exists in database
             user_info = await db_lookup.call_with_deadline(
@@ -631,7 +647,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     f'Service account user {user_id} no longer exists')
                 return _bearer_auth_401_response(
                     request,
-                    {'detail': 'Service account user no longer exists'})
+                    {'detail': 'Service account user no longer exists'},
+                    subject=user_id)
 
             # Update last used timestamp for token tracking, skipped while
             # the row's last_used_at is fresher than
@@ -688,13 +705,14 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                          exc_info=True)
             return _bearer_auth_401_response(
                 request,
-                {'detail': f'Service account authentication failed: {str(e)}'})
+                {'detail': f'Service account authentication failed: {str(e)}'},
+                audit_detail='Service account authentication failed')
 
-        return await call_next(request)
+        return None
 
 
 @middleware_utils.websocket_aware
-class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class AuthProxyMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to handle external auth proxy.
 
     This middleware extracts user identity from HTTP headers set by an
@@ -702,8 +720,8 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """
 
     # pylint: disable=redefined-outer-name
-    def __init__(self, app, **kwargs):
-        super().__init__(app, **kwargs)
+    def __init__(self, app):
+        super().__init__(app)
         self.config = server_config.load_external_proxy_config()
         if self.config.enabled:
             logger.debug('AuthProxyMiddleware enabled with header: '
@@ -712,9 +730,9 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         else:
             logger.debug('AuthProxyMiddleware disabled via configuration')
 
-    async def dispatch(self, request: fastapi.Request, call_next):
+    async def on_request(self, request: fastapi.Request):
         if not self.config.enabled:
-            return await call_next(request)
+            return None
 
         auth_user = _extract_user_from_header(request, self.config)
 
@@ -728,7 +746,7 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             if auth_user is not None:
                 logger.debug('Warning: ignoring auth proxy header since the '
                              'auth user was already set.')
-            return await call_next(request)
+            return None
 
         # Add user to database if auth_user is present. Offload the sync DB
         # upsert to the bounded auth thread executor under a deadline (it
@@ -758,7 +776,7 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if auth_user is not None:
             request.state.auth_user = auth_user
 
-        return await call_next(request)
+        return None
 
 
 # Default expiration time for upload ids before cleanup.
@@ -818,7 +836,7 @@ async def cleanup_unreferenced_file_mounts():
 
         with storage.gc_lock() as should_run:
             if not should_run:
-                logger.debug('Another replica is running blob GC, skipping')
+                logger.debug('Another server is running blob GC, skipping')
                 return
 
             # A blob is kept alive by either an active API request (e.g. the
@@ -1088,7 +1106,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             stall_watchdog.stop()
 
 
-class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class SecurityHeadersMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to add security headers to all HTTP responses.
 
     Adds Content-Security-Policy and other security headers to mitigate
@@ -1138,8 +1156,8 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                      'form-action \'self\'; '
                      'frame-ancestors \'self\'')
 
-    async def dispatch(self, request: fastapi.Request, call_next):
-        response = await call_next(request)
+    def on_response(self, request: fastapi.Request, status_code: int,
+                    headers: starlette.datastructures.MutableHeaders) -> None:
         # Endpoints that serve HTML set request.state.csp_nonce so the
         # CSP header can reference the nonce that was injected into the
         # HTML body.  Non-HTML responses get a strict policy with no
@@ -1150,59 +1168,63 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         else:
             script_src = '\'self\''
         csp = self._CSP_TEMPLATE.format(script_src=script_src)
-        response.headers['Content-Security-Policy'] = csp
+        headers['Content-Security-Policy'] = csp
         # X-Frame-Options for legacy browsers that don't support CSP
         # frame-ancestors directive.
-        response.headers['X-Frame-Options'] = 'SAMEORIGIN'
-        response.headers['X-Content-Type-Options'] = 'nosniff'
-        response.headers['Referrer-Policy'] = (
-            'strict-origin-when-cross-origin')
-        response.headers['Permissions-Policy'] = (
+        headers['X-Frame-Options'] = 'SAMEORIGIN'
+        headers['X-Content-Type-Options'] = 'nosniff'
+        headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+        headers['Permissions-Policy'] = (
             'camera=(), microphone=(), geolocation=()')
-        return response
 
 
 # Add a new middleware class to handle /internal/dashboard prefix
-class InternalDashboardPrefixMiddleware(
-        starlette.middleware.base.BaseHTTPMiddleware):
+class InternalDashboardPrefixMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to handle /internal/dashboard prefix in requests."""
 
-    async def dispatch(self, request: fastapi.Request, call_next):
+    async def on_request(self, request: fastapi.Request):
         path = request.url.path
         if path.startswith('/internal/dashboard/'):
             # Remove /internal/dashboard prefix and update request scope
             request.scope['path'] = path.replace('/internal/dashboard/', '/', 1)
-        return await call_next(request)
+        return None
 
 
-class CacheControlStaticMiddleware(starlette.middleware.base.BaseHTTPMiddleware
-                                  ):
+class CacheControlStaticMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to add cache control headers to static files."""
 
-    async def dispatch(self, request: fastapi.Request, call_next):
-        if request.url.path.startswith('/dashboard/_next'):
-            response = await call_next(request)
-            # Respect an explicit Cache-Control set by downstream middleware
-            # or handlers (e.g. an auth middleware that set 'no-store' on a
-            # 401). Otherwise, fall back to the static-asset defaults.
-            if 'Cache-Control' not in response.headers:
-                if response.status_code >= 400:
-                    # Error responses (e.g. 401 from an auth middleware) must
-                    # not be cached: a CDN that caches them for the same path
-                    # will serve the error to all subsequent users until the
-                    # cache entry expires, breaking the dashboard for
-                    # everyone.
-                    response.headers['Cache-Control'] = 'no-store'
-                else:
-                    response.headers['Cache-Control'] = 'max-age=3600'
-            return response
-        return await call_next(request)
+    async def __call__(self, scope: starlette.types.Scope,
+                       receive: starlette.types.Receive,
+                       send: starlette.types.Send) -> None:
+        # Matched on the path as received, before inner layers rewrite it.
+        if (scope['type'] == 'http' and
+                scope['path'].startswith('/dashboard/_next')):
+            await super().__call__(scope, receive, send)
+        else:
+            await self.app(scope, receive, send)
+
+    def on_response(self, request: fastapi.Request, status_code: int,
+                    headers: starlette.datastructures.MutableHeaders) -> None:
+        # Respect an explicit Cache-Control set by downstream middleware
+        # or handlers (e.g. an auth middleware that set 'no-store' on a
+        # 401). Otherwise, fall back to the static-asset defaults.
+        if 'Cache-Control' in headers:
+            return
+        if status_code >= 400:
+            # Error responses (e.g. 401 from an auth middleware) must
+            # not be cached: a CDN that caches them for the same path
+            # will serve the error to all subsequent users until the
+            # cache entry expires, breaking the dashboard for
+            # everyone.
+            headers['Cache-Control'] = 'no-store'
+        else:
+            headers['Cache-Control'] = 'max-age=3600'
 
 
-class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class PathCleanMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to check the path of requests."""
 
-    async def dispatch(self, request: fastapi.Request, call_next):
+    async def on_request(self, request: fastapi.Request):
         if request.url.path.startswith('/dashboard/'):
             # If the requested path is not relative to the expected directory,
             # then the user is attempting path traversal, so deny the request.
@@ -1213,14 +1235,14 @@ class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     request, middleware_utils.REJECT_REASON_FORBIDDEN)
                 return fastapi.responses.JSONResponse(
                     status_code=403, content={'detail': 'Forbidden'})
-        return await call_next(request)
+        return None
 
 
 @middleware_utils.websocket_aware
-class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class GracefulShutdownMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to control requests when server is shutting down."""
 
-    async def dispatch(self, request: fastapi.Request, call_next):
+    async def on_request(self, request: fastapi.Request):
         if state.get_block_requests():
             # Allow /api/ paths to continue, which are critical to operate
             # on-going requests but will not submit new requests.
@@ -1235,21 +1257,18 @@ class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                                   'please try again later.'
                     })
 
-        return await call_next(request)
+        return None
 
 
 @middleware_utils.websocket_aware
-class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class APIVersionMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to add API version to the request.
 
     Also records the dispatched endpoint context-locally for workspace-access
     classification (see `sky.server.requests.workspace_access`). The access
     level a request needs on the caller's active workspace is derived from the
     endpoint rather than from the request name, so plugin endpoints are covered
-    by the same declaration as OSS ones. This is folded in here (rather than a
-    dedicated middleware) to avoid an extra `BaseHTTPMiddleware` layer -- each
-    such layer opens an anyio task group + memory stream per request, and the
-    API server is latency-sensitive.
+    by the same declaration as OSS ones.
 
     This layer sits inside `PathCleanMiddleware` / `InternalDashboardPrefix
     Middleware`, so `request.url.path` here is the router-matched path after
@@ -1257,7 +1276,7 @@ class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     inside those two for the recorded path to be correct.
     """
 
-    async def dispatch(self, request: fastapi.Request, call_next):
+    async def on_request(self, request: fastapi.Request):
         workspace_access.set_request_endpoint(request.url.path, request.method)
         version_info = versions.check_compatibility_at_server(request.headers)
         # Bypass version handling for backward compatibility with clients prior
@@ -1265,25 +1284,29 @@ class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         # /api/health response and hint an upgrade.
         # TODO(aylei): remove this after v0.13.0 is released.
         if version_info is None:
-            return await call_next(request)
+            return None
+        request.state.client_version_checked = True
         if version_info.error is None:
             versions.set_remote_api_version(version_info.api_version)
             versions.set_remote_version(version_info.version)
-            response = await call_next(request)
-        else:
-            middleware_utils.mark_rejection(
-                request, middleware_utils.REJECT_REASON_API_VERSION)
-            response = fastapi.responses.JSONResponse(
-                status_code=400,
-                content={
-                    'error': common.ApiServerStatus.VERSION_MISMATCH.value,
-                    'message': version_info.error,
-                })
-        response.headers[server_constants.API_VERSION_HEADER] = str(
+            return None
+        middleware_utils.mark_rejection(
+            request, middleware_utils.REJECT_REASON_API_VERSION)
+        return fastapi.responses.JSONResponse(
+            status_code=400,
+            content={
+                'error': common.ApiServerStatus.VERSION_MISMATCH.value,
+                'message': version_info.error,
+            })
+
+    def on_response(self, request: fastapi.Request, status_code: int,
+                    headers: starlette.datastructures.MutableHeaders) -> None:
+        if not getattr(request.state, 'client_version_checked', False):
+            return
+        headers[server_constants.API_VERSION_HEADER] = str(
             server_constants.API_VERSION)
-        response.headers[server_constants.VERSION_HEADER] = \
-            versions.get_local_readable_version()
-        return response
+        headers[server_constants.VERSION_HEADER] = (
+            versions.get_local_readable_version())
 
 
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
@@ -1293,7 +1316,7 @@ app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 #   app.add_middleware(Middleware3)
 # The effect will be like:
 #   Middleware3(Middleware2(Middleware1(request)))
-# If MiddlewareN does something like print(n); call_next(); print(n), you'll get
+# If MiddlewareN prints n in both on_request and on_response, you'll get
 #   3; 2; 1; <request>; 1; 2; 3
 # The metrics middleware is added last, i.e. outermost; see below.
 # APIVersionMiddleware also records the dispatched endpoint for workspace-access
@@ -1389,6 +1412,15 @@ app.include_router(recipes_rest.router, prefix='/recipes', tags=['recipes'])
 # increase the resource limit for the server
 soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
+
+
+@app.exception_handler(exceptions.InvalidUserIdError)
+def handle_invalid_user_id_error(request: fastapi.Request,
+                                 e: exceptions.InvalidUserIdError):
+    del request  # request is not used
+    # The request never reached the queue, so this is a client-side mistake.
+    return fastapi.responses.JSONResponse(status_code=400,
+                                          content={'detail': str(e)})
 
 
 @app.exception_handler(exceptions.ConcurrentWorkerExhaustedError)
@@ -1751,7 +1783,7 @@ async def list_accelerator_counts(
 @app.post('/validate')
 async def validate(validate_body: payloads.ValidateBody) -> None:
     """Validates the user's DAG."""
-    # TODO(SKY-1035): validate if existing cluster satisfies the requested
+    # TODO: validate if existing cluster satisfies the requested
     # resources, e.g. sky exec --gpus V100:8 existing-cluster-with-no-gpus
 
     # TODO: Our current launch process is split into three calls:
@@ -2004,7 +2036,7 @@ async def _receive_and_assemble_chunks(
             status_code=500,
             detail='Upload request body should not be received before streaming'
         )
-    # TODO(SKY-1271): We need to double check security of uploading zip file.
+    # TODO: We need to double check security of uploading zip file.
     # Check chunk_index to be a valid integer
     if chunk_index < 0 or chunk_index >= total_chunks:
         raise ValueError(
@@ -4312,7 +4344,7 @@ def _init_or_restore_server_user_hash():
     """Restores the server user hash from the global user state db.
 
     The API server must have a stable user hash across restarts and potential
-    multiple replicas. Thus we persist the user hash in db and restore it on
+    multiple instances. Thus we persist the user hash in db and restore it on
     startup. When upgrading from old version, the user hash will be read from
     the local file (if any) to keep the user hash consistent.
     """
@@ -4332,7 +4364,7 @@ def _init_or_restore_server_user_hash():
         return
 
     # Initial deployment. Insert-if-absent and apply whatever is live
-    # afterwards: replicas starting together would otherwise each generate a
+    # afterwards: servers starting together would otherwise each generate a
     # hash and the last write would win, leaving them disagreeing on the
     # server id they have already applied locally.
     user_hash = global_user_state.get_or_set_system_config(
@@ -4367,7 +4399,7 @@ def _bootstrap_jwt_secret() -> None:
 if __name__ == '__main__':
     # Raise the websockets library header limits before importing uvicorn.
     # The env vars are read by websockets.http11 and websockets.legacy.http
-    # at import time. Enterprise SSO cookies from oauth2proxy can exceed the
+    # at import time. Large auth cookies from an auth proxy can exceed the
     # default 8KB limit, causing WebSocket upgrade to fail with HTTP 400.
     os.environ.setdefault('WEBSOCKETS_MAX_LINE_LENGTH',
                           server_constants.WEBSOCKETS_MAX_HEADER_LINE_LENGTH)
@@ -4532,8 +4564,8 @@ if __name__ == '__main__':
         # supervisor process so the leader role and the controller
         # subprocesses it spawns share a single OS lifecycle.  Routing
         # this daemon through the executor task queue (as other daemons
-        # do) lets it drift between replicas while the controllers stay
-        # behind, which causes cross-replica controller orphans.  See
+        # do) lets it drift between servers while the controllers stay
+        # behind, which orphans controllers on the server it left.  See
         # sky/jobs/managed_job_refresh_thread.py for details.
         # pylint: disable=import-outside-toplevel
         from sky.jobs import managed_job_refresh_thread

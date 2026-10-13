@@ -733,7 +733,6 @@ def launch(
     _need_confirmation: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
-    _disable_controller_check: bool = False,
     _file_mounts_blob_id: Optional[str] = None,
     _extra_launch_context: Optional[Dict[str, Any]] = None,
     _include_credentials: bool = False,
@@ -920,7 +919,6 @@ def launch(
             _need_confirmation,
             _is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller,
-            _disable_controller_check,
             _file_mounts_blob_id,
             _extra_launch_context,
             _include_credentials,
@@ -946,7 +944,6 @@ def _launch(
     _need_confirmation: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
-    _disable_controller_check: bool = False,
     _file_mounts_blob_id: Optional[str] = None,
     _extra_launch_context: Optional[Dict[str, Any]] = None,
     _include_credentials: bool = False,
@@ -963,7 +960,7 @@ def _launch(
     confirm_shown = False
     if _need_confirmation:
         cluster_status = None
-        # TODO(SKY-998): we should reduce RTTs before launching the cluster.
+        # TODO: we should reduce RTTs before launching the cluster.
         status_request_id = status([cluster_name], all_users=True)
         clusters = get(status_request_id)
         cluster_user_hash = common_utils.get_user_hash()
@@ -1094,7 +1091,6 @@ def _launch(
         is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         is_launched_by_sky_serve_controller=(
             _is_launched_by_sky_serve_controller),
-        disable_controller_check=_disable_controller_check,
         file_mounts_blob_id=file_mounts_blob_id,
         resize=resize,
         extra_launch_context=_extra_launch_context or {},
@@ -3772,11 +3768,11 @@ def _build_client_info() -> Dict[str, Any]:
         'python_version': platform.python_version(),
         'platform': platform.platform(),
         'user_hash': common_utils.get_user_hash(),
-        'environment': {
+        'environment': debug_dump_helpers.redact_env_vars({
             k: v
             for k, v in sorted(os.environ.items())
             if k.startswith(('SKYPILOT_', 'SKY_'))
-        },
+        }),
         'user_config': user_config,
         'merged_config': merged_config,
     }

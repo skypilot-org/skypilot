@@ -17,7 +17,9 @@ How it renders
 Each case is rendered through the same helper production uses,
 ``common_utils.fill_template``, so the tests exercise the real Jinja
 environment (undefined-variable and whitespace semantics), not a hand-rolled
-one.
+one. The pod fields computed in Python (``kubernetes_utils.get_pod_fields``)
+are then merged into the rendered pod with
+``kubernetes_utils.combine_pod_fields``, as ``write_cluster_config`` does.
 
 The fixture
 -----------
@@ -296,6 +298,10 @@ CASES: Dict[str, Dict[str, Any]] = {
         'k8s_service_account_name': 'skypilot-controller-service-account',
         'k8s_is_controller': True,
     },
+    'remote_identity_none': {
+        'k8s_automount_sa_token': 'false',
+        'k8s_remote_identity_none': True,
+    },
     'user_labels': {
         'labels': {
             'team': 'research',
@@ -476,31 +482,45 @@ CASES: Dict[str, Dict[str, Any]] = {
 
 
 def _build_variables(case_name: str) -> Dict[str, Any]:
-    """Merges a case onto the base and derives the computed template vars.
+    """Merges a case onto the base and derives the computed pod fields.
 
-    ``k8s_node_affinity`` is built by calling the same production helper
-    (``kubernetes_utils.get_node_affinity``) that
-    ``make_deploy_resources_variables`` uses, from the raw accelerator-label
-    vars the case carries. Deriving it here rather than hard-coding it is what
+    ``pod_fields`` is built by calling the same production helper
+    (``kubernetes_utils.get_pod_fields``) that
+    ``make_deploy_resources_variables`` uses, from the raw accelerator, spot
+    and flex-start vars the case carries. Deriving it here rather than hard-coding it is what
     makes the goldens a semantic-identity proof for the Python lift.
     """
     variables = base_variables()
     variables.update(CASES[case_name])
-    variables['k8s_node_affinity'] = kubernetes_utils.get_node_affinity(
-        variables['k8s_acc_label_key'],
-        variables['k8s_acc_label_values'],
-        variables['avoid_label_keys'],
+    variables['pod_fields'] = kubernetes_utils.get_pod_fields(
+        acc_label_key=variables['k8s_acc_label_key'],
+        acc_label_values=variables['k8s_acc_label_values'],
+        avoid_label_keys=variables['avoid_label_keys'],
+        topology_label_key=variables['k8s_topology_label_key'],
+        topology_label_value=variables['k8s_topology_label_value'],
+        spot_label_key=variables['k8s_spot_label_key'],
+        spot_label_value=variables['k8s_spot_label_value'],
+        enable_flex_start=variables['k8s_enable_flex_start'],
     )
     return variables
 
 
 def _render(variables: Dict[str, Any]) -> str:
-    """Render the template through the production fill_template helper."""
+    """Render the manifest the way write_cluster_config builds it.
+
+    The pod fields computed in Python are taken out of the variables, the
+    template goes through the production fill_template helper, and the
+    production combine_pod_fields helper merges the pod fields in.
+    """
+    variables = dict(variables)
+    pod_fields = variables.pop('pod_fields')
     with tempfile.TemporaryDirectory() as tmpdir:
         output_path = os.path.join(tmpdir, 'rendered.yml')
         common_utils.fill_template(TEMPLATE_NAME, variables, output_path)
         with open(output_path, 'r', encoding='utf-8') as f:
-            return f.read()
+            rendered = yaml.safe_load(f.read())
+    return yaml.safe_dump(
+        kubernetes_utils.combine_pod_fields(rendered, pod_fields))
 
 
 @pytest.mark.parametrize('source', ['task', 'cli', 'config_file', 'absent'])

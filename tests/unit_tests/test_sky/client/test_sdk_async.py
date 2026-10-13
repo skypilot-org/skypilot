@@ -1,5 +1,6 @@
 """Unit tests for sky/client/sdk_async.py."""
 import asyncio
+import inspect
 from unittest import mock
 
 import pytest
@@ -313,7 +314,7 @@ async def test_api_login(mock_to_thread, mock_sdk_functions):
 
 
 @pytest.mark.asyncio
-async def test_get_raises_typed_error_from_500_detail():
+async def test_get_raises_typed_error_from_500_detail(monkeypatch):
     """get() must unwrap the 'detail'-nested payload of a 500 response.
 
     A failed request is returned by /api/get as a 500 whose body nests the
@@ -323,6 +324,8 @@ async def test_get_raises_typed_error_from_500_detail():
     typed exception into a generic RuntimeError - breaking callers that
     dispatch on exception type.
     """
+    monkeypatch.setattr('sky.server.common.check_server_healthy_or_start_fn',
+                        lambda *args, **kwargs: None)
     detail = {
         'request_id': 'req-1',
         'name': 'launch',
@@ -372,3 +375,26 @@ async def test_get_raises_typed_error_from_500_detail():
     decoded_payload = mock_decode.call_args[0][0]
     assert decoded_payload.request_id == 'req-1'
     assert decoded_payload.status == 'FAILED'
+
+
+@pytest.mark.asyncio
+async def test_launch_forwards_each_arg_to_its_own_parameter(mock_get):
+    """sdk.launch gains parameters over time; a positional forward silently
+    shifts every later argument into its neighbour's slot."""
+    signature = inspect.signature(sdk_async.sdk.launch)
+    with mock.patch('sky.client.sdk_async.sdk.launch',
+                    return_value='req') as mock_launch:
+        await sdk_async.launch('task',
+                               'my-cluster',
+                               fast=True,
+                               _need_confirmation=True,
+                               _is_launched_by_jobs_controller=True,
+                               stream_logs=None)
+    bound = signature.bind(*mock_launch.call_args.args,
+                           **mock_launch.call_args.kwargs)
+    bound.apply_defaults()
+    assert bound.arguments['fast'] is True
+    assert bound.arguments['resize'] is False
+    assert bound.arguments['_need_confirmation'] is True
+    assert bound.arguments['_is_launched_by_jobs_controller'] is True
+    assert bound.arguments['_is_launched_by_sky_serve_controller'] is False

@@ -3452,6 +3452,48 @@ def test_cancel_logs_request(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_interrupted_logs_follow_leaves_no_remote_tail():
+    """An interrupted `sky logs` follow must not leave its tail in the pod.
+
+    `kubectl exec -i` sends the remote command no signal when the exec session
+    ends, so the follow-mode `tail_logs` used to keep running in the head pod
+    until the job finished. A normal follow must still print every line.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    # The [t] keeps the pattern from matching this command's own shell.
+    count_remote_tails = (f'ssh {name} \'ps -eo args | '
+                          f'grep -c "[t]ail_logs.*follow=True"\' || true')
+    test = smoke_tests_utils.Test(
+        'interrupted_logs_follow_leaves_no_remote_tail',
+        [
+            f'sky launch -y -c {name} --infra kubernetes '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -d '
+            '\'for i in $(seq 1 100000); do echo "tick $i"; sleep 2; done\'',
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='1',
+                job_status=[sky.JobStatus.RUNNING],
+                timeout=300),
+            # Follow is the default; SIGINT is what Ctrl-C sends.
+            f'(timeout --signal=INT 20 sky logs {name} 1 || true) | '
+            'grep "tick"',
+            # The remote tail checks for a closed stdin every 5 seconds.
+            f'sleep 20; n=$({count_remote_tails}); '
+            'echo "remote tail processes left: $n"; [ "$n" -eq 0 ]',
+            f'sky cancel -y {name} 1',
+            f'sky exec -d {name} '
+            '\'for i in $(seq 1 15); do echo "line $i of 15"; sleep 1; done\'',
+            f'out=$(sky logs {name} 2) && echo "$out" && '
+            'for i in $(seq 1 15); do '
+            'echo "$out" | grep -q "line $i of 15" || exit 1; done',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_aws
 @pytest.mark.no_gcp
 @pytest.mark.no_nebius

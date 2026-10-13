@@ -1672,6 +1672,7 @@ def test_services_on_kubernetes():
 
 # ---------- Pod Annotations on Kubernetes ----------
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_identity_none  # Autodown.
 def test_add_pod_annotations_for_autodown_with_launch():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -1711,6 +1712,7 @@ def test_add_pod_annotations_for_autodown_with_launch():
 
 
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_identity_none  # Autodown.
 def test_add_and_remove_pod_annotations_with_autostop():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -2053,9 +2055,8 @@ def test_volume_env_mount_kubernetes():
                 # Cancel by name, never -a: on a shared remote API server all
                 # concurrently running smoke tests submit jobs as the same
                 # service-account user, so `-a` cancels *their* in-flight jobs
-                # too (observed in enterprise CI: one such teardown killed an
-                # unrelated job-group test's job and another lane's kueue
-                # blocker mid-run).
+                # too (observed in CI: one such teardown killed an unrelated
+                # job-group test's job mid-run).
                 f'sky jobs cancel -y -n {name}-job || true',
                 # The managed job's worker cluster is torn down in the
                 # controller's `finally` block, and the controller only sets
@@ -3607,6 +3608,76 @@ def test_use_spot(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+# Reads the head VM's spec through SkyPilot's nebius adaptor, the same
+# GetInstance read the provisioner's start() check uses, and asserts the
+# spot pricing opt-in. The nebius CLI's JSON output does not include the
+# pricing field, so the SDK is used here.
+_NEBIUS_PRICING_MODEL_CHECK = textwrap.dedent("""\
+    import os
+    from sky.adaptors import nebius
+    service = nebius.compute().InstanceServiceClient(nebius.sdk())
+    instance = nebius.sync_call(
+        service.get_by_name(nebius.nebius_common().GetByNameRequest(
+            parent_id=os.environ['PROJECT_ID'],
+            name=os.environ['INSTANCE_NAME'])))
+    instance = nebius.sync_call(
+        service.get(nebius.compute().GetInstanceRequest(
+            id=instance.metadata.id)))
+    mode = instance.spec.which_field_in_oneof('pricing_model')
+    print(f'{instance.metadata.id}: preemptible='
+          f'{instance.spec.check_presence("preemptible")}, '
+          f'pricing_model={mode}')
+    assert mode == 'follows_spot_price', f'unexpected pricing_model: {mode}'
+    """)
+
+
+@pytest.mark.nebius
+def test_use_spot_nebius_gpu():
+    """Test Nebius GPU spot launch with explicit pricing opt-in verification.
+
+    Spot on Nebius is GPU-only, so unlike test_use_spot (CPU, excluded for
+    Nebius) this launches an L40S spot cluster. Verifies that:
+    1. The cluster launches and the job succeeds with --use-spot
+    2. The head VM's Nebius spec selects the price-taking spot pricing
+       model (follows_spot_price)
+    3. sky stop + sky start round-trips on the spot cluster (a restarted
+       spot VM keeps its pricing opt-in, so start does not require manual
+       migration)
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    # The provision log records the head VM's instance name and Nebius
+    # project ("Creating instance <name> in project <id>.").
+    check_pricing_model_cmd = (
+        f'PROVISION_LINE=$(sky logs --provision {name} | '
+        f'grep -oE \'Creating instance [^ .]+ in project [^ .]+\' | '
+        f'head -1) && '
+        f'INSTANCE_NAME=$(echo "$PROVISION_LINE" | awk \'{{print $3}}\') && '
+        f'PROJECT_ID=$(echo "$PROVISION_LINE" | awk \'{{print $NF}}\') && '
+        f'echo "Head instance: $INSTANCE_NAME in project $PROJECT_ID" && '
+        f'INSTANCE_NAME="$INSTANCE_NAME" PROJECT_ID="$PROJECT_ID" '
+        f'python -c {shlex.quote(_NEBIUS_PRICING_MODEL_CHECK)}')
+    test = smoke_tests_utils.Test(
+        'use-spot-nebius-gpu',
+        [
+            f'sky launch -y -c {name} --infra nebius --gpus L40S:1 '
+            f'--use-spot \'echo hello from nebius spot\'',
+            f'sky logs {name} 1 --status',
+            check_pricing_model_cmd,
+            f'sky stop -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                name, [sky.ClusterStatus.STOPPED], timeout=10 * 60),
+            f'sky start -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                name, [sky.ClusterStatus.UP], timeout=15 * 60),
+            f'sky exec {name} \'echo hello after spot restart\'',
+            f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=40 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.azure
 def test_azure_spot_instance_verification():
     """Test Azure spot instance provisioning with explicit verification.
@@ -4628,6 +4699,7 @@ def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support autostop
+@pytest.mark.no_remote_identity_none  # Autodown.
 def test_autodown(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     num_nodes = 2
@@ -5151,6 +5223,7 @@ def test_kubernetes_pod_config_change_detection():
 
 # ---------- Testing Kubernetes remote_identity override ----------
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_identity_none  # Sets other identities on purpose.
 def test_kubernetes_remote_identity_override():
     """Test that config.kubernetes.remote_identity can be overridden in task YAML.
 
@@ -5180,6 +5253,75 @@ def test_kubernetes_remote_identity_override():
         ],
         f'sky down -y {name}',
         timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing Kubernetes remote_identity: NONE ----------
+_K8S_SA_TOKEN = '/var/run/secrets/kubernetes.io/serviceaccount/token'
+_K8S_IDENTITY_NONE = '--config kubernetes.remote_identity=NONE'
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_remote_identity_none():
+    """With remote_identity: NONE the pod has no API token, and the cluster
+    still launches, runs, takes exec/ssh/logs and tears down.
+
+    Under --remote-identity-none the whole session is NONE, so the control
+    (a token without NONE) is skipped.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    launch = (f'sky launch -y --infra kubernetes '
+              f'{smoke_tests_utils.LOW_RESOURCE_ARG}')
+    commands = [
+        f'{launch} -c {name} {_K8S_IDENTITY_NONE} "test ! -e {_K8S_SA_TOKEN}"',
+        f'sky logs {name} 1 --status',
+        f'sky exec {name} "test ! -e {_K8S_SA_TOKEN}"',
+        f'sky logs {name} 2 --status',
+        f'ssh {name} "test ! -e {_K8S_SA_TOKEN}"',
+        f'sky queue {name}',
+        f'sky down -y {name}',
+    ]
+    if not smoke_tests_utils.is_remote_identity_none_test():
+        commands += [
+            f'{launch} -c {name}-sa "test -e {_K8S_SA_TOKEN}"',
+            f'sky logs {name}-sa 1 --status',
+        ]
+    test = smoke_tests_utils.Test(
+        'kubernetes_remote_identity_none',
+        commands,
+        f'sky down -y {name} {name}-sa',
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_remote_identity_none_refusals():
+    """NONE refuses what would need, or hand back, pod credentials: autodown,
+    and a pod_config that mounts the token. Dryrun only, so no pods.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    launch = (f'sky launch -y -c {name} --infra kubernetes --dryrun '
+              f'{smoke_tests_utils.LOW_RESOURCE_ARG}')
+    autodown = f'{launch} --down -i 1 echo hi'
+    automount = (f'{launch} --config '
+                 'kubernetes.pod_config.spec.automountServiceAccountToken=true'
+                 ' echo hi')
+    commands = [
+        f's=$({autodown} {_K8S_IDENTITY_NONE} 2>&1) && exit 1; echo "$s"; '
+        'echo "$s" | grep "Autodown needs the pod to delete itself"',
+        f's=$({automount} {_K8S_IDENTITY_NONE} 2>&1) && exit 1; echo "$s"; '
+        'echo "$s" | grep "automountServiceAccountToken would give them some"',
+    ]
+    if not smoke_tests_utils.is_remote_identity_none_test():
+        # Controls: the same commands without NONE are accepted.
+        commands += [autodown, automount]
+    test = smoke_tests_utils.Test(
+        'kubernetes_remote_identity_none_refusals',
+        commands,
+        f'sky down -y {name}',
+        timeout=10 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 

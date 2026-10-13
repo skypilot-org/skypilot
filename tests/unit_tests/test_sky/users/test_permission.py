@@ -397,6 +397,78 @@ class TestPermissionService:
             mock_kv_cache.delete_cache_entries_by_prefix_suffix.call_args[1])
         assert 'user1' in call_kwargs['suffix']
 
+    @mock.patch('sky.users.permission.kv_cache')
+    @mock.patch('sky.users.permission._policy_lock')
+    def test_add_user_if_not_exists_invalidates_cache_after_the_write(
+            self, mock_policy_lock, mock_kv_cache):
+        """Seeding a role-less user clears their cached workspace denials.
+
+        A user checked while role-less may have a cached '0' for a workspace
+        that their new role grants; it must not outlive the seed.
+        """
+        mock_policy_lock.return_value.__enter__ = mock.Mock()
+        mock_policy_lock.return_value.__exit__ = mock.Mock()
+
+        call_order = []
+        mock_enforcer = mock.Mock()
+        mock_enforcer.get_roles_for_user.return_value = []
+        mock_enforcer.add_grouping_policy.side_effect = (
+            lambda *a: call_order.append('add_grouping_policy'))
+        mock_kv_cache.delete_cache_entries_by_prefix_suffix.side_effect = (
+            lambda *a, **kw: call_order.append('invalidate'))
+
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._load_policy_no_lock = mock.Mock()
+
+        service.add_user_if_not_exists('user1')
+
+        call_kwargs = (
+            mock_kv_cache.delete_cache_entries_by_prefix_suffix.call_args[1])
+        assert 'user1' in call_kwargs['suffix']
+        assert call_order == ['add_grouping_policy', 'invalidate']
+
+    @mock.patch('sky.users.permission.kv_cache')
+    @mock.patch('sky.users.permission._policy_lock')
+    def test_add_user_if_not_exists_survives_cache_clear_failure(
+            self, mock_policy_lock, mock_kv_cache):
+        """The role is saved even if clearing the cache then fails."""
+        mock_policy_lock.return_value.__enter__ = mock.Mock()
+        mock_policy_lock.return_value.__exit__ = mock.Mock()
+
+        mock_enforcer = mock.Mock()
+        mock_enforcer.get_roles_for_user.return_value = []
+        mock_kv_cache.delete_cache_entries_by_prefix_suffix.side_effect = (
+            RuntimeError('cache db unavailable'))
+
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._load_policy_no_lock = mock.Mock()
+
+        service.add_user_if_not_exists('user1')
+
+        mock_enforcer.add_grouping_policy.assert_called_once()
+
+    @mock.patch('sky.users.permission.kv_cache')
+    @mock.patch('sky.users.permission._policy_lock')
+    def test_add_user_if_not_exists_keeps_cache_for_existing_role(
+            self, mock_policy_lock, mock_kv_cache):
+        """No role written, nothing to invalidate."""
+        mock_policy_lock.return_value.__enter__ = mock.Mock()
+        mock_policy_lock.return_value.__exit__ = mock.Mock()
+
+        mock_enforcer = mock.Mock()
+        mock_enforcer.get_roles_for_user.return_value = ['user']
+
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._load_policy_no_lock = mock.Mock()
+
+        service.add_user_if_not_exists('user1')
+
+        mock_enforcer.add_grouping_policy.assert_not_called()
+        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
+
     def test_get_user_roles(self):
         """Test getting user roles."""
         mock_enforcer = mock.Mock()
@@ -2069,6 +2141,24 @@ class TestWorkspaceReadOnlyAccess:
         assert writable == {'ws-mine', 'ws-pub'}
         # A single scan of the policy backs both sets.
         assert enf.get_policy.call_count == 1
+
+    @mock.patch('sky.workspaces.utils.get_read_only_workspace_names')
+    def test_get_readable_workspace_names(self, mock_ro_names, monkeypatch):
+        service, enf = self._service()
+        enf.get_policy.return_value = [
+            ('u1', 'ws-mine', '*'),
+            ('*', 'ws-pub', '*'),
+        ]
+        mock_ro_names.return_value = {'ws-ro'}
+        names = {'ws-mine', 'ws-ro', 'ws-pub', 'ws-other'}
+        assert service.get_readable_workspace_names(
+            'u1', names) == {'ws-mine', 'ws-ro', 'ws-pub'}
+        # Unrestricted is None, not every requested workspace.
+        service.get_user_roles.return_value = ['admin']
+        assert service.get_readable_workspace_names('u1', names) is None
+        monkeypatch.delenv(constants.ENV_VAR_IS_SKYPILOT_SERVER)
+        service.get_user_roles.return_value = ['user']
+        assert service.get_readable_workspace_names('u1', names) is None
 
     def test_add_workspace_policy_only_member_grants(self):
         service, enf = self._service()

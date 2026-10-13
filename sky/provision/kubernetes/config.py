@@ -27,6 +27,19 @@ def bootstrap_instances(
     _configure_services(namespace, context, config.provider_config)
 
     requested_service_account = config.node_config['spec']['serviceAccountName']
+    if config.provider_config.get('remote_identity_none', False):
+        # Keyed on the identity, not the account name: NONE keeps SkyPilot's
+        # account name, and binding roles to it would hand them back.
+        logger.info(f'remote_identity is NONE: ensuring service account '
+                    f'{requested_service_account!r} exists, binding no roles.')
+        _configure_autoscaler_service_account(namespace, context,
+                                              config.provider_config)
+        if config.provider_config.get('fuse_device_required', False):
+            # Creates only the namespace the FUSE daemonset lives in: its
+            # role and binding are rendered for controllers, never for NONE.
+            _configure_skypilot_system_namespace(config.provider_config)
+            _configure_fuse_mounting(config.provider_config)
+        return config
     # Both of SkyPilot's own accounts are reconciled here. Which roles exist
     # to bind is decided in the template: a controller cluster renders the
     # provisioner-only ones, a workload cluster does not, and the configurers
