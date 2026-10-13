@@ -658,8 +658,9 @@ def test_get_cloud_dependencies_installation_commands_cudo_only(
 @pytest.mark.parametrize('consolidated', [False, True])
 def test_controller_config_drops_workspace_names(consolidated: bool,
                                                  monkeypatch):
-    """Workspace names never reach a controller; the id marker only reaches a
-    consolidated one (same version as the server)."""
+    """Workspace names never reach a controller. A consolidated one (same
+    version as the server) gets the active workspace pinned as an exact id;
+    a dedicated one gets no marker, even a stale one from the config."""
     from sky.utils import yaml_utils
 
     monkeypatch.setattr(
@@ -670,7 +671,8 @@ def test_controller_config_drops_workspace_names(consolidated: bool,
     controller = controller_utils.Controllers.from_type('jobs')
     user_config = {
         'active_workspace': 'team-a',
-        'active_workspace_id': 'team-a',
+        # Overwritten with the active workspace, or dropped.
+        'active_workspace_id': 'stale',
         'workspaces': {
             'team-a': {
                 'name': 'proj-a',
@@ -685,7 +687,8 @@ def test_controller_config_drops_workspace_names(consolidated: bool,
     saved_config = yaml_utils.read_yaml(result['local_user_config_path'])
     assert saved_config['workspaces'] == {'team-a': {'private': False}}
     assert saved_config['active_workspace'] == 'team-a'
-    assert ('active_workspace_id' in saved_config) == consolidated
+    assert saved_config.get('active_workspace_id') == ('team-a' if consolidated
+                                                       else None)
 
 
 @pytest.mark.parametrize('controller_type', ['jobs', 'serve'])

@@ -66,9 +66,11 @@ def test_typed_active_workspace_becomes_the_id(server_workspaces):
             {'active_workspace': 'archive'}):
             assert skypilot_config.get_active_workspace() == 'team-a'
             resolved = skypilot_config.resolved_config()
-    # Saved job configs carry the id marker, so recovery never re-resolves.
     assert resolved['active_workspace'] == 'team-a'
-    assert resolved['active_workspace_id'] == 'team-a'
+    # resolved_config() also runs on the client (client-side admin policies),
+    # where the active workspace is still the typed name: it must not claim
+    # an exact id. Controller configs add the marker themselves.
+    assert 'active_workspace_id' not in resolved
 
 
 def test_active_workspace_id_is_exact(server_workspaces):
@@ -115,6 +117,19 @@ def test_enabled_clouds_resolves_only_the_typed_field(server_workspaces):
         # The dashboard sends the id; it is not resolved as a name.
         core.enabled_clouds_for_request(workspace_id='team-a')
         assert enabled_clouds.call_args.kwargs['workspace'] == 'team-a'
+
+
+def test_permission_error_names_the_workspace_as_typed():
+    user = models.User(id='bob', name='bob')
+    with mock.patch.object(workspaces_core.permission.permission_service,
+                           'check_workspace_permission',
+                           return_value=False):
+        with pytest.raises(Exception) as e:
+            workspaces_core.check_workspace_permission(user,
+                                                       'ws-0123456789ab',
+                                                       workspace_ref='proj-a')
+    assert "'proj-a'" in str(e.value)
+    assert 'ws-0123456789ab' not in str(e.value)
 
 
 def _request(user):

@@ -922,7 +922,8 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
 def check_workspace_permission(
         user: models.User,
         workspace: str,
-        action: str = workspace_constants.WORKSPACE_ACTION_WRITE) -> None:
+        action: str = workspace_constants.WORKSPACE_ACTION_WRITE,
+        workspace_ref: Optional[str] = None) -> None:
     """Checks that a user has permission to access the given workspace.
 
     Args:
@@ -930,6 +931,9 @@ def check_workspace_permission(
         workspace: The workspace name to check.
         action: 'write' (default, membership) or 'read' (also satisfied by a
             read-only workspace).
+        workspace_ref: What the user typed for this workspace, shown in the
+            error instead of the id. Never the stored name: the caller may
+            not be allowed to see it.
 
     Raises:
         PermissionDeniedError: If the user does not have permission to access
@@ -939,12 +943,13 @@ def check_workspace_permission(
             user.id, workspace, action=action):
         raise exceptions.PermissionDeniedError(
             f'User {user.name} ({user.id}) does not have '
-            f'permission to access workspace {workspace!r}')
+            f'permission to access workspace {workspace_ref or workspace!r}')
 
 
 def reject_request_for_unauthorized_workspace(
         user: models.User,
-        action: str = workspace_constants.WORKSPACE_ACTION_WRITE) -> None:
+        action: str = workspace_constants.WORKSPACE_ACTION_WRITE,
+        workspace_ref: Optional[str] = None) -> None:
     """Rejects a request that has no permission to access active workspace.
 
     Args:
@@ -955,6 +960,8 @@ def reject_request_for_unauthorized_workspace(
             so a non-member whose active workspace is read-only (e.g. a user
             whose only accessible workspaces are read-only) can still issue
             read requests.
+        workspace_ref: What the user typed for the active workspace, for the
+            error message.
 
     Raises:
         PermissionDeniedError: If the user does not have permission to access
@@ -962,7 +969,8 @@ def reject_request_for_unauthorized_workspace(
     """
     check_workspace_permission(user,
                                skypilot_config.get_active_workspace(),
-                               action=action)
+                               action=action,
+                               workspace_ref=workspace_ref)
 
 
 def check_cluster_write_permission(user: models.User,

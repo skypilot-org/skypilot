@@ -833,8 +833,16 @@ def override_request_env_and_config(
                     try:
                         # Reject requests that the user does not have
                         # permission to access.
+                        # Name the workspace as the user typed it, not by the
+                        # id it resolved to.
+                        override = request_body.override_skypilot_config or {}
+                        workspace_ref = (None
+                                         if override.get('active_workspace_id')
+                                         else override.get('active_workspace'))
                         workspaces_core.reject_request_for_unauthorized_workspace(  # pylint: disable=line-too-long
-                            user, ws_action)
+                            user,
+                            ws_action,
+                            workspace_ref=workspace_ref)
                     except exceptions.PermissionDeniedError as e:
                         logger.debug(
                             f'{request_id} permission denied to workspace: '

@@ -688,9 +688,6 @@ def resolved_config() -> config_utils.Config:
     """
     config = to_dict()
     config['active_workspace'] = get_active_workspace()
-    # Job configs saved from this are replayed on recovery; the id must not
-    # be re-resolved as a name there.
-    config['active_workspace_id'] = config['active_workspace']
     return config
 
 
