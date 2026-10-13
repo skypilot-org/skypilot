@@ -339,6 +339,9 @@ class _SDKHandle:
     """
 
     def __init__(self, sdk_client: Any) -> None:
+        # Loop creation can trigger GC while holding _loop_lock. Initialize it
+        # before registering any finalizer that could try to acquire that lock.
+        _get_event_loop()
         self._sdk_client = sdk_client
         # At interpreter exit the OS reclaims process-owned resources. Do not
         # attempt to start/join event-loop threads during interpreter shutdown.

@@ -5,6 +5,9 @@ import concurrent.futures
 from importlib import metadata
 import gc
 import os
+import subprocess
+import sys
+import textwrap
 import threading
 import time
 from types import SimpleNamespace
@@ -38,8 +41,7 @@ def _wait_closed(raw):
 @pytest.fixture(name='sdk_factory')
 def mock_sdk_factory(monkeypatch):
     """Use distinct fake clients so duplicate creation cannot go unnoticed."""
-    monkeypatch.setattr(nebius, '_sdk_cache', {})
-    monkeypatch.setattr(nebius, '_sdk_sources', {})
+    nebius.clear_sdk_cache()
     monkeypatch.setattr(nebius, 'api_domain', lambda: 'api.nebius.test')
     monkeypatch.setattr(nebius.skypilot_config, 'get_active_workspace',
                         lambda: 'workspace-a')
@@ -52,23 +54,74 @@ def mock_sdk_factory(monkeypatch):
 
 
 @pytest.mark.parametrize('use_token', [False, True])
-def test_reuses_sdk_across_requests(sdk_factory, tmp_path, use_token):
+def test_reuses_sdk_across_requests(sdk_factory, monkeypatch, tmp_path,
+                                    use_token):
+    """Catch the original leak using APIs also present on unpatched master."""
     credentials = tmp_path / 'credentials.json'
     credentials.write_text('fake credentials')
-    args = ('token', None) if use_token else (None, str(credentials))
-    first = nebius._sdk(*args)
-    raw = first._sdk_client
+    cloud_config = {} if use_token else {
+        'credentials_file_path': str(credentials)
+    }
+    monkeypatch.setattr(nebius.skypilot_config, 'get_workspace_cloud',
+                        lambda cloud: cloud_config)
+    monkeypatch.setattr(nebius, 'get_iam_token', lambda: 'token'
+                        if use_token else None)
     for _ in range(10):
+        nebius.sdk()
         annotations.clear_request_level_cache()
-        assert nebius._sdk(*args) is first
     assert sdk_factory.call_count == 1
+
+
+def test_clear_waits_for_previous_users(sdk_factory):
+    del sdk_factory
+    first = nebius._sdk('token', None)
+    raw = first._sdk_client
     nebius.clear_sdk_cache()
     raw.close.assert_not_awaited()
-    assert nebius._sdk(*args) is not first
+    assert nebius._sdk('token', None) is not first
     del first
     _wait_closed(raw)
     nebius.clear_sdk_cache()
     raw.close.assert_awaited_once()
+
+
+def test_finalizer_during_first_loop_creation_does_not_deadlock():
+    # Run in a fresh process so earlier tests cannot initialize the loop and
+    # mask the bug. A regression must time out instead of hanging pytest.
+    script = textwrap.dedent("""
+        import asyncio
+        import gc
+        import threading
+        from types import SimpleNamespace
+
+        from sky.adaptors import nebius
+
+        gc.disable()
+        closed = threading.Event()
+
+        async def close():
+            closed.set()
+
+        handle = nebius._SDKHandle(SimpleNamespace(close=close))
+        handle.cycle = [handle]
+        del handle
+        original_new_event_loop = asyncio.new_event_loop
+
+        def collect_then_create_loop():
+            gc.collect()
+            return original_new_event_loop()
+
+        nebius.asyncio.new_event_loop = collect_then_create_loop
+        nebius._get_event_loop()
+        gc.collect()
+        assert closed.wait(timeout=5), 'Retired SDK was not closed'
+    """)
+    result = subprocess.run([sys.executable, '-c', script],
+                            capture_output=True,
+                            text=True,
+                            timeout=15,
+                            check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_concurrent_cache_misses_create_one_sdk(sdk_factory):
