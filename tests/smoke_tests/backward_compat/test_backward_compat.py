@@ -166,7 +166,7 @@ class TestBackwardCompatibility:
             # Older wheels lack the v36/v37 model compatibility fixes.
             # Keep the base environment on the legacy client; the current
             # environment should exercise the latest supported client.
-            # TODO: Remove once the base version supports v37.
+            # Remove once the base version supports v37.
             'uv pip install "kubernetes<36.0.0"')
 
         # Hot-patch old env with me-south-1 fix (PR #9240 + #9244).
