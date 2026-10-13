@@ -68,12 +68,13 @@ jest.mock('@/data/connectors/jobs', () => ({
   __esModule: true,
   getManagedJobs: jest.fn(async () => ({ jobs: [] })),
 }));
+const mockInvalidate = jest.fn();
 const mockCacheGet = jest.fn((fn, args = []) => fn(...args));
 jest.mock('@/lib/cache', () => ({
   __esModule: true,
   dashboardCache: {
     get: (...args) => mockCacheGet(...args),
-    invalidate: jest.fn(),
+    invalidate: (...args) => mockInvalidate(...args),
     invalidateFunction: jest.fn(),
   },
 }));
@@ -447,15 +448,17 @@ describe('WorkspaceEditor for a non-admin', () => {
     expect(mockGetWorkspaces.mock.calls.length).toBeGreaterThan(calls);
   });
 
-  test('Refresh fetches stats from the server, not the cache', async () => {
+  test('Refresh drops the cached stats and refetches them', async () => {
     render(<WorkspaceEditor workspaceName="ws" />);
     await screen.findByText('Only admins can change this configuration.');
-    const cached = mockCacheGet.mock.calls.length;
+    mockInvalidate.mockClear();
     const fetched = mockGetClusters.mock.calls.length;
     await act(async () => {
       fireEvent.click(screen.getByText('Refresh'));
     });
-    expect(mockCacheGet.mock.calls.length).toBe(cached);
+    // Clusters, managed jobs and enabled infra; the refetch goes through the
+    // cache so the next visit sees the new numbers too.
+    expect(mockInvalidate).toHaveBeenCalledTimes(3);
     expect(mockGetClusters.mock.calls.length).toBe(fetched + 1);
   });
 
@@ -558,5 +561,33 @@ describe('WorkspaceEditor Refresh for an admin', () => {
     });
     expect(screen.getByText('0 / 0')).toBeTruthy();
     expect(screen.queryByText('1 / 1')).toBeNull();
+  });
+
+  test('a failed newer stats request keeps an older success', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    mockApiFetch.mockImplementation(async () => ({ ok: true }));
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Apply');
+    // Refresh's request succeeds after the newer post-check request fails.
+    let releaseFirst;
+    mockGetClusters
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseFirst = () =>
+              resolve([{ cluster: 'c', workspace: 'ws', status: 'RUNNING' }]);
+          })
+      )
+      .mockImplementationOnce(async () => {
+        throw new Error('down');
+      });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    await act(async () => {
+      releaseFirst();
+    });
+    expect(screen.getByText('1 / 1')).toBeTruthy();
+    console.error.mockRestore();
   });
 });

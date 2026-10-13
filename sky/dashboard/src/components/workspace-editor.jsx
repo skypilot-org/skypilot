@@ -482,17 +482,22 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     [workspaceName]
   );
 
-  // Only the latest stats request may update the page, so a slow earlier one
-  // can't overwrite newer numbers.
+  // Stats requests are numbered; a result is dropped only once a newer one
+  // has been shown, so a slow earlier request can't overwrite newer numbers
+  // and a failed newer one doesn't discard an earlier success.
   const statsRequestRef = useRef(0);
-  // `fresh`: fetch from the server instead of the dashboard cache (Refresh).
+  const statsShownRef = useRef(0);
+  // `fresh`: drop the cached entries first, so this fetches from the server
+  // and the cache holds the new numbers for the next visit (Refresh).
   const fetchWorkspaceStats = useCallback(
     async ({ fresh = false } = {}) => {
       if (isNewWorkspace) return;
 
       const request = ++statsRequestRef.current;
-      const load = (fn, args = []) =>
-        fresh ? fn(...args) : dashboardCache.get(fn, args);
+      const load = (fn, args = []) => {
+        if (fresh) dashboardCache.invalidate(fn, args);
+        return dashboardCache.get(fn, args);
+      };
       setStatsLoading(true);
       try {
         const [clustersResponse, managedJobsResponse, enabledClouds] =
@@ -508,7 +513,8 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
             ]),
             load(getEnabledClouds, [workspaceName, true]),
           ]);
-        if (request !== statsRequestRef.current) return;
+        if (request < statsShownRef.current) return;
+        statsShownRef.current = request;
 
         // Filter clusters for this workspace
         const workspaceClusters = clustersResponse.filter(
