@@ -2417,10 +2417,11 @@ export function ManagedJobsTable({
       <div className="flex flex-col space-y-1 mb-1">
         {/* Combined Status Filter. Below lg it is a grid: status chips and
             More wrap across the full width, then the toggles with Refresh on
-            the right.
+            the right. At lg Refresh aligns to the last row, so it stays level
+            with the toggles when the chips wrap.
             Narrow-only rules use max-lg: so plugin stylesheets, which load
             later, cannot override them. */}
-        <div className="text-sm mb-4 lg:flex lg:items-center lg:justify-between max-lg:grid max-lg:grid-cols-[minmax(0,1fr)_auto] max-lg:items-start max-lg:gap-y-3">
+        <div className="text-sm mb-4 lg:flex lg:items-end lg:justify-between max-lg:grid max-lg:grid-cols-[minmax(0,1fr)_auto] max-lg:items-start max-lg:gap-y-3">
           <div className="lg:flex lg:flex-wrap lg:items-center lg:min-w-0 max-lg:contents">
             <span className="mr-2 text-sm font-medium text-gray-700 max-lg:hidden">
               Statuses:
@@ -2660,7 +2661,7 @@ export function ManagedJobsTable({
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0 ml-2 max-lg:h-8">
+          <div className="flex items-center gap-2 shrink-0 ml-2 h-8">
             {loading && (
               <div className="flex items-center">
                 <CircularProgress size={15} className="mt-0" />
