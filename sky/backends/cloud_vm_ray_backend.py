@@ -4730,6 +4730,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         job_id, log_dir = self._add_job(handle, task_copy.name, resources_str,
                                         task.metadata_json)
+        self._record_job_spec(handle, job_id, task)
 
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
@@ -4740,6 +4741,39 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._execute_task_one_node(handle, task_copy, job_id, log_dir)
 
         return job_id
+
+    def _record_job_spec(self, handle: CloudVmRayResourceHandle, job_id: int,
+                         task: task_lib.Task) -> None:
+        """Records the job's task YAML and entrypoint for the dashboard.
+
+        Best-effort: a failure here is logged and does not fail the job, which
+        has already been added to the cluster.
+        """
+        try:
+            cluster_hash = global_user_state.get_cluster_hash(
+                handle.cluster_name)
+            if cluster_hash is None:
+                return
+            # The YAML as the user wrote it (secrets redacted), like the
+            # cluster's last_creation_yaml, but with the envs and secrets the
+            # job actually runs with: `--env` / `--secret` overrides are not in
+            # the user's file, and they are what tells two submissions of the
+            # same YAML apart.
+            config = task.to_yaml_config(use_user_specified_yaml=True)
+            if task.envs:
+                config['envs'] = dict(task.envs)
+            if task.secrets and isinstance(config.get('secrets'), dict):
+                for key in task.secrets:
+                    config['secrets'].setdefault(key, '<redacted>')
+            elif task.secrets and config.get('secrets') is None:
+                config['secrets'] = {key: '<redacted>' for key in task.secrets}
+            task_yaml = yaml_utils.dump_yaml_str(config)
+            entrypoint = common_utils.get_current_command()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to build the spec of job {job_id}: {e}')
+            return
+        global_user_state.add_cluster_job_spec(cluster_hash, job_id, task_yaml,
+                                               entrypoint)
 
     def _post_execute(self, handle: CloudVmRayResourceHandle,
                       down: bool) -> None:

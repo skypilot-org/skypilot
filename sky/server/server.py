@@ -2563,6 +2563,21 @@ async def queue(request: fastapi.Request,
     )
 
 
+@app.post('/cluster_job_spec')
+async def cluster_job_spec(request: fastapi.Request,
+                           body: payloads.ClusterJobSpecBody) -> None:
+    """Gets the task YAML and entrypoint a cluster job was submitted with."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.CLUSTER_JOB_SPEC,
+        request_body=body,
+        func=core.cluster_job_spec,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        request_cluster_name=body.cluster_name,
+        auth_user=request.state.auth_user,
+    )
+
+
 @app.post('/job_status')
 async def job_status(request: fastapi.Request,
                      job_status_body: payloads.JobStatusBody) -> None:

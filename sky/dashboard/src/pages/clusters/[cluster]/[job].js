@@ -2,13 +2,21 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useClusterDetails } from '@/data/connectors/clusters';
+import {
+  useClusterDetails,
+  getClusterJobSpec,
+} from '@/data/connectors/clusters';
 import {
   CustomTooltip as Tooltip,
   formatFullTimestamp,
   LogFilter,
 } from '@/components/utils';
-import { RotateCwIcon, Download } from 'lucide-react';
+import {
+  RotateCwIcon,
+  Download,
+  ChevronDownIcon,
+  ChevronRightIcon,
+} from 'lucide-react';
 import { CircularProgress } from '@mui/material';
 import {
   streamClusterJobLogs,
@@ -22,6 +30,8 @@ import { CheckIcon, CopyIcon } from 'lucide-react';
 import PropTypes from 'prop-types';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import { useCallback } from 'react';
+import { formatYaml } from '@/lib/yamlUtils';
+import { YamlCodeBlock } from '@/components/ui/yaml-code-block';
 import {
   LINK_SCOPE_JOBS,
   normalizeUrl,
@@ -85,6 +95,114 @@ function JobHeader({
   );
 }
 
+// The entrypoint command and task YAML the job was submitted with. Renders
+// nothing for jobs without a recorded spec (submitted before the API server
+// recorded them).
+function JobSpecSection({ spec }) {
+  const [isYamlExpanded, setIsYamlExpanded] = useState(false);
+  const [isYamlCopied, setIsYamlCopied] = useState(false);
+  const [isCommandCopied, setIsCommandCopied] = useState(false);
+
+  const entrypoint = spec?.entrypoint;
+  const taskYaml = spec?.task_yaml;
+  const hasYaml = Boolean(taskYaml) && taskYaml.trim() !== '{}';
+  if (!entrypoint && !hasYaml) {
+    return null;
+  }
+
+  const copy = async (text, setCopied) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
+    }
+  };
+
+  return (
+    <div className="col-span-2">
+      <div className="flex items-center">
+        <div className="text-gray-600 font-medium text-base">Entrypoint</div>
+        {entrypoint && (
+          <Tooltip
+            content={isCommandCopied ? 'Copied!' : 'Copy command'}
+            className="text-muted-foreground"
+          >
+            <button
+              title="Copy command"
+              onClick={() => copy(entrypoint, setIsCommandCopied)}
+              className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+            >
+              {isCommandCopied ? (
+                <CheckIcon className="w-4 h-4 text-green-600" />
+              ) : (
+                <CopyIcon className="w-4 h-4" />
+              )}
+            </button>
+          </Tooltip>
+        )}
+      </div>
+
+      <div className="space-y-4 mt-3">
+        {entrypoint && (
+          <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
+            <code className="text-sm text-gray-800 font-mono break-all">
+              {entrypoint}
+            </code>
+          </div>
+        )}
+
+        {hasYaml && (
+          <div>
+            <div className="flex items-center mb-2">
+              <button
+                onClick={() => setIsYamlExpanded(!isYamlExpanded)}
+                className="flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200"
+              >
+                {isYamlExpanded ? (
+                  <ChevronDownIcon className="w-4 h-4 mr-1" />
+                ) : (
+                  <ChevronRightIcon className="w-4 h-4 mr-1" />
+                )}
+                <span className="text-base">Show SkyPilot YAML</span>
+              </button>
+
+              <Tooltip
+                content={isYamlCopied ? 'Copied!' : 'Copy YAML'}
+                className="text-muted-foreground"
+              >
+                <button
+                  title="Copy YAML"
+                  onClick={() => copy(formatYaml(taskYaml), setIsYamlCopied)}
+                  className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                >
+                  {isYamlCopied ? (
+                    <CheckIcon className="w-4 h-4 text-green-600" />
+                  ) : (
+                    <CopyIcon className="w-4 h-4" />
+                  )}
+                </button>
+              </Tooltip>
+            </div>
+
+            {isYamlExpanded && (
+              <YamlCodeBlock value={formatYaml(taskYaml)} readOnly />
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+JobSpecSection.propTypes = {
+  spec: PropTypes.shape({
+    entrypoint: PropTypes.string,
+    task_yaml: PropTypes.string,
+  }),
+};
+
 export function JobDetailPage() {
   const router = useRouter();
   const { cluster, job } = router.query;
@@ -99,6 +217,8 @@ export function JobDetailPage() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isCopied, setIsCopied] = useState(false);
   const [logsRefreshToken, setLogsRefreshToken] = useState(0);
+  const [jobSpec, setJobSpec] = useState(null);
+  const [jobSpecRefreshToken, setJobSpecRefreshToken] = useState(0);
 
   const PENDING_STATUSES = useMemo(() => ['INIT', 'PENDING', 'SETTING_UP'], []);
 
@@ -123,6 +243,25 @@ export function JobDetailPage() {
     }),
     [cluster, job, clusterData?.workspace]
   );
+
+  // The spec is read from the API server's database, so it is fetched
+  // separately from the job queue and does not need the cluster to be UP.
+  const clusterLoaded = Boolean(clusterData);
+  const clusterWorkspace = clusterData?.workspace;
+  useEffect(() => {
+    if (!cluster || !job || !clusterLoaded) return undefined;
+    let cancelled = false;
+    getClusterJobSpec({
+      clusterName: cluster,
+      jobId: job,
+      workspace: clusterWorkspace,
+    }).then((spec) => {
+      if (!cancelled) setJobSpec(spec);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cluster, job, clusterLoaded, clusterWorkspace, jobSpecRefreshToken]);
 
   const handleStreamError = useCallback((error) => {
     console.error('Error streaming cluster logs:', error);
@@ -189,6 +328,7 @@ export function JobDetailPage() {
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     setLogsRefreshToken((token) => token + 1);
+    setJobSpecRefreshToken((token) => token + 1);
     try {
       if (refreshData) {
         await refreshData();
@@ -384,6 +524,7 @@ export function JobDetailPage() {
                         </div>
                       </div>
                     )}
+                    <JobSpecSection spec={jobSpec} />
                   </div>
                 </div>
               </Card>
