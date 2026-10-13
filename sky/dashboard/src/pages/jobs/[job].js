@@ -163,9 +163,8 @@ function JobDetails({
   const [selectedNode, setSelectedNode] = useState('all');
   const [logNodes, setLogNodes] = useState([]);
   // If a plugin owns the logs slot, the OSS "(Logs are not streaming;
-  // click refresh ...)" hint is misleading — the plugin's component
-  // streams live. Hide it. (ControllerLogsSection makes the same check
-  // independently for the controller-logs heading.)
+  // click refresh ...)" hint does not apply. Hide it. (ControllerLogsSection
+  // makes the same check independently for the controller-logs heading.)
   const logsSlotHasPlugin = usePluginComponents('jobs.detail.logs').length > 0;
   const [logExtractedLinks, setLogExtractedLinks] = useState({});
   // Track download-in-flight per kind ('logs' / 'controller' / per-task)
@@ -1025,10 +1024,9 @@ function JobDetails({
               />
             )}
 
-            {/* Plugin Slot: Job Detail GPU metrics. The built-in
-                TelemetrySection above covers Kubernetes; this lets a plugin
-                contribute a GPU-metrics/telemetry panel for other infra
-                (empty when no plugin registers for it). */}
+            {/* Plugin Slot: Job Detail GPU metrics. Rendered after the
+                built-in TelemetrySection above (empty when no plugin
+                registers for it). */}
             <PluginSlot
               name="jobs.detail.gpu-metrics"
               context={{
@@ -1302,6 +1300,13 @@ function JobDetailsContent({
     }
     return jobData.status;
   }, [allTasks, jobData.status]);
+
+  // The connector only sets statusTooltip when it is meaningful (PENDING
+  // reason, FAILED* attribution), but only show it when the aggregated
+  // status matches the row's own status so a tooltip computed for another
+  // state is not shown.
+  const statusTooltip =
+    computedStatus === jobData.status ? jobData.statusTooltip : null;
 
   const toggleYamlExpanded = () => {
     setIsYamlExpanded(!isYamlExpanded);
@@ -1713,20 +1718,18 @@ function JobDetailsContent({
             return (
               <PluginSlot
                 name="jobs.detail.status.badge"
-                context={jobData}
+                // The slot must see the status the fallback renders:
+                // jobData is the first task's row, not the group's
+                // aggregate.
+                context={{
+                  ...jobData,
+                  status: computedStatus,
+                  statusTooltip,
+                }}
                 fallback={
                   <StatusBadge
                     status={computedStatus}
-                    statusTooltip={
-                      // The connector only sets statusTooltip when it is
-                      // meaningful (PENDING reason, FAILED* attribution),
-                      // but only pass it through when the aggregated
-                      // status matches the connector's row status so a
-                      // tooltip computed for another state is not shown.
-                      computedStatus === jobData.status
-                        ? jobData.statusTooltip
-                        : null
-                    }
+                    statusTooltip={statusTooltip}
                   />
                 }
               />
@@ -1937,6 +1940,25 @@ function JobDetailsContent({
           {renderPoolLink(jobData.pool, jobData.pool_hash, poolsData)}
         </div>
       </div>
+
+      {jobData.depends_on?.length > 0 && (
+        <div>
+          <div className="text-gray-600 font-medium text-base">Depends On</div>
+          <div className="text-base mt-1">
+            {jobData.depends_on.map((dependency, index) => (
+              <span key={dependency}>
+                {index > 0 && ', '}
+                <Link
+                  href={`/jobs/${dependency}`}
+                  className="text-blue-600 hover:underline"
+                >
+                  {dependency}
+                </Link>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Batch Progress section - only for batch jobs */}
       {jobData.batch_total_batches != null && (

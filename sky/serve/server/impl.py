@@ -14,6 +14,7 @@ import colorama
 import filelock
 
 from sky import backends
+from sky import clouds
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
@@ -170,6 +171,8 @@ def up(
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, request_name=request_names.AdminPolicyRequestName.SERVE_UP)
+    clouds.Kubernetes.check_request_keeps_server_none()
+    clouds.Kubernetes.check_task_keeps_server_none(dag.tasks[0])
     dag.resolve_and_validate_volumes()
     dag.pre_mount_volumes()
     task = dag.tasks[0]
@@ -187,10 +190,10 @@ def up(
             storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
         force_disable_cloud_bucket = skypilot_config.get_nested(
             ('serve', 'force_disable_cloud_bucket'), False)
+        local_to_controller_file_mounts: Dict[str, str] = {}
         if storage_clouds and not force_disable_cloud_bucket:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
                 task, task_type='serve')
-            local_to_controller_file_mounts = {}
         else:
             # Fall back to two-hop file_mount uploading when no cloud storage
             if task.storage_mounts:
@@ -198,8 +201,19 @@ def up(
                     'Cloud-based file_mounts are specified, but no cloud '
                     'storage is available. Please specify local '
                     'file_mounts only.')
-            local_to_controller_file_mounts = (
-                controller_utils.translate_local_file_mounts_to_two_hop(task))
+            if serve_utils.is_consolidation_mode(pool):
+                # The controller and replicas share the API server host, so
+                # there is no cluster hop and the file mounts are already
+                # resolved on this host (the client uploaded them under the
+                # owner's dir). Skip the two-hop, which would otherwise stage
+                # the sources under ~/.sky/tmp/controller -- outside the
+                # caller's roots, so the server would reject them. Mirrors the
+                # managed jobs path in jobs/server/core.py.
+                local_to_controller_file_mounts = {}
+            else:
+                local_to_controller_file_mounts = (
+                    controller_utils.translate_local_file_mounts_to_two_hop(
+                        task))
 
     tls_template_vars = _rewrite_tls_credential_paths_and_get_tls_env_vars(
         service_name, task)
@@ -559,6 +573,8 @@ def update(
     dag, _ = admin_policy_utils.apply(
         task, request_name=request_names.AdminPolicyRequestName.SERVE_UPDATE)
     task = dag.tasks[0]
+    clouds.Kubernetes.check_request_keeps_server_none()
+    clouds.Kubernetes.check_task_keeps_server_none(task)
     if pool:
         _maybe_display_run_warning(task)
         # Use dummy run script for pool.
@@ -825,7 +841,7 @@ class _DefaultServiceStatusRunner:
 
     Registered lazily by ``sky.serve.runner.current()``. Plugins override
     by calling ``sky.serve.runner.register()`` with their own
-    implementation (e.g. an in-process runner for consolidation mode).
+    implementation.
     """
 
     def get_service_status(

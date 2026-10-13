@@ -1,0 +1,9 @@
+resources:
+  accelerators: H100:1
+  disk_size: 256
+  image_id: docker:public.ecr.aws/whitecircle/halo:hopper
+
+workdir: .
+
+run: |
+  halo launch sft train.yaml

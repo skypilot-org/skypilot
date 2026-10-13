@@ -1476,7 +1476,7 @@ async def test_get_expanded_request_id_admin_unscoped(monkeypatch):
     assert exc.value.status_code == 400
 
 
-# --- SKY-6429: cross-user request-API access control (integration) ----------
+# --- Cross-user request-API access control (integration) --------------------
 
 
 def _seed_request(rid, user_id, status=None):
@@ -1576,6 +1576,43 @@ def test_api_status_scopes_to_caller(_request_authz_env, monkeypatch):
         }).json()
     }
     assert {'alice-req-1', 'bob-req-1'} <= ids
+
+
+def test_api_status_does_not_read_stored_results(_request_authz_env,
+                                                 monkeypatch):
+    from fastapi.testclient import TestClient
+    client = TestClient(server.app)
+    _scope_as(monkeypatch, None)
+
+    requested_fields = []
+    list_tasks = server.requests_lib.get_request_tasks_async
+    prefix_tasks = server.requests_lib.get_requests_async_with_prefix
+
+    async def _list_tasks(req_filter):
+        requested_fields.append(req_filter.fields)
+        return await list_tasks(req_filter)
+
+    async def _prefix_tasks(request_id_prefix, fields=None):
+        requested_fields.append(fields)
+        return await prefix_tasks(request_id_prefix, fields)
+
+    monkeypatch.setattr(server.requests_lib, 'get_request_tasks_async',
+                        _list_tasks)
+    monkeypatch.setattr(server.requests_lib, 'get_requests_async_with_prefix',
+                        _prefix_tasks)
+
+    listed = client.get('/api/status', params={'all_status': True})
+    by_id = client.get('/api/status', params={'request_ids': ['alice-req-1']})
+
+    assert listed.status_code == 200
+    listed_ids = {r['request_id'] for r in listed.json()}
+    assert {'alice-req-1', 'bob-req-1'} <= listed_ids
+    assert [r['request_id'] for r in by_id.json()] == ['alice-req-1']
+    assert len(requested_fields) == 2
+    for fields in requested_fields:
+        assert 'return_value' not in fields
+        assert 'error' not in fields
+        assert 'request_body' in fields
 
 
 def test_api_completion_scopes_to_caller(_request_authz_env, monkeypatch):
@@ -2041,3 +2078,78 @@ def test_an_unusable_cap_means_no_cap(monkeypatch, raw):
 def test_a_configured_cap_is_read_as_bytes(monkeypatch):
     monkeypatch.setenv(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR, '12345')
     assert server._max_upload_total_bytes() == 12345
+
+
+_STORE_CAP = 200 * 1000 * 1000
+
+
+@pytest.fixture
+def store_cap(monkeypatch):
+    """The store's cap is off unless a deployment sets it."""
+    monkeypatch.setenv(server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR,
+                       str(_STORE_CAP))
+    return _STORE_CAP
+
+
+def _store_holding(monkeypatch, used_bytes):
+    """Makes the store's filesystem report *used_bytes* in use."""
+    monkeypatch.setattr(server.local_disk, 'used_for_path',
+                        lambda path: used_bytes)
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_is_refused_once_the_store_is_full(
+        tmp_path, monkeypatch, store_cap):
+    """The cap covers what the store holds, across uploads."""
+    _store_holding(monkeypatch, store_cap)
+
+    with pytest.raises(fastapi.HTTPException) as exc_info:
+        await server._admit_stored_file_mounts(tmp_path)
+
+    assert exc_info.value.status_code == 507
+    assert 'bucket' in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_is_admitted_while_the_store_has_room(
+        tmp_path, monkeypatch, store_cap):
+    _store_holding(monkeypatch, store_cap - 1)
+
+    await server._admit_stored_file_mounts(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_the_store_has_no_cap_unless_one_is_configured(
+        tmp_path, monkeypatch):
+    """The cap is opt-in, so an unset deployment uploads as before."""
+    monkeypatch.delenv(server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR,
+                       raising=False)
+    measured = []
+    monkeypatch.setattr(server.local_disk, 'used_for_path',
+                        lambda path: measured.append(path) or 0)
+
+    await server._admit_stored_file_mounts(tmp_path)
+
+    assert measured == []
+
+
+@pytest.mark.asyncio
+async def test_an_unmeasurable_store_is_not_enforced_against(
+        tmp_path, monkeypatch, store_cap):
+    """Refusing every upload is the wrong answer to not being able to tell."""
+    _store_holding(monkeypatch, None)
+
+    await server._admit_stored_file_mounts(tmp_path)
+
+
+@pytest.mark.parametrize('raw', ['', 'not-a-number', '0', '-1'])
+def test_an_unusable_store_cap_means_no_cap(monkeypatch, raw):
+    monkeypatch.setenv(server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR,
+                       raw)
+    assert server._max_stored_file_mounts_bytes() is None
+
+
+def test_a_configured_store_cap_is_read_as_bytes(monkeypatch):
+    monkeypatch.setenv(server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR,
+                       '12345')
+    assert server._max_stored_file_mounts_bytes() == 12345

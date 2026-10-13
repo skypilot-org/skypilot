@@ -229,8 +229,12 @@ class TestGetManagedJobQueue:
         defaults.update(kwargs)
         return defaults
 
-    def _patch_managed_job_state(self, monkeypatch: pytest.MonkeyPatch,
-                                 jobs: List[Dict[str, Any]]):
+    def _patch_managed_job_state(
+            self,
+            monkeypatch: pytest.MonkeyPatch,
+            jobs: List[Dict[str, Any]],
+            unfinished_dependencies: Optional[Dict[int, List[int]]] = None,
+            dependencies: Optional[Dict[int, List[int]]] = None):
         """Patch managed_job_state functions for testing."""
 
         def fake_get_managed_jobs_total():
@@ -266,6 +270,20 @@ class TestGetManagedJobQueue:
         monkeypatch.setattr(jobs_utils.managed_job_state,
                             'get_managed_jobs_highest_priority',
                             fake_get_managed_jobs_highest_priority)
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state, 'get_unfinished_dependencies',
+            lambda job_ids: {
+                job_id: deps
+                for job_id, deps in (unfinished_dependencies or {}).items()
+                if job_id in job_ids
+            })
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state, 'get_jobs_dependencies',
+            lambda job_ids: {
+                job_id: deps
+                for job_id, deps in (dependencies or {}).items()
+                if job_id in job_ids
+            })
 
     def _patch_global_user_state(self, monkeypatch: pytest.MonkeyPatch):
         """Patch global_user_state for testing."""
@@ -480,6 +498,45 @@ class TestGetManagedJobQueue:
         # Job 1 has lower priority than the highest (10)
         job1 = next(j for j in result['jobs'] if j['job_id'] == 1)
         assert 'Waiting for higher priority jobs to launch' in job1['details']
+
+    @pytest.mark.parametrize(('dependencies', 'expected'), [
+        ([7], 'Dependency: 7'),
+        ([7, 8], 'Dependencies: 7, 8'),
+    ])
+    def test_details_for_job_waiting_on_dependencies(self, monkeypatch,
+                                                     dependencies, expected):
+        jobs = [self._make_test_job(1, priority=10)]
+        self._patch_managed_job_state(monkeypatch,
+                                      jobs,
+                                      unfinished_dependencies={1: dependencies})
+        self._patch_global_user_state(monkeypatch)
+
+        result = jobs_utils.get_managed_job_queue()
+
+        assert result['jobs'][0]['details'] == expected
+
+    def test_depends_on_field(self, monkeypatch):
+        jobs = [self._make_test_job(1), self._make_test_job(2)]
+        self._patch_managed_job_state(monkeypatch,
+                                      jobs,
+                                      dependencies={1: [7, 8]})
+        self._patch_global_user_state(monkeypatch)
+
+        by_id = {
+            job['job_id']: job
+            for job in jobs_utils.get_managed_job_queue()['jobs']
+        }
+        assert by_id[1]['depends_on'] == [7, 8]
+        assert by_id[2]['depends_on'] is None
+
+        # get_managed_job_queue rewrites the job records in place.
+        self._patch_managed_job_state(
+            monkeypatch, [self._make_test_job(1),
+                          self._make_test_job(2)],
+            dependencies={1: [7, 8]})
+        only_status = jobs_utils.get_managed_job_queue(
+            fields=['job_id', 'status'])['jobs']
+        assert all('depends_on' not in job for job in only_status)
 
     def test_details_for_waiting_state_with_same_priority(self, monkeypatch):
         """Test details generation for WAITING state with same priority."""

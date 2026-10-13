@@ -52,9 +52,7 @@ _MAX_RETRY = 3
 _TITLE = '\n\n' + '=' * 20 + ' {} ' + '=' * 20 + '\n'
 
 # Hooks that report where a provider actually placed a cluster's instances,
-# for providers that submit work to one control plane and then execute it on
-# another -- the submission target names the control plane, so on its own it
-# does not say where the instances ended up.
+# when that can differ from the region the launch was submitted to.
 #
 # Each hook is called with ``(provider_name, region_name,
 # cluster_name_on_cloud)`` and returns the name of the execution target, or
@@ -263,7 +261,8 @@ def bulk_provision(
         count=num_nodes,
         tags={},
         resume_stopped_nodes=True,
-        ports_to_open_on_launch=ports_to_open_on_launch)
+        ports_to_open_on_launch=ports_to_open_on_launch,
+        prev_cluster_ever_up=prev_cluster_ever_up)
 
     # None outside a server-side request execution, where no scheduler exists
     # to park and resume a launch -- so no attempt can ever be resumed there,
@@ -661,6 +660,14 @@ def _post_provision_setup(
     ssh_credentials = backend_utils.ssh_credential_from_yaml(
         handle_cluster_yaml, ssh_user=cluster_info.ssh_user)
     docker_config = config_from_yaml.get('docker', {})
+    if docker_config and cloud_name.lower() == 'azure':
+        docker_config['azure_use_managed_identity'] = True
+        # Pass the VM's managed identity through so a private ACR pull can
+        # authenticate as that exact identity on the host, before the task
+        # container exists. See DockerInitializer.initialize.
+        msi = (cluster_info.provider_config or {}).get('msi', None)
+        if msi is not None:
+            docker_config['azure_managed_identity'] = msi
 
     with rich_utils.safe_status(
             ux_utils.spinner_message('Launching - Waiting for SSH access',
@@ -857,6 +864,10 @@ def _post_provision_setup(
                 custom_resource=custom_resource,
                 cluster_info=cluster_info,
                 ssh_credentials=ssh_credentials)
+            # ray_port was read while the head was down, so it is the default;
+            # a hostNetwork head just took its assigned port instead, and the
+            # workers must be told that one.
+            ray_port, _, _ = check_ray_port_and_cluster_healthy()
         else:
             logger.debug('Ray cluster on head is ready. Skip starting ray '
                          'cluster on head node.')
