@@ -1044,21 +1044,6 @@ def _update_spinner_message(*, iteration: int, pods: List[Any],
     pass
 
 
-@timeline.event
-def _is_transport_error(e: Exception) -> bool:
-    """Whether ``e`` is a failure of the HTTP transport to the API server.
-
-    urllib3 transport errors propagate raw out of the kubernetes client,
-    with one exception: the client wraps ``urllib3.exceptions.SSLError``
-    into an ``ApiException`` with ``status=0`` (no HTTP response was
-    received). An ``ApiException`` with a real HTTP status is an API error
-    response, not a transport failure.
-    """
-    if isinstance(e, kubernetes.api_exception()):
-        return e.status == 0
-    return isinstance(e, kubernetes.urllib3_http_error())
-
-
 def _count_transport_error(e: Exception, first_error_time: Optional[float],
                            cluster_name: str) -> float:
     """Account a pod-poll transport error; raise once the streak persists.
@@ -1222,7 +1207,7 @@ def _wait_for_pods_to_schedule(namespace,
             # Treat a transport failure as a missed poll and retry within
             # the deadline above; see _POD_POLL_REQUEST_TIMEOUT for why the
             # call must be bounded rather than left to block indefinitely.
-            if not _is_transport_error(e):
+            if not kubernetes_utils.is_transport_error(e):
                 raise
             transport_error_since = _count_transport_error(
                 e, transport_error_since, cluster_name)
@@ -1754,7 +1739,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             # This loop has no deadline, so the transport-error grace window
             # is what keeps a persistently unreachable API server from
             # turning into an endless silent retry loop.
-            if not _is_transport_error(e):
+            if not kubernetes_utils.is_transport_error(e):
                 raise
             transport_error_since = _count_transport_error(
                 e, transport_error_since, cluster_name)

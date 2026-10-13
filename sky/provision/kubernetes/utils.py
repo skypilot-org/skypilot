@@ -5306,6 +5306,21 @@ def get_namespace_from_config(provider_config: Dict[str, Any]) -> str:
 
 
 @timeline.event
+def is_transport_error(e: Exception) -> bool:
+    """Whether ``e`` is a failure of the HTTP transport to the API server.
+
+    urllib3 transport errors propagate raw out of the kubernetes client,
+    with one exception: the client wraps ``urllib3.exceptions.SSLError``
+    into an ``ApiException`` with ``status=0`` (no HTTP response was
+    received). An ``ApiException`` with a real HTTP status is an API error
+    response, not a transport failure.
+    """
+    if isinstance(e, kubernetes.api_exception()):
+        return e.status == 0
+    return isinstance(e, kubernetes.urllib3_http_error())
+
+
+@timeline.event
 def filter_pods(namespace: str,
                 context: Optional[str],
                 tag_filters: Dict[str, str],

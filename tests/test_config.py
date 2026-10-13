@@ -1797,6 +1797,56 @@ def test_get_effective_queue_name(monkeypatch, tmp_path) -> None:
         workspace='workspaceA') == 'workspaceA-queue-via-quota'
 
 
+def test_get_effective_kai_value(monkeypatch, tmp_path) -> None:
+    """`kubernetes.kai` resolves workspace > global, context > cloud."""
+    with open(tmp_path / 'kai.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        kubernetes:
+            kai:
+                queue: global-queue
+                preemptibility: preemptible
+            context_configs:
+                contextA:
+                    kai:
+                        queue: contextA-queue
+        workspaces:
+            workspaceA:
+                kubernetes:
+                    kai:
+                        queue: workspaceA-queue
+                    context_configs:
+                        contextA:
+                            kai:
+                                queue: workspaceA-contextA-queue
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'kai.yaml')
+    skypilot_config.reload_config()
+
+    assert skypilot_config.get_effective_kai_value(
+        'queue', workspace='default') == 'global-queue'
+    assert skypilot_config.get_effective_kai_value(
+        'queue', region='contextA', workspace='default') == 'contextA-queue'
+    assert skypilot_config.get_effective_kai_value(
+        'queue', region='contextB', workspace='default') == 'global-queue'
+    assert skypilot_config.get_effective_kai_value(
+        'queue', workspace='workspaceA') == 'workspaceA-queue'
+    # Keys resolve independently: the workspace sets no preemptibility.
+    assert skypilot_config.get_effective_kai_value(
+        'preemptibility', workspace='workspaceA') == 'preemptible'
+    task_queue = {'kubernetes': {'kai': {'queue': 'task-queue'}}}
+    assert skypilot_config.get_effective_kai_value(
+        'queue', workspace='workspaceA',
+        override_configs=task_queue) == 'task-queue'
+    # A task cannot override a context's queue, so a workspace that sets
+    # one pins its members to it.
+    assert skypilot_config.get_effective_kai_value(
+        'queue',
+        region='contextA',
+        workspace='workspaceA',
+        override_configs=task_queue) == 'workspaceA-contextA-queue'
+
+
 def test_get_effective_queue_name_workspace_override(monkeypatch,
                                                      tmp_path) -> None:
     """Cloud-level `override_configs` must apply inside workspace scope.
