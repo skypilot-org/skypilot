@@ -103,6 +103,7 @@ Below is the available helm value keys and the default value of each key:
       :ref:`headerName <helm-values-auth-externalProxy-headerName>`: 'X-Auth-Request-Email'
       :ref:`headerFormat <helm-values-auth-externalProxy-headerFormat>`: 'plaintext'
       :ref:`jwtIdentityClaim <helm-values-auth-externalProxy-jwtIdentityClaim>`: 'sub'
+      :ref:`requireIdentity <helm-values-auth-externalProxy-requireIdentity>`: false
 
   :ref:`storage <helm-values-storage>`:
     :ref:`enabled <helm-values-storage-enabled>`: true
@@ -1266,6 +1267,28 @@ Default: ``'sub'``
     externalProxy:
       headerFormat: 'jwt'
       jwtIdentityClaim: 'email'
+
+.. _helm-values-auth-externalProxy-requireIdentity:
+
+``auth.externalProxy.requireIdentity``
+''
+
+Refuse a request that reaches the API server without an identity.
+
+With the external proxy enabled, the API server trusts the proxy to have authenticated every request. A request that arrives without the proxy's identity header, for example from a client inside the cluster that reaches the API server service directly, is served as an unauthenticated request: RBAC is skipped and it sees every user's work. With ``requireIdentity`` enabled, such a request is refused with ``401`` (a websocket handshake is closed with ``4401``).
+
+A request passes when it carries the proxy's identity header, a ``sky_`` service account token, or comes from loopback (which keeps managed jobs consolidation mode working). ``/api/health`` is always served.
+
+Only applies when ``enabled`` is ``true``.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  auth:
+    externalProxy:
+      enabled: true
+      requireIdentity: true
 
 
 .. _helm-values-storage:

@@ -368,6 +368,9 @@ def _get_server_config_schema() -> dict:
             'jwt_identity_claim': {
                 'type': 'string',
             },
+            'require_identity': {
+                'type': 'boolean',
+            },
         },
     }
 
@@ -399,11 +402,17 @@ class ExternalProxyConfig:
         header_format: The format of the header value ('plaintext' or 'jwt').
         jwt_identity_claim: The JWT claim containing user identity (only used
             when header_format is 'jwt').
+        require_identity: Whether to refuse a request that no authentication
+            middleware assigned an identity to, instead of serving it as an
+            unauthenticated (admin-scoped) request. Only enforced when
+            `enabled` is True; carried through when it is not so the server
+            can warn about the misconfiguration.
     """
     enabled: bool = False
     header_name: str = _DEFAULT_HEADER_NAME
     header_format: Literal['plaintext', 'jwt'] = 'plaintext'
     jwt_identity_claim: str = _DEFAULT_IDENTITY_CLAIM
+    require_identity: bool = False
 
 
 def load_server_config() -> config_utils.Config:
@@ -437,6 +446,8 @@ def load_external_proxy_config() -> ExternalProxyConfig:
     """
     server_config = load_server_config()
 
+    require_identity = server_config.get_nested(
+        ('auth', 'external_proxy', 'require_identity'), False)
     enabled = server_config.get_nested(('auth', 'external_proxy', 'enabled'),
                                        None)
     if enabled is None:
@@ -454,7 +465,8 @@ def load_external_proxy_config() -> ExternalProxyConfig:
              == 'true')):
             enabled = False
     if not enabled:
-        return ExternalProxyConfig(enabled=False)
+        return ExternalProxyConfig(enabled=False,
+                                   require_identity=require_identity)
 
     header_format = server_config.get_nested(
         ('auth', 'external_proxy', 'header_format'), 'plaintext')
@@ -485,4 +497,5 @@ def load_external_proxy_config() -> ExternalProxyConfig:
         header_name=header_name,
         header_format=header_format,
         jwt_identity_claim=jwt_identity_claim,
+        require_identity=require_identity,
     )

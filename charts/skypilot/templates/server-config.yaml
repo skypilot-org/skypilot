@@ -16,6 +16,7 @@ data:
         header_name: {{ .Values.auth.externalProxy.headerName | quote }}
         header_format: {{ .Values.auth.externalProxy.headerFormat | quote }}
         jwt_identity_claim: {{ .Values.auth.externalProxy.jwtIdentityClaim | quote }}
+        require_identity: {{ .Values.auth.externalProxy.requireIdentity | default false }}
         {{- else }}
         # Enabled for ingress.oauth2-proxy compatibility
         enabled: true

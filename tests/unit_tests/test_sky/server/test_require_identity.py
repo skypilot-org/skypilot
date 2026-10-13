@@ -4,8 +4,8 @@ With the external auth proxy, a request that arrives without the proxy's
 identity header reaches the handlers with ``request.state.auth_user`` unset:
 RBAC is skipped, request visibility is admin scope, and the executor takes
 the user id from the request body. The middleware is opt-in
-(``SKYPILOT_REQUIRE_IDENTITY=true``) and enforces only while the proxy is
-enabled.
+(``auth.external_proxy.require_identity``) and enforces only while the proxy
+is enabled.
 
 These tests wire the real ``InitializeRequestAuthUserMiddleware``,
 ``AuthProxyMiddleware`` and ``RequireIdentityMiddleware`` in the production
@@ -13,7 +13,6 @@ order onto a small FastAPI app, stub the auth DB calls, and check what a
 client sees for each pass rule and for the refusal, over HTTP and over a
 websocket handshake.
 """
-import os
 from typing import Optional, Tuple
 from unittest import mock
 
@@ -37,10 +36,12 @@ _REMOTE = ('203.0.113.7', 50000)
 
 def _proxy_config(
         enabled: bool,
+        require: bool,
         header_name: str = _HEADER) -> server_config.ExternalProxyConfig:
     return server_config.ExternalProxyConfig(enabled=enabled,
                                              header_name=header_name,
-                                             header_format='plaintext')
+                                             header_format='plaintext',
+                                             require_identity=require)
 
 
 def _routes(app: fastapi.FastAPI) -> None:
@@ -70,23 +71,17 @@ def _app(require: bool = True,
 
     server.py adds ``RequireIdentityMiddleware`` before the authentication
     middlewares, i.e. inside them, so on the request path it runs after each
-    of them had its chance to set ``request.state.auth_user``. Both the env
-    var and the proxy config are read when the stack is built. With ``rbac``
+    of them had its chance to set ``request.state.auth_user``. The proxy
+    config is read when the stack is built. With ``rbac``
     the real ``RBACMiddleware`` is added first, i.e. innermost, as in
     server.py.
     """
     app = fastapi.FastAPI()
     _routes(app)
-    env = {
-        k: v for k, v in os.environ.items() if k != 'SKYPILOT_REQUIRE_IDENTITY'
-    }
-    if require:
-        env['SKYPILOT_REQUIRE_IDENTITY'] = 'true'
-    with mock.patch.dict(os.environ, env, clear=True), \
-            mock.patch.object(server_config,
-                              'load_external_proxy_config',
-                              return_value=_proxy_config(
-                                  proxy_enabled, header_name)):
+    with mock.patch.object(server_config,
+                           'load_external_proxy_config',
+                           return_value=_proxy_config(proxy_enabled, require,
+                                                      header_name)):
         if rbac:
             app.add_middleware(server.RBACMiddleware)
         app.add_middleware(server.RequireIdentityMiddleware)
@@ -94,7 +89,7 @@ def _app(require: bool = True,
         app.add_middleware(server.InitializeRequestAuthUserMiddleware)
         # Middleware classes are instantiated when the stack is built, which
         # Starlette defers to the first request; build and keep it now, while
-        # the env var and the config are patched.
+        # the config is patched.
         app.middleware_stack = app.build_middleware_stack()
     return app
 
@@ -193,8 +188,8 @@ def test_an_unidentified_request_skips_rbac_unless_refused_first(
         require, status):
     """The gap this middleware closes. ``RBACMiddleware`` checks the
     endpoint permission only for a request that has an auth user; one that
-    has none goes straight to the handler, with no check at all. With the
-    env var unset that is still what happens; with it set the request is
+    has none goes straight to the handler, with no check at all. Without
+    ``require_identity`` that is still what happens; with it the request is
     refused before RBAC runs. An identified request is checked either way,
     which shows RBAC is wired and the skip is real."""
     app = _app(require=require, rbac=True)
@@ -215,17 +210,17 @@ def test_an_unidentified_request_skips_rbac_unless_refused_first(
         assert (path, method) == ('/status', 'GET')
 
 
-def test_nothing_is_enforced_without_the_env_var():
+def test_nothing_is_enforced_unless_configured():
     assert _client(_app(require=False)).get('/status').status_code == 200
 
 
 def test_warns_and_enforces_nothing_when_the_proxy_is_disabled():
     """Another auth scheme refuses unauthenticated requests in that case;
-    the variable is a misconfiguration, logged once at startup."""
+    the setting is a misconfiguration, logged once at startup."""
     with mock.patch.object(server.logger, 'warning') as warning:
         app = _app(proxy_enabled=False)
     assert warning.call_count == 1
-    assert 'SKYPILOT_REQUIRE_IDENTITY' in warning.call_args.args[0]
+    assert 'require_identity' in warning.call_args.args[0]
     assert _client(app).get('/status').status_code == 200
 
 

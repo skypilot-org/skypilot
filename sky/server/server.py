@@ -779,11 +779,10 @@ class AuthProxyMiddleware(middleware_utils.ASGIMiddleware):
         return None
 
 
-# SkyPilot runs a request that no middleware identified as the server's
-# own root account, an admin, and does not check websockets at all. With
-# SKYPILOT_REQUIRE_IDENTITY=true and the external auth proxy
-# enabled, such a request is refused instead.
-_REQUIRE_IDENTITY_ENV_VAR = 'SKYPILOT_REQUIRE_IDENTITY'
+# With the external auth proxy, a request that no middleware identified is
+# served as if no auth were configured: RBAC is skipped, request visibility
+# is admin scope, and the user id comes from the request body. With
+# auth.external_proxy.require_identity set, such a request is refused.
 
 
 @middleware_utils.websocket_aware
@@ -811,13 +810,10 @@ class RequireIdentityMiddleware(middleware_utils.ASGIMiddleware):
     def __init__(self, app: starlette.types.ASGIApp) -> None:
         super().__init__(app)
         proxy_config = server_config.load_external_proxy_config()
-        self.enabled = (os.environ.get(_REQUIRE_IDENTITY_ENV_VAR,
-                                       'false').lower() == 'true' and
-                        proxy_config.enabled)
-        self.header_name = proxy_config.header_name if self.enabled else None
-        if os.environ.get(_REQUIRE_IDENTITY_ENV_VAR,
-                          'false').lower() == 'true' and not self.enabled:
-            logger.warning(f'{_REQUIRE_IDENTITY_ENV_VAR} is set but '
+        self.enabled = proxy_config.enabled and proxy_config.require_identity
+        self.header_name = proxy_config.header_name
+        if proxy_config.require_identity and not proxy_config.enabled:
+            logger.warning('auth.external_proxy.require_identity is set but '
                            'the external auth proxy is disabled; not '
                            'enforced')
 

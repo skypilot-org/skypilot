@@ -566,6 +566,72 @@ class TestLoadExternalProxyConfig:
         assert proxy_config.header_format == 'jwt'
         assert proxy_config.jwt_identity_claim == 'email'
 
+    def test_require_identity_defaults_to_false(self):
+        mock_config = _mock_server_config(
+            {'auth': {
+                'external_proxy': {
+                    'enabled': True,
+                }
+            }})
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_config):
+            with mock.patch.dict(
+                    os.environ, {
+                        'ENABLE_BASIC_AUTH': '',
+                        'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': '',
+                        'SKYPILOT_AUTH_USER_HEADER': '',
+                    }):
+                proxy_config = config.load_external_proxy_config()
+
+        assert proxy_config.enabled is True
+        assert proxy_config.require_identity is False
+
+    def test_require_identity_is_loaded(self):
+        mock_config = _mock_server_config({
+            'auth': {
+                'external_proxy': {
+                    'enabled': True,
+                    'require_identity': True,
+                }
+            }
+        })
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_config):
+            with mock.patch.dict(
+                    os.environ, {
+                        'ENABLE_BASIC_AUTH': '',
+                        'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': '',
+                        'SKYPILOT_AUTH_USER_HEADER': '',
+                    }):
+                proxy_config = config.load_external_proxy_config()
+
+        assert proxy_config.enabled is True
+        assert proxy_config.require_identity is True
+
+    def test_require_identity_is_carried_when_proxy_is_disabled(self):
+        """The middleware warns about require_identity without the proxy,
+        so the flag must survive the disabled early return."""
+        mock_config = _mock_server_config({
+            'auth': {
+                'external_proxy': {
+                    'enabled': False,
+                    'require_identity': True,
+                }
+            }
+        })
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_config):
+            with mock.patch.dict(
+                    os.environ, {
+                        'ENABLE_BASIC_AUTH': '',
+                        'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': '',
+                        'SKYPILOT_AUTH_USER_HEADER': '',
+                    }):
+                proxy_config = config.load_external_proxy_config()
+
+        assert proxy_config.enabled is False
+        assert proxy_config.require_identity is True
+
     def test_load_from_server_yaml_disabled(self):
         """Test loading disabled configuration from server.yaml."""
         mock_config = _mock_server_config(
