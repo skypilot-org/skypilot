@@ -180,7 +180,8 @@ def test_launch_fires_submission_hooks(consolidation, blob_id, raises, tmp_path,
                                    file_mounts_blob_id=blob_id,
                                    parent_job_id=None,
                                    parent_task_id=None,
-                                   root_job_id=None)
+                                   root_job_id=None,
+                                   depends_on=[])
 
     assert result == (job_ids, None)
     assert submit.call_args.kwargs['file_mounts_blob_id'] == blob_id
