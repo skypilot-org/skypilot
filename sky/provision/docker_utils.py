@@ -38,6 +38,64 @@ DOCKER_SOCKET_NOT_READY_STR_2 = (
 
 _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 30
 
+# Packages SkyPilot needs inside a container on a VM. The Kubernetes pod
+# setup (kubernetes-ray.yml.j2) installs the same set.
+CONTAINER_PACKAGES = 'rsync curl wget patch openssh-server'
+
+# Runs in the container as root. Installs only what the container does not
+# already have, so an image that ships every dependency needs no apt mirror.
+#
+# * `python3-pip` is installed only when the container has no `python3` on
+#   PATH at all. The package depends on the system `python3` and, without
+#   `--no-install-recommends`, pulls in `python3-dev` and friends: on a
+#   conda-only Ubuntu 24.04 image that is 26 packages and 78 MB the runtime
+#   never uses (the SkyPilot venv is created by uv with its own interpreter).
+#   An image without any `python3` still gets one, which is what the user
+#   env creation in sky/skylet/constants.py expects.
+# * FUSE is needed for storage mounts (the mount script installs gcsfuse
+#   without the fuse package). `fuse3` declares `Breaks: fuse` on Ubuntu
+#   22.04+ and Debian 12, so asking apt for `fuse` on an image that has
+#   `fuse3` removes `fuse3`. Mirror the Kubernetes pod setup instead: leave an
+#   image's `fuse` or `fuse3` alone, and when neither is present install
+#   `fuse` first and then `fuse3` with the rest. apt's Breaks resolution then
+#   removes the `fuse` package but keeps `libfuse2`, so both ABIs end up
+#   available. The two apt calls are deliberate: one call for both fails.
+# * The lock serialises concurrent setups (e.g. several SkyPilot processes
+#   provisioning the same node). `apt-get update` failing is tolerated
+#   because it fails as a whole when any one configured repository is
+#   unusable -- an expired release file on an end-of-life suite, say -- even
+#   though the packages below all resolve from the suites that did refresh.
+#   The install is what decides: it fails loudly, with the name of the
+#   package it could not get.
+# * `--force-confnew` suppresses the fuse configuration prompt.
+#
+# `${Status}` must reach dpkg-query literally: the backslash keeps the
+# inner shell from expanding it. A package whose files were removed but
+# whose config files remain (`deinstall ok config-files`) counts as
+# missing.
+CONTAINER_PACKAGES_INSTALL_SCRIPT = (
+    'exec 200>/var/tmp/sky_apt.lock; '
+    'flock -x -w 120 200 || exit 1; '
+    'export DEBIAN_FRONTEND=noninteractive; '
+    'installed() { '
+    'case "$(dpkg-query -W -f "\\${Status}" "$1" 2>/dev/null)" in '
+    '*" ok installed") return 0 ;; *) return 1 ;; esac; }; '
+    'missing=""; '
+    f'for pkg in {CONTAINER_PACKAGES}; do '
+    'installed "$pkg" || missing="$missing $pkg"; done; '
+    'command -v python3 >/dev/null 2>&1 || missing="$missing python3-pip"; '
+    'fuse_first=""; '
+    'if ! installed fuse && ! installed fuse3; then '
+    'fuse_first=fuse; missing="$missing fuse3"; fi; '
+    'if [ -z "$fuse_first$missing" ]; then exit 0; fi; '
+    '{ apt-get -yq update || echo "apt-get update failed; '
+    'continuing with the existing package index"; } && '
+    '{ [ -z "$fuse_first" ] || '
+    'apt-get -o DPkg::Options::=--force-confnew install -y $fuse_first; } && '
+    'apt-get -o DPkg::Options::=--force-confnew install -y $missing')
+CONTAINER_PACKAGES_INSTALL_CMD = (
+    f'bash -lc {shlex.quote(CONTAINER_PACKAGES_INSTALL_SCRIPT)}')
+
 # Install AWS CLI v2 (not v1 from pip) as it's required for ECR authentication
 # AWS CLI v2 is installed as a standalone binary, not a Python package. See:
 # https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
@@ -468,25 +526,7 @@ class DockerInitializer:
             'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;',
             run_env='docker')
         # Install dependencies.
-        cmd = (
-            'bash -lc \''
-            'exec 200>/var/tmp/sky_apt.lock; '
-            'flock -x -w 120 200 || exit 1; '
-            'export DEBIAN_FRONTEND=noninteractive; '
-            # `apt-get update` fails as a whole when any one configured
-            # repository is unusable -- an expired release file on an
-            # end-of-life suite, say -- even though the packages below all
-            # resolve from the suites that did refresh. Keep going and let
-            # the install be what decides: it fails loudly, and with the
-            # name of the package it could not get.
-            '{ apt-get -yq update || echo "apt-get update failed; '
-            'continuing with the existing package index"; } && '
-            # Our mount script will install gcsfuse without fuse package.
-            # We need to install fuse package first to enable storage mount.
-            # The dpkg option is to suppress the prompt for fuse installation.
-            'apt-get -o DPkg::Options::=--force-confnew install -y '
-            'rsync curl wget patch openssh-server python3-pip fuse\'')
-        self._run(cmd, run_env='docker')
+        self._run(CONTAINER_PACKAGES_INSTALL_CMD, run_env='docker')
 
         # Copy local authorized_keys to docker container.
         # Stop and disable jupyter service. This is to avoid port conflict on

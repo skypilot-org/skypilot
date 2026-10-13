@@ -1,7 +1,12 @@
 """Tests for docker container initialization on a remote node."""
+import importlib.util
+import json
 import os
 from pathlib import Path
+import shlex
+import shutil
 import subprocess
+import sys
 from unittest import mock
 
 import pytest
@@ -194,3 +199,231 @@ docker() {
         assert (tmp_path / 'docker-command').read_text().strip() == (
             f'login {_ACR_SERVER} --username {docker_utils.ACR_TOKEN_USERNAME} '
             '--password-stdin')
+
+
+def _plain_docker_config():
+    return {
+        'container_name': 'sky_container',
+        'image': 'myimage:latest',
+        'pull_before_run': True,
+    }
+
+
+def test_initialize_runs_container_packages_install():
+    runs = []
+    initializer = _make_initializer(_plain_docker_config(), runs)
+    initializer.initialize()
+    install = [cmd for cmd, _ in runs if 'sky_apt.lock' in cmd]
+    assert len(install) == 1
+    # `_run` wraps the command in `docker exec ... /bin/bash -c <login
+    # shell -c <cmd>>`; peel both layers and check the command is intact.
+    login_shell = shlex.split(install[0])[-1]
+    wrapped = shlex.split(login_shell)[-1]
+    assert wrapped.endswith(
+        f'({docker_utils.CONTAINER_PACKAGES_INSTALL_CMD})'), wrapped
+    # The script itself must survive the quoting unchanged.
+    assert shlex.split(docker_utils.CONTAINER_PACKAGES_INSTALL_CMD) == [
+        'bash', '-lc', docker_utils.CONTAINER_PACKAGES_INSTALL_SCRIPT
+    ]
+
+
+# The install script is exercised against a fake dpkg/apt-get (see
+# fake_dpkg_apt.py) that keeps a package database and emulates the Debian
+# semantics the script has to cope with. The tests below assert on the
+# image state after the script ran and on the conditions from the issue:
+# an image's fuse3 must survive, a non-system python3 must not get a
+# system one next to it, and a complete image must not need apt at all.
+# They deliberately do not check which apt-get commands were run.
+_FAKE_TOOLS = Path(__file__).parent / 'fake_dpkg_apt.py'
+# Loaded by path: the tests directory is not a package.
+_spec = importlib.util.spec_from_file_location('fake_dpkg_apt', _FAKE_TOOLS)
+fake_dpkg_apt = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(fake_dpkg_apt)
+_PACKAGES = docker_utils.CONTAINER_PACKAGES.split()
+# What the K8s pod setup leaves in an image: fuse3 for the FUSE 3 ABI
+# (fusermount3) plus libfuse2 for FUSE 2 clients.
+_FUSE_BOTH_ABIS = {'fuse3', 'libfuse2'}
+# Ordinary utilities the script may use. They are linked into the fake
+# PATH from the host so that the stubs stay the only dpkg, apt-get and
+# python3 visible to the script.
+_TOOLBOX = ('awk', 'basename', 'cat', 'cut', 'dirname', 'env', 'grep', 'head',
+            'id', 'mkdir', 'printf', 'rm', 'sed', 'sh', 'sort', 'tail', 'tee',
+            'touch', 'tr', 'uniq', 'wc', 'xargs')
+
+
+class _FakeImage:
+    """A container image state the install script can be run against."""
+
+    def __init__(self,
+                 tmp_path: Path,
+                 installed=(),
+                 removed=(),
+                 known=(),
+                 python3_on_path: bool = False):
+        self.root = tmp_path
+        self.bin = tmp_path / 'bin'
+        self.bin.mkdir()
+        self.tools = tmp_path / 'tools'
+        self.tools.mkdir()
+        for tool in _TOOLBOX:
+            host_tool = shutil.which(tool)
+            if host_tool is not None:
+                (self.tools / tool).symlink_to(host_tool)
+        self.db = tmp_path / 'dpkg.json'
+        self.apt_log = tmp_path / 'apt-get.log'
+        status = {}
+        status.update({p: fake_dpkg_apt.NOT_INSTALLED for p in known})
+        status.update({p: fake_dpkg_apt.CONFIG_FILES for p in removed})
+        status.update({p: fake_dpkg_apt.INSTALLED for p in installed})
+        self.db.write_text(json.dumps(status))
+        for tool in ('dpkg-query', 'dpkg', 'apt-get'):
+            self._stub(
+                tool, f'exec "$SKY_FAKE_PYTHON" "{_FAKE_TOOLS}" '
+                f'{tool} "$@"\n')
+        self._stub('flock', 'exit 0\n')
+        if python3_on_path:
+            self._stub('python3', 'exit 0\n')
+
+    def _stub(self, name: str, body: str) -> None:
+        path = self.bin / name
+        path.write_text('#!/bin/sh\n' + body)
+        path.chmod(0o755)
+
+    def run(self, **extra_env) -> subprocess.CompletedProcess:
+        script = docker_utils.CONTAINER_PACKAGES_INSTALL_SCRIPT
+        # The lock file is created on the host otherwise.
+        assert '/var/tmp/sky_apt.lock' in script
+        script = script.replace('/var/tmp/sky_apt.lock',
+                                str(self.root / 'apt.lock'))
+        # PATH holds the stubs and the toolbox only, so the host's
+        # python3, dpkg and apt-get are invisible. A non-login `bash -c`
+        # sources no profile that could add to it.
+        env = {
+            'PATH': f'{self.bin}:{self.tools}',
+            'HOME': str(self.root),
+            'SKY_FAKE_PYTHON': sys.executable,
+            'SKY_FAKE_DPKG_DB': str(self.db),
+            'SKY_FAKE_APT_LOG': str(self.apt_log),
+            'SKY_FAKE_BIN': str(self.bin),
+            **extra_env,
+        }
+        self.apt_log.write_text('')
+        return subprocess.run(['/bin/bash', '-c', script],
+                              env=env,
+                              capture_output=True,
+                              text=True,
+                              check=False)
+
+    def status(self):
+        return json.loads(self.db.read_text())
+
+    def installed(self):
+        return {
+            p for p, s in self.status().items() if s == fake_dpkg_apt.INSTALLED
+        }
+
+    def apt_commands(self):
+        """The apt-get subcommands run (`update`, `install`), in order."""
+        return [
+            json.loads(line)['command']
+            for line in self.apt_log.read_text().splitlines()
+        ]
+
+    def has_python3(self) -> bool:
+        return (self.bin / 'python3').exists()
+
+
+def _complete_image(tmp_path, fuse='fuse3', **kwargs):
+    """An image that already ships every dependency."""
+    return _FakeImage(tmp_path,
+                      installed=_PACKAGES + [fuse],
+                      known=['fuse', 'fuse3', 'python3-pip'],
+                      python3_on_path=True,
+                      **kwargs)
+
+
+def test_bare_image_gets_every_dependency(tmp_path):
+    image = _FakeImage(tmp_path)
+    result = image.run()
+    assert result.returncode == 0, result.stderr
+    assert set(_PACKAGES) <= image.installed()
+    assert image.has_python3()
+    assert _FUSE_BOTH_ABIS <= image.installed()
+
+
+@pytest.mark.parametrize('fuse', ['fuse3', 'fuse'])
+def test_complete_image_needs_no_apt(tmp_path, fuse):
+    image = _complete_image(tmp_path, fuse=fuse)
+    before = image.status()
+    result = image.run()
+    assert result.returncode == 0, result.stderr
+    assert image.apt_commands() == []
+    assert image.status() == before
+
+
+@pytest.mark.parametrize('missing', _PACKAGES)
+def test_existing_fuse3_survives_installing_other_packages(tmp_path, missing):
+    image = _FakeImage(tmp_path,
+                       installed=[p for p in _PACKAGES if p != missing] +
+                       ['fuse3'],
+                       known=['fuse', missing],
+                       python3_on_path=True)
+    result = image.run()
+    assert result.returncode == 0, result.stderr
+    assert missing in image.installed()
+    assert 'fuse3' in image.installed()
+
+
+def test_non_system_python3_is_not_shadowed_by_a_system_one(tmp_path):
+    # A conda or venv python3 on PATH, with one package left to install so
+    # that apt does run.
+    image = _FakeImage(tmp_path,
+                       installed=_PACKAGES[1:] + ['fuse3'],
+                       python3_on_path=True)
+    result = image.run()
+    assert result.returncode == 0, result.stderr
+    assert _PACKAGES[0] in image.installed()
+    assert 'python3' not in image.installed()
+    assert 'python3-pip' not in image.installed()
+
+
+def test_image_without_python3_gets_one(tmp_path):
+    image = _FakeImage(tmp_path, installed=_PACKAGES + ['fuse3'])
+    result = image.run()
+    assert result.returncode == 0, result.stderr
+    assert image.has_python3()
+    assert 'fuse3' in image.installed()
+
+
+def test_fuse_removed_but_not_purged_counts_as_missing(tmp_path):
+    image = _FakeImage(tmp_path,
+                       installed=_PACKAGES,
+                       removed=['fuse'],
+                       python3_on_path=True)
+    result = image.run()
+    assert result.returncode == 0, result.stderr
+    assert image.installed() & {'fuse', 'fuse3'}
+
+
+def test_second_run_on_the_same_image_needs_no_apt(tmp_path):
+    image = _FakeImage(tmp_path)
+    assert image.run().returncode == 0
+    after_first = image.status()
+    result = image.run()
+    assert result.returncode == 0, result.stderr
+    assert image.apt_commands() == []
+    assert image.status() == after_first
+
+
+def test_failed_apt_update_does_not_stop_the_install(tmp_path):
+    image = _FakeImage(tmp_path)
+    result = image.run(SKY_FAKE_APT_UPDATE_FAILS='1')
+    assert result.returncode == 0, result.stderr
+    assert 'update' in image.apt_commands()
+    assert set(_PACKAGES) <= image.installed()
+
+
+def test_failed_install_fails_the_setup(tmp_path):
+    image = _FakeImage(tmp_path)
+    result = image.run(SKY_FAKE_APT_UNAVAILABLE=_PACKAGES[0])
+    assert result.returncode != 0
