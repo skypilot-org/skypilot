@@ -152,3 +152,15 @@ def test_requested_workspace_is_resolved_before_the_resolver(server_workspaces):
                         return_value={'team-a'}):
         users_server.get_user_workspace(_request(user), requested='archive')
     assert resolve.call_args.kwargs['requested'] == 'team-a'
+
+
+def test_workspace_filter_narrows_by_name(monkeypatch):
+    monkeypatch.setattr(workspaces_core, '_load_workspaces', lambda: _REUSED)
+    ids = ['default', 'team-a', 'ws-0123456789ab']
+    assert workspaces_core.filter_workspace_ids_by_name(ids,
+                                                        'arch') == ['team-a']
+    # Matched against names, so 'team' finds the workspace named 'team-a',
+    # not the one whose id is 'team-a'.
+    assert workspaces_core.filter_workspace_ids_by_name(
+        ids, 'TEAM') == ['ws-0123456789ab']
+    assert workspaces_core.filter_workspace_ids_by_name(ids, 'nope') == []

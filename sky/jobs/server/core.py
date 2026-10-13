@@ -1747,6 +1747,12 @@ def queue_v2(
     accessible_workspaces = list(
         workspaces_core.get_accessible_workspace_names(
             action=workspace_constants.WORKSPACE_ACTION_READ))
+    if workspace_match is not None:
+        # The filter is typed against workspace names, while the controller
+        # stores ids.
+        accessible_workspaces = workspaces_core.filter_workspace_ids_by_name(
+            accessible_workspaces, workspace_match)
+        workspace_match = None
 
     if handle.is_grpc_enabled_with_flag:
         try:

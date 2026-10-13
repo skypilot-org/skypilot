@@ -3,7 +3,7 @@
 import copy
 from dataclasses import dataclass
 import secrets
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 from sky import check as sky_check
 from sky import exceptions
@@ -129,6 +129,22 @@ def get_accessible_workspace_names(
         common_utils.get_current_user().id,
         set(workspaces.keys()),
         action=action)
+
+
+def filter_workspace_ids_by_name(workspace_ids: Iterable[str],
+                                 name_match: str) -> List[str]:
+    """Returns the ids whose user-facing name contains `name_match`.
+
+    For a workspace filter a user typed: stored rows and the jobs controller
+    only know ids, so callers narrow by id set instead of passing the text.
+    """
+    workspaces = _load_workspaces()
+    name_match = name_match.lower()
+    return [
+        workspace_id for workspace_id in workspace_ids
+        if name_match in skypilot_config.get_workspace_name(
+            workspace_id, workspaces).lower()
+    ]
 
 
 def get_workspace_access_sets() -> Tuple[Set[str], Set[str]]:
