@@ -36,6 +36,22 @@ export const evaluateCondition = (item, filter) => {
     }
   }
 
+  // Workspace filters are typed against names; `workspace` is the id.
+  if (propertyLower === 'workspace') {
+    const itemValue = (item.workspace_name || item.workspace)
+      ?.toString()
+      .toLowerCase();
+    const filterValue = value.toString().toLowerCase();
+    switch (operator) {
+      case '=':
+        return itemValue === filterValue;
+      case ':':
+        return itemValue?.includes(filterValue);
+      default:
+        return true;
+    }
+  }
+
   // Special handling for labels filtering
   if (propertyLower === 'labels') {
     const labels = item.labels || {};

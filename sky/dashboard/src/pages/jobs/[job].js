@@ -1750,7 +1750,7 @@ function JobDetailsContent({
             href="/workspaces"
             className="text-gray-700 hover:text-blue-600 hover:underline"
           >
-            {jobData.workspace || 'default'}
+            {jobData.workspace_name || jobData.workspace || 'default'}
           </Link>
         </div>
       </div>

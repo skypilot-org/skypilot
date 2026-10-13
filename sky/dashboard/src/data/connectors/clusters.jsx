@@ -161,6 +161,7 @@ export async function getClusters({
         time: new Date(cluster.launched_at * 1000),
         num_nodes: cluster.nodes,
         workspace: cluster.workspace,
+        workspace_name: cluster.workspace_name || cluster.workspace,
         autostop: cluster.autostop,
         last_event: cluster.last_event,
         statusTooltip:
@@ -311,7 +312,8 @@ export async function streamClusterJobLogs({
         job_id: jobId,
         tail,
         override_skypilot_config: {
-          active_workspace: workspace || 'default',
+          // The record's workspace id; exact, never resolved as a name.
+          active_workspace_id: workspace || 'default',
         },
       },
       onNewLog,
@@ -369,7 +371,7 @@ export async function downloadJobLogs({
       cluster_name: clusterName,
       job_ids: jobIds ? jobIds.map(String) : null, // Convert to strings as expected by server
       override_skypilot_config: {
-        active_workspace: workspace || 'default',
+        active_workspace_id: workspace || 'default',
       },
     });
 
@@ -415,7 +417,7 @@ export async function getClusterJobs({ clusterName, workspace }) {
       cluster_name: clusterName,
       all_users: true,
       override_skypilot_config: {
-        active_workspace: workspace,
+        active_workspace_id: workspace,
       },
     });
 

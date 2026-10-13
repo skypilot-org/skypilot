@@ -6,6 +6,38 @@ import { getWorkspaces } from '@/data/connectors/workspaces';
 // WORKSPACE). A cluster/job with no explicit workspace lands here.
 export const DEFAULT_WORKSPACE = 'default';
 
+// Same rule as the server's workspace names (check_workspace_name_is_valid).
+const WORKSPACE_NAME_REGEX = /^[a-z]([-_a-z0-9]*[a-z0-9])?$/;
+const WORKSPACE_NAME_MAX_LENGTH = 63;
+
+/**
+ * The user-facing name of a workspace. Keys of the `GET /workspaces` map are
+ * immutable ids; send ids to APIs and show this to users.
+ */
+export function getWorkspaceName(workspacesConfig, workspaceId) {
+  if (!workspaceId || workspaceId === DEFAULT_WORKSPACE) {
+    return workspaceId || DEFAULT_WORKSPACE;
+  }
+  return workspacesConfig?.[workspaceId]?.name || workspaceId;
+}
+
+/** Why `name` is not a valid workspace name, or null if it is. */
+export function workspaceNameError(name) {
+  if (!name) {
+    return 'Name is required.';
+  }
+  if (name.length > WORKSPACE_NAME_MAX_LENGTH) {
+    return `Name must be at most ${WORKSPACE_NAME_MAX_LENGTH} characters.`;
+  }
+  if (!WORKSPACE_NAME_REGEX.test(name)) {
+    return (
+      'Use lowercase letters, numbers, dashes and underscores; start with ' +
+      'a letter and end with a letter or number.'
+    );
+  }
+  return null;
+}
+
 /**
  * Shared source of per-workspace writability for the dashboard.
  *
@@ -23,7 +55,7 @@ export const DEFAULT_WORKSPACE = 'default';
  * for a visual gate.
  *
  * @returns {{workspacesConfig: Object, isWorkspaceWritable: (ws: string) =>
- *   boolean, loaded: boolean}}
+ *   boolean, workspaceName: (ws: string) => string, loaded: boolean}}
  */
 export function useWorkspacesConfig() {
   // One synchronous cache peek at mount, shared by both bits of initial state.
@@ -62,5 +94,7 @@ export function useWorkspacesConfig() {
     return workspacesConfig[ws || DEFAULT_WORKSPACE]?.writable !== false;
   };
 
-  return { workspacesConfig, isWorkspaceWritable, loaded };
+  const workspaceName = (ws) => getWorkspaceName(workspacesConfig, ws);
+
+  return { workspacesConfig, isWorkspaceWritable, workspaceName, loaded };
 }

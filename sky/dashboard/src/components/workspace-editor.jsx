@@ -25,6 +25,7 @@ import {
   TrashIcon,
   CheckIcon,
   RotateCwIcon,
+  PencilIcon,
   User,
 } from 'lucide-react';
 import {
@@ -49,6 +50,8 @@ import { CLOUD_CANONICALIZATIONS } from '@/data/connectors/constants';
 import { getUsers } from '@/data/connectors/users';
 import { dashboardCache } from '@/lib/cache';
 import { apiClient } from '@/data/connectors/client';
+import { Input } from '@/components/ui/input';
+import { workspaceNameError } from '@/hooks/useWorkspacesConfig';
 
 // Success display component
 const SuccessDisplay = ({ message }) => {
@@ -262,17 +265,21 @@ const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
 //
 // Plugin slots:
 // - `workspaces.detail.allowedUser.role` replaces the role badge on each row.
-//   Context: { workspaceName, entry, isAdmin, onChanged }, where `entry` is the
-//   allowed_users entry (a username or user id) and `isAdmin` is true for
-//   users with the global admin role.
+//   Context: { workspaceName, workspaceDisplayName, entry, isAdmin, onChanged },
+//   where `entry` is the allowed_users entry (a username or user id) and
+//   `isAdmin` is true for users with the global admin role.
 // - `workspaces.detail.allowedUsers.actions` renders below the list.
-//   Context: { workspaceName, allowedUsers, onChanged }, where
+//   Context: { workspaceName, workspaceDisplayName, allowedUsers, onChanged },
+//   where
 //   `allowedUsers` is the workspace's own `allowed_users` (usernames or user
 //   ids), not the displayed list, which also shows every global admin.
+// `workspaceName` is the workspace id (send it to APIs);
+// `workspaceDisplayName` is its user-facing name (show it to users).
 // Plugins call `onChanged()` after changing the workspace so the page reloads
 // its config.
 export const DetailedAllowedUsers = ({
   workspaceName,
+  workspaceDisplayName = workspaceName,
   workspaceConfig,
   allUsers,
   writable = true,
@@ -306,6 +313,7 @@ export const DetailedAllowedUsers = ({
       name="workspaces.detail.allowedUsers.actions"
       context={{
         workspaceName,
+        workspaceDisplayName,
         allowedUsers: allowedUsersFromConfig,
         onChanged,
       }}
@@ -343,7 +351,13 @@ export const DetailedAllowedUsers = ({
               <span className="font-medium text-gray-700">{username}</span>
               <PluginSlot
                 name="workspaces.detail.allowedUser.role"
-                context={{ workspaceName, entry: username, isAdmin, onChanged }}
+                context={{
+                  workspaceName,
+                  workspaceDisplayName,
+                  entry: username,
+                  isAdmin,
+                  onChanged,
+                }}
                 wrapperClassName="contents"
                 fallback={
                   isAdmin ? (
@@ -368,8 +382,40 @@ export const DetailedAllowedUsers = ({
   );
 };
 
+function workspaceYaml(key, config) {
+  if (Object.keys(config).length === 0) {
+    return `${key}:\n  # Empty workspace configuration - uses all accessible infrastructure\n`;
+  }
+  return yaml.dump(
+    { [key]: config },
+    {
+      indent: 2,
+      lineWidth: -1,
+      noRefs: true,
+      skipInvalid: true,
+      flowLevel: -1,
+    }
+  );
+}
+
+// `workspaceName` is the workspace id (its URL key) for an existing
+// workspace, and the name being created for a new one.
 export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const router = useRouter();
+  // The stored user-facing name. Kept out of the YAML: renaming goes through
+  // the Rename dialog, which warns about configs still using the old name.
+  const [storedName, setStoredName] = useState(null);
+  const displayName = isNewWorkspace
+    ? workspaceName
+    : workspaceName === 'default'
+      ? 'default'
+      : storedName || workspaceName;
+  const [renameState, setRenameState] = useState({
+    open: false,
+    value: '',
+    error: null,
+    saving: false,
+  });
   const [workspaceConfig, setWorkspaceConfig] = useState({});
   const [originalConfig, setOriginalConfig] = useState({});
   // Server-computed read-only-visibility flag (accounts for the org-wide
@@ -437,9 +483,11 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         const {
           writable: writableFlag,
           read_only: readOnly,
-          ...config
+          ...storedConfig
         } = allWorkspaces[workspaceName] || {};
+        const { name, ...config } = storedConfig;
         setOriginalConfig(config);
+        setStoredName(name || null);
         setIsReadOnlyVisible(readOnly === true);
         setIsWritable(writableFlag !== false);
         setAllUsers(usersResponse || []);
@@ -447,22 +495,13 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
           return;
         }
         setWorkspaceConfig(config);
-        baseConfigRef.current = config;
+        baseConfigRef.current = storedConfig;
 
-        // Format as YAML with workspace name as top-level key
-        const fullConfig = { [workspaceName]: config };
-        let yamlOutput;
-        if (Object.keys(config).length === 0) {
-          yamlOutput = `${workspaceName}:\n  # Empty workspace configuration - uses all accessible infrastructure\n`;
-        } else {
-          yamlOutput = yaml.dump(fullConfig, {
-            indent: 2,
-            lineWidth: -1,
-            noRefs: true,
-            skipInvalid: true,
-            flowLevel: -1,
-          });
-        }
+        // Format as YAML with the workspace name as top-level key
+        const yamlOutput = workspaceYaml(
+          workspaceName === 'default' ? 'default' : name || workspaceName,
+          config
+        );
         serverYamlRef.current = yamlOutput;
         draftYamlRef.current = yamlOutput;
         setYamlValue(yamlOutput);
@@ -490,7 +529,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
             {
               allUsers: true,
               skipFinished: true,
-              workspaceMatch: workspaceName,
+              // Counted by id below. Not filtered by `workspaceMatch`, which
+              // matches names: the name may not be loaded yet, and a rename
+              // must not refetch these stats.
               fields: ['workspace', 'status'],
             },
           ]),
@@ -581,14 +622,14 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         setWorkspaceConfig({});
       } else if (keys.length === 1) {
         const parsedWorkspaceName = keys[0];
-        if (parsedWorkspaceName !== workspaceName) {
+        if (parsedWorkspaceName !== displayName) {
           setYamlError(
-            `Workspace name cannot be changed. Expected "${workspaceName}" but found "${parsedWorkspaceName}".`
+            `The top-level key must stay "${displayName}" (found "${parsedWorkspaceName}"). Use Rename to rename the workspace.`
           );
           return;
         }
         // Extract the configuration for this workspace
-        const config = parsed[workspaceName] || {};
+        const config = parsed[displayName] || {};
         setWorkspaceConfig(config);
       } else {
         setYamlError(
@@ -617,23 +658,28 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
       // Additional validation: ensure workspace name hasn't been changed in YAML
       const parsed = yaml.load(yamlValue) || {};
       const keys = Object.keys(parsed);
-      if (keys.length > 0 && keys[0] !== workspaceName) {
+      if (keys.length > 0 && keys[0] !== displayName) {
         throw new Error(
-          `Workspace name cannot be changed. Expected "${workspaceName}".`
+          `The top-level key must stay "${displayName}". Use Rename to rename the workspace.`
         );
       }
 
       if (isNewWorkspace) {
-        await createWorkspace(workspaceName, workspaceConfig);
+        const created = await createWorkspace(workspaceName, workspaceConfig);
         setSuccess('Workspace created successfully!');
-        // Navigate to the created workspace
+        // The server keys the new workspace by a generated id.
+        const createdId =
+          Object.keys(created || {}).find(
+            (id) => created[id]?.name === workspaceName
+          ) || workspaceName;
         setTimeout(() => {
-          router.push(`/workspaces/${workspaceName}`);
+          router.push(`/workspaces/${createdId}`);
         }, 1500);
       } else {
+        const configToSave = withStoredName(workspaceConfig);
         await updateWorkspace(
           workspaceName,
-          workspaceConfig,
+          configToSave,
           force ? undefined : baseConfigRef.current
         );
         setSuccess('Workspace updated successfully!');
@@ -642,7 +688,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         // The server stores the config as sent, so that is the new baseline.
         // Not re-read: a change landing after this save must still show up
         // as a conflict on the next Apply, not become the baseline.
-        baseConfigRef.current = workspaceConfig;
+        baseConfigRef.current = configToSave;
         // Refresh stats after successful save
         fetchWorkspaceStats();
       }
@@ -693,25 +739,18 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     });
   };
 
+  // The stored config (what `expected_config` must match) is the editable
+  // config plus the name, which is kept out of the YAML.
+  const withStoredName = (config, name = storedName) =>
+    name ? { ...config, name } : config;
+
   const handleDiscard = () => {
     // Reset to original configuration
     setWorkspaceConfig(originalConfig);
-    baseConfigRef.current = originalConfig;
+    baseConfigRef.current = withStoredName(originalConfig);
 
     // Reset YAML value to original
-    const fullConfig = { [workspaceName]: originalConfig };
-    let yamlOutput;
-    if (Object.keys(originalConfig).length === 0) {
-      yamlOutput = `${workspaceName}:\n  # Empty workspace configuration - uses all accessible infrastructure\n`;
-    } else {
-      yamlOutput = yaml.dump(fullConfig, {
-        indent: 2,
-        lineWidth: -1,
-        noRefs: true,
-        skipInvalid: true,
-        flowLevel: -1,
-      });
-    }
+    const yamlOutput = workspaceYaml(displayName, originalConfig);
     serverYamlRef.current = yamlOutput;
     draftYamlRef.current = yamlOutput;
     setYamlValue(yamlOutput);
@@ -720,6 +759,42 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     setYamlError(null);
     setError(null);
     setSuccess(null);
+  };
+
+  const handleRename = async () => {
+    const newName = renameState.value.trim();
+    const nameError = workspaceNameError(newName);
+    if (nameError) {
+      setRenameState((prev) => ({ ...prev, error: nameError }));
+      return;
+    }
+    setRenameState((prev) => ({ ...prev, saving: true, error: null }));
+    try {
+      // Only `name` changes, so the server allows it while clusters and
+      // jobs are running.
+      const renamed = { ...baseConfigRef.current, name: newName };
+      await updateWorkspace(workspaceName, renamed, baseConfigRef.current);
+      dashboardCache.invalidate(getWorkspaces);
+      // The server stores the config as sent, so that is the new baseline,
+      // as in handleSave. A re-read right after the write can be stale.
+      baseConfigRef.current = renamed;
+      setStoredName(newName);
+      const yamlOutput = workspaceYaml(newName, originalConfig);
+      serverYamlRef.current = yamlOutput;
+      draftYamlRef.current = yamlOutput;
+      setYamlValue(yamlOutput);
+      setRenameState({ open: false, value: '', error: null, saving: false });
+      setSuccess(`Workspace renamed to "${newName}".`);
+    } catch (err) {
+      setRenameState((prev) => ({
+        ...prev,
+        saving: false,
+        error:
+          err?.type === 'WorkspaceConfigConflictError'
+            ? 'The workspace changed since this page loaded. Refresh and try again.'
+            : err?.message || String(err),
+      }));
+    }
   };
 
   const handleRefresh = async () => {
@@ -740,7 +815,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
 
   const title = isNewWorkspace
     ? 'Create New Workspace | SkyPilot Dashboard'
-    : `Workspace: ${workspaceName} | SkyPilot Dashboard`;
+    : `Workspace: ${displayName} | SkyPilot Dashboard`;
 
   return (
     <>
@@ -763,7 +838,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
               }
               className="text-sky-blue hover:underline"
             >
-              {isNewWorkspace ? 'New Workspace' : workspaceName}
+              {isNewWorkspace ? 'New Workspace' : displayName}
             </Link>
             {hasChanges && (
               <span className="ml-3 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded">
@@ -791,6 +866,29 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                 >
                   <RotateCwIcon className="w-4 h-4 mr-1.5" />
                   Refresh
+                </button>
+              )}
+
+              {!isNewWorkspace && workspaceName !== 'default' && (
+                <button
+                  onClick={() =>
+                    setRenameState({
+                      open: true,
+                      value: displayName,
+                      error: null,
+                      saving: false,
+                    })
+                  }
+                  disabled={hasChanges || saving || deleteState.deleting}
+                  title={
+                    hasChanges
+                      ? 'Apply or discard the YAML changes first'
+                      : undefined
+                  }
+                  className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center disabled:text-gray-400"
+                >
+                  <PencilIcon className="w-4 h-4 mr-1.5" />
+                  Rename
                 </button>
               )}
 
@@ -839,7 +937,12 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                         <div className="flex items-center justify-between">
                           <div>
                             <span className="font-semibold">Workspace:</span>{' '}
-                            {workspaceName}
+                            {displayName}
+                            {displayName !== workspaceName && (
+                              <span className="ml-2 text-xs text-gray-500">
+                                ID: {workspaceName}
+                              </span>
+                            )}
                           </div>
                           <WorkspaceBadge
                             isPrivate={originalConfig.private === true}
@@ -910,6 +1013,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                       {/* Detailed allowed users for private workspaces */}
                       <DetailedAllowedUsers
                         workspaceName={workspaceName}
+                        workspaceDisplayName={displayName}
                         workspaceConfig={originalConfig}
                         allUsers={allUsers}
                         writable={isWritable}
@@ -965,7 +1069,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           </h4>
                           <div className="p-3 bg-gray-50 border rounded-lg">
                             <pre className="text-xs font-mono text-gray-600 whitespace-pre-wrap">
-                              {`${workspaceName || 'my-workspace'}:
+                              {`${displayName || 'my-workspace'}:
   private: true
   # who can read it (default: allowed_users = members only; all = anyone)
   read_access: all
@@ -1021,7 +1125,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                 Workspace changed since you started editing
               </DialogTitle>
               <DialogDescription>
-                Workspace &quot;{workspaceName}&quot; was changed after you
+                Workspace &quot;{displayName}&quot; was changed after you
                 started editing, for example by another admin or in another tab.
                 Applying replaces its whole configuration with your YAML and
                 would undo those changes.
@@ -1053,13 +1157,84 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
           </DialogContent>
         </Dialog>
 
+        <Dialog
+          open={renameState.open}
+          onOpenChange={(open) => {
+            if (!open && !renameState.saving) {
+              setRenameState({
+                open: false,
+                value: '',
+                error: null,
+                saving: false,
+              });
+            }
+          }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader className="">
+              <DialogTitle>Rename Workspace</DialogTitle>
+              <DialogDescription>
+                Clusters and managed jobs keep running. Configs and scripts that
+                still use the name &quot;{displayName}&quot; will stop working,
+                or reach whichever workspace takes that name next. Tell the
+                members of this workspace before renaming it.
+              </DialogDescription>
+            </DialogHeader>
+            <Input
+              value={renameState.value}
+              onChange={(e) =>
+                setRenameState((prev) => ({
+                  ...prev,
+                  value: e.target.value,
+                  error: null,
+                }))
+              }
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleRename();
+                }
+              }}
+              placeholder="New workspace name"
+              autoFocus
+            />
+            {renameState.error && (
+              <p className="text-sm text-red-600">{renameState.error}</p>
+            )}
+            <DialogFooter className="">
+              <Button
+                variant="outline"
+                onClick={() =>
+                  setRenameState({
+                    open: false,
+                    value: '',
+                    error: null,
+                    saving: false,
+                  })
+                }
+                disabled={renameState.saving}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleRename}
+                disabled={
+                  renameState.saving || renameState.value.trim() === displayName
+                }
+                className="bg-sky-600 hover:bg-sky-700 text-white"
+              >
+                {renameState.saving ? 'Renaming...' : 'Rename'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <Dialog open={deleteState.showDialog} onOpenChange={handleCancelDelete}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader className="">
               <DialogTitle>Delete Workspace</DialogTitle>
               <DialogDescription>
                 Are you sure you want to delete workspace &quot;
-                {workspaceName}&quot;? This action cannot be undone.
+                {displayName}&quot;? This action cannot be undone.
               </DialogDescription>
             </DialogHeader>
 

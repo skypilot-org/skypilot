@@ -15,6 +15,7 @@ import {
   InfoIcon,
 } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
+import { useWorkspacesConfig } from '@/hooks/useWorkspacesConfig';
 import { useUrlFilterState } from '@/hooks/useUrlFilterState';
 import {
   checkGrafanaAvailability,
@@ -418,6 +419,8 @@ export function InfrastructureSection({
   statusByKey = null, // Map<`${kind}:${id}`, Status> from plugin data providers
   inactiveContexts = [], // [{name, note?}] rows listed without capacity data
 }) {
+  // contextWorkspaceMap holds workspace ids; show names.
+  const { workspaceName } = useWorkspacesConfig();
   // Add defensive check for contexts (memoized so downstream useMemos don't
   // recompute on every render when `contexts` is nullish)
   const safeContexts = React.useMemo(() => contexts || [], [contexts]);
@@ -927,7 +930,8 @@ export function InfrastructureSection({
                           </div>
                           {workspaces.length > 0 && (
                             <div className="text-sm text-gray-500 mt-1.5">
-                              (workspaces: {workspaces.join(', ')})
+                              (workspaces:{' '}
+                              {workspaces.map(workspaceName).join(', ')})
                             </div>
                           )}
                         </td>
@@ -1136,7 +1140,8 @@ export function InfrastructureSection({
                       </div>
                       {workspaces.length > 0 && (
                         <div className="text-sm text-gray-500 mt-1.5 truncate">
-                          (workspaces: {workspaces.join(', ')})
+                          (workspaces:{' '}
+                          {workspaces.map(workspaceName).join(', ')})
                         </div>
                       )}
                     </div>
@@ -2693,6 +2698,7 @@ function InfrastructureHint() {
 }
 
 export function GPUs() {
+  const { workspaceName } = useWorkspacesConfig();
   // Plugin-contributed extra rows + status data.
   //
   // OSS does not know any plugin id; we discover providers by hook name.
@@ -4285,7 +4291,7 @@ export function GPUs() {
                     <SelectItem value="all">All Workspaces</SelectItem>
                     {availableWorkspaces.map((workspace) => (
                       <SelectItem key={workspace} value={workspace}>
-                        {workspace}
+                        {workspaceName(workspace)}
                       </SelectItem>
                     ))}
                   </SelectContent>

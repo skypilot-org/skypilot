@@ -40,6 +40,10 @@ import { getPoolStatus } from '@/data/connectors/jobs';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
+import {
+  getWorkspaceName,
+  useWorkspacesConfig,
+} from '@/hooks/useWorkspacesConfig';
 import { getUsers } from '@/data/connectors/users';
 import { apiClient, getCurrentUserInfo } from '@/data/connectors/client';
 import {
@@ -729,6 +733,13 @@ export function ManagedJobsTable({
   // Plugin-registered filter properties (see ManagedJobs): their values are
   // forwarded to the data provider verbatim as {property: key, value}.
   const pluginFilterProps = usePluginTableFilters('jobs');
+  // Records carry `workspace_name`; the config covers rows without it.
+  const { workspacesConfig } = useWorkspacesConfig();
+  const workspaceLabel = React.useCallback(
+    (job) =>
+      job.workspace_name || getWorkspaceName(workspacesConfig, job.workspace),
+    [workspacesConfig]
+  );
   const [loading, setLocalLoading] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [currentPage, setCurrentPage] = useState(() => {
@@ -1218,7 +1229,7 @@ export function ManagedJobsTable({
     data.forEach((job) => {
       if (job.name) names.add(job.name);
       if (job.user) users.add(job.user);
-      if (job.workspace) workspaces.add(job.workspace);
+      if (job.workspace) workspaces.add(workspaceLabel(job));
       if (job.pool) pools.add(job.pool);
       // An `--infra` spec, not the rendered `infra` / `full_infra` cell:
       // the box is matched server-side by `InfraInfo.from_str`, and a
@@ -1291,11 +1302,13 @@ export function ManagedJobsTable({
             ].sort()
           : prev.user,
         workspace: workspacesData
-          ? Object.keys(workspacesData).sort()
+          ? Object.keys(workspacesData)
+              .map((id) => getWorkspaceName(workspacesData, id))
+              .sort()
           : prev.workspace,
       }));
     });
-  }, [data, poolsData, serverInfraOptions, setValueList]);
+  }, [data, poolsData, serverInfraOptions, setValueList, workspaceLabel]);
 
   const requestSort = React.useCallback(
     (key) => {
@@ -1952,7 +1965,7 @@ export function ManagedJobsTable({
                   href="/workspaces"
                   className="text-gray-700 hover:text-blue-600 hover:underline"
                 >
-                  {item.workspace || 'default'}
+                  {workspaceLabel(item)}
                 </Link>
               )}
             </TableCell>
@@ -2333,6 +2346,7 @@ export function ManagedJobsTable({
       poolsLoading,
       poolsData,
       onUserFilter,
+      workspaceLabel,
     ]
   );
 

@@ -47,7 +47,10 @@ import {
   useClusterData,
 } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
-import { useWorkspacesConfig } from '@/hooks/useWorkspacesConfig';
+import {
+  getWorkspaceName,
+  useWorkspacesConfig,
+} from '@/hooks/useWorkspacesConfig';
 import { sortData } from '@/data/utils';
 import { SquareCode, Terminal, RotateCwIcon, Brackets } from 'lucide-react';
 import { ServerIcon } from '@/components/elements/icons';
@@ -725,7 +728,7 @@ export function ClusterTable({
   // disabled for clusters in workspaces the user can only read (read-only
   // visibility). Shared with the cluster detail page; missing entry -> treated
   // as writable (open/default).
-  const { isWorkspaceWritable } = useWorkspacesConfig();
+  const { isWorkspaceWritable, workspacesConfig } = useWorkspacesConfig();
 
   // Read initial page/limit from URL
   const getInitialPage = () => {
@@ -835,7 +838,7 @@ export function ClusterTable({
     setLoading(hookLoading);
   }, [hookLoading, setLoading]);
 
-  const fetchOptionValuesFromClusters = (clusters) => {
+  const fetchOptionValuesFromClusters = (clusters, workspacesConfig) => {
     let optionValues = {
       status: [],
       cluster: [],
@@ -855,7 +858,11 @@ export function ClusterTable({
       pushWithoutDuplication(optionValues.status, cluster.status);
       pushWithoutDuplication(optionValues.cluster, cluster.cluster);
       pushWithoutDuplication(optionValues.user, cluster.user);
-      pushWithoutDuplication(optionValues.workspace, cluster.workspace);
+      pushWithoutDuplication(
+        optionValues.workspace,
+        cluster.workspace_name ||
+          getWorkspaceName(workspacesConfig, cluster.workspace)
+      );
       // Use full_infra for filter values so they match database values
       pushWithoutDuplication(
         optionValues.infra,
@@ -880,9 +887,9 @@ export function ClusterTable({
   // Update filter option values when data changes
   useEffect(() => {
     if (allData && allData.length > 0) {
-      setOptionValues(fetchOptionValuesFromClusters(allData));
+      setOptionValues(fetchOptionValuesFromClusters(allData, workspacesConfig));
     }
-  }, [allData, setOptionValues]);
+  }, [allData, setOptionValues, workspacesConfig]);
 
   // Use useMemo to compute sorted and filtered data
   // For server-side pagination, data is already paginated, so we apply filters/sort to hookData
@@ -892,7 +899,20 @@ export function ClusterTable({
     // For client-side pagination, we filter/sort the full data then paginate.
     // The current-user ("My Clusters") scope is applied server-side via the
     // allUsers flag on useClusterData, so no client-side owner filter here.
-    const dataToProcess = isServerPagination ? hookData : allData;
+    // Filters and sorting go by the workspace name; records hold the id
+    // (history rows and older servers carry no name).
+    const dataToProcess = (isServerPagination ? hookData : allData || []).map(
+      (cluster) =>
+        cluster.workspace_name
+          ? cluster
+          : {
+              ...cluster,
+              workspace_name: getWorkspaceName(
+                workspacesConfig,
+                cluster.workspace
+              ),
+            }
+    );
 
     if (!isServerPagination) {
       const historicalCount = (allData || []).filter(
@@ -913,7 +933,14 @@ export function ClusterTable({
       : filterData(dataToProcess, filters, { orProperties: OR_PROPERTIES });
 
     return sortData(filteredData, sortConfig.key, sortConfig.direction);
-  }, [hookData, allData, sortConfig, filters, isServerPagination]);
+  }, [
+    hookData,
+    allData,
+    sortConfig,
+    filters,
+    isServerPagination,
+    workspacesConfig,
+  ]);
 
   // Number of clusters owned by *other* users, i.e. how many rows switching to
   // "All Clusters" would actually reveal. Used to gate the empty-state CTA so
@@ -1109,15 +1136,15 @@ export function ClusterTable({
       order: 3,
       header: {
         label: 'Workspace',
-        sortKey: 'workspace',
+        sortKey: 'workspace_name',
         className: 'sortable whitespace-nowrap',
       },
       renderHeader: () => (
         <TableHead
           className="sortable whitespace-nowrap"
-          onClick={() => requestSort('workspace')}
+          onClick={() => requestSort('workspace_name')}
         >
-          Workspace{getSortDirection('workspace')}
+          Workspace{getSortDirection('workspace_name')}
         </TableHead>
       ),
       renderCell: (item) => (
@@ -1126,7 +1153,8 @@ export function ClusterTable({
             href="/workspaces"
             className="text-gray-700 hover:text-blue-600 hover:underline"
           >
-            {item.workspace || 'default'}
+            {item.workspace_name ||
+              getWorkspaceName(workspacesConfig, item.workspace)}
           </Link>
         </TableCell>
       ),

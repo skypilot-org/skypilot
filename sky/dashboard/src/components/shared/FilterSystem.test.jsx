@@ -192,3 +192,34 @@ describe('filterData grouping', () => {
     expect(filterData(rows, [])).toBe(rows);
   });
 });
+
+describe('evaluateCondition on workspaces', () => {
+  // `workspace` is the id; users filter by the name they see.
+  const renamed = { workspace: 'team-a', workspace_name: 'proj-a' };
+
+  it('matches the workspace name, not the id', () => {
+    expect(
+      evaluateCondition(renamed, {
+        property: 'Workspace',
+        operator: '=',
+        value: 'proj-a',
+      })
+    ).toBe(true);
+    expect(
+      evaluateCondition(renamed, {
+        property: 'Workspace',
+        operator: ':',
+        value: 'team',
+      })
+    ).toBe(false);
+  });
+
+  it('falls back to the id for records without a name', () => {
+    expect(
+      evaluateCondition(
+        { workspace: 'team-b' },
+        { property: 'Workspace', operator: '=', value: 'team-b' }
+      )
+    ).toBe(true);
+  });
+});

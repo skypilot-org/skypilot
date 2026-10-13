@@ -190,13 +190,14 @@ export async function getWorkspaces() {
   }
 }
 
-export async function getEnabledClouds(workspaceName = null, expand = false) {
+export async function getEnabledClouds(workspaceId = null, expand = false) {
   try {
     // Step 1: Call the /enabled_clouds endpoint to schedule the task
     let url = `/enabled_clouds`;
     const params = new URLSearchParams();
-    if (workspaceName) {
-      params.append('workspace', workspaceName);
+    if (workspaceId) {
+      // An id, used as-is (`workspace` would be resolved as a typed name).
+      params.append('workspace_id', workspaceId);
     }
     if (expand) {
       params.append('expand', 'true');
@@ -311,7 +312,7 @@ export async function getEnabledClouds(workspaceName = null, expand = false) {
         // which is also a JSON string.
         enabledCloudsData = JSON.parse(resultData.return_value);
         console.log(
-          `Successfully parsed enabled_clouds data for workspace ${workspaceName}:`,
+          `Successfully parsed enabled_clouds data for workspace ${workspaceId}:`,
           enabledCloudsData
         );
       } catch (parseError) {

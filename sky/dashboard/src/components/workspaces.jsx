@@ -49,6 +49,7 @@ import {
   NonCapitalizedTooltip,
 } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
+import { getWorkspaceName } from '@/hooks/useWorkspacesConfig';
 import { statusGroups } from './jobs';
 import dashboardCache from '@/lib/cache';
 import { REFRESH_INTERVALS } from '@/lib/config';
@@ -291,7 +292,7 @@ export function Workspaces() {
 
   // Sorting state
   const [sortConfig, setSortConfig] = useState({
-    key: 'name',
+    key: 'displayName',
     direction: 'asc',
   });
 
@@ -518,7 +519,10 @@ export function Workspaces() {
         // Initialize workspace details with zeros - UI will show spinners for counts
         const initialWorkspaceDetails = configuredWorkspaceNames
           .map((wsName) => ({
+            // `name` is the workspace id (links, stats, API calls);
+            // `displayName` is what users see.
             name: wsName,
+            displayName: getWorkspaceName(fetchedWorkspacesConfig, wsName),
             totalClusterCount: 0,
             runningClusterCount: 0,
             managedJobsCount: 0,
@@ -526,7 +530,7 @@ export function Workspaces() {
               ? enabledCloudsMap[wsName]
               : [],
           }))
-          .sort((a, b) => a.name.localeCompare(b.name));
+          .sort((a, b) => a.displayName.localeCompare(b.displayName));
 
         setWorkspaceDetails(initialWorkspaceDetails);
 
@@ -652,7 +656,7 @@ export function Workspaces() {
       const searchLower = searchQuery.toLowerCase().trim();
       filtered = workspaceDetails.filter((workspace) => {
         // Check workspace name
-        if (workspace.name.toLowerCase().includes(searchLower)) {
+        if (workspace.displayName.toLowerCase().includes(searchLower)) {
           return true;
         }
 
@@ -707,7 +711,7 @@ export function Workspaces() {
 
       // Show success message at top level
       setTopLevelSuccess(
-        `Workspace "${deleteState.workspaceToDelete}" deleted successfully!`
+        `Workspace "${getWorkspaceName(rawWorkspacesData, deleteState.workspaceToDelete)}" deleted successfully!`
       );
 
       setDeleteState({
@@ -935,9 +939,9 @@ export function Workspaces() {
                 <TableRow>
                   <TableHead
                     className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                    onClick={() => handleSort('name')}
+                    onClick={() => handleSort('displayName')}
                   >
-                    Workspace{getSortDirection('name')}
+                    Workspace{getSortDirection('displayName')}
                   </TableHead>
                   <TableHead
                     className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
@@ -993,7 +997,7 @@ export function Workspaces() {
                             disabled={roleLoading}
                             className="text-blue-600 hover:text-blue-600 hover:underline text-left"
                           >
-                            {workspace.name}
+                            {workspace.displayName}
                           </button>
                           <span className="ml-2">
                             <WorkspaceBadge
@@ -1007,7 +1011,7 @@ export function Workspaces() {
                             onClick={() => {
                               router.push({
                                 pathname: '/clusters',
-                                query: { workspace: workspace.name },
+                                query: { workspace: workspace.displayName },
                               });
                             }}
                             className="text-gray-700 hover:text-blue-600 hover:underline"
@@ -1026,7 +1030,7 @@ export function Workspaces() {
                             onClick={() => {
                               router.push({
                                 pathname: '/jobs',
-                                query: { workspace: workspace.name },
+                                query: { workspace: workspace.displayName },
                               });
                             }}
                             className="text-gray-700 hover:text-blue-600 hover:underline"
@@ -1190,8 +1194,11 @@ export function Workspaces() {
             <DialogTitle>Delete Workspace</DialogTitle>
             <DialogDescription>
               Are you sure you want to delete workspace &quot;
-              {deleteState.workspaceToDelete}&quot;? This action cannot be
-              undone.
+              {getWorkspaceName(
+                rawWorkspacesData,
+                deleteState.workspaceToDelete
+              )}
+              &quot;? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
 

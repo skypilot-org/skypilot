@@ -400,7 +400,7 @@ function TaskDetailsContent({ taskData, taskIndex, poolsData }) {
             href="/workspaces"
             className="text-gray-700 hover:text-blue-600 hover:underline"
           >
-            {taskData.workspace || 'default'}
+            {taskData.workspace_name || taskData.workspace || 'default'}
           </Link>
         </div>
       </div>
