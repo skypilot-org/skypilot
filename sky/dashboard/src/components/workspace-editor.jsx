@@ -747,10 +747,18 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const handleRefresh = async () => {
     setLoading(true);
     try {
-      await apiClient.fetch('/check', {}, 'POST');
+      // Re-checking infra is an admin action; others just reload the page's
+      // data, which a failed check must not hold up either.
+      if (isAdmin === true) {
+        try {
+          await apiClient.fetch('/check', {}, 'POST');
+        } catch (error) {
+          console.error('Error during sky check refresh:', error);
+        }
+      }
       await Promise.all([fetchWorkspaceConfig(false), fetchWorkspaceStats()]);
     } catch (error) {
-      console.error('Error during sky check refresh:', error);
+      console.error('Error refreshing workspace:', error);
     } finally {
       setLoading(false);
     }

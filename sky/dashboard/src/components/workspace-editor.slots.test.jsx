@@ -54,6 +54,11 @@ jest.mock('@/data/connectors/users', () => ({
     { userId: 'u-bob', username: 'bob', role: 'user' },
   ]),
 }));
+const mockApiFetch = jest.fn(async () => ({ ok: true }));
+jest.mock('@/data/connectors/client', () => ({
+  __esModule: true,
+  apiClient: { fetch: (...args) => mockApiFetch(...args) },
+}));
 jest.mock('@/data/connectors/clusters', () => ({
   __esModule: true,
   getClusters: jest.fn(async () => []),
@@ -413,6 +418,33 @@ describe('WorkspaceEditor for a non-admin', () => {
     expect(screen.getByLabelText('workspace yaml').readOnly).toBe(true);
   });
 
+  test('shows a non-member only the badges the server sends', async () => {
+    // A non-member of a read-only-visible workspace gets its flags, not its
+    // configuration.
+    mockGetWorkspaces.mockImplementation(async () => ({
+      ws: { read_only: true, writable: false },
+    }));
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Only admins can change this configuration.');
+    expect(screen.queryByText('Apply')).toBeNull();
+    expect(screen.queryByText('Delete')).toBeNull();
+    const yamlText = screen.getByLabelText('workspace yaml').value;
+    expect(yamlText).not.toContain('read_only');
+    expect(yamlText).not.toContain('writable');
+  });
+
+  test('Refresh reloads the data without re-checking infra', async () => {
+    mockApiFetch.mockClear();
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Only admins can change this configuration.');
+    const calls = mockGetWorkspaces.mock.calls.length;
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    expect(mockApiFetch).not.toHaveBeenCalled();
+    expect(mockGetWorkspaces.mock.calls.length).toBeGreaterThan(calls);
+  });
+
   test('treats a failed role lookup as non-admin', async () => {
     mockGetUserRole.mockImplementation(async () => {
       throw new Error('boom');
@@ -421,6 +453,43 @@ describe('WorkspaceEditor for a non-admin', () => {
     render(<WorkspaceEditor workspaceName="ws" />);
     await screen.findByText('Only admins can change this configuration.');
     expect(screen.queryByText('Apply')).toBeNull();
+    console.error.mockRestore();
+  });
+});
+
+describe('WorkspaceEditor Refresh for an admin', () => {
+  beforeEach(() => {
+    mockGetWorkspaces.mockReset();
+    mockGetWorkspaces.mockImplementation(async () => ({
+      ws: { private: true, allowed_users: ['alice'] },
+    }));
+    mockApiFetch.mockReset();
+  });
+
+  test('re-checks infra, then reloads', async () => {
+    mockApiFetch.mockImplementation(async () => ({ ok: true }));
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Apply');
+    const calls = mockGetWorkspaces.mock.calls.length;
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    expect(mockApiFetch).toHaveBeenCalledWith('/check', {}, 'POST');
+    expect(mockGetWorkspaces.mock.calls.length).toBeGreaterThan(calls);
+  });
+
+  test('still reloads when the infra check fails', async () => {
+    mockApiFetch.mockImplementation(async () => {
+      throw new Error('check failed');
+    });
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Apply');
+    const calls = mockGetWorkspaces.mock.calls.length;
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    expect(mockGetWorkspaces.mock.calls.length).toBeGreaterThan(calls);
     console.error.mockRestore();
   });
 });

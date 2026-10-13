@@ -1092,25 +1092,56 @@ export function usePluginAccessChecks(action) {
 
 const EMPTY_ACCESS_CHECKS = [];
 
+// How long one access check may take before it counts as a no.
+export const ACCESS_CHECK_TIMEOUT_MS = 10000;
+
 /**
- * Whether any of `checks` allows the action for `context`. A check that throws
- * or rejects counts as a no.
+ * Whether any of `checks` allows the action for `context`. Resolves `true` as
+ * soon as one check says yes. A check that throws, rejects or takes longer
+ * than ACCESS_CHECK_TIMEOUT_MS counts as a no.
  */
-export async function anyAccessCheckAllows(checks, context) {
-  const results = await Promise.all(
-    (checks || []).map(async (entry) => {
-      try {
-        return (await entry.check(context)) === true;
-      } catch (error) {
-        console.warn(
-          `[SkyDashboardPlugin] Access check ${entry.id} failed:`,
-          error
-        );
-        return false;
+export function anyAccessCheckAllows(checks, context) {
+  const list = checks || [];
+  if (list.length === 0) {
+    return Promise.resolve(false);
+  }
+  return new Promise((resolve) => {
+    let pending = list.length;
+    const settle = (allowed) => {
+      if (allowed) {
+        resolve(true);
+      } else if (--pending === 0) {
+        resolve(false);
       }
-    })
-  );
-  return results.some(Boolean);
+    };
+    list.forEach((entry) => {
+      let timer;
+      const timeout = new Promise((done) => {
+        timer = setTimeout(() => {
+          console.warn(
+            `[SkyDashboardPlugin] Access check ${entry.id} timed out`
+          );
+          done(false);
+        }, ACCESS_CHECK_TIMEOUT_MS);
+      });
+      const result = Promise.resolve()
+        .then(() => entry.check(context))
+        .then(
+          (allowed) => allowed === true,
+          (error) => {
+            console.warn(
+              `[SkyDashboardPlugin] Access check ${entry.id} failed:`,
+              error
+            );
+            return false;
+          }
+        );
+      Promise.race([result, timeout]).then((allowed) => {
+        clearTimeout(timer);
+        settle(allowed);
+      });
+    });
+  });
 }
 
 export function usePluginRecipeTypes() {
