@@ -744,6 +744,10 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const withStoredName = (config, name = storedName) =>
     name ? { ...config, name } : config;
 
+  // Any text edit, including comment-only or not-yet-valid YAML, which
+  // `hasChanges` (parsed config) does not see. A rename rewrites the YAML.
+  const hasYamlDraft = yamlValue !== serverYamlRef.current;
+
   const handleDiscard = () => {
     // Reset to original configuration
     setWorkspaceConfig(originalConfig);
@@ -879,9 +883,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                       saving: false,
                     })
                   }
-                  disabled={hasChanges || saving || deleteState.deleting}
+                  disabled={hasYamlDraft || saving || deleteState.deleting}
                   title={
-                    hasChanges
+                    hasYamlDraft
                       ? 'Apply or discard the YAML changes first'
                       : undefined
                   }
