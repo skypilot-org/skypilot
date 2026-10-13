@@ -1655,6 +1655,83 @@ class TestStreamLogsByIdExternalStoreFallback:
         assert 'external log store' in msg
 
 
+class TestStreamLogsByIdJobFinishedBetweenChecks:
+    """A followed tail prints a job's logs even if it never saw it RUNNING.
+
+    A short job is RUNNING only until the controller's next status check, which
+    can come before the tail's next one. The tail then goes from STARTING
+    straight to a terminal status without streaming from the cluster, and must
+    print the logs the controller persists for the finished job instead.
+    """
+
+    def _patch_job(self, monkeypatch, final_status, log_files):
+        """Stubs a job that is STARTING on entry and final_status afterwards.
+
+        log_files: what successive reads of the task's local log path return;
+            the last one repeats.
+        """
+        starting = managed_job_state.ManagedJobStatus.STARTING
+        statuses = iter([starting])
+        mock_state = MagicMock(wraps=managed_job_state)
+        mock_state.ManagedJobStatus = managed_job_state.ManagedJobStatus
+        mock_state.get_num_tasks.return_value = 1
+        mock_state.get_status.side_effect = (
+            lambda _: next(statuses, final_status))
+        mock_state.is_batch_job.return_value = False
+        mock_state.get_latest_task_id_status.side_effect = [(0, starting),
+                                                            (0, final_status)]
+        mock_state.get_pool_from_job_id.return_value = None
+        mock_state.get_task_name.return_value = 'mytask'
+        reads = iter(log_files)
+        last = [log_files[-1]]
+
+        def _task_info(_):
+            last[0] = next(reads, last[0])
+            return [(0, 'mytask', final_status, last[0], None)]
+
+        mock_state.get_all_task_ids_names_statuses_logs.side_effect = _task_info
+        monkeypatch.setattr(jobs_utils, 'managed_job_state', mock_state)
+        # The cluster is never seen while the job is RUNNING.
+        monkeypatch.setattr(jobs_utils.global_user_state,
+                            'get_handle_from_cluster_name', lambda _: None)
+        monkeypatch.setattr(jobs_utils, 'read_provision_status_from_log',
+                            lambda path, pos, msg: (pos, msg))
+        monkeypatch.setattr(jobs_utils, '_parked_launch_reason',
+                            lambda *args: None)
+        monkeypatch.setattr(jobs_utils.time, 'sleep', lambda _: None)
+        mock_logs = MagicMock()
+        mock_logs.get_log_reader.return_value = None
+        monkeypatch.setattr(jobs_utils, 'logs', mock_logs)
+        return mock_state
+
+    def test_prints_persisted_logs(self, monkeypatch, tmp_path, capsys):
+        log_file = tmp_path / 'run.log'
+        log_file.write_text(
+            f'{jobs_utils.log_lib.LOG_FILE_START_STREAMING_AT}\njob output\n',
+            encoding='utf-8')
+        # The controller records the log path only after it marks the job
+        # SUCCEEDED, so the first reads find none.
+        self._patch_job(monkeypatch,
+                        managed_job_state.ManagedJobStatus.SUCCEEDED,
+                        [None, None, str(log_file)])
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=True)
+
+        assert 'job output' in capsys.readouterr().out
+        assert code == exceptions.JobExitCode.SUCCEEDED
+
+    def test_no_persisted_logs_to_wait_for(self, monkeypatch, capsys):
+        # A job that failed before it ran user code has no logs to wait for.
+        mock_state = self._patch_job(
+            monkeypatch, managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
+            [None])
+
+        jobs_utils.stream_logs_by_id(5, follow=True)
+
+        mock_state.get_all_task_ids_names_statuses_logs.assert_not_called()
+        assert 'already in terminal state' not in capsys.readouterr().out
+
+
 class TestTryToGetJobEndTime:
     """Tests for try_to_get_job_end_time's best-effort fallback."""
 

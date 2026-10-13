@@ -139,6 +139,17 @@ _JOB_CANCELLED_MESSAGE = (
 # update the state.
 _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 120
 
+# Terminal task statuses for which the controller downloads the task's logs
+# from its cluster and records their local path.
+_STATUSES_WITH_PERSISTED_LOGS = (
+    managed_job_state.ManagedJobStatus.SUCCEEDED,
+    managed_job_state.ManagedJobStatus.FAILED,
+    managed_job_state.ManagedJobStatus.FAILED_SETUP,
+)
+# The maximum time a followed tail that never saw its job RUNNING waits for the
+# controller to persist the job's logs, before printing what it can find.
+_PERSISTED_LOG_WAIT_TIMEOUT_SECONDS = 30
+
 # Content written to the jobs cancel signal file.
 _JOBS_GRACEFUL_CANCEL_SIGNAL = 'graceful'
 
@@ -2259,6 +2270,29 @@ def _waiting_line_detail(provision_msg: Optional[str],
     return parked_reason
 
 
+def _wait_for_persisted_task_logs(job_id: int) -> None:
+    """Waits for the controller to persist the logs of a finished job's tasks.
+
+    The controller marks a task SUCCEEDED (or failed) before it downloads the
+    task's logs and records their local path, so a reader that sees the
+    terminal status can be ahead of the path. Waits until every task that ran
+    user code has a local log path, or _PERSISTED_LOG_WAIT_TIMEOUT_SECONDS
+    pass. Returns at once when a log reader is registered, as the controller
+    then normally keeps no local copy and the reader serves the logs.
+    """
+    if logs.get_log_reader() is not None:
+        return
+    deadline = time.time() + _PERSISTED_LOG_WAIT_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        context_utils.raise_if_canceled()
+        task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
+            job_id)
+        if all(log_file for _, _, task_status, log_file, _ in task_info
+               if task_status in _STATUSES_WITH_PERSISTED_LOGS):
+            return
+        time.sleep(1)
+
+
 def stream_logs_by_id(
         job_id: int,
         follow: bool = True,
@@ -2291,6 +2325,17 @@ def stream_logs_by_id(
     # it would outlive the request and accumulate one thread per tail call.
     if context_lib.get() is None:
         log_lib.start_orphan_watchdog()
+    return _stream_logs_by_id(job_id,
+                              follow=follow,
+                              tail=tail,
+                              tail_offset=tail_offset,
+                              task=task)
+
+
+def _stream_logs_by_id(job_id: int, follow: bool, tail: Optional[int],
+                       tail_offset: Optional[int],
+                       task: Optional[Union[str, int]]) -> Tuple[str, int]:
+    """Body of stream_logs_by_id, without starting the orphan watchdog."""
 
     def should_keep_logging(status: managed_job_state.ManagedJobStatus) -> bool:
         # If we see CANCELLING, just exit - we could miss some job logs but the
@@ -2362,6 +2407,8 @@ def stream_logs_by_id(
             controller_log_path, provision_pos, provision_msg)
         return provision_msg
 
+    # Whether this tail streamed any task's logs from its cluster.
+    streamed_from_cluster = False
     with status_display:
         prev_msg = msg
         while (managed_job_status :=
@@ -2664,6 +2711,7 @@ def stream_logs_by_id(
             assert (managed_job_status ==
                     managed_job_state.ManagedJobStatus.RUNNING)
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
+            streamed_from_cluster = True
             status_display.stop()
             returncode = None
             if managed_job_runtime.is_registered():
@@ -2838,6 +2886,21 @@ def stream_logs_by_id(
         # The job is not in terminal state and we are not following,
         # just return.
         return '', exceptions.JobExitCode.SUCCEEDED
+    if (follow and not streamed_from_cluster and
+            managed_job_status in _STATUSES_WITH_PERSISTED_LOGS):
+        # The job ran and finished between two of our status checks, so we
+        # never saw it RUNNING and streamed nothing. A short job is RUNNING
+        # only until the controller's next status check, which can come
+        # sooner than ours. Print the logs the controller keeps for the
+        # finished job instead, as `sky jobs logs` does for one.
+        _wait_for_persisted_task_logs(job_id)
+        persisted_msg, _ = _stream_logs_by_id(job_id,
+                                              follow=False,
+                                              tail=tail,
+                                              tail_offset=tail_offset,
+                                              task=task)
+        if persisted_msg:
+            print(persisted_msg, flush=True)
     logger.info(
         ux_utils.finishing_message(f'Managed job finished: {job_id} '
                                    f'(status: {managed_job_status.value}).'))
