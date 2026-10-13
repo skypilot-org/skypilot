@@ -5301,6 +5301,14 @@ class AkaveStore(S3CompatibleStore):
             get_endpoint_url=akave.get_endpoint,
             credentials_file=akave.AKAVE_CREDENTIALS_PATH,
             config_file=akave.AKAVE_CONFIG_PATH,
+            # Akave rejects multipart parts sent with aws-chunked encoding
+            # and a trailing checksum by some AWS SDKs (see
+            # get_akave_mount_cmd). Send `aws s3 sync` uploads as plain
+            # requests too, matching the mount.
+            extra_cli_env={
+                'AWS_REQUEST_CHECKSUM_CALCULATION': 'when_required',
+                'AWS_RESPONSE_CHECKSUM_VALIDATION': 'when_required',
+            },
             cloud_name=akave.NAME,
             default_region=akave.DEFAULT_REGION,
             mount_cmd_factory=cls._get_akave_mount_cmd,

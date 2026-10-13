@@ -1,9 +1,11 @@
 import tempfile
 import time
+from unittest import mock
 
 import pytest
 
 from sky import exceptions
+from sky.adaptors import akave
 from sky.data import mounting_utils
 from sky.data import storage as storage_lib
 
@@ -871,6 +873,28 @@ class TestAkaveStorage:
     def test_akave_in_store_enabled_clouds(self):
         """Verify Akave is in STORE_ENABLED_CLOUDS."""
         assert 'Akave' in storage_lib.STORE_ENABLED_CLOUDS
+
+    def test_akave_upload_commands_disable_trailing_checksums(self, tmp_path):
+        """Local-to-bucket `aws s3 sync` uploads must send plain requests."""
+        with mock.patch.object(akave,
+                               'get_endpoint',
+                               return_value='https://s3.example.com'):
+            store = object.__new__(storage_lib.AkaveStore)
+            store.config = storage_lib.AkaveStore.get_config()
+            store.name = 'test-bucket'
+            store._bucket_sub_path = None  # pylint: disable=protected-access
+            with mock.patch.object(storage_lib.data_utils,
+                                   'parallel_upload') as upload:
+                store.batch_aws_rsync([str(tmp_path)])
+                file_cmd_fn, dir_cmd_fn = upload.call_args[0][1:3]
+                file_cmd = file_cmd_fn(str(tmp_path), ['a.bin'])
+                dir_cmd = dir_cmd_fn(str(tmp_path), 'data')
+        for cmd in (file_cmd, dir_cmd):
+            assert 'aws s3 sync' in cmd
+            assert 'AWS_REQUEST_CHECKSUM_CALCULATION=when_required' in cmd
+            assert 'AWS_RESPONSE_CHECKSUM_VALIDATION=when_required' in cmd
+            assert cmd.index('AWS_REQUEST_CHECKSUM_CALCULATION') < cmd.index(
+                'aws s3 sync')
 
 
 class TestMountConfig:
