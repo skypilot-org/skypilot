@@ -2251,6 +2251,28 @@ def _waiting_line_detail(provision_msg: Optional[str],
     return parked_reason
 
 
+def _wait_for_task_log_file(job_id: int, task_id: int) -> None:
+    """Waits for the controller to record the log file of a finished task.
+
+    The controller sets a task's terminal status before it downloads the
+    task's logs, so a reader that sees the terminal status can find no log
+    file yet. Returns once the file is recorded, once the controller is done
+    with the job (it records no file when the logs went to an external store
+    or the download failed), or after _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS.
+    """
+    for _ in range(_FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS):
+        context_utils.raise_if_canceled()
+        task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
+            job_id)
+        if any(t_id == task_id and log_file
+               for t_id, _, _, log_file, _ in task_info):
+            return
+        if (managed_job_state.get_job_schedule_state(job_id) ==
+                managed_job_state.ManagedJobScheduleState.DONE):
+            return
+        time.sleep(1)
+
+
 def stream_logs_by_id(
         job_id: int,
         follow: bool = True,
@@ -2354,6 +2376,188 @@ def stream_logs_by_id(
             controller_log_path, provision_pos, provision_msg)
         return provision_msg
 
+    def _print_finished_job_logs(
+        managed_job_status: managed_job_state.ManagedJobStatus
+    ) -> Tuple[str, int]:
+        job_msg = ''
+        if managed_job_status.is_failed():
+            job_msg = ('\nFailure reason: '
+                       f'{managed_job_state.get_failure_reason(job_id)}')
+        log_file_ever_existed = False
+        # Whether a task's logs went to an external store is a per-task,
+        # write-time fact: the controller only skips persisting a local
+        # copy (leaving local_log_file NULL) when a logging agent forwarded
+        # the logs elsewhere (see download_log_and_stream). So we decide the
+        # read source per task by the presence of a local file, NOT by the
+        # current global logging-agent config -- this keeps read-back
+        # working after the agent is disconnected or when serving from a
+        # server whose config view differs. When there is no local copy we
+        # stream from the registered log reader, mirroring core.tail_logs.
+        log_reader = logs.get_log_reader()
+        task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
+            job_id)
+        total_tasks = len(task_info)
+        # Filter tasks if task filter is specified
+        if task is not None:
+            task_info = [
+                t for t in task_info if matches_task_filter(t[0], t[1], task)
+            ]
+            if not task_info:
+                valid_range = (f'0-{total_tasks - 1}'
+                               if total_tasks > 1 else '0')
+                return (f'No task found matching {task!r} in job {job_id}. '
+                        f'Valid task IDs are {valid_range}.',
+                        exceptions.JobExitCode.NOT_FOUND)
+        num_tasks = len(task_info)
+        for (task_id, task_name, task_status, log_file,
+             logs_cleaned_at) in task_info:
+            if log_file:
+                log_file_ever_existed = True
+                if logs_cleaned_at is not None:
+                    ts_str = datetime.fromtimestamp(logs_cleaned_at).strftime(
+                        '%Y-%m-%d %H:%M:%S')
+                    print(f'Task {task_name}({task_id}) log has been '
+                          f'cleaned at {ts_str}.')
+                    continue
+                task_str = (f'Task {task_name}({task_id})'
+                            if task_name else f'Task {task_id}')
+                # Show task header when multiple tasks OR when filtering
+                if num_tasks > 1 or task is not None:
+                    print(f'=== {task_str} ===')
+                log_path = os.path.expanduser(log_file)
+                if tail is not None:
+                    assert tail > 0
+                    # Backward-seek tail: O(tail × line) instead of
+                    # scanning the whole file. The previous
+                    # `collections.deque(f, maxlen=tail)` scanned every
+                    # byte of the cached log, making dashboard log
+                    # loading 10+ s for multi-GB cancelled jobs.
+                    offset = max(tail_offset or 0, 0)
+                    lines, _ = log_lib.tail_lines_from_end(
+                        log_path, tail, offset)
+                    # Apply the same start-stream-marker filter that
+                    # log_lib.tail_logs_iter uses: when the marker
+                    # appears in both the head of the file and the
+                    # tail window (small log fully covered), filter
+                    # so pre-marker boilerplate (Ray INFO lines etc.)
+                    # is hidden.
+                    with open(log_path, 'r', encoding='utf-8') as peek_f:
+                        head_lines = log_lib._peek_head_lines(peek_f)  # type: ignore[attr-defined] # pylint: disable=protected-access
+                    start_streaming = (
+                        log_lib._should_stream_the_whole_tail_lines(  # type: ignore[attr-defined] # pylint: disable=protected-access
+                            head_lines, lines,
+                            log_lib.LOG_FILE_START_STREAMING_AT))
+                    for line in lines:
+                        if log_lib.LOG_FILE_START_STREAMING_AT in line:
+                            start_streaming = True
+                        if start_streaming:
+                            print(line, end='', flush=True)
+                else:
+                    with open(log_path, 'r', encoding='utf-8') as f:
+                        start_streaming = False
+                        for line in f:
+                            if log_lib.LOG_FILE_START_STREAMING_AT in line:
+                                start_streaming = True
+                            if start_streaming:
+                                print(line, end='', flush=True)
+                # Show task finished message for multi-task or filtering
+                if num_tasks > 1 or task is not None:
+                    # Add the "Task finished" message for terminal states
+                    if task_status.is_terminal():
+                        print(ux_utils.finishing_message(
+                            f'{task_str} finished '
+                            f'(status: {task_status.value}).'),
+                              flush=True)
+            elif log_reader is not None:
+                # No local copy was persisted for this task, so its logs
+                # were forwarded to an external store. Stream them back for
+                # this task's ephemeral cluster; the cluster ran exactly one
+                # job, so read the latest indexed one (job_id=None).
+                returncode = None
+                try:
+                    pool = managed_job_state.get_pool_from_job_id(job_id)
+                    if pool is not None:
+                        cluster_name, _ = (
+                            managed_job_state.get_pool_submit_info(job_id))
+                    else:
+                        cluster_name = generate_managed_job_cluster_name(
+                            task_name, job_id)
+                    if cluster_name is None:
+                        # A pool job that was never assigned a cluster has
+                        # no logs to read back; fall through to the message.
+                        continue
+                    task_str = (f'Task {task_name}({task_id})'
+                                if task_name else f'Task {task_id}')
+                    if num_tasks > 1 or task is not None:
+                        print(f'=== {task_str} ===')
+                    returncode = log_reader.read_cluster_job_logs(
+                        cluster_name,
+                        None,
+                        follow=False,
+                        tail=tail if tail is not None else 0)
+                    if returncode is None:
+                        # Not cluster-addressed: retry by managed-job
+                        # identity (job_id, task_id). Readers without
+                        # managed-job addressing return None again and we
+                        # fall through to the terminal-state message.
+                        returncode = log_reader.read_managed_job_logs(
+                            job_id,
+                            task_id,
+                            task_name=task_name,
+                            follow=False,
+                            tail=tail if tail is not None else 0)
+                except Exception as e:  # pylint: disable=broad-except
+                    # Surface the failure (streamed to the user via the
+                    # request's stdout redirection) and fall through to the
+                    # terminal-state message instead of crashing.
+                    logger.warning(
+                        'Failed to read logs for job %s task %s from the '
+                        'external log store: %s', job_id, task_id, e)
+                    continue
+                if returncode is None:
+                    # No logs in the external store for this task; fall
+                    # through to the terminal-state message below.
+                    continue
+                log_file_ever_existed = True
+                if num_tasks > 1 or task is not None:
+                    if task_status.is_terminal():
+                        print(ux_utils.finishing_message(
+                            f'{task_str} finished '
+                            f'(status: {task_status.value}).'),
+                              flush=True)
+        if log_file_ever_existed:
+            # Add the "Job finished" message for terminal states
+            if managed_job_status.is_terminal():
+                print(ux_utils.finishing_message(
+                    f'Job finished (status: {managed_job_status.value}).'),
+                      flush=True)
+            return '', exceptions.JobExitCode.from_managed_job_status(
+                managed_job_status)
+        if log_reader is not None:
+            # An external log reader is registered but returned nothing for
+            # this job: its logs were not persisted locally and are not (or
+            # no longer) in the external store -- e.g. outside the store's
+            # retention window, or never captured. When a logging agent is
+            # in use, task-log retention is governed by the external store,
+            # not by jobs.controller.task_logs_gc_retention_hours.
+            return (f'{colorama.Fore.YELLOW}'
+                    f'No logs found for job {job_id} in the external log '
+                    f'store. The logs may be outside the store\'s retention '
+                    f'window or were never captured. For controller logs, '
+                    f'run: sky jobs logs --controller {job_id}'
+                    f'{colorama.Style.RESET_ALL}'
+                    f'{job_msg}',
+                    exceptions.JobExitCode.from_managed_job_status(
+                        managed_job_status))
+        return (
+            f'{colorama.Fore.YELLOW}'
+            f'Job {job_id} is already in terminal state '
+            f'{managed_job_status.value}. For more details, run: '
+            f'sky jobs logs --controller {job_id}'
+            f'{colorama.Style.RESET_ALL}'
+            f'{job_msg}',
+            exceptions.JobExitCode.from_managed_job_status(managed_job_status))
+
     with status_display:
         prev_msg = msg
         while (managed_job_status :=
@@ -2369,187 +2573,7 @@ def stream_logs_by_id(
                   f'{colorama.Style.RESET_ALL}')
 
         if not should_keep_logging(managed_job_status):
-            job_msg = ''
-            if managed_job_status.is_failed():
-                job_msg = ('\nFailure reason: '
-                           f'{managed_job_state.get_failure_reason(job_id)}')
-            log_file_ever_existed = False
-            # Whether a task's logs went to an external store is a per-task,
-            # write-time fact: the controller only skips persisting a local
-            # copy (leaving local_log_file NULL) when a logging agent forwarded
-            # the logs elsewhere (see download_log_and_stream). So we decide the
-            # read source per task by the presence of a local file, NOT by the
-            # current global logging-agent config -- this keeps read-back
-            # working after the agent is disconnected or when serving from a
-            # server whose config view differs. When there is no local copy we
-            # stream from the registered log reader, mirroring core.tail_logs.
-            log_reader = logs.get_log_reader()
-            task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
-                job_id)
-            total_tasks = len(task_info)
-            # Filter tasks if task filter is specified
-            if task is not None:
-                task_info = [
-                    t for t in task_info
-                    if matches_task_filter(t[0], t[1], task)
-                ]
-                if not task_info:
-                    valid_range = (f'0-{total_tasks - 1}'
-                                   if total_tasks > 1 else '0')
-                    return (f'No task found matching {task!r} in job {job_id}. '
-                            f'Valid task IDs are {valid_range}.',
-                            exceptions.JobExitCode.NOT_FOUND)
-            num_tasks = len(task_info)
-            for (task_id, task_name, task_status, log_file,
-                 logs_cleaned_at) in task_info:
-                if log_file:
-                    log_file_ever_existed = True
-                    if logs_cleaned_at is not None:
-                        ts_str = datetime.fromtimestamp(
-                            logs_cleaned_at).strftime('%Y-%m-%d %H:%M:%S')
-                        print(f'Task {task_name}({task_id}) log has been '
-                              f'cleaned at {ts_str}.')
-                        continue
-                    task_str = (f'Task {task_name}({task_id})'
-                                if task_name else f'Task {task_id}')
-                    # Show task header when multiple tasks OR when filtering
-                    if num_tasks > 1 or task is not None:
-                        print(f'=== {task_str} ===')
-                    log_path = os.path.expanduser(log_file)
-                    if tail is not None:
-                        assert tail > 0
-                        # Backward-seek tail: O(tail × line) instead of
-                        # scanning the whole file. The previous
-                        # `collections.deque(f, maxlen=tail)` scanned every
-                        # byte of the cached log, making dashboard log
-                        # loading 10+ s for multi-GB cancelled jobs.
-                        offset = max(tail_offset or 0, 0)
-                        lines, _ = log_lib.tail_lines_from_end(
-                            log_path, tail, offset)
-                        # Apply the same start-stream-marker filter that
-                        # log_lib.tail_logs_iter uses: when the marker
-                        # appears in both the head of the file and the
-                        # tail window (small log fully covered), filter
-                        # so pre-marker boilerplate (Ray INFO lines etc.)
-                        # is hidden.
-                        with open(log_path, 'r', encoding='utf-8') as peek_f:
-                            head_lines = log_lib._peek_head_lines(peek_f)  # type: ignore[attr-defined] # pylint: disable=protected-access
-                        start_streaming = (
-                            log_lib._should_stream_the_whole_tail_lines(  # type: ignore[attr-defined] # pylint: disable=protected-access
-                                head_lines, lines,
-                                log_lib.LOG_FILE_START_STREAMING_AT))
-                        for line in lines:
-                            if log_lib.LOG_FILE_START_STREAMING_AT in line:
-                                start_streaming = True
-                            if start_streaming:
-                                print(line, end='', flush=True)
-                    else:
-                        with open(log_path, 'r', encoding='utf-8') as f:
-                            start_streaming = False
-                            for line in f:
-                                if (log_lib.LOG_FILE_START_STREAMING_AT
-                                        in line):
-                                    start_streaming = True
-                                if start_streaming:
-                                    print(line, end='', flush=True)
-                    # Show task finished message for multi-task or filtering
-                    if num_tasks > 1 or task is not None:
-                        # Add the "Task finished" message for terminal states
-                        if task_status.is_terminal():
-                            print(ux_utils.finishing_message(
-                                f'{task_str} finished '
-                                f'(status: {task_status.value}).'),
-                                  flush=True)
-                elif log_reader is not None:
-                    # No local copy was persisted for this task, so its logs
-                    # were forwarded to an external store. Stream them back for
-                    # this task's ephemeral cluster; the cluster ran exactly one
-                    # job, so read the latest indexed one (job_id=None).
-                    returncode = None
-                    try:
-                        pool = managed_job_state.get_pool_from_job_id(job_id)
-                        if pool is not None:
-                            cluster_name, _ = (
-                                managed_job_state.get_pool_submit_info(job_id))
-                        else:
-                            cluster_name = generate_managed_job_cluster_name(
-                                task_name, job_id)
-                        if cluster_name is None:
-                            # A pool job that was never assigned a cluster has
-                            # no logs to read back; fall through to the message.
-                            continue
-                        task_str = (f'Task {task_name}({task_id})'
-                                    if task_name else f'Task {task_id}')
-                        if num_tasks > 1 or task is not None:
-                            print(f'=== {task_str} ===')
-                        returncode = log_reader.read_cluster_job_logs(
-                            cluster_name,
-                            None,
-                            follow=False,
-                            tail=tail if tail is not None else 0)
-                        if returncode is None:
-                            # Not cluster-addressed: retry by managed-job
-                            # identity (job_id, task_id). Readers without
-                            # managed-job addressing return None again and we
-                            # fall through to the terminal-state message.
-                            returncode = log_reader.read_managed_job_logs(
-                                job_id,
-                                task_id,
-                                task_name=task_name,
-                                follow=False,
-                                tail=tail if tail is not None else 0)
-                    except Exception as e:  # pylint: disable=broad-except
-                        # Surface the failure (streamed to the user via the
-                        # request's stdout redirection) and fall through to the
-                        # terminal-state message instead of crashing.
-                        logger.warning(
-                            'Failed to read logs for job %s task %s from the '
-                            'external log store: %s', job_id, task_id, e)
-                        continue
-                    if returncode is None:
-                        # No logs in the external store for this task; fall
-                        # through to the terminal-state message below.
-                        continue
-                    log_file_ever_existed = True
-                    if num_tasks > 1 or task is not None:
-                        if task_status.is_terminal():
-                            print(ux_utils.finishing_message(
-                                f'{task_str} finished '
-                                f'(status: {task_status.value}).'),
-                                  flush=True)
-            if log_file_ever_existed:
-                # Add the "Job finished" message for terminal states
-                if managed_job_status.is_terminal():
-                    print(ux_utils.finishing_message(
-                        f'Job finished (status: {managed_job_status.value}).'),
-                          flush=True)
-                return '', exceptions.JobExitCode.from_managed_job_status(
-                    managed_job_status)
-            if log_reader is not None:
-                # An external log reader is registered but returned nothing for
-                # this job: its logs were not persisted locally and are not (or
-                # no longer) in the external store -- e.g. outside the store's
-                # retention window, or never captured. When a logging agent is
-                # in use, task-log retention is governed by the external store,
-                # not by jobs.controller.task_logs_gc_retention_hours.
-                return (
-                    f'{colorama.Fore.YELLOW}'
-                    f'No logs found for job {job_id} in the external log '
-                    f'store. The logs may be outside the store\'s retention '
-                    f'window or were never captured. For controller logs, '
-                    f'run: sky jobs logs --controller {job_id}'
-                    f'{colorama.Style.RESET_ALL}'
-                    f'{job_msg}',
-                    exceptions.JobExitCode.from_managed_job_status(
-                        managed_job_status))
-            return (f'{colorama.Fore.YELLOW}'
-                    f'Job {job_id} is already in terminal state '
-                    f'{managed_job_status.value}. For more details, run: '
-                    f'sky jobs logs --controller {job_id}'
-                    f'{colorama.Style.RESET_ALL}'
-                    f'{job_msg}',
-                    exceptions.JobExitCode.from_managed_job_status(
-                        managed_job_status))
+            return _print_finished_job_logs(managed_job_status)
         # Batch coordinator jobs run inline on the controller — no
         # separate cluster is provisioned. Stream controller logs instead
         # of trying to find a worker cluster handle.
@@ -2578,6 +2602,7 @@ def stream_logs_by_id(
         assert latest_task_id is not None, (job_id, latest_task_id)
         task_id = latest_task_id
 
+        tailed_task_logs = False
         while should_keep_logging(managed_job_status):
             context_utils.raise_if_canceled()
             handle = None
@@ -2657,6 +2682,7 @@ def stream_logs_by_id(
                     managed_job_state.ManagedJobStatus.RUNNING)
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
             status_display.stop()
+            tailed_task_logs = True
             returncode = None
             if managed_job_runtime.is_registered():
                 returncode = managed_job_runtime.tail_logs(
@@ -2830,6 +2856,15 @@ def stream_logs_by_id(
         # The job is not in terminal state and we are not following,
         # just return.
         return '', exceptions.JobExitCode.SUCCEEDED
+    if not tailed_task_logs and managed_job_status in (
+            managed_job_state.ManagedJobStatus.SUCCEEDED,
+            managed_job_state.ManagedJobStatus.FAILED,
+            managed_job_state.ManagedJobStatus.FAILED_SETUP):
+        # The task ran but left RUNNING between two status checks, so its logs
+        # were never tailed from the cluster. Print the copy the controller
+        # downloads when the task ends.
+        _wait_for_task_log_file(job_id, task_id)
+        return _print_finished_job_logs(managed_job_status)
     logger.info(
         ux_utils.finishing_message(f'Managed job finished: {job_id} '
                                    f'(status: {managed_job_status.value}).'))
