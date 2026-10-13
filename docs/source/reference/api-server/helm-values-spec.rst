@@ -1271,7 +1271,7 @@ Default: ``'sub'``
 .. _helm-values-auth-externalProxy-requireIdentity:
 
 ``auth.externalProxy.requireIdentity``
-''
+''''''''''''''''''''''''''''''''''''''
 
 Refuse a request that reaches the API server without an identity.
 
