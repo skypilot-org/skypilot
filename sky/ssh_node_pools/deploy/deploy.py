@@ -447,14 +447,7 @@ def deploy_single_cluster(cluster_name,
         return []
 
     logger.debug('Checking TCP Forwarding Options...')
-    cmd = (
-        'if [ "$(sudo sshd -T | grep allowtcpforwarding)" = "allowtcpforwarding yes" ]; then '
-        f'echo "TCP Forwarding already enabled on head node ({head_node})."; '
-        'else '
-        'sudo sed -i \'s/^#\\?\\s*AllowTcpForwarding.*/AllowTcpForwarding yes/\' '
-        '/etc/ssh/sshd_config && sudo systemctl restart sshd && '
-        f'echo "Successfully enabled TCP Forwarding on head node ({head_node})."; '
-        'fi')
+    cmd = _tcp_forwarding_cmd(askpass_block, head_node)
     result = deploy_utils.run_remote(head_node,
                                      shlex.quote(cmd),
                                      ssh_user,
@@ -1051,6 +1044,24 @@ def deploy_single_cluster(cluster_name,
     return unsuccessful_workers
 
 
+def _tcp_forwarding_cmd(askpass_block: str, head_node: str) -> str:
+    """Command that enables AllowTcpForwarding in sshd on the head node.
+
+    Uses the askpass block and `sudo -A` like the other sudo commands, so
+    hosts that need a sudo password work too.
+    """
+    return (
+        f'{askpass_block}\n'
+        'if [ "$(sudo -A sshd -T | grep allowtcpforwarding)" = '
+        '"allowtcpforwarding yes" ]; then '
+        f'echo "TCP Forwarding already enabled on head node ({head_node})."; '
+        'else '
+        'sudo -A sed -i \'s/^#\\?\\s*AllowTcpForwarding.*/AllowTcpForwarding yes/\' '
+        '/etc/ssh/sshd_config && sudo -A systemctl restart sshd && '
+        f'echo "Successfully enabled TCP Forwarding on head node ({head_node})."; '
+        'fi')
+
+
 def _dcgm_exporter_service_cmd(askpass_block: str, selector: str) -> str:
     """Create a command to apply a dcgm-exporter Service with Prometheus annotations.
 
@@ -1155,10 +1166,10 @@ def create_askpass_script(password):
 # Create temporary askpass script
 ASKPASS_SCRIPT=$(mktemp)
 trap 'rm -f $ASKPASS_SCRIPT' EXIT INT TERM ERR QUIT
-cat > $ASKPASS_SCRIPT << EOF
+cat > $ASKPASS_SCRIPT << 'SKYPILOT_ASKPASS_EOF'
 #!/bin/bash
-echo {password}
-EOF
+printf '%s\n' {shlex.quote(password)}
+SKYPILOT_ASKPASS_EOF
 chmod 700 $ASKPASS_SCRIPT
 # Use askpass
 export SUDO_ASKPASS=$ASKPASS_SCRIPT

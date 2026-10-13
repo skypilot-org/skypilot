@@ -1,5 +1,7 @@
 """Unit tests for sky/ssh_node_pools/deploy/deploy.py helpers."""
 
+import subprocess
+
 from sky.ssh_node_pools.deploy import deploy
 
 
@@ -67,3 +69,29 @@ def test_prometheus_install_cmd_node_exporter_enabled_not_disabled():
     # The first 'enabled:' after the node-exporter key must be 'true'.
     enabled_line = ne_section[ne_section.index('enabled:'):].splitlines()[0]
     assert enabled_line.strip() == 'enabled: true'
+
+
+def test_askpass_script_returns_the_exact_password():
+    """Passwords with shell characters must reach sudo unchanged."""
+    password = 'p$w`d\'"\\ x;EOF'
+    block = deploy.create_askpass_script(password)
+    out = subprocess.run(['bash', '-c', block + '\n"$SUDO_ASKPASS"'],
+                         capture_output=True,
+                         text=True,
+                         check=True)
+    assert out.stdout == password + '\n'
+
+
+def test_askpass_script_is_empty_without_password():
+    assert deploy.create_askpass_script('') == ''
+
+
+def test_tcp_forwarding_cmd_uses_askpass_for_every_sudo():
+    askpass_block = 'export SUDO_ASKPASS=/tmp/askpass'
+    cmd = deploy._tcp_forwarding_cmd(askpass_block, '10.0.0.1')
+    assert cmd.startswith(askpass_block)
+    # Every sudo must go through askpass; a plain `sudo` fails without a
+    # terminal on hosts that need a sudo password.
+    assert cmd.count('sudo ') == cmd.count('sudo -A ')
+    assert cmd.count('sudo -A ') == 3
+    assert '10.0.0.1' in cmd
