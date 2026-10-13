@@ -112,7 +112,11 @@ _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 
 _LAUNCHED_HEAD_PATTERN = re.compile(r'(\d+) ray[._]head[._]default')
 _LAUNCHED_LOCAL_WORKER_PATTERN = re.compile(r'(\d+) node_')
+# Emitted by instance_setup.RAY_ALIVE_NODE_COUNT_COMMAND: alive, total.
+_ALIVE_NODES_PATTERN = re.compile(r'^SKY_ALIVE_NODES (\d+) (\d+)$',
+                                  re.MULTILINE)
 _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
+_RAY_HEALTH_CHECK_ATTEMPTS = 12
 _LAUNCHED_RESERVED_WORKER_PATTERN = re.compile(
     r'(\d+) ray[._]worker[._]reserved')
 # Intentionally not using prefix 'rf' for the string format because yapf have a
@@ -2796,18 +2800,24 @@ def _update_cluster_status(
 
     def get_node_counts_from_ray_status(
             runner: command_runner.CommandRunner) -> Tuple[int, int, str, str]:
-        rc, output, stderr = runner.run(
-            instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-            stream_logs=False,
-            require_outputs=True,
-            separate_stderr=True)
+        cmd = instance_setup.RAY_ALIVE_NODE_COUNT_COMMAND
+        rc, output, stderr = runner.run(cmd,
+                                        stream_logs=False,
+                                        require_outputs=True,
+                                        separate_stderr=True)
         if rc:
             raise exceptions.CommandError(
-                rc, instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-                f'Failed to check ray cluster\'s healthiness.\n'
+                rc, cmd, f'Failed to check ray cluster\'s healthiness.\n'
                 '-- stdout --\n'
                 f'{output}\n', stderr)
-        return (*_count_healthy_nodes_from_ray(output), output, stderr)
+        match = _ALIVE_NODES_PATTERN.search(output)
+        if match is None:
+            raise exceptions.CommandError(
+                rc, cmd, 'Failed to read the alive node count from the ray '
+                f'cluster.\n-- stdout --\n{output}\n', stderr)
+        # The head is one of them; the caller compares head + workers.
+        alive = int(match.group(1))
+        return (min(alive, 1), max(alive - 1, 0), output, stderr)
 
     ray_status_details: Optional[str] = None
 
@@ -2841,7 +2851,11 @@ def _update_cluster_status(
             ready_workers = 0
             output = ''
             stderr = ''
-            for i in range(5):
+            # Ray's GCS needs ~35s to mark a gone node dead (2.56.1:
+            # health_check_initial_delay_ms + period x failure_threshold), so a
+            # shorter budget reports a node that is on its way out as a live
+            # one short of the expected count.
+            for i in range(_RAY_HEALTH_CHECK_ATTEMPTS):
                 try:
                     ready_head, ready_workers, output, stderr = (
                         get_node_counts_from_ray_status(head_runner))

@@ -265,16 +265,40 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
     f'{_RAY_PORT_COMMAND}; '
     f'RAY_ADDRESS=127.0.0.1:$RAY_PORT {constants.SKY_RAY_CMD} status')
 
+# `ray status` keeps a node under `Active:` after the GCS has marked it dead
+# (on Ray 2.56.1 it never drops off), so counting its node lines over-reports
+# after any node loss -- a resize-down, a preemption, a replaced worker. Ask
+# the GCS instead, the same source task_codegen uses to size its placement
+# groups. Prints one parseable line plus a per-node dump for diagnostics.
+_ALIVE_NODES_PY = (
+    'import os, ray; '
+    'ray.init(address=os.environ["RAY_ADDRESS"], log_to_driver=False); '
+    'ns = ray.nodes(); '
+    'print("SKY_ALIVE_NODES", sum(1 for n in ns if n["Alive"]), len(ns)); '
+    '[print(" ", n["NodeID"][:16], n["Alive"], n.get("NodeManagerAddress")) '
+    'for n in ns]')
+RAY_ALIVE_NODE_COUNT_COMMAND = (
+    f'{_RAY_PORT_COMMAND}; '
+    f'RAY_ADDRESS=127.0.0.1:$RAY_PORT {constants.SKY_PYTHON_CMD} '
+    f'-c {shlex.quote(_ALIVE_NODES_PY)}')
+
 # Command that waits for the ray status to be initialized. Otherwise, a later
 # `sky status -r` may fail due to the ray cluster not being ready.
 # Reads SKYPILOT_RAY_PORT (exported by the hostNetwork probe) rather than
 # the constants.RAY_STATUS literal — the probe picks a dynamic port.
+_RAY_HEAD_WAIT_TIMEOUT_SECONDS = 120
+# Keyed on the exit status, not on a message: Ray 2.9.3 printed "No cluster
+# status." when the GCS was not up yet, 2.56.1 raises instead, which turned
+# this wait into a no-op. Deadline rather than an iteration count, because a
+# failing `ray status` takes ~35s to return on 2.56.1.
 RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
-    'while `RAY_ADDRESS=127.0.0.1:${SKYPILOT_RAY_PORT:-'
+    f'_sky_deadline=$(( $(date +%s) + {_RAY_HEAD_WAIT_TIMEOUT_SECONDS} )); '
+    'while [ $(date +%s) -lt $_sky_deadline ]; do '
+    'RAY_ADDRESS=127.0.0.1:${SKYPILOT_RAY_PORT:-'
     f'{constants.SKY_REMOTE_RAY_PORT}}} '
-    f'{constants.SKY_RAY_CMD} status | grep -q "No cluster status."`; do '
-    'sleep 0.5; '
+    f'{constants.SKY_RAY_CMD} status > /dev/null 2>&1 && break; '
     'echo "Waiting ray cluster to be initialized"; '
+    'sleep 0.5; '
     'done;')
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
