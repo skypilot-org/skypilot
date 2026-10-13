@@ -402,14 +402,15 @@ def ha_recovery_for_consolidation_mode(
 
     Args:
         still_leader: re-checked while the controller pool starts, which spans
-            tens of seconds. Raises scheduler.ControllerPoolNotOwnedError if
-            leadership is lost, so the caller steps down instead of recovering
-            jobs another replica has already taken over.
+            tens of seconds, and again before scanning jobs; recovery returns
+            early once it is False, leaving the jobs to the new leader.
     """
     # No setup recovery is needed in consolidation mode, as the API server
     # already has all runtime installed. Directly start jobs recovery here.
     # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
     scheduler.maybe_start_controllers(still_owned=still_leader)
+    if still_leader is not None and not still_leader():
+        return
     with open(constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format('jobs_'),
               'a',
               encoding='utf-8') as f:

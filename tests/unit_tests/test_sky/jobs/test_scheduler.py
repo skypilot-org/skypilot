@@ -191,35 +191,25 @@ class TestMaybeStartControllersOwnership:
     controllers on one job.
     """
 
-    def test_aborts_mid_start_when_ownership_is_lost(self):
+    def test_stops_mid_start_when_ownership_is_lost(self):
         """The rest of the pool is not started once the lease is gone."""
-        calls = []
         still_owned = mock.Mock(side_effect=[True, False])
-        with pytest.raises(scheduler.ControllerPoolNotOwnedError):
-            _start_calls(alive=0,
-                         wanted=5,
-                         still_owned=still_owned,
-                         calls=calls)
+        with mock.patch.object(scheduler, 'logger') as log:
+            calls = _start_calls(alive=0, wanted=5, still_owned=still_owned)
         assert calls.count('start') == 2
         assert still_owned.call_count == 2
+        # How far the pool got is the only clue to how many controllers this
+        # server left behind; it must reach the log.
+        assert any('after starting 2 of 5 controllers' in str(c)
+                   for c in log.error.call_args_list)
 
-    def test_checks_once_more_after_the_last_start(self):
-        """Recovery runs straight after, so the last sleep must not go
-        unchecked."""
-        calls = []
-        still_owned = mock.Mock(side_effect=[True, False])
-        with pytest.raises(scheduler.ControllerPoolNotOwnedError):
-            _start_calls(alive=0,
-                         wanted=2,
-                         still_owned=still_owned,
-                         calls=calls)
-        assert calls.count('start') == 2
-        assert still_owned.call_count == 2
-
-    def test_single_start_is_checked_too(self):
+    def test_single_start_does_not_check(self):
+        """No sleep happens before the first start, so there is nothing
+        stale to re-check; the caller's own check still holds."""
         still_owned = mock.Mock(return_value=False)
-        with pytest.raises(scheduler.ControllerPoolNotOwnedError):
-            _start_calls(alive=30, wanted=31, still_owned=still_owned)
+        assert _start_calls(alive=30, wanted=31,
+                            still_owned=still_owned) == ['start']
+        still_owned.assert_not_called()
 
     def test_full_pool_does_not_check(self):
         still_owned = mock.Mock(return_value=False)
@@ -230,5 +220,5 @@ class TestMaybeStartControllersOwnership:
         still_owned = mock.Mock(return_value=True)
         calls = _start_calls(alive=0, wanted=4, still_owned=still_owned)
         assert calls.count('start') == 4
-        # Three between starts, one after the last.
-        assert still_owned.call_count == 4
+        # One check after each of the three sleeps.
+        assert still_owned.call_count == 3
