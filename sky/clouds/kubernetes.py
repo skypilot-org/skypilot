@@ -1037,8 +1037,10 @@ class Kubernetes(clouds.Cloud):
         # This makes check_cluster_name_not_controller() (controller_utils)
         # load-bearing for a permission boundary: it is what stops a user
         # launching `sky-jobs-controller-mine` to be handed this identity.
-        # Relaxing that guard would turn into privilege escalation -- see the
-        # test in tests/unit_tests/kubernetes/.
+        # Relaxing that guard, or letting a request skip it
+        # (`_disable_controller_check` is in-process only), would turn into
+        # privilege escalation -- see test_kubernetes_ray_template_snapshot.py
+        # and test_payloads.py under tests/unit_tests/test_sky/.
         is_controller = common.is_controller_name(cluster_name.display_name)
 
         # NONE set by the server holds even when the requester's layer says
@@ -1391,7 +1393,14 @@ class Kubernetes(clouds.Cloud):
             'k8s_acc_label_values': k8s_acc_label_values,
             # Merged into the rendered pod by write_cluster_config().
             'pod_fields': kubernetes_utils.get_pod_fields(
-                k8s_acc_label_key, k8s_acc_label_values, avoid_label_keys),
+                acc_label_key=k8s_acc_label_key,
+                acc_label_values=k8s_acc_label_values,
+                avoid_label_keys=avoid_label_keys,
+                topology_label_key=k8s_topology_label_key,
+                topology_label_value=k8s_topology_label_value,
+                spot_label_key=spot_label_key,
+                spot_label_value=spot_label_value,
+                enable_flex_start=enable_flex_start),
             'k8s_service_account_name': k8s_service_account_name,
             # Gates the provisioner-only roles: only a controller pod
             # provisions, and only in non-consolidation deployments --
@@ -1410,11 +1419,7 @@ class Kubernetes(clouds.Cloud):
                 kubernetes_fuse.get_fusermount_shim_setup_command(
                     sudo_cmd='$(prefix_cmd)',
                     shared_dir=kubernetes_fuse.FUSERMOUNT_SHARED_DIR),
-            'k8s_spot_label_key': spot_label_key,
-            'k8s_spot_label_value': spot_label_value,
             'tpu_requested': tpu_requested,
-            'k8s_topology_label_key': k8s_topology_label_key,
-            'k8s_topology_label_value': k8s_topology_label_value,
             'k8s_resource_key': k8s_resource_key,
             'k8s_env_vars': k8s_env_vars,
             'image_id': image_id,
@@ -1445,8 +1450,6 @@ class Kubernetes(clouds.Cloud):
                 constants.SKY_UNSET_PYTHONPATH_AND_SET_CWD,
             'k8s_high_availability_storage_class_name':
                 (k8s_ha_storage_class_name),
-            'avoid_label_keys': avoid_label_keys,
-            'k8s_enable_flex_start': enable_flex_start,
             'k8s_max_run_duration_seconds': max_run_duration_seconds,
             'k8s_network_type': network_type.value,
             'k8s_context': context,

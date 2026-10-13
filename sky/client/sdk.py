@@ -429,6 +429,27 @@ def kubernetes_label_gpus(
     return server_common.get_request_id(response)
 
 
+def _omit_job_section_for_older_server(dag: 'sky.Dag') -> None:
+    """Drops the tasks' `job:` section if the server predates it.
+
+    An older server rejects the unknown key. `job:` only affects managed
+    jobs, whose launch refuses such a server before reaching here (see
+    sky/jobs/client/sdk.py), so nothing is lost.
+    """
+    if not any(task.job for task in dag.tasks):
+        return
+    remote_api_version = versions.get_remote_api_version()
+    min_version = (
+        server_constants.MIN_JOBS_WAIT_FOR_SCHEDULING_TIMEOUT_API_VERSION)
+    if remote_api_version is not None and remote_api_version >= min_version:
+        return
+    for task in dag.tasks:
+        # pylint: disable=protected-access
+        task._job = {}
+    logger.debug('`job` is ignored because the server does not support it '
+                 'yet.')
+
+
 def _check_slurm_host_path_volume_api_version(dag: 'sky.Dag') -> None:
     if not any(
             isinstance(volume_config, dict) and 'host_path' in volume_config
@@ -475,6 +496,7 @@ def optimize(
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
     _check_slurm_host_path_volume_api_version(dag)
+    _omit_job_section_for_older_server(dag)
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
     body = payloads.OptimizeBody(dag=dag_str,
@@ -665,6 +687,10 @@ def validate(
             logger.debug('`max_hourly_cost` is ignored because the server '
                          'does not support it yet.')
 
+    # Also covers launch() and exec(), which validate the DAG before they
+    # send it.
+    _omit_job_section_for_older_server(dag)
+
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
                                  request_options=admin_policy_request_options)
@@ -710,7 +736,6 @@ def launch(
     _need_confirmation: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
-    _disable_controller_check: bool = False,
     _file_mounts_blob_id: Optional[str] = None,
     _extra_launch_context: Optional[Dict[str, Any]] = None,
     _include_credentials: bool = False,
@@ -897,7 +922,6 @@ def launch(
             _need_confirmation,
             _is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller,
-            _disable_controller_check,
             _file_mounts_blob_id,
             _extra_launch_context,
             _include_credentials,
@@ -923,7 +947,6 @@ def _launch(
     _need_confirmation: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
-    _disable_controller_check: bool = False,
     _file_mounts_blob_id: Optional[str] = None,
     _extra_launch_context: Optional[Dict[str, Any]] = None,
     _include_credentials: bool = False,
@@ -1071,7 +1094,6 @@ def _launch(
         is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         is_launched_by_sky_serve_controller=(
             _is_launched_by_sky_serve_controller),
-        disable_controller_check=_disable_controller_check,
         file_mounts_blob_id=file_mounts_blob_id,
         resize=resize,
         extra_launch_context=_extra_launch_context or {},

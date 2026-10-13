@@ -5886,6 +5886,81 @@ class TestGetNodeAffinity:
         }
 
 
+def _pod_fields(acc_label_key=None,
+                acc_label_values=None,
+                avoid_label_keys=None,
+                topology_label_key=None,
+                topology_label_value=None,
+                spot_label_key=None,
+                spot_label_value=None,
+                enable_flex_start=False):
+    return utils.get_pod_fields(acc_label_key=acc_label_key,
+                                acc_label_values=acc_label_values,
+                                avoid_label_keys=avoid_label_keys,
+                                topology_label_key=topology_label_key,
+                                topology_label_value=topology_label_value,
+                                spot_label_key=spot_label_key,
+                                spot_label_value=spot_label_value,
+                                enable_flex_start=enable_flex_start)
+
+
+class TestGetNodeSelector:
+    """Tests for utils.get_node_selector."""
+
+    def test_none_when_no_entries(self):
+        assert utils.get_node_selector(None, None, None, None, False) is None
+
+    def test_none_when_key_without_value(self):
+        """A key with a None value does not produce an entry."""
+        assert utils.get_node_selector('cloud.google.com/gke-tpu-topology',
+                                       None, 'cloud.google.com/gke-spot', None,
+                                       False) is None
+
+    def test_topology_only(self):
+        assert utils.get_node_selector(
+            'cloud.google.com/gke-tpu-topology', '2x2', None, None, False) == {
+                'cloud.google.com/gke-tpu-topology': '2x2',
+            }
+
+    def test_spot_only(self):
+        assert utils.get_node_selector(None, None, 'cloud.google.com/gke-spot',
+                                       'true', False) == {
+                                           'cloud.google.com/gke-spot': 'true',
+                                       }
+
+    def test_flex_start_only(self):
+        assert utils.get_node_selector(None, None, None, None, True) == {
+            'cloud.google.com/gke-flex-start': 'true',
+        }
+
+    def test_all_entries(self):
+        assert utils.get_node_selector(
+            'cloud.google.com/gke-tpu-topology', '2x2',
+            'cloud.google.com/gke-spot', 'true', True) == {
+                'cloud.google.com/gke-tpu-topology': '2x2',
+                'cloud.google.com/gke-spot': 'true',
+                'cloud.google.com/gke-flex-start': 'true',
+            }
+
+
+class TestGetSpotToleration:
+    """Tests for utils.get_spot_toleration."""
+
+    def test_none_without_a_spot_label(self):
+        assert utils.get_spot_toleration(None, None) is None
+        assert utils.get_spot_toleration('cloud.google.com/gke-spot',
+                                         None) is None
+
+    def test_tolerates_the_spot_taint(self):
+        assert utils.get_spot_toleration(
+            'karpenter.sh/capacity-type', 'spot') == {
+                'key': 'karpenter.sh/capacity-type',
+                'operator': 'Equal',
+                'value': 'spot',
+                'effect': 'NoSchedule',
+            }
+
+
 class TestPodFields:
     """Tests for utils.get_pod_fields and utils.combine_pod_fields."""
 
@@ -5907,11 +5982,11 @@ class TestPodFields:
             'node_config']['spec']
 
     def test_empty_when_no_field_applies(self):
-        assert utils.get_pod_fields(None, None, None) == {}
+        assert _pod_fields() == {}
 
     def test_node_affinity_is_a_pod_spec_field(self):
-        pod_fields = utils.get_pod_fields('skypilot.co/accelerator', ['H100'],
-                                          ['some-other-key'])
+        pod_fields = _pod_fields('skypilot.co/accelerator', ['H100'],
+                                 ['some-other-key'])
         assert pod_fields == {
             'spec': {
                 'affinity': {
@@ -5936,8 +6011,7 @@ class TestPodFields:
                 'podAffinity': pod_affinity
             },
         })
-        pod_fields = utils.get_pod_fields('skypilot.co/accelerator', ['H100'],
-                                          None)
+        pod_fields = _pod_fields('skypilot.co/accelerator', ['H100'])
 
         combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
 
@@ -5956,7 +6030,7 @@ class TestPodFields:
             {'containers': [{
                 'name': 'ray-node'
             }]})
-        pod_fields = utils.get_pod_fields(None, None, ['some-other-key'])
+        pod_fields = _pod_fields(avoid_label_keys=['some-other-key'])
 
         combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
 
@@ -5968,8 +6042,7 @@ class TestPodFields:
             {'containers': [{
                 'name': 'ray-node'
             }]})
-        pod_fields = utils.get_pod_fields('skypilot.co/accelerator', ['H100'],
-                                          None)
+        pod_fields = _pod_fields('skypilot.co/accelerator', ['H100'])
         expected_pod_fields = copy.deepcopy(pod_fields)
 
         combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
@@ -5977,6 +6050,71 @@ class TestPodFields:
 
         assert 'affinity' not in self._pod_spec(cluster_yaml)
         assert pod_fields == expected_pod_fields
+
+    def test_spot_pins_and_tolerates(self):
+        """A spot request gives the pod the spot node selector and the
+        toleration for the taint those nodes carry."""
+        pod_fields = _pod_fields(spot_label_key='cloud.google.com/gke-spot',
+                                 spot_label_value='true')
+        assert pod_fields == {
+            'spec': {
+                'nodeSelector': {
+                    'cloud.google.com/gke-spot': 'true'
+                },
+                'tolerations': [{
+                    'key': 'cloud.google.com/gke-spot',
+                    'operator': 'Equal',
+                    'value': 'true',
+                    'effect': 'NoSchedule',
+                }],
+            }
+        }
+
+    def test_every_field_together(self):
+        pod_fields = _pod_fields(
+            acc_label_key='cloud.google.com/gke-tpu-accelerator',
+            acc_label_values=['tpu-v5-lite-podslice'],
+            topology_label_key='cloud.google.com/gke-tpu-topology',
+            topology_label_value='2x4',
+            spot_label_key='cloud.google.com/gke-spot',
+            spot_label_value='true',
+            enable_flex_start=True)
+        assert pod_fields['spec'] == {
+            'nodeSelector': {
+                'cloud.google.com/gke-tpu-topology': '2x4',
+                'cloud.google.com/gke-spot': 'true',
+                'cloud.google.com/gke-flex-start': 'true',
+            },
+            'affinity': {
+                'nodeAffinity': utils.get_node_affinity(
+                    'cloud.google.com/gke-tpu-accelerator',
+                    ['tpu-v5-lite-podslice'], None)
+            },
+            'tolerations': [
+                utils.get_spot_toleration('cloud.google.com/gke-spot', 'true')
+            ],
+        }
+
+    def test_combine_appends_the_user_tolerations_after(self):
+        """The spot toleration is in place before the user's pod_config is
+        merged, so merge_k8s_configs appends the user's tolerations to it."""
+        from sky.utils import config_utils
+
+        cluster_yaml = self._cluster_yaml(
+            {'containers': [{
+                'name': 'ray-node'
+            }]})
+        pod_fields = _pod_fields(spot_label_key='cloud.google.com/gke-spot',
+                                 spot_label_value='true')
+        combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
+        user_toleration = {'key': 'dedicated', 'operator': 'Exists'}
+        config_utils.merge_k8s_configs(self._pod_spec(combined),
+                                       {'tolerations': [user_toleration]})
+
+        assert self._pod_spec(combined)['tolerations'] == [
+            utils.get_spot_toleration('cloud.google.com/gke-spot', 'true'),
+            user_toleration,
+        ]
 
 
 def _make_pod_with_spec(*,
