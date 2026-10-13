@@ -10,9 +10,11 @@ import fastapi
 import pytest
 import sqlalchemy
 import sqlalchemy_adapter
+import yaml
 
 from sky import global_user_state
 from sky import models
+from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.skylet import constants
@@ -21,6 +23,7 @@ from sky.users import rbac
 from sky.users import server
 from sky.utils import common
 from sky.utils import common_utils
+from sky.workspaces import utils as workspaces_utils
 
 
 class TestGetUserType:
@@ -1249,14 +1252,29 @@ class TestUserContextIsolation:
         assert after == before  # no leak after the handler returns
 
 
-@pytest.fixture
-def users_and_tokens(tmp_path, monkeypatch):
-    """Real user, token and role tables.
+_ALL_USERS = ['admin', 'alice', 'bob', 'carol', 'dave', 'vic']
+_PRIVATE_A = {'private': True, 'allowed_users': ['alice', 'bob', 'sa-a']}
+_READ_ONLY_B = {
+    'private': True,
+    'read_access': 'all',
+    'allowed_users': ['carol'],
+}
+_PRIVATE_DEFAULT = {'private': True, 'allowed_users': []}
+_READ_ONLY_DEFAULT = {
+    'private': True,
+    'read_access': 'all',
+    'allowed_users': []
+}
 
-    alice and bob are users, vic a viewer, and sa-a and sa-b service accounts.
-    alice, bob and sa-a share private workspace ws-a, which must not make them
-    visible to each other. The admin created token t-a for sa-a; bob created
-    t-b for sa-b.
+
+@pytest.fixture(name='set_workspaces')
+def _users_and_tokens(tmp_path, monkeypatch):
+    """Real user, token and role tables, and workspaces from real config.
+
+    alice, bob, carol and dave are users, vic a viewer, and sa-a and sa-b
+    service accounts. Call the returned function with a workspaces config to
+    write it and materialize its grants, as `/workspaces/update` does. The
+    admin created token t-a for sa-a; bob created t-b for sa-b.
     """
     engine = sqlalchemy.create_engine(f'sqlite:///{tmp_path}/state.db')
     monkeypatch.setattr(global_user_state._db_manager, '_engine', engine)
@@ -1267,33 +1285,51 @@ def users_and_tokens(tmp_path, monkeypatch):
         sqlalchemy_adapter.Adapter(engine,
                                    db_class=sqlalchemy_adapter.CasbinRule))
     monkeypatch.setattr(permission, 'permission_service', service)
+    monkeypatch.setattr(service, 'invalidate_workspace_permission_cache',
+                        lambda workspace_name: None)
 
-    for user_id, role in [('admin', 'admin'), ('alice', 'user'),
-                          ('bob', 'user'), ('vic', 'viewer'), ('sa-a', 'user'),
+    for user_id, role in [('admin', 'admin'),
+                          ('alice', 'user'), ('bob', 'user'), ('carol', 'user'),
+                          ('dave', 'user'), ('vic', 'viewer'), ('sa-a', 'user'),
                           ('sa-b', 'user')]:
         global_user_state.add_or_update_user(
             models.User(id=user_id, name=user_id))
         service.enforcer.add_grouping_policy(user_id, role)
-    for user_id in ['alice', 'bob', 'sa-a']:
-        service.enforcer.add_policy(user_id, 'ws-a', '*')
-    service.enforcer.add_policy('*', 'default', '*')
     for token_id, creator, service_account in [('t-a', 'admin', 'sa-a'),
                                                ('t-b', 'bob', 'sa-b')]:
         global_user_state.add_service_account_token(token_id, token_id,
                                                     f'hash-{token_id}', creator,
                                                     service_account)
 
+    config_path = tmp_path / 'config.yaml'
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       str(config_path))
+
+    def set_workspaces(workspaces, write_grants=True):
+        config_path.write_text(yaml.safe_dump({'workspaces': workspaces}))
+        if write_grants:
+            for name, config in workspaces.items():
+                service.update_workspace_policy(
+                    name, workspaces_utils.get_workspace_users(config))
+
+    set_workspaces({'default': {}, 'ws-a': _PRIVATE_A})
+    yield set_workspaces
+    monkeypatch.delenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
+    skypilot_config.reload_config()
+
 
 def _request_as(user_id):
     request = mock.MagicMock(spec=fastapi.Request)
     request.state = mock.MagicMock()
-    request.state.auth_user = models.User(id=user_id, name=user_id)
+    request.state.auth_user = (None if user_id is None else models.User(
+        id=user_id, name=user_id))
     return request
 
 
-@pytest.mark.usefixtures('users_and_tokens')
-class TestRoleScopedVisibility:
-    """Admins see all users and tokens; others see themselves and their own."""
+@pytest.mark.usefixtures('set_workspaces')
+class TestReadableWorkspaceVisibility:
+    """Admins see all users. Others see the members of every workspace they can
+    read, which is everyone if one is public. Tokens follow their creator."""
 
     @staticmethod
     def _user_ids(user_id):
@@ -1305,16 +1341,57 @@ class TestRoleScopedVisibility:
                       for token in server.get_service_account_tokens(
                           _request_as(user_id)))
 
-    @pytest.mark.parametrize('user_id', ['alice', 'vic'])
-    def test_non_admin_sees_only_self(self, user_id):
-        assert self._user_ids(user_id) == [user_id]
+    @pytest.mark.parametrize('user_id', ['alice', 'dave', 'vic'])
+    def test_public_workspace_shows_everyone(self, user_id):
+        # `default` is public in the fixture's config.
+        assert self._user_ids(user_id) == _ALL_USERS
 
-    def test_admin_sees_everyone_but_service_accounts(self):
-        assert self._user_ids('admin') == ['admin', 'alice', 'bob', 'vic']
+    def test_private_member_sees_only_their_workspace(self, set_workspaces):
+        set_workspaces({'default': _PRIVATE_DEFAULT, 'ws-a': _PRIVATE_A})
+        assert self._user_ids('alice') == ['alice', 'bob']
+        assert self._user_ids('dave') == ['dave']
+        assert self._user_ids('vic') == ['vic']
 
-    def test_service_account_sees_no_users(self):
-        # Service accounts are never listed, not even to themselves.
-        assert self._user_ids('sa-a') == []
+    def test_read_only_workspace_shows_its_members(self, set_workspaces):
+        set_workspaces({
+            'default': _PRIVATE_DEFAULT,
+            'ws-a': _PRIVATE_A,
+            'ws-b': _READ_ONLY_B
+        })
+        assert self._user_ids('dave') == ['carol', 'dave']
+        assert self._user_ids('alice') == ['alice', 'bob', 'carol']
+        # carol cannot read ws-a.
+        assert self._user_ids('carol') == ['carol']
+
+    def test_read_only_workspace_without_members_adds_nobody(
+            self, set_workspaces):
+        set_workspaces({'default': _READ_ONLY_DEFAULT, 'ws-a': _PRIVATE_A})
+        assert self._user_ids('dave') == ['dave']
+        assert self._user_ids('alice') == ['alice', 'bob']
+
+    def test_read_access_change_applies_without_restart(self, set_workspaces):
+        set_workspaces({'default': _PRIVATE_DEFAULT, 'ws-b': _PRIVATE_A})
+        assert self._user_ids('dave') == ['dave']
+        # Another process opens ws-b read-only. read_access is not a grant.
+        set_workspaces(
+            {
+                'default': _PRIVATE_DEFAULT,
+                'ws-b': dict(_PRIVATE_A, read_access='all')
+            },
+            write_grants=False)
+        assert self._user_ids('dave') == ['alice', 'bob', 'dave']
+
+    @pytest.mark.parametrize('user_id', ['admin', None])
+    def test_admin_and_unauthenticated_see_everyone(self, set_workspaces,
+                                                    user_id):
+        set_workspaces({'default': _PRIVATE_DEFAULT, 'ws-a': _PRIVATE_A})
+        assert self._user_ids(user_id) == _ALL_USERS
+
+    def test_service_accounts_are_never_listed(self, set_workspaces):
+        set_workspaces({'default': _PRIVATE_DEFAULT, 'ws-a': _PRIVATE_A})
+        # sa-a shares ws-a with alice and bob, but is not listed itself.
+        assert self._user_ids('sa-a') == ['alice', 'bob']
+        assert self._user_ids('alice') == ['alice', 'bob']
 
     def test_non_admin_sees_only_tokens_they_created(self):
         assert self._token_ids('bob') == ['t-b']
@@ -1332,13 +1409,23 @@ class TestRoleScopedVisibility:
         call()
         return load.call_count
 
+    @pytest.mark.parametrize('default', [{}, _PRIVATE_DEFAULT])
     @pytest.mark.parametrize('user_id', ['admin', 'alice', 'vic', 'sa-a'])
-    def test_user_list_adds_no_policy_load(self, user_id, monkeypatch):
+    def test_user_list_adds_no_policy_load(self, set_workspaces, default,
+                                           user_id, monkeypatch):
+        set_workspaces({
+            'default': default,
+            'ws-a': _PRIVATE_A,
+            'ws-b': _READ_ONLY_B
+        })
         loads = self._policy_loads(monkeypatch, lambda: self._user_ids(user_id))
         # One per role, as for the unfiltered list.
         assert loads == len(rbac.get_supported_roles())
 
-    def test_user_list_sees_role_change_from_another_process(self, tmp_path):
+    def test_user_list_sees_role_change_from_another_process(
+            self, set_workspaces, tmp_path):
+        set_workspaces({'default': _PRIVATE_DEFAULT, 'ws-a': _PRIVATE_A})
+        assert self._user_ids('alice') == ['alice', 'bob']
         # Another process's enforcer, writing the same policy table.
         other = casbin.SyncedEnforcer(
             os.path.join(os.path.dirname(permission.__file__), 'model.conf'),
@@ -1347,7 +1434,18 @@ class TestRoleScopedVisibility:
                 db_class=sqlalchemy_adapter.CasbinRule))
         other.remove_grouping_policy('alice', 'user')
         other.add_grouping_policy('alice', 'admin')
-        assert self._user_ids('alice') == ['admin', 'alice', 'bob', 'vic']
+        assert self._user_ids('alice') == _ALL_USERS
+
+    def test_user_list_sees_grant_from_another_process(self, set_workspaces,
+                                                       tmp_path):
+        set_workspaces({'default': _PRIVATE_DEFAULT, 'ws-a': _PRIVATE_A})
+        other = casbin.SyncedEnforcer(
+            os.path.join(os.path.dirname(permission.__file__), 'model.conf'),
+            sqlalchemy_adapter.Adapter(
+                sqlalchemy.create_engine(f'sqlite:///{tmp_path}/state.db'),
+                db_class=sqlalchemy_adapter.CasbinRule))
+        other.add_policy('dave', 'ws-a', '*')
+        assert self._user_ids('dave') == ['alice', 'bob', 'dave']
 
     def test_token_roles_load_only_for_visible_tokens(self, monkeypatch):
         # One for the admin check, then one for bob's only token.

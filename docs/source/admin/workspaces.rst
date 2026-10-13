@@ -411,6 +411,24 @@ service account by its token name, just like a human user:
    tab, or via the ``/service-account-tokens/update-role`` API), then add it to
    the ``allowed_users`` of the workspaces it should reach.
 
+Who appears in the user list
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Admins see every user. Everyone else sees themselves and the members of every
+workspace they can read: the workspaces whose clusters and jobs they can see.
+A public workspace counts as having everyone as a member, so a user who can
+read one sees every user. A private workspace with ``read_access: all`` adds
+only its ``allowed_users``.
+
+To keep the list scoped, make every workspace private, including ``default``,
+and add each user only to the workspaces they need. A user whose request does
+not name a workspace then lands in their preferred workspace, or their only
+workspace. A user in several workspaces must pick one with
+``sky workspace use <name>``, or each such request fails as ambiguous.
+A user with no workspace of their own is refused everything. To let them still
+run read requests such as ``sky status``, but not launch, also set
+``read_access: all`` on ``default``.
+
 User management
 ----------------
 

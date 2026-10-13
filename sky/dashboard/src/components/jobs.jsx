@@ -1285,8 +1285,8 @@ export function ManagedJobsTable({
     ]).then(([usersData, workspacesData]) => {
       setValueList((prev) => ({
         ...prev,
-        // Union with the jobs' own owners: for a non-admin the user list holds
-        // only the caller, so it misses the owners of other visible jobs.
+        // Union with the jobs' own owners: the user list omits service
+        // accounts, and for a non-admin, owners outside their workspaces.
         user: usersData
           ? [
               ...new Set([

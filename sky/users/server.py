@@ -134,9 +134,12 @@ def get_user_type(user: models.User) -> str:
 # support.
 @router.get('')
 def users(request: fastapi.Request) -> List[Dict[str, Any]]:
-    """Gets all users for admins, and only the caller for everyone else.
+    """Gets all users for admins, and for everyone else the members of the
+    workspaces they can read, plus themselves.
 
-    No authenticated user is treated as admin, as in `GET /users/role`.
+    The readable workspaces are the ones that decide which clusters and jobs
+    the caller sees. A public one makes every user visible. No authenticated
+    user is treated as admin, as in `GET /users/role`.
     """
     all_users = []
     user_list = global_user_state.get_all_users()
@@ -151,7 +154,13 @@ def users(request: fastapi.Request) -> List[Dict[str, Any]]:
     # The loop above has just reloaded the policy.
     if auth_user is not None and not _is_admin(
             permission.permission_service.roles_in_memory(auth_user.id)):
-        user_list = [user for user in user_list if user.id == auth_user.id]
+        # The read_access settings that decide the readable workspaces may
+        # have changed on another process.
+        server_common.refresh_workspace_state_for_sync_handler()
+        visible = workspaces_core.readable_workspace_members_in_memory(
+            auth_user.id)
+        if visible is not None:
+            user_list = [user for user in user_list if user.id in visible]
 
     for user in user_list:
         # Filter out service accounts - they have IDs starting with "sa-"

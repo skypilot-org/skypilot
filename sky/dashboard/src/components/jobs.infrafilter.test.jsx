@@ -521,8 +521,7 @@ describe('the Infra suggestions the table publishes', () => {
   });
 });
 
-// For a non-admin, GET /users returns only the caller, so the owners of other
-// visible jobs are missing from it.
+// GET /users can omit the owners of visible jobs, e.g. service accounts.
 describe('the User suggestions the table publishes', () => {
   it('keep the owners of visible jobs that the user list omits', async () => {
     respondWith(PAGE);
