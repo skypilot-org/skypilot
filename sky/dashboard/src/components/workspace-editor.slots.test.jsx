@@ -590,4 +590,36 @@ describe('WorkspaceEditor Refresh for an admin', () => {
     expect(screen.getByText('1 / 1')).toBeTruthy();
     console.error.mockRestore();
   });
+
+  test('stats for a workspace the page left are dropped', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    mockGetWorkspaces.mockImplementation(async () => ({
+      ws: { private: true, allowed_users: ['alice'] },
+      other: { private: true, allowed_users: ['alice'] },
+    }));
+    let releaseWs;
+    mockGetClusters
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseWs = () =>
+              resolve([{ cluster: 'c', workspace: 'ws', status: 'RUNNING' }]);
+          })
+      )
+      .mockImplementationOnce(async () => {
+        throw new Error('down');
+      });
+    const { rerender } = render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Apply');
+    // Switch workspaces; the new workspace's stats request fails, then the
+    // old one answers.
+    await act(async () => {
+      rerender(<WorkspaceEditor workspaceName="other" />);
+    });
+    await act(async () => {
+      releaseWs();
+    });
+    expect(screen.queryByText('1 / 1')).toBeNull();
+    console.error.mockRestore();
+  });
 });

@@ -487,6 +487,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   // and a failed newer one doesn't discard an earlier success.
   const statsRequestRef = useRef(0);
   const statsShownRef = useRef(0);
+  // A result for a workspace the page no longer shows is always dropped.
+  const currentWorkspaceRef = useRef(workspaceName);
+  currentWorkspaceRef.current = workspaceName;
   // `fresh`: drop the cached entries first, so this fetches from the server
   // and the cache holds the new numbers for the next visit (Refresh).
   const fetchWorkspaceStats = useCallback(
@@ -513,7 +516,12 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
             ]),
             load(getEnabledClouds, [workspaceName, true]),
           ]);
-        if (request < statsShownRef.current) return;
+        if (
+          request < statsShownRef.current ||
+          workspaceName !== currentWorkspaceRef.current
+        ) {
+          return;
+        }
         statsShownRef.current = request;
 
         // Filter clusters for this workspace
