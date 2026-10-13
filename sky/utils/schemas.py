@@ -1177,6 +1177,26 @@ def _task_config_schema():
     }
 
 
+def get_task_job_schema():
+    """Schema for the task's `job:` section: managed-job lifecycle settings."""
+    return {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'wait_for_scheduling_timeout': {
+                'anyOf': [{
+                    'type': 'string',
+                    'pattern': constants.TIME_PATTERN_SECONDS,
+                }, {
+                    'type': 'integer',
+                    'minimum': 1,
+                }],
+            },
+        },
+    }
+
+
 def get_task_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -1210,6 +1230,7 @@ def get_task_schema():
             'num_nodes': {
                 'type': 'integer',
             },
+            'job': get_task_job_schema(),
             # resources config is validated separately using RESOURCES_SCHEMA
             'resources': {
                 'type': 'object',
@@ -1444,6 +1465,8 @@ class RemoteIdentityOptions(enum.Enum):
     LOCAL_CREDENTIALS = 'LOCAL_CREDENTIALS'
     SERVICE_ACCOUNT = 'SERVICE_ACCOUNT'
     NO_UPLOAD = 'NO_UPLOAD'
+    # Kubernetes only: the pod gets no API credentials at all.
+    NONE = 'NONE'
 
 
 def get_default_remote_identity(cloud: str) -> str:
@@ -1467,7 +1490,9 @@ _REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {
         'type': 'string',
         'case_insensitive_enum': [
-            option.value for option in RemoteIdentityOptions
+            option.value
+            for option in RemoteIdentityOptions
+            if option is not RemoteIdentityOptions.NONE
         ]
     }
 }

@@ -9,6 +9,7 @@ from unittest import mock
 
 from click import testing as cli_testing
 
+from sky import exceptions
 from sky.client.cli import command
 
 
@@ -185,3 +186,17 @@ def test_stdout_to_stderr_covers_streams_bound_to_stdout(capfd):
     captured = capfd.readouterr()
     assert captured.out == 'result\nafter\n'
     assert 'printed' in captured.err and 'held' in captured.err
+
+
+def test_cancel_on_a_malformed_controller_name_shows_the_hint():
+    """The server rejects every controller-prefixed name; the CLI's hint for
+    that rejection must not trip over a suffix that is not a valid hash."""
+    runner = cli_testing.CliRunner()
+    with mock.patch.object(command.sdk,
+                           'cancel',
+                           side_effect=exceptions.NotSupportedError('no')):
+        result = runner.invoke(command.cancel,
+                               ['sky-jobs-controller-a_b', '-a', '-y'])
+    assert not isinstance(result.exception, AssertionError), result.exception
+    assert isinstance(result.exception, SystemExit), result.exception
+    assert result.exit_code == 2  # click.UsageError

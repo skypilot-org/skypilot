@@ -49,17 +49,23 @@ _QUEUE_ADMISSION_TIMEOUT_KEYS = ('kubernetes', 'kueue', 'admission_timeout')
 
 
 @contextlib.contextmanager
-def _replica_queue_admission_wait(
+def _queue_admission_wait(
+        task: 'sky.Task', is_launched_by_jobs_controller: bool,
         is_launched_by_sky_serve_controller: bool) -> Iterator[None]:
-    """Lets replica launches wait indefinitely for queue admission by default.
+    """Lets launches bounded elsewhere wait indefinitely for queue admission.
 
-    A SkyServe replica or pool worker is a standing request for capacity: the
-    controller relaunches it until it is up. When the cluster is placed in a
-    Kueue local queue and quota is short, its pods are held by an admission
-    gate. With the default ``kubernetes.kueue.admission_timeout`` the launch
-    would fail after 24 hours and the relaunch would create a new Workload at
-    the back of the queue, so replica launches default to waiting
-    indefinitely (``-1``) instead.
+    When the cluster is placed in a Kueue local queue and quota is short, its
+    pods are held by an admission gate. With the default
+    ``kubernetes.kueue.admission_timeout`` the launch would fail after 24
+    hours and the relaunch would create a new Workload at the back of the
+    queue. Two kinds of launch default to waiting indefinitely (``-1``)
+    instead:
+
+    - A SkyServe replica or pool worker, a standing request for capacity: the
+      controller relaunches it until it is up.
+    - A managed job task that sets ``job.wait_for_scheduling_timeout``: the
+      jobs controller cancels the job once that is reached, so it is the only
+      bound on the wait.
 
     The default is installed at the global cloud scope, the lowest in the
     resolution order (see ``skypilot_config.get_effective_queue_admission_
@@ -69,7 +75,11 @@ def _replica_queue_admission_wait(
     in-process only: the provisioner reads it while the launch runs, no
     subprocess needs it, and no temporary config file is left behind.
     """
-    if not is_launched_by_sky_serve_controller:
+    bounded_elsewhere = (
+        is_launched_by_sky_serve_controller or
+        (is_launched_by_jobs_controller and
+         task.job.get('wait_for_scheduling_timeout') is not None))
+    if not bounded_elsewhere:
         yield
         return
     config = skypilot_config.to_dict()
@@ -261,6 +271,7 @@ def _execute(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _extra_launch_context: Optional[Dict[str, Any]] = None,
+    _kubernetes_identity: Optional[str] = None,
     job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute an entrypoint.
@@ -343,6 +354,11 @@ def _execute(
                 down=down,
                 dryrun=dryrun,
             )) as dag:
+        if _kubernetes_identity is not None:
+            # After the admin policy, which may rebuild the dag.
+            for task in dag.tasks:
+                for resource in task.resources:
+                    resource.set_kubernetes_identity(_kubernetes_identity)
         dag.resolve_and_validate_volumes()
         if (not _is_launched_by_jobs_controller and
                 not _is_launched_by_sky_serve_controller):
@@ -375,6 +391,17 @@ def _execute(
             _is_launched_by_sky_serve_controller,
             _extra_launch_context=_extra_launch_context,
             job_logger=job_logger)
+
+
+def _autodown_needs_identity_it_lacks(
+        handle: Optional[backends.ResourceHandle]) -> bool:
+    """Whether the cluster's pods have no credentials to autodown with."""
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
+        return False
+    launched = handle.launched_resources
+    return (isinstance(launched.cloud, clouds.Kubernetes) and
+            clouds.Kubernetes.remote_identity_is_none(launched.region,
+                                                      launched))
 
 
 def _execute_dag(
@@ -595,8 +622,8 @@ def _execute_dag(
                 'Provisioning requested, but handle is already set. PROVISION '
                 'should be excluded from stages or '
                 'skip_unecessary_provisioning should be set. ')
-            with _replica_queue_admission_wait(
-                    _is_launched_by_sky_serve_controller):
+            with _queue_admission_wait(task, _is_launched_by_jobs_controller,
+                                       _is_launched_by_sky_serve_controller):
                 (handle, provisioning_skipped) = backend.provision(
                     task,
                     task.best_resources,
@@ -680,6 +707,15 @@ def _execute_dag(
                     hook = entry['run']
                     hook_timeout = entry.get('timeout')
                     break
+            if (idle_minutes_to_autostop is not None and
+                    _is_launched_by_jobs_controller and down and
+                    _autodown_needs_identity_it_lacks(handle)):
+                # The controller's leak guard, on a pod that cannot delete
+                # itself: setting it would wedge the cluster, not free it.
+                job_logger.info('Not setting the autodown leak guard: '
+                                '`remote_identity: NONE` gives the cluster no '
+                                'credentials to delete itself.')
+                idle_minutes_to_autostop = None
             if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 assert isinstance(handle, backends.CloudVmRayResourceHandle)
@@ -745,11 +781,14 @@ def launch(
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
+    # In-process callers only; never map it from a request body. Kubernetes
+    # gives controller-named clusters the controller service account.
     _disable_controller_check: bool = False,
     _extra_launch_context: Optional[Dict[str, Any]] = None,
     _request_name: request_names.AdminPolicyRequestName = request_names.
     AdminPolicyRequestName.CLUSTER_LAUNCH,
     _include_credentials: bool = False,
+    _kubernetes_identity: Optional[str] = None,
     job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -952,6 +991,7 @@ def launch(
         _is_launched_by_sky_serve_controller,
         _extra_launch_context=_extra_launch_context,
         _request_name=_request_name,
+        _kubernetes_identity=_kubernetes_identity,
         job_logger=job_logger)
 
 

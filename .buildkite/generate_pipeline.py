@@ -151,6 +151,7 @@ def _parse_args(args: Optional[str] = None):
     parser.add_argument('--jobs-consolidation', action="store_true")
     parser.add_argument('--serve-consolidation', action="store_true")
     parser.add_argument('--grpc', action="store_true")
+    parser.add_argument('--remote-identity-none', action='store_true')
     parser.add_argument('--env-file')
     parser.add_argument('--plugin-yaml')
     parser.add_argument('--submodule-base-branch')
@@ -210,6 +211,8 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append('--serve-consolidation')
     if parsed_args.grpc:
         extra_args.append('--grpc')
+    if parsed_args.remote_identity_none:
+        extra_args.append('--remote-identity-none')
     if parsed_args.env_file:
         extra_args.extend(['--env-file', parsed_args.env_file])
     if parsed_args.plugin_yaml:

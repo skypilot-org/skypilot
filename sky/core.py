@@ -382,6 +382,19 @@ def get_cluster_events(
         # answer: an empty type list translates to `type IN ()`, i.e. no
         # events, which a caller would read as "this cluster has no history".
         raise ValueError(f'No valid cluster event type in {event_type!r}.')
+    workspaces_filter = workspaces_core.get_readable_workspace_names()
+    if workspaces_filter is not None:
+        # Events are readable iff the cluster's history is. A denied caller
+        # gets the same answer as for a cluster that does not exist.
+        cluster_hash, workspace = (
+            global_user_state.get_cluster_history_workspace(
+                cluster_hash, cluster_name))
+        if workspace not in workspaces_filter:
+            if cluster_name is not None:
+                raise ValueError(f'Hash for cluster {cluster_name} not found.')
+            return []
+        # Read the hash that was checked, in case the name is reused meanwhile.
+        cluster_name = None
     return global_user_state.get_cluster_events(
         cluster_name=cluster_name,
         cluster_hash=cluster_hash,
@@ -490,7 +503,8 @@ def cost_report(days: Optional[int] = None,
             abbreviate_response=abbreviate_response,
             cluster_hashes=cluster_hashes,
             cluster_names=cluster_names,
-            exclude_managed_clusters=exclude_managed_clusters))
+            exclude_managed_clusters=exclude_managed_clusters,
+            workspaces_filter=workspaces_core.get_readable_workspace_names()))
 
     def _process_cluster_report(
             cluster_report: Dict[str, Any]) -> Dict[str, Any]:
@@ -1233,8 +1247,7 @@ def autostop(
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.YELLOW}{operation} on cluster '
                 f'{cluster_name!r}...skipped.{colorama.Style.RESET_ALL}\n'
-                f'  Auto{option_str} is not supported on {cloud!r} - '
-                f'see reason above.') from e
+                f'  {e}') from e
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     hooks_list = (handle.launched_resources.hooks
