@@ -809,11 +809,13 @@ async def test_a_client_disconnect_is_counted_in_a_known_bucket():
         'router': object(),
     })
 
-    async def cancelled(_):
+    async def cancelled(scope, receive, send):
+        del scope, receive, send
         raise asyncio.CancelledError()
 
+    middleware.app = cancelled
     with pytest.raises(asyncio.CancelledError):
-        await middleware.dispatch(request, cancelled)
+        await middleware(request.scope, request.receive, mock.AsyncMock())
 
     assert _sample(metrics_utils.SKY_APISERVER_REQUESTS_TOTAL,
                    path='/status',
@@ -937,7 +939,7 @@ class TestAuthProxyReasonsAreDistinct:
             app=mock.Mock()).middleware
         with mock.patch.object(middleware, 'get_auth_user', get_auth_user):
             response = await middleware._authenticate(  # pylint: disable=protected-access
-                request, mock.AsyncMock(), _StubSession(status))
+                request, _StubSession(status))
         return request, response
 
     @pytest.mark.asyncio

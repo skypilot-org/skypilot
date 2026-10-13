@@ -20,8 +20,8 @@ import textwrap
 import time
 import traceback
 import typing
-from typing import (Any, Dict, Iterable, Iterator, List, Literal, Optional, Set,
-                    TextIO, Tuple, Union)
+from typing import (Any, Callable, Dict, Iterable, Iterator, List, Literal,
+                    Optional, Set, TextIO, Tuple, Union)
 
 import colorama
 import filelock
@@ -386,7 +386,8 @@ def cleanup_expired_api_access_tokens() -> int:
     return removed
 
 
-def ha_recovery_for_consolidation_mode() -> None:
+def ha_recovery_for_consolidation_mode(
+        still_leader: Optional[Callable[[], bool]] = None) -> None:
     """Recovery logic for consolidation mode.
 
     Naming quirk: this path is historically called "HA recovery" because it
@@ -398,11 +399,18 @@ def ha_recovery_for_consolidation_mode() -> None:
     This should only be called from the managed-job-status-refresh-daemon, due
     so that we have correct ordering recovery -> controller start -> job status
     updates. This also should ensure correct operation during a rolling update.
+
+    Args:
+        still_leader: re-checked while the controller pool starts, which spans
+            tens of seconds, and again before scanning jobs; recovery returns
+            early once it is False, leaving the jobs to the new leader.
     """
     # No setup recovery is needed in consolidation mode, as the API server
     # already has all runtime installed. Directly start jobs recovery here.
     # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
-    scheduler.maybe_start_controllers()
+    scheduler.maybe_start_controllers(still_owned=still_leader)
+    if still_leader is not None and not still_leader():
+        return
     with open(constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format('jobs_'),
               'a',
               encoding='utf-8') as f:

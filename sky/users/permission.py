@@ -647,6 +647,21 @@ class PermissionService:
         readable = writable | self._read_only_visible(workspace_names)
         return readable, writable
 
+    def get_readable_workspace_names(
+            self, user_id: str,
+            workspace_names: Set[str]) -> Optional[Set[str]]:
+        """Return workspace names the user can read, or None if unrestricted.
+
+        Same as `get_accessible_workspace_names` with ``action='read'``, except
+        that server-off and admin return None instead of ``workspace_names``.
+        For filtering records that outlive their workspace, such as cluster
+        history, which an admin must still see after the workspace is deleted.
+        """
+        writable = self._writable_workspace_names(user_id, workspace_names)
+        if writable is None:
+            return None
+        return writable | self._read_only_visible(workspace_names)
+
     def _writable_workspace_names(
             self, user_id: str,
             workspace_names: Set[str]) -> Optional[Set[str]]:

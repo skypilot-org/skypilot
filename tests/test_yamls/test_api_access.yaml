@@ -17,7 +17,7 @@ run: |
   sky api info
 
   # Launch a nested job and wait for it
-  sky jobs launch --cpus 2+ --memory 4+ -n nested-job -y -d "echo nested-job-success"
+  sky jobs launch --infra kubernetes --cpus 2+ --memory 4+ -n nested-job -y -d "echo nested-job-success"
 
   # Wait for nested job to complete
   for i in $(seq 1 60); do
