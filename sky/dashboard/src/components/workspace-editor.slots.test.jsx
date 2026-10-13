@@ -59,21 +59,22 @@ jest.mock('@/data/connectors/client', () => ({
   __esModule: true,
   apiClient: { fetch: (...args) => mockApiFetch(...args) },
 }));
+const mockGetClusters = jest.fn(async () => []);
 jest.mock('@/data/connectors/clusters', () => ({
   __esModule: true,
-  getClusters: jest.fn(async () => []),
+  getClusters: (...args) => mockGetClusters(...args),
 }));
 jest.mock('@/data/connectors/jobs', () => ({
   __esModule: true,
   getManagedJobs: jest.fn(async () => ({ jobs: [] })),
 }));
-const mockInvalidateFunction = jest.fn();
+const mockCacheGet = jest.fn((fn, args = []) => fn(...args));
 jest.mock('@/lib/cache', () => ({
   __esModule: true,
   dashboardCache: {
-    get: (fn, args = []) => fn(...args),
+    get: (...args) => mockCacheGet(...args),
     invalidate: jest.fn(),
-    invalidateFunction: (...args) => mockInvalidateFunction(...args),
+    invalidateFunction: jest.fn(),
   },
 }));
 
@@ -444,8 +445,30 @@ describe('WorkspaceEditor for a non-admin', () => {
     });
     expect(mockApiFetch).not.toHaveBeenCalled();
     expect(mockGetWorkspaces.mock.calls.length).toBeGreaterThan(calls);
-    // Stats are refetched, not served from the cache.
-    expect(mockInvalidateFunction).toHaveBeenCalledTimes(3);
+  });
+
+  test('Refresh fetches stats from the server, not the cache', async () => {
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Only admins can change this configuration.');
+    const cached = mockCacheGet.mock.calls.length;
+    const fetched = mockGetClusters.mock.calls.length;
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    expect(mockCacheGet.mock.calls.length).toBe(cached);
+    expect(mockGetClusters.mock.calls.length).toBe(fetched + 1);
+  });
+
+  test('a stalled role lookup does not hold up Refresh', async () => {
+    mockGetUserRole.mockImplementation(() => new Promise(() => {}));
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Allowed Users (1)');
+    const calls = mockGetWorkspaces.mock.calls.length;
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    expect(mockGetWorkspaces.mock.calls.length).toBeGreaterThan(calls);
+    expect(screen.queryByText('Loading...')).toBeNull();
   });
 
   test('treats a failed role lookup as non-admin', async () => {
@@ -509,5 +532,31 @@ describe('WorkspaceEditor Refresh for an admin', () => {
       fireEvent.click(screen.getByText('Refresh'));
     });
     expect(mockApiFetch).toHaveBeenCalledWith('/check', {}, 'POST');
+  });
+
+  test('a slower, older stats request does not overwrite newer stats', async () => {
+    mockApiFetch.mockImplementation(async () => ({ ok: true }));
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Apply');
+    // Refresh's own stats request answers last with an old view; the one made
+    // after the infra check is newer and must win.
+    let releaseOld;
+    mockGetClusters
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseOld = () =>
+              resolve([{ cluster: 'old', workspace: 'ws', status: 'RUNNING' }]);
+          })
+      )
+      .mockImplementationOnce(async () => []);
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    await act(async () => {
+      releaseOld();
+    });
+    expect(screen.getByText('0 / 0')).toBeTruthy();
+    expect(screen.queryByText('1 / 1')).toBeNull();
   });
 });

@@ -482,69 +482,80 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     [workspaceName]
   );
 
-  const fetchWorkspaceStats = useCallback(async () => {
-    if (isNewWorkspace) return;
+  // Only the latest stats request may update the page, so a slow earlier one
+  // can't overwrite newer numbers.
+  const statsRequestRef = useRef(0);
+  // `fresh`: fetch from the server instead of the dashboard cache (Refresh).
+  const fetchWorkspaceStats = useCallback(
+    async ({ fresh = false } = {}) => {
+      if (isNewWorkspace) return;
 
-    setStatsLoading(true);
-    try {
-      const [clustersResponse, managedJobsResponse, enabledClouds] =
-        await Promise.all([
-          dashboardCache.get(getClusters),
-          dashboardCache.get(getManagedJobs, [
-            {
-              allUsers: true,
-              skipFinished: true,
-              workspaceMatch: workspaceName,
-              fields: ['workspace', 'status'],
-            },
-          ]),
-          dashboardCache.get(getEnabledClouds, [workspaceName, true]),
-        ]);
+      const request = ++statsRequestRef.current;
+      const load = (fn, args = []) =>
+        fresh ? fn(...args) : dashboardCache.get(fn, args);
+      setStatsLoading(true);
+      try {
+        const [clustersResponse, managedJobsResponse, enabledClouds] =
+          await Promise.all([
+            load(getClusters),
+            load(getManagedJobs, [
+              {
+                allUsers: true,
+                skipFinished: true,
+                workspaceMatch: workspaceName,
+                fields: ['workspace', 'status'],
+              },
+            ]),
+            load(getEnabledClouds, [workspaceName, true]),
+          ]);
+        if (request !== statsRequestRef.current) return;
 
-      // Filter clusters for this workspace
-      const workspaceClusters = clustersResponse.filter(
-        (cluster) => (cluster.workspace || 'default') === workspaceName
-      );
+        // Filter clusters for this workspace
+        const workspaceClusters = clustersResponse.filter(
+          (cluster) => (cluster.workspace || 'default') === workspaceName
+        );
 
-      // Count running clusters
-      const runningClusters = workspaceClusters.filter(
-        (cluster) =>
-          cluster.status === 'RUNNING' || cluster.status === 'LAUNCHING'
-      );
+        // Count running clusters
+        const runningClusters = workspaceClusters.filter(
+          (cluster) =>
+            cluster.status === 'RUNNING' || cluster.status === 'LAUNCHING'
+        );
 
-      // Map cluster names to workspace for job filtering
-      const clusterNameToWorkspace = {};
-      clustersResponse.forEach((c) => {
-        clusterNameToWorkspace[c.cluster] = c.workspace || 'default';
-      });
+        // Map cluster names to workspace for job filtering
+        const clusterNameToWorkspace = {};
+        clustersResponse.forEach((c) => {
+          clusterNameToWorkspace[c.cluster] = c.workspace || 'default';
+        });
 
-      // Count managed jobs for this workspace
-      const jobs = managedJobsResponse.jobs || [];
-      const activeJobStatuses = new Set(statusGroups.active);
-      let managedJobsCount = 0;
+        // Count managed jobs for this workspace
+        const jobs = managedJobsResponse.jobs || [];
+        const activeJobStatuses = new Set(statusGroups.active);
+        let managedJobsCount = 0;
 
-      jobs.forEach((job) => {
-        if (
-          job.workspace === workspaceName &&
-          activeJobStatuses.has(job.status)
-        ) {
-          managedJobsCount++;
-        }
-      });
+        jobs.forEach((job) => {
+          if (
+            job.workspace === workspaceName &&
+            activeJobStatuses.has(job.status)
+          ) {
+            managedJobsCount++;
+          }
+        });
 
-      setWorkspaceStats({
-        totalClusterCount: workspaceClusters.length,
-        runningClusterCount: runningClusters.length,
-        managedJobsCount: managedJobsCount,
-        clouds: Array.isArray(enabledClouds) ? enabledClouds : [],
-      });
-    } catch (err) {
-      console.error('Failed to fetch workspace stats:', err);
-      // Don't show error to user for stats, just log it
-    } finally {
-      setStatsLoading(false);
-    }
-  }, [workspaceName, isNewWorkspace]);
+        setWorkspaceStats({
+          totalClusterCount: workspaceClusters.length,
+          runningClusterCount: runningClusters.length,
+          managedJobsCount: managedJobsCount,
+          clouds: Array.isArray(enabledClouds) ? enabledClouds : [],
+        });
+      } catch (err) {
+        console.error('Failed to fetch workspace stats:', err);
+        // Don't show error to user for stats, just log it
+      } finally {
+        if (request === statsRequestRef.current) setStatsLoading(false);
+      }
+    },
+    [workspaceName, isNewWorkspace]
+  );
 
   useEffect(() => {
     if (isNewWorkspace) return undefined;
@@ -744,31 +755,36 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     setSuccess(null);
   };
 
+  // Admins also re-check the infra and then refetch the stats it affects.
+  // That runs alongside the reload, so a slow check or role lookup never holds
+  // the page's data back. The role may still be loading, so ask for it rather
+  // than skip an admin's check.
+  const recheckInfra = async () => {
+    const admin =
+      isAdmin !== null
+        ? isAdmin
+        : await getUserRole().then(
+            (data) => data?.role === 'admin',
+            () => false
+          );
+    if (!admin) return;
+    try {
+      await apiClient.fetch('/check', {}, 'POST');
+    } catch (error) {
+      console.error('Error during sky check refresh:', error);
+      return;
+    }
+    await fetchWorkspaceStats({ fresh: true });
+  };
+
   const handleRefresh = async () => {
     setLoading(true);
+    void recheckInfra();
     try {
-      // Re-checking infra is an admin action; others just reload the page's
-      // data, which a failed check must not hold up either. The role may
-      // still be loading, so ask for it rather than skip an admin's check.
-      let admin = isAdmin;
-      if (admin === null) {
-        admin = await getUserRole().then(
-          (data) => data?.role === 'admin',
-          () => false
-        );
-      }
-      if (admin) {
-        try {
-          await apiClient.fetch('/check', {}, 'POST');
-        } catch (error) {
-          console.error('Error during sky check refresh:', error);
-        }
-      }
-      // Refresh means current numbers, not the cached ones.
-      dashboardCache.invalidateFunction(getClusters);
-      dashboardCache.invalidateFunction(getManagedJobs);
-      dashboardCache.invalidateFunction(getEnabledClouds);
-      await Promise.all([fetchWorkspaceConfig(false), fetchWorkspaceStats()]);
+      await Promise.all([
+        fetchWorkspaceConfig(false),
+        fetchWorkspaceStats({ fresh: true }),
+      ]);
     } catch (error) {
       console.error('Error refreshing workspace:', error);
     } finally {
