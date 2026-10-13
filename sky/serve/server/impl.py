@@ -29,6 +29,7 @@ from sky.serve import runner as serve_runner
 from sky.serve import serve_rpc_utils
 from sky.serve import serve_state
 from sky.serve import serve_utils
+from sky.server import common as server_common
 from sky.server.requests import request_names
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -142,8 +143,18 @@ def up(
     task: 'task_lib.Task',
     service_name: Optional[str] = None,
     pool: bool = False,
+    file_mounts_blob_id: Optional[str] = None,
 ) -> Tuple[str, str]:
-    """Spins up a service or a pool."""
+    """Spins up a service or a pool.
+
+    Args:
+        task: The task to serve.
+        service_name: Name of the service or pool.
+        pool: Whether this is a pool.
+        file_mounts_blob_id: The blob the client uploaded the task's workdir
+            and file mounts into, if any. The task's local sources point
+            inside it.
+    """
     task.validate()
     serve_utils.validate_service_task(task, pool=pool)
     assert task.service is not None
@@ -188,6 +199,8 @@ def up(
         force_disable_cloud_bucket = skypilot_config.get_nested(
             ('serve', 'force_disable_cloud_bucket'), False)
         local_to_controller_file_mounts: Dict[str, str] = {}
+        # Set when the task keeps sources inside the client's upload blob.
+        controller_file_mounts_blob_id: Optional[str] = None
         if storage_clouds and not force_disable_cloud_bucket:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
                 task, task_type='serve')
@@ -199,14 +212,23 @@ def up(
                     'storage is available. Please specify local '
                     'file_mounts only.')
             if serve_utils.is_consolidation_mode(pool):
-                # The controller and replicas share the API server host, so
-                # there is no cluster hop and the file mounts are already
-                # resolved on this host (the client uploaded them under the
-                # owner's dir). Skip the two-hop, which would otherwise stage
-                # the sources under ~/.sky/tmp/controller -- outside the
-                # caller's roots, so the server would reject them. Mirrors the
-                # managed jobs path in jobs/server/core.py.
+                # The controller and replicas share the API server, so there
+                # is no cluster hop: keep the sources as resolved from the
+                # client's upload. Skip the two-hop, which would otherwise
+                # stage the sources under ~/.sky/tmp/controller -- outside
+                # the caller's roots, so the server would reject them.
+                # Mirrors the managed jobs path in jobs/server/core.py.
                 local_to_controller_file_mounts = {}
+                # The resolved sources may only exist on this API server
+                # replica: a blob backend can extract to a host-local cache,
+                # and the controller can run, or be recovered, on another
+                # replica. Hand the blob id to the controller, which passes
+                # it with every replica launch so the API server re-extracts
+                # the blob on whichever replica handles that launch.
+                if (file_mounts_blob_id is not None and
+                        server_common.local_file_mounts_required(
+                            task.to_yaml_config())):
+                    controller_file_mounts_blob_id = file_mounts_blob_id
             else:
                 local_to_controller_file_mounts = (
                     controller_utils.translate_local_file_mounts_to_two_hop(
@@ -258,6 +280,9 @@ def up(
             # hash has to be passed in explicitly rather than read from the
             # controller's own environment.
             'user_hash': shlex.quote(common_utils.get_current_user().id),
+            'file_mounts_blob_id':
+                (shlex.quote(controller_file_mounts_blob_id)
+                 if controller_file_mounts_blob_id is not None else None),
             **tls_template_vars,
             **controller_utils.shared_controller_vars_to_fill(
                 controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
@@ -716,6 +741,7 @@ def apply(
     service_name: str,
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
     pool: bool = False,
+    file_mounts_blob_id: Optional[str] = None,
 ) -> None:
     """Applies the config to the service or pool."""
     with filelock.FileLock(serve_utils.get_service_filelock_path(service_name)):
@@ -761,7 +787,7 @@ def apply(
                 return update(task, service_name, mode, pool, workers)
         except exceptions.ClusterNotUpError:
             pass
-        up(task, service_name, pool)
+        up(task, service_name, pool, file_mounts_blob_id=file_mounts_blob_id)
 
 
 def down(
