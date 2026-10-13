@@ -257,6 +257,34 @@ def generate_tmp_logging_file_path(file_name: str) -> str:
     return log_path
 
 
+class _OncePerRecordFilter(logging.Filter):
+    """Passes each record once, for a handler attached at two levels."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        seen = record.__dict__.setdefault('_sky_once_filters', set())
+        if id(self) in seen:
+            return False
+        seen.add(id(self))
+        return True
+
+
+def attach_to_sky_and_provision(handler: logging.Handler) -> None:
+    """Attaches ``handler`` to ``sky`` and ``sky.provision``.
+
+    ``sky.provision`` stops propagating during a provision, so the direct
+    attachment is what captures provision logs then; at other times its
+    records also propagate to ``sky``, and the filter keeps them single.
+    """
+    handler.addFilter(_OncePerRecordFilter())
+    _root_logger.addHandler(handler)
+    logging.getLogger('sky.provision').addHandler(handler)
+
+
+def detach_from_sky_and_provision(handler: logging.Handler) -> None:
+    _root_logger.removeHandler(handler)
+    logging.getLogger('sky.provision').removeHandler(handler)
+
+
 @contextlib.contextmanager
 def add_debug_log_handler(request_id: str):
     if os.getenv(constants.ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING) != 'true':
@@ -269,14 +297,9 @@ def add_debug_log_handler(request_id: str):
         debug_log_handler = logging.FileHandler(log_path)
         debug_log_handler.setFormatter(FORMATTER)
         debug_log_handler.setLevel(logging.DEBUG)
-        _root_logger.addHandler(debug_log_handler)
-        # sky.provision sets up its own logger/handler with propogate=False,
-        # so add it there too.
-        provision_logger = logging.getLogger('sky.provision')
-        provision_logger.addHandler(debug_log_handler)
-        provision_logger.setLevel(logging.DEBUG)
+        attach_to_sky_and_provision(debug_log_handler)
+        logging.getLogger('sky.provision').setLevel(logging.DEBUG)
         yield
     finally:
-        _root_logger.removeHandler(debug_log_handler)
-        provision_logger.removeHandler(debug_log_handler)
+        detach_from_sky_and_provision(debug_log_handler)
         debug_log_handler.close()

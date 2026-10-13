@@ -4,6 +4,7 @@ from typing import Optional
 from unittest import mock
 
 from sky.provision.kubernetes import instance as k8s_instance
+from sky.provision.kubernetes import utils as k8s_utils
 from sky.provision.kubernetes.instance import _check_nodes_health
 from sky.provision.kubernetes.instance import _get_pod_health_issues
 
@@ -432,11 +433,22 @@ class TestGetPodTerminationReason:
         assert 'Terminated unexpectedly' in result
 
 
-def _make_event(reason, message):
-    """Create a mock kubelet pod event."""
+def _make_event(reason, message, at=None):
+    """Create a mock kubelet pod event.
+
+    *at* is when the event was observed; leaving it out makes an undated
+    event, which is what a MagicMock with no timestamps reads as.
+    """
     e = mock.MagicMock()
     e.reason = reason
     e.message = message
+    if at is not None:
+        # The reader prefers these over the creation timestamp; leaving them
+        # as auto-created MagicMocks would make the event read as undated.
+        e.series = None
+        e.last_timestamp = None
+        e.event_time = None
+        e.metadata.creation_timestamp = at
     return e
 
 
@@ -523,6 +535,12 @@ class TestQueryInstancesEventEnrichment:
         mock_events.assert_not_called()
 
 
+_CLUSTER_LAUNCHED_AT = datetime.datetime(2025,
+                                         1,
+                                         1,
+                                         tzinfo=datetime.timezone.utc)
+
+
 class TestGetClusterFailureReasonFromEvents:
     """Tests for get_cluster_failure_reason_from_events."""
 
@@ -530,7 +548,12 @@ class TestGetClusterFailureReasonFromEvents:
     @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
     def test_returns_first_evicted(self, mock_events, mock_kutils):
         mock_kutils.get_namespace_from_config.return_value = 'ns'
-        mock_kutils.get_context_from_config.return_value = 'ctx'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        # The derivation of a reason from pod events lives in
+        # kubernetes_utils, which the mock above stands in for; let the real
+        # one run, since it is what the result is being asserted on.
+        mock_kutils.reason_from_pod_events.side_effect = (
+            k8s_utils.reason_from_pod_events)
         mock_events.return_value = [
             _make_event(
                 'Evicted', 'Pod ephemeral local storage usage '
@@ -546,10 +569,75 @@ class TestGetClusterFailureReasonFromEvents:
     @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
     def test_none_when_no_failure_event(self, mock_events, mock_kutils):
         mock_kutils.get_namespace_from_config.return_value = 'ns'
-        mock_kutils.get_context_from_config.return_value = 'ctx'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        # The derivation of a reason from pod events lives in
+        # kubernetes_utils, which the mock above stands in for; let the real
+        # one run, since it is what the result is being asserted on.
+        mock_kutils.reason_from_pod_events.side_effect = (
+            k8s_utils.reason_from_pod_events)
         mock_events.return_value = [_make_event('Scheduled', 'assigned')]
         assert k8s_instance.get_cluster_failure_reason_from_events(
             {}, ['pod-0', 'pod-1']) is None
+
+    @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    def test_events_from_before_the_cluster_are_ignored(self, mock_events,
+                                                        mock_kutils):
+        """Pod names are a function of the cluster name and Kubernetes keeps
+        events for an hour, so what deleted the pods of the cluster that held
+        this name before is still on file. It says nothing about this one."""
+        mock_kutils.get_namespace_from_config.return_value = 'ns'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        mock_kutils.reason_from_pod_events.side_effect = (
+            k8s_utils.reason_from_pod_events)
+        mock_events.return_value = [
+            _make_event('Stopped',
+                        'Exceeded the PodsReady timeout default/old',
+                        at=_CLUSTER_LAUNCHED_AT -
+                        datetime.timedelta(minutes=30)),
+        ]
+        assert k8s_instance.get_cluster_failure_reason_from_events(
+            {}, ['pod-0'], since=_CLUSTER_LAUNCHED_AT) is None
+
+    @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    def test_events_from_after_the_launch_still_count(self, mock_events,
+                                                      mock_kutils):
+        mock_kutils.get_namespace_from_config.return_value = 'ns'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        mock_kutils.reason_from_pod_events.side_effect = (
+            k8s_utils.reason_from_pod_events)
+        mock_events.return_value = [
+            _make_event('Stopped',
+                        'Exceeded the PodsReady timeout default/wl',
+                        at=_CLUSTER_LAUNCHED_AT +
+                        datetime.timedelta(minutes=5)),
+        ]
+        assert k8s_instance.get_cluster_failure_reason_from_events(
+            {}, ['pod-0'],
+            since=_CLUSTER_LAUNCHED_AT) == ('Stopped by Kueue: Exceeded the '
+                                            'PodsReady timeout default/wl')
+
+    @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    def test_without_a_bound_an_older_event_still_counts(
+            self, mock_events, mock_kutils):
+        """Callers that cannot work out when the cluster was launched get the
+        unbounded lookup they had before."""
+        mock_kutils.get_namespace_from_config.return_value = 'ns'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        mock_kutils.reason_from_pod_events.side_effect = (
+            k8s_utils.reason_from_pod_events)
+        mock_events.return_value = [
+            _make_event('Stopped',
+                        'Exceeded the PodsReady timeout default/old',
+                        at=_CLUSTER_LAUNCHED_AT -
+                        datetime.timedelta(minutes=30)),
+        ]
+        assert k8s_instance.get_cluster_failure_reason_from_events(
+            {}, ['pod-0'],
+            since=None) == ('Stopped by Kueue: Exceeded the PodsReady '
+                            'timeout default/old')
 
 
 class TestGetClusterFailureReasonFromPods:
@@ -566,7 +654,7 @@ class TestGetClusterFailureReasonFromPods:
     def test_returns_condensed_reason_for_abnormal_pod(self, mock_kutils,
                                                        mock_core_api):
         mock_kutils.get_namespace_from_config.return_value = 'ns'
-        mock_kutils.get_context_from_config.return_value = 'ctx'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
         mock_kutils.pod_terminated_abnormally.return_value = True
         mock_kutils.get_condensed_pod_reason.return_value = (
             'OOMKilled (exit code 137)')
@@ -578,7 +666,7 @@ class TestGetClusterFailureReasonFromPods:
     @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
     def test_none_when_no_pod_abnormal(self, mock_kutils, mock_core_api):
         mock_kutils.get_namespace_from_config.return_value = 'ns'
-        mock_kutils.get_context_from_config.return_value = 'ctx'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
         mock_kutils.pod_terminated_abnormally.return_value = False
         assert k8s_instance.get_cluster_failure_reason_from_pods(
             {}, ['pod-0', 'pod-1']) is None
@@ -587,7 +675,7 @@ class TestGetClusterFailureReasonFromPods:
     @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
     def test_skips_pod_read_errors(self, mock_kutils, mock_core_api):
         mock_kutils.get_namespace_from_config.return_value = 'ns'
-        mock_kutils.get_context_from_config.return_value = 'ctx'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
         # First pod read raises; the second pod is abnormal.
         mock_core_api.return_value.read_namespaced_pod.side_effect = [
             Exception('boom'),

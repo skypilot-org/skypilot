@@ -27,6 +27,7 @@ const PluginContext = createContext({
   components: {},
   dataEnhancements: {},
   tableColumns: {},
+  tableFilters: {},
   dataProviders: {},
   recipeTypes: [],
 });
@@ -68,6 +69,7 @@ const initialState = {
   components: {}, // Map of slot name → array of component configs
   dataEnhancements: {}, // Map of dataSource → array of enhancements
   tableColumns: {}, // Map of table name → array of column configs
+  tableFilters: {}, // Map of table name → array of filter property configs
   dataProviders: {}, // Map of provider id → provider config (with useHook)
   recipeTypes: [], // Array of { id, label, fullLabel, icon, color, template }
 };
@@ -78,6 +80,7 @@ const actions = {
   REGISTER_COMPONENT: 'REGISTER_COMPONENT',
   REGISTER_DATA_ENHANCEMENT: 'REGISTER_DATA_ENHANCEMENT',
   REGISTER_TABLE_COLUMN: 'REGISTER_TABLE_COLUMN',
+  REGISTER_TABLE_FILTER: 'REGISTER_TABLE_FILTER',
   REGISTER_DATA_PROVIDER: 'REGISTER_DATA_PROVIDER',
   CLEAR_CACHED_NAV_LINKS: 'CLEAR_CACHED_NAV_LINKS',
   REGISTER_RECIPE_TYPE: 'REGISTER_RECIPE_TYPE',
@@ -151,6 +154,19 @@ function pluginReducer(state, action) {
         ...state,
         tableColumns: {
           ...state.tableColumns,
+          [table]: updated,
+        },
+      };
+    }
+    case actions.REGISTER_TABLE_FILTER: {
+      const { table } = action.payload;
+      const existing = state.tableFilters[table] || [];
+      const updated = upsertById(existing, action.payload);
+      updated.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+      return {
+        ...state,
+        tableFilters: {
+          ...state.tableFilters,
           [table]: updated,
         },
       };
@@ -337,9 +353,19 @@ function normalizeRoute(route) {
     ? normalizedPath
     : `/${normalizedPath}`;
 
+  // Optional: the built-in nav link this route belongs under (e.g. '/jobs'),
+  // so the sidebar can highlight it while the route is open. Plugin routes
+  // are all served by one catch-all page, so the router's pathname alone
+  // cannot tell the sidebar which section a plugin page is part of.
+  const navHref =
+    typeof route.navHref === 'string' && route.navHref.startsWith('/')
+      ? route.navHref
+      : undefined;
+
   return {
     id: String(route.id),
     path: pathname,
+    navHref,
     title: typeof route.title === 'string' ? route.title : undefined,
     description:
       typeof route.description === 'string' ? route.description : undefined,
@@ -460,6 +486,34 @@ function normalizeTableColumn(config) {
                 : undefined,
           }
         : undefined,
+  };
+}
+
+function normalizeTableFilter(config) {
+  if (
+    !config ||
+    typeof config !== 'object' ||
+    !config.id ||
+    !config.table ||
+    !config.key ||
+    !config.label
+  ) {
+    console.warn(
+      '[SkyDashboardPlugin] Invalid table filter registration:',
+      config
+    );
+    return null;
+  }
+  return {
+    id: String(config.id),
+    table: String(config.table),
+    // Shape of the page filter schemas (e.g. JOB_FILTER_SCHEMA): `key` is
+    // what the URL carries and what the fetch path sends to the provider,
+    // `label` is what the dropdown and the filter chip show.
+    key: String(config.key),
+    label: String(config.label),
+    kind: config.kind ? String(config.kind) : 'text',
+    order: Number.isFinite(config.order) ? config.order : 100,
   };
 }
 
@@ -687,6 +741,17 @@ function createPluginApi(dispatch) {
       }
       dispatch({
         type: actions.REGISTER_TABLE_COLUMN,
+        payload: normalized,
+      });
+      return normalized.id;
+    },
+    registerTableFilter(config) {
+      const normalized = normalizeTableFilter(config);
+      if (!normalized) {
+        return null;
+      }
+      dispatch({
+        type: actions.REGISTER_TABLE_FILTER,
         payload: normalized,
       });
       return normalized.id;
@@ -1062,6 +1127,27 @@ export function useTableColumns(tableName, context = {}) {
       return true;
     });
   }, [tableName, tableColumns, context]);
+}
+
+/**
+ * Hook to access plugin-registered filter properties for a table.
+ *
+ * Each entry is `{ id, table, key, label, kind, order }`, shaped like the
+ * page filter schemas (see e.g. JOB_FILTER_SCHEMA): the page appends these
+ * to its own schema so the dropdown offers them, the URL round-trips them,
+ * and the fetch path forwards their values to the data provider that
+ * registered them. Registration is reactive — a plugin may register after
+ * its first data fetch and the page picks the filters up live.
+ *
+ * @param {string} tableName - The table name (e.g., 'jobs')
+ * @returns {Array} Registered filter property configs, sorted by order
+ */
+export function usePluginTableFilters(tableName) {
+  const { tableFilters } = usePluginState();
+  return useMemo(
+    () => (tableName && tableFilters[tableName]) || [],
+    [tableName, tableFilters]
+  );
 }
 
 export function useDataProvider(id) {

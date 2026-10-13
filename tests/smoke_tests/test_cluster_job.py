@@ -106,8 +106,9 @@ def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
     [
         'docker:nvidia/cuda:11.8.0-devel-ubuntu18.04',
         'docker:ubuntu:18.04',
-        # Test latest image with python 3.11 installed by default.
-        'docker:continuumio/miniconda3:24.1.2-0',
+        # Test a pinned miniconda image on a supported Debian release
+        # (bookworm), with python 3.13 installed by default.
+        'docker:continuumio/miniconda3:25.3.1-1',
         # Test python>=3.12 where SkyPilot should automatically create a separate
         # conda env for runtime with python 3.10.
         'docker:continuumio/miniconda3:latest',
@@ -695,6 +696,191 @@ def test_docker_preinstalled_package_slurm_sqsh(generic_cloud: str):
         f'sky down -y {name} {name_rel}; '
         f'SLURM_CLUSTER=$({get_slurm_cluster}) && '
         f'ssh -F ~/.slurm/config $SLURM_CLUSTER "rm -f ~/nginx+latest.sqsh"',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+def test_slurm_container_stop_start(generic_cloud: str):
+    """A Slurm container keeps its state, job queue, and logs after restart."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'slurm_container_stop_start',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            '--image-id docker:ubuntu:24.04 -- '
+            "'echo pre-stop-job-1; echo generation-1 > /snapshot_marker; "
+            "apt-get update; apt-get install -y tree'",
+            f'sky logs {name} 1 --status',
+            f'sky exec {name} -- echo pre-stop-job-2',
+            f'sky logs {name} 2 --status',
+            f'sky stop -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            f'sky start -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='1',
+                job_status=[sky.JobStatus.SUCCEEDED],
+                timeout=60),
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='2',
+                job_status=[sky.JobStatus.SUCCEEDED],
+                timeout=60),
+            f'logs="$(sky logs {name} 1 --no-follow)"; '
+            'printf "%s\\n" "$logs"; '
+            '[[ "$logs" == *pre-stop-job-1* ]]',
+            f'logs="$(sky logs {name} 2 --no-follow)"; '
+            'printf "%s\\n" "$logs"; '
+            '[[ "$logs" == *pre-stop-job-2* ]]',
+            f'sky exec {name} -- '
+            "'test \"$(cat /snapshot_marker)\" = generation-1; "
+            "dpkg -s tree'",
+            f'sky logs {name} 3 --status',
+            f'ssh {name} \'test "$(cat /snapshot_marker)" = generation-1\'',
+            f'sky down -y {name}',
+        ],
+        f'sky down -y {name} || true',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+def test_slurm_container_stop_start_multi_node(generic_cloud: str):
+    """Each Slurm node restores the snapshot from its previous rank."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'slurm_container_stop_start_multi_node',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} '
+            f'--num-nodes 2 {smoke_tests_utils.LOW_RESOURCE_ARG} '
+            '--image-id docker:ubuntu:24.04 -- '
+            "'echo pre-stop-rank-$SKYPILOT_NODE_RANK; "
+            "echo rank-$SKYPILOT_NODE_RANK > /snapshot_rank_marker'",
+            f'sky logs {name} 1 --status',
+            f'sky stop -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            f'sky start -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='1',
+                job_status=[sky.JobStatus.SUCCEEDED],
+                timeout=60),
+            f'logs="$(sky logs {name} 1 --no-follow)"; '
+            'printf "%s\\n" "$logs"; '
+            '[[ "$logs" == *pre-stop-rank-0* ]]; '
+            '[[ "$logs" == *pre-stop-rank-1* ]]',
+            f'sky exec {name} --num-nodes 2 -- '
+            "'test \"$(cat /snapshot_rank_marker)\" = "
+            "\"rank-$SKYPILOT_NODE_RANK\"; "
+            "echo restored-rank-$SKYPILOT_NODE_RANK'",
+            f'sky logs {name} 2 --status',
+            f'ssh {name} '
+            '\'test "$(cat /snapshot_rank_marker)" = rank-0\'',
+            f'sky down -y {name}',
+        ],
+        f'sky down -y {name} || true',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+def test_slurm_container_autostop(generic_cloud: str):
+    """`-i 1` stops a container cluster with no client action.
+
+    Skylet performs the same snapshot-and-release procedure as `sky stop`,
+    and `sky start` afterwards restores the snapshot like a manual stop.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'slurm_container_autostop',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -i 1 '
+            '--image-id docker:ubuntu:24.04 -- '
+            '"echo pre-stop-job-1; echo generation-1 > /snapshot_marker"',
+            f'sky logs {name} 1 --status',
+            # The cluster stops itself once idle; the API server's refresh
+            # converges the record to STOPPED.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            f'sky start -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='1',
+                job_status=[sky.JobStatus.SUCCEEDED],
+                timeout=60),
+            f'logs="$(sky logs {name} 1 --no-follow)"; '
+            'printf "%s\\n" "$logs"; '
+            '[[ "$logs" == *pre-stop-job-1* ]]',
+            f"sky exec {name} -- "
+            "'test \"$(cat /snapshot_marker)\" = generation-1'",
+            f'sky logs {name} 2 --status',
+            # Autostop can be set and cleared on the running cluster.
+            f'sky autostop -y {name} -i 20',
+            f'status="$(sky status {name})"; printf "%s\\n" "$status"; '
+            '[[ "$status" == *"20m"* ]]',
+            f'sky autostop -y {name} --cancel',
+            f'status="$(sky status {name})"; printf "%s\\n" "$status"; '
+            '[[ "$status" != *"20m"* ]]',
+            f'sky down -y {name}',
+        ],
+        f'sky down -y {name} || true',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+def test_slurm_container_autodown(generic_cloud: str):
+    """`-i 1 --down` fully terminates the cluster and its snapshot."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'slurm_container_autodown',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -i 1 --down '
+            '--image-id docker:ubuntu:24.04 -- "echo down-job-1"',
+            f'sky logs {name} 1 --status',
+            # The cluster downs itself once idle; the refresh removes the
+            # record and no snapshot is left behind.
+            smoke_tests_utils.get_cmd_wait_until_cluster_is_not_found(
+                cluster_name=name,
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            # A down leaves no snapshot to restore, so the cluster cannot
+            # be started again.
+            f'sky start -y {name} 2>&1 | '
+            'grep -q "Cluster(s) not found"',
+        ],
+        f'sky down -y {name} || true',
+        timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1467,6 +1653,7 @@ def test_services_on_kubernetes():
 
 # ---------- Pod Annotations on Kubernetes ----------
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_identity_none  # Autodown.
 def test_add_pod_annotations_for_autodown_with_launch():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -1506,6 +1693,7 @@ def test_add_pod_annotations_for_autodown_with_launch():
 
 
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_identity_none  # Autodown.
 def test_add_and_remove_pod_annotations_with_autostop():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -1848,9 +2036,8 @@ def test_volume_env_mount_kubernetes():
                 # Cancel by name, never -a: on a shared remote API server all
                 # concurrently running smoke tests submit jobs as the same
                 # service-account user, so `-a` cancels *their* in-flight jobs
-                # too (observed in enterprise CI: one such teardown killed an
-                # unrelated job-group test's job and another lane's kueue
-                # blocker mid-run).
+                # too (observed in CI: one such teardown killed an unrelated
+                # job-group test's job mid-run).
                 f'sky jobs cancel -y -n {name}-job || true',
                 # The managed job's worker cluster is torn down in the
                 # controller's `finally` block, and the controller only sets
@@ -3402,6 +3589,76 @@ def test_use_spot(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+# Reads the head VM's spec through SkyPilot's nebius adaptor, the same
+# GetInstance read the provisioner's start() check uses, and asserts the
+# spot pricing opt-in. The nebius CLI's JSON output does not include the
+# pricing field, so the SDK is used here.
+_NEBIUS_PRICING_MODEL_CHECK = textwrap.dedent("""\
+    import os
+    from sky.adaptors import nebius
+    service = nebius.compute().InstanceServiceClient(nebius.sdk())
+    instance = nebius.sync_call(
+        service.get_by_name(nebius.nebius_common().GetByNameRequest(
+            parent_id=os.environ['PROJECT_ID'],
+            name=os.environ['INSTANCE_NAME'])))
+    instance = nebius.sync_call(
+        service.get(nebius.compute().GetInstanceRequest(
+            id=instance.metadata.id)))
+    mode = instance.spec.which_field_in_oneof('pricing_model')
+    print(f'{instance.metadata.id}: preemptible='
+          f'{instance.spec.check_presence("preemptible")}, '
+          f'pricing_model={mode}')
+    assert mode == 'follows_spot_price', f'unexpected pricing_model: {mode}'
+    """)
+
+
+@pytest.mark.nebius
+def test_use_spot_nebius_gpu():
+    """Test Nebius GPU spot launch with explicit pricing opt-in verification.
+
+    Spot on Nebius is GPU-only, so unlike test_use_spot (CPU, excluded for
+    Nebius) this launches an L40S spot cluster. Verifies that:
+    1. The cluster launches and the job succeeds with --use-spot
+    2. The head VM's Nebius spec selects the price-taking spot pricing
+       model (follows_spot_price)
+    3. sky stop + sky start round-trips on the spot cluster (a restarted
+       spot VM keeps its pricing opt-in, so start does not require manual
+       migration)
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    # The provision log records the head VM's instance name and Nebius
+    # project ("Creating instance <name> in project <id>.").
+    check_pricing_model_cmd = (
+        f'PROVISION_LINE=$(sky logs --provision {name} | '
+        f'grep -oE \'Creating instance [^ .]+ in project [^ .]+\' | '
+        f'head -1) && '
+        f'INSTANCE_NAME=$(echo "$PROVISION_LINE" | awk \'{{print $3}}\') && '
+        f'PROJECT_ID=$(echo "$PROVISION_LINE" | awk \'{{print $NF}}\') && '
+        f'echo "Head instance: $INSTANCE_NAME in project $PROJECT_ID" && '
+        f'INSTANCE_NAME="$INSTANCE_NAME" PROJECT_ID="$PROJECT_ID" '
+        f'python -c {shlex.quote(_NEBIUS_PRICING_MODEL_CHECK)}')
+    test = smoke_tests_utils.Test(
+        'use-spot-nebius-gpu',
+        [
+            f'sky launch -y -c {name} --infra nebius --gpus L40S:1 '
+            f'--use-spot \'echo hello from nebius spot\'',
+            f'sky logs {name} 1 --status',
+            check_pricing_model_cmd,
+            f'sky stop -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                name, [sky.ClusterStatus.STOPPED], timeout=10 * 60),
+            f'sky start -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                name, [sky.ClusterStatus.UP], timeout=15 * 60),
+            f'sky exec {name} \'echo hello after spot restart\'',
+            f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=40 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.azure
 def test_azure_spot_instance_verification():
     """Test Azure spot instance provisioning with explicit verification.
@@ -3547,8 +3804,9 @@ def test_aws_custom_docker_image_with_motd(image_id):
     [
         'docker:nvidia/cuda:11.8.0-devel-ubuntu18.04',
         'docker:ubuntu:18.04',
-        # Test latest image with python 3.11 installed by default.
-        'docker:continuumio/miniconda3:24.1.2-0',
+        # Test a pinned miniconda image on a supported Debian release
+        # (bookworm), with python 3.13 installed by default.
+        'docker:continuumio/miniconda3:25.3.1-1',
         # Test python>=3.12 where SkyPilot should automatically create a separate
         # conda env for runtime with python 3.10.
         'docker:continuumio/miniconda3:latest',
@@ -3882,6 +4140,197 @@ def test_aws_disk_tier():
                 f'sky down -y {name}',
                 smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
             timeout=10 * 60,  # 10 mins  (it takes around ~6 mins)
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Volume tagging degrades instead of failing the launch ----------
+# Needs a role that may launch EC2 instances but may not tag EBS volumes -- the
+# minimal policy SkyPilot documented before volume tagging existed. Supplied by
+# the environment so no account-specific identifier lives in the test.
+_NO_VOLUME_TAG_ROLE_ENV = 'SKYPILOT_TEST_NO_VOLUME_TAG_ROLE_ARN'
+_NO_VOLUME_TAG_PROFILE = 'sky-no-volume-tags'
+_VOLUME_TAG_WARNING = 'Volumes will not be tagged'
+
+
+def _volume_tags_cmd(region: str, name_on_cloud: str, must_be_tagged: bool,
+                     label: str) -> str:
+    """Reads the attached volume's tags back from EC2 and asserts on them."""
+    if must_be_tagged:
+        assertion = (f'if ! echo "$vtags" | grep -q ray-cluster-name; then '
+                     f'echo "FAIL[{label}]: volume is not tagged"; exit 1; fi')
+    else:
+        assertion = (
+            f'if echo "$vtags" | grep -q ray-cluster-name; then '
+            f'echo "FAIL[{label}]: volume is tagged, but the credentials '
+            f'cannot tag volumes"; exit 1; fi')
+    return (
+        f'id=$(aws ec2 describe-instances --region {region} --filters '
+        f'Name=tag:ray-cluster-name,Values={name_on_cloud} '
+        f'--query "Reservations[].Instances[].InstanceId" --output text); '
+        f'echo "[{label}] instance: $id"; '
+        f'if [ -z "$id" ]; then echo "FAIL[{label}]: no instance"; exit 1; fi; '
+        # The instance must always be tagged: it is how SkyPilot finds the
+        # cluster again, and it proves the launch really used these settings.
+        f'itags=$(aws ec2 describe-instances --region {region} '
+        f'--instance-ids $id --query "Reservations[].Instances[].Tags[]" '
+        f'--output text); echo "[{label}] instance tags: $itags"; '
+        f'if ! echo "$itags" | grep -q ray-cluster-name; then '
+        f'echo "FAIL[{label}]: instance is not tagged"; exit 1; fi; '
+        # Guard against a vacuous pass: the volume query must resolve.
+        f'vols=$(aws ec2 describe-volumes --region {region} '
+        f'--filters Name=attachment.instance-id,Values=$id '
+        f'--query "Volumes[].VolumeId" --output text); '
+        f'echo "[{label}] volumes: $vols"; '
+        f'if [ -z "$vols" ]; then echo "FAIL[{label}]: no volume attached"; '
+        f'exit 1; fi; '
+        f'vtags=$(aws ec2 describe-volumes --region {region} '
+        f'--filters Name=attachment.instance-id,Values=$id '
+        f'--query "Volumes[].Tags[]" --output text); '
+        f'echo "[{label}] volume tags: $vtags"; '
+        f'{assertion}; echo "PASS[{label}]"')
+
+
+@pytest.mark.aws
+@pytest.mark.no_remote_server  # Restarts the API server to declare a workspace.
+def test_aws_volume_tagging_degrades_without_permission():
+    """`sky launch` must survive credentials that cannot tag EBS volumes.
+
+    AWS rejects the whole RunInstances call when the caller may not tag one of
+    the resource types it names, so this is the difference between a warning
+    and every EC2 launch failing.
+
+    Launches twice in the same account: once on the default credentials, once
+    through a workspace pinned to an AWS profile that cannot tag volumes. Both
+    must come up; only the volume tags and the warning differ.
+    """
+    role_arn = os.environ.get(_NO_VOLUME_TAG_ROLE_ENV)
+    if not role_arn:
+        pytest.skip(f'{_NO_VOLUME_TAG_ROLE_ENV} is not set')
+
+    name = smoke_tests_utils.get_cluster_name()
+    region = 'us-east-2'
+    allowed = f'{name}-ok'
+    denied = f'{name}-no'
+    enforced = f'{name}-en'
+    allowed_on_cloud = common_utils.make_cluster_name_on_cloud(
+        allowed, sky.AWS.max_cluster_name_length())
+    denied_on_cloud = common_utils.make_cluster_name_on_cloud(
+        denied, sky.AWS.max_cluster_name_length())
+
+    # A profile backed by the restricted role. Session credentials are enough:
+    # the launch only has to outlive the test.
+    write_profile = (
+        f'creds=$(aws sts assume-role --role-arn {role_arn} '
+        f'--role-session-name sky-volume-tag-smoke '
+        f'--query "Credentials.[AccessKeyId,SecretAccessKey,SessionToken]" '
+        f'--output text); '
+        f'aws configure set --profile {_NO_VOLUME_TAG_PROFILE} '
+        f'aws_access_key_id "$(echo "$creds" | cut -f1)"; '
+        f'aws configure set --profile {_NO_VOLUME_TAG_PROFILE} '
+        f'aws_secret_access_key "$(echo "$creds" | cut -f2)"; '
+        f'aws configure set --profile {_NO_VOLUME_TAG_PROFILE} '
+        f'aws_session_token "$(echo "$creds" | cut -f3)"; '
+        f'aws configure set --profile {_NO_VOLUME_TAG_PROFILE} '
+        f'region {region}')
+
+    # `profile` is only settable per workspace, and a workspace has to be
+    # declared server-side, so the server is restarted with this config.
+    server_config = textwrap.dedent(f"""\
+        workspaces:
+          default: {{}}
+          no-volume-tags:
+            aws:
+              profile: {_NO_VOLUME_TAG_PROFILE}
+    """)
+    denied_client_config = 'active_workspace: no-volume-tags\n'
+    # Same restricted workspace, but the tags are demanded rather than
+    # attempted, so the launch has to fail instead of degrading.
+    enforced_client_config = textwrap.dedent("""\
+        active_workspace: no-volume-tags
+        aws:
+          enforce_tags:
+            - volume
+    """)
+
+    with tempfile.NamedTemporaryFile('w', suffix='.yaml',
+                                     delete=False) as server_f, \
+         tempfile.NamedTemporaryFile('w', suffix='.yaml',
+                                     delete=False) as denied_f, \
+         tempfile.NamedTemporaryFile('w', suffix='.yaml',
+                                     delete=False) as enforced_f:
+        server_f.write(server_config)
+        denied_f.write(denied_client_config)
+        enforced_f.write(enforced_client_config)
+        server_f.flush()
+        denied_f.flush()
+        enforced_f.flush()
+
+        launch = (f'--infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+                  f'echo hi')
+        test = smoke_tests_utils.Test(
+            'aws_volume_tagging_degrades_without_permission',
+            [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
+                write_profile,
+                f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}='
+                f'{server_f.name} && {smoke_tests_utils.SKY_API_RESTART}',
+
+                # 1. Default credentials: no warning, volumes tagged.
+                f'sky launch -y -c {allowed} {launch} '
+                f'> {allowed}.log 2>&1; cat {allowed}.log',
+                f'! grep -q "{_VOLUME_TAG_WARNING}" {allowed}.log',
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    cmd=_volume_tags_cmd(region,
+                                         allowed_on_cloud,
+                                         must_be_tagged=True,
+                                         label='default-creds')),
+
+                # 2. A role that cannot tag volumes: warning, launch succeeds,
+                #    volumes untagged.
+                smoke_tests_utils.with_config(
+                    f'sky launch -y -c {denied} {launch} '
+                    f'> {denied}.log 2>&1; cat {denied}.log', denied_f.name),
+                f'grep -q "{_VOLUME_TAG_WARNING}" {denied}.log',
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    cmd=_volume_tags_cmd(region,
+                                         denied_on_cloud,
+                                         must_be_tagged=False,
+                                         label='restricted-creds')),
+
+                # 3. Same role, but `aws.enforce_tags: [volume]`: the launch
+                #    must fail rather than quietly produce untagged volumes,
+                #    and say why.
+                smoke_tests_utils.with_config(
+                    f'! sky launch -y -c {enforced} {launch} '
+                    f'> {enforced}.log 2>&1; cat {enforced}.log',
+                    enforced_f.name),
+                # The cause must reach the failure summary the user reads,
+                # not just a log line: the headline is the generic "relax the
+                # task's resource requirements", which cannot be acted on.
+                f'grep -q "Reason: Volume tagging is required" {enforced}.log',
+                f'grep -q "ec2:CreateTags" {enforced}.log',
+                # Nothing may be left behind by a refused launch.
+                f'! sky status 2>/dev/null | grep -q "{enforced}"',
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {allowed}',
+                # Torn down through the same workspace it was created in.
+                # The restricted profile is a different AWS identity, and
+                # SkyPilot refuses to operate on a cluster owned by another
+                # one -- tearing this down on the default credentials fails
+                # with ClusterOwnerIdentityMismatchError and leaks the VM.
+                smoke_tests_utils.with_config(f'sky down -y {denied}',
+                                              denied_f.name),
+                # Should be a no-op -- the enforced launch is refused before
+                # anything is created -- but never leave that to chance.
+                smoke_tests_utils.with_config(f'sky down -y {enforced} || true',
+                                              enforced_f.name),
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name),
+                smoke_tests_utils.SKY_API_RESTART),
+            timeout=30 * 60,
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -4231,6 +4680,7 @@ def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support autostop
+@pytest.mark.no_remote_identity_none  # Autodown.
 def test_autodown(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     num_nodes = 2
@@ -4754,6 +5204,7 @@ def test_kubernetes_pod_config_change_detection():
 
 # ---------- Testing Kubernetes remote_identity override ----------
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_identity_none  # Sets other identities on purpose.
 def test_kubernetes_remote_identity_override():
     """Test that config.kubernetes.remote_identity can be overridden in task YAML.
 
@@ -4783,6 +5234,75 @@ def test_kubernetes_remote_identity_override():
         ],
         f'sky down -y {name}',
         timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing Kubernetes remote_identity: NONE ----------
+_K8S_SA_TOKEN = '/var/run/secrets/kubernetes.io/serviceaccount/token'
+_K8S_IDENTITY_NONE = '--config kubernetes.remote_identity=NONE'
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_remote_identity_none():
+    """With remote_identity: NONE the pod has no API token, and the cluster
+    still launches, runs, takes exec/ssh/logs and tears down.
+
+    Under --remote-identity-none the whole session is NONE, so the control
+    (a token without NONE) is skipped.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    launch = (f'sky launch -y --infra kubernetes '
+              f'{smoke_tests_utils.LOW_RESOURCE_ARG}')
+    commands = [
+        f'{launch} -c {name} {_K8S_IDENTITY_NONE} "test ! -e {_K8S_SA_TOKEN}"',
+        f'sky logs {name} 1 --status',
+        f'sky exec {name} "test ! -e {_K8S_SA_TOKEN}"',
+        f'sky logs {name} 2 --status',
+        f'ssh {name} "test ! -e {_K8S_SA_TOKEN}"',
+        f'sky queue {name}',
+        f'sky down -y {name}',
+    ]
+    if not smoke_tests_utils.is_remote_identity_none_test():
+        commands += [
+            f'{launch} -c {name}-sa "test -e {_K8S_SA_TOKEN}"',
+            f'sky logs {name}-sa 1 --status',
+        ]
+    test = smoke_tests_utils.Test(
+        'kubernetes_remote_identity_none',
+        commands,
+        f'sky down -y {name} {name}-sa',
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_remote_identity_none_refusals():
+    """NONE refuses what would need, or hand back, pod credentials: autodown,
+    and a pod_config that mounts the token. Dryrun only, so no pods.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    launch = (f'sky launch -y -c {name} --infra kubernetes --dryrun '
+              f'{smoke_tests_utils.LOW_RESOURCE_ARG}')
+    autodown = f'{launch} --down -i 1 echo hi'
+    automount = (f'{launch} --config '
+                 'kubernetes.pod_config.spec.automountServiceAccountToken=true'
+                 ' echo hi')
+    commands = [
+        f's=$({autodown} {_K8S_IDENTITY_NONE} 2>&1) && exit 1; echo "$s"; '
+        'echo "$s" | grep "Autodown needs the pod to delete itself"',
+        f's=$({automount} {_K8S_IDENTITY_NONE} 2>&1) && exit 1; echo "$s"; '
+        'echo "$s" | grep "automountServiceAccountToken would give them some"',
+    ]
+    if not smoke_tests_utils.is_remote_identity_none_test():
+        # Controls: the same commands without NONE are accepted.
+        commands += [autodown, automount]
+    test = smoke_tests_utils.Test(
+        'kubernetes_remote_identity_none_refusals',
+        commands,
+        f'sky down -y {name}',
+        timeout=10 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 

@@ -1,5 +1,6 @@
 """SDK functions for cluster/job management."""
 import concurrent.futures
+import itertools
 import json
 import shlex
 import typing
@@ -30,6 +31,7 @@ from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
 from sky.server.requests import request_names
+from sky.server.requests.serializers import encoders
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -56,6 +58,9 @@ else:
     jobsv1_pb2 = adaptors_common.LazyImport('sky.schemas.generated.jobsv1_pb2')
 
 logger = sky_logging.init_logger(__name__)
+
+# History records cost_report processes at a time.
+_COST_REPORT_CHUNK_SIZE = 256
 
 # ======================
 # = Cluster Management =
@@ -357,15 +362,39 @@ def get_cluster_events(
             'transitioned_at' (unix timestamp) fields.
         Events are ordered from oldest to newest.
     """
-    event_type_enums = [
-        global_user_state.ClusterEventType(event_type_str.strip())
-        for event_type_str in event_type.split(',')
-        if event_type_str.strip()
-    ]
+    event_type_enums = []
+    for event_type_str in event_type.split(','):
+        name = event_type_str.strip()
+        if not name:
+            continue
+        try:
+            event_type_enums.append(global_user_state.ClusterEventType(name))
+        except ValueError:
+            # A name this server does not know is dropped, not fatal. The
+            # callers are dashboards shipped separately from the server, so a
+            # newer one routinely asks for a type an older server has no rows
+            # of -- and raising there fails the whole request, taking the
+            # types it *could* have answered with it. Dropping degrades to
+            # "no rows of that type", which is also the truth.
+            logger.debug(f'Ignoring unknown cluster event type {name!r}.')
     if not event_type_enums:
-        # Reject blank/empty input rather than silently matching nothing
-        # (an empty type list translates to `type IN ()`, i.e. no events).
+        # Nothing valid at all is still an error rather than a silent empty
+        # answer: an empty type list translates to `type IN ()`, i.e. no
+        # events, which a caller would read as "this cluster has no history".
         raise ValueError(f'No valid cluster event type in {event_type!r}.')
+    workspaces_filter = workspaces_core.get_readable_workspace_names()
+    if workspaces_filter is not None:
+        # Events are readable iff the cluster's history is. A denied caller
+        # gets the same answer as for a cluster that does not exist.
+        cluster_hash, workspace = (
+            global_user_state.get_cluster_history_workspace(
+                cluster_hash, cluster_name))
+        if workspace not in workspaces_filter:
+            if cluster_name is not None:
+                raise ValueError(f'Hash for cluster {cluster_name} not found.')
+            return []
+        # Read the hash that was checked, in case the name is reused meanwhile.
+        cluster_name = None
     return global_user_state.get_cluster_events(
         cluster_name=cluster_name,
         cluster_hash=cluster_hash,
@@ -459,7 +488,8 @@ def cost_report(days: Optional[int] = None,
 
     Returns:
         A list of dicts, with each dict containing the cost information of a
-        cluster.
+        cluster. 'resources' is already encoded for the API response, and
+        sky.cost_report decodes it back to a resources.Resources.
     """
     if days is None:
         days = constants.COST_REPORT_DEFAULT_DAYS
@@ -467,14 +497,14 @@ def cost_report(days: Optional[int] = None,
     abbreviate_response = (dashboard_summary_response and
                            cluster_hashes is None and cluster_names is None)
 
-    cluster_reports = global_user_state.get_clusters_from_history(
-        days=days,
-        abbreviate_response=abbreviate_response,
-        cluster_hashes=cluster_hashes,
-        cluster_names=cluster_names,
-        exclude_managed_clusters=exclude_managed_clusters)
-    logger.debug(
-        f'{len(cluster_reports)} clusters found from history with {days} days.')
+    history = iter(
+        global_user_state.iter_clusters_from_history(
+            days=days,
+            abbreviate_response=abbreviate_response,
+            cluster_hashes=cluster_hashes,
+            cluster_names=cluster_names,
+            exclude_managed_clusters=exclude_managed_clusters,
+            workspaces_filter=workspaces_core.get_readable_workspace_names()))
 
     def _process_cluster_report(
             cluster_report: Dict[str, Any]) -> Dict[str, Any]:
@@ -500,21 +530,30 @@ def cost_report(days: Optional[int] = None,
 
         return report
 
-    # Process clusters in parallel
-    if not cluster_reports:
-        return []
-
-    if not abbreviate_response:
-        cluster_reports = subprocess_utils.run_in_parallel(
-            _process_cluster_report, cluster_reports)
-
-    for report in cluster_reports:
-        _update_record_with_resources(report, dashboard_summary_response)
-        if dashboard_summary_response:
-            report.pop('usage_intervals')
-            report.pop('user_hash')
-            report.pop('resources')
-
+    # Records are processed a chunk at a time, and each one's resources are
+    # encoded for the response as soon as its fields are derived, so only one
+    # chunk of unpickled resources is alive at a time.
+    cluster_reports: List[Dict[str, Any]] = []
+    while True:
+        chunk = list(itertools.islice(history, _COST_REPORT_CHUNK_SIZE))
+        if not chunk:
+            break
+        if not abbreviate_response:
+            # Process clusters in parallel
+            chunk = subprocess_utils.run_in_parallel(_process_cluster_report,
+                                                     chunk)
+        for report in chunk:
+            _update_record_with_resources(report, dashboard_summary_response)
+            if dashboard_summary_response:
+                report.pop('usage_intervals')
+                report.pop('user_hash')
+                report.pop('resources')
+            else:
+                report['resources'] = encoders.encode_resources(
+                    report['resources'])
+        cluster_reports.extend(chunk)
+    logger.debug(
+        f'{len(cluster_reports)} clusters found from history with {days} days.')
     return cluster_reports
 
 
@@ -868,6 +907,21 @@ def _graceful_job_cancel(handle: backends.ResourceHandle,
         logger.debug(f'All MOUNT_CACHED uploads completed on {cluster_name!r}')
 
 
+def _user_action_event_reason(action: str) -> str:
+    """The cluster-event reason for a user-requested lifecycle action.
+
+    Names the requesting user and the API request that carried the action
+    when they are known, so the cluster's event log records who stopped or
+    terminated a cluster -- the attribution the managed-job event log keeps
+    for a cancellation. Falls back to the plain text when there is no request
+    context to name (an in-process caller).
+    """
+    actor = common_utils.get_current_request_actor()
+    if actor is None:
+        return f'Cluster was {action} by user.'
+    return f'Cluster was {action} by user {actor}.'
+
+
 def user_initiated_down(cluster_name: str,
                         purge: bool = False,
                         graceful: bool = False,
@@ -918,7 +972,7 @@ def down(cluster_name: str,
         # so its hash can be resolved (teardown deletes the row). There is no
         # TERMINATED cluster status, so new_status is None.
         global_user_state.add_cluster_event(
-            cluster_name, None, 'Cluster was terminated by user.',
+            cluster_name, None, _user_action_event_reason('terminated'),
             global_user_state.ClusterEventType.STATUS_CHANGE)
 
     backend = backend_utils.get_backend_from_handle(handle)
@@ -1060,7 +1114,7 @@ def stop(cluster_name: str,
 
     global_user_state.add_cluster_event(
         cluster_name, status_lib.ClusterStatus.STOPPED,
-        'Cluster was stopped by user.',
+        _user_action_event_reason('stopped'),
         global_user_state.ClusterEventType.STATUS_CHANGE)
 
     backend = backend_utils.get_backend_from_handle(handle)
@@ -1193,8 +1247,7 @@ def autostop(
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.YELLOW}{operation} on cluster '
                 f'{cluster_name!r}...skipped.{colorama.Style.RESET_ALL}\n'
-                f'  Auto{option_str} is not supported on {cloud!r} - '
-                f'see reason above.') from e
+                f'  {e}') from e
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     hooks_list = (handle.launched_resources.hooks

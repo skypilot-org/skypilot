@@ -133,9 +133,13 @@ export const USER_FILTER_SCHEMA = [
 // to on, so only the off state needs to travel.
 const USER_VIEW_SCHEMA = [{ key: 'deduplicate', default: 'true' }];
 
-const PROPERTY_OPTIONS = USER_FILTER_SCHEMA.map(({ key, label }) => ({
+const SERVICE_ACCOUNT_SEARCH_PLACEHOLDER =
+  'Search by service account name, or created by';
+
+const PROPERTY_OPTIONS = USER_FILTER_SCHEMA.map(({ key, label, multi }) => ({
   label,
   value: key,
+  multi: multi ?? false,
 }));
 
 const MULTI_VALUE_LABELS = new Set(
@@ -752,6 +756,57 @@ export function Users() {
     );
   }
 
+  // Default filter input and active-filter chips.
+  const trackNewFilter = (property, value) =>
+    trackFilterUsed('user', { property, value });
+  const filterInput = (
+    <FilterDropdown
+      propertyList={PROPERTY_OPTIONS}
+      valueList={valueList}
+      setFilters={setFilters}
+      addFilter={addFilter}
+      onFilterAdd={trackNewFilter}
+      placeholder="Filter users"
+    />
+  );
+  const filterChips = <Filters filters={filters} setFilters={setFilters} />;
+  const serviceAccountSearchInput = (
+    <div className="relative flex-1 max-w-md">
+      <input
+        type="text"
+        placeholder={SERVICE_ACCOUNT_SEARCH_PLACEHOLDER}
+        value={serviceAccountSearchQuery}
+        onChange={(e) => {
+          setServiceAccountSearchQuery(e.target.value);
+        }}
+        className="h-8 w-full px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+      />
+      {serviceAccountSearchQuery && (
+        <button
+          onClick={() => {
+            setServiceAccountSearchQuery('');
+          }}
+          className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          title="Clear search"
+        >
+          <svg
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <>
       {/* Main Tabs with Controls */}
@@ -846,52 +901,33 @@ export function Users() {
       <div className="flex items-center justify-between mb-4">
         {activeMainTab === 'users' ? (
           <div className="w-full sm:w-auto max-w-xl">
-            <FilterDropdown
-              propertyList={PROPERTY_OPTIONS}
-              valueList={valueList}
-              setFilters={setFilters}
-              addFilter={addFilter}
-              onFilterAdd={(property, value) =>
-                trackFilterUsed('user', { property, value })
-              }
-              placeholder="Filter users"
+            <PluginSlot
+              name="users.filters.input"
+              context={{
+                filters,
+                setFilters,
+                addFilter,
+                propertyList: PROPERTY_OPTIONS,
+                valueList,
+                placeholder: 'Filter users',
+                onFilterAdd: trackNewFilter,
+                defaultContent: filterInput,
+              }}
+              fallback={filterInput}
             />
           </div>
         ) : activeMainTab === 'service-accounts' ? (
-          <div className="relative flex-1 max-w-md">
-            <input
-              type="text"
-              placeholder="Search by service account name, or created by"
-              value={serviceAccountSearchQuery}
-              onChange={(e) => {
-                setServiceAccountSearchQuery(e.target.value);
-              }}
-              className="h-8 w-full px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
-            />
-            {serviceAccountSearchQuery && (
-              <button
-                onClick={() => {
-                  setServiceAccountSearchQuery('');
-                }}
-                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                title="Clear search"
-              >
-                <svg
-                  className="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            )}
-          </div>
+          <PluginSlot
+            name="users.service-accounts.filters.input"
+            context={{
+              searchQuery: serviceAccountSearchQuery,
+              setSearchQuery: setServiceAccountSearchQuery,
+              placeholder: SERVICE_ACCOUNT_SEARCH_PLACEHOLDER,
+              defaultContent: serviceAccountSearchInput,
+            }}
+            wrapperClassName="w-full sm:w-auto max-w-xl"
+            fallback={serviceAccountSearchInput}
+          />
         ) : (
           <PluginSlot
             name="users.tab-filter"
@@ -954,7 +990,11 @@ export function Users() {
 
       {/* Display Active Filters - only for users tab */}
       {activeMainTab === 'users' && (
-        <Filters filters={filters} setFilters={setFilters} />
+        <PluginSlot
+          name="users.filters.active"
+          context={{ filters, setFilters, defaultContent: filterChips }}
+          fallback={filterChips}
+        />
       )}
 
       {/* Error/Success messages positioned at top right, below navigation bar */}

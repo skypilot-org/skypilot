@@ -1318,3 +1318,45 @@ tests:
       - matchRegex:
           path: spec.template.spec.containers[0].args[2]
           pattern: "exec sky api start .*--host=::"
+
+  # Test cases for apiService.topologySpreadTopologyKey
+  - it: should not render topologySpreadConstraints by default
+    asserts:
+      - notExists:
+          path: spec.template.spec.topologySpreadConstraints
+
+  - it: should spread API server pods per ReplicaSet when topologySpreadTopologyKey is set
+    set:
+      apiService.topologySpreadTopologyKey: kubernetes.io/hostname
+    capabilities:
+      majorVersion: 1
+      minorVersion: 27
+    asserts:
+      - equal:
+          path: spec.template.spec.topologySpreadConstraints
+          value:
+            - maxSkew: 1
+              topologyKey: kubernetes.io/hostname
+              whenUnsatisfiable: DoNotSchedule
+              labelSelector:
+                matchLabels:
+                  app: RELEASE-NAME-api
+              matchLabelKeys:
+                - pod-template-hash
+
+  - it: should omit matchLabelKeys from topologySpreadConstraints before Kubernetes 1.27
+    set:
+      apiService.topologySpreadTopologyKey: kubernetes.io/hostname
+    capabilities:
+      majorVersion: 1
+      minorVersion: 26
+    asserts:
+      - equal:
+          path: spec.template.spec.topologySpreadConstraints
+          value:
+            - maxSkew: 1
+              topologyKey: kubernetes.io/hostname
+              whenUnsatisfiable: DoNotSchedule
+              labelSelector:
+                matchLabels:
+                  app: RELEASE-NAME-api

@@ -1177,6 +1177,26 @@ def _task_config_schema():
     }
 
 
+def get_task_job_schema():
+    """Schema for the task's `job:` section: managed-job lifecycle settings."""
+    return {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'wait_for_scheduling_timeout': {
+                'anyOf': [{
+                    'type': 'string',
+                    'pattern': constants.TIME_PATTERN_SECONDS,
+                }, {
+                    'type': 'integer',
+                    'minimum': 1,
+                }],
+            },
+        },
+    }
+
+
 def get_task_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -1210,6 +1230,7 @@ def get_task_schema():
             'num_nodes': {
                 'type': 'integer',
             },
+            'job': get_task_job_schema(),
             # resources config is validated separately using RESOURCES_SCHEMA
             'resources': {
                 'type': 'object',
@@ -1444,6 +1465,8 @@ class RemoteIdentityOptions(enum.Enum):
     LOCAL_CREDENTIALS = 'LOCAL_CREDENTIALS'
     SERVICE_ACCOUNT = 'SERVICE_ACCOUNT'
     NO_UPLOAD = 'NO_UPLOAD'
+    # Kubernetes only: the pod gets no API credentials at all.
+    NONE = 'NONE'
 
 
 def get_default_remote_identity(cloud: str) -> str:
@@ -1467,7 +1490,9 @@ _REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {
         'type': 'string',
         'case_insensitive_enum': [
-            option.value for option in RemoteIdentityOptions
+            option.value
+            for option in RemoteIdentityOptions
+            if option is not RemoteIdentityOptions.NONE
         ]
     }
 }
@@ -1506,6 +1531,28 @@ _SBATCH_OPTIONS_SCHEMA = {
                 'type': 'null'
             },
         ]
+    },
+}
+
+# `quota.queue` names the QOS a job is submitted with (`sbatch --qos`) and
+# `quota.account` the account it is charged to (`sbatch --account`), mirroring
+# `kubernetes.quota.queue`. Permissive so plugins can layer their own
+# sub-fields under `quota`.
+_SLURM_QUOTA_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': True,
+    'properties': {
+        # Non-empty: an empty value would still be emitted as a bare
+        # `--qos=` / `--account=` directive and be rejected by sbatch.
+        'queue': {
+            'type': 'string',
+            'minLength': 1,
+        },
+        'account': {
+            'type': 'string',
+            'minLength': 1,
+        },
     },
 }
 
@@ -1610,6 +1657,15 @@ _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
 }
 
 _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
+    # Per context because the constraint it satisfies is per cluster: the
+    # range has to sit outside the node's ephemeral port pool, and that
+    # pool's floor is a per-node sysctl. Measured 32768 on GKE and OCI,
+    # 10240 on CoreWeave -- so one value cannot serve a deployment that
+    # spans them.
+    'host_network_port_range': {
+        'type': 'string',
+        'pattern': r'^\d+-\d+$',
+    },
     'allowed_nodes': {
         'type': 'object',
         'required': [],
@@ -1714,10 +1770,9 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         },
     },
     # Alias of `kueue.local_queue_name`; `quota.queue` takes precedence
-    # when both are set. Permissive so external schedulers (registered
-    # via plugins) can layer their own sub-fields under `quota` without
-    # requiring per-key OSS schema updates; sub-field validation is the
-    # consumer's responsibility.
+    # when both are set. Permissive so plugins can layer their own
+    # sub-fields under `quota` without requiring per-key OSS schema
+    # updates; sub-field validation is the consumer's responsibility.
     'quota': {
         'type': 'object',
         'required': [],
@@ -1841,6 +1896,17 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             },
         ],
     },
+}
+
+_SLURM_USERNAME_MAP_SCHEMA = {
+    'type': 'object',
+    'propertyNames': {
+        'minLength': 1
+    },
+    'additionalProperties': {
+        'type': 'string',
+        'pattern': '^[a-z_][a-z0-9_.+-]*$'
+    }
 }
 
 
@@ -1992,6 +2058,14 @@ def get_config_schema():
                                 'type': 'string'
                             }
                         }]
+                    },
+                },
+                'enforce_tags': {
+                    'type': 'array',
+                    'uniqueItems': True,
+                    'items': {
+                        'type': 'string',
+                        'case_sensitive_enum': ['instance', 'volume'],
                     },
                 },
                 **_CAPABILITIES_SCHEMA,
@@ -2196,8 +2270,10 @@ def get_config_schema():
                 'submit_as_user': {
                     'type': 'boolean',
                 },
+                'username_map': (_SLURM_USERNAME_MAP_SCHEMA),
                 'pricing': _PRICING_SCHEMA,
                 'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                'quota': _SLURM_QUOTA_SCHEMA,
                 'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,
                 'cpu_partition': {
                     'type': 'string',
@@ -2243,6 +2319,7 @@ def get_config_schema():
                             'submit_as_user': {
                                 'type': 'boolean',
                             },
+                            'username_map': (_SLURM_USERNAME_MAP_SCHEMA),
                             # The Prometheus this cluster's GPU metrics are
                             # federated from.
                             'prometheus': {
@@ -2284,6 +2361,7 @@ def get_config_schema():
                             },
                             'pricing': _PRICING_SCHEMA,
                             'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                            'quota': _SLURM_QUOTA_SCHEMA,
                             'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,
                             'cpu_partition': {
                                 'type': 'string',
@@ -2300,6 +2378,7 @@ def get_config_schema():
                                     'properties': {
                                         'pricing': _PRICING_SCHEMA,
                                         'sbatch_options': _SBATCH_OPTIONS_SCHEMA,  # pylint: disable=line-too-long
+                                        'quota': _SLURM_QUOTA_SCHEMA,
                                     },
                                 },
                             },
@@ -2549,6 +2628,9 @@ def get_config_schema():
             'cluster_terminal_event_retention_hours': {
                 'type': 'number',
             },
+            'launch_attempt_retention_hours': {
+                'type': 'number',
+            },
             'daemon_log_max_bytes': {
                 'type': 'integer',
                 'minimum': 0,
@@ -2594,13 +2676,15 @@ def get_config_schema():
 
     allowed_workspace_cloud_names = list(
         constants.ALL_CLOUDS) + constants.STORAGE_ONLY_CLOUDS
-    # Create pattern for not supported clouds, i.e.
-    # all clouds except aws, gcp, kubernetes, ssh, nebius
+    # Create pattern for not supported clouds, i.e. all clouds except aws,
+    # gcp, kubernetes, ssh, nebius, slurm.
     not_supported_clouds = [
-        cloud for cloud in allowed_workspace_cloud_names
-        if cloud.lower() not in ['aws', 'gcp', 'kubernetes', 'ssh', 'nebius']
+        cloud for cloud in allowed_workspace_cloud_names if cloud.lower() not in
+        ['aws', 'gcp', 'kubernetes', 'ssh', 'nebius', 'slurm']
     ]
     not_supported_cloud_regex = '|'.join(not_supported_clouds)
+    slurm_allowed_clusters_schema = cloud_configs['slurm']['properties'][
+        'allowed_clusters']
     workspaces_schema = {
         'type': 'object',
         'required': [],
@@ -2795,6 +2879,47 @@ def get_config_schema():
                     # server-side validation.
                     'additionalProperties': _allow_additional_properties(),
                 },
+                'slurm': {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': {
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                        'allowed_clusters': slurm_allowed_clusters_schema,
+                        'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                        'quota': _SLURM_QUOTA_SCHEMA,
+                        'cluster_configs': {
+                            'type': 'object',
+                            'required': [],
+                            'properties': {},
+                            'additionalProperties': {
+                                'type': 'object',
+                                'required': [],
+                                'additionalProperties': False,
+                                'properties': {
+                                    'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                                    'quota': _SLURM_QUOTA_SCHEMA,
+                                    'partition_configs': {
+                                        'type': 'object',
+                                        'required': [],
+                                        'properties': {},
+                                        'additionalProperties': {
+                                            'type': 'object',
+                                            'required': [],
+                                            'additionalProperties': False,
+                                            'properties': {
+                                                'sbatch_options': _SBATCH_OPTIONS_SCHEMA,  # pylint: disable=line-too-long
+                                                'quota': _SLURM_QUOTA_SCHEMA,
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
                 'nebius': {
                     'type': 'object',
                     'required': [],
@@ -2837,10 +2962,21 @@ def get_config_schema():
         'type': 'object',
         'required': ['store'],
         'additionalProperties': False,
+        # The OTLP store has no default endpoint, so its block is required.
+        'if': {
+            'properties': {
+                'store': {
+                    'case_insensitive_enum': ['otlp'],
+                },
+            },
+        },
+        'then': {
+            'required': ['otlp'],
+        },
         'properties': {
             'store': {
                 'type': 'string',
-                'case_insensitive_enum': ['gcp', 'aws'],
+                'case_insensitive_enum': ['gcp', 'aws', 'otlp'],
             },
             'gcp': {
                 'type': 'object',
@@ -2878,6 +3014,48 @@ def get_config_schema():
                         'type': 'boolean',
                     },
                     'additional_tags': {
+                        'type': 'object',
+                        'additionalProperties': {
+                            'type': 'string',
+                        },
+                    },
+                },
+            },
+            'otlp': {
+                'type': 'object',
+                'required': ['endpoint'],
+                'additionalProperties': False,
+                'properties': {
+                    'endpoint': {
+                        'type': 'string',
+                    },
+                    'protocol': {
+                        'type': 'string',
+                        'case_insensitive_enum': ['http/protobuf', 'grpc'],
+                    },
+                    'headers': {
+                        'type': 'object',
+                        'additionalProperties': {
+                            'type': 'string',
+                        },
+                    },
+                    'headers_file': {
+                        'type': 'string',
+                    },
+                    'compression': {
+                        'type': 'string',
+                        'case_insensitive_enum': ['none', 'gzip'],
+                    },
+                    'tls': {
+                        'type': 'object',
+                        'additionalProperties': False,
+                        'properties': {
+                            'insecure_skip_verify': {
+                                'type': 'boolean',
+                            },
+                        },
+                    },
+                    'resource_attributes': {
                         'type': 'object',
                         'additionalProperties': {
                             'type': 'string',

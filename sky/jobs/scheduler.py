@@ -203,7 +203,7 @@ def get_alive_controllers() -> Optional[int]:
 
 
 def kill_local_job_controllers(sig: int = signal.SIGTERM) -> int:
-    """SIGTERM all live controller PIDs recorded on this replica.
+    """SIGTERM all live controller PIDs recorded on this host.
 
     Returns:
         The number of signals delivered.
@@ -240,10 +240,10 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
         # In consolidation mode the controller pool is owned exclusively by the
         # leader-elected managed-job refresh daemon (see
         # sky/jobs/managed_job_refresh_thread.py). Never start controllers from
-        # a request: the request path runs on whichever replica handled the
-        # request, whose controller PIDs the leader cannot see (its liveness
-        # check is a local psutil lookup), and controller startup would inherit
-        # per-request state into a long-lived process tree.
+        # a request: the request path runs on whichever API server instance
+        # handled the request, whose controller PIDs the leader cannot see (its
+        # liveness check is a local psutil lookup), and controller startup
+        # would inherit per-request state into a long-lived process tree.
         #
         # This is safe for launch latency: submit_jobs has already moved the job
         # to WAITING, and a controller from the leader's warm pool claims it
@@ -318,7 +318,11 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
                 started += 1
 
             if started > 0:
-                logger.info(f'Started {started} controllers')
+                explicit = controller_utils.explicit_jobs_controllers()
+                source = ('derived' if explicit is None else
+                          f'from {constants.ENV_VAR_SERVER_JOBS_CONTROLLERS}')
+                logger.info(f'Started {started} controllers '
+                            f'(pool size {wanted}, {source})')
 
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock
@@ -414,7 +418,7 @@ async def scheduled_launch(
     multiple uses of this context are nested, behavior is undefined. Don't do
     that.
     """
-    pool = state.get_pool_from_job_id(job_id)
+    pool = await asyncio.to_thread(state.get_pool_from_job_id, job_id)
     # For pool, since there is no execution.launch, we don't need to have all
     # the ALIVE_WAITING state. The state transition will be
     # WAITING -> ALIVE -> DONE without any intermediate transitions.
@@ -427,7 +431,8 @@ async def scheduled_launch(
     # level in _run_job_group(), so bypass per-task scheduling here.
     # Check if job is a JobGroup by examining the DAG YAML content.
     # TODO(zhwu): make JobGroup scheduler aware.
-    dag_content = file_content_utils.get_job_dag_content(job_id)
+    dag_content = await asyncio.to_thread(
+        file_content_utils.get_job_dag_content, job_id)
     if dag_content is not None and dag_utils.is_job_group_yaml_str(dag_content):
         yield
         return
@@ -437,8 +442,9 @@ async def scheduled_launch(
 
     while True:
         async with starting_lock:
-            starting_count = len(starting)
-            if starting_count < controller_utils.LAUNCHES_PER_WORKER:
+            # start_job already reserved this job's slot for its first launch.
+            if (job_id in starting or
+                    len(starting) < controller_utils.LAUNCHES_PER_WORKER):
                 break
             logger.info('Too many jobs starting, waiting for a slot')
             await starting_signal.wait()

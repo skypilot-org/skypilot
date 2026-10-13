@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/router';
 import {
   getWorkspaces,
@@ -13,6 +13,7 @@ import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { NonCapitalizedTooltip } from '@/components/utils';
 import { Layout } from '@/components/elements/layout';
+import { PluginSlot } from '@/plugins/PluginSlot';
 import Link from 'next/link';
 import Head from 'next/head';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -257,11 +258,25 @@ const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
   );
 };
 
-// Detailed allowed users component for workspace editor
-const DetailedAllowedUsers = ({
+// Detailed allowed users component for workspace editor.
+//
+// Plugin slots:
+// - `workspaces.detail.allowedUser.role` replaces the role badge on each row.
+//   Context: { workspaceName, entry, isAdmin, onChanged }, where `entry` is the
+//   allowed_users entry (a username or user id) and `isAdmin` is true for
+//   users with the global admin role.
+// - `workspaces.detail.allowedUsers.actions` renders below the list.
+//   Context: { workspaceName, allowedUsers, onChanged }, where
+//   `allowedUsers` is the workspace's own `allowed_users` (usernames or user
+//   ids), not the displayed list, which also shows every global admin.
+// Plugins call `onChanged()` after changing the workspace so the page reloads
+// its config.
+export const DetailedAllowedUsers = ({
+  workspaceName,
   workspaceConfig,
   allUsers,
   writable = true,
+  onChanged = () => {},
 }) => {
   if (!workspaceConfig.private) return null;
   // Non-member (read-only-visible) view: the server strips allowed_users from
@@ -275,11 +290,28 @@ const DetailedAllowedUsers = ({
   // Get all admin users
   const adminUsers = (allUsers || []).filter((user) => user.role === 'admin');
   const adminUsernames = adminUsers.map((user) => user.username);
+  // allowed_users entries may be usernames or user ids.
+  const adminIdentities = new Set([
+    ...adminUsernames,
+    ...adminUsers.map((user) => user.userId),
+  ]);
 
   // Combine allowed users and admin users, remove duplicates
   const allAllowedUsers = [
     ...new Set([...allowedUsersFromConfig, ...adminUsernames]),
   ];
+
+  const actionsSlot = (
+    <PluginSlot
+      name="workspaces.detail.allowedUsers.actions"
+      context={{
+        workspaceName,
+        allowedUsers: allowedUsersFromConfig,
+        onChanged,
+      }}
+      wrapperClassName="mt-2"
+    />
+  );
 
   if (allAllowedUsers.length === 0) {
     return (
@@ -290,6 +322,7 @@ const DetailedAllowedUsers = ({
         <div className="text-amber-600 text-xs italic p-2 bg-amber-50 rounded border border-amber-200">
           No users configured (workspace may be inaccessible)
         </div>
+        {actionsSlot}
       </div>
     );
   }
@@ -301,28 +334,36 @@ const DetailedAllowedUsers = ({
       </h4>
       <div className="space-y-1 max-h-48 overflow-y-auto border border-gray-200 rounded">
         {allAllowedUsers.map((username) => {
-          const isAdmin = adminUsernames.includes(username);
+          const isAdmin = adminIdentities.has(username);
           return (
             <div
               key={username}
               className="flex items-center justify-between text-xs p-2 bg-gray-50 hover:bg-gray-100 border-b border-gray-100 last:border-b-0"
             >
               <span className="font-medium text-gray-700">{username}</span>
-              {isAdmin ? (
-                <span className="inline-flex items-center text-blue-600">
-                  <StarIcon className="w-3 h-3 mr-1" />
-                  Admin
-                </span>
-              ) : (
-                <span className="inline-flex items-center text-gray-600">
-                  <User className="w-3 h-3 mr-1" />
-                  User
-                </span>
-              )}
+              <PluginSlot
+                name="workspaces.detail.allowedUser.role"
+                context={{ workspaceName, entry: username, isAdmin, onChanged }}
+                wrapperClassName="contents"
+                fallback={
+                  isAdmin ? (
+                    <span className="inline-flex items-center text-blue-600">
+                      <StarIcon className="w-3 h-3 mr-1" />
+                      Admin
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center text-gray-600">
+                      <User className="w-3 h-3 mr-1" />
+                      User
+                    </span>
+                  )
+                }
+              />
             </div>
           );
         })}
       </div>
+      {actionsSlot}
     </div>
   );
 };
@@ -342,6 +383,18 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+  // The editor text as last loaded from the server, and as it is now. A draft
+  // is any difference, including comment-only or not-yet-valid edits that
+  // leave the parsed config unchanged. Refs so fetchWorkspaceConfig can read
+  // them without depending on them.
+  const serverYamlRef = useRef('');
+  const draftYamlRef = useRef('');
+  // The server config the editor text was based on, sent with Apply as
+  // `expected_config`. If the workspace changed while the draft was open
+  // (another admin, another tab, a change made from this page), the server
+  // refuses the write and Apply asks before overwriting it.
+  const baseConfigRef = useRef({});
+  const [conflict, setConflict] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [yamlError, setYamlError] = useState(null);
@@ -363,8 +416,10 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   });
   const [statsLoading, setStatsLoading] = useState(false);
 
+  // `keepDraft`: refresh the server snapshot (roster, badges) but leave
+  // unsaved YAML edits in place. Used when a plugin changes the workspace.
   const fetchWorkspaceConfig = useCallback(
-    async (showLoading = true) => {
+    async (showLoading = true, { keepDraft = false } = {}) => {
       if (showLoading) {
         setLoading(true);
       }
@@ -384,11 +439,15 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
           read_only: readOnly,
           ...config
         } = allWorkspaces[workspaceName] || {};
-        setWorkspaceConfig(config);
         setOriginalConfig(config);
         setIsReadOnlyVisible(readOnly === true);
         setIsWritable(writableFlag !== false);
         setAllUsers(usersResponse || []);
+        if (keepDraft && draftYamlRef.current !== serverYamlRef.current) {
+          return;
+        }
+        setWorkspaceConfig(config);
+        baseConfigRef.current = config;
 
         // Format as YAML with workspace name as top-level key
         const fullConfig = { [workspaceName]: config };
@@ -404,6 +463,8 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
             flowLevel: -1,
           });
         }
+        serverYamlRef.current = yamlOutput;
+        draftYamlRef.current = yamlOutput;
         setYamlValue(yamlOutput);
       } catch (err) {
         console.error('Error fetching workspace config:', err);
@@ -506,6 +567,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   }, [workspaceConfig, originalConfig]);
 
   const handleYamlChange = (value) => {
+    draftYamlRef.current = value;
     setYamlValue(value);
     setYamlError(null);
 
@@ -538,10 +600,13 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async ({ force = false } = {}) => {
     setSaving(true);
     setError(null);
     setSuccess(null);
+    // The text being saved. Typing that happens during the request stays a
+    // draft, so only this snapshot becomes the new server baseline.
+    const savedYaml = yamlValue;
 
     try {
       // Validate YAML
@@ -566,15 +631,28 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
           router.push(`/workspaces/${workspaceName}`);
         }, 1500);
       } else {
-        await updateWorkspace(workspaceName, workspaceConfig);
+        await updateWorkspace(
+          workspaceName,
+          workspaceConfig,
+          force ? undefined : baseConfigRef.current
+        );
         setSuccess('Workspace updated successfully!');
         setOriginalConfig(workspaceConfig);
+        serverYamlRef.current = savedYaml;
+        // The server stores the config as sent, so that is the new baseline.
+        // Not re-read: a change landing after this save must still show up
+        // as a conflict on the next Apply, not become the baseline.
+        baseConfigRef.current = workspaceConfig;
         // Refresh stats after successful save
         fetchWorkspaceStats();
       }
     } catch (err) {
-      console.error('Error saving workspace:', err);
-      setError(err);
+      if (err?.type === 'WorkspaceConfigConflictError') {
+        setConflict(true);
+      } else {
+        console.error('Error saving workspace:', err);
+        setError(err);
+      }
     } finally {
       setSaving(false);
     }
@@ -618,6 +696,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const handleDiscard = () => {
     // Reset to original configuration
     setWorkspaceConfig(originalConfig);
+    baseConfigRef.current = originalConfig;
 
     // Reset YAML value to original
     const fullConfig = { [workspaceName]: originalConfig };
@@ -633,6 +712,8 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         flowLevel: -1,
       });
     }
+    serverYamlRef.current = yamlOutput;
+    draftYamlRef.current = yamlOutput;
     setYamlValue(yamlOutput);
 
     // Clear any errors
@@ -828,9 +909,13 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
 
                       {/* Detailed allowed users for private workspaces */}
                       <DetailedAllowedUsers
+                        workspaceName={workspaceName}
                         workspaceConfig={originalConfig}
                         allUsers={allUsers}
                         writable={isWritable}
+                        onChanged={() =>
+                          fetchWorkspaceConfig(false, { keepDraft: true })
+                        }
                       />
                     </div>
                   </Card>
@@ -906,7 +991,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                         {/* Action buttons */}
                         <div className="flex justify-end space-x-3 pt-3 border-gray-200">
                           <Button
-                            onClick={handleSave}
+                            onClick={() => handleSave()}
                             disabled={saving || yamlError || loading}
                             className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white"
                           >
@@ -924,6 +1009,50 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         )}
 
         {/* Delete Confirmation Dialog */}
+        <Dialog
+          open={conflict}
+          onOpenChange={(open) => {
+            if (!open) setConflict(false);
+          }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader className="">
+              <DialogTitle>
+                Workspace changed since you started editing
+              </DialogTitle>
+              <DialogDescription>
+                Workspace &quot;{workspaceName}&quot; was changed after you
+                started editing, for example by another admin or in another tab.
+                Applying replaces its whole configuration with your YAML and
+                would undo those changes.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="">
+              <Button variant="outline" onClick={() => setConflict(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setConflict(false);
+                  fetchWorkspaceConfig(false);
+                }}
+              >
+                Reload latest
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  setConflict(false);
+                  handleSave({ force: true });
+                }}
+              >
+                Apply anyway
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <Dialog open={deleteState.showDialog} onOpenChange={handleCancelDelete}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader className="">

@@ -24,9 +24,8 @@ ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD: str
 DEFAULT_SSH_CONTROL_NAME: str
 
 
-def wrap_command_as_user(command: str,
+def wrap_command_as_user(argv: List[str],
                          user: str,
-                         shell_argv0: Optional[str] = ...,
                          use_sudo: bool = ...) -> str:
     ...
 
@@ -122,6 +121,9 @@ class CommandRunner:
         ...
 
     def get_remote_home_dir(self) -> str:
+        ...
+
+    def command_as_user(self, argv: List[str]) -> str:
         ...
 
     def rsync(

@@ -2,6 +2,7 @@
 import asyncio
 import concurrent.futures
 import functools
+import gc
 import os
 import pathlib
 import queue as queue_lib
@@ -9,10 +10,13 @@ import threading
 import time
 from typing import List
 from unittest import mock
+import weakref
 
 import pytest
 
 from sky import exceptions
+from sky import global_user_state
+from sky import models
 from sky import skypilot_config
 from sky.server import config as server_config
 from sky.server import constants as server_constants
@@ -20,10 +24,12 @@ from sky.server import daemons as server_daemons
 from sky.server.requests import continue_condition as continue_condition_lib
 from sky.server.requests import executor
 from sky.server.requests import payloads
+from sky.server.requests import preconditions
 from sky.server.requests import process
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import context_utils
+from sky.utils.db import db_utils
 
 
 @pytest.fixture()
@@ -177,6 +183,117 @@ async def test_api_cancel_race_condition(isolated_database):
     assert updated.status == requests_lib.RequestStatus.CANCELLED
 
 
+def _make_pending_request(request_id: str) -> requests_lib.Request:
+    return requests_lib.Request(request_id=request_id,
+                                name='test-request',
+                                entrypoint=dummy_entrypoint,
+                                request_body=payloads.RequestBody(),
+                                status=requests_lib.RequestStatus.PENDING,
+                                created_at=0.0,
+                                user_id='test-user')
+
+
+@pytest.mark.asyncio
+async def test_enqueue_failure_marks_request_failed(isolated_database):
+    """A failed queue put must leave the request FAILED, not PENDING."""
+    req = _make_pending_request('enqueue-fails')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=RuntimeError('put failed'))
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        with pytest.raises(RuntimeError, match='put failed'):
+            await executor.schedule_prepared_request(req)
+
+    updated = requests_lib.get_request('enqueue-fails')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+    error = updated.get_error()
+    assert error is not None
+    assert 'put failed' in str(error['object'])
+
+
+@pytest.mark.asyncio
+async def test_enqueue_cancellation_marks_request_failed(isolated_database):
+    """A cancelled queue put must not strand the request in PENDING."""
+    req = _make_pending_request('enqueue-cancelled')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=asyncio.CancelledError())
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        with pytest.raises(asyncio.CancelledError):
+            await executor.schedule_prepared_request(req)
+
+    updated = requests_lib.get_request('enqueue-cancelled')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+
+
+@pytest.mark.parametrize('claimed_status', [
+    requests_lib.RequestStatus.RUNNING,
+    requests_lib.RequestStatus.WAITING,
+])
+@pytest.mark.asyncio
+async def test_enqueue_failure_does_not_clobber_claimed_request(
+        isolated_database, claimed_status):
+    """A row claimed by a worker before the failure mark is left untouched.
+
+    The queue put may commit and still raise (e.g. a timeout racing the
+    commit); a worker can then dequeue and claim the request -- and even park
+    it WAITING for a retry -- before the failure path runs. The failure mark
+    must not overwrite the claimed run.
+    """
+    req = _make_pending_request('enqueue-claimed')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    async def claim_then_fail(input_tuple):
+        del input_tuple
+        with requests_lib.update_request('enqueue-claimed') as claimed:
+            assert claimed is not None
+            claimed.status = claimed_status
+        raise RuntimeError('put failed after commit')
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=claim_then_fail)
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        with pytest.raises(RuntimeError, match='put failed after commit'):
+            await executor.schedule_prepared_request(req)
+
+    updated = requests_lib.get_request('enqueue-claimed')
+    assert updated is not None
+    assert updated.status == claimed_status
+
+
+class _AlwaysMetPrecondition(preconditions.Precondition):
+
+    async def check(self):
+        return True, None
+
+
+@pytest.mark.asyncio
+async def test_enqueue_failure_with_precondition_marks_request_failed(
+        isolated_database):
+    """The terminal-state guard must also cover the precondition path."""
+    req = _make_pending_request('enqueue-fails-precondition')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=RuntimeError('put failed'))
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        before = set(preconditions.background_tasks)
+        await executor.schedule_prepared_request(
+            req, precondition=_AlwaysMetPrecondition(req.request_id))
+        new_tasks = preconditions.background_tasks - before
+        assert len(new_tasks) == 1
+        with pytest.raises(RuntimeError, match='put failed'):
+            await next(iter(new_tasks))
+
+    updated = requests_lib.get_request('enqueue-fails-precondition')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+
+
 @pytest.mark.asyncio
 async def test_waiting_request_is_executed_not_skipped(mock_fd_operations,
                                                        mock_global_user_state,
@@ -206,6 +323,43 @@ async def test_waiting_request_is_executed_not_skipped(mock_fd_operations,
     assert updated is not None
     assert updated.status == requests_lib.RequestStatus.SUCCEEDED
     assert updated.return_value == 'success'
+
+
+class _ResultTooLargeError(Exception):
+    """A database error that carries the statement's parameters."""
+
+    def __init__(self, params):
+        super().__init__('invalid memory alloc request size 1073741824')
+        self.params = params
+
+
+@pytest.mark.asyncio
+async def test_result_that_cannot_be_stored_fails_the_request(
+        mock_fd_operations, mock_global_user_state, mock_skypilot_config):
+    """A result the database rejects ends the request FAILED, not RUNNING."""
+    req = requests_lib.Request(request_id='result-not-stored',
+                               name='test',
+                               entrypoint=_success_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    await requests_lib.create_if_not_exists_async(req)
+
+    error = _ResultTooLargeError(params={'return_value': 'x' * 10000})
+    with mock.patch.object(requests_lib,
+                           'set_request_succeeded',
+                           side_effect=error):
+        executor._request_execution_wrapper('result-not-stored',
+                                            ignore_return_value=False)
+
+    updated = requests_lib.get_request('result-not-stored')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+    message = updated.get_error()['message']
+    assert 'invalid memory alloc request size' in message
+    # The rejected result is not copied into the stored error.
+    assert 'x' * 100 not in message
 
 
 def _test_isolation_worker_fn(expected_env_a: str, expected_env_b: str,
@@ -716,11 +870,13 @@ async def test_request_worker_retry_execution_retryable_error(
 class _PauseHarness:
     """Bundles the worker, queue, and request id for pause/watch tests."""
 
-    def __init__(self, worker, request_id, queue_items, sleep_calls):
+    def __init__(self, worker, request_id, queue_items, sleep_calls, queued):
         self.worker = worker
         self.request_id = request_id
         self.queue_items = queue_items
         self.sleep_calls = sleep_calls
+        # Set on every requeue; the async-path tests wait on it.
+        self.queued = queued
 
     def run(self, condition, retry_wait_seconds=30):
         """Drive handle_task_result with an ExecutionPausedError."""
@@ -754,6 +910,8 @@ def pause_harness(isolated_database, monkeypatch):
     queue_items = []
     backing = queue_lib.Queue()
 
+    queued = threading.Event()
+
     class MockRequestQueue:
 
         def get(self):
@@ -765,6 +923,9 @@ def pause_harness(isolated_database, monkeypatch):
         def put(self, item):
             queue_items.append(item)
             backing.put(item)
+            # Signals the async-path tests, whose requeue happens on the
+            # shared request event loop after handle_task_result returned.
+            queued.set()
 
     request_queue = MockRequestQueue()
     monkeypatch.setattr(executor, '_get_queue',
@@ -783,7 +944,7 @@ def pause_harness(isolated_database, monkeypatch):
         config=server_config.WorkerConfig(garanteed_parallelism=1,
                                           burstable_parallelism=0,
                                           num_db_connections_per_worker=0))
-    return _PauseHarness(worker, request_id, queue_items, sleep_calls)
+    return _PauseHarness(worker, request_id, queue_items, sleep_calls, queued)
 
 
 class _RecordingCondition(continue_condition_lib.ContinueCondition):
@@ -1001,6 +1162,182 @@ def test_pause_passes_the_new_kwarg_to_a_kwargs_absorbing_wait(pause_harness):
     assert condition.kwargs == [['update_status_msg']]
 
 
+class _AsyncRecordingCondition(continue_condition_lib.ContinueCondition):
+    """A condition whose wait_async() returns a fixed verdict.
+
+    Records what the executor drives it with, so tests can assert the async
+    contract: awaitable callbacks, and the coroutine running off the monitor
+    thread on the shared request event loop.
+    """
+
+    def __init__(self, verdict: bool, reasons=()):
+        self._verdict = verdict
+        self._reasons = reasons
+        self.calls = []
+        self.done = threading.Event()
+
+    def wait(self, **kwargs) -> bool:
+        raise AssertionError(
+            'sync wait() must not run for an async-capable condition')
+
+    async def wait_async(self,
+                         *,
+                         is_cancelled,
+                         fallback_wait_seconds,
+                         update_status_msg=None) -> bool:
+        self.calls.append({
+            'is_cancelled': await is_cancelled(),
+            'fallback_wait_seconds': fallback_wait_seconds,
+            'thread': threading.current_thread(),
+        })
+        for reason in self._reasons:
+            assert update_status_msg is not None
+            await update_status_msg(reason)
+        self.done.set()
+        return self._verdict
+
+
+def test_pause_async_condition_reschedules(pause_harness):
+    """An async condition's True verdict requeues the request.
+
+    Also pins down the contract: the coroutine runs off the monitor thread,
+    and is_cancelled is awaitable there.
+    """
+    condition = _AsyncRecordingCondition(verdict=True)
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert pause_harness.queued.wait(timeout=10)
+    assert pause_harness.queue_items == [request_element]
+    assert condition.calls == [{
+        'is_cancelled': False,
+        'fallback_wait_seconds': 30,
+        'thread': mock.ANY,
+    }]
+    assert condition.calls[0]['thread'] is not threading.current_thread()
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status'])
+    assert updated.status == requests_lib.RequestStatus.WAITING
+
+
+def test_pause_async_condition_dropped_when_wait_returns_false(pause_harness):
+    """An async condition's False verdict drops the request (no reschedule)."""
+    condition = _AsyncRecordingCondition(verdict=False)
+
+    pause_harness.run(condition)
+
+    assert condition.done.wait(timeout=10)
+    # The requeue (if any, wrongly) would follow right after the verdict on
+    # the same coroutine; give it a beat before asserting it never happened.
+    assert not pause_harness.queued.wait(timeout=0.2)
+    assert pause_harness.queue_items == []
+
+
+def test_pause_async_status_msg_refreshed_while_parked(pause_harness):
+    """A reason pushed through the awaitable updater lands on the request."""
+    condition = _AsyncRecordingCondition(
+        verdict=True, reasons=['Pending (Queue: q, Position: 4)'])
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert pause_harness.queued.wait(timeout=10)
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status_msg'])
+    assert updated.status_msg == (
+        'Pending (Queue: q, Position: 4) (waiting to resume)')
+
+
+class _GatedAsyncCondition(continue_condition_lib.ContinueCondition):
+    """A wait_async() that stays parked until the test releases it."""
+
+    def __init__(self):
+        self.release = threading.Event()
+
+    async def wait_async(self,
+                         *,
+                         is_cancelled,
+                         fallback_wait_seconds,
+                         update_status_msg=None) -> bool:
+        del is_cancelled, fallback_wait_seconds, update_status_msg
+        await asyncio.get_running_loop().run_in_executor(
+            None, self.release.wait)
+        return True
+
+
+def test_pause_async_wait_does_not_hold_the_monitor_thread(pause_harness):
+    """handle_task_result returns while the async wait is still parked.
+
+    This is the point of wait_async: parked requests can outnumber executor
+    workers by orders of magnitude, so the wait must not keep the per-request
+    monitor thread alive for its duration.
+    """
+    condition = _GatedAsyncCondition()
+
+    # Returns immediately; on a thread-blocking wait this would deadlock
+    # until the (never-released) gate.
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert pause_harness.queue_items == []
+    condition.release.set()
+    assert pause_harness.queued.wait(timeout=10)
+    assert pause_harness.queue_items == [request_element]
+
+
+class _FailingAsyncCondition(continue_condition_lib.ContinueCondition):
+    """A wait_async() that dies mid-wait."""
+
+    async def wait_async(self, **kwargs) -> bool:
+        del kwargs
+        raise RuntimeError('probe exploded')
+
+
+def test_pause_async_wait_failure_falls_back_to_fixed_wait(pause_harness):
+    """A failing wait_async degrades to one fixed backoff, then reschedules.
+
+    Same policy as the sync path: a broken probe must not drop the request.
+    """
+    condition = _FailingAsyncCondition()
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=0)
+
+    assert pause_harness.queued.wait(timeout=10)
+    assert pause_harness.queue_items == [request_element]
+
+
+class _NonCoroutineWaitAsyncCondition(continue_condition_lib.ContinueCondition):
+    """A condition whose wait_async attribute is not a coroutine function."""
+
+    def __init__(self):
+        self.sync_calls = 0
+
+    def wait_async(self, **kwargs) -> bool:
+        raise AssertionError('a non-coroutine wait_async must be ignored')
+
+    def wait(self,
+             *,
+             is_cancelled,
+             fallback_wait_seconds,
+             update_status_msg=None) -> bool:
+        del is_cancelled, fallback_wait_seconds, update_status_msg
+        self.sync_calls += 1
+        return True
+
+
+def test_pause_non_coroutine_wait_async_uses_sync_path(pause_harness):
+    """Only a real coroutine function opts into the waiter loop.
+
+    A plain callable named wait_async cannot be awaited; degrading it to the
+    fallback wait would silently discard the condition's wait() policy, so
+    the executor must keep the thread-based path instead.
+    """
+    condition = _NonCoroutineWaitAsyncCondition()
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert condition.sync_calls == 1
+    assert pause_harness.queue_items == [request_element]
+
+
 @pytest.mark.parametrize(('reason', 'suffix', 'expected'), [
     ('Pending (Queue: q)', 'waiting to resume',
      'Pending (Queue: q) (waiting to resume)'),
@@ -1182,7 +1519,7 @@ def test_override_env_skipped_for_daemon_request(stub_override_request_env_deps,
                                                  monkeypatch):
     """Daemon request_ids must NOT have their persisted env_vars overlaid.
 
-    Reproduces SKY-5502: a daemon row in PG carrying stale downward-API
+    Regression: a daemon row in PG carrying stale downward-API
     values from a previous deployment generation must not clobber the
     current pod's os.environ.
     """
@@ -1226,6 +1563,42 @@ def test_override_env_applied_for_client_request(stub_override_request_env_deps,
             body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
         assert os.environ['SKYPILOT_POD_MEMORY_BYTES_LIMIT'] == str(100 * 1024 *
                                                                     1024)
+
+
+@pytest.mark.parametrize('server_value', [None, '8'])
+def test_client_cannot_override_auth_db_timeout(stub_override_request_env_deps,
+                                                monkeypatch, server_value):
+    """A client-supplied SKYPILOT_AUTH_DB_TIMEOUT_SECONDS is dropped.
+
+    The users upsert inside the overlay derives its server-side SET LOCAL
+    timeouts from that variable at call time, so a client (an older one
+    still forwards every SKYPILOT_* variable) must not be able to loosen
+    or break them: the worker keeps the server's own setting, or none.
+    """
+    if server_value is None:
+        monkeypatch.delenv(constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS,
+                           raising=False)
+    else:
+        monkeypatch.setenv(constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS,
+                           server_value)
+    expected_deadline = db_utils.get_auth_db_timeout_seconds()
+    expected_timeouts = global_user_state._user_upsert_timeouts_ms()  # pylint: disable=protected-access
+
+    body = payloads.RequestBody(
+        env_vars={
+            constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS: '1000000',
+            constants.USER_ID_ENV_VAR: 'client-user-id',
+            constants.USER_ENV_VAR: 'client-user',
+        })
+
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        assert os.environ.get(
+            constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS) == server_value
+        assert db_utils.get_auth_db_timeout_seconds() == expected_deadline
+        assert (global_user_state._user_upsert_timeouts_ms()  # pylint: disable=protected-access
+                == expected_timeouts)
+    assert constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS not in body.env_vars
 
 
 def test_daemon_env_mutations_reverted_on_exit(stub_override_request_env_deps,
@@ -1317,6 +1690,61 @@ async def test_wrapper_clears_in_request_execution_after_success(
 
 def _gate_clears_after_success_entrypoint():
     return 'ok'
+
+
+class _Result(list):
+    """A request result that can be weakly referenced."""
+
+
+_result_refs: List['weakref.ReferenceType[_Result]'] = []
+
+
+def _result_entrypoint():
+    result = _Result(['x' * 1024])
+    _result_refs.append(weakref.ref(result))
+    return result
+
+
+@pytest.mark.asyncio
+async def test_wrapper_releases_result_before_release_memory(
+        isolated_database, reset_sigterm_gate, monkeypatch):
+    """The peak RSS sample sees the result; release_memory() can free it."""
+    req = requests_lib.Request(request_id='result-released',
+                               name='test',
+                               entrypoint=_result_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+    result_alive = []
+
+    def _check_release_memory():
+        gc.collect()
+        result_alive.append(_result_refs[-1]() is not None)
+
+    monkeypatch.setattr(executor.common_utils, 'release_memory',
+                        _check_release_memory)
+    result_alive_at_rss_sample = []
+
+    class _Process(executor.psutil.Process):
+
+        def memory_info(self):
+            ref = _result_refs[-1] if _result_refs else None
+            result_alive_at_rss_sample.append(ref is not None and
+                                              ref() is not None)
+            return super().memory_info()
+
+    monkeypatch.setattr(executor.psutil, 'Process', _Process)
+
+    executor._request_execution_wrapper('result-released',
+                                        ignore_return_value=False)
+
+    assert True in result_alive_at_rss_sample
+    assert result_alive == [False]
+    assert requests_lib.get_request('result-released').get_return_value() == [
+        'x' * 1024
+    ]
 
 
 def _install_gated_handler_in_worker():
@@ -1600,27 +2028,171 @@ def test_saturating_request_executor_does_not_block_auth():
         _reset_thread_executors()
 
 
-def test_executor_initializer_sets_budget_before_plugin_install():
-    """The connection budget must be applied before plugins install.
+def test_maybe_observe_request_pending_first_execution_only():
+    """Pending-time metric observes first executions only.
 
-    A plugin that keeps the engine it gets during install() would otherwise
-    hold one built for the wrong budget for the life of the worker, and
-    disposing the cached engine does not invalidate a reference someone
-    already holds.
+    The retry/pause requeue path sets WAITING (and clears pid) before
+    re-enqueueing, so a WAITING request at execution start is a
+    re-execution and must not re-observe its age; a PENDING request is
+    the first start and must observe exactly once.
+    """
+
+    def make_request(status):
+        return requests_lib.Request(
+            request_id='pending-metric-test',
+            name='test-request',
+            status=status,
+            created_at=time.time() - 5,
+            user_id='test-user',
+            entrypoint=dummy_entrypoint,
+            request_body=payloads.RequestBody(),
+            schedule_type=requests_lib.ScheduleType.SHORT)
+
+    with mock.patch.object(executor.metrics_utils,
+                           'observe_request_pending') as observe:
+        executor._maybe_observe_request_pending(  # pylint: disable=protected-access
+            make_request(requests_lib.RequestStatus.PENDING))
+        assert observe.call_count == 1
+        name, schedule_type, pending_seconds = observe.call_args[0]
+        assert name == 'test-request'
+        assert schedule_type == requests_lib.ScheduleType.SHORT.value
+        assert pending_seconds >= 5
+
+        executor._maybe_observe_request_pending(  # pylint: disable=protected-access
+            make_request(requests_lib.RequestStatus.WAITING))
+        assert observe.call_count == 1
+
+
+class TestClientUserIdValidation:
+    """The client-supplied user id is validated before it becomes an owner.
+
+    Regression tests for #9621: a corrupted ~/.sky/user_hash used to be stored
+    verbatim as a cluster's owner, producing an identity that matches no user.
+    """
+
+    def _body(self, user_id: str) -> payloads.RequestBody:
+        body = payloads.RequestBody()
+        body.env_vars[constants.USER_ID_ENV_VAR] = user_id
+        body.env_vars[constants.USER_ENV_VAR] = 'someone'
+        return body
+
+    async def _prepare(self, user_id: str, auth_user=None):
+        # Everything after the identity check needs the requests DB, which is
+        # not what these tests are about.
+        with mock.patch.object(executor.api_requests,
+                               'create_if_not_exists_async',
+                               new=mock.AsyncMock(return_value=True)), \
+             mock.patch.object(executor.workspace_access,
+                               'for_current_request',
+                               return_value=None), \
+             mock.patch.object(pathlib.Path, 'touch'):
+            return await executor.prepare_request_async(
+                request_id='req-9621',
+                request_name='test.identity',
+                request_body=self._body(user_id),
+                func=lambda: None,
+                schedule_type=requests_lib.ScheduleType.SHORT,
+                auth_user=auth_user)
+
+    @pytest.mark.parametrize(
+        'user_id',
+        [
+            'abc%123',  # the shape reported in #9621
+            '',
+            '-leading-hyphen',
+            '../x',  # path traversal characters
+            '/abs',
+            'abcdef12\n',  # trailing newline: a distinct identity
+        ])
+    @pytest.mark.asyncio
+    async def test_malformed_user_id_is_rejected(self, user_id):
+        with pytest.raises(exceptions.InvalidUserIdError):
+            await self._prepare(user_id)
+
+    @pytest.mark.asyncio
+    async def test_valid_user_id_passes_through(self):
+        request = await self._prepare('abcdef12')
+        assert request.user_id == 'abcdef12'
+
+    @pytest.mark.asyncio
+    async def test_service_account_id_still_accepted(self):
+        """Service-account ids use hyphens and must keep working."""
+        request = await self._prepare('sa-abc123-token-xyz')
+        assert request.user_id == 'sa-abc123-token-xyz'
+
+    @pytest.mark.asyncio
+    async def test_authenticated_identity_bypasses_client_value(self):
+        """With auth on, the server's identity wins and the bad client value
+        is overwritten rather than rejected."""
+        auth_user = models.User(id='authuser1', name='auth-user')
+        request = await self._prepare('bad%id', auth_user=auth_user)
+        assert request.user_id == 'authuser1'
+
+
+@pytest.mark.parametrize('missing,claimed,seeded', [
+    (True, True, True),
+    (True, False, False),
+    (False, True, False),
+])
+def test_seed_role_if_missing(missing, claimed, seeded):
+    """A role-less user is seeded only when this worker claims the attempt."""
+    service = executor.permission.permission_service
+    with mock.patch.object(service, 'role_seed_missing',
+                           return_value=missing), \
+            mock.patch.object(service, 'claim_role_seed_attempt',
+                              return_value=claimed), \
+            mock.patch.object(executor.permission,
+                              'seed_new_user_role') as seed_new_user_role:
+        executor._seed_role_if_missing('user1')
+    if seeded:
+        seed_new_user_role.assert_called_once_with('user1')
+    else:
+        seed_new_user_role.assert_not_called()
+
+
+def test_seed_role_if_missing_swallows_seed_failure():
+    """A failed seed (e.g. a policy lock timeout) does not raise."""
+    service = executor.permission.permission_service
+    with mock.patch.object(service, 'role_seed_missing', return_value=True), \
+            mock.patch.object(service, 'claim_role_seed_attempt',
+                              return_value=True), \
+            mock.patch.object(executor.permission, 'seed_new_user_role',
+                              side_effect=RuntimeError('lock timeout')):
+        executor._seed_role_if_missing('user1')
+
+
+@pytest.mark.parametrize('seed_error', [None, RuntimeError('lock timeout')])
+def test_override_env_seeds_role_before_workspace_check(
+        stub_override_request_env_deps, monkeypatch, seed_error):
+    """A request's role-less user is seeded before the workspace check.
+
+    The user is created by the request itself when there is no auth (e.g. on
+    a jobs controller's API server); without a role every workspace except
+    `default` denies them. A failing seed must not fail the request.
     """
     calls = []
-    with mock.patch.object(executor.db_utils,
-                           'set_max_connections',
-                           side_effect=lambda n: calls.append(
-                               ('set_max_connections', n))), \
-         mock.patch.object(executor.plugins,
-                           'load_plugins',
-                           side_effect=lambda _: calls.append(
-                               ('load_plugins', None))), \
-         mock.patch.object(executor.metrics_lib,
-                           'register_multiproc_cleanup_atexit'), \
-         mock.patch.object(executor.setproctitle, 'setproctitle'), \
-         mock.patch.object(executor.threading, 'Thread'):
-        executor.executor_initializer('short', None, 1)
+    service = executor.permission.permission_service
+    monkeypatch.setattr(service, 'role_seed_missing', lambda user_id: True)
+    monkeypatch.setattr(service, 'claim_role_seed_attempt',
+                        lambda user_id: True)
 
-    assert calls == [('set_max_connections', 1), ('load_plugins', None)]
+    def fake_seed(user_id):
+        calls.append(('seed', user_id))
+        if seed_error is not None:
+            raise seed_error
+
+    monkeypatch.setattr(executor.permission, 'seed_new_user_role', fake_seed)
+    monkeypatch.setattr(
+        'sky.workspaces.core.reject_request_for_unauthorized_workspace',
+        lambda *args, **kwargs: calls.append(('workspace_check',)))
+
+    body = payloads.RequestBody(
+        env_vars={
+            constants.USER_ID_ENV_VAR: 'client-user-id',
+            constants.USER_ENV_VAR: 'client-user',
+        })
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        pass
+
+    assert calls == [('seed', 'client-user-id'), ('workspace_check',)]

@@ -28,7 +28,9 @@ jest.mock('@/lib/cache-preloader', () => ({
 }));
 jest.mock('@/plugins/PluginSlot', () => ({
   __esModule: true,
-  PluginSlot: () => null,
+  // Honour `fallback` so the built-in rendering a slot wraps (e.g. the
+  // Infra cell) stays under test when no plugin is registered.
+  PluginSlot: ({ fallback = null }) => fallback,
 }));
 jest.mock('@/plugins/PluginProvider', () => ({
   __esModule: true,
@@ -37,6 +39,12 @@ jest.mock('@/plugins/PluginProvider', () => ({
   // Empty on purpose: the table's own columns are not what these assert on, and
   // rendering them here would require emulating the plugin column merge.
   useMergedTableColumns: () => [],
+  // Stable identity, like the real (memoized) hook: a fresh array per render
+  // would churn the fetch effect's dependencies into a loop.
+  usePluginTableFilters: (() => {
+    const empty = [];
+    return () => empty;
+  })(),
   usePluginRoute: () => null,
   getDataEnhancements: () => [],
 }));

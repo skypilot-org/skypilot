@@ -3,7 +3,18 @@ resources:
   # Nvidia image from
   # https://aws.amazon.com/marketplace/pp/prodview-rf7na2b2ttvdg
   image_id: ami-062ddd90fb6f8267a
-  accelerators: T4:1
+  # Any one of these will do -- the GPU is incidental here, the point is to
+  # boot the custom image and exercise the file mounts. A single GPU family can
+  # be out of capacity in every zone of a region for hours, and with only one
+  # candidate `--retry-until-up` has nothing to fail over to, so it just spins
+  # until the test times out. g4dn (T4) and g5 (A10G) are each offered in all
+  # three us-east-2 zones, which gives the optimizer six instance/zone
+  # candidates instead of three.
+  #
+  # Both are within reach of this AMI's driver: it ships the HPC SDK 22.03
+  # (510-series), which covers Turing and Ampere. Ada parts (L4, L40S) need
+  # >= 525 and are deliberately left out even though us-east-2 offers them.
+  accelerators: {'T4:1', 'A10G:1'}
 
 # Test file_mounts - both rsync and mounting based.
 file_mounts:
@@ -17,9 +28,9 @@ setup: |
 
 run: |
   set -ex
-  
+
   ls -ltr /mount_public_s3/corpora
-  
+
   for i in {1..100}; do
     echo "Hello $i"
     sleep 0.25
