@@ -291,7 +291,9 @@ export function Volumes() {
               </div>
             )}
             {!loading && lastFetchedTime && (
-              <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+              <div className="max-lg:hidden lg:flex lg:items-center">
+                <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+              </div>
             )}
             <button
               onClick={handleRefresh}
