@@ -7,9 +7,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from sky import exceptions
+from sky.backends import cloud_vm_ray_backend
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as jobs_utils
+from sky.skylet import job_lib
 
 
 class TestClusterHandleNotRequired:
@@ -1653,6 +1655,194 @@ class TestStreamLogsByIdExternalStoreFallback:
         # Should not raise.
         msg, _ = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
         assert 'external log store' in msg
+
+
+class TestStreamLogsByIdMissedRunning:
+    """A task that leaves RUNNING between two status checks keeps its logs.
+
+    stream_logs_by_id tails a task's logs from the cluster only when a status
+    check sees the task RUNNING. The checks are JOB_STATUS_CHECK_GAP_SECONDS
+    apart, so a short task can go from PENDING to SUCCEEDED between two of
+    them; its logs then come from the copy the controller downloads when the
+    task ends.
+    """
+
+    _LOG = ('Waiting for task resources on 1 node.\n'
+            'hello from the task\n')
+
+    def _patch_job(
+            self,
+            monkeypatch,
+            tmp_path,
+            statuses,
+            task_infos,
+            schedule_state=(managed_job_state.ManagedJobScheduleState.ALIVE),
+            handle=None):
+        """Stubs a single-task job whose status checks return `statuses`.
+
+        Each get_status / get_latest_task_id_status call returns the next
+        status, and the last one repeats. Each
+        get_all_task_ids_names_statuses_logs call returns the next entry of
+        `task_infos`, and the last one repeats.
+        """
+        status_iter = iter(statuses)
+        current_status = [statuses[0]]
+
+        def _next_status(*_):
+            current_status[0] = next(status_iter, current_status[0])
+            return current_status[0]
+
+        task_info_iter = iter(task_infos)
+        current_task_info = [task_infos[0]]
+
+        def _next_task_info(_):
+            current_task_info[0] = next(task_info_iter, current_task_info[0])
+            return current_task_info[0]
+
+        mock_state = MagicMock()
+        mock_state.ManagedJobStatus = managed_job_state.ManagedJobStatus
+        mock_state.ManagedJobScheduleState = (
+            managed_job_state.ManagedJobScheduleState)
+        mock_state.get_num_tasks.return_value = 1
+        mock_state.get_status.side_effect = _next_status
+        mock_state.get_latest_task_id_status.side_effect = (lambda _:
+                                                            (0, _next_status()))
+        mock_state.is_batch_job.return_value = False
+        mock_state.get_pool_from_job_id.return_value = None
+        mock_state.get_task_name.return_value = 'mytask'
+        mock_state.get_all_task_ids_names_statuses_logs.side_effect = (
+            _next_task_info)
+        mock_state.get_job_schedule_state.return_value = schedule_state
+        mock_state.get_failure_reason.return_value = 'boom'
+        monkeypatch.setattr(jobs_utils, 'managed_job_state', mock_state)
+
+        backend = MagicMock()
+        monkeypatch.setattr(jobs_utils.backends, 'CloudVmRayBackend',
+                            lambda: backend)
+        monkeypatch.setattr(jobs_utils.global_user_state,
+                            'get_handle_from_cluster_name', lambda _: handle)
+        monkeypatch.setattr(jobs_utils.logs, 'get_log_reader', lambda: None)
+        monkeypatch.setattr(jobs_utils, 'controller_log_file_for_job',
+                            lambda _: str(tmp_path / 'controller.log'))
+        monkeypatch.setattr(jobs_utils, '_parked_launch_reason',
+                            lambda *_: None)
+        monkeypatch.setattr(jobs_utils.time, 'sleep', lambda _: None)
+        return mock_state, backend
+
+    def _task_info(self, log_file):
+        return [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                 log_file, None)]
+
+    def test_prints_downloaded_logs_when_running_was_never_seen(
+            self, monkeypatch, tmp_path, capsys):
+        log_file = tmp_path / 'run.log'
+        log_file.write_text(self._LOG, encoding='utf-8')
+        _, backend = self._patch_job(
+            monkeypatch,
+            tmp_path,
+            statuses=[
+                managed_job_state.ManagedJobStatus.PENDING,
+                managed_job_state.ManagedJobStatus.PENDING,
+                managed_job_state.ManagedJobStatus.SUCCEEDED,
+            ],
+            task_infos=[self._task_info(str(log_file))])
+
+        msg, code = jobs_utils.stream_logs_by_id(5, follow=True)
+
+        backend.tail_logs.assert_not_called()
+        assert 'hello from the task' in capsys.readouterr().out
+        assert msg == ''
+        assert code == exceptions.JobExitCode.SUCCEEDED
+
+    def test_waits_for_the_controller_to_record_the_log_file(
+            self, monkeypatch, tmp_path, capsys):
+        # The controller sets SUCCEEDED before it downloads the logs, so the
+        # log file shows up a few checks after the terminal status.
+        log_file = tmp_path / 'run.log'
+        log_file.write_text(self._LOG, encoding='utf-8')
+        mock_state, _ = self._patch_job(
+            monkeypatch,
+            tmp_path,
+            statuses=[
+                managed_job_state.ManagedJobStatus.PENDING,
+                managed_job_state.ManagedJobStatus.PENDING,
+                managed_job_state.ManagedJobStatus.SUCCEEDED,
+            ],
+            task_infos=[
+                self._task_info(None),
+                self._task_info(None),
+                self._task_info(str(log_file)),
+            ])
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=True)
+
+        assert 'hello from the task' in capsys.readouterr().out
+        assert code == exceptions.JobExitCode.SUCCEEDED
+        mock_state.get_job_schedule_state.assert_called()
+
+    def test_stops_waiting_once_the_controller_is_done(self, monkeypatch,
+                                                       tmp_path):
+        # No log file is ever recorded (download failed): the wait ends when
+        # the controller is done with the job, not after the full timeout.
+        mock_state, _ = self._patch_job(
+            monkeypatch,
+            tmp_path,
+            statuses=[
+                managed_job_state.ManagedJobStatus.PENDING,
+                managed_job_state.ManagedJobStatus.PENDING,
+                managed_job_state.ManagedJobStatus.SUCCEEDED,
+            ],
+            task_infos=[self._task_info(None)],
+            schedule_state=managed_job_state.ManagedJobScheduleState.DONE)
+
+        msg, code = jobs_utils.stream_logs_by_id(5, follow=True)
+
+        assert mock_state.get_job_schedule_state.call_count == 1
+        assert 'already in terminal state SUCCEEDED' in msg
+        assert code == exceptions.JobExitCode.SUCCEEDED
+
+    def test_job_that_never_ran_does_not_wait_for_logs(self, monkeypatch,
+                                                       tmp_path):
+        # FAILED_NO_RESOURCE never ran on a cluster, so there are no logs to
+        # wait for.
+        mock_state, _ = self._patch_job(
+            monkeypatch,
+            tmp_path,
+            statuses=[
+                managed_job_state.ManagedJobStatus.PENDING,
+                managed_job_state.ManagedJobStatus.STARTING,
+                managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
+            ],
+            task_infos=[self._task_info(None)])
+
+        msg, code = jobs_utils.stream_logs_by_id(5, follow=True)
+
+        mock_state.get_all_task_ids_names_statuses_logs.assert_not_called()
+        mock_state.get_job_schedule_state.assert_not_called()
+        assert msg == ''
+        assert code == exceptions.JobExitCode.from_managed_job_status(
+            managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE)
+
+    def test_tailed_task_is_not_printed_again(self, monkeypatch, tmp_path):
+        handle = MagicMock(spec=cloud_vm_ray_backend.CloudVmRayResourceHandle)
+        mock_state, backend = self._patch_job(
+            monkeypatch,
+            tmp_path,
+            statuses=[
+                managed_job_state.ManagedJobStatus.PENDING,
+                managed_job_state.ManagedJobStatus.RUNNING,
+                managed_job_state.ManagedJobStatus.SUCCEEDED,
+            ],
+            task_infos=[self._task_info(None)],
+            handle=handle)
+        backend.tail_logs.return_value = exceptions.JobExitCode.SUCCEEDED
+        backend.get_job_status.return_value = {1: job_lib.JobStatus.SUCCEEDED}
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=True)
+
+        backend.tail_logs.assert_called_once()
+        mock_state.get_all_task_ids_names_statuses_logs.assert_not_called()
+        assert code == exceptions.JobExitCode.SUCCEEDED
 
 
 class TestTryToGetJobEndTime:
