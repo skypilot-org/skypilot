@@ -1285,14 +1285,9 @@ export function ManagedJobsTable({
     ]).then(([usersData, workspacesData]) => {
       setValueList((prev) => ({
         ...prev,
-        // Union with the jobs' own owners: the user list omits service
-        // accounts, and for a non-admin, owners outside their workspaces.
         user: usersData
           ? [
-              ...new Set([
-                ...users,
-                ...usersData.map((u) => u.username).filter(Boolean),
-              ]),
+              ...new Set(usersData.map((u) => u.username).filter(Boolean)),
             ].sort()
           : prev.user,
         workspace: workspacesData

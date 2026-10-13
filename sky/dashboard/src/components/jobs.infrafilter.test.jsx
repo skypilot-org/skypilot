@@ -106,8 +106,6 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { getCurrentUserInfo } from '@/data/connectors/client';
-import { getUsers } from '@/data/connectors/users';
-import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import {
   ManagedJobs,
@@ -518,25 +516,5 @@ describe('the Infra suggestions the table publishes', () => {
 
     await waitFor(() => expect(published()).toBeTruthy());
     expect(published().infra).toEqual(['slurm/prod-gpu']);
-  });
-});
-
-// GET /users can omit the owners of visible jobs, e.g. service accounts.
-describe('the User suggestions the table publishes', () => {
-  it('keep the owners of visible jobs that the user list omits', async () => {
-    respondWith(PAGE);
-    dashboardCache.get.mockImplementation(async (fn) =>
-      fn === getUsers ? [{ username: 'alice' }] : {}
-    );
-    const setValueList = jest.fn();
-    renderTable(setValueList);
-    const publishedUsers = () =>
-      setValueList.mock.calls
-        .filter(([v]) => typeof v === 'function')
-        .map(([update]) => update({ user: [] }).user);
-
-    await waitFor(() =>
-      expect(publishedUsers()).toContainEqual(['alice', 'lb'])
-    );
   });
 });
