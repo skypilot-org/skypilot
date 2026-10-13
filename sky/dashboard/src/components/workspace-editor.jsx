@@ -748,14 +748,26 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     setLoading(true);
     try {
       // Re-checking infra is an admin action; others just reload the page's
-      // data, which a failed check must not hold up either.
-      if (isAdmin === true) {
+      // data, which a failed check must not hold up either. The role may
+      // still be loading, so ask for it rather than skip an admin's check.
+      let admin = isAdmin;
+      if (admin === null) {
+        admin = await getUserRole().then(
+          (data) => data?.role === 'admin',
+          () => false
+        );
+      }
+      if (admin) {
         try {
           await apiClient.fetch('/check', {}, 'POST');
         } catch (error) {
           console.error('Error during sky check refresh:', error);
         }
       }
+      // Refresh means current numbers, not the cached ones.
+      dashboardCache.invalidateFunction(getClusters);
+      dashboardCache.invalidateFunction(getManagedJobs);
+      dashboardCache.invalidateFunction(getEnabledClouds);
       await Promise.all([fetchWorkspaceConfig(false), fetchWorkspaceStats()]);
     } catch (error) {
       console.error('Error refreshing workspace:', error);

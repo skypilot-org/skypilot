@@ -67,12 +67,13 @@ jest.mock('@/data/connectors/jobs', () => ({
   __esModule: true,
   getManagedJobs: jest.fn(async () => ({ jobs: [] })),
 }));
+const mockInvalidateFunction = jest.fn();
 jest.mock('@/lib/cache', () => ({
   __esModule: true,
   dashboardCache: {
     get: (fn, args = []) => fn(...args),
     invalidate: jest.fn(),
-    invalidateFunction: jest.fn(),
+    invalidateFunction: (...args) => mockInvalidateFunction(...args),
   },
 }));
 
@@ -443,6 +444,8 @@ describe('WorkspaceEditor for a non-admin', () => {
     });
     expect(mockApiFetch).not.toHaveBeenCalled();
     expect(mockGetWorkspaces.mock.calls.length).toBeGreaterThan(calls);
+    // Stats are refetched, not served from the cache.
+    expect(mockInvalidateFunction).toHaveBeenCalledTimes(3);
   });
 
   test('treats a failed role lookup as non-admin', async () => {
@@ -491,5 +494,20 @@ describe('WorkspaceEditor Refresh for an admin', () => {
     });
     expect(mockGetWorkspaces.mock.calls.length).toBeGreaterThan(calls);
     console.error.mockRestore();
+  });
+
+  test('asks for the role when it is still loading', async () => {
+    mockApiFetch.mockImplementation(async () => ({ ok: true }));
+    // The page's own role lookup never answers; Refresh asks again.
+    mockGetUserRole
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockImplementationOnce(async () => ({ role: 'admin', name: 'root' }));
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Allowed Users (1)');
+    expect(screen.queryByText('Apply')).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    expect(mockApiFetch).toHaveBeenCalledWith('/check', {}, 'POST');
   });
 });
