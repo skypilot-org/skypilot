@@ -2371,6 +2371,21 @@ async def launch(launch_body: payloads.LaunchBody,
                  request: fastapi.Request) -> None:
     """Launches a cluster or task."""
     request_id = request.state.request_id
+    # Only the jobs and serve controllers set these, and they always call a
+    # co-located server over loopback. From anyone else they would let the
+    # caller pick the admin policy request name and the provisioning path.
+    if ((launch_body.is_launched_by_jobs_controller or
+         launch_body.is_launched_by_sky_serve_controller or
+         launch_body.extra_launch_context) and
+            not loopback.is_loopback_request(request)):
+        peer = request.client.host if request.client else None
+        logger.warning(f'Rejected launch request {request_id} for cluster '
+                       f'{launch_body.cluster_name!r} from {peer}: '
+                       'controller-only fields set by a non-loopback caller.')
+        raise fastapi.HTTPException(
+            status_code=403,
+            detail='Controller-only launch fields are not accepted from '
+            'remote clients.')
     logger.info(f'Launching request: {request_id}')
     await executor.schedule_request_async(
         request_id,
