@@ -418,6 +418,17 @@ class TestEmergencyRecoveryState:
         assert await state.get_emergency_recovery_budget_async(1) == (1, now)
 
     @pytest.mark.asyncio
+    async def test_budget_raises_when_job_record_is_gone(
+            self, _mock_managed_jobs_db_conn):
+        """A missing job_info row is reported, not read as a fresh budget:
+        the bookkeeping must stop rather than count attempt 1 forever."""
+        with pytest.raises(exceptions.ManagedJobRecordMissingError):
+            await state.get_emergency_recovery_budget_async(404)
+        with pytest.raises(exceptions.ManagedJobRecordMissingError):
+            await state.record_emergency_recovery_attempt_async(
+                404, 1, time.time())
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         'schedule_state,expected',
         [
@@ -770,16 +781,56 @@ class TestEmergencyRetryLoop:
     @pytest.mark.asyncio
     async def test_bookkeeping_exhausted_falls_back_to_failing(
             self, monkeypatch):
+        """An error that is not a database outage gets a bounded number of
+        rounds, then the job fails."""
         h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom')])
-        h.get_budget.side_effect = ConnectionError('db down')
+        h.get_budget.side_effect = RuntimeError('bookkeeping bug')
 
         await h.jc.run()
 
+        assert (h.get_budget.await_count ==
+                controller._EMERGENCY_BOOKKEEPING_ROUNDS)
         h.jc._update_failed_task_state.assert_awaited_once()
         assert h.jc._update_failed_task_state.await_args.args[1] == (
             state.ManagedJobStatus.FAILED_CONTROLLER)
         failure_reason = h.jc._update_failed_task_state.await_args.args[2]
         assert 'bookkeeping failed' in failure_reason
+
+    @pytest.mark.asyncio
+    async def test_bookkeeping_retries_database_outage_until_it_ends(
+            self, monkeypatch):
+        """A transient database error is retried past the round limit: the
+        bookkeeping cannot be recorded until the database is back, and
+        giving up would only turn the outage into a failed job."""
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        outage = sqlalchemy.exc.OperationalError('SELECT 1', {},
+                                                 OSError('connection refused'))
+        rounds = controller._EMERGENCY_BOOKKEEPING_ROUNDS * 3
+        h.get_budget.side_effect = [outage] * rounds + [(0, None)]
+
+        await h.jc.run()
+
+        h.jc._update_failed_task_state.assert_not_called()
+        assert h.jc._run_one_task.call_count == 2
+        assert h.get_budget.await_count == rounds + 1
+
+    @pytest.mark.asyncio
+    async def test_bookkeeping_stops_when_job_record_is_gone(self, monkeypatch):
+        """A job whose record is gone is failed without any retry: no round
+        can record anything for it."""
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom')])
+        h.get_budget.side_effect = exceptions.ManagedJobRecordMissingError(
+            'no job_info record')
+
+        await h.jc.run()
+
+        assert h.get_budget.await_count == 1
+        assert h.sleeps == []
+        h.jc._update_failed_task_state.assert_awaited_once()
+        assert h.jc._update_failed_task_state.await_args.args[1] == (
+            state.ManagedJobStatus.FAILED_CONTROLLER)
+        failure_reason = h.jc._update_failed_task_state.await_args.args[2]
+        assert 'job record is gone' in failure_reason
 
     @pytest.mark.asyncio
     async def test_backoff_sequence_and_final_escape(self, monkeypatch):
