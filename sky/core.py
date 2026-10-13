@@ -208,7 +208,11 @@ def status(
         include_handle=include_handle)
 
     status_responses = []
+    workspaces = skypilot_config.get_nested(('workspaces',), {})
     for cluster in clusters:
+        if cluster.get('workspace') is not None:
+            cluster['workspace_name'] = skypilot_config.get_workspace_name(
+                cluster['workspace'], workspaces)
         try:
             status_responses.append(
                 responses.StatusResponse.model_validate(cluster))

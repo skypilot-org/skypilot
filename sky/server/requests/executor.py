@@ -825,7 +825,9 @@ def override_request_env_and_config(
                             _RESOURCE_CREATING_REQUEST_NAMES_FOR_RESOLUTION_LOG
                             and resolution.source
                             not in _SILENT_WORKSPACE_RESOLUTION_SOURCES):
-                        logger.info(f'Using workspace {resolution.workspace!r} '
+                        workspace_name = skypilot_config.get_workspace_name(
+                            resolution.workspace)
+                        logger.info(f'Using workspace {workspace_name!r} '
                                     f'(source: {resolution.source}).')
                 with workspace_ctx:
                     try:

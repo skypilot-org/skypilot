@@ -368,6 +368,15 @@ def get_user_workspace(
     # Workspaces the user can only view (read-only visibility for non-members):
     # visible but not writable. Lets the CLI/dashboard list them separately.
     response['read_only'] = sorted(readable - writable)
+    # Everything above is an id. Names only for workspaces the user can see,
+    # so a preferred one they lost access to doesn't reveal its new name.
+    named = set(readable)
+    if response['workspace'] is not None:
+        named.add(response['workspace'])
+    response['names'] = {
+        workspace_id: skypilot_config.get_workspace_name(workspace_id)
+        for workspace_id in sorted(named)
+    }
     return response
 
 

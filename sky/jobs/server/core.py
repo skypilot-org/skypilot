@@ -804,8 +804,11 @@ def _check_job_group_attachment(
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Cannot attach to job {parent_job_id}: it is in '
-                    f'workspace {parent.workspace!r}, not the requested '
-                    f'workspace {active_workspace!r}.')
+                    'workspace '
+                    f'{skypilot_config.get_workspace_name(parent.workspace)!r}'
+                    ', not the requested workspace '
+                    f'{skypilot_config.get_workspace_name(active_workspace)!r}'
+                    '.')
         # The executor authorized the caller for the workspace the request
         # resolved to, not for this one. Switching workspaces is a launch
         # there, so it needs the same write access a `--workspace` launch
@@ -848,7 +851,10 @@ def _check_job_dependencies(depends_on: Optional[List[int]]) -> List[int]:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Cannot depend on job {dependency}: it is in workspace '
-                    f'{row.workspace!r}, not {active_workspace!r}.')
+                    f'{skypilot_config.get_workspace_name(row.workspace)!r}, '
+                    'not '
+                    f'{skypilot_config.get_workspace_name(active_workspace)!r}'
+                    '.')
         if status.is_terminal():
             succeeded, outcome = managed_job_state.get_job_outcome(dependency)
             if not succeeded:
@@ -1615,6 +1621,11 @@ def queue_v2_api(
         # and clients key records on them.
         keep = set(fields) | {'job_id', 'task_id', 'status'}
         jobs = [{k: v for k, v in job.items() if k in keep} for job in jobs]
+    workspaces = skypilot_config.get_nested(('workspaces',), {})
+    for job in jobs:
+        if job.get('workspace') is not None:
+            job['workspace_name'] = skypilot_config.get_workspace_name(
+                job['workspace'], workspaces)
     return ([responses.ManagedJobRecord(**job) for job in jobs], total,
             status_counts, total_no_filter, infra_options)
 

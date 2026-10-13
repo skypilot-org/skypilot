@@ -317,8 +317,9 @@ def resolve_auto_mounts(region: Optional[str]) -> AutoMountResolution:
                     volume_name,
                     f'Auto-mount volume {volume_name!r} has scope {scope!r} '
                     f'and does not apply to this launch (user '
-                    f'{current_user_hash!r}, workspace {active_workspace!r}). '
-                    f'Skipping.',
+                    f'{current_user_hash!r}, workspace '
+                    f'{skypilot_config.get_workspace_name(active_workspace)!r}'
+                    '). Skipping.',
                     is_warning=False))
             continue
         volume_config = record['handle']

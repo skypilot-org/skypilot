@@ -174,8 +174,10 @@ def check_capabilities(
     ])
     initial_hint = 'Checking credentials to enable infra for SkyPilot.'
     if len(available_workspaces) > 1:
+        workspace_names = ', '.join(
+            skypilot_config.get_workspace_name(w) for w in available_workspaces)
         initial_hint = (f'Checking credentials to enable infra for SkyPilot '
-                        f'(Workspaces: {", ".join(available_workspaces)}).')
+                        f'(Workspaces: {workspace_names}).')
     echo(initial_hint)
     if capabilities is None:
         capabilities = sky_cloud.ALL_CAPABILITIES
@@ -313,7 +315,9 @@ def check_capabilities(
 
         cloud2ctx2text: Dict[str, Dict[str, str]] = {}
 
-        workspace_str = f' for workspace: {current_workspace_name!r}'
+        workspace_str = (
+            ' for workspace: '
+            f'{skypilot_config.get_workspace_name(current_workspace_name)!r}')
         if hide_workspace_str:
             workspace_str = ''
         with rich_utils.safe_status(
@@ -425,8 +429,9 @@ def check_capabilities(
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Workspace {workspace!r} not found in SkyPilot '
-                    'configuration. '
-                    f'Available workspaces: {", ".join(available_workspaces)}')
+                    'configuration. Available workspaces: ' + ', '.join(
+                        skypilot_config.get_workspace_name(w)
+                        for w in available_workspaces))
 
         # Always show details for single specified check (if verbose)
         hide_per_cloud_details_flag = False
@@ -443,7 +448,8 @@ def check_capabilities(
 
         for ws_name in workspaces_to_check:
             if not hide_workspace_str:
-                echo(f'\nChecking enabled infra for workspace: {ws_name!r}')
+                echo('\nChecking enabled infra for workspace: '
+                     f'{skypilot_config.get_workspace_name(ws_name)!r}')
             with skypilot_config.local_active_workspace_ctx(ws_name):
                 enabled_ws_clouds = _execute_check_logic_for_workspace(
                     ws_name, hide_per_cloud_details_flag, hide_workspace_str)
@@ -841,14 +847,17 @@ def _summary_message(
                                               key=lambda item: item[0])
         ])
 
-    workspace_str = f' for workspace: {current_workspace_name!r}'
+    workspace_str = (
+        ' for workspace: '
+        f'{skypilot_config.get_workspace_name(current_workspace_name)!r}')
     if hide_workspace_str:
         workspace_str = ''
 
     disallowed_clouds_hint = ''
     if disallowed_cloud_names:
         disable_for_workspace_hint = (
-            f' or disabled for this workspace {current_workspace_name!r}')
+            ' or disabled for this workspace '
+            f'{skypilot_config.get_workspace_name(current_workspace_name)!r}')
         if hide_workspace_str:
             disable_for_workspace_hint = ''
         disallowed_clouds_hint = (
