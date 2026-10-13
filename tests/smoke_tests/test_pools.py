@@ -2973,13 +2973,18 @@ def test_pool_scale_down_with_job_count_priority(generic_cloud: str):
 def test_pool_local_file_mounts_two_hop(generic_cloud: str):
     """A pool with local file_mounts/workdir and no cloud bucket reaches READY.
 
-    With no cloud bucket the server stages worker sources via the two-hop relay
-    under ~/.sky/tmp/controller. On a deployed server (file-mount containment
-    on) in consolidation mode, the replica manager launches workers on the
-    local endpoint, so without special handling the containment check would
-    reject those staged sources and the workers would never become READY.
-    Regression test for the serve two-hop + consolidation + containment path;
-    only discriminates on a deployed (remote) server, where containment is on.
+    Without consolidation mode, the server stages worker sources via the
+    two-hop relay under ~/.sky/tmp/controller. In consolidation mode the
+    workers launch from the client's upload blob instead: the staged two-hop
+    sources would be outside the caller's roots, so the file-mount containment
+    check on a deployed server would reject them and the workers would never
+    become READY. Only discriminates on a deployed (remote) server, where
+    containment is on.
+
+    On an API server with several replicas, the controller and its launch
+    requests may run on a replica that never extracted the blob. This test
+    cannot force that placement; see tests/unit_tests/
+    test_serve_blob_file_mounts.py for that case.
     """
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'

@@ -79,6 +79,9 @@ run: |
     --task-yaml {{remote_task_yaml_path}} \
     --entrypoint {{entrypoint}} \
     --user-hash {{user_hash}} \
+    {%- if file_mounts_blob_id is not none %}
+    --file-mounts-blob-id {{file_mounts_blob_id}} \
+    {%- endif %}
     {%- if consolidation_mode_job_id is not none %}
     --job-id {{consolidation_mode_job_id}} \
     {%- else %}

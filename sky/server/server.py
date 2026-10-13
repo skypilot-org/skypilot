@@ -63,6 +63,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.slurm import utils as slurm_utils
 from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
+from sky.serve import serve_state
 from sky.serve.server import server as serve_rest
 from sky.server import clean_env as clean_env_module
 from sky.server import common
@@ -839,12 +840,14 @@ async def cleanup_unreferenced_file_mounts():
                 logger.debug('Another server is running blob GC, skipping')
                 return
 
-            # A blob is kept alive by either an active API request (e.g. the
-            # submit request that is still running) or a non-terminal managed
-            # job that was started from it.
+            # A blob is kept alive by an active API request (e.g. the submit
+            # request that is still running), a non-terminal managed job that
+            # was started from it, or a service/pool that launches replicas
+            # from it.
             active_blob_ids = (
                 requests_lib.get_active_file_mounts_blob_ids() |
-                managed_job_state.get_active_file_mounts_blob_ids())
+                managed_job_state.get_active_file_mounts_blob_ids() |
+                serve_state.get_active_file_mounts_blob_ids())
             grace_cutoff = time.time() - bs.GC_GRACE_SECONDS
 
             for user_id in storage.list_users():

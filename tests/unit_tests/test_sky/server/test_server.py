@@ -706,6 +706,31 @@ async def test_cleanup_blobs_unreferenced_recent_blob_not_deleted(tmp_path):
         'Unreferenced but recent blob should not be deleted')
 
 
+@pytest.mark.asyncio
+async def test_cleanup_blobs_blob_of_live_service_not_deleted(tmp_path):
+    """A blob that a service or pool still launches replicas from must NOT be
+    deleted once the request that created the service has finished."""
+    blobs_dir = _make_blobs_dir(tmp_path, user='userA')
+    old_mtime = time.time() - 7200  # 2 hours ago
+    blob_path = _create_blob(blobs_dir, _BLOB_HEX, old_mtime)
+
+    with mock.patch.object(server_common, 'API_SERVER_CLIENT_DIR',
+                           pathlib.Path(tmp_path)), \
+         mock.patch('sky.server.requests.requests'
+                    '.get_active_file_mounts_blob_ids',
+                    return_value=set()), \
+         mock.patch('sky.jobs.state.get_active_file_mounts_blob_ids',
+                    return_value=set()), \
+         mock.patch('sky.serve.serve_state.get_active_file_mounts_blob_ids',
+                    return_value={_BLOB_HEX}), \
+         mock.patch('asyncio.sleep',
+                    side_effect=_mock_sleep_cancel()):
+        with pytest.raises(asyncio.CancelledError):
+            await server.cleanup_unreferenced_file_mounts()
+
+    assert blob_path.exists(), 'Blob of a live service should not be deleted'
+
+
 # --- Tests for _resolve_dynamic_route ---
 
 # A minimal routes manifest matching the real Next.js dashboard build output.
