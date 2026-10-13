@@ -52,9 +52,7 @@ _MAX_RETRY = 3
 _TITLE = '\n\n' + '=' * 20 + ' {} ' + '=' * 20 + '\n'
 
 # Hooks that report where a provider actually placed a cluster's instances,
-# for providers that submit work to one control plane and then execute it on
-# another -- the submission target names the control plane, so on its own it
-# does not say where the instances ended up.
+# when that can differ from the region the launch was submitted to.
 #
 # Each hook is called with ``(provider_name, region_name,
 # cluster_name_on_cloud)`` and returns the name of the execution target, or
@@ -193,6 +191,44 @@ def _bulk_provision(
     return provision_record
 
 
+def _active_workspace() -> Optional[str]:
+    """The workspace this launch belongs to, for slicing launch latency.
+
+    Best-effort: a label missing from a metric is better than a launch failing
+    because the workspace could not be resolved.
+    """
+    try:
+        return skypilot_config.get_active_workspace()
+    except Exception:  # pylint: disable=broad-except
+        logger.debug('Could not resolve the active workspace for the launch '
+                     'attempt record.')
+        return None
+
+
+def _existing_cluster_hash(cluster_name: str) -> Optional[str]:
+    """Which incarnation of this cluster the attempt belongs to, if any.
+
+    Best-effort for the same reason as `_active_workspace`, and it has to be
+    its own function to be so: this is evaluated as an *argument* to
+    `open_launch_attempt`, and an argument is evaluated in the caller's frame
+    before the call -- so the `_best_effort` guard on that function, which
+    wraps its body, never sees it.
+
+    Unguarded it is worse than losing a label. It reads the clusters table,
+    and the raise would land in the handler below that runs `teardown_cluster`
+    with `terminate = not prev_cluster_ever_up`: relaunching onto a cluster
+    that is already up, a transient database error here would *stop that
+    running cluster* before failing the launch -- to fill one column on a
+    measurement row.
+    """
+    try:
+        return global_user_state.get_cluster_hash(cluster_name)
+    except Exception:  # pylint: disable=broad-except
+        logger.debug('Could not resolve the cluster hash for the launch '
+                     'attempt record.')
+        return None
+
+
 def bulk_provision(
     cloud: clouds.Cloud,
     region: clouds.Region,
@@ -225,7 +261,17 @@ def bulk_provision(
         count=num_nodes,
         tags={},
         resume_stopped_nodes=True,
-        ports_to_open_on_launch=ports_to_open_on_launch)
+        ports_to_open_on_launch=ports_to_open_on_launch,
+        prev_cluster_ever_up=prev_cluster_ever_up)
+
+    # None outside a server-side request execution, where no scheduler exists
+    # to park and resume a launch -- so no attempt can ever be resumed there,
+    # which is exactly what a None request_id means to open_launch_attempt.
+    # Read via is_in_request_context() rather than trusting
+    # get_current_request_id(), which returns a shared placeholder when unset;
+    # two unrelated launches sharing that value could adopt each other's rows.
+    request_id = (common_utils.get_current_request_id()
+                  if common_utils.is_in_request_context() else None)
 
     with provision_logging.setup_provision_logging(log_dir):
         try:
@@ -235,24 +281,55 @@ def bulk_provision(
             redacted_config = bootstrap_config.get_redacted_config()
             logger.debug('Provision config:\n'
                          f'{json.dumps(redacted_config, indent=2)}')
+            # One timestamp for both: the attempt's phases have to add up to
+            # the duration reported beside them, and two time.time() calls
+            # here would make them disagree by however long opening the row
+            # took.
             provision_start = time.time()
+            attempt_id = global_user_state.open_launch_attempt(
+                cluster_name=cluster_name.display_name,
+                cluster_hash=_existing_cluster_hash(cluster_name.display_name),
+                request_id=request_id,
+                provision_start=provision_start,
+                cluster_name_on_cloud=cluster_name.name_on_cloud,
+                workspace=_active_workspace())
             try:
                 provision_record = _bulk_provision(cloud, region, cluster_name,
                                                    bootstrap_config)
             except exceptions.ExecutionPausedError:
                 # A pause to wait on an external condition is neither a
-                # success nor a failure; the attempt resumes later.
+                # success nor a failure; the attempt resumes later. The row is
+                # deliberately left open for that resume, which re-enters here
+                # and continues this same attempt, so the wait being measured
+                # stays one interval instead of being split at the pause.
                 raise
             except (KeyboardInterrupt, SystemExit):
                 # User cancellation (SIGTERM on the executor surfaces as
-                # KeyboardInterrupt): not an outcome of the attempt, so
-                # record nothing.
+                # KeyboardInterrupt): not an outcome of the attempt, so record
+                # nothing. The row stays open and the sweep closes it as
+                # abandoned, which is honest -- the measurement really was
+                # lost.
                 raise
             except BaseException:
+                if attempt_id is not None:
+                    global_user_state.close_launch_attempt(
+                        attempt_id, global_user_state.LaunchOutcome.FAILED)
                 metrics_utils.observe_provision_duration(
                     repr(cloud), 'failure',
                     time.time() - provision_start)
                 raise
+            # Past the point of success. Nothing below may raise: the handler
+            # further down tears the cluster down and fails over, so an
+            # exception here would destroy the cluster that was just
+            # provisioned. The two state calls are `_best_effort` and the
+            # metric swallows its own failures.
+            if attempt_id is not None:
+                global_user_state.record_launch_milestone(
+                    attempt_id,
+                    global_user_state.LaunchMilestone.INSTANCES_READY,
+                    time.time())
+                global_user_state.close_launch_attempt(
+                    attempt_id, global_user_state.LaunchOutcome.SUCCEEDED)
             metrics_utils.observe_provision_duration(
                 repr(cloud), 'success',
                 time.time() - provision_start)
@@ -583,6 +660,14 @@ def _post_provision_setup(
     ssh_credentials = backend_utils.ssh_credential_from_yaml(
         handle_cluster_yaml, ssh_user=cluster_info.ssh_user)
     docker_config = config_from_yaml.get('docker', {})
+    if docker_config and cloud_name.lower() == 'azure':
+        docker_config['azure_use_managed_identity'] = True
+        # Pass the VM's managed identity through so a private ACR pull can
+        # authenticate as that exact identity on the host, before the task
+        # container exists. See DockerInitializer.initialize.
+        msi = (cluster_info.provider_config or {}).get('msi', None)
+        if msi is not None:
+            docker_config['azure_managed_identity'] = msi
 
     with rich_utils.safe_status(
             ux_utils.spinner_message('Launching - Waiting for SSH access',
@@ -779,6 +864,10 @@ def _post_provision_setup(
                 custom_resource=custom_resource,
                 cluster_info=cluster_info,
                 ssh_credentials=ssh_credentials)
+            # ray_port was read while the head was down, so it is the default;
+            # a hostNetwork head just took its assigned port instead, and the
+            # workers must be told that one.
+            ray_port, _, _ = check_ray_port_and_cluster_healthy()
         else:
             logger.debug('Ray cluster on head is ready. Skip starting ray '
                          'cluster on head node.')

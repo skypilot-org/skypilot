@@ -64,8 +64,7 @@ logger = logging.getLogger(__name__)
 # runtime. When false, ``sky.utils.db.sql_metrics.install`` attaches no
 # event listeners, so the cost is not merely "skip the observe" but the
 # whole SQLAlchemy has-events code path staying off.
-ENABLED = os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED,
-                         'false').lower() == 'true'
+ENABLED = constants.server_metrics_enabled()
 
 # Label value used when a statement's primary table cannot be determined
 # from a compiled construct (``sqlalchemy.text()`` and driver-level
@@ -267,8 +266,8 @@ SKY_APISERVER_DB_INVALIDATIONS_TOTAL = prom.Counter(
     ['db', 'pool'],
 )
 
-# Pool saturation is a per-process condition: a fleet-wide sum can exceed
-# any single pool's limit while no individual pool is full, so per-pid
+# Pool saturation is a per-process condition: a sum across processes can
+# exceed any single pool's limit while no individual pool is full, so per-pid
 # series are kept. multiprocess_mode must be 'liveall' — the aggregating
 # modes strip any label named 'pid', including this user-defined one, and
 # merge every process into one series.

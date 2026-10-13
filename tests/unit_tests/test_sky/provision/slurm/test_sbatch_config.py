@@ -84,6 +84,10 @@ class TestBuildCustomSbatchDirectives:
         result = _build_custom_sbatch_directives({'partition': 'gpu'})
         assert result == ''
 
+    def test_requeue_flag_cannot_override_no_requeue(self):
+        result = _build_custom_sbatch_directives({'requeue': True})
+        assert result == ''
+
     @pytest.mark.parametrize('option', sorted(_SBATCH_PROTECTED_OPTIONS))
     def test_all_protected_options_skipped(self, option):
         result = _build_custom_sbatch_directives({option: 'value'})

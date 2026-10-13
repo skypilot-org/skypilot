@@ -69,6 +69,9 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`provision <config-yaml-provision>`:
     :ref:`ssh_timeout <config-yaml-provision-ssh-timeout>`: 10
     :ref:`install_conda <config-yaml-provision-install-conda>`: false
+    :ref:`setup_command_timeout <config-yaml-provision-setup-command-timeout>`: 1800
+    :ref:`file_mount_timeout <config-yaml-provision-file-mount-timeout>`: 600
+    :ref:`health_check_timeout <config-yaml-provision-health-check-timeout>`: 5
 
   :ref:`kubernetes <config-yaml-kubernetes>`:
     :ref:`ports <config-yaml-kubernetes-ports>`: loadbalancer
@@ -789,6 +792,75 @@ Example:
   The default SkyPilot Kubernetes images no longer bundle conda. If your tasks
   rely on a conda environment, either set ``install_conda: true`` or use a
   custom image that ships conda.
+
+.. _config-yaml-provision-setup-command-timeout:
+
+``provision.setup_command_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Timeout in seconds for each remote command SkyPilot runs while setting up its
+runtime on a new cluster: setup commands, starting Ray, starting the skylet and
+setting up logging (optional).
+
+A command that exceeds the timeout is treated as failed, and the step is
+retried. This keeps a stalled connection from hanging the launch forever. The
+timeout bounds elapsed time, not progress, so set it well above how long
+runtime setup legitimately takes on your nodes. Stopping a timed-out command
+only stops SkyPilot's local client; the remote command may keep running while
+the retry starts.
+
+Set it to ``0`` or a negative value to disable the timeout.
+
+Default: ``1800``.
+
+.. _config-yaml-provision-file-mount-timeout:
+
+``provision.file_mount_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Timeout in seconds for each remote operation of SkyPilot's internal file
+mounts during runtime setup (optional).
+
+The directory creation and the file sync are bounded separately, so one mount
+can take up to twice this value. As with ``setup_command_timeout``, an operation
+that exceeds it is treated as failed and retried.
+
+Set it to ``0`` or a negative value to disable the timeout.
+
+Default: ``600``.
+
+Example:
+
+.. code-block:: yaml
+
+  provision:
+    setup_command_timeout: 3600
+    file_mount_timeout: 1200
+
+.. _config-yaml-provision-health-check-timeout:
+
+``provision.health_check_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+How long, in seconds, SkyPilot keeps retrying the health probe of a cluster's
+head node after its first failure when refreshing the cluster's status
+(optional). Retries run every second. If the probe still fails, the cluster is
+marked ``INIT``, which a :ref:`managed job <managed-jobs>` treats as a
+preemption. ``0`` disables retries.
+
+Raise it if the head node is reached over a flaky link, e.g. SSH through
+:ref:`aws.use_ssm <config-yaml-aws-use-ssm>`. If the retries take longer than
+about 20 seconds, concurrent status refreshes of the cluster return its cached
+status.
+
+Default: ``5``.
+
+Example:
+
+.. code-block:: yaml
+
+  provision:
+    health_check_timeout: 30
 
 .. _config-yaml-aws:
 
@@ -1697,9 +1769,21 @@ Default: ``loadbalancer``.
 ``kubernetes.remote_identity``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Service account for remote authentication (optional).
+Identity for the pods SkyPilot launches (optional).
 
-Name of the service account to use for remote authentication.
+One of:
+
+- ``SERVICE_ACCOUNT`` (default): pods run as ``skypilot-service-account``,
+  which SkyPilot creates and grants permissions.
+- The name of your own service account: pods run as that account. SkyPilot
+  creates nothing for it, and you own its permissions.
+- ``LOCAL_CREDENTIALS``: like ``SERVICE_ACCOUNT``, and your local kubeconfig is
+  also uploaded to the pods.
+- ``NO_UPLOAD``: like ``SERVICE_ACCOUNT``, and your local kubeconfig is not
+  uploaded. The pods still have the service account's token.
+- ``NONE`` (case-insensitive, so ``none`` too): the pods get no Kubernetes
+  identity: no token is mounted and no roles are granted. Autodown is not
+  available. See :ref:`kubernetes-remote-identity-none`.
 
 .. _config-yaml-kubernetes-allowed-contexts:
 
@@ -2035,8 +2119,11 @@ Default: ``86400`` (24 hours).
 
 SkyServe replicas and pool workers are standing requests for capacity, so
 when this field is not set they wait for admission indefinitely instead of
-failing after 24 hours and re-entering the queue at the back. Set the field
-explicitly to bound their wait as well.
+failing after 24 hours and re-entering the queue at the back. So do managed
+jobs that set
+:ref:`job.wait_for_scheduling_timeout <yaml-spec-job-wait-for-scheduling-timeout>`,
+which bounds their wait instead. Set the field explicitly to bound their wait
+as well.
 
 .. _config-yaml-kubernetes-dws:
 
@@ -2390,38 +2477,18 @@ SkyPilot maps the username to the portion before ``@``. For example,
 a lowercase letter or ``_`` and contain only lowercase letters, digits, ``_``,
 ``.``, or ``-``. The account must already exist on the Slurm cluster.
 
-When enabled, the ``User`` in ``~/.slurm/config`` must be ``root`` or have
-passwordless ``sudo`` permission to run ``/bin/bash`` as the mapped Unix users.
-SkyPilot connects as that SSH user, then runs job lifecycle commands and file
-transfers as the mapped Unix user. A missing account or insufficient privilege
-causes the operation to fail without falling back to the SSH user.
+When enabled, the ``User`` in ``~/.slurm/config`` must be ``root`` (using
+``runuser``) or have passwordless ``sudo`` permission for individual Slurm
+executables and the required file operations as the mapped Unix users.
+SkyPilot runs shell orchestration as the SSH user and invokes commands such as
+``sudo -n -H -u alice -- sbatch ...``. Workload scripts execute inside Slurm
+allocations through ``srun``. A missing account or insufficient privilege causes
+the operation to fail without falling back to the SSH user.
 
-For a non-root SSH user, scope the grant to a group that contains the accounts
-SkyPilot may submit as:
-
-.. code-block:: text
-
-  Runas_Alias SLURM_USERS = %slurm-users
-  Defaults>SLURM_USERS !requiretty
-  skypilot ALL=(SLURM_USERS) NOPASSWD: /bin/bash
-
-This limits impersonation to members of ``slurm-users`` and records each
-invocation according to the host's sudo logging configuration. It is not a
-per-command allowlist: SkyPilot must run job setup and run scripts, ``rsync``,
-and an interactive SSH helper as the submitting user.
-
-Treat membership in ``slurm-users`` as privileged access. Every member must be
-a workload account without ``sudo``, Slurm administrative privileges, or
-another escalation path. Any privileges available to a member are transitively
-available to the shared SSH user. Do not use ``(ALL, !root)`` instead: it still
-permits impersonating the ``slurm`` account (Slurm's ``SlurmUser``), which is
-equivalent to controlling the scheduler.
-
-The ``Defaults>`` line disables ``requiretty`` for commands run as members of
-``SLURM_USERS`` while leaving it in force elsewhere. SkyPilot invokes sudo over
-SSH without allocating a terminal, so a global ``requiretty`` setting makes
-sudo refuse the command with ``sorry, you must have a tty to run sudo``. This
-also prevents file transfers and other job lifecycle operations from running.
+See :ref:`Submitting as authenticated users <slurm-submit-as-user>` for the
+executable list, directory scopes, environment configuration, and an example
+sudoers policy. Restrict run-as identities to workload accounts without
+administrative privileges.
 
 Cluster-wide inventory commands run as the SSH user so monitoring and capacity
 views do not depend on the user requesting them. The SSH user must have

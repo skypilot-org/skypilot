@@ -17,6 +17,7 @@ from sqlalchemy import create_engine
 from sqlalchemy import orm
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
 from sky.jobs import utils as jobs_utils
 from sky.skylet import constants
@@ -665,6 +666,25 @@ class TestGetManagedJobsWithFilters:
         returned_job_ids = [job['job_id'] for job in jobs]
         assert set(returned_job_ids) == set(job_ids)
 
+    def test_file_contents_not_selected_without_fields(self, _seed_test_jobs):
+        """Without fields the queue returns the user YAML, not file contents."""
+        job_id = _seed_test_jobs['job_id1']
+        jobs, _ = state.get_managed_jobs_with_filters(job_ids=[job_id])
+        assert jobs[0]['user_yaml'] == '/tmp/user1.yaml'
+        assert jobs[0]['dag_yaml_content'] is None
+        assert jobs[0]['env_file_content'] is None
+        assert jobs[0]['config_file_content'] is None
+
+        # Naming a column still selects it.
+        jobs, _ = state.get_managed_jobs_with_filters(
+            job_ids=[job_id], fields=['job_id', 'dag_yaml_content'])
+        assert jobs[0]['dag_yaml_content'] == '/tmp/dag1.yaml'
+
+        # The controller reads the contents through their own query.
+        contents = state.get_job_file_contents(job_id)
+        assert contents['dag_yaml_content'] == '/tmp/dag1.yaml'
+        assert contents['env_file_content'] == '/tmp/env1'
+
     def test_with_workspace_filter(self, _seed_test_jobs):
         """Test filtering by accessible_workspaces."""
         jobs, total = state.get_managed_jobs_with_filters(
@@ -1003,7 +1023,7 @@ class TestSetRecoveringEventReason:
     """Reason/code selection for the RECOVERING event in set_recovering_async.
 
     Priority: external failures (plugin-reported), then a user-job failure
-    reason (non-zero exit on a healthy cluster, SKY-6411), then the last
+    reason (non-zero exit on a healthy cluster), then the last
     cluster event, then the generic preemption fallback.
     """
 
@@ -1888,6 +1908,182 @@ class TestInfraFilterCodegenCompatibility:
             self._run_branch(code, one_older)
 
 
+class TestIncludeTreeCodegenCompatibility:
+    """The generated queue code against a controller that predates
+    `include_tree`: same arrangement as the infra filter above. Dropped, the
+    request would be answered with the roots alone -- which looks complete
+    and is not -- so the old controller has to refuse instead."""
+
+    def _run_branch(self, built: str, version: int):
+        return TestInfraFilterCodegenCompatibility._run_branch(
+            self, built, version)
+
+    def test_old_controller_is_not_handed_the_kwarg(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(job_ids=[1])
+        one_older = jobs_utils.INCLUDE_TREE_MANAGED_JOBS_VERSION - 1
+        kwargs = self._run_branch(code, one_older)
+        assert 'include_tree' not in kwargs
+        # The rest of the request still goes through unchanged.
+        assert kwargs['job_ids'] == [1]
+
+    def test_new_controller_is_handed_the_kwarg(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(job_ids=[1],
+                                                          include_tree=True)
+        kwargs = self._run_branch(code,
+                                  jobs_utils.INCLUDE_TREE_MANAGED_JOBS_VERSION)
+        assert kwargs['include_tree'] is True
+        assert kwargs['job_ids'] == [1]
+        # Not asked for: passed as False, not omitted, on a new controller.
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(job_ids=[1])
+        kwargs = self._run_branch(code,
+                                  jobs_utils.INCLUDE_TREE_MANAGED_JOBS_VERSION)
+        assert kwargs['include_tree'] is False
+
+    def test_old_controller_refuses_a_tree_request(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(job_ids=[1],
+                                                          include_tree=True)
+        one_older = jobs_utils.INCLUDE_TREE_MANAGED_JOBS_VERSION - 1
+        with pytest.raises(RuntimeError,
+                           match=jobs_utils.INCLUDE_TREE_UNSUPPORTED_MARKER):
+            self._run_branch(code, one_older)
+
+    def test_current_version_accepts_the_kwarg(self):
+        # The guard and the branch that passes the kwarg are keyed on the
+        # same version, and it is the version this tree ships.
+        assert (jobs_utils.INCLUDE_TREE_MANAGED_JOBS_VERSION ==
+                managed_job_constants.MANAGED_JOBS_VERSION)
+
+
+class TestTreeRootIds:
+    """`tree_root_ids`: every row of the trees rooted at those ids. The ids
+    come from `get_tree_root_ids`; `utils.get_managed_job_queue` resolves the
+    API's `include_tree` request into them once."""
+
+    @staticmethod
+    def _tree():
+        new_job = TestParentJobLinks._new_job
+        root = new_job('group')
+        state.set_pending(root,
+                          task_id=1,
+                          task_name='watcher',
+                          resources_str='{}',
+                          metadata='{}')
+        eval1 = new_job('eval-1', parent_job_id=root, parent_task_id=1)
+        eval1a = new_job('eval-1a', parent_job_id=eval1, root_job_id=root)
+        return root, eval1, eval1a
+
+    @staticmethod
+    def _keys(rows):
+        return sorted((j['job_id'], j['task_id']) for j in rows)
+
+    def test_root_ids_normalize_and_dedupe(self, _mock_managed_jobs_db_conn):
+        root, eval1, eval1a = self._tree()
+        other = TestParentJobLinks._new_job('other')
+        assert state.get_tree_root_ids([root]) == [root]
+        assert state.get_tree_root_ids([eval1a]) == [root]
+        # Three names for one tree are that one tree; an unknown id is
+        # nothing; the answer is sorted.
+        assert state.get_tree_root_ids([eval1a, other, root, eval1,
+                                        12345]) == [root, other]
+        assert state.get_tree_root_ids([]) == []
+        assert state.get_tree_root_ids([12345]) == []
+
+    def test_whole_tree_from_any_node(self, _mock_managed_jobs_db_conn):
+        root, eval1, eval1a = self._tree()
+        TestParentJobLinks._new_job('other')
+        whole = [(root, 0), (root, 1), (eval1, 0), (eval1a, 0)]
+        for named in ([root], [eval1], [eval1a], [root, eval1, eval1a]):
+            rows, total = state.get_managed_jobs_with_filters(
+                tree_root_ids=state.get_tree_root_ids(named))
+            assert self._keys(rows) == whole, named
+            # The total counts trees, so three ids from one tree are one.
+            assert total == 1, named
+
+    def test_job_ids_alone_is_unchanged(self, _mock_managed_jobs_db_conn):
+        root, eval1, eval1a = self._tree()
+        rows, total = state.get_managed_jobs_with_filters(job_ids=[eval1])
+        assert self._keys(rows) == [(eval1, 0)]
+        assert total == 1
+        rows, total = state.get_managed_jobs_with_filters(job_ids=[root])
+        assert self._keys(rows) == [(root, 0), (root, 1)]
+
+    def test_a_member_id_passed_as_a_root_matches_only_itself(
+            self, _mock_managed_jobs_db_conn):
+        # The contract the callers uphold by resolving first.
+        root, eval1, eval1a = self._tree()
+        rows, total = state.get_managed_jobs_with_filters(tree_root_ids=[eval1])
+        assert self._keys(rows) == [(eval1, 0)]
+        assert total == 1
+
+    def test_several_trees(self, _mock_managed_jobs_db_conn):
+        root, eval1, eval1a = self._tree()
+        other = TestParentJobLinks._new_job('other')
+        other_child = TestParentJobLinks._new_job('other-child',
+                                                  parent_job_id=other)
+        roots = state.get_tree_root_ids([eval1a, other_child])
+        rows, total = state.get_managed_jobs_with_filters(tree_root_ids=roots)
+        assert total == 2
+        assert self._keys(rows) == [(root, 0), (root, 1), (eval1, 0),
+                                    (eval1a, 0), (other, 0), (other_child, 0)]
+        # Newest tree first, the same order the list gives.
+        assert [j['job_id'] for j in rows][:2] == [other, other_child]
+
+    def test_visibility_still_applies(self, _mock_managed_jobs_db_conn):
+        root, eval1, _ = self._tree()
+        roots = state.get_tree_root_ids([eval1])
+        rows, total = state.get_managed_jobs_with_filters(
+            tree_root_ids=roots,
+            accessible_workspaces=['ws'],
+            user_hashes=['user1'])
+        assert total == 1 and len(rows) == 4
+        rows, total = state.get_managed_jobs_with_filters(
+            tree_root_ids=roots, accessible_workspaces=['nope'])
+        assert rows == [] and total == 0
+
+    def test_counts_and_options_cover_the_tree(self,
+                                               _mock_managed_jobs_db_conn):
+        root, eval1, eval1a = self._tree()
+        TestParentJobLinks._new_job('other')
+        roots = state.get_tree_root_ids([eval1])
+        counts = state.get_status_count_with_filters(tree_root_ids=roots)
+        assert sum(counts.values()) == 4
+        counts = state.get_status_count_with_filters(job_ids=[eval1])
+        assert sum(counts.values()) == 1
+        # Nothing here has been placed, so no infra either way; the point is
+        # the call takes the parameter and does not blow up on it.
+        assert state.get_infra_options_with_filters(tree_root_ids=roots) == []
+
+    def test_legacy_job_without_job_info_is_its_own_root(
+            self, _mock_managed_jobs_db_conn):
+        # A job from before job_info existed: spot rows only. The queue lists
+        # it (outer join), so a tree request for it must find it too.
+        root, _, _ = self._tree()
+        legacy = 500
+        with _mock_managed_jobs_db_conn.begin() as conn:
+            conn.execute(state.spot_table.insert().values(
+                spot_job_id=legacy,
+                task_id=0,
+                task_name='legacy',
+                job_name='legacy',
+                status=state.ManagedJobStatus.SUCCEEDED.value,
+                resources='{}'))
+        assert state.get_tree_root_ids([legacy]) == [legacy]
+        assert state.get_tree_root_ids([legacy, root]) == [root, legacy]
+        rows, total = state.get_managed_jobs_with_filters(
+            tree_root_ids=[legacy])
+        assert self._keys(rows) == [(legacy, 0)]
+        assert total == 1
+
+    def test_unknown_or_empty_roots_select_nothing(self,
+                                                   _mock_managed_jobs_db_conn):
+        self._tree()
+        rows, total = state.get_managed_jobs_with_filters(
+            tree_root_ids=state.get_tree_root_ids([12345]))
+        assert rows == [] and total == 0
+        rows, total = state.get_managed_jobs_with_filters(tree_root_ids=[])
+        assert rows == [] and total == 0
+
+
 class TestPaginationByTreeRoot:
     """The queue pages and counts by top-level job: a job launched from inside
     another job rides along with its root instead of taking a page slot."""
@@ -2342,3 +2538,53 @@ class TestParentJobLinks:
         by_id = self._links([root, child])
         assert by_id[root] == (None, None, None)
         assert by_id[child] == (root, root, 1)
+
+
+class _CountingRowMapping(dict):
+    """Stands in for a SQLAlchemy RowMapping, counting direct ``.get()`` calls.
+
+    A real ``RowMapping`` does not return a default cheaply for a key that is
+    not in the result set: it routes through ``_key_fallback`` and
+    *constructs* a ``NoSuchColumnError`` first. ``_get_jobs_dict`` names every
+    column unconditionally, so if it read them off the RowMapping, a query
+    narrowed by ``fields`` would pay one exception object per unselected
+    column per row.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.direct_gets = 0
+
+    def get(self, key, default=None):
+        self.direct_gets += 1
+        return super().get(key, default)
+
+
+def test_get_jobs_dict_reads_selected_columns_without_probing_row_mapping():
+    """Only the ambiguous Column keys may be read off the RowMapping.
+
+    Guards the cost, not just the result: reverting to ``r.get('...')`` per
+    column still returns the right dict, but reintroduces one exception
+    construction per unselected column per row.
+    """
+    # The shape a `fields`-narrowed query produces: a few selected columns,
+    # every other column absent from the result set.
+    row = _CountingRowMapping({
+        'job_id': 7,
+        'task_id': 0,
+        'job_name': 'my-job',
+        'status': state.ManagedJobStatus.RUNNING,
+    })
+
+    result = state._get_jobs_dict(row)  # pylint: disable=protected-access
+
+    assert result['_job_id'] == 7
+    assert result['task_id'] == 0
+    assert result['status'] == state.ManagedJobStatus.RUNNING
+    # Columns the query did not select come back as None, not as an error.
+    assert result['dag_yaml_content'] is None
+    assert result['pool'] is None
+    # Two ambiguous columns (spot.spot_job_id and job_info.spot_job_id) are
+    # keyed by Column object and must stay on the RowMapping; nothing else
+    # may touch it.
+    assert row.direct_gets <= 2

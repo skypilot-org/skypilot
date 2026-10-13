@@ -128,6 +128,8 @@ def _make_create_instance_request(parent_id: str, platform_name: str,
     if preemptible:
         instance_spec_kwargs['preemptible'] = compute_v1.PreemptibleSpec(
             on_preemption=compute_v1.PreemptibleSpec.PreemptionPolicy.STOP)
+        instance_spec_kwargs['follows_spot_price'] = (
+            compute_v1.FollowsSpotPriceSpec())
 
     return compute_v1.CreateInstanceRequest(
         metadata=nebius_common().ResourceMetadata(parent_id=parent_id,),

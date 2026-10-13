@@ -489,6 +489,8 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 skip_finished=request.skip_finished,
                 accessible_workspaces=accessible_workspaces,
                 job_ids=job_ids,
+                include_tree=(request.include_tree
+                              if request.HasField('include_tree') else False),
                 workspace_match=request.workspace_match
                 if request.HasField('workspace_match') else None,
                 name_match=request.name_match
@@ -593,7 +595,10 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 # predates the field leaves it false, which is how the caller
                 # tells an empty result apart from an unfiltered one.
                 infra_match_applied=True,
-                infra_options=infra_options)
+                infra_options=infra_options,
+                # Same for include_tree: the caller cannot otherwise tell a
+                # tree answer from a root-only one.
+                include_tree_applied=True)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(e, exc_info=True)
             context.abort(grpc.StatusCode.INTERNAL, str(e))

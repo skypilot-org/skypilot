@@ -26,7 +26,8 @@ import threading
 import time
 import traceback
 import typing
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Type
+from typing import (Any, Callable, Dict, List, Literal, Optional, Set, Tuple,
+                    Type)
 import uuid
 import zipfile
 
@@ -36,7 +37,9 @@ import fastapi
 from fastapi.middleware import cors
 import jwt as pyjwt
 import starlette.background
-import starlette.middleware.base
+import starlette.datastructures
+import starlette.requests
+import starlette.types
 import uvloop
 
 import sky
@@ -138,10 +141,22 @@ _SERVER_USER_HASH_KEY = 'server_user_hash'
 
 logger = sky_logging.init_logger(__name__)
 
-# Resolved once at import so `subprocess.Popen(executable=...)` gets an
-# absolute path — a required precondition for Python subprocess to route
-# through posix_spawn instead of fork_exec.
-_KUBECTL_PATH: Optional[str] = shutil.which('kubectl')
+# Grace period for srun to exit after SIGTERM before the Slurm ssh proxy
+# escalates to SIGKILL.
+_SRUN_REAP_TIMEOUT_SECONDS = 5
+
+
+def _reap_srun(proc: subprocess.Popen) -> None:
+    """Waits for srun to exit, escalating to SIGKILL. Runs in a thread."""
+    try:
+        proc.wait(timeout=_SRUN_REAP_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        logger.warning(f'srun did not exit within '
+                       f'{_SRUN_REAP_TIMEOUT_SECONDS}s of SIGTERM; sending '
+                       'SIGKILL.')
+        proc.kill()
+        proc.wait()
+
 
 # TODO(zhwu): Streaming requests, such log tailing after sky launch or sky logs,
 # need to be detached from the main requests queue. Otherwise, the streaming
@@ -152,6 +167,7 @@ def _basic_auth_401_response(request: fastapi.Request, content: str):
     """Return a 401 response with basic auth realm."""
     middleware_utils.mark_rejection(request,
                                     middleware_utils.REJECT_REASON_UNAUTHORIZED)
+    middleware_utils.mark_auth_rejection(request, content)
     return fastapi.responses.JSONResponse(
         status_code=401,
         headers={
@@ -164,10 +180,21 @@ def _basic_auth_401_response(request: fastapi.Request, content: str):
         content=content)
 
 
-def _bearer_auth_401_response(request: fastapi.Request, content):
-    """Return a 401 response for bearer token authentication failures."""
+def _bearer_auth_401_response(request: fastapi.Request,
+                              content: Dict[str, str],
+                              subject: Optional[str] = None,
+                              audit_detail: Optional[str] = None):
+    """Return a 401 response for bearer token authentication failures.
+
+    `subject` is the service account the token was verified to belong to,
+    when it was rejected after verification (revoked, expired, user gone).
+    `audit_detail` replaces the response detail in the audit stamp when the
+    detail carries variable text (an exception message).
+    """
     middleware_utils.mark_rejection(request,
                                     middleware_utils.REJECT_REASON_UNAUTHORIZED)
+    middleware_utils.mark_auth_rejection(request, audit_detail or
+                                         content['detail'], subject)
     return fastapi.responses.JSONResponse(
         status_code=401,
         headers={
@@ -227,19 +254,19 @@ async def _try_set_basic_auth_user(request: fastapi.Request):
 
 
 @middleware_utils.websocket_aware
-class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class RBACMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to handle RBAC."""
 
-    async def dispatch(self, request: fastapi.Request, call_next):
+    async def on_request(self, request: fastapi.Request):
         # TODO(hailong): should have a list of paths
         # that are not checked for RBAC
         if (request.url.path.startswith('/dashboard/') or
                 request.url.path.startswith('/api/')):
-            return await call_next(request)
+            return None
 
         auth_user = request.state.auth_user
         if auth_user is None:
-            return await call_next(request)
+            return None
 
         permission_service = permission.permission_service
         # Check the role permission. Offload to the bounded auth thread
@@ -264,18 +291,35 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             return fastapi.responses.JSONResponse(
                 status_code=403, content={'detail': 'Forbidden'})
 
-        return await call_next(request)
+        return None
 
 
-class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class RequestIDMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to add a request ID to each request."""
 
-    async def dispatch(self, request: fastapi.Request, call_next):
-        request_id = requests_lib.get_new_request_id()
-        request.state.request_id = request_id
-        response = await call_next(request)
-        response.headers['X-Skypilot-Request-ID'] = request_id
-        return response
+    async def on_request(self, request: fastapi.Request):
+        request.state.request_id = requests_lib.get_new_request_id()
+        return None
+
+    def on_response(self, request: fastapi.Request, status_code: int,
+                    headers: starlette.datastructures.MutableHeaders) -> None:
+        headers['X-Skypilot-Request-ID'] = request.state.request_id
+
+
+def _strip_jwt_padding(jwt_token: str) -> str:
+    """Remove base64 padding from each segment of a compact JWT.
+
+    RFC 7515 compact serialization uses unpadded base64url, but some proxies
+    emit padded segments: the AWS ALB ``x-amzn-oidc-data`` header is documented
+    to include padding characters, and its 64-byte ES256 signature segment
+    always ends in ``==``. PyJWT 2.14+ enforces the compact encoding rules and
+    rejects any segment that contains ``=``, which would silently drop the
+    identity (upstream: https://github.com/jpadilla/pyjwt/issues/1209).
+    Stripping the padding is a pure normalization: the decoded bytes are
+    identical, and this code path never verifies the signature.
+    """
+    return '.'.join(
+        segment.rstrip('=') for segment in jwt_token.strip().split('.'))
 
 
 def _extract_identity_from_jwt(jwt_token: str, claim: str) -> Optional[str]:
@@ -294,7 +338,7 @@ def _extract_identity_from_jwt(jwt_token: str, claim: str) -> Optional[str]:
     try:
         # Trusted proxy scenario - skip all verification since the proxy
         # has already authenticated the request
-        payload = pyjwt.decode(jwt_token,
+        payload = pyjwt.decode(_strip_jwt_padding(jwt_token),
                                options={
                                    'verify_signature': False,
                                    'verify_exp': False,
@@ -302,7 +346,9 @@ def _extract_identity_from_jwt(jwt_token: str, claim: str) -> Optional[str]:
                                })
         return payload.get(claim)
     except pyjwt.exceptions.DecodeError as e:
-        logger.debug(f'Failed to decode JWT from header: {e}')
+        # The proxy set the header but it cannot be parsed, so the request
+        # proceeds without an identity. That must not be silent.
+        logger.warning(f'Failed to decode JWT from header: {e}')
         return None
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Unexpected error decoding JWT: {e}')
@@ -376,32 +422,31 @@ def _generate_auth_token(request: fastapi.Request) -> str:
 
 
 @middleware_utils.websocket_aware
-class InitializeRequestAuthUserMiddleware(
-        starlette.middleware.base.BaseHTTPMiddleware):
+class InitializeRequestAuthUserMiddleware(middleware_utils.ASGIMiddleware):
 
-    async def dispatch(self, request: fastapi.Request, call_next):
+    async def on_request(self, request: fastapi.Request):
         # Make sure that request.state.auth_user is set. Otherwise, we may get a
         # KeyError while trying to read it.
         request.state.auth_user = None
-        return await call_next(request)
+        return None
 
 
 @middleware_utils.websocket_aware
-class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class BasicAuthMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to handle HTTP Basic Auth."""
 
-    async def dispatch(self, request: fastapi.Request, call_next):
+    async def on_request(self, request: fastapi.Request):
         # If a previous middleware already authenticated the user, pass through
         if request.state.auth_user is not None:
-            return await call_next(request)
+            return None
 
         if loopback.is_loopback_request(request):
-            return await call_next(request)
+            return None
 
         if request.url.path.startswith('/api/health'):
             # Try to set the auth user from basic auth
             await _try_set_basic_auth_user(request)
-            return await call_next(request)
+            return None
 
         auth_header = request.headers.get('authorization')
         if not auth_header:
@@ -441,7 +486,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             return _basic_auth_401_response(request, 'Invalid credentials')
         request.state.auth_user = user
 
-        return await call_next(request)
+        return None
 
 
 # Minimum seconds between persisted last_used_at updates per service-account
@@ -457,10 +502,10 @@ _SA_LAST_USED_UPDATE_INTERVAL_SECONDS = 60
 
 
 @middleware_utils.websocket_aware
-class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to handle Bearer Token Auth (Service Accounts)."""
 
-    async def dispatch(self, request: fastapi.Request, call_next):
+    async def on_request(self, request: fastapi.Request):
         """Make sure correct bearer token auth is present.
 
         1. If the request has the X-Skypilot-Auth-Mode: token header, it must
@@ -478,7 +523,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         """
         # If a previous middleware already authenticated the user, pass through
         if request.state.auth_user is not None:
-            return await call_next(request)
+            return None
 
         has_skypilot_auth_header = (
             request.headers.get('X-Skypilot-Auth-Mode') == 'token')
@@ -492,7 +537,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # This is case #3 above. We do not need to validate the request.
             # No Bearer token, continue with normal processing (OAuth2 cookies,
             # etc.)
-            return await call_next(request)
+            return None
         # After this point, all requests must be validated.
 
         if auth_header is None:
@@ -507,11 +552,11 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         sa_token = split_header[1]
 
         # Handle SkyPilot service account tokens
-        return await self._handle_service_account_token(request, sa_token,
-                                                        call_next)
+        return await self._handle_service_account_token(request, sa_token)
 
-    async def _handle_service_account_token(self, request: fastapi.Request,
-                                            sa_token: str, call_next):
+    async def _handle_service_account_token(
+            self, request: fastapi.Request,
+            sa_token: str) -> Optional[fastapi.Response]:
         """Handle SkyPilot service account tokens."""
         # Check if service account tokens are enabled
         sa_enabled = os.environ.get(constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
@@ -584,13 +629,15 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     '(revoked or rotated)')
                 return _bearer_auth_401_response(
                     request,
-                    {'detail': 'Service account token revoked or rotated'})
+                    {'detail': 'Service account token revoked or rotated'},
+                    subject=user_id)
 
             if (token_row['expires_at'] is not None and
                     token_row['expires_at'] < int(time.time())):
                 logger.warning(f'Service account token {token_id} has expired')
                 return _bearer_auth_401_response(
-                    request, {'detail': 'Service account token has expired'})
+                    request, {'detail': 'Service account token has expired'},
+                    subject=user_id)
 
             # Verify user still exists in database
             user_info = await db_lookup.call_with_deadline(
@@ -600,7 +647,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     f'Service account user {user_id} no longer exists')
                 return _bearer_auth_401_response(
                     request,
-                    {'detail': 'Service account user no longer exists'})
+                    {'detail': 'Service account user no longer exists'},
+                    subject=user_id)
 
             # Update last used timestamp for token tracking, skipped while
             # the row's last_used_at is fresher than
@@ -657,13 +705,14 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                          exc_info=True)
             return _bearer_auth_401_response(
                 request,
-                {'detail': f'Service account authentication failed: {str(e)}'})
+                {'detail': f'Service account authentication failed: {str(e)}'},
+                audit_detail='Service account authentication failed')
 
-        return await call_next(request)
+        return None
 
 
 @middleware_utils.websocket_aware
-class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class AuthProxyMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to handle external auth proxy.
 
     This middleware extracts user identity from HTTP headers set by an
@@ -671,8 +720,8 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """
 
     # pylint: disable=redefined-outer-name
-    def __init__(self, app, **kwargs):
-        super().__init__(app, **kwargs)
+    def __init__(self, app):
+        super().__init__(app)
         self.config = server_config.load_external_proxy_config()
         if self.config.enabled:
             logger.debug('AuthProxyMiddleware enabled with header: '
@@ -681,9 +730,9 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         else:
             logger.debug('AuthProxyMiddleware disabled via configuration')
 
-    async def dispatch(self, request: fastapi.Request, call_next):
+    async def on_request(self, request: fastapi.Request):
         if not self.config.enabled:
-            return await call_next(request)
+            return None
 
         auth_user = _extract_user_from_header(request, self.config)
 
@@ -697,7 +746,7 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             if auth_user is not None:
                 logger.debug('Warning: ignoring auth proxy header since the '
                              'auth user was already set.')
-            return await call_next(request)
+            return None
 
         # Add user to database if auth_user is present. Offload the sync DB
         # upsert to the bounded auth thread executor under a deadline (it
@@ -727,7 +776,7 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if auth_user is not None:
             request.state.auth_user = auth_user
 
-        return await call_next(request)
+        return None
 
 
 # Default expiration time for upload ids before cleanup.
@@ -748,15 +797,33 @@ async def cleanup_upload_ids():
         upload_ids_to_cleanup_list = list(upload_ids_to_cleanup.items())
         for (upload_id, user_hash), expire_time in upload_ids_to_cleanup_list:
             if current_time > expire_time:
-                logger.info(f'Cleaning up upload id: {upload_id}')
-                client_file_mounts_dir = (
-                    common.API_SERVER_CLIENT_DIR.expanduser().resolve() /
-                    user_hash / 'file_mounts')
-                shutil.rmtree(client_file_mounts_dir / upload_id,
-                              ignore_errors=True)
-                (client_file_mounts_dir /
-                 upload_id).with_suffix('.zip').unlink(missing_ok=True)
-                upload_ids_to_cleanup.pop((upload_id, user_hash))
+                # Guard each entry so one bad entry (e.g. a filesystem error)
+                # cannot kill the loop for the rest of the worker's life. The
+                # upload handler is the only writer and validates before
+                # queueing, so this is robustness, not a second check.
+                try:
+                    logger.info(f'Cleaning up upload id: {upload_id}')
+                    client_file_mounts_dir = (
+                        common.API_SERVER_CLIENT_DIR.expanduser().resolve() /
+                        user_hash / 'file_mounts')
+                    # A missing dir is normal (single-chunk upload, or an
+                    # earlier partial cleanup); any other rmtree error must
+                    # reach the handler so the entry is kept and retried, not
+                    # swallowed by ignore_errors.
+                    try:
+                        shutil.rmtree(client_file_mounts_dir / upload_id)
+                    except FileNotFoundError:
+                        pass
+                    (client_file_mounts_dir /
+                     upload_id).with_suffix('.zip').unlink(missing_ok=True)
+                except Exception as e:  # pylint: disable=broad-except
+                    # Keep the entry so a later sweep retries; a transient
+                    # error (e.g. a temporary permission failure) would
+                    # otherwise strand the chunks on disk.
+                    logger.warning(f'Failed to clean up upload id '
+                                   f'{upload_id}, will retry: {e}')
+                else:
+                    upload_ids_to_cleanup.pop((upload_id, user_hash))
 
 
 async def cleanup_unreferenced_file_mounts():
@@ -769,7 +836,7 @@ async def cleanup_unreferenced_file_mounts():
 
         with storage.gc_lock() as should_run:
             if not should_run:
-                logger.debug('Another replica is running blob GC, skipping')
+                logger.debug('Another server is running blob GC, skipping')
                 return
 
             # A blob is kept alive by either an active API request (e.g. the
@@ -947,23 +1014,13 @@ async def cleanup_sky_logs():
         await asyncio.sleep(3600)
 
 
-# Cadence of the per-worker loop lag timer. Also the heartbeat interval the
-# stall watchdog measures against, so the two must agree.
-LOOP_LAG_INTERVAL = 0.1
+def _request_loop_lag_observer(
+        loop: asyncio.AbstractEventLoop) -> Callable[[float], None]:
+    """Records one request-serving loop's lag; see loop_stall.start_lag_monitor.
 
-
-async def loop_lag_monitor(
-        loop: asyncio.AbstractEventLoop,
-        interval: float = LOOP_LAG_INTERVAL,
-        stall_watchdog: Optional[loop_stall.LoopStallWatchdog] = None) -> None:
-    """Measures the loop's own scheduling lag on a fixed timer.
-
-    The single tick on the loop for this: it feeds the lag metrics when those
-    are enabled, and the stall watchdog's heartbeat when that is enabled. Each
-    consumer is gated on its own, so neither can silently disable the other.
+    Keeps the tumbling-window state for the per-pid peak gauge, which is
+    why this is a closure rather than a plain function.
     """
-    target = loop.time() + interval
-
     pid = str(os.getpid())
     lag_threshold = perf_utils.get_loop_lag_threshold()
     # Tumbling 30s window peak per process — paired with the pid-less lag
@@ -973,29 +1030,24 @@ async def loop_lag_monitor(
     lag_max_window_end = loop.time() + lag_max_window_seconds
     lag_max_in_window = 0.0
 
-    def tick():
-        nonlocal target, lag_max_window_end, lag_max_in_window
+    def observe(lag: float) -> None:
+        nonlocal lag_max_window_end, lag_max_in_window
+        if not metrics_utils.METRICS_ENABLED:
+            return
+        if lag_threshold is not None and lag > lag_threshold:
+            logger.warning(f'Event loop lag {lag} seconds exceeds threshold '
+                           f'{lag_threshold} seconds.')
+        metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.observe(lag)
         now = loop.time()
-        lag = max(0.0, now - target)
-        if stall_watchdog is not None:
-            stall_watchdog.beat()
-        if metrics_utils.METRICS_ENABLED:
-            if lag_threshold is not None and lag > lag_threshold:
-                logger.warning(
-                    f'Event loop lag {lag} seconds exceeds threshold '
-                    f'{lag_threshold} seconds.')
-            metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.observe(lag)
-            if now >= lag_max_window_end:
-                lag_max_window_end = now + lag_max_window_seconds
-                lag_max_in_window = lag
-            else:
-                lag_max_in_window = max(lag_max_in_window, lag)
-            metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_MAX_SECONDS.labels(
-                pid=pid).set(lag_max_in_window)
-        target = now + interval
-        loop.call_at(target, tick)
+        if now >= lag_max_window_end:
+            lag_max_window_end = now + lag_max_window_seconds
+            lag_max_in_window = lag
+        else:
+            lag_max_in_window = max(lag_max_in_window, lag)
+        metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_MAX_SECONDS.labels(
+            pid=pid).set(lag_max_in_window)
 
-    loop.call_at(target, tick)
+    return observe
 
 
 async def schedule_on_boot_check_async():
@@ -1037,14 +1089,14 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     # Attribute event loop stalls to the code that caused them. Not gated on
     # METRICS_ENABLED: its primary output is a log line, which is the only
     # thing available when debugging a deployment after the fact.
-    stall_watchdog = loop_stall.start_watchdog(
-        heartbeat_interval=LOOP_LAG_INTERVAL)
+    stall_watchdog = loop_stall.start_watchdog()
     if metrics_utils.METRICS_ENABLED or stall_watchdog is not None:
         # One timer per worker loop, shared by the lag metrics and the stall
         # watchdog's heartbeat.
-        asyncio.create_task(
-            loop_lag_monitor(asyncio.get_event_loop(),
-                             stall_watchdog=stall_watchdog))
+        loop = asyncio.get_event_loop()
+        loop_stall.start_lag_monitor(loop,
+                                     _request_loop_lag_observer(loop),
+                                     stall_watchdog=stall_watchdog)
     try:
         yield
     finally:
@@ -1054,7 +1106,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             stall_watchdog.stop()
 
 
-class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class SecurityHeadersMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to add security headers to all HTTP responses.
 
     Adds Content-Security-Policy and other security headers to mitigate
@@ -1104,8 +1156,8 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                      'form-action \'self\'; '
                      'frame-ancestors \'self\'')
 
-    async def dispatch(self, request: fastapi.Request, call_next):
-        response = await call_next(request)
+    def on_response(self, request: fastapi.Request, status_code: int,
+                    headers: starlette.datastructures.MutableHeaders) -> None:
         # Endpoints that serve HTML set request.state.csp_nonce so the
         # CSP header can reference the nonce that was injected into the
         # HTML body.  Non-HTML responses get a strict policy with no
@@ -1116,59 +1168,63 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         else:
             script_src = '\'self\''
         csp = self._CSP_TEMPLATE.format(script_src=script_src)
-        response.headers['Content-Security-Policy'] = csp
+        headers['Content-Security-Policy'] = csp
         # X-Frame-Options for legacy browsers that don't support CSP
         # frame-ancestors directive.
-        response.headers['X-Frame-Options'] = 'SAMEORIGIN'
-        response.headers['X-Content-Type-Options'] = 'nosniff'
-        response.headers['Referrer-Policy'] = (
-            'strict-origin-when-cross-origin')
-        response.headers['Permissions-Policy'] = (
+        headers['X-Frame-Options'] = 'SAMEORIGIN'
+        headers['X-Content-Type-Options'] = 'nosniff'
+        headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+        headers['Permissions-Policy'] = (
             'camera=(), microphone=(), geolocation=()')
-        return response
 
 
 # Add a new middleware class to handle /internal/dashboard prefix
-class InternalDashboardPrefixMiddleware(
-        starlette.middleware.base.BaseHTTPMiddleware):
+class InternalDashboardPrefixMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to handle /internal/dashboard prefix in requests."""
 
-    async def dispatch(self, request: fastapi.Request, call_next):
+    async def on_request(self, request: fastapi.Request):
         path = request.url.path
         if path.startswith('/internal/dashboard/'):
             # Remove /internal/dashboard prefix and update request scope
             request.scope['path'] = path.replace('/internal/dashboard/', '/', 1)
-        return await call_next(request)
+        return None
 
 
-class CacheControlStaticMiddleware(starlette.middleware.base.BaseHTTPMiddleware
-                                  ):
+class CacheControlStaticMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to add cache control headers to static files."""
 
-    async def dispatch(self, request: fastapi.Request, call_next):
-        if request.url.path.startswith('/dashboard/_next'):
-            response = await call_next(request)
-            # Respect an explicit Cache-Control set by downstream middleware
-            # or handlers (e.g. an auth middleware that set 'no-store' on a
-            # 401). Otherwise, fall back to the static-asset defaults.
-            if 'Cache-Control' not in response.headers:
-                if response.status_code >= 400:
-                    # Error responses (e.g. 401 from an auth middleware) must
-                    # not be cached: a CDN that caches them for the same path
-                    # will serve the error to all subsequent users until the
-                    # cache entry expires, breaking the dashboard for
-                    # everyone.
-                    response.headers['Cache-Control'] = 'no-store'
-                else:
-                    response.headers['Cache-Control'] = 'max-age=3600'
-            return response
-        return await call_next(request)
+    async def __call__(self, scope: starlette.types.Scope,
+                       receive: starlette.types.Receive,
+                       send: starlette.types.Send) -> None:
+        # Matched on the path as received, before inner layers rewrite it.
+        if (scope['type'] == 'http' and
+                scope['path'].startswith('/dashboard/_next')):
+            await super().__call__(scope, receive, send)
+        else:
+            await self.app(scope, receive, send)
+
+    def on_response(self, request: fastapi.Request, status_code: int,
+                    headers: starlette.datastructures.MutableHeaders) -> None:
+        # Respect an explicit Cache-Control set by downstream middleware
+        # or handlers (e.g. an auth middleware that set 'no-store' on a
+        # 401). Otherwise, fall back to the static-asset defaults.
+        if 'Cache-Control' in headers:
+            return
+        if status_code >= 400:
+            # Error responses (e.g. 401 from an auth middleware) must
+            # not be cached: a CDN that caches them for the same path
+            # will serve the error to all subsequent users until the
+            # cache entry expires, breaking the dashboard for
+            # everyone.
+            headers['Cache-Control'] = 'no-store'
+        else:
+            headers['Cache-Control'] = 'max-age=3600'
 
 
-class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class PathCleanMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to check the path of requests."""
 
-    async def dispatch(self, request: fastapi.Request, call_next):
+    async def on_request(self, request: fastapi.Request):
         if request.url.path.startswith('/dashboard/'):
             # If the requested path is not relative to the expected directory,
             # then the user is attempting path traversal, so deny the request.
@@ -1179,14 +1235,14 @@ class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     request, middleware_utils.REJECT_REASON_FORBIDDEN)
                 return fastapi.responses.JSONResponse(
                     status_code=403, content={'detail': 'Forbidden'})
-        return await call_next(request)
+        return None
 
 
 @middleware_utils.websocket_aware
-class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class GracefulShutdownMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to control requests when server is shutting down."""
 
-    async def dispatch(self, request: fastapi.Request, call_next):
+    async def on_request(self, request: fastapi.Request):
         if state.get_block_requests():
             # Allow /api/ paths to continue, which are critical to operate
             # on-going requests but will not submit new requests.
@@ -1201,21 +1257,18 @@ class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                                   'please try again later.'
                     })
 
-        return await call_next(request)
+        return None
 
 
 @middleware_utils.websocket_aware
-class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class APIVersionMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to add API version to the request.
 
     Also records the dispatched endpoint context-locally for workspace-access
     classification (see `sky.server.requests.workspace_access`). The access
     level a request needs on the caller's active workspace is derived from the
     endpoint rather than from the request name, so plugin endpoints are covered
-    by the same declaration as OSS ones. This is folded in here (rather than a
-    dedicated middleware) to avoid an extra `BaseHTTPMiddleware` layer -- each
-    such layer opens an anyio task group + memory stream per request, and the
-    API server is latency-sensitive.
+    by the same declaration as OSS ones.
 
     This layer sits inside `PathCleanMiddleware` / `InternalDashboardPrefix
     Middleware`, so `request.url.path` here is the router-matched path after
@@ -1223,7 +1276,7 @@ class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     inside those two for the recorded path to be correct.
     """
 
-    async def dispatch(self, request: fastapi.Request, call_next):
+    async def on_request(self, request: fastapi.Request):
         workspace_access.set_request_endpoint(request.url.path, request.method)
         version_info = versions.check_compatibility_at_server(request.headers)
         # Bypass version handling for backward compatibility with clients prior
@@ -1231,25 +1284,29 @@ class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         # /api/health response and hint an upgrade.
         # TODO(aylei): remove this after v0.13.0 is released.
         if version_info is None:
-            return await call_next(request)
+            return None
+        request.state.client_version_checked = True
         if version_info.error is None:
             versions.set_remote_api_version(version_info.api_version)
             versions.set_remote_version(version_info.version)
-            response = await call_next(request)
-        else:
-            middleware_utils.mark_rejection(
-                request, middleware_utils.REJECT_REASON_API_VERSION)
-            response = fastapi.responses.JSONResponse(
-                status_code=400,
-                content={
-                    'error': common.ApiServerStatus.VERSION_MISMATCH.value,
-                    'message': version_info.error,
-                })
-        response.headers[server_constants.API_VERSION_HEADER] = str(
+            return None
+        middleware_utils.mark_rejection(
+            request, middleware_utils.REJECT_REASON_API_VERSION)
+        return fastapi.responses.JSONResponse(
+            status_code=400,
+            content={
+                'error': common.ApiServerStatus.VERSION_MISMATCH.value,
+                'message': version_info.error,
+            })
+
+    def on_response(self, request: fastapi.Request, status_code: int,
+                    headers: starlette.datastructures.MutableHeaders) -> None:
+        if not getattr(request.state, 'client_version_checked', False):
+            return
+        headers[server_constants.API_VERSION_HEADER] = str(
             server_constants.API_VERSION)
-        response.headers[server_constants.VERSION_HEADER] = \
-            versions.get_local_readable_version()
-        return response
+        headers[server_constants.VERSION_HEADER] = (
+            versions.get_local_readable_version())
 
 
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
@@ -1259,7 +1316,7 @@ app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 #   app.add_middleware(Middleware3)
 # The effect will be like:
 #   Middleware3(Middleware2(Middleware1(request)))
-# If MiddlewareN does something like print(n); call_next(); print(n), you'll get
+# If MiddlewareN prints n in both on_request and on_response, you'll get
 #   3; 2; 1; <request>; 1; 2; 3
 # The metrics middleware is added last, i.e. outermost; see below.
 # APIVersionMiddleware also records the dispatched endpoint for workspace-access
@@ -1330,7 +1387,7 @@ if __name__ == 'sky.server.server':
 # middleware added), none of those were counted and an authentication outage
 # showed up on dashboards as a drop in successful requests rather than as
 # errors. Use environment variable to make the metrics middleware optional.
-if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
+if metrics_utils.METRICS_ENABLED:
     app.add_middleware(metrics.PrometheusMiddleware)
 
 # The middleware stack is final here: plugins loaded above, the metrics layer
@@ -1355,6 +1412,15 @@ app.include_router(recipes_rest.router, prefix='/recipes', tags=['recipes'])
 # increase the resource limit for the server
 soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
+
+
+@app.exception_handler(exceptions.InvalidUserIdError)
+def handle_invalid_user_id_error(request: fastapi.Request,
+                                 e: exceptions.InvalidUserIdError):
+    del request  # request is not used
+    # The request never reached the queue, so this is a client-side mistake.
+    return fastapi.responses.JSONResponse(status_code=400,
+                                          content={'detail': str(e)})
 
 
 @app.exception_handler(exceptions.ConcurrentWorkerExhaustedError)
@@ -1717,7 +1783,7 @@ async def list_accelerator_counts(
 @app.post('/validate')
 async def validate(validate_body: payloads.ValidateBody) -> None:
     """Validates the user's DAG."""
-    # TODO(SKY-1035): validate if existing cluster satisfies the requested
+    # TODO: validate if existing cluster satisfies the requested
     # resources, e.g. sky exec --gpus V100:8 existing-cluster-with-no-gpus
 
     # TODO: Our current launch process is split into three calls:
@@ -1779,14 +1845,8 @@ async def optimize(optimize_body: payloads.OptimizeBody,
     )
 
 
-async def _prepare_client_mount_dir(user_hash: str,
-                                    request: fastapi.Request) -> pathlib.Path:
-    # For anonymous access, use the user hash from client
-    user_id = user_hash
-    if request.state.auth_user is not None:
-        # Otherwise, the authenticated identity should be used.
-        user_id = request.state.auth_user.id
-
+async def _prepare_client_mount_dir(user_id: str) -> pathlib.Path:
+    # `user_id` is a validated single path component (see owner_user_id).
     client_file_mounts_dir = (
         common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
         'file_mounts')
@@ -1841,19 +1901,28 @@ def _gb(num_bytes: int) -> str:
     return f'{num_bytes / 1000 ** 3:.1f} GB'
 
 
-def _max_upload_total_bytes() -> Optional[int]:
-    """The configured cap on one upload, or None when uncapped."""
-    raw = os.environ.get(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR)
+def _byte_limit_env(name: str) -> Optional[int]:
+    """The byte limit *name* declares, or None when it declares none."""
+    raw = os.environ.get(name)
     if not raw:
         return None
     try:
         value = int(raw)
     except ValueError:
-        logger.warning(
-            'Ignoring unparseable '
-            f'{server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR}={raw!r}')
+        logger.warning(f'Ignoring unparseable {name}={raw!r}')
         return None
     return value if value > 0 else None
+
+
+def _max_upload_total_bytes() -> Optional[int]:
+    """The configured cap on one upload, or None when uncapped."""
+    return _byte_limit_env(server_constants.MAX_UPLOAD_TOTAL_BYTES_ENV_VAR)
+
+
+def _max_stored_file_mounts_bytes() -> Optional[int]:
+    """The configured cap on the stored file mounts, or None when uncapped."""
+    return _byte_limit_env(
+        server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR)
 
 
 def _upload_too_large(num_bytes: int, limit: int) -> fastapi.HTTPException:
@@ -1861,6 +1930,15 @@ def _upload_too_large(num_bytes: int, limit: int) -> fastapi.HTTPException:
         status_code=413,
         detail=(f'Upload of {_gb(num_bytes)} exceeds the {_gb(limit)} limit '
                 'on a single upload. Upload fewer or smaller files.'))
+
+
+def _file_mounts_storage_full(stored: int, limit: int) -> fastapi.HTTPException:
+    return fastapi.HTTPException(
+        status_code=507,
+        detail=(f'The storage holding file mounts is at {_gb(stored)}, over '
+                f'the {_gb(limit)} this server keeps. Read large inputs from '
+                'a bucket or a volume instead of uploading them, or retry '
+                'once the workloads using the current ones have finished.'))
 
 
 def _stored_bytes(directory: Optional[pathlib.Path]) -> int:
@@ -1910,6 +1988,26 @@ def _admit_extraction(members: List[zipfile.ZipInfo], target_dir: pathlib.Path):
         yield
 
 
+async def _admit_stored_file_mounts(blobs_dir: pathlib.Path) -> None:
+    """Refuses a chunk once the blob store's filesystem is full.
+
+    The limit bounds that filesystem, not one user's uploads: anything
+    else mounted there competes for the same space and counts too.
+
+    The limit is soft: an upload admitted while there was still room runs
+    to the end, and uploads in flight are admitted against the same
+    reading. What bounds how far past the limit that carries the store is
+    MAX_UPLOAD_TOTAL_BYTES, and on a backend that extracts, what an
+    admitted archive expands to.
+    """
+    limit = _max_stored_file_mounts_bytes()
+    if limit is None:
+        return
+    stored = await asyncio.to_thread(local_disk.used_for_path, str(blobs_dir))
+    if stored is not None and stored >= limit:
+        raise _file_mounts_storage_full(stored, limit)
+
+
 async def _receive_and_assemble_chunks(
     base_dir: pathlib.Path,
     zip_name: str,
@@ -1936,7 +2034,7 @@ async def _receive_and_assemble_chunks(
             status_code=500,
             detail='Upload request body should not be received before streaming'
         )
-    # TODO(SKY-1271): We need to double check security of uploading zip file.
+    # TODO: We need to double check security of uploading zip file.
     # Check chunk_index to be a valid integer
     if chunk_index < 0 or chunk_index >= total_chunks:
         raise ValueError(
@@ -2069,19 +2167,24 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         chunk_index: The chunk index, starting from 0.
         total_chunks: The total number of chunks.
     """
-    # Add the upload id to the cleanup list.
-    upload_ids_to_cleanup[(upload_id,
-                           user_hash)] = (datetime.datetime.now() +
-                                          _DEFAULT_UPLOAD_EXPIRATION_TIME)
-    # Check upload_id to be a valid SkyPilot run_timestamp appended with 8 hex
-    # characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
-    if not re.match(
+    # Validate upload_id BEFORE any side effect: it is the last component of
+    # the path this request writes to and the path a later cleanup deletes.
+    # A valid SkyPilot run_timestamp appended with 8 hex characters, e.g.
+    # 'sky-2025-01-17-09-10-13-933602-35d31c22'.
+    if not re.fullmatch(
             r'sky-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}-'
-            r'[0-9]{2}-[0-9]{6}-[0-9a-f]{8}$', upload_id):
-        raise ValueError(
-            f'Invalid upload_id: {upload_id}. Please use a valid uuid.')
+            r'[0-9]{2}-[0-9]{6}-[0-9a-f]{8}', upload_id):
+        raise fastapi.HTTPException(status_code=400,
+                                    detail=f'Invalid upload_id: {upload_id}')
 
-    base_dir = await _prepare_client_mount_dir(user_hash, request)
+    user_id = download_utils.owner_user_id(request, user_hash)
+    # Register cleanup under the validated owner id, i.e. the dir actually
+    # written, so cleanup deletes exactly that dir and nothing else.
+    upload_ids_to_cleanup[(upload_id,
+                           user_id)] = (datetime.datetime.now() +
+                                        _DEFAULT_UPLOAD_EXPIRATION_TIME)
+
+    base_dir = await _prepare_client_mount_dir(user_id)
     missing_chunks = await _receive_and_assemble_chunks(
         base_dir=base_dir,
         zip_name=upload_id,
@@ -2106,12 +2209,10 @@ async def check_blob_exists(
         description='Client-reported compressed ZIP size in bytes.'),
 ) -> Dict[str, bool]:
     """Check if a file mount blob already exists."""
-    if not re.match(r'^[0-9a-f]{64}$', blob_id):
+    if not re.fullmatch(r'[0-9a-f]{64}', blob_id):
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Invalid blob_id: {blob_id}')
-    user_id = user_hash
-    if request.state.auth_user is not None:
-        user_id = request.state.auth_user.id
+    user_id = download_utils.owner_user_id(request, user_hash)
     exists = await bs.get_blob_storage().blob_exists(user_id, blob_id)
     if metrics_utils.METRICS_ENABLED and size_bytes is not None:
         metrics_utils.SKY_APISERVER_BLOB_CHECK_SIZE_BYTES.labels(
@@ -2129,13 +2230,11 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
     into a staging directory, then atomically renames to a shared extraction
     directory (blobs/{upload_id}/) so all requests can reuse it.
     """
-    if not re.match(r'^[0-9a-f]{64}$', upload_id):
+    if not re.fullmatch(r'[0-9a-f]{64}', upload_id):
         raise fastapi.HTTPException(
             status_code=400, detail=f'Invalid upload_id for v2: {upload_id}')
 
-    user_id = user_hash
-    if request.state.auth_user is not None:
-        user_id = request.state.auth_user.id
+    user_id = download_utils.owner_user_id(request, user_hash)
 
     storage = bs.get_blob_storage()
 
@@ -2156,6 +2255,7 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
     # Note that we skip assemble and extract here since cocurrent chunk
     # uploads will race, and we do finalize with the upload_lock instead.
     staging_dir = storage.get_staging_dir(user_id, upload_id)
+    await _admit_stored_file_mounts(storage.blobs_dir(user_id))
     result = await _receive_and_assemble_chunks(base_dir=staging_dir,
                                                 zip_name='staging',
                                                 request=request,
@@ -2278,6 +2378,21 @@ async def launch(launch_body: payloads.LaunchBody,
                  request: fastapi.Request) -> None:
     """Launches a cluster or task."""
     request_id = request.state.request_id
+    # Only the jobs and serve controllers set these, and they always call a
+    # co-located server over loopback. From anyone else they would let the
+    # caller pick the admin policy request name and the provisioning path.
+    if ((launch_body.is_launched_by_jobs_controller or
+         launch_body.is_launched_by_sky_serve_controller or
+         launch_body.extra_launch_context) and
+            not loopback.is_loopback_request(request)):
+        peer = request.client.host if request.client else None
+        logger.warning(f'Rejected launch request {request_id} for cluster '
+                       f'{launch_body.cluster_name!r} from {peer}: '
+                       'controller-only fields set by a non-loopback caller.')
+        raise fastapi.HTTPException(
+            status_code=403,
+            detail='Controller-only launch fields are not accepted from '
+            'remote clients.')
     logger.info(f'Launching request: {request_id}')
     await executor.schedule_request_async(
         request_id,
@@ -2531,7 +2646,8 @@ async def download_logs(
         request: fastapi.Request,
         cluster_jobs_body: payloads.ClusterJobsDownloadLogsBody) -> None:
     """Downloads the logs of a job."""
-    user_hash = download_utils.download_user_id(request, cluster_jobs_body)
+    user_hash = download_utils.owner_user_id(request,
+                                             cluster_jobs_body.user_hash)
     logs_dir_on_api_server = pathlib.Path(
         bs.get_blob_storage().download_tmp_dir(user_hash))
     logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
@@ -2553,7 +2669,7 @@ async def download_logs(
 async def download(download_body: payloads.DownloadBody,
                    request: fastapi.Request) -> None:
     """Downloads a folder from the cluster to the local machine."""
-    user_hash = download_utils.download_user_id(request, download_body)
+    user_hash = download_utils.owner_user_id(request, download_body.user_hash)
     logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
     download_tmp = bs.get_blob_storage().download_tmp_dir(user_hash)
     allowed_roots = [
@@ -3143,7 +3259,9 @@ async def api_status(
     limit: Optional[int] = fastapi.Query(
         None, description='Number of requests to show.'),
     fields: Optional[List[str]] = fastapi.Query(
-        None, description='Fields to get. If None, get all fields.'),
+        None,
+        description=('Fields to get. If None, get all fields except '
+                     'return_value and error. Ignored if request_ids is set.')),
     cluster_name: Optional[str] = fastapi.Query(
         None, description='Filter requests by cluster name.'),
 ) -> List[payloads.RequestPayload]:
@@ -3176,7 +3294,7 @@ async def api_status(
                     for d in daemons.HIDDEN_REQUEST_NAMES
                 ],
                 limit=limit,
-                fields=fields,
+                fields=fields or requests_lib.DISPLAY_COLUMNS,
                 sort=True,
             ))
         return requests_lib.encode_requests(request_tasks,
@@ -3185,7 +3303,7 @@ async def api_status(
         encoded_request_tasks = []
         for request_id in request_ids:
             request_tasks = await requests_lib.get_requests_async_with_prefix(
-                request_id)
+                request_id, requests_lib.DISPLAY_COLUMNS)
             if request_tasks is None:
                 continue
             for request_task in request_tasks:
@@ -3544,38 +3662,16 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
     head_ssh_port = handle.head_ssh_port or 22
     kubectl_cmd = handle.get_command_runners()[0].port_forward_command(
         port_forward=[(None, head_ssh_port)])
-    # Under uvloop, `asyncio.create_subprocess_exec` goes through libuv's
-    # `uv_spawn`, which on Linux always uses fork().
-    # The forked child runs `PyOS_AfterFork_Child` which tears down inherited
-    # Python objects; if any sqlite3 statement is in that set, its
-    # destructor calls `sqlite3_free → pthread_mutex_lock` on the sqlite3
+    # Must not fork. Beyond the stall `spawn_without_fork` documents, a child
+    # forked from this process runs `PyOS_AfterFork_Child`, which tears down
+    # inherited Python objects; if any sqlite3 statement is among them, its
+    # destructor calls `sqlite3_free -> pthread_mutex_lock` on the sqlite3
     # static allocator mutex. That mutex was held by another parent thread at
-    # the fork moment (aiosqlite worker), and the child only has one thread,
-    # so no one ever releases it. Child deadlocks before execv, leaks the
-    # parent's inherited fds (including every `.<request>.lock` flock), and
-    # the parent's event loop stall trips uvicorn's 5s ping-timeout →
-    # parent SIGKILL.
-    # Run `subprocess.Popen` in a worker thread to bypass uvloop's transport
-    # entirely.
-    if _KUBECTL_PATH is None or not os.path.isabs(_KUBECTL_PATH):
-        raise RuntimeError(
-            'kubectl not found on PATH with an absolute path; refusing to '
-            'fall back to fork-based spawn which risks the SQLite-mutex '
-            'ghost-worker deadlock.')
-    argv = [_KUBECTL_PATH] + list(kubectl_cmd[1:])
-
-    def _spawn_sync() -> subprocess.Popen:
-        return subprocess.Popen(
-            argv,
-            executable=_KUBECTL_PATH,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            close_fds=False,
-        )
-
+    # the fork moment (aiosqlite worker), and the child has only one thread,
+    # so nobody releases it. The child then deadlocks before execv and leaks
+    # every fd it inherited, including each `.<request>.lock` flock.
     loop = asyncio.get_running_loop()
-    proc = await loop.run_in_executor(None, _spawn_sync)
+    proc = await asyncio_utils.spawn_without_fork(kubectl_cmd)
     logger.info(f'Started kubectl port-forward with command: {kubectl_cmd}')
     assert proc.stdout is not None
 
@@ -3713,7 +3809,9 @@ def _build_slurm_job_ssh_command(
     )
     if slurm_user is not None:
         command = command_runner.wrap_command_as_user(
-            command, slurm_user, use_sudo=login_node_user != 'root')
+            shlex.split(command),
+            slurm_user,
+            use_sudo=login_node_user != 'root')
     return command
 
 
@@ -3790,19 +3888,27 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
             ))
     ]
 
-    proc = await asyncio.create_subprocess_shell(
-        ' '.join(ssh_cmd),
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,  # Capture stderr separately for logging
+    loop = asyncio.get_running_loop()
+    # `/bin/sh -c` is what `asyncio.create_subprocess_shell` would run, minus
+    # the forking spawn that call carries under uvloop.
+    proc = await asyncio_utils.spawn_without_fork(
+        ['/bin/sh', '-c', ' '.join(ssh_cmd)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,  # Capture stderr separately for logging
     )
     assert proc.stdin is not None
     assert proc.stdout is not None
     assert proc.stderr is not None
 
-    stdin = proc.stdin
-    stdout = proc.stdout
-    stderr = proc.stderr
+    # Drive the three pipes without handing their fds to the loop; `proc`
+    # stays their single owner and closes each exactly once in the `finally`.
+    stdin = asyncio_utils.NonOwningPipeWriter(loop, proc.stdin.fileno())
+    stdout = asyncio_utils.NonOwningPipeReader(loop, proc.stdout.fileno())
+    stderr = asyncio_utils.NonOwningPipeReader(loop, proc.stderr.fileno())
+    stdin.start()
+    stdout.start()
+    stderr.start()
 
     async def log_stderr():
         while True:
@@ -3811,9 +3917,11 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
                 break
             logger.debug(f'srun stderr: {line.decode().rstrip()}')
 
-    stderr_task = None
-    if env_options.Options.SHOW_DEBUG_INFO.get():
-        stderr_task = asyncio.create_task(log_stderr())
+    # Drain stderr for the life of the session, not only under SKYPILOT_DEBUG:
+    # the reader empties the OS pipe as soon as srun writes, so an unconsumed
+    # stderr grows the buffer it feeds instead of filling the pipe. `logger`
+    # drops the lines itself when debug logging is off.
+    stderr_task = asyncio.create_task(log_stderr())
     conn_gauge = metrics_utils.SKY_APISERVER_WEBSOCKET_CONNECTIONS.labels(
         pid=os.getpid())
     ssh_failed = False
@@ -3823,11 +3931,14 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
             path=websocket_utils.SSH_PATH_SLURM).inc()
 
         async def write_and_drain(data: bytes) -> None:
-            stdin.write(data)
-            await stdin.drain()
+            await stdin.write(data)
 
         async def close_stdin() -> None:
+            # Stop watching, then close the fd through its owner: srun reads
+            # EOF on stdin and shuts the session down.
             stdin.close()
+            assert proc.stdin is not None
+            proc.stdin.close()
 
         ssh_failed = await websocket_utils.run_websocket_proxy(
             websocket,
@@ -3841,35 +3952,51 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
         )
 
     finally:
+        # Nothing in this block may `await`: a cancellation delivered into one
+        # skips every statement after it, and this is the only code that takes
+        # the loop's watchers off the srun pipes before their owner closes
+        # them. A watcher left on a closed fd fires for whatever the kernel
+        # hands out next. `test_slurm_ssh_proxy_teardown_does_not_await`
+        # enforces this.
         conn_gauge.dec()
-        reason = ''
-        try:
-            logger.info('Terminating srun process')
+        logger.info('Terminating srun process')
+        # `subprocess.Popen.terminate()` is a no-op on a process that has
+        # already been reaped rather than raising ProcessLookupError, so ask
+        # for the exit status directly.
+        srun_exited = proc.poll() is not None
+        if not srun_exited:
             proc.terminate()
-        except ProcessLookupError:
-            stdout_data = await stdout.read()
-            logger.error('srun process was terminated before the '
-                         'ssh websocket connection was closed. Remaining '
-                         f'output: {str(stdout_data)}')
-            reason = 'SrunProcessExit'
-            metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
-                pid=os.getpid(), reason=reason).inc()
-        else:
-            if ssh_failed:
-                reason = 'SSHToSlurmJobDisconnected'
-            else:
-                reason = 'ClientClosed'
+        stderr_task.cancel()
+        # Reads the fd, so it has to run before the owner closes it below.
+        leftover = stdout.drain() if srun_exited else b''
 
+        # Every watcher has to come off its fd before the object that owns the
+        # fd closes it.
+        stdin.close()
+        stdout.stop()
+        stderr.stop()
+        for pipe in (proc.stdin, proc.stdout, proc.stderr):
+            if pipe is not None:
+                pipe.close()
+        # `subprocess.Popen` is outside asyncio's child watcher, so nothing
+        # else would ever wait() on srun.
+        loop.run_in_executor(None, _reap_srun, proc)
+
+        if srun_exited:
+            logger.error('srun process exited with returncode '
+                         f'{proc.returncode} before the ssh websocket '
+                         'connection was closed; its stderr is in the debug '
+                         f'log. Remaining output: {str(leftover)}')
+            reason = 'SrunProcessExit'
+        elif ssh_failed:
+            reason = 'SSHToSlurmJobDisconnected'
+        else:
+            reason = 'ClientClosed'
+        # Counted once per session. The early-exit branch used to increment
+        # here as well as on its own, so one failed session reported two
+        # closures.
         metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
             pid=os.getpid(), reason=reason).inc()
-
-        # Cancel the stderr logging task if it's still running
-        if stderr_task is not None and not stderr_task.done():
-            stderr_task.cancel()
-            try:
-                await stderr_task
-            except asyncio.CancelledError:
-                pass
 
 
 @app.websocket('/ssh-interactive-auth')
@@ -4217,7 +4344,7 @@ def _init_or_restore_server_user_hash():
     """Restores the server user hash from the global user state db.
 
     The API server must have a stable user hash across restarts and potential
-    multiple replicas. Thus we persist the user hash in db and restore it on
+    multiple instances. Thus we persist the user hash in db and restore it on
     startup. When upgrading from old version, the user hash will be read from
     the local file (if any) to keep the user hash consistent.
     """
@@ -4237,7 +4364,7 @@ def _init_or_restore_server_user_hash():
         return
 
     # Initial deployment. Insert-if-absent and apply whatever is live
-    # afterwards: replicas starting together would otherwise each generate a
+    # afterwards: servers starting together would otherwise each generate a
     # hash and the last write would win, leaving them disagreeing on the
     # server id they have already applied locally.
     user_hash = global_user_state.get_or_set_system_config(
@@ -4272,7 +4399,7 @@ def _bootstrap_jwt_secret() -> None:
 if __name__ == '__main__':
     # Raise the websockets library header limits before importing uvicorn.
     # The env vars are read by websockets.http11 and websockets.legacy.http
-    # at import time. Enterprise SSO cookies from oauth2proxy can exceed the
+    # at import time. Large auth cookies from an auth proxy can exceed the
     # default 8KB limit, causing WebSocket upgrade to fail with HTTP 400.
     os.environ.setdefault('WEBSOCKETS_MAX_LINE_LENGTH',
                           server_constants.WEBSOCKETS_MAX_HEADER_LINE_LENGTH)
@@ -4308,6 +4435,13 @@ if __name__ == '__main__':
     if not common_utils.is_port_available(cmd_args.port):
         logger.error(f'Port {cmd_args.port} is not available, exiting.')
         raise RuntimeError(f'Port {cmd_args.port} is not available')
+
+    # Decide whether to contain client file-mount sources and record it in the
+    # process env before any worker is spawned, so workers inherit it. A
+    # deployed / network-reachable server enforces; a loopback `sky api start`
+    # is exempt (its legitimate sources are arbitrary local paths). An operator
+    # may override this by exporting the env var explicitly before startup.
+    common.init_mount_containment_enforced(cmd_args.deploy, cmd_args.host)
 
     # Always load plugin in main process, an edge case is that the main process
     # will also run uvicorn server when num_worker=1 and then the plugins will
@@ -4347,6 +4481,24 @@ if __name__ == '__main__':
     permission.permission_service.initialize()
     logger.info('Permission service initialized')
 
+    # Nothing can legitimately be provisioning yet, so any launch attempt
+    # still open belongs to a process that died mid-launch. Closing them here
+    # keeps a new launch of the same cluster from stamping milestones onto a
+    # dead attempt, and makes the measurements that were lost countable.
+    #
+    # Guarded because this is startup: tidying measurement rows must not be
+    # able to stop the server from coming up. The daemon that also runs this
+    # catches for the same reason, and the next tick of it will sweep whatever
+    # was missed here.
+    try:
+        stranded = global_user_state.sweep_abandoned_launch_attempts()
+        if stranded:
+            logger.info(f'Closed {stranded} launch attempt(s) abandoned by a '
+                        'previous server process.')
+    except Exception as sweep_error:  # pylint: disable=broad-except
+        logger.warning(f'Could not sweep abandoned launch attempts at '
+                       f'startup: {sweep_error}')
+
     max_db_connections = global_user_state.get_max_db_connections()
     logger.info(f'Max db connections: {max_db_connections}')
 
@@ -4358,6 +4510,12 @@ if __name__ == '__main__':
             # pool controller.
             reserve_extra_for_pool=not os.environ.get(
                 constants.IS_SKYPILOT_SERVE_CONTROLLER)))
+
+    # Explicit pool sizes are checked here, before requests are accepted: the
+    # controller pool starts from a background thread that retries on errors,
+    # and compute_server_config() does not check the short-pool floor.
+    server_config.validate_explicit_worker_counts()
+    controller_utils.explicit_jobs_controllers()
 
     config = server_config.compute_server_config(
         cmd_args.deploy,
@@ -4372,7 +4530,7 @@ if __name__ == '__main__':
     global_tasks: List[asyncio.Task] = []
     try:
         background = uvloop.new_event_loop()
-        if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
+        if metrics_utils.METRICS_ENABLED:
             metrics.maybe_register_managed_jobs_collector()
             # Deliberately not on `background`: the scrape shares that
             # loop's anyio thread limiter with every daemon below, and the
@@ -4406,8 +4564,8 @@ if __name__ == '__main__':
         # supervisor process so the leader role and the controller
         # subprocesses it spawns share a single OS lifecycle.  Routing
         # this daemon through the executor task queue (as other daemons
-        # do) lets it drift between replicas while the controllers stay
-        # behind, which causes cross-replica controller orphans.  See
+        # do) lets it drift between servers while the controllers stay
+        # behind, which orphans controllers on the server it left.  See
         # sky/jobs/managed_job_refresh_thread.py for details.
         # pylint: disable=import-outside-toplevel
         from sky.jobs import managed_job_refresh_thread

@@ -321,7 +321,9 @@ class LaunchBody(RequestBody):
     quiet_optimizer: bool = False
     is_launched_by_jobs_controller: bool = False
     is_launched_by_sky_serve_controller: bool = False
-    disable_controller_check: bool = False
+    # No disable_controller_check here: the Kubernetes service account is
+    # chosen by the controller-name prefix, so only in-process callers may
+    # skip that check. Old clients still send it; extra='ignore' drops it.
     # When True, resize the existing cluster to the num_nodes specified in
     # the task instead of performing a normal launch.
     resize: bool = False
@@ -352,8 +354,6 @@ class LaunchBody(RequestBody):
             'is_launched_by_jobs_controller')
         kwargs['_is_launched_by_sky_serve_controller'] = kwargs.pop(
             'is_launched_by_sky_serve_controller')
-        kwargs['_disable_controller_check'] = kwargs.pop(
-            'disable_controller_check')
         kwargs['_extra_launch_context'] = kwargs.pop('extra_launch_context')
         kwargs['_include_credentials'] = kwargs.pop('include_credentials')
         return kwargs
@@ -632,6 +632,8 @@ class JobsLaunchBody(RequestBody):
     # False when it came from the in-job-group default. Decides whether a
     # server that cannot record attachments errors or launches top-level.
     job_group_explicit: bool = False
+    # Managed jobs this job waits for.
+    depends_on: Optional[List[int]] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
@@ -661,6 +663,11 @@ class JobsQueueV2Body(RequestBody):
     skip_finished: bool = False
     all_users: bool = False
     job_ids: Optional[List[int]] = None
+    # With `job_ids`, also return the rest of each job's tree: the jobs
+    # launched under it, at any depth. Servers older than
+    # MIN_JOBS_INCLUDE_TREE_API_VERSION ignore this field, so the client
+    # checks the server version before sending it.
+    include_tree: bool = False
     user_match: Optional[str] = None
     workspace_match: Optional[str] = None
     name_match: Optional[str] = None
@@ -964,6 +971,10 @@ class UpdateWorkspaceBody(RequestBody):
     """The request body for updating a specific workspace configuration."""
     workspace_name: str = ''  # Will be set from path parameter
     config: Dict[str, Any]
+    # The workspace config the update was based on. When set, the update is
+    # rejected with WorkspaceConfigConflictError if the workspace no longer
+    # holds it (compared under the config lock).
+    expected_config: Optional[Dict[str, Any]] = None
 
 
 class CreateWorkspaceBody(RequestBody):
