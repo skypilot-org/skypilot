@@ -3734,10 +3734,13 @@ class TestRunJobLoopTransientDbErrors:
             raise RuntimeError('context initialization failed')
 
         sleep_calls = 0
+        real_sleep = asyncio.sleep
 
         async def stop_monitor(seconds):
             nonlocal sleep_calls
-            del seconds
+            if seconds == 0:
+                await real_sleep(0)
+                return
             sleep_calls += 1
             if sleep_calls > 1:
                 raise asyncio.CancelledError()
@@ -3918,6 +3921,12 @@ class TestRunJobLoopTransientDbErrors:
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(manager.monitor_loop(), timeout=1)
 
+        async def initialization_finished():
+            while (not managed_job_state.fail_job_controller_initialization.
+                   called or 1 in manager.starting):
+                await asyncio.sleep(0)
+
+        await asyncio.wait_for(initialization_finished(), timeout=1)
         assert managed_job_state.get_waiting_job_async.await_count == 2
         assert not unrelated_task.done()
         assert 1 not in manager.starting
@@ -3951,8 +3960,95 @@ class TestRunJobLoopTransientDbErrors:
         with pytest.raises(asyncio.CancelledError):
             await manager.monitor_loop()
 
+        async def start_dispatched():
+            while start_job.await_count == 0:
+                await asyncio.sleep(0)
+
+        await asyncio.wait_for(start_dispatched(), timeout=1)
         start_job.assert_awaited_once_with(1, None)
         assert signal_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_monitor_loop_claims_next_job_during_initialization(
+            self, manager, monkeypatch, tmp_path):
+        first_started = asyncio.Event()
+        second_started = asyncio.Event()
+        first_finished = asyncio.Event()
+        release_first = asyncio.Event()
+
+        async def start_job(job_id, pool):
+            del pool
+            if job_id == 1:
+                first_started.set()
+                await release_first.wait()
+                first_finished.set()
+            else:
+                second_started.set()
+
+        monkeypatch.setattr(manager, 'start_job', start_job)
+        monkeypatch.setattr(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                            str(tmp_path))
+        monkeypatch.setattr(
+            managed_job_state, 'get_waiting_job_async',
+            AsyncMock(side_effect=[{
+                'job_id': 1,
+                'pool': None
+            }, {
+                'job_id': 2,
+                'pool': None
+            }, None]))
+
+        monitor = asyncio.create_task(manager.monitor_loop())
+        try:
+            await asyncio.wait_for(first_started.wait(), timeout=1)
+            await asyncio.wait_for(second_started.wait(), timeout=1)
+        finally:
+            release_first.set()
+            monitor.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await monitor
+            await asyncio.wait_for(first_finished.wait(), timeout=1)
+
+    @pytest.mark.asyncio
+    async def test_monitor_loop_counts_initializing_job_before_next_claim(
+            self, manager, monkeypatch, tmp_path):
+        manager.starting.clear()
+        started = asyncio.Event()
+        finished = asyncio.Event()
+        release = asyncio.Event()
+
+        async def start_job(job_id, pool):
+            del pool
+            manager.starting.add(job_id)
+            started.set()
+            await release.wait()
+            finished.set()
+
+        monkeypatch.setattr(manager, 'start_job', start_job)
+        monkeypatch.setattr(controller_module.controller_utils,
+                            'LAUNCHES_PER_WORKER', 1)
+        monkeypatch.setattr(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                            str(tmp_path))
+        get_waiting = AsyncMock(side_effect=[{
+            'job_id': 1,
+            'pool': None
+        }, {
+            'job_id': 2,
+            'pool': None
+        }])
+        monkeypatch.setattr(managed_job_state, 'get_waiting_job_async',
+                            get_waiting)
+
+        monitor = asyncio.create_task(manager.monitor_loop())
+        try:
+            await asyncio.wait_for(started.wait(), timeout=1)
+            assert get_waiting.await_count == 1
+        finally:
+            release.set()
+            monitor.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await monitor
+            await asyncio.wait_for(finished.wait(), timeout=1)
 
     @pytest.mark.asyncio
     async def test_pending_cancel_retries_transient_db_error(

@@ -204,6 +204,14 @@ _DEADLINE_CHECK_INTERVAL_SECONDS = 30
 _DEADLINE_CANCELS_PER_CHECK = controller_utils.LAUNCHES_PER_WORKER
 
 
+async def create_background_task(coro: typing.Coroutine) -> None:
+    """Create a background task and keep a strong reference to it."""
+    async with _background_tasks_lock:
+        task = asyncio.create_task(coro)
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+
+
 def _get_dag(job_id: int) -> 'sky.Dag':
     """Parse a fresh Dag from the job's stored YAML.
 
@@ -4339,7 +4347,9 @@ class ControllerManager:
                         await callback('CANCELLED')
                         continue
 
-            await self.start_job(job_id, pool)
+            await create_background_task(self.start_job(job_id, pool))
+            # Let start_job reserve its launch slot before claiming another.
+            await asyncio.sleep(0)
 
 
 async def main(controller_uuid: str):
