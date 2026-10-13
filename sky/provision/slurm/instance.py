@@ -201,15 +201,24 @@ def _build_gres_directive(sbatch_options: Dict[str, Any],
     for key, value in sbatch_options.items():
         if key.replace('_', '-') == _SBATCH_GRES_OPTION:
             user_value = value
-    if user_value not in (None, False):
-        str_value = str(user_value)
+    if user_value is not None and not isinstance(user_value, str):
+        # The schema allows booleans and numbers for sbatch options, but
+        # neither names a GRES: `gres: true` would request a GRES named
+        # `True`.
+        if user_value is not False:
+            logger.warning(
+                f'{colorama.Fore.YELLOW}Ignoring slurm.sbatch_options.gres '
+                f'{user_value!r}: expected a GRES string such as '
+                f'"scratch:300G".{colorama.Style.RESET_ALL}')
+        user_value = None
+    if user_value is not None:
         # Defense in depth: schema validation rejects newlines, but guard
         # here too to prevent script injection.
-        if '\n' in str_value:
+        if '\n' in user_value:
             raise ValueError(
                 f'Newline characters are not allowed in sbatch options: '
-                f'{_SBATCH_GRES_OPTION!r}={str_value!r}')
-        for entry in str_value.split(','):
+                f'{_SBATCH_GRES_OPTION!r}={user_value!r}')
+        for entry in user_value.split(','):
             entry = entry.strip()
             if not entry:
                 continue

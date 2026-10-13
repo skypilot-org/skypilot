@@ -222,6 +222,12 @@ class TestBuildGresDirective:
         assert (_build_gres_directive({'gres': user_gres}, 'H100',
                                       1) == '#SBATCH --gres=gpu:H100:1')
 
+    @pytest.mark.parametrize('user_gres', [True, 1, 2.5])
+    def test_non_string_user_gres_ignored(self, user_gres):
+        assert (_build_gres_directive({'gres': user_gres}, 'H100',
+                                      1) == '#SBATCH --gres=gpu:H100:1')
+        assert _build_gres_directive({'gres': user_gres}, None, 0) == ''
+
     def test_newline_in_user_gres_raises(self):
         with pytest.raises(ValueError, match='Newline'):
             _build_gres_directive({'gres': 'scratch:1G\n#SBATCH --x'}, None, 0)
