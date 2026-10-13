@@ -613,6 +613,20 @@ def shared_controller_vars_to_fill(
         # Remove api_server config so that the controller does not try to use
         # a remote API server.
         local_user_config.pop('api_server', None)
+        # A dedicated controller may run an older wheel that rejects these
+        # keys. Without names, its replayed `active_workspace` (an id) still
+        # resolves exactly; a consolidated controller is the same version and
+        # keeps the id marker, which pins recovery to the workspace id.
+        for workspace_config in (local_user_config.get('workspaces') or
+                                 {}).values():
+            if isinstance(workspace_config, dict):
+                workspace_config.pop('name', None)
+        if controller.value.controller_type == 'jobs':
+            consolidated = is_jobs_consolidation_mode()
+        else:
+            consolidated = _is_consolidation_mode(pool=False)
+        if not consolidated:
+            local_user_config.pop('active_workspace_id', None)
         with tempfile.NamedTemporaryFile(
                 delete=False,
                 suffix=_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX) as temp_file:

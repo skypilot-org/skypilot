@@ -655,6 +655,39 @@ def test_get_cloud_dependencies_installation_commands_cudo_only(
     assert 'cudoctl' in combined_commands
 
 
+@pytest.mark.parametrize('consolidated', [False, True])
+def test_controller_config_drops_workspace_names(consolidated: bool,
+                                                 monkeypatch):
+    """Workspace names never reach a controller; the id marker only reaches a
+    consolidated one (same version as the server)."""
+    from sky.utils import yaml_utils
+
+    monkeypatch.setattr(
+        'sky.utils.controller_utils._get_cloud_dependencies_installation_commands',
+        lambda controller: [])
+    monkeypatch.setattr('sky.utils.controller_utils.is_jobs_consolidation_mode',
+                        lambda: consolidated)
+    controller = controller_utils.Controllers.from_type('jobs')
+    user_config = {
+        'active_workspace': 'team-a',
+        'active_workspace_id': 'team-a',
+        'workspaces': {
+            'team-a': {
+                'name': 'proj-a',
+                'private': False
+            }
+        },
+    }
+
+    result = controller_utils.shared_controller_vars_to_fill(
+        controller, '/remote/path/to/config', user_config)
+
+    saved_config = yaml_utils.read_yaml(result['local_user_config_path'])
+    assert saved_config['workspaces'] == {'team-a': {'private': False}}
+    assert saved_config['active_workspace'] == 'team-a'
+    assert ('active_workspace_id' in saved_config) == consolidated
+
+
 @pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
 def test_shared_controller_vars_to_fill(controller_type: str, monkeypatch):
     """Test that api_server config is removed from user config sent to controller."""

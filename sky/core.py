@@ -1771,6 +1771,16 @@ def enabled_clouds(workspace: Optional[str] = None,
 
 
 @usage_lib.entrypoint
+def enabled_clouds_for_request(workspace: Optional[str] = None,
+                               expand: bool = False,
+                               workspace_id: Optional[str] = None) -> List[str]:
+    """`GET /enabled_clouds`: `workspace` is typed by a user (CLI); UIs send
+    the exact `workspace_id` instead."""
+    if workspace_id is None and workspace is not None:
+        workspace_id = skypilot_config.resolve_workspace_ref(workspace)
+    return enabled_clouds(workspace=workspace_id, expand=expand)
+
+
 def enabled_clouds_batch(workspaces: List[str],
                          expand: bool = False) -> Dict[str, List[str]]:
     """Returns enabled clouds for multiple workspaces in a single call.

@@ -504,6 +504,29 @@ def get_workspace_name(workspace_id: str,
     return workspace_id
 
 
+def resolve_workspace_ref(ref: str,
+                          workspaces: Optional[Dict[str, Any]] = None) -> str:
+    """Maps a workspace a person typed (`-w`, `active_workspace`) to its id.
+
+    Only for fields a person types: ids from records, URLs and stored config
+    must be used as-is, since a renamed workspace's old name can be reused by
+    another workspace. A current name wins; an unmatched ref is returned
+    unchanged, so an old name (the id) still works until it is reused and an
+    unknown one fails where it is checked today.
+    """
+    if workspaces is None:
+        workspaces = get_nested(keys=('workspaces',), default_value={})
+    matches = [
+        workspace_id for workspace_id in set(workspaces) |
+        {constants.SKYPILOT_DEFAULT_WORKSPACE}
+        if get_workspace_name(workspace_id, workspaces) == ref
+    ]
+    if len(matches) > 1:
+        raise ValueError(f'More than one workspace is named {ref!r}. Ask an '
+                         'administrator to rename one of them.')
+    return matches[0] if matches else ref
+
+
 def get_workspace_cloud(cloud: str,
                         workspace: Optional[str] = None) -> config_utils.Config:
     """Returns the workspace cloud config, deep-merged with global cloud config.
@@ -665,6 +688,9 @@ def resolved_config() -> config_utils.Config:
     """
     config = to_dict()
     config['active_workspace'] = get_active_workspace()
+    # Job configs saved from this are replayed on recovery; the id must not
+    # be re-resolved as a name there.
+    config['active_workspace_id'] = config['active_workspace']
     return config
 
 
@@ -1023,11 +1049,22 @@ def override_skypilot_config(
         override_configs=dict(override_configs),
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
-    workspace = config.get_nested(
-        keys=('active_workspace',),
-        default_value=constants.SKYPILOT_DEFAULT_WORKSPACE)
-    if (workspace != constants.SKYPILOT_DEFAULT_WORKSPACE and workspace
-            not in get_nested(keys=('workspaces',), default_value={})):
+    workspaces = get_nested(keys=('workspaces',), default_value={})
+    # `active_workspace_id` is set by system callers (job recovery, the
+    # dashboard) and is exact; `active_workspace` is typed by a person.
+    workspace = config.get_nested(keys=('active_workspace_id',),
+                                  default_value=None)
+    if workspace is None:
+        workspace = config.get_nested(keys=('active_workspace',),
+                                      default_value=None)
+        if workspace is not None:
+            workspace = resolve_workspace_ref(workspace, workspaces)
+    if workspace is None:
+        workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
+    else:
+        config.set_nested(('active_workspace',), workspace)
+    if (workspace != constants.SKYPILOT_DEFAULT_WORKSPACE and
+            workspace not in workspaces):
         raise ValueError(f'Workspace {workspace} does not exist. '
                          'Use `sky check` to see if it is defined on the API '
                          'server and try again.')

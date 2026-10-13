@@ -193,8 +193,17 @@ def set_user_preferred_workspace(
     if auth_user is None:
         raise fastapi.HTTPException(status_code=401,
                                     detail='Not authenticated.')
+    preferred = body.preferred
+    if preferred is not None:
+        # Typed by the user (`sky workspace use NAME`); the users table stores
+        # the id. Resolve against the latest config, not this process's copy.
+        server_common.refresh_workspace_state_for_sync_handler()
+        try:
+            preferred = skypilot_config.resolve_workspace_ref(preferred)
+        except ValueError as e:
+            raise fastapi.HTTPException(status_code=409, detail=str(e)) from e
     try:
-        workspaces_core.set_user_preferred_workspace(auth_user, body.preferred)
+        workspaces_core.set_user_preferred_workspace(auth_user, preferred)
     except exceptions.PermissionDeniedError as e:
         raise fastapi.HTTPException(status_code=403, detail=str(e)) from e
     except ValueError as e:
@@ -282,6 +291,12 @@ def get_user_workspace(
     # set `active_workspace` globally gets honored.
     if requested is None and skypilot_config.is_active_workspace_set():
         requested = skypilot_config.get_active_workspace()
+    if requested is not None:
+        # The client's `active_workspace` is what a person typed.
+        try:
+            requested = skypilot_config.resolve_workspace_ref(requested)
+        except ValueError as e:
+            raise fastapi.HTTPException(status_code=409, detail=str(e)) from e
     response: Dict[str, Any] = {
         'workspace': None,
         'source': None,

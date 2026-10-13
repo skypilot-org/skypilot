@@ -505,6 +505,24 @@ def check(
     return result
 
 
+def check_for_request(
+    quiet: bool = False,
+    verbose: bool = False,
+    clouds: Optional[Iterable[str]] = None,
+    workspace: Optional[str] = None,
+) -> Dict[str, Dict[str, List[str]]]:
+    """`POST /check`: `check`, with `workspace` as typed by the user.
+
+    In-process callers hold workspace ids and call `check` directly.
+    """
+    if workspace is not None:
+        workspace = skypilot_config.resolve_workspace_ref(workspace)
+    return check(quiet=quiet,
+                 verbose=verbose,
+                 clouds=clouds,
+                 workspace=workspace)
+
+
 def get_cached_enabled_clouds_or_refresh(
         capability: sky_cloud.CloudCapability,
         raise_if_no_cloud_access: bool = False) -> List[sky_clouds.Cloud]:

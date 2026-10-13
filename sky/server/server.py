@@ -1584,7 +1584,7 @@ async def check(request: fastapi.Request,
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CHECK,
         request_body=check_body,
-        func=sky_check.check,
+        func=sky_check.check_for_request,
         schedule_type=requests_lib.ScheduleType.SHORT,
         auth_user=request.state.auth_user,
     )
@@ -1593,14 +1593,16 @@ async def check(request: fastapi.Request,
 @app.get('/enabled_clouds')
 async def enabled_clouds(request: fastapi.Request,
                          workspace: Optional[str] = None,
-                         expand: bool = False) -> None:
+                         expand: bool = False,
+                         workspace_id: Optional[str] = None) -> None:
     """Gets enabled clouds on the server."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ENABLED_CLOUDS,
         request_body=payloads.EnabledCloudsBody(workspace=workspace,
-                                                expand=expand),
-        func=core.enabled_clouds,
+                                                expand=expand,
+                                                workspace_id=workspace_id),
+        func=core.enabled_clouds_for_request,
         schedule_type=requests_lib.ScheduleType.SHORT,
         auth_user=request.state.auth_user,
     )
