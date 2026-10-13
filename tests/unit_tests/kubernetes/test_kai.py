@@ -214,19 +214,43 @@ def test_ensure_pod_group_omits_unset_priority(cluster):
     assert cluster.pod_groups[CLUSTER]['spec'] == {'minMember': 1, 'queue': 'q'}
 
 
+def _running_gang(**spec):
+    return {
+        'spec': {
+            'minMember': 4,
+            'queue': 'q',
+            'priorityClassName': 'batch',
+            **spec
+        },
+        'status': 'kept'
+    }
+
+
 def test_ensure_pod_group_resizes_running_cluster(cluster):
-    cluster.pod_groups[CLUSTER] = {'spec': {'minMember': 4}, 'status': 'kept'}
+    cluster.pod_groups[CLUSTER] = _running_gang()
     cluster.live_pods = {CLUSTER: object()}
 
     kai.ensure_pod_group(CONTEXT, NAMESPACE, CLUSTER, _node_config(), 2)
 
-    assert cluster.pod_groups[CLUSTER] == {
-        'spec': {
-            'minMember': 2
-        },
-        'status': 'kept'
-    }
+    assert cluster.pod_groups[CLUSTER] == _running_gang(minMember=2)
     assert ('delete', CLUSTER) not in cluster.calls
+
+
+@pytest.mark.parametrize('spec', [{
+    'queue': 'other'
+}, {
+    'priorityClassName': 'other'
+}, {
+    'preemptibility': 'preemptible'
+}])
+def test_ensure_pod_group_refuses_changed_settings(cluster, spec):
+    cluster.pod_groups[CLUSTER] = _running_gang(**spec)
+    cluster.live_pods = {CLUSTER: object()}
+
+    with pytest.raises(exceptions.ProvisionUnsupportedError,
+                       match=f'Cannot change KAI {next(iter(spec))}'):
+        kai.ensure_pod_group(CONTEXT, NAMESPACE, CLUSTER, _node_config(), 2)
+    assert cluster.pod_groups[CLUSTER] == _running_gang(**spec)
 
 
 def test_ensure_pod_group_replaces_stale_group(cluster):

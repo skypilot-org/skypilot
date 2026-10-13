@@ -33,6 +33,7 @@ _QUOTA_REASONS = {
         ('podGroupRequestedNonPreemptibleResources', 'quota'),
 }
 _GPU_RESOURCE = 'nvidia.com/gpu'
+_IMMUTABLE_SPEC_FIELDS = ('queue', 'priorityClassName', 'preemptibility')
 _PARKED_POLL_SECONDS = 30
 _WAIT_CHECK_SECONDS = 10
 
@@ -82,7 +83,12 @@ def delete_pod_group(context: Optional[str], namespace: str, name: str) -> None:
 def ensure_pod_group(context: Optional[str], namespace: str,
                      cluster_name_on_cloud: str, node_config: Dict[str, Any],
                      count: int) -> None:
-    """Creates the cluster's PodGroup, or resizes it for a running cluster."""
+    """Creates the cluster's PodGroup, or resizes it for a running cluster.
+
+    Raises:
+        exceptions.ProvisionUnsupportedError: The running cluster's PodGroup has
+            a different queue, priority class or preemptibility.
+    """
     if 'deployment_spec' in node_config:
         raise exceptions.ProvisionUnsupportedError(
             'KAI Scheduler is not supported for high availability '
@@ -106,6 +112,18 @@ def ensure_pod_group(context: Optional[str], namespace: str,
     except kubernetes.api_exception() as e:
         if e.status != 409 or not live_pods:
             raise
+        existing = _get_pod_group(context, namespace, cluster_name_on_cloud)
+        if existing is None:
+            raise
+        # The running pods keep their settings, so the gang cannot change them.
+        changed = [
+            field for field in _IMMUTABLE_SPEC_FIELDS
+            if existing['spec'].get(field) != body['spec'].get(field)
+        ]
+        if changed:
+            raise exceptions.ProvisionUnsupportedError(
+                f'Cannot change KAI {", ".join(changed)} of a running cluster. '
+                'Run `sky down` first.') from e
         api.patch_namespaced_custom_object(
             *POD_GROUP_API,
             namespace,

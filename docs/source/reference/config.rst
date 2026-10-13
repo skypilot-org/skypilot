@@ -2077,6 +2077,11 @@ Name of the KAI ``Queue`` to submit clusters to.
 ``preemptible`` or ``non-preemptible`` (optional). If not set, KAI derives it
 from the priority.
 
+KAI does not gate queued pods, so
+:ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>`
+also bounds the wait in KAI's queue, except while a launch on the API server is
+paused there.
+
 .. _config-yaml-kubernetes-dws:
 
 ``kubernetes.dws``
