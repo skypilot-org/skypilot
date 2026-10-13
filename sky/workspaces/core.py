@@ -1,6 +1,8 @@
 """Workspace management core."""
 
+import copy
 from dataclasses import dataclass
+import secrets
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from sky import check as sky_check
@@ -27,6 +29,10 @@ logger = sky_logging.init_logger(__name__)
 
 # Lock for workspace configuration updates to prevent race conditions
 _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS = 60
+
+# Fields whose change touches no infra, so it is allowed while the workspace
+# has active resources. `name` is the user-facing label; the key is the id.
+_ACCESS_AND_NAME_FIELDS = ('private', 'allowed_users', 'read_access', 'name')
 
 
 @dataclass
@@ -177,9 +183,11 @@ def _update_workspaces_config(
             # Read the current (freshly reloaded) config inside the lock.
             current_config = skypilot_config.to_dict()
             current_workspaces = current_config.get('workspaces', {}).copy()
+            old_workspaces = copy.deepcopy(current_workspaces)
 
             # Apply the modification inside the lock
             workspace_modifier_fn(current_workspaces)
+            _check_workspace_names_unique(old_workspaces, current_workspaces)
 
             # Update the config with the modified workspaces
             current_config['workspaces'] = current_workspaces
@@ -194,6 +202,34 @@ def _update_workspaces_config(
             'when trying to acquire the config lock. This may '
             'indicate another SkyPilot process is currently updating the '
             'configuration. Please try again.') from e
+
+
+def _without_access_and_name(config: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: v for k, v in config.items() if k not in _ACCESS_AND_NAME_FIELDS}
+
+
+def _check_workspace_names_unique(old_workspaces: Dict[str, Any],
+                                  new_workspaces: Dict[str, Any]) -> None:
+    """Raises if this write gives a workspace a name another one already has.
+
+    Only workspaces whose name appeared or changed in this write are checked,
+    so a duplicate left by a hand-edited config never blocks unrelated writes
+    (e.g. membership sync).
+    """
+    default_id = constants.SKYPILOT_DEFAULT_WORKSPACE
+    names = {
+        workspace_id:
+        skypilot_config.get_workspace_name(workspace_id, new_workspaces)
+        for workspace_id in set(new_workspaces) | {default_id}
+    }
+    old_ids = set(old_workspaces) | {default_id}
+    for workspace_id, name in names.items():
+        if (workspace_id in old_ids and skypilot_config.get_workspace_name(
+                workspace_id, old_workspaces) == name):
+            continue
+        if any(other_id != workspace_id and other_name == name
+               for other_id, other_name in names.items()):
+            raise ValueError(f'Workspace {name!r} already exists.')
 
 
 def _validate_workspace_config(workspace_name: str,
@@ -211,6 +247,20 @@ def _validate_workspace_config(workspace_name: str,
         # more user-friendly and b) it will not be caught by the try-except by
         # the caller the may cause confusion.
         raise ValueError(str(e)) from e
+    _validate_workspace_name_field(workspace_name, workspace_config)
+
+
+def _validate_workspace_name_field(workspace_id: str,
+                                   workspace_config: Dict[str, Any]) -> None:
+    name = workspace_config.get('name')
+    if name is None:
+        return
+    # 'default' is also a literal fallback and a hard-coded id in callers, so
+    # it keeps its name.
+    if (workspace_id == constants.SKYPILOT_DEFAULT_WORKSPACE and
+            name != workspace_id):
+        raise ValueError(f'The {workspace_id!r} workspace cannot be renamed.')
+    common_utils.check_workspace_name_is_valid(name)
 
 
 def _extract_k8s_allowed_contexts(
@@ -305,14 +355,10 @@ def _compare_workspace_configs(
     # adds/removes no member and touches no infra, so it must not be treated
     # as an "other" change that requires the workspace to have no active
     # resources. Exclude it here so a read_access-only change is
-    # classified as a (safe) user-access change.
-    access_fields = ['private', 'allowed_users', 'read_access']
-    current_without_access = {
-        k: v for k, v in current_config.items() if k not in access_fields
-    }
-    new_without_access = {
-        k: v for k, v in new_config.items() if k not in access_fields
-    }
+    # classified as a (safe) user-access change. A rename (`name`) is equally
+    # safe.
+    current_without_access = _without_access_and_name(current_config)
+    new_without_access = _without_access_and_name(new_config)
 
     only_user_access_changes = current_without_access == new_without_access
 
@@ -597,6 +643,12 @@ def update_workspace(
     # Use the internal helper function to save
     result = _update_workspaces_config(update_workspace_fn)
 
+    # A rename or access change touches no cloud config, so skip the
+    # (slow) re-check.
+    if (_without_access_and_name(current_config) == _without_access_and_name(
+            config)):
+        return result
+
     # Validate the workspace by running sky check for it
     try:
         sky_check.check(quiet=True, workspace=workspace_name)
@@ -608,17 +660,27 @@ def update_workspace(
     return result
 
 
+def _new_workspace_id(workspaces: Dict[str, Any]) -> str:
+    while True:
+        workspace_id = f'ws-{secrets.token_hex(6)}'
+        if workspace_id not in workspaces:
+            return workspace_id
+
+
 @usage_lib.entrypoint
 def create_workspace(workspace_name: str, config: Dict[str,
                                                        Any]) -> Dict[str, Any]:
     """Creates a new workspace configuration.
+
+    The workspace gets a generated id (its key in `workspaces:`), and
+    `workspace_name` is stored as its user-facing `name`.
 
     Args:
         workspace_name: The name of the workspace to create.
         config: The configuration for the new workspace.
 
     Returns:
-        The updated workspaces configuration.
+        The updated workspaces configuration, keyed by workspace id.
 
     Raises:
         ValueError: If the workspace already exists or configuration is invalid.
@@ -630,25 +692,27 @@ def create_workspace(workspace_name: str, config: Dict[str,
         raise ValueError('Workspace name must be a non-empty string.')
     common_utils.check_workspace_name_is_valid(workspace_name)
 
+    config = dict(config, name=workspace_name)
     _validate_workspace_config(workspace_name, config)
+    created_ids: List[str] = []
 
     def create_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to create workspace inside the lock."""
-        if workspace_name in workspaces:
-            raise ValueError(f'Workspace {workspace_name!r} already exists. '
-                             'Use update instead.')
-        workspaces[workspace_name] = config
+        workspace_id = _new_workspace_id(workspaces)
+        workspaces[workspace_id] = config
         # Add policy for the workspace and allowed users
         users = workspaces_utils.get_workspace_users(config)
         permission_service = permission.permission_service
-        permission_service.add_workspace_policy(workspace_name, users)
+        permission_service.add_workspace_policy(workspace_id, users)
+        created_ids.append(workspace_id)
 
     # Use the internal helper function to save
     result = _update_workspaces_config(create_workspace_fn)
+    workspace_id = created_ids[-1]
 
     # Validate the workspace by running sky check for it
     try:
-        sky_check.check(quiet=True, workspace=workspace_name)
+        sky_check.check(quiet=True, workspace=workspace_id)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Workspace {workspace_name} configuration saved but '
                        f'validation check failed: {e}')
@@ -771,6 +835,7 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
             # Validate names for newly added workspaces only (not existing
             # ones, for backward compatibility with pre-validation names).
             common_utils.check_workspace_name_is_valid(workspace_name)
+            _validate_workspace_name_field(workspace_name, new_workspace_config)
             users = workspaces_utils.get_workspace_users(new_workspace_config)
             workspaces_to_check_policy['add'][workspace_name] = users
             continue
@@ -802,6 +867,11 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
     try:
         with skypilot_config.get_skypilot_config_lock(
                 _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
+            # Check names against the store as of now, not the pre-lock read,
+            # so a concurrent create can't slip a duplicate in.
+            skypilot_config.reload_config()
+            _check_workspace_names_unique(
+                skypilot_config.to_dict().get('workspaces', {}), new_workspaces)
             # Convert to config_utils.Config and save
             config_obj = config_utils.Config.from_dict(config)
             skypilot_config.update_api_server_config_no_lock(config_obj)
@@ -1265,6 +1335,8 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
             }
             if workspaces[name].get('private') is not None:
                 ws_config['private'] = workspaces[name]['private']
+            if workspaces[name].get('name') is not None:
+                ws_config['name'] = workspaces[name]['name']
         else:
             # Copy so the request-cached config isn't mutated with computed
             # state.

@@ -2728,6 +2728,11 @@ def get_config_schema():
                     'type': 'string',
                     'enum': ['allowed_users', 'all'],
                 },
+                # User-facing name; the key is the workspace's immutable id.
+                # Defaults to the id when unset.
+                'name': {
+                    'type': 'string',
+                },
                 'gcp': {
                     'type': 'object',
                     'properties': {

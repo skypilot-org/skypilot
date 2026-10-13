@@ -486,6 +486,24 @@ def get_effective_region_config(cloud: str,
         merge_dicts=merge_dicts)
 
 
+def get_workspace_name(workspace_id: str,
+                       workspaces: Optional[Dict[str, Any]] = None) -> str:
+    """Returns the user-facing name of the workspace with this id.
+
+    A workspace's key in `workspaces:` is its immutable id; its `name` field is
+    what users see and type, and defaults to the id. The default workspace is
+    always named 'default', whatever is stored.
+    """
+    if workspace_id == constants.SKYPILOT_DEFAULT_WORKSPACE:
+        return workspace_id
+    if workspaces is None:
+        workspaces = get_nested(keys=('workspaces',), default_value={})
+    workspace_config = workspaces.get(workspace_id)
+    if isinstance(workspace_config, dict) and workspace_config.get('name'):
+        return workspace_config['name']
+    return workspace_id
+
+
 def get_workspace_cloud(cloud: str,
                         workspace: Optional[str] = None) -> config_utils.Config:
     """Returns the workspace cloud config, deep-merged with global cloud config.
