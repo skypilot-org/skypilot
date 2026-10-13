@@ -171,7 +171,8 @@ def test_submit_validation_uses_bounded_submit_runner():
         client.validate_submit_user('a', 'svc')
         assert runner.call_args.kwargs['slurm_user'] == 'svc'
         assert runner.return_value.run.call_args.kwargs['timeout'] == 15
-        assert runner.return_value.run.call_args.args[0] == ['id', '-un']
+        assert runner.return_value.run.call_args.args[0].endswith(
+            '\nsudo --non-interactive -H -u svc -- id -un')
 
 
 @pytest.mark.parametrize(
@@ -182,8 +183,8 @@ def test_submit_validation_accepts_login_banner(stdout):
                            'run',
                            return_value=(0, stdout, '')) as transport:
         client.validate_submit_user('cluster', 'alice')
-    assert transport.call_args.args[0] == (
-        'sudo --non-interactive -H -u alice -- id -un')
+    assert transport.call_args.args[0].endswith(
+        '\nsudo --non-interactive -H -u alice -- id -un')
 
 
 @pytest.mark.parametrize('rc,stdout', [(0, ''), (0, 'alice\nlogin\n'),
