@@ -260,8 +260,13 @@ def terminate_cluster(
         except Exception as e:  # pylint: disable=broad-except
             retry_cnt += 1
             if retry_cnt >= max_retry:
+                # The message ends up in the job's failure reason, so keep the
+                # cause but drop terminal colors from command errors.
+                cause = common_utils.remove_color(
+                    common_utils.format_exception(e))
                 raise RuntimeError(
-                    f'Failed to terminate the cluster {cluster_name}.') from e
+                    f'Failed to terminate the cluster {cluster_name}: '
+                    f'{cause}') from e
             logger.error(
                 f'Failed to terminate the cluster {cluster_name}. Retrying.'
                 f'Details: {common_utils.format_exception(e)}')

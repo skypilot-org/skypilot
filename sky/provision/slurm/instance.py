@@ -886,6 +886,31 @@ def _wait_for_job_ready(
         time.sleep(poll_interval_seconds)
 
 
+def _validate_submit_user(client: slurm.SlurmClient, region: str,
+                          submit_user: str) -> None:
+    """Checks the submit account before anything can create a Slurm job.
+
+    The check only runs `id -un` as the account, before the first command that
+    can submit or adopt a job, so a failure proves that this attempt created
+    nothing. NothingCreatedError says so, which lets failover skip tearing
+    down, as the same account, a job that was never submitted.
+
+    Raises:
+        common.NothingCreatedError: Carries ProvisionUnsupportedError when the
+            login node refused the account, or RuntimeError when the check
+            may pass on a later attempt.
+    """
+    try:
+        client.validate_submit_user(region, submit_user)
+    except slurm.SubmitUserRefusedError as e:
+        # Not a capacity failure: failover moves on to other candidates, and a
+        # launch with no other candidate fails instead of waiting for room.
+        raise common.NothingCreatedError(
+            exceptions.ProvisionUnsupportedError(str(e))) from e
+    except RuntimeError as e:
+        raise common.NothingCreatedError(RuntimeError(str(e))) from e
+
+
 @timeline.event
 def _create_virtual_instance(
         region: str, cluster_name: str, cluster_name_on_cloud: str,
@@ -900,7 +925,7 @@ def _create_virtual_instance(
     client = _make_slurm_client(provider_config)
     submit_user = provider_config.get('slurm_user')
     if submit_user is not None:
-        client.validate_submit_user(region, submit_user)
+        _validate_submit_user(client, region, submit_user)
 
     slurm_cluster = slurm_utils.get_slurm_cluster_from_config(provider_config)
 

@@ -1325,6 +1325,11 @@ class RetryingVmProvisioner(object):
                                 cluster_name, handle.cluster_name_on_cloud),
                             num_nodes=num_nodes,
                             cluster_yaml=handle.cluster_yaml,
+                            # Whether the cluster had a record when this
+                            # candidate started, not the one written above on
+                            # every attempt. The ray up path below guards
+                            # skip_cleanup with the same value.
+                            prev_cluster_exists=cluster_exists,
                             prev_cluster_ever_up=prev_cluster_ever_up,
                             log_dir=self.log_dir,
                             ports_to_open_on_launch=ports_to_open_on_launch)
