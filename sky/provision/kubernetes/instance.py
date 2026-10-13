@@ -2343,7 +2343,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     if uses_kai:
         # Created before the pods so KAI schedules them as one gang.
         kai.ensure_pod_group(context, namespace, cluster_name_on_cloud,
-                             config.node_config, config.count)
+                             provider_config, config.node_config, config.count)
 
     ephemeral_volumes = provider_config.get('ephemeral_volume_infos')
     if ephemeral_volumes:

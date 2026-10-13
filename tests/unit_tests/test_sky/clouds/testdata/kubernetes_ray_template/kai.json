@@ -191,6 +191,8 @@
     },
     "context": "my-k8s-context",
     "fuse_device_required": false,
+    "kai_preemptibility": "preemptible",
+    "kai_priority_class": "low-priority",
     "kai_queue": "team-queue",
     "module": "sky.provision.kubernetes",
     "namespace": "default",

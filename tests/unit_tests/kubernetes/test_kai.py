@@ -116,6 +116,9 @@ def cluster(monkeypatch):
     return fake
 
 
+PROVIDER_CONFIG = {'kai_queue': 'q', 'kai_priority_class': 'batch'}
+
+
 def _node_config(**labels):
     return {
         'metadata': {
@@ -182,13 +185,14 @@ WAIT_FOR_QUOTA = _quota_reason('NonPreemptibleOverQuota', '4')
 WAIT_FOR_NODES = {'reason': 'PodSchedulingErrors', 'message': 'no nodes'}
 
 
-def test_ensure_pod_group_creates_gang_from_pod_fields(cluster):
-    kai.ensure_pod_group(
-        CONTEXT, NAMESPACE, CLUSTER,
-        _node_config(**{
-            'kai.scheduler/preemptibility': 'preemptible',
-            'shard': 'a'
-        }), 4)
+def test_ensure_pod_group_creates_gang_from_config(cluster):
+    # pod_config may override the pod's own KAI fields; the gang ignores them.
+    node_config = _node_config(**{'kai.scheduler/queue': 'other', 'shard': 'a'})
+    node_config['spec']['priorityClassName'] = 'other'
+
+    kai.ensure_pod_group(CONTEXT, NAMESPACE, CLUSTER, {
+        **PROVIDER_CONFIG, 'kai_preemptibility': 'preemptible'
+    }, node_config, 4)
 
     pod_group = cluster.pod_groups[CLUSTER]
     assert pod_group['spec'] == {
@@ -198,18 +202,15 @@ def test_ensure_pod_group_creates_gang_from_pod_fields(cluster):
         'preemptibility': 'preemptible',
     }
     assert pod_group['metadata']['labels'] == {
-        'kai.scheduler/queue': 'q',
-        'kai.scheduler/preemptibility': 'preemptible',
+        'kai.scheduler/queue': 'other',
         'shard': 'a',
         'skypilot-cluster-name': CLUSTER,
     }
 
 
 def test_ensure_pod_group_omits_unset_priority(cluster):
-    node_config = _node_config()
-    del node_config['spec']['priorityClassName']
-
-    kai.ensure_pod_group(CONTEXT, NAMESPACE, CLUSTER, node_config, 1)
+    kai.ensure_pod_group(CONTEXT, NAMESPACE, CLUSTER, {'kai_queue': 'q'},
+                         _node_config(), 1)
 
     assert cluster.pod_groups[CLUSTER]['spec'] == {'minMember': 1, 'queue': 'q'}
 
@@ -230,7 +231,8 @@ def test_ensure_pod_group_resizes_running_cluster(cluster):
     cluster.pod_groups[CLUSTER] = _running_gang()
     cluster.live_pods = {CLUSTER: object()}
 
-    kai.ensure_pod_group(CONTEXT, NAMESPACE, CLUSTER, _node_config(), 2)
+    kai.ensure_pod_group(CONTEXT, NAMESPACE, CLUSTER, PROVIDER_CONFIG,
+                         _node_config(), 2)
 
     assert cluster.pod_groups[CLUSTER] == _running_gang(minMember=2)
     assert ('delete', CLUSTER) not in cluster.calls
@@ -249,14 +251,16 @@ def test_ensure_pod_group_refuses_changed_settings(cluster, spec):
 
     with pytest.raises(exceptions.ProvisionUnsupportedError,
                        match=f'Cannot change KAI {next(iter(spec))}'):
-        kai.ensure_pod_group(CONTEXT, NAMESPACE, CLUSTER, _node_config(), 2)
+        kai.ensure_pod_group(CONTEXT, NAMESPACE, CLUSTER, PROVIDER_CONFIG,
+                             _node_config(), 2)
     assert cluster.pod_groups[CLUSTER] == _running_gang(**spec)
 
 
 def test_ensure_pod_group_replaces_stale_group(cluster):
     cluster.pod_groups[CLUSTER] = {'spec': {}, 'status': 'stale'}
 
-    kai.ensure_pod_group(CONTEXT, NAMESPACE, CLUSTER, _node_config(), 1)
+    kai.ensure_pod_group(CONTEXT, NAMESPACE, CLUSTER, PROVIDER_CONFIG,
+                         _node_config(), 1)
 
     assert cluster.calls == [('delete', CLUSTER), ('create', CLUSTER)]
     assert 'status' not in cluster.pod_groups[CLUSTER]
@@ -268,12 +272,13 @@ def test_ensure_pod_group_fails_if_stale_group_survives(cluster, monkeypatch):
                         lambda *args, **kwargs: None)
 
     with pytest.raises(FakeApiException):
-        kai.ensure_pod_group(CONTEXT, NAMESPACE, CLUSTER, _node_config(), 1)
+        kai.ensure_pod_group(CONTEXT, NAMESPACE, CLUSTER, PROVIDER_CONFIG,
+                             _node_config(), 1)
 
 
 def test_ensure_pod_group_rejects_deployments(cluster):
     with pytest.raises(exceptions.ProvisionUnsupportedError):
-        kai.ensure_pod_group(CONTEXT, NAMESPACE, CLUSTER, {
+        kai.ensure_pod_group(CONTEXT, NAMESPACE, CLUSTER, PROVIDER_CONFIG, {
             **_node_config(), 'deployment_spec': {}
         }, 1)
     assert not cluster.calls

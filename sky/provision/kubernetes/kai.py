@@ -42,15 +42,17 @@ _WAIT_CHECK_SECONDS = 10
 SchedulingCallback = Callable[[Optional[str], str, str, str], None]
 
 
-def _pod_group_body(name: str, node_config: Dict[str, Any],
-                    count: int) -> Dict[str, Any]:
-    labels = node_config['metadata'].get('labels', {})
-    spec: Dict[str, Any] = {'minMember': count, 'queue': labels[QUEUE_LABEL]}
-    priority_class = node_config['spec'].get('priorityClassName')
-    if priority_class is not None:
-        spec['priorityClassName'] = priority_class
-    if _PREEMPTIBILITY_LABEL in labels:
-        spec['preemptibility'] = labels[_PREEMPTIBILITY_LABEL]
+def _pod_group_body(name: str, provider_config: Dict[str, Any],
+                    labels: Dict[str, str], count: int) -> Dict[str, Any]:
+    # Taken from the resolved config, not the pod, which pod_config can change.
+    spec: Dict[str, Any] = {
+        'minMember': count,
+        'queue': provider_config['kai_queue']
+    }
+    if 'kai_priority_class' in provider_config:
+        spec['priorityClassName'] = provider_config['kai_priority_class']
+    if 'kai_preemptibility' in provider_config:
+        spec['preemptibility'] = provider_config['kai_preemptibility']
     # Copy the pod labels so a KAI scheduling shard selecting the pods also
     # selects the PodGroup.
     return {
@@ -81,8 +83,9 @@ def delete_pod_group(context: Optional[str], namespace: str, name: str) -> None:
 
 
 def ensure_pod_group(context: Optional[str], namespace: str,
-                     cluster_name_on_cloud: str, node_config: Dict[str, Any],
-                     count: int) -> None:
+                     cluster_name_on_cloud: str, provider_config: Dict[str,
+                                                                       Any],
+                     node_config: Dict[str, Any], count: int) -> None:
     """Creates the cluster's PodGroup, or resizes it for a running cluster.
 
     Raises:
@@ -93,7 +96,8 @@ def ensure_pod_group(context: Optional[str], namespace: str,
         raise exceptions.ProvisionUnsupportedError(
             'KAI Scheduler is not supported for high availability '
             'controllers.')
-    body = _pod_group_body(cluster_name_on_cloud, node_config, count)
+    body = _pod_group_body(cluster_name_on_cloud, provider_config,
+                           node_config['metadata'].get('labels', {}), count)
     live_pods = kubernetes_utils.filter_pods(
         namespace, context,
         {k8s_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud},

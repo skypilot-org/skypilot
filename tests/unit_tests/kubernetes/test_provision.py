@@ -162,7 +162,8 @@ def test_create_pods_gangs_a_kai_cluster_only(monkeypatch, kai_queue):
         assert gangs == []
         assert callbacks == [None]
     else:
-        assert gangs == [('ctx', 'ns', cluster_on_cloud, config.node_config, 1)]
+        assert gangs == [('ctx', 'ns', cluster_on_cloud, config.provider_config,
+                          config.node_config, 1)]
         assert callbacks == [checker]
 
 
