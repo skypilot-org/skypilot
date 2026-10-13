@@ -553,10 +553,10 @@ export function ManagedJobs() {
     <>
       {/* Jobs section */}
       <div className="flex flex-wrap items-center gap-2 mb-1">
-        <div className="text-base">
+        <div className="flex items-center">
           <Link
             href="/jobs"
-            className="text-sky-blue hover:underline leading-none"
+            className="text-sky-blue hover:underline leading-none text-base"
           >
             Managed Jobs
           </Link>
@@ -2422,7 +2422,7 @@ export function ManagedJobsTable({
             later, cannot override them. */}
         <div className="text-sm mb-4 lg:flex lg:items-center lg:justify-between max-lg:grid max-lg:grid-cols-[minmax(0,1fr)_auto] max-lg:items-start max-lg:gap-y-3">
           <div className="lg:flex lg:flex-wrap lg:items-center lg:min-w-0 max-lg:contents">
-            <span className="mr-2 text-sm font-medium max-lg:hidden">
+            <span className="mr-2 text-sm font-medium text-gray-700 max-lg:hidden">
               Statuses:
             </span>
             <div className="lg:flex lg:flex-wrap lg:gap-2 lg:items-center max-lg:contents">
@@ -2660,7 +2660,7 @@ export function ManagedJobsTable({
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0 ml-2 h-8">
+          <div className="flex items-center gap-2 shrink-0 ml-2 max-lg:h-8">
             {loading && (
               <div className="flex items-center">
                 <CircularProgress size={15} className="mt-0" />

@@ -626,7 +626,7 @@ export function Clusters() {
               </div>
             )}
         </div>
-        <div className="flex items-center gap-2 shrink-0 ml-2 h-8">
+        <div className="flex items-center gap-2 shrink-0 ml-2 max-lg:h-8">
           {showHistory && (
             <Select
               value={historyDays.toString()}
@@ -660,7 +660,7 @@ export function Clusters() {
             onClick={handleRefresh}
             disabled={loading}
             title="Refresh"
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center text-sm"
           >
             <RotateCwIcon className={`h-4 w-4 ${isMobile ? '' : 'mr-1.5'}`} />
             {!isMobile && <span>Refresh</span>}

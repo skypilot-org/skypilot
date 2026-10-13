@@ -4265,15 +4265,14 @@ export function GPUs() {
       {!selectedContext && (
         <div className="flex items-center mb-4 max-lg:flex-wrap max-lg:gap-y-3 lg:h-5">
           <div className="flex-1 text-base flex items-center">
-            <Link href="/infra" className="text-sky-blue cursor-default">
+            <Link
+              href="/infra"
+              className="text-sky-blue cursor-default leading-none text-base"
+            >
               Infrastructure
             </Link>
           </div>
-          <PluginSlot
-            name="infra.headerActions"
-            wrapperClassName="max-lg:order-2 lg:order-3 lg:ml-3"
-          />
-          <div className="max-lg:order-3 lg:order-2 max-lg:w-full flex items-center">
+          <div className="max-lg:order-3 max-lg:w-full flex items-center">
             {/* Workspace Selector */}
             {availableWorkspaces.length > 0 && (
               <div className="flex items-center mr-4">
@@ -4320,7 +4319,7 @@ export function GPUs() {
                 onClick={handleRefresh}
                 disabled={isAnyLoading}
                 title="Refresh"
-                className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                className="text-sky-blue hover:text-sky-blue-bright flex items-center text-sm"
               >
                 <RotateCwIcon
                   className={`h-4 w-4 ${isMobile ? '' : 'mr-1.5'}`}
@@ -4329,6 +4328,10 @@ export function GPUs() {
               </button>
             </div>
           </div>
+          <PluginSlot
+            name="infra.headerActions"
+            wrapperClassName="max-lg:order-2 lg:ml-3"
+          />
         </div>
       )}
 
