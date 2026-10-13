@@ -9,6 +9,7 @@ import pytest
 from sky.adaptors import slurm as slurm_adaptor
 from sky.provision.slurm import instance as slurm_instance
 from sky.provision.slurm.instance import _build_custom_sbatch_directives
+from sky.provision.slurm.instance import _build_gres_directive
 from sky.provision.slurm.instance import _build_sbatch_directives
 from sky.provision.slurm.instance import _compute_time_directive
 from sky.provision.slurm.instance import _SBATCH_PROTECTED_OPTIONS
@@ -180,6 +181,57 @@ class TestBuildCustomSbatchDirectives:
         """Validator is also wired for the short form 't'."""
         with pytest.raises(ValueError, match='Invalid slurm.sbatch_options'):
             _build_custom_sbatch_directives({'t': 'bogus'})
+
+
+class TestBuildGresDirective:
+    """Test _build_gres_directive() merges GPU and user-supplied GRES."""
+
+    def test_no_gres(self):
+        assert _build_gres_directive({}, None, 0) == ''
+
+    def test_typed_gpu(self):
+        assert (_build_gres_directive({}, 'H100',
+                                      8) == '#SBATCH --gres=gpu:H100:8')
+
+    @pytest.mark.parametrize('accelerator_type', [None, 'none', 'NONE'])
+    def test_untyped_gpu(self, accelerator_type):
+        assert (_build_gres_directive({}, accelerator_type,
+                                      2) == '#SBATCH --gres=gpu:2')
+
+    def test_user_gres_appended_to_gpu(self):
+        result = _build_gres_directive({'gres': 'scratch:300G'}, 'H200', 1)
+        assert result == '#SBATCH --gres=gpu:H200:1,scratch:300G'
+
+    def test_user_gres_without_gpu(self):
+        result = _build_gres_directive({'gres': 'scratch:300G'}, None, 0)
+        assert result == '#SBATCH --gres=scratch:300G'
+
+    def test_multiple_user_gres_entries(self):
+        result = _build_gres_directive({'gres': ' scratch:300G, ,shard:2 '},
+                                       'H100', 1)
+        assert result == '#SBATCH --gres=gpu:H100:1,scratch:300G,shard:2'
+
+    @pytest.mark.parametrize('user_gres', ['gpu:h100:4', 'gpu:2', 'gpu'])
+    def test_user_gpu_gres_skipped(self, user_gres):
+        result = _build_gres_directive({'gres': f'{user_gres},scratch:1G'},
+                                       'H100', 1)
+        assert result == '#SBATCH --gres=gpu:H100:1,scratch:1G'
+
+    @pytest.mark.parametrize('user_gres', [None, False, ''])
+    def test_empty_user_gres_ignored(self, user_gres):
+        assert (_build_gres_directive({'gres': user_gres}, 'H100',
+                                      1) == '#SBATCH --gres=gpu:H100:1')
+
+    def test_newline_in_user_gres_raises(self):
+        with pytest.raises(ValueError, match='Newline'):
+            _build_gres_directive({'gres': 'scratch:1G\n#SBATCH --x'}, None, 0)
+
+    def test_not_emitted_as_custom_directive(self):
+        result = _build_custom_sbatch_directives({
+            'gres': 'scratch:300G',
+            'qos': 'high',
+        })
+        assert result == '\n#SBATCH --qos=high'
 
 
 class TestComputeTimeDirective:

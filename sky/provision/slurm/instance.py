@@ -97,9 +97,11 @@ _SBATCH_PROTECTED_OPTIONS = frozenset({
     'requeue',
     'cpus-per-task',
     'mem',
-    'gres',
     'partition',
 })
+# Merged into the --gres directive SkyPilot writes for the GPUs, so that
+# non-GPU GRES (e.g. local scratch disk) can be requested alongside them.
+_SBATCH_GRES_OPTION = 'gres'
 
 _PYXIS_MOUNT_PATH_PATTERN = re.compile(
     r'/(?:[A-Za-z0-9._~+@%=/\-]|\$[A-Za-z_][A-Za-z0-9_]*)*')
@@ -145,6 +147,9 @@ def _build_custom_sbatch_directives(sbatch_options: Dict[str, Any]) -> str:
     # Build directive lines.
     lines = []
     for key in sorted(normalized):
+        if key == _SBATCH_GRES_OPTION:
+            # Emitted by _build_gres_directive().
+            continue
         value = normalized[key]
         if value is None or value is False:
             continue
@@ -166,6 +171,60 @@ def _build_custom_sbatch_directives(sbatch_options: Dict[str, Any]) -> str:
     # Prefix with newline so it slots in after other directives
     # in the provision script f-string.
     return '\n' + '\n'.join(lines)
+
+
+def _build_gres_directive(sbatch_options: Dict[str, Any],
+                          accelerator_type: Optional[str],
+                          accelerator_count: int) -> str:
+    """Build the ``#SBATCH --gres=...`` directive.
+
+    Combines the GPUs SkyPilot requests for the resources with any non-GPU
+    GRES from ``sbatch_options.gres`` (e.g. ``scratch:300G``) into a single
+    ``--gres`` directive, so the two requests cannot conflict. GPU entries in
+    ``sbatch_options.gres`` are skipped with a warning: GPUs come from the
+    resources' accelerators.
+
+    Returns the directive line (no trailing newline), or empty string when
+    no GRES is requested.
+    """
+    gres = []
+    if accelerator_count > 0:
+        if (accelerator_type is not None and
+                accelerator_type.upper() != 'NONE'):
+            # Typed GRES: gpu:<type>:<count>
+            gres.append(f'gpu:{accelerator_type}:{accelerator_count}')
+        else:
+            # GRES without GPU type: gpu:<count>
+            gres.append(f'gpu:{accelerator_count}')
+
+    user_value = None
+    for key, value in sbatch_options.items():
+        if key.replace('_', '-') == _SBATCH_GRES_OPTION:
+            user_value = value
+    if user_value not in (None, False):
+        str_value = str(user_value)
+        # Defense in depth: schema validation rejects newlines, but guard
+        # here too to prevent script injection.
+        if '\n' in str_value:
+            raise ValueError(
+                f'Newline characters are not allowed in sbatch options: '
+                f'{_SBATCH_GRES_OPTION!r}={str_value!r}')
+        for entry in str_value.split(','):
+            entry = entry.strip()
+            if not entry:
+                continue
+            if entry.split(':', 1)[0] == 'gpu':
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}Ignoring GPU GRES {entry!r} in '
+                    'slurm.sbatch_options.gres. Request GPUs with '
+                    f'resources.accelerators instead.{colorama.Style.RESET_ALL}'
+                )
+                continue
+            gres.append(entry)
+
+    if not gres:
+        return ''
+    return f'#SBATCH --gres={",".join(gres)}'
 
 
 def _compute_time_directive(sbatch_options: Dict[str, Any],
@@ -1065,16 +1124,8 @@ def _create_virtual_instance(
                                                        partition)
 
     # Build the sbatch script
-    gpu_directive = ''
-    if accelerator_count > 0:
-        if (accelerator_type is not None and
-                accelerator_type.upper() != 'NONE'):
-            # Typed GRES: #SBATCH --gres=gpu:<type>:<count>
-            gpu_directive = (f'#SBATCH --gres=gpu:{accelerator_type}:'
-                             f'{accelerator_count}')
-        else:
-            # GRES without GPU type: #SBATCH --gres=gpu:<count>
-            gpu_directive = f'#SBATCH --gres=gpu:{accelerator_count}'
+    gres_directive = _build_gres_directive(sbatch_options, accelerator_type,
+                                           accelerator_count)
 
     # Build container initialization block if container image specified
     container_block = ''
@@ -1321,7 +1372,7 @@ exit 1
 # Let the job be terminated rather than requeued implicitly.
 #SBATCH --no-requeue
 #SBATCH --cpus-per-task={math.ceil(float(resources["cpus"]))}
-{mem_directive}{gpu_directive}{extra_sbatch_directives}
+{mem_directive}{gres_directive}{extra_sbatch_directives}
 
 # Cleanup function to remove cluster dirs on job termination.
 cleanup() {{
