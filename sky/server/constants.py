@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 64  # managed jobs: depends_on on launch
+API_VERSION = 65  # launch: disable_controller_check removed from the request
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
