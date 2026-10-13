@@ -49,17 +49,23 @@ _QUEUE_ADMISSION_TIMEOUT_KEYS = ('kubernetes', 'kueue', 'admission_timeout')
 
 
 @contextlib.contextmanager
-def _replica_queue_admission_wait(
+def _queue_admission_wait(
+        task: 'sky.Task', is_launched_by_jobs_controller: bool,
         is_launched_by_sky_serve_controller: bool) -> Iterator[None]:
-    """Lets replica launches wait indefinitely for queue admission by default.
+    """Lets launches bounded elsewhere wait indefinitely for queue admission.
 
-    A SkyServe replica or pool worker is a standing request for capacity: the
-    controller relaunches it until it is up. When the cluster is placed in a
-    Kueue local queue and quota is short, its pods are held by an admission
-    gate. With the default ``kubernetes.kueue.admission_timeout`` the launch
-    would fail after 24 hours and the relaunch would create a new Workload at
-    the back of the queue, so replica launches default to waiting
-    indefinitely (``-1``) instead.
+    When the cluster is placed in a Kueue local queue and quota is short, its
+    pods are held by an admission gate. With the default
+    ``kubernetes.kueue.admission_timeout`` the launch would fail after 24
+    hours and the relaunch would create a new Workload at the back of the
+    queue. Two kinds of launch default to waiting indefinitely (``-1``)
+    instead:
+
+    - A SkyServe replica or pool worker, a standing request for capacity: the
+      controller relaunches it until it is up.
+    - A managed job task that sets ``job.wait_for_scheduling_timeout``: the
+      jobs controller cancels the job once that is reached, so it is the only
+      bound on the wait.
 
     The default is installed at the global cloud scope, the lowest in the
     resolution order (see ``skypilot_config.get_effective_queue_admission_
@@ -69,7 +75,11 @@ def _replica_queue_admission_wait(
     in-process only: the provisioner reads it while the launch runs, no
     subprocess needs it, and no temporary config file is left behind.
     """
-    if not is_launched_by_sky_serve_controller:
+    bounded_elsewhere = (
+        is_launched_by_sky_serve_controller or
+        (is_launched_by_jobs_controller and
+         task.job.get('wait_for_scheduling_timeout') is not None))
+    if not bounded_elsewhere:
         yield
         return
     config = skypilot_config.to_dict()
@@ -612,8 +622,8 @@ def _execute_dag(
                 'Provisioning requested, but handle is already set. PROVISION '
                 'should be excluded from stages or '
                 'skip_unecessary_provisioning should be set. ')
-            with _replica_queue_admission_wait(
-                    _is_launched_by_sky_serve_controller):
+            with _queue_admission_wait(task, _is_launched_by_jobs_controller,
+                                       _is_launched_by_sky_serve_controller):
                 (handle, provisioning_skipped) = backend.provision(
                     task,
                     task.best_resources,

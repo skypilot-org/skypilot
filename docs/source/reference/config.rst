@@ -2047,8 +2047,11 @@ Default: ``86400`` (24 hours).
 
 SkyServe replicas and pool workers are standing requests for capacity, so
 when this field is not set they wait for admission indefinitely instead of
-failing after 24 hours and re-entering the queue at the back. Set the field
-explicitly to bound their wait as well.
+failing after 24 hours and re-entering the queue at the back. So do managed
+jobs that set
+:ref:`job.wait_for_scheduling_timeout <yaml-spec-job-wait-for-scheduling-timeout>`,
+which bounds their wait instead. Set the field explicitly to bound their wait
+as well.
 
 .. _config-yaml-kubernetes-dws:
 
