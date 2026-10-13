@@ -393,3 +393,22 @@ class TestMergeSshdPortBackoff:
             host_network_probe._merge_sshd_port('cm', 'ns', 'w1', 12345)
         # 500 is not retriable -> bail immediately, no backoff.
         assert not sleeps
+
+
+class TestRayMemoryMonitorDisabled:
+    """Both `ray start` commands must disable Ray's memory monitor.
+
+    The `run:` script is a single Ray task; the monitor's only victim is that
+    task, and page cache / shm pressure on a VM that is meant to fill its RAM
+    SIGKILLs it (and, via subprocess_daemon.py, the whole payload tree).
+    """
+
+    def test_head_disables_memory_monitor(self):
+        cmd = instance_setup.ray_head_start_command(None, None)
+        start = cmd.index(f'{constants.SKY_RAY_CMD} start --head')
+        assert 'RAY_memory_monitor_refresh_ms=0' in cmd[:start]
+
+    def test_worker_disables_memory_monitor(self):
+        cmd = instance_setup.ray_worker_start_command(None, None, False)
+        start = cmd.index(f'{constants.SKY_RAY_CMD} start')
+        assert 'RAY_memory_monitor_refresh_ms=0' in cmd[:start]

@@ -446,6 +446,19 @@ _SHARED_RAY_PORT_FLAGS = (
     '--metrics-export-port=$SKYPILOT_RAY_METRICS_EXPORT_PORT}')
 
 
+# Env for every `ray start` SkyPilot issues (head and worker).
+# RAY_memory_monitor_refresh_ms=0 disables Ray's memory monitor: SkyPilot runs
+# the user's `run:` script as ONE Ray task, so the monitor's only possible
+# victim is that task -- it SIGKILLs the worker at 95% of (MemTotal -
+# MemAvailable), and subprocess_daemon.py then tears down the task's whole
+# process tree. Page cache / shm / a GPU->host checkpoint copy on a node that
+# is SUPPOSED to fill its RAM trip it with no real pressure (observed
+# 2026-10-06: a healthy serving container killed mid snapshot-capture). The
+# kubernetes template already sets this for the same reason; VMs never did.
+_RAY_ENV_PREFIX = ('RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
+                   'RAY_memory_monitor_refresh_ms=0')
+
+
 def ray_head_start_command(custom_resource: Optional[str],
                            custom_ray_options: Optional[Dict[str, Any]]) -> str:
     """Returns the command to start Ray on the head node."""
@@ -472,7 +485,7 @@ def ray_head_start_command(custom_resource: Optional[str],
 
     cmd = (
         _host_network_probe_cmd('head') + f'{constants.SKY_RAY_CMD} stop; '
-        'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
+        f'{_RAY_ENV_PREFIX} '
         # worker_maximum_startup_concurrency controls the maximum number of
         # workers that can be started concurrently. However, it also controls
         # this warning message:
@@ -512,7 +525,7 @@ def ray_worker_start_command(custom_resource: Optional[str],
             ray_options += f' --{key}={value}'
 
     cmd = (
-        'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
+        f'{_RAY_ENV_PREFIX} '
         f'{constants.SKY_RAY_CMD} start --disable-usage-stats {ray_options} || '
         'exit 1;' + RAY_PRLIMIT)
     if no_restart:
