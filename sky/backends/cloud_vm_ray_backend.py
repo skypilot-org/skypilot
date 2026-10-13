@@ -4755,19 +4755,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if cluster_hash is None:
                 return
             # The YAML as the user wrote it (secrets redacted), like the
-            # cluster's last_creation_yaml, but with the envs and secrets the
-            # job actually runs with: `--env` / `--secret` overrides are not in
-            # the user's file, and they are what tells two submissions of the
-            # same YAML apart.
-            config = task.to_yaml_config(use_user_specified_yaml=True)
-            if task.envs:
-                config['envs'] = dict(task.envs)
-            if task.secrets and isinstance(config.get('secrets'), dict):
-                for key in task.secrets:
-                    config['secrets'].setdefault(key, '<redacted>')
-            elif task.secrets and config.get('secrets') is None:
-                config['secrets'] = {key: '<redacted>' for key in task.secrets}
-            task_yaml = yaml_utils.dump_yaml_str(config)
+            # cluster's last_creation_yaml, but with the `--env`, `--secret`
+            # and resource overrides the job actually runs with.
+            task_yaml = yaml_utils.dump_yaml_str(
+                task.to_submitted_yaml_config())
             entrypoint = common_utils.get_current_command()
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to build the spec of job {job_id}: {e}')

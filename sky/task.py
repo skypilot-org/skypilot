@@ -1988,6 +1988,52 @@ class Task:
             return config
         return self._to_yaml_config()
 
+    def to_submitted_yaml_config(self) -> Dict[str, Any]:
+        """The YAML this task was submitted with, secrets redacted.
+
+        INTERNAL: this method is internal-facing.
+
+        The user-specified YAML (see `to_yaml_config`) as written, except for
+        the parts that CLI/SDK overrides change after the file is read --
+        `--env`, `--secret` and resource flags such as `--cpus` -- which are
+        taken from this task, since they are what tells two submissions of the
+        same file apart. Tasks without a user-specified YAML (e.g. an inline
+        command) are serialized from the task itself.
+        """
+        if self._user_specified_yaml is None:
+            return self._to_yaml_config(redact_secrets=True)
+        config = yaml_utils.safe_load(self._user_specified_yaml)
+        redact_task_yaml_dict(config)
+        effective = self._to_yaml_config(redact_secrets=True)
+
+        if self.envs:
+            config['envs'] = dict(self.envs)
+
+        # Secrets come in dict, list (references) and mixed forms; take them
+        # from the task's own serialization, which emits whichever is valid.
+        if self.secrets:
+            for key in ('secrets', 'managed_secrets'):
+                # Assigning an existing key keeps its place in the YAML.
+                if key in effective:
+                    config[key] = effective[key]
+                else:
+                    config.pop(key, None)
+
+        # Keep the user's resources as written unless an override changed
+        # them, so a plain submission shows the file unchanged.
+        effective_resources = effective.get('resources')
+        try:
+            user_resources = _resources_to_config(
+                resources_lib.Resources.from_yaml_config(
+                    config.get('resources')),
+                redact_secrets=True)
+        except Exception:  # pylint: disable=broad-except
+            user_resources = None
+        if (effective_resources is not None and
+                user_resources != effective_resources):
+            config['resources'] = effective_resources
+        return config
+
     def _to_yaml_config(self, redact_secrets: bool = False) -> Dict[str, Any]:
         config = {}
 

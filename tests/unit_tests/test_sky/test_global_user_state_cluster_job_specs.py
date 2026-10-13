@@ -178,7 +178,7 @@ def test_backend_skips_without_cluster_hash():
 def test_backend_does_not_raise_when_building_spec_fails():
     task = task_lib.Task(run='echo hi')
     with mock.patch.object(task,
-                           'to_yaml_config',
+                           'to_submitted_yaml_config',
                            side_effect=RuntimeError('boom')):
         add_spec = _record(task)
     add_spec.assert_not_called()
@@ -210,3 +210,69 @@ def test_backend_records_env_and_secret_overrides():
     assert recorded['secrets'] == {'TOKEN': '<redacted>', 'EXTRA': '<redacted>'}
     assert 'from-file' not in task_yaml
     assert 'from-cli' not in task_yaml
+
+
+def _task_from_user_yaml(config, **overrides):
+    """A task loaded from a YAML file, as the CLI does, then overridden."""
+    user_yaml = yaml_utils.dump_yaml_str(config)
+    task = task_lib.Task.from_yaml_config(yaml_utils.safe_load(user_yaml),
+                                          **overrides)
+    task._user_specified_yaml = user_yaml
+    return task
+
+
+def test_submitted_yaml_keeps_unchanged_resources_as_written():
+    config = {'resources': {'cpus': '1+', 'memory': '2+'}, 'run': 'echo'}
+    task = _task_from_user_yaml(config)
+
+    recorded = task.to_submitted_yaml_config()
+
+    assert recorded['resources'] == {'cpus': '1+', 'memory': '2+'}
+
+
+def test_submitted_yaml_applies_resource_overrides():
+    """`sky exec c --cpus 2 task.yaml` runs with 2 CPUs, not the file's 1+."""
+    config = {'resources': {'cpus': '1+'}, 'run': 'echo'}
+    task = _task_from_user_yaml(config)
+    task.set_resources_override({'cpus': '2'})
+
+    recorded = task.to_submitted_yaml_config()
+
+    assert recorded['resources']['cpus'] == '2'
+
+
+def test_submitted_yaml_applies_resource_overrides_to_every_choice():
+    config = {
+        'resources': {
+            'any_of': [{
+                'cpus': '1+'
+            }, {
+                'cpus': '4+'
+            }]
+        },
+        'run': 'echo',
+    }
+    task = _task_from_user_yaml(config)
+    task.set_resources_override({'memory': '8'})
+
+    recorded = task.to_submitted_yaml_config()
+
+    choices = recorded['resources']['any_of']
+    assert sorted(c['cpus'] for c in choices) == ['1+', '4+']
+    assert all(c['memory'] == '8' for c in choices)
+
+
+def test_submitted_yaml_adds_cli_secret_to_list_form_secrets():
+    """`secrets: [ref]` in the file plus `--secret EXTRA=value`."""
+    config = {'secrets': ['HF_TOKEN'], 'run': 'echo'}
+    task = _task_from_user_yaml(config,
+                                secrets_overrides=[('EXTRA', 'cli-value')])
+
+    recorded = task.to_submitted_yaml_config()
+    dumped = yaml_utils.dump_yaml_str(recorded)
+
+    assert 'cli-value' not in dumped
+    assert 'EXTRA' in dumped
+    assert 'HF_TOKEN' in dumped
+    # Still a valid task YAML.
+    task_lib.Task.from_yaml_config(yaml_utils.safe_load(dumped))

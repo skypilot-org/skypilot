@@ -248,6 +248,11 @@ export function JobDetailPage() {
   // separately from the job queue and does not need the cluster to be UP.
   const clusterLoaded = Boolean(clusterData);
   const clusterWorkspace = clusterData?.workspace;
+  // Navigating between jobs reuses this page: drop the previous job's spec so
+  // it is never shown under another job's details while the new one loads.
+  useEffect(() => {
+    setJobSpec(null);
+  }, [cluster, job]);
   useEffect(() => {
     if (!cluster || !job || !clusterLoaded) return undefined;
     let cancelled = false;

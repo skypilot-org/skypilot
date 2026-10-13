@@ -631,6 +631,34 @@ Gets the status of jobs on a cluster.
     sky.exceptions.CloudUserIdentityError: if we fail to get the current
         user identity.
 
+### `sky.cluster_job_spec`
+
+```python
+sky.cluster_job_spec(cluster_name: str, job_id: int) -> server_common.RequestId[Optional[Dict[str, Any]]]
+```
+
+Gets the task YAML and entrypoint a cluster job was submitted with.
+
+**Args:**
+    cluster_name: name of the cluster.
+    job_id: id of the job on the cluster.
+
+**Returns:**
+    The request ID of the cluster job spec request.
+
+**Request Returns:**
+    spec (Optional[Dict[str, Any]]): None if the cluster does not exist or
+        the job's spec was not recorded (e.g. it was submitted by an older
+        API server version), otherwise:
+
+        ```python
+
+            {
+                'task_yaml': (str) the task YAML, with secrets redacted,
+                'entrypoint': (str) the command that submitted the job,
+                'submitted_at': (float) timestamp of submission,
+            }
+
 ### `sky.cancel`
 
 ```python
