@@ -1,6 +1,7 @@
 """Unit tests for database utilities with SKY_RUNTIME_DIR environment variable."""
 import os
 import sqlite3
+import time
 from unittest import mock
 
 import pytest
@@ -9,6 +10,10 @@ import sqlalchemy
 from sqlalchemy.ext import asyncio as sqlalchemy_async
 
 from sky.utils.db import db_utils
+
+
+def _rendered(url: sqlalchemy.engine.URL) -> str:
+    return url.render_as_string(hide_password=False)
 
 
 class TestSkyRuntimeDirEnvVar:
@@ -45,6 +50,54 @@ class TestSkyRuntimeDirEnvVar:
             db_path = call_args[0][0]
             expected_path = str(tmp_path / '.sky/test.db')
             assert expected_path in db_path
+
+
+class TestSqliteEngineLockTimeout:
+    """The SQLite engines wait for the write lock for _DB_TIMEOUT_S."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_engine_cache(self, tmp_path, monkeypatch):
+        monkeypatch.setenv('SKY_RUNTIME_DIR', str(tmp_path))
+        monkeypatch.setattr(db_utils, '_sqlite_engine_cache', {})
+
+    def test_busy_timeout_is_db_timeout(self):
+        engine = db_utils.get_engine(db_name='lock_timeout')
+        with engine.connect() as conn:
+            busy_timeout_ms = conn.execute(
+                sqlalchemy.text('PRAGMA busy_timeout')).scalar()
+        assert busy_timeout_ms == db_utils._DB_TIMEOUT_S * 1000
+
+    @pytest.mark.asyncio
+    async def test_async_busy_timeout_is_db_timeout(self):
+        engine = db_utils.get_engine(db_name='lock_timeout', async_engine=True)
+        try:
+            async with engine.connect() as conn:
+                busy_timeout_ms = (await conn.execute(
+                    sqlalchemy.text('PRAGMA busy_timeout'))).scalar()
+        finally:
+            await engine.dispose()
+        assert busy_timeout_ms == db_utils._DB_TIMEOUT_S * 1000
+
+    def test_write_fails_when_lock_budget_expires(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(db_utils, '_DB_TIMEOUT_S', 0.05)
+        engine = db_utils.get_engine(db_name='lock_timeout')
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text('CREATE TABLE items (value TEXT)'))
+        blocker = sqlite3.connect(tmp_path / '.sky/lock_timeout.db')
+        blocker.execute('BEGIN IMMEDIATE')
+        try:
+            start = time.monotonic()
+            with pytest.raises(sqlalchemy.exc.OperationalError,
+                               match='database is locked'):
+                with engine.begin() as conn:
+                    conn.execute(
+                        sqlalchemy.text('INSERT INTO items VALUES (1)'))
+            # sqlite3's default 5s timeout would exceed this bound.
+            assert time.monotonic() - start < 2
+        finally:
+            blocker.rollback()
+            blocker.close()
+            engine.dispose()
 
 
 @pytest_asyncio.fixture
@@ -112,6 +165,10 @@ class TestGetEngine:
         monkeypatch.delenv('SKYPILOT_DB_CONNECTION_URI', raising=False)
         monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
         monkeypatch.delenv('SKYPILOT_DB_POOL_CONNECTION_URI', raising=False)
+        monkeypatch.delenv('SKYPILOT_SERVER_DB_CONNECTION_POOL_SIZE',
+                           raising=False)
+        monkeypatch.delenv('SKYPILOT_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW',
+                           raising=False)
 
     def test_sqlite_sync_engine_creation(self, tmp_path, monkeypatch):
         """Test SQLite sync engine is created correctly."""
@@ -159,7 +216,9 @@ class TestGetEngine:
             call_args = mock_create.call_args
             assert 'sqlite+aiosqlite:///' in call_args[0][0]
             assert 'async_db.db' in call_args[0][0]
-            assert call_args[1]['connect_args'] == {'timeout': 30}
+            assert call_args[1]['connect_args'] == {
+                'timeout': db_utils._DB_TIMEOUT_S
+            }
             assert engine == mock_engine
 
     def test_sqlite_async_engine_not_cached(self, tmp_path, monkeypatch):
@@ -202,7 +261,8 @@ class TestGetEngine:
 
             mock_create.assert_called_once()
             call_args = mock_create.call_args
-            assert call_args[0][0] == 'postgresql://user:pass@localhost/db'
+            assert _rendered(call_args[0][0]) == (
+                'postgresql+psycopg2://user:pass@localhost/db')
             assert call_args[1]['poolclass'] == sqlalchemy.NullPool
             assert engine == mock_engine
 
@@ -221,7 +281,8 @@ class TestGetEngine:
 
             mock_create.assert_called_once()
             call_args = mock_create.call_args
-            assert call_args[0][0] == 'postgresql://user:pass@localhost/db'
+            assert _rendered(call_args[0][0]) == (
+                'postgresql+psycopg2://user:pass@localhost/db')
             assert call_args[1]['poolclass'] == sqlalchemy.pool.QueuePool
             assert call_args[1]['pool_size'] == 10
             assert call_args[1]['max_overflow'] == 0  # max(0, 5-10)
@@ -489,8 +550,9 @@ class TestGetEngine:
             mock_create.return_value = mock.MagicMock()
             db_utils.get_engine(db_name='ignored')
 
-            assert mock_create.call_args[0][0] == (
-                'postgresql://user:pass@127.0.0.1:6432/db?sslmode=disable')
+            assert _rendered(mock_create.call_args[0][0]) == (
+                'postgresql+psycopg2://user:pass@127.0.0.1:6432/db'
+                '?sslmode=disable')
 
     def test_direct_bypasses_pooler(self, monkeypatch):
         """direct=True keeps the raw URI even when a pooler is configured."""
@@ -504,8 +566,8 @@ class TestGetEngine:
             mock_create.return_value = mock.MagicMock()
             db_utils.get_engine(db_name='ignored', direct=True)
 
-            assert mock_create.call_args[0][0] == (
-                'postgresql://user:pass@10.0.0.5:5432/db')
+            assert _rendered(mock_create.call_args[0][0]) == (
+                'postgresql+psycopg2://user:pass@10.0.0.5:5432/db')
 
     def test_pooled_and_direct_engines_cached_separately(self, monkeypatch):
         """Pooled and direct engines are distinct entries in the cache."""
@@ -552,17 +614,16 @@ class TestGetEngine:
         pools = {}
 
         def rec(conn, **kw):
-            pools[conn] = kw.get('poolclass')
+            pools[_rendered(conn)] = kw.get('poolclass')
             return mock.MagicMock()
 
         with mock.patch('sqlalchemy.create_engine', side_effect=rec):
             db_utils.get_engine(db_name='ignored')  # pooled
             db_utils.get_engine(db_name='ignored', direct=True)  # direct
 
-        assert pools[
-            'postgresql://user:pass@127.0.0.1:6432/db?sslmode=disable'] == (
-                sqlalchemy.pool.QueuePool)
-        assert pools['postgresql://user:pass@10.0.0.5:5432/db'] == (
+        assert pools['postgresql+psycopg2://user:pass@127.0.0.1:6432/db'
+                     '?sslmode=disable'] == sqlalchemy.pool.QueuePool
+        assert pools['postgresql+psycopg2://user:pass@10.0.0.5:5432/db'] == (
             sqlalchemy.NullPool)
 
     def test_direct_engine_uses_queuepool_when_no_pooler(self, monkeypatch):
@@ -581,6 +642,154 @@ class TestGetEngine:
                 sqlalchemy.pool.QueuePool)
 
 
+class TestDbConnectionPoolSizeOverride:
+    """Tests for the SKYPILOT_SERVER_DB_CONNECTION_POOL_SIZE override."""
+
+    _ENV = 'SKYPILOT_SERVER_DB_CONNECTION_POOL_SIZE'
+    _OVERFLOW_ENV = 'SKYPILOT_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW'
+
+    @pytest.fixture(autouse=True)
+    def clear_state(self, monkeypatch):
+        db_utils._postgres_engine_cache.clear()
+        db_utils.set_max_connections(0)
+        monkeypatch.delenv(self._ENV, raising=False)
+        monkeypatch.delenv(self._OVERFLOW_ENV, raising=False)
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://user:pass@localhost/db')
+        monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
+        monkeypatch.delenv('SKYPILOT_DB_POOL_CONNECTION_URI', raising=False)
+        yield
+        db_utils._postgres_engine_cache.clear()
+        db_utils.set_max_connections(0)
+
+    @pytest.mark.parametrize('value', ['', '   '])
+    def test_unset_or_blank_defers_to_the_derived_budget(
+            self, monkeypatch, value):
+        db_utils.set_max_connections(3)
+        assert db_utils.get_db_connection_pool_size() == 3
+        monkeypatch.setenv(self._ENV, value)
+        assert db_utils.get_db_connection_pool_size() == 3
+
+    def test_override_wins_over_the_derived_budget(self, monkeypatch):
+        db_utils.set_max_connections(3)
+        monkeypatch.setenv(self._ENV, '7')
+        assert db_utils.get_db_connection_pool_size() == 7
+
+    def test_override_of_zero_disables_pooling(self, monkeypatch):
+        db_utils.set_max_connections(3)
+        monkeypatch.setenv(self._ENV, '0')
+        assert db_utils.get_db_connection_pool_size() == 0
+
+    @pytest.mark.parametrize('value', ['abc', '1.5', '2 connections'])
+    def test_non_integer_is_refused(self, monkeypatch, value):
+        monkeypatch.setenv(self._ENV, value)
+        with pytest.raises(ValueError, match='not an integer'):
+            db_utils.get_db_connection_pool_size()
+
+    def test_negative_is_refused(self, monkeypatch):
+        monkeypatch.setenv(self._ENV, '-1')
+        with pytest.raises(ValueError, match='non-negative'):
+            db_utils.get_db_connection_pool_size()
+
+    def test_engine_pools_without_the_process_setting_a_budget(
+            self, monkeypatch):
+        """The override applies to an engine built before the process sets
+        its budget -- the case the derived budget cannot reach, since
+        get_engine() caches that engine for the life of the process."""
+        monkeypatch.setenv(self._ENV, '4')
+
+        with mock.patch('sqlalchemy.create_engine') as mock_create:
+            mock_create.return_value = mock.MagicMock()
+            db_utils.get_engine(db_name='ignored')
+
+        call_kwargs = mock_create.call_args[1]
+        assert call_kwargs['poolclass'] == sqlalchemy.pool.QueuePool
+        assert call_kwargs['pool_size'] == 4
+        assert call_kwargs['max_overflow'] == 1  # max(0, 5-4)
+
+    def test_engine_stays_unpooled_when_the_override_is_zero(self, monkeypatch):
+        """An explicit 0 keeps NullPool even where the derived budget asked
+        for a pool."""
+        db_utils.set_max_connections(3)
+        monkeypatch.setenv(self._ENV, '0')
+
+        with mock.patch('sqlalchemy.create_engine') as mock_create:
+            mock_create.return_value = mock.MagicMock()
+            db_utils.get_engine(db_name='ignored')
+
+        assert mock_create.call_args[1]['poolclass'] == sqlalchemy.NullPool
+
+    @pytest.mark.parametrize('pool_size,expected_overflow', [(1, 4), (4, 1),
+                                                             (5, 0), (8, 0)])
+    def test_burst_defaults_to_topping_up_to_the_default_concurrency(
+            self, pool_size, expected_overflow):
+        assert db_utils.get_db_connection_pool_max_overflow(
+            pool_size) == expected_overflow
+
+    def test_burst_override_wins_over_the_default(self, monkeypatch):
+        """A wide pool can still be given burst room, which the default
+        (top up to the default concurrency) would have left at 0."""
+        monkeypatch.setenv(self._OVERFLOW_ENV, '20')
+        assert db_utils.get_db_connection_pool_max_overflow(8) == 20
+
+    def test_burst_override_of_zero_caps_the_process_at_the_pool(
+            self, monkeypatch):
+        monkeypatch.setenv(self._OVERFLOW_ENV, '0')
+        assert db_utils.get_db_connection_pool_max_overflow(1) == 0
+
+    @pytest.mark.parametrize('value', ['abc', '-1'])
+    def test_invalid_burst_is_refused(self, monkeypatch, value):
+        monkeypatch.setenv(self._OVERFLOW_ENV, value)
+        with pytest.raises(ValueError, match='connections'):
+            db_utils.get_db_connection_pool_max_overflow(1)
+
+    def test_engine_takes_both_the_pool_size_and_the_burst(self, monkeypatch):
+        monkeypatch.setenv(self._ENV, '2')
+        monkeypatch.setenv(self._OVERFLOW_ENV, '20')
+
+        with mock.patch('sqlalchemy.create_engine') as mock_create:
+            mock_create.return_value = mock.MagicMock()
+            db_utils.get_engine(db_name='ignored')
+
+        call_kwargs = mock_create.call_args[1]
+        assert call_kwargs['poolclass'] == sqlalchemy.pool.QueuePool
+        assert call_kwargs['pool_size'] == 2
+        assert call_kwargs['max_overflow'] == 20
+
+    def test_burst_alone_leaves_the_derived_budget_in_charge(self, monkeypatch):
+        """The burst override sizes the pool the derived budget asked for; it
+        does not turn pooling on by itself."""
+        monkeypatch.setenv(self._OVERFLOW_ENV, '20')
+
+        with mock.patch('sqlalchemy.create_engine') as mock_create:
+            mock_create.return_value = mock.MagicMock()
+            db_utils.get_engine(db_name='ignored')
+
+        assert mock_create.call_args[1]['poolclass'] == sqlalchemy.NullPool
+
+    def test_direct_engine_stays_unpooled_behind_a_pooler(self, monkeypatch):
+        """The override sizes the pooled engine; it does not put a reuse pool
+        on the direct engine, which would pin an idle backend per process."""
+        monkeypatch.setenv('SKYPILOT_DB_POOL_HOSTPORT', '127.0.0.1:6432')
+        monkeypatch.setenv(self._ENV, '4')
+
+        pools = {}
+
+        def rec(conn, **kwargs):
+            pools[_rendered(conn)] = kwargs.get('poolclass')
+            return mock.MagicMock()
+
+        with mock.patch('sqlalchemy.create_engine', side_effect=rec):
+            db_utils.get_engine(db_name='ignored')
+            db_utils.get_engine(db_name='ignored', direct=True)
+
+        assert pools['postgresql+psycopg2://user:pass@127.0.0.1:6432/db?'
+                     'sslmode=disable'] == sqlalchemy.pool.QueuePool
+        assert pools['postgresql+psycopg2://user:pass@localhost/db'] == (
+            sqlalchemy.NullPool)
+
+
 class TestConnStringResolution:
     """Tests for _rewrite_hostport and _resolve_conn_string."""
 
@@ -590,6 +799,15 @@ class TestConnStringResolution:
         monkeypatch.delenv('SKYPILOT_DB_CONNECTION_URI', raising=False)
         monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
         monkeypatch.delenv('SKYPILOT_DB_POOL_CONNECTION_URI', raising=False)
+
+    @pytest.mark.parametrize('conn_string,expected', [
+        ('postgresql://u:p%40ss@h:5432/db?sslmode=require',
+         'postgresql+psycopg2://u:p%40ss@h:5432/db?sslmode=require'),
+        ('postgresql+psycopg2://u:p@h/db', 'postgresql+psycopg2://u:p@h/db'),
+        ('postgresql+psycopg://u:p@h/db', 'postgresql+psycopg://u:p@h/db'),
+    ])
+    def test_psycopg2_url(self, conn_string, expected):
+        assert _rendered(db_utils.psycopg2_url(conn_string)) == expected
 
     def test_rewrite_preserves_userinfo_and_dbname(self):
         out = db_utils._rewrite_hostport(

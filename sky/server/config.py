@@ -141,11 +141,24 @@ def compute_server_config(
         excess = max(0.0, resident * SERVER_WORKER_MEM_GB - _min_avail_mem_gb())
         mem_size_gb = max(0.0, mem_size_gb - excess)
         logger.debug(f'Memory size for executor pools: {mem_size_gb}GB')
-    max_parallel_for_long = _max_long_worker_parallism(cpu_count,
-                                                       mem_size_gb,
-                                                       local=not deploy)
-    max_parallel_for_short = _max_short_worker_parallism(
-        mem_size_gb, max_parallel_for_long)
+    # An explicit count wins over the derived one; the derived short count
+    # still budgets against whatever long count is in effect. The short-pool
+    # floor is checked once at startup, see validate_explicit_worker_counts().
+    explicit_long = explicit_process_count(
+        constants.ENV_VAR_SERVER_LONG_WORKERS, minimum=_MIN_LONG_WORKERS)
+    explicit_short = explicit_process_count(
+        constants.ENV_VAR_SERVER_SHORT_WORKERS, minimum=1)
+    if explicit_long is not None:
+        max_parallel_for_long = explicit_long
+    else:
+        max_parallel_for_long = _max_long_worker_parallism(cpu_count,
+                                                           mem_size_gb,
+                                                           local=not deploy)
+    if explicit_short is not None:
+        max_parallel_for_short = explicit_short
+    else:
+        max_parallel_for_short = _max_short_worker_parallism(
+            mem_size_gb, max_parallel_for_long)
     queue_backend = QueueBackend.MULTIPROCESSING
     burstable_parallel_for_long = 0
     burstable_parallel_for_short = 0
@@ -177,8 +190,10 @@ def compute_server_config(
             # never reject to start due to resource constraints.
             # Note that the refresh daemon will still occupy one worker
             # permanently because it never exits.
-            max_parallel_for_long = 0
-            max_parallel_for_short = 0
+            if explicit_long is None:
+                max_parallel_for_long = 0
+            if explicit_short is None:
+                max_parallel_for_short = 0
             if not quiet:
                 logger.warning(
                     'SkyPilot API server will run in low resource mode because '
@@ -197,11 +212,16 @@ def compute_server_config(
             num_db_connections_per_worker = 1
 
     if not quiet:
+        long_source = _sizing_source(explicit_long,
+                                     constants.ENV_VAR_SERVER_LONG_WORKERS)
+        short_source = _sizing_source(explicit_short,
+                                      constants.ENV_VAR_SERVER_SHORT_WORKERS)
         logger.info(
             f'SkyPilot API server will start {num_server_workers} server '
             f'processes with {max_parallel_for_long} background workers for '
-            f'long requests and will allow at max {max_parallel_for_short} '
-            'short requests in parallel.')
+            f'long requests ({long_source}) and will allow at max '
+            f'{max_parallel_for_short} short requests in parallel '
+            f'({short_source}).')
     return ServerConfig(
         num_server_workers=num_server_workers,
         queue_backend=queue_backend,
@@ -215,6 +235,69 @@ def compute_server_config(
             num_db_connections_per_worker=num_db_connections_per_worker),
         num_db_connections_per_worker=num_db_connections_per_worker,
     )
+
+
+def explicit_process_count(env_var: str,
+                           minimum: int,
+                           maximum: Optional[int] = None) -> Optional[int]:
+    """The process count set in ``env_var``, None when it is unset.
+
+    Raises:
+        ValueError: if the variable is set but is not an integer within
+            [``minimum``, ``maximum``]. A misconfigured pool is refused at
+            startup rather than clamped, since clamping would quietly give
+            the deployment a pool it did not ask for.
+    """
+    raw = os.environ.get(env_var)
+    if raw is None or not raw.strip():
+        return None
+    try:
+        count = int(raw)
+    except ValueError:
+        raise ValueError(
+            f'{env_var}={raw!r} is not an integer number of processes.'
+        ) from None
+    if count < minimum:
+        raise ValueError(f'{env_var}={raw!r} must be at least {minimum}.')
+    if maximum is not None and count > maximum:
+        raise ValueError(f'{env_var}={raw!r} must be at most {maximum}.')
+    return count
+
+
+def validate_explicit_worker_counts() -> None:
+    """Checks the explicit long and short pool sizes against their bounds.
+
+    Called once at server startup; compute_server_config() only parses the
+    values, since it also runs on request paths.
+
+    Raises:
+        ValueError: if a value is not an integer or is below its floor.
+    """
+    explicit_process_count(constants.ENV_VAR_SERVER_LONG_WORKERS,
+                           minimum=_MIN_LONG_WORKERS)
+    short = explicit_process_count(constants.ENV_VAR_SERVER_SHORT_WORKERS,
+                                   minimum=1)
+    if short is not None:
+        floor = _min_pinned_short_workers()
+        if short < floor:
+            raise ValueError(
+                f'{constants.ENV_VAR_SERVER_SHORT_WORKERS}={short} must be at '
+                f'least {floor}: one idle worker plus one per internal request '
+                'daemon, enabled or not.')
+
+
+def _min_pinned_short_workers() -> int:
+    """Floor for an explicit short pool: one idle worker plus every daemon.
+
+    Counts daemons whether or not they are enabled now. A uvicorn worker
+    restart schedules any daemon the live config has enabled since startup,
+    and a pinned pool does not grow to make room for it.
+    """
+    return _MIN_IDLE_SHORT_WORKERS + len(daemons.INTERNAL_REQUEST_DAEMONS)
+
+
+def _sizing_source(explicit: Optional[int], env_var: str) -> str:
+    return f'from {env_var}' if explicit is not None else 'derived'
 
 
 def _min_avail_mem_gb() -> float:

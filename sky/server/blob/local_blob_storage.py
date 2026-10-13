@@ -15,6 +15,7 @@ from sky import sky_logging
 from sky.server import common as server_common
 from sky.server.blob import blob_storage as bs
 from sky.server.requests import executor
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -40,9 +41,19 @@ class LocalFilesystemBlobStorage(bs.BlobStorage):
         }
 
     def blobs_dir(self, user_id: str) -> pathlib.Path:
-
+        # Defense in depth: user_id is joined as a directory component, so a
+        # non-component value would escape the clients dir. HTTP handlers
+        # validate it (owner_user_id), but non-HTTP callers reach here too.
+        if not common_utils.is_single_path_component(user_id):
+            raise ValueError(f'Invalid user id: {user_id!r}')
         return (server_common.API_SERVER_CLIENT_DIR.expanduser().resolve() /
                 user_id / 'file_mounts' / 'blobs')
+
+    def user_roots(self, user_id: str) -> List[pathlib.Path]:
+        # Blobs live under clients/<user>/file_mounts/blobs, so the
+        # file_mounts dir already contains every path this backend resolves.
+        return [(server_common.API_SERVER_CLIENT_DIR.expanduser().resolve() /
+                 user_id / 'file_mounts')]
 
     async def blob_exists(self, user_id: str, blob_id: str) -> bool:
         target = self.get_target_dir(user_id, blob_id)

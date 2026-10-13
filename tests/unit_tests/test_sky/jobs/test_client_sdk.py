@@ -50,6 +50,37 @@ def test_queue_v2_fields_none_requests_all_fields():
     assert body['fields'] is None
 
 
+def test_queue_v2_sends_include_tree():
+    body = _call_raw_queue_v2(refresh=False, job_ids=[7], include_tree=True)
+    assert body['job_ids'] == [7]
+    assert body['include_tree'] is True
+    body = _call_raw_queue_v2(refresh=False, job_ids=[7])
+    assert body['include_tree'] is False
+
+
+def test_queue_v2_include_tree_refuses_an_old_server():
+    # An older server drops the field and answers with the roots alone, which
+    # reads as the whole tree and is not -- so refuse rather than mislabel.
+    from sky import exceptions
+    from sky.server import constants as server_constants
+    raw_queue_v2 = _unwrap(jobs_sdk.queue_v2)
+    too_old = server_constants.MIN_JOBS_INCLUDE_TREE_API_VERSION - 1
+    with mock.patch.object(jobs_sdk.versions,
+                           'get_remote_api_version',
+                           return_value=too_old), \
+         mock.patch.object(jobs_sdk.server_common,
+                           'make_authenticated_request') as mock_request:
+        with pytest.raises(exceptions.NotSupportedError, match='include_tree'):
+            raw_queue_v2(refresh=False, job_ids=[7], include_tree=True)
+        mock_request.assert_not_called()
+        # Not asking for the tree is fine on that server.
+        with mock.patch.object(jobs_sdk.server_common,
+                               'get_request_id',
+                               return_value='request-id'):
+            raw_queue_v2(refresh=False, job_ids=[7])
+        mock_request.assert_called_once()
+
+
 def test_queue_version_2_dispatches_to_queue_v2():
     raw_queue = jobs_sdk.queue.__wrapped__.__wrapped__
 
@@ -129,6 +160,27 @@ async def test_async_queue_passes_version_through():
     mock_queue.assert_called_once_with(True, False, True, [9], 2)
     mock_stream.assert_called_once_with(
         'request-id', jobs_sdk_async.sdk_async.DEFAULT_STREAM_CONFIG)
+
+
+@pytest.mark.asyncio
+async def test_async_launch_forwards_depends_on():
+
+    async def mock_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    with mock.patch('sky.jobs.client.sdk_async.asyncio.to_thread',
+                    side_effect=mock_to_thread), \
+         mock.patch.object(jobs_sdk, 'launch',
+                           return_value='request-id') as mock_launch, \
+         mock.patch.object(jobs_sdk_async.sdk_async,
+                           'get',
+                           new=mock.AsyncMock(return_value='launch-result')):
+        result = await jobs_sdk_async.launch('task',
+                                             stream_logs=None,
+                                             depends_on=[12, 13])
+
+    assert result == 'launch-result'
+    assert mock_launch.call_args.kwargs['depends_on'] == [12, 13]
 
 
 class TestResolveJobGroup:
@@ -264,3 +316,18 @@ class TestResolveJobGroup:
             self._resolve_with('dup',
                                [self._record(5, 'dup'),
                                 self._record(9, 'dup')])
+
+
+def test_launch_depends_on_refuses_an_old_server():
+    from sky import exceptions
+    from sky.server import constants as server_constants
+    raw_launch = _unwrap(jobs_sdk.launch)
+    too_old = server_constants.MIN_JOBS_DEPENDS_ON_API_VERSION - 1
+    with mock.patch.object(jobs_sdk.versions,
+                           'get_remote_api_version',
+                           return_value=too_old), \
+         mock.patch.object(jobs_sdk.server_common,
+                           'make_authenticated_request') as mock_request:
+        with pytest.raises(exceptions.NotSupportedError, match='depends_on'):
+            raw_launch(mock.MagicMock(), depends_on=[1])
+        mock_request.assert_not_called()

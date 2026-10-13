@@ -24,6 +24,7 @@ import pathlib
 import subprocess
 import tempfile
 import textwrap
+import uuid
 
 import jinja2
 import pytest
@@ -124,6 +125,73 @@ def test_azure_private_image():
         f'sky down -y {name}',
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.azure
+def test_azure_acr_managed_identity_image():
+    """Pulls a private ACR image authenticated by the VM's managed identity.
+
+    The test creates an isolated registry and user-assigned identity, grants
+    AcrPull, and removes the resource group during teardown. Empty docker
+    credentials select the managed-identity path; azure.remote_identity
+    attaches the generated identity to the VM.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    suffix = uuid.uuid4().hex[:10]
+    resource_group = f'sky-acr-smoke-{suffix}'
+    registry_name = f'skyacr{suffix}'
+    registry = f'{registry_name}.azurecr.io'
+    identity_name = f'sky-acr-pull-{suffix}'
+    subscription_id = azure.get_subscription_id()
+    identity = (f'/subscriptions/{subscription_id}/resourceGroups/'
+                f'{resource_group}/providers/Microsoft.ManagedIdentity/'
+                f'userAssignedIdentities/{identity_name}')
+    task_yaml = textwrap.dedent(f"""\
+        resources:
+          infra: azure/eastus
+          image_id: docker:{registry}/skypilot-ci-test:latest
+        envs:
+          SKYPILOT_DOCKER_USERNAME: ""
+          SKYPILOT_DOCKER_PASSWORD: ""
+          SKYPILOT_DOCKER_SERVER: {registry}
+        run: |
+          echo hello-from-acr-image
+        """)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(task_yaml)
+        f.flush()
+        test = smoke_tests_utils.Test(
+            'azure_acr_managed_identity_image',
+            [
+                f'az group create --name {resource_group} '
+                '--location eastus --output none',
+                f'az acr create --resource-group {resource_group} '
+                f'--name {registry_name} --sku Basic --output none',
+                f'az acr import --name {registry_name} '
+                '--source docker.io/library/ubuntu:22.04 '
+                '--image skypilot-ci-test:latest --force --output none',
+                f'az identity create --resource-group {resource_group} '
+                f'--name {identity_name} --output none',
+                f'principal_id=$(az identity show --resource-group '
+                f'{resource_group} --name {identity_name} '
+                '--query principalId --output tsv) && '
+                f'scope=$(az acr show --name {registry_name} '
+                '--query id --output tsv) && '
+                'az role assignment create '
+                '--assignee-principal-type ServicePrincipal '
+                '--assignee-object-id "$principal_id" --role AcrPull '
+                '--scope "$scope" --output none',
+                f'sky launch -y -c {name} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+                f'--config azure.remote_identity={identity} {f.name}',
+                f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+                f'sky logs {name} 1 | grep hello-from-acr-image',
+            ],
+            f'sky down -y {name}; '
+            f'az group delete --name {resource_group} --yes --no-wait',
+            timeout=30 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.aws

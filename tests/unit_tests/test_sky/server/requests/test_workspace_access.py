@@ -100,8 +100,10 @@ def _discover_server_modules(root: pathlib.Path) -> Dict[str, str]:
     return modules
 
 
+# Wrappers that schedule a request on the handler's behalf count too, as
+# long as the handler names the request explicitly.
 _SCHEDULERS = ('schedule_request_async', 'schedule_request',
-               'prepare_request_async')
+               'prepare_request_async', 'schedule_update_config')
 _HTTP_METHODS = ('GET', 'POST', 'PUT', 'DELETE', 'PATCH')
 
 # The access level every executor-backed endpoint needs on the caller's active

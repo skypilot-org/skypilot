@@ -2,6 +2,7 @@
 
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+import uuid
 
 import colorama
 
@@ -691,6 +692,7 @@ class Slurm(clouds.Cloud):
             'slurm_partition': partition,
             'provision_timeout': provision_timeout,
             'sky_base_dir': sky_base_dir,
+            'snapshot_id': uuid.uuid4().hex,
             # TODO(jwj): Pass SSH config in a smarter way
             'ssh_hostname': ssh_config_dict['hostname'],
             'ssh_port': str(ssh_config_dict.get('port', 22)),

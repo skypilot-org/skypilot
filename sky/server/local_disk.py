@@ -347,6 +347,19 @@ def available_for_path(path: str) -> Optional[int]:
     return min(bounds)
 
 
+def used_for_path(path: str) -> Optional[int]:
+    """Bytes in use on the filesystem holding *path*, or None if unknown.
+
+    Everything on that filesystem counts, not only what the caller put
+    there. Reserved blocks count as used.
+    """
+    filesystems = _filesystem_usage([_nearest_existing(path)])
+    if not filesystems:
+        return None
+    filesystem = next(iter(filesystems.values()))
+    return max(filesystem.size_bytes - filesystem.avail_bytes, 0)
+
+
 def _count_unreadable(error: OSError) -> int:
     """Returns 1 if *error* hides bytes from the walk, 0 if it does not."""
     return 0 if error.errno == errno.ENOENT else 1
@@ -551,7 +564,7 @@ def scan(
     such a root is where a persistent volume gets mounted -- on a network
     filesystem, where a walk of many small files takes minutes. The
     filesystem behind it is still reported; for a volume shared between
-    replicas its free space is the meaningful number anyway.
+    servers its free space is the meaningful number anyway.
     """
     started = time.monotonic()
     deadline = started + timeout_seconds

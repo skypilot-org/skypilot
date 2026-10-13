@@ -100,10 +100,12 @@ def test_merge_orders_newest_first_and_truncates(monkeypatch):
     # job-level/DAG name 'my-pipeline').
     assert captured['name'] == 'my-task-1'
     # Both the milestone sequence and the finer-grained launch progress are
-    # requested.
+    # requested, plus the launch milestones -- the admission boundary is only
+    # visible in that last one.
     assert (set(captured['event_types']) == {
         global_user_state.ClusterEventType.STATUS_CHANGE,
         global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+        global_user_state.ClusterEventType.LAUNCH_MILESTONE,
     })
     # Newest first, and the window is exactly the most recent three rows of
     # the merged list -- so the older 'Job is starting' drops out.

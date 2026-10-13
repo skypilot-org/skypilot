@@ -1,0 +1,10 @@
+config:
+  kubernetes:
+    remote_identity: NONE
+
+run: |
+  # run has no `set -e`: fail the job explicitly when the token is there.
+  test ! -e /var/run/secrets/kubernetes.io/serviceaccount/token || exit 1
+  echo "no_token_check: ok"
+  # Stay RUNNING long enough for the test to read the logs by name.
+  sleep 60
