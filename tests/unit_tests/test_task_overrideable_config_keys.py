@@ -217,3 +217,46 @@ def test_task_config_schema_lenient_on_client(monkeypatch):
     monkeypatch.delenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, raising=False)
     task_config_schema = schemas.get_task_schema()['properties']['config']
     assert task_config_schema['additionalProperties'] is True
+
+
+def test_primeintellect_ceiling_key_is_task_overrideable():
+    """The skypilot-controller runner threads the proven price ceiling to
+    the launch-path offer filter as a per-task
+    `primeintellect.create_instance_kwargs.max_hourly_cost_usd` override
+    (skypilot_runner._provider_launch_ceiling_overrides — the same channel
+    vast uses, ENG-519). BOTH halves must exist: the config schema section
+    AND the task-overrideable registration, or the strict server-side gate
+    in Resources.from_yaml_config rejects the whole override with "Found
+    unsupported field 'primeintellect'" before the provisioner's ceiling
+    re-resolution ever runs (the live SkyPilotLaunchFailed, 2026-10-14).
+    """
+    assert ('primeintellect', 'create_instance_kwargs') in (
+        constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK)
+    task_config_schema = schemas.get_task_schema()['properties']['config']
+    assert 'primeintellect' in task_config_schema['properties']
+    assert 'create_instance_kwargs' in task_config_schema['properties'][
+        'primeintellect']['properties']
+
+
+def test_primeintellect_ceiling_override_passes_strict_validation(monkeypatch):
+    """The EXACT override dict the controller builds must clear the strict
+    server-side re-validation in Resources.from_yaml_config (the gate that
+    fired live) and survive Resources.copy, which silently filters
+    unregistered sections.
+    """
+    monkeypatch.setattr(schemas, '_allow_additional_properties', lambda: False)
+    override = {
+        'primeintellect': {
+            'create_instance_kwargs': {
+                'max_hourly_cost_usd': '1.46'
+            }
+        }
+    }
+    resources = next(
+        iter(
+            Resources.from_yaml_config({
+                '_cluster_config_overrides': override
+            })))
+    assert resources.cluster_config_overrides == override
+    copied = resources.copy()
+    assert copied.cluster_config_overrides == override

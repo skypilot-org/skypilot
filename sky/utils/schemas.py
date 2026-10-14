@@ -2248,6 +2248,16 @@ def get_config_schema():
                 },
             }
         },
+        'primeintellect': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'create_instance_kwargs': {
+                    'type': 'object',
+                },
+            }
+        },
         'nebius': {
             'type': 'object',
             'required': [],
