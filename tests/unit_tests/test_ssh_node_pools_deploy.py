@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+from unittest import mock
 
 from sky.ssh_node_pools.deploy import deploy
 from sky.ssh_node_pools.deploy import utils as deploy_utils
@@ -111,7 +112,7 @@ def test_gpu_operator_cmd_is_rerunnable_and_drops_legacy_service():
     cmd = deploy._gpu_operator_install_cmd('')
     assert 'helm upgrade --install gpu-operator' in cmd
     assert 'helm install gpu-operator' not in cmd
-    assert cmd.rstrip().endswith(deploy._DELETE_LEGACY_DCGM_SERVICE)
+    assert deploy._DELETE_LEGACY_DCGM_SERVICE in cmd
 
 
 def _fake_run(calls, returncode):
@@ -138,6 +139,7 @@ def test_run_remote_sends_script_on_stdin_not_argv(monkeypatch, tmp_path):
                                        use_ssh_config=use_ssh_config) == 'out'
     for args, kwargs in calls:
         assert not any(password in a for a in args)
+        assert '-T' in args and args[-1] == deploy_utils._REMOTE_RUNNER
         assert kwargs['input'] == cmd
 
 
@@ -153,10 +155,20 @@ def test_run_remote_failure_log_redacts_password(monkeypatch):
     assert '<redacted>' in errors[0] and 'sudo -A false' in errors[0]
 
 
+def _stub_bin(tmp_path, stubs):
+    """A PATH dir whose executables are the given bash bodies."""
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    for name, body in stubs.items():
+        path = bin_dir / name
+        path.write_text(f'#!/bin/bash\n{body}\n')
+        path.chmod(0o755)
+    return {**os.environ, 'PATH': f'{bin_dir}:{os.environ["PATH"]}'}
+
+
 def test_remote_runner_runs_script_and_keeps_exit_code(tmp_path):
-    """The script runs from a deleted temp file and cannot read itself."""
     out = subprocess.run(['bash', '-c', deploy_utils._REMOTE_RUNNER],
-                         input='echo hi; cat; exit 7\n',
+                         input='echo hi; exit 7\n',
                          capture_output=True,
                          text=True,
                          env={
@@ -165,3 +177,56 @@ def test_remote_runner_runs_script_and_keeps_exit_code(tmp_path):
                          check=False)
     assert (out.returncode, out.stdout) == (7, 'hi\n')
     assert not list(tmp_path.iterdir())
+
+
+def test_run_remote_runs_tcp_forwarding_cmd_with_password(tmp_path):
+    """End to end through a fake ssh: quoting and askpass survive the trip."""
+    password = 'p$w\'d"x`;q\\'
+    env = _stub_bin(
+        tmp_path,
+        {
+            # ssh runs its last argument, like sshd's `$SHELL -c`.
+            'ssh': 'exec bash -c "${@: -1}"',
+            # sudo -A: check the askpass helper returns the password.
+            'sudo': ('[ "$1" = -A ] && shift; '
+                     '[ "$("$SUDO_ASKPASS")" = "$EXPECTED" ] || exit 1; '
+                     '"$@"'),
+            'sshd': 'echo "allowtcpforwarding yes"',
+        })
+    env['EXPECTED'] = password
+    cmd = deploy._tcp_forwarding_cmd(deploy.create_askpass_script(password),
+                                     '10.0.0.1')
+    with mock.patch.dict(os.environ, env, clear=True):
+        out = deploy_utils.run_remote('10.0.0.1', cmd, use_ssh_config=True)
+    assert out == 'TCP Forwarding already enabled on head node (10.0.0.1).'
+
+
+def _gpu_install(tmp_path, helm_upgrade_rc, kubectl_delete_rc):
+    env = _stub_bin(
+        tmp_path, {
+            'curl': 'printf "exit 0\\n" > get_helm.sh',
+            'sudo': '[ "$1" = -A ] && shift; [ "$1" = -E ] && shift; "$@"',
+            'helm': (f'[ "$1" = upgrade ] && exit {helm_upgrade_rc}; exit 0'),
+            'kubectl': ('case "$*" in *describe*) '
+                        'echo "nvidia.com/gpu: 1 nvidia.com/gpu.product";; '
+                        f'*delete*) exit {kubectl_delete_rc};; esac'),
+        })
+    return subprocess.run(
+        ['bash', '-c', deploy._gpu_operator_install_cmd('')],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False)
+
+
+def test_gpu_operator_cmd_fails_when_helm_fails(tmp_path):
+    out = _gpu_install(tmp_path, helm_upgrade_rc=1, kubectl_delete_rc=0)
+    assert out.returncode != 0
+    assert 'installed successfully' not in out.stdout
+
+
+def test_gpu_operator_cmd_ignores_legacy_service_delete_failure(tmp_path):
+    out = _gpu_install(tmp_path, helm_upgrade_rc=0, kubectl_delete_rc=1)
+    assert out.returncode == 0
+    assert 'installed successfully' in out.stdout

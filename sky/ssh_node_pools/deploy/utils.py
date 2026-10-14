@@ -93,10 +93,9 @@ _ASKPASS_BODY_RE = re.compile(
 
 # Scripts go over stdin, not argv: they can hold the sudo password, and argv
 # is visible to every user on the host. The temp file is unlinked before the
-# script runs, and the script's own stdin is /dev/null so it cannot read
-# itself.
-_REMOTE_RUNNER = ('bash -c \'f=$(mktemp) && cat >"$f" && exec 3<"$f" && '
-                  'rm -f "$f" && exec bash /dev/fd/3 </dev/null\'')
+# script is written into it, so nothing is left behind if the connection drops.
+_REMOTE_RUNNER = ('bash -c \'f=$(mktemp) && exec 3>"$f" 4<"$f" && rm -f "$f" '
+                  '&& cat >&3 && exec 3>&- && exec bash /dev/fd/4\'')
 
 
 def redact_askpass(cmd: str) -> str:
@@ -116,13 +115,13 @@ def run_remote(node,
     ssh_cmd: List[str]
     if use_ssh_config:
         # Use SSH config for connection parameters
-        ssh_cmd = ['ssh', node, _REMOTE_RUNNER]
+        ssh_cmd = ['ssh', '-T', node, _REMOTE_RUNNER]
     else:
         # Use explicit parameters
         ssh_cmd = [
-            'ssh', '-o', 'StrictHostKeyChecking=no', '-o', 'IdentitiesOnly=yes',
-            '-o', f'ConnectTimeout={connect_timeout}', '-o',
-            'ServerAliveInterval=10', '-o', 'ServerAliveCountMax=3'
+            'ssh', '-T', '-o', 'StrictHostKeyChecking=no', '-o',
+            'IdentitiesOnly=yes', '-o', f'ConnectTimeout={connect_timeout}',
+            '-o', 'ServerAliveInterval=10', '-o', 'ServerAliveCountMax=3'
         ]
 
         if ssh_key:

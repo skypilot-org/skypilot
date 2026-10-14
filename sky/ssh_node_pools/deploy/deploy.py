@@ -1008,8 +1008,8 @@ curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scr
 chmod 700 get_helm.sh &&
 {_GET_HELM} &&
 helm repo add nvidia https://helm.ngc.nvidia.com/nvidia && helm repo update &&
-kubectl create namespace gpu-operator --kubeconfig ~/.kube/config || true &&
-sudo -A ln -s /sbin/ldconfig /sbin/ldconfig.real || true &&
+{{ kubectl create namespace gpu-operator --kubeconfig ~/.kube/config || true; }} &&
+{{ sudo -A ln -s /sbin/ldconfig /sbin/ldconfig.real || true; }} &&
 helm upgrade --install gpu-operator -n gpu-operator --create-namespace nvidia/gpu-operator \\
     --set 'toolkit.env[0].name=CONTAINERD_CONFIG' \\
     --set 'toolkit.env[0].value=/var/lib/rancher/k3s/agent/etc/containerd/config.toml' \\
@@ -1023,9 +1023,9 @@ echo 'Waiting for GPU operator installation...' &&
 while ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu:' || ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu.product'; do
     echo 'Waiting for GPU operator...'
     sleep 5
-done
+done &&
 echo 'GPU operator installed successfully.' &&
-{_DELETE_LEGACY_DCGM_SERVICE}
+{{ {_DELETE_LEGACY_DCGM_SERVICE} || true; }}
 """
 
 
