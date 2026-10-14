@@ -187,11 +187,15 @@ def deploy_multiple_clusters(
                         if history_hosts_info[i] != hosts_info[i]:
                             role = ('server'
                                     if current_ha and i > 0 else 'head')
+                            # Field names only: the values hold passwords.
+                            old, new = history_hosts_info[i], hosts_info[i]
+                            changed = sorted(k for k in set(old) | set(new)
+                                             if old.get(k) != new.get(k))
                             raise ValueError(
                                 f'Cluster configuration has changed for '
-                                f'{role} node (host {i}). '
-                                f'Previous: {history_hosts_info[i]}, '
-                                f'Current: {hosts_info[i]}. '
+                                f'{role} node (host {i}, '
+                                f'{new.get("ip", old.get("ip"))}): '
+                                f'{", ".join(changed)}. '
                                 f'Run `sky ssh down` first to '
                                 f'reconfigure server nodes.')
 
