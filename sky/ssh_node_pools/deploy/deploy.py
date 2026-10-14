@@ -142,7 +142,9 @@ def deploy_multiple_clusters(
             if os.path.exists(history_yaml_file):
                 logger.debug(f'Loading history from {history_yaml_file}')
                 with open(history_yaml_file, 'r', encoding='utf-8') as f:
-                    history = yaml.safe_load(f)
+                    # Same loader as the pools file, so a password reads the
+                    # same from both (master wrote `password: 123456`).
+                    history = yaml.load(f, Loader=ssh_utils.UniqueKeySafeLoader)
             else:
                 logger.debug(f'No history found for {context_name}.')
 

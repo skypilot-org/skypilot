@@ -288,6 +288,29 @@ def test_gpu_operator_cmd_ignores_legacy_service_delete_failure(tmp_path):
     assert 'installed successfully' in out.stdout
 
 
+def test_unchanged_numeric_password_matches_a_master_history(
+        monkeypatch, tmp_path):
+    """master wrote an unquoted numeric password into the history as an int;
+    the same unchanged pools file must not count as a config change."""
+    key = tmp_path / 'key'
+    key.write_text('k')
+    pools = tmp_path / 'pools.yaml'
+    pools.write_text(f'p:\n  hosts:\n  - 10.0.0.1\n  user: u\n'
+                     f'  identity_file: {key}\n  password: 123456\n')
+    # Literal master output (yaml.dump of the loaded config), not ours.
+    (tmp_path / 'ssh-p-history.yaml').write_text(
+        f'ha_enabled: false\nhosts:\n- 10.0.0.1\nidentity_file: {key}\n'
+        'password: 123456\nuser: u\n')
+    monkeypatch.setattr(deploy.constants, 'NODE_POOLS_INFO_DIR', str(tmp_path))
+    single = mock.Mock(return_value=[])
+    monkeypatch.setattr(deploy, 'deploy_single_cluster', single)
+    deploy.deploy_multiple_clusters('p',
+                                    ssh_node_pools_file=str(pools),
+                                    kubeconfig_path=str(tmp_path / 'kc'),
+                                    cleanup=False)
+    single.assert_called_once()
+
+
 def test_head_password_change_does_not_print_it(monkeypatch, tmp_path):
     """A per-host password on the head changed: name the field, not values."""
     key = tmp_path / 'key'
