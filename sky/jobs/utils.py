@@ -2273,12 +2273,13 @@ def _waiting_line_detail(provision_msg: Optional[str],
 def _wait_for_persisted_task_logs(job_id: int) -> bool:
     """Waits for the controller to persist the logs of a finished job's tasks.
 
-    The controller marks a task SUCCEEDED (or failed) before it downloads the
-    task's logs and records their local path, so a reader that sees the
-    terminal status can be ahead of the path. Waits until every task that ran
-    user code has a local log path, or _PERSISTED_LOG_WAIT_TIMEOUT_SECONDS
-    pass. Returns at once when a log reader is registered, as the controller
-    then normally keeps no local copy and the reader serves the logs.
+    The controller marks a task SUCCEEDED before it downloads the task's logs
+    and records their local path, so a reader that sees SUCCEEDED can be ahead
+    of the path. (For a failed task it records the path, if any, before the
+    failed status.) Waits until every SUCCEEDED task that ran user code has a
+    local log path, or _PERSISTED_LOG_WAIT_TIMEOUT_SECONDS pass. Returns at
+    once when a log reader is registered, as the controller then normally
+    keeps no local copy and the reader serves the logs.
 
     Returns:
         False if no task of the job ran user code, so there are no task logs
@@ -2295,8 +2296,8 @@ def _wait_for_persisted_task_logs(job_id: int) -> bool:
         task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
             job_id)
         if all(log_file for task_id, _, task_status, log_file, _ in task_info
-               if task_status in _STATUSES_WITH_PERSISTED_LOGS and
-               task_id in submitted_task_ids):
+               if task_status == managed_job_state.ManagedJobStatus.SUCCEEDED
+               and task_id in submitted_task_ids):
             return True
         time.sleep(1)
     return True

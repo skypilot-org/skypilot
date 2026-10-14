@@ -1769,6 +1769,20 @@ class TestStreamLogsByIdJobFinishedBetweenChecks:
         mock_state.get_all_task_ids_names_statuses_logs.assert_not_called()
         assert 'already in terminal state' not in capsys.readouterr().out
 
+    def test_failed_task_without_log_does_not_wait(self, monkeypatch, capsys):
+        # The controller records a failed task's log path, if any, before it
+        # marks the task failed, so there is nothing to wait for.
+        mock_state = self._patch_job(monkeypatch,
+                                     managed_job_state.ManagedJobStatus.FAILED,
+                                     [None])
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=True)
+
+        # One read in the wait, one in the terminal-job read.
+        assert mock_state.get_all_task_ids_names_statuses_logs.call_count == 2
+        assert 'already in terminal state' not in capsys.readouterr().out
+        assert code == exceptions.JobExitCode.FAILED
+
     def test_log_never_persisted_prints_no_warning(self, monkeypatch, capsys):
         # The log path never shows up (e.g. the download failed): the wait
         # gives up and the tail ends as it did before, with no warning.
