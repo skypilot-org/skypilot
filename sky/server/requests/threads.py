@@ -3,9 +3,10 @@
 import asyncio
 import concurrent.futures
 import os
+import queue
 import sys
 import threading
-from typing import Callable, Optional, Set, TypeVar
+from typing import Any, Callable, Dict, Optional, Set, Tuple, TypeVar
 
 import prometheus_client as prom
 
@@ -24,6 +25,9 @@ _P = ParamSpec('_P')
 _T = TypeVar('_T')
 
 logger = sky_logging.init_logger(__name__)
+
+_WorkItem = Tuple[Callable[..., Any], Tuple[Any, ...], Dict[str, Any],
+                  concurrent.futures.Future]
 
 
 class _BoundedAdmission:
@@ -184,25 +188,70 @@ class OnDemandThreadExecutor(_BoundedAdmission, concurrent.futures.Executor):
             t.join()
 
 
-class PooledThreadExecutor(_BoundedAdmission,
-                           concurrent.futures.ThreadPoolExecutor):
-    """Like `OnDemandThreadExecutor`, but keeps idle threads for reuse.
+class PooledThreadExecutor(_BoundedAdmission, concurrent.futures.Executor):
+    """Like `OnDemandThreadExecutor`, but keeps finished threads for reuse.
 
     For short tasks on the request hot path, where starting a thread per task
-    costs more than the task itself.
+    costs more than the task itself. Threads are daemons, so one stuck in a
+    call never holds up interpreter exit.
     """
 
     def __init__(self, name: str, max_workers: int):
-        super().__init__(max_workers=max_workers, thread_name_prefix=name)
         self._init_admission(name, max_workers)
+        self._work: 'queue.SimpleQueue[Optional[_WorkItem]]' = (
+            queue.SimpleQueue())
+        self._lock = threading.Lock()
+        self._idle = 0
+        self._num_threads = 0
+        self._shutdown = False
 
     def submit(self, fn: Callable[_P, _T], /, *args: _P.args,
                **kwargs: _P.kwargs) -> 'concurrent.futures.Future[_T]':
-        self._admit()
-        try:
-            fut = super().submit(fn, *args, **kwargs)
-        except BaseException:
-            self._release()
-            raise
-        fut.add_done_callback(self._release)
+        with self._lock:
+            if self._shutdown:
+                raise RuntimeError(
+                    'Cannot submit task after executor is shutdown')
+            self._admit()
+            if self._idle > 0:
+                self._idle -= 1
+            else:
+                thread = threading.Thread(
+                    target=self._worker,
+                    name=f'{self.name}-{self._num_threads + 1}',
+                    daemon=True)
+                try:
+                    thread.start()
+                except Exception:
+                    self._release()
+                    raise
+                self._num_threads += 1
+            fut: concurrent.futures.Future = concurrent.futures.Future()
+            self._work.put((fn, args, kwargs, fut))
         return fut
+
+    def _worker(self) -> None:
+        while True:
+            item = self._work.get()
+            if item is None:
+                return
+            fn, args, kwargs, fut = item
+            if fut.set_running_or_notify_cancel():
+                try:
+                    fut.set_result(fn(*args, **kwargs))
+                except BaseException as e:  # pylint: disable=broad-except
+                    fut.set_exception(e)
+            # Counted idle before the slot is freed, so a submit admitted by
+            # this slot reuses this thread instead of starting one.
+            with self._lock:
+                self._idle += 1
+            self._release()
+
+    def shutdown(self,
+                 wait: bool = True,
+                 *,
+                 cancel_futures: bool = False) -> None:
+        del wait, cancel_futures  # Daemon threads; nothing to join.
+        with self._lock:
+            self._shutdown = True
+            for _ in range(self._num_threads):
+                self._work.put(None)

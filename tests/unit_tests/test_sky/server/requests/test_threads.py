@@ -211,9 +211,33 @@ def test_pooled_executor_reuses_threads():
         for _ in range(10):
             idents.add(executor.submit(threading.get_ident).result(timeout=5))
             _wait_running_zero(executor)
-        # A finished thread can be marked idle just after the next submit, so
-        # a second thread may start; never one per task.
-        assert len(idents) <= executor.max_workers
+        assert len(idents) == 1
+    finally:
+        executor.shutdown()
+
+
+def test_pooled_executor_threads_are_daemons():
+    executor = PooledThreadExecutor(name='pooled', max_workers=1)
+    try:
+        assert executor.submit(
+            lambda: threading.current_thread().daemon).result(timeout=5)
+    finally:
+        executor.shutdown()
+
+
+def test_pooled_executor_never_exceeds_max_threads():
+    executor = PooledThreadExecutor(name='pooled', max_workers=4)
+    try:
+        for _ in range(50):
+            futs = []
+            for _ in range(4):
+                try:
+                    futs.append(executor.submit(dummy_task, 0.001))
+                except exceptions.ConcurrentWorkerExhaustedError:
+                    pass
+            concurrent.futures.wait(futs, timeout=5)
+        _wait_running_zero(executor)
+        assert executor._num_threads <= 4  # pylint: disable=protected-access
     finally:
         executor.shutdown()
 

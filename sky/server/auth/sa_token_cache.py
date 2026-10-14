@@ -45,8 +45,9 @@ _Entry = Tuple[float, TokenRow, models.User]
 _entries: 'collections.OrderedDict[str, _Entry]' = collections.OrderedDict()
 
 
-def fetch(token_hash: str,
-          user_id: str) -> Tuple[Optional[TokenRow], Optional[models.User]]:
+def fetch_token_and_user(
+        token_hash: str,
+        user_id: str) -> Tuple[Optional[TokenRow], Optional[models.User]]:
     """Read the token row and, if it exists, the user. Sync: DB queries."""
     token_row = global_user_state.get_service_account_token_by_hash(token_hash)
     if token_row is None:

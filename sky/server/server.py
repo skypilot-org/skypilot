@@ -628,7 +628,7 @@ class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
                 # timeouts and executor exhaustion are converted to retryable
                 # 503s below.
                 token_row, user_info = await db_lookup.call_with_deadline(
-                    sa_token_cache.fetch, incoming_hash, user_id)
+                    sa_token_cache.fetch_token_and_user, incoming_hash, user_id)
             else:
                 token_row, user_info = cached
             if token_row is None:
