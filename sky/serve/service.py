@@ -768,15 +768,12 @@ if __name__ == '__main__':
                         type=str,
                         default=None,
                         help='User hash of the user creating the service')
-    # Only passed in consolidation mode, when the task's sources live in the
-    # client's upload blob.
-    parser.add_argument('--file-mounts-blob-id',
-                        type=str,
-                        default=None,
-                        help='Blob holding the task workdir and file mounts')
     args = parser.parse_args()
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.
     multiprocessing.set_start_method('spawn', force=True)
+    # Only set in consolidation mode, when the task's sources live in the
+    # client's upload blob.
     _start(args.service_name, args.task_yaml, args.job_id, args.entrypoint,
-           args.user_hash, args.file_mounts_blob_id)
+           args.user_hash,
+           os.environ.get(constants.FILE_MOUNTS_BLOB_ID_ENV_VAR) or None)

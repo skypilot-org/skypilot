@@ -410,3 +410,26 @@ class TestFileMountsBlobId:
         serve_state.remove_service_completely('svc-a')
         # svc-a2 shares the content-addressed blob and still needs it.
         assert serve_state.get_active_file_mounts_blob_ids() == {'a' * 64}
+
+    def test_clear_releases_blob(self, _mock_serve_db):
+        for name in ('svc-a', 'svc-a2'):
+            serve_state.add_service(
+                name=name,
+                controller_job_id=1,
+                policy='policy',
+                requested_resources_str='1x[CPU:1+]',
+                load_balancing_policy='round_robin',
+                status=serve_state.ServiceStatus.CONTROLLER_INIT,
+                tls_encrypted=False,
+                pool=True,
+                controller_pid=12345,
+                entrypoint='entry',
+                file_mounts_blob_id='a' * 64)
+        serve_state.clear_service_file_mounts_blob_id('svc-a')
+        assert serve_state.get_service_file_mounts_blob_id('svc-a') is None
+        # svc-a2 shares the content-addressed blob and still holds it.
+        assert serve_state.get_active_file_mounts_blob_ids() == {'a' * 64}
+        serve_state.clear_service_file_mounts_blob_id('svc-a2')
+        assert serve_state.get_active_file_mounts_blob_ids() == set()
+        # The service row itself stays.
+        assert serve_state.get_glob_service_names(['svc-a']) == ['svc-a']

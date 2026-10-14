@@ -1647,6 +1647,18 @@ class SkyPilotReplicaManager(ReplicaManager):
         self.yaml_content = new_yaml_content
         self._update_mode = update_mode
 
+        # Replicas only launch from the latest version. An update with local
+        # sources goes through a cloud bucket, so once the latest version no
+        # longer needs local file mounts, the original upload blob is unused:
+        # drop the reference so the blob GC can reclaim it. A launch still in
+        # flight keeps the blob alive through its own request.
+        if (self._file_mounts_blob_id is not None and
+                not server_common.local_file_mounts_required(
+                    task_lib.Task.from_yaml_str(
+                        new_yaml_content).to_yaml_config())):
+            self._file_mounts_blob_id = None
+            serve_state.clear_service_file_mounts_blob_id(self._service_name)
+
         # Reuse all replicas that have the same config as the new version
         # (except for the `service` field) by directly setting the version to be
         # the latest version. This can significantly improve the speed
