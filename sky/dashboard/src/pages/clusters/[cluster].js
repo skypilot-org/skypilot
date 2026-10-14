@@ -22,13 +22,7 @@ import {
 } from '@/data/connectors/clusters';
 import dashboardCache from '@/lib/cache';
 import { useWorkspacesConfig } from '@/hooks/useWorkspacesConfig';
-import {
-  RotateCwIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  CopyIcon,
-  CheckIcon,
-} from 'lucide-react';
+import { RotateCwIcon, ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import yaml from 'js-yaml';
 import {
   CustomTooltip as Tooltip,
@@ -52,9 +46,8 @@ import {
 } from '@/components/elements/modals';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
-import { formatYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
-import { YamlCodeBlock } from '@/components/ui/yaml-code-block';
+import { EntrypointAndYaml } from '@/components/elements/EntrypointYaml';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { TelemetrySection } from '@/components/TelemetrySection';
 import { hasAccelerator } from '@/utils/gpuUtils';
@@ -313,10 +306,6 @@ function ActiveTab({
   telemetryRefreshTrigger,
   isHistoricalCluster = false,
 }) {
-  const [isYamlExpanded, setIsYamlExpanded] = useState(false);
-  const [isCopied, setIsCopied] = useState(false);
-  const [isCommandCopied, setIsCommandCopied] = useState(false);
-
   // Links extracted from provision logs and the latest job's tail logs,
   // matched against built-in plus admin-configured `dashboard.external_links`.
   const [clusterExtractedLinks, setClusterExtractedLinks] = useState({});
@@ -370,39 +359,14 @@ function ActiveTab({
     LINK_SCOPE_CLUSTER
   );
 
-  const toggleYamlExpanded = () => {
-    setIsYamlExpanded(!isYamlExpanded);
-  };
-
-  const copyYamlToClipboard = async () => {
-    try {
-      const yamlContent =
-        clusterData.task_yaml || clusterData.last_creation_yaml;
-      const formattedYaml = formatYaml(yamlContent);
-      await navigator.clipboard.writeText(formattedYaml);
-      setIsCopied(true);
-      setTimeout(() => setIsCopied(false), 2000); // Reset after 2 seconds
-    } catch (err) {
-      console.error('Failed to copy YAML to clipboard:', err);
-    }
-  };
-
-  const copyCommandToClipboard = async () => {
-    try {
-      const command = clusterData.command || clusterData.last_creation_command;
-      await navigator.clipboard.writeText(command);
-      setIsCommandCopied(true);
-      setTimeout(() => setIsCommandCopied(false), 2000); // Reset after 2 seconds
-    } catch (err) {
-      console.error('Failed to copy command to clipboard:', err);
-    }
-  };
-
-  const hasCreationArtifacts =
-    clusterData?.last_creation_command ||
-    clusterData?.last_creation_yaml ||
-    clusterData?.command ||
-    clusterData?.task_yaml;
+  // The YAML the cluster was launched with. Not shown for the controllers,
+  // whose YAML is generated rather than the user's.
+  const clusterName = clusterData?.cluster || clusterData?.name;
+  const creationYaml =
+    clusterName?.startsWith('sky-jobs-controller-') ||
+    clusterName?.startsWith('sky-serve-controller-')
+      ? null
+      : clusterData?.task_yaml || clusterData?.last_creation_yaml;
 
   // Helper functions for historical clusters
   const formatDuration = (durationSeconds) => {
@@ -679,106 +643,12 @@ function ActiveTab({
               )}
 
               {/* Created by section - spans both columns */}
-              {hasCreationArtifacts && (
-                <div className="col-span-2">
-                  {(clusterData.command ||
-                    clusterData.last_creation_command) && (
-                    <div className="flex items-center">
-                      <div className="text-gray-600 font-medium text-base">
-                        Entrypoint
-                      </div>
-                      {clusterData.command && (
-                        <Tooltip
-                          content={isCommandCopied ? 'Copied!' : 'Copy command'}
-                          className="text-muted-foreground"
-                        >
-                          <button
-                            onClick={copyCommandToClipboard}
-                            className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
-                          >
-                            {isCommandCopied ? (
-                              <CheckIcon className="w-4 h-4 text-green-600" />
-                            ) : (
-                              <CopyIcon className="w-4 h-4" />
-                            )}
-                          </button>
-                        </Tooltip>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="space-y-4 mt-3">
-                    {/* Creation Command */}
-                    {(clusterData.command ||
-                      clusterData.last_creation_command) && (
-                      <div>
-                        <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
-                          <code className="text-sm text-gray-800 font-mono break-all">
-                            {clusterData.command ||
-                              clusterData.last_creation_command}
-                          </code>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Task YAML - Collapsible */}
-                    {(clusterData.task_yaml ||
-                      clusterData.last_creation_yaml) &&
-                      clusterData.task_yaml !== '{}' &&
-                      clusterData.last_creation_yaml !== '{}' &&
-                      !(clusterData.cluster || clusterData.name)?.startsWith(
-                        'sky-jobs-controller-'
-                      ) &&
-                      !(clusterData.cluster || clusterData.name)?.startsWith(
-                        'sky-serve-controller-'
-                      ) && (
-                        <div>
-                          <div className="flex items-center mb-2">
-                            <button
-                              onClick={toggleYamlExpanded}
-                              className="flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200"
-                            >
-                              {isYamlExpanded ? (
-                                <ChevronDownIcon className="w-4 h-4 mr-1" />
-                              ) : (
-                                <ChevronRightIcon className="w-4 h-4 mr-1" />
-                              )}
-                              <span className="text-base">
-                                Show SkyPilot YAML
-                              </span>
-                            </button>
-
-                            <Tooltip
-                              content={isCopied ? 'Copied!' : 'Copy YAML'}
-                              className="text-muted-foreground"
-                            >
-                              <button
-                                onClick={copyYamlToClipboard}
-                                className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
-                              >
-                                {isCopied ? (
-                                  <CheckIcon className="w-4 h-4 text-green-600" />
-                                ) : (
-                                  <CopyIcon className="w-4 h-4" />
-                                )}
-                              </button>
-                            </Tooltip>
-                          </div>
-
-                          {isYamlExpanded && (
-                            <YamlCodeBlock
-                              value={formatYaml(
-                                clusterData.task_yaml ||
-                                  clusterData.last_creation_yaml
-                              )}
-                              readOnly
-                            />
-                          )}
-                        </div>
-                      )}
-                  </div>
-                </div>
-              )}
+              <EntrypointAndYaml
+                entrypoint={
+                  clusterData.command || clusterData.last_creation_command
+                }
+                taskYaml={creationYaml}
+              />
             </div>
           </div>
         </div>

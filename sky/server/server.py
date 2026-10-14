@@ -2631,6 +2631,7 @@ async def queue(request: fastapi.Request,
 async def cluster_job_spec(request: fastapi.Request,
                            body: payloads.ClusterJobSpecBody) -> None:
     """Gets the task YAML and entrypoint a cluster job was submitted with."""
+    await _reject_cluster_read_for_unauthorized(request, body.cluster_name)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CLUSTER_JOB_SPEC,

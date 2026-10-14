@@ -126,9 +126,9 @@ def test_core_cluster_job_spec(tmp_path, monkeypatch):
     assert core.cluster_job_spec('no-such-cluster', 1) is None
 
 
-def _record(task, cluster_hash='h1'):
+def _record(task, cluster_hash='h1', cluster_name='c'):
     backend = cloud_vm_ray_backend.CloudVmRayBackend()
-    handle = mock.Mock(cluster_name='c')
+    handle = mock.Mock(cluster_name=cluster_name)
     with mock.patch.object(global_user_state,
                            'get_cluster_hash',
                            return_value=cluster_hash), \
@@ -276,3 +276,61 @@ def test_submitted_yaml_adds_cli_secret_to_list_form_secrets():
     assert 'HF_TOKEN' in dumped
     # Still a valid task YAML.
     task_lib.Task.from_yaml_config(yaml_utils.safe_load(dumped))
+
+
+def test_backend_skips_controllers():
+    """Every managed job / service adds a job to its controller."""
+    task = task_lib.Task(run='echo hi')
+    for controller in ('sky-jobs-controller-abcd1234',
+                       'sky-serve-controller-abcd1234'):
+        add_spec = _record(task, cluster_name=controller)
+        add_spec.assert_not_called()
+
+
+def test_submitted_yaml_applies_name_and_num_nodes_overrides():
+    """`sky exec c --name renamed --num-nodes 1` on a file saying otherwise."""
+    config = {'name': 'train', 'num_nodes': 2, 'run': 'echo'}
+    task = _task_from_user_yaml(config)
+    task.name = 'renamed'
+    task.num_nodes = 1
+
+    recorded = task.to_submitted_yaml_config()
+
+    assert recorded['name'] == 'renamed'
+    assert recorded['num_nodes'] == 1
+
+
+def test_submitted_yaml_keeps_unchanged_name_and_num_nodes():
+    config = {'name': 'train', 'run': 'echo'}
+    task = _task_from_user_yaml(config)
+
+    recorded = task.to_submitted_yaml_config()
+
+    assert recorded['name'] == 'train'
+    # Not in the file, and the default was not overridden.
+    assert 'num_nodes' not in recorded
+
+
+def test_submitted_yaml_applies_git_workdir_override():
+    """`--git-url` / `--git-ref` replace the workdir with a git repo."""
+    config = {'workdir': '.', 'run': 'echo'}
+    task = _task_from_user_yaml(config)
+    task.update_workdir(None, 'https://github.com/org/repo.git', 'v1')
+
+    recorded = task.to_submitted_yaml_config()
+
+    assert recorded['workdir'] == {
+        'url': 'https://github.com/org/repo.git',
+        'ref': 'v1'
+    }
+
+
+def test_submitted_yaml_keeps_local_workdir_as_written():
+    """On the API server a local workdir points at the uploaded copy."""
+    config = {'workdir': '~/my-project', 'run': 'echo'}
+    task = _task_from_user_yaml(config)
+    task.workdir = '/home/server/.sky/api_server/clients/abc/workdir'
+
+    recorded = task.to_submitted_yaml_config()
+
+    assert recorded['workdir'] == '~/my-project'

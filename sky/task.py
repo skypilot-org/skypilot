@@ -2032,9 +2032,10 @@ class Task:
 
         The user-specified YAML (see `to_yaml_config`) as written, except for
         the parts that CLI/SDK overrides change after the file is read --
-        `--env`, `--secret` and resource flags such as `--cpus` -- which are
-        taken from this task, since they are what tells two submissions of the
-        same file apart. Tasks without a user-specified YAML (e.g. an inline
+        `--env`, `--secret`, resource flags such as `--cpus`, `--name`,
+        `--num-nodes` and `--git-url` / `--git-ref` -- which are taken from
+        this task, since they are what tells two submissions of the same file
+        apart. Tasks without a user-specified YAML (e.g. an inline
         command) are serialized from the task itself.
         """
         if self._user_specified_yaml is None:
@@ -2069,6 +2070,19 @@ class Task:
         if (effective_resources is not None and
                 user_resources != effective_resources):
             config['resources'] = effective_resources
+
+        # `--name` / `--num-nodes`.
+        if self.name is not None and self.name != config.get('name'):
+            config['name'] = self.name
+        if self.num_nodes != config.get('num_nodes', 1):
+            config['num_nodes'] = self.num_nodes
+        # `--git-url` / `--git-ref` make the workdir a git repo, which reads
+        # the same anywhere. A local workdir is left as the user wrote it: on
+        # the API server it has been rewritten to the uploaded copy's path,
+        # which means nothing to the user (the entrypoint keeps `--workdir`).
+        if (isinstance(self.workdir, dict) and
+                self.workdir != config.get('workdir')):
+            config['workdir'] = dict(self.workdir)
         return config
 
     def _to_yaml_config(self, redact_secrets: bool = False) -> Dict[str, Any]:

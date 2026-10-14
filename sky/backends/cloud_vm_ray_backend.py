@@ -4748,7 +4748,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         Best-effort: a failure here is logged and does not fail the job, which
         has already been added to the cluster.
+
+        Skipped on the jobs/serve controllers: every managed job or service
+        submits a job to its controller, nothing reads that job's spec (the
+        managed job and service pages show the user's own YAML), and the rows
+        would pile up until the controller is torn down. A plain prefix check:
+        `Controllers.from_name` asserts on, or adopts, a name that is not the
+        current user's controller.
         """
+        if handle.cluster_name.startswith(
+            (common.JOB_CONTROLLER_PREFIX, common.SKY_SERVE_CONTROLLER_PREFIX)):
+            return
         try:
             cluster_hash = global_user_state.get_cluster_hash(
                 handle.cluster_name)

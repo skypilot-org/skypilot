@@ -1511,10 +1511,12 @@ def test_cluster_labels_in_status(generic_cloud: str):
 def test_cluster_job_spec(generic_cloud: str):
     """Each cluster job's task YAML and entrypoint are recorded and returned.
 
-    Covers a YAML `sky launch` (job 1), a YAML `sky exec` with an `--env`
-    override (job 2) and an inline `sky exec` command (job 3), that the
-    recorded YAML carries the override and has secrets redacted, and that the
-    specs are dropped with the cluster on `sky down`.
+    Covers a YAML `sky launch` (job 1), a YAML `sky exec` with `--env`,
+    `--name` and `--num-nodes` overrides (job 2) and an inline `sky exec`
+    command (job 3), that the recorded YAML carries the overrides and has
+    secrets redacted, and that the specs are dropped with the cluster on
+    `sky down`. The file asks for 2 nodes and both submissions override it to
+    1, so the cluster stays a single node.
     """
     from sky.client import sdk
 
@@ -1522,6 +1524,7 @@ def test_cluster_job_spec(generic_cloud: str):
     marker = f'spec-marker-{name}'
     override_marker = f'override-{name}'
     inline_marker = f'inline-{name}'
+    renamed = f'renamed-{name}'
     secret_value = f'secret-{name}'
 
     def get_spec(job_id: int):
@@ -1544,12 +1547,22 @@ def test_cluster_job_spec(generic_cloud: str):
                 f'{spec["task_yaml"]}')
         assert get_spec(4) is None, 'Spec returned for a job that never ran'
 
+        # `--num-nodes 1` on a file asking for 2, and `--name` on job 2.
+        for job_id in (1, 2):
+            recorded = yaml_utils.safe_load(get_spec(job_id)['task_yaml'])
+            assert recorded['num_nodes'] == 1, (job_id, recorded)
+        assert yaml_utils.safe_load(get_spec(2)['task_yaml'])['name'] == renamed
+
     def check_specs_dropped():
         assert get_spec(1) is None, 'Spec outlived the terminated cluster'
 
     yaml_content = textwrap.dedent(f"""\
+        name: spec-file-name
+
         resources:
           cpus: 2+
+
+        num_nodes: 2
 
         envs:
           SPEC_MARKER: {marker}
@@ -1569,8 +1582,8 @@ def test_cluster_job_spec(generic_cloud: str):
         test = smoke_tests_utils.Test(
             'cluster_job_spec',
             [
-                f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}',
-                f'sky exec {name} --env SPEC_MARKER={override_marker} {yaml_path}',
+                f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 1 {yaml_path}',
+                f'sky exec {name} --env SPEC_MARKER={override_marker} --name {renamed} --num-nodes 1 {yaml_path}',
                 f'sky exec {name} "echo {inline_marker}"',
                 lambda: check_specs(),
                 f'sky down -y {name}',
