@@ -589,6 +589,32 @@ def test_from_yaml_config_env_and_secrets_overrides_independent():
     assert combined == expected_combined
 
 
+@pytest.mark.parametrize('value', [
+    'say "hello"',
+    'models\\bitnet',
+    'first line\nsecond line',
+    'column\tvalue',
+])
+def test_from_yaml_config_escapes_substituted_env_values(value):
+    config = {
+        'envs': {
+            'PROMPT': value,
+        },
+        'service': {
+            'readiness_probe': {
+                'path': '/health',
+                'post_data': {
+                    'prompt': '$PROMPT',
+                },
+            },
+        },
+    }
+
+    task_obj = task.Task.from_yaml_config(config)
+
+    assert task_obj.service.post_data == {'prompt': value}
+
+
 def test_docker_login_config_all_in_envs_or_secrets():
     """Test Docker login config when all variables are in envs OR all in secrets."""
 
