@@ -4011,3 +4011,130 @@ class TestJobGroupResumeWithFinishedPrimaries:
         for task in asyncio.all_tasks():
             if task is not asyncio.current_task():
                 task.cancel()
+
+
+class TestCancelClaimedJob:
+    """Tests for ControllerManager._cancel_claimed_job_if_requested.
+
+    A cancel that lands after a controller claimed a job (schedule_state
+    LAUNCHING) but before the job loop started is left as a signal file. The
+    controller must then finish the job without starting it.
+    """
+
+    @pytest.fixture
+    def signal_dir(self, tmp_path, monkeypatch):
+        signal_dir = tmp_path / 'signals'
+        signal_dir.mkdir()
+        monkeypatch.setattr(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                            str(signal_dir))
+        return signal_dir
+
+    @staticmethod
+    def _seed_claimed_job(engine, num_tasks: int = 1) -> int:
+        job_id = managed_job_state.set_job_info_without_job_id(
+            name='claimed-job',
+            workspace='default',
+            entrypoint='ep',
+            pool=None,
+            pool_hash=None,
+            user_hash='user1')
+        for task_id in range(num_tasks):
+            managed_job_state.set_pending(job_id,
+                                          task_id=task_id,
+                                          task_name=f'task-{task_id}',
+                                          resources_str='{}',
+                                          metadata='{}')
+        # The state get_waiting_job_async leaves a claimed job in.
+        with engine.connect() as conn:
+            conn.execute(managed_job_state.job_info_table.update().where(
+                managed_job_state.job_info_table.c.spot_job_id ==
+                job_id).values(schedule_state=managed_job_state.
+                               ManagedJobScheduleState.LAUNCHING.value))
+            conn.commit()
+        return job_id
+
+    @staticmethod
+    def _statuses(job_id: int) -> List[managed_job_state.ManagedJobStatus]:
+        return [
+            task['status']
+            for task in managed_job_state.get_managed_job_tasks(job_id)
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('num_tasks', [1, 2])
+    async def test_cancelled_job_is_done(self, _mock_managed_jobs_db_conn,
+                                         signal_dir, num_tasks):
+        job_id = self._seed_claimed_job(_mock_managed_jobs_db_conn, num_tasks)
+        (signal_dir / str(job_id)).write_text('')
+
+        manager = ControllerManager('test-uuid')
+        assert await manager._cancel_claimed_job_if_requested(job_id)
+
+        assert self._statuses(job_id) == (
+            [managed_job_state.ManagedJobStatus.CANCELLED] * num_tasks)
+        assert (managed_job_state.get_job_schedule_state(job_id) ==
+                managed_job_state.ManagedJobScheduleState.DONE)
+        assert not (signal_dir / str(job_id)).exists()
+        reasons = [
+            e['reason'] for e in managed_job_state.get_job_events(job_id)
+        ]
+        assert 'Job is cancelling' in reasons
+        assert 'Job has been cancelled' in reasons
+
+    @pytest.mark.asyncio
+    async def test_no_signal_file(self, _mock_managed_jobs_db_conn, signal_dir):
+        del signal_dir
+        job_id = self._seed_claimed_job(_mock_managed_jobs_db_conn)
+
+        manager = ControllerManager('test-uuid')
+        assert not await manager._cancel_claimed_job_if_requested(job_id)
+
+        assert self._statuses(job_id) == [
+            managed_job_state.ManagedJobStatus.PENDING
+        ]
+        assert (managed_job_state.get_job_schedule_state(job_id) ==
+                managed_job_state.ManagedJobScheduleState.LAUNCHING)
+
+    @pytest.mark.asyncio
+    async def test_started_job_is_left_to_the_job_loop(
+            self, _mock_managed_jobs_db_conn, signal_dir):
+        """A job that already launched something must take the normal cancel
+        path, which tears its resources down."""
+        job_id = self._seed_claimed_job(_mock_managed_jobs_db_conn)
+        with _mock_managed_jobs_db_conn.connect() as conn:
+            conn.execute(managed_job_state.spot_table.update().where(
+                managed_job_state.spot_table.c.spot_job_id == job_id).values(
+                    status=managed_job_state.ManagedJobStatus.RECOVERING.value))
+            conn.commit()
+        (signal_dir / str(job_id)).write_text('')
+
+        manager = ControllerManager('test-uuid')
+        assert not await manager._cancel_claimed_job_if_requested(job_id)
+
+        assert self._statuses(job_id) == [
+            managed_job_state.ManagedJobStatus.RECOVERING
+        ]
+        assert (signal_dir / str(job_id)).exists()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        'failing_step', ['set_cancelling_async', 'finalize_job_done_async'])
+    async def test_signal_file_kept_until_cancel_is_recorded(
+            self, _mock_managed_jobs_db_conn, signal_dir, monkeypatch,
+            failing_step):
+        """If the controller dies before the cancel is recorded, the signal
+        file must survive so that the cancel is not lost."""
+        job_id = self._seed_claimed_job(_mock_managed_jobs_db_conn)
+        (signal_dir / str(job_id)).write_text('')
+
+        async def _die(*args, **kwargs):
+            del args, kwargs
+            raise RuntimeError('controller died')
+
+        monkeypatch.setattr(managed_job_state, failing_step, _die)
+
+        manager = ControllerManager('test-uuid')
+        with pytest.raises(RuntimeError, match='controller died'):
+            await manager._cancel_claimed_job_if_requested(job_id)
+
+        assert (signal_dir / str(job_id)).exists()

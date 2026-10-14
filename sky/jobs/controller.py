@@ -4357,24 +4357,46 @@ class ControllerManager:
             job_id = waiting_job['job_id']
             pool = waiting_job.get('pool', None)
 
-            cancels = os.listdir(jobs_constants.CONSOLIDATED_SIGNAL_PATH)
-            if str(job_id) in cancels:
-                status = await managed_job_state.get_status_async(job_id)
-                if status == managed_job_state.ManagedJobStatus.PENDING:
-                    logger.info(f'Job {job_id} cancelled')
-                    os.remove(f'{jobs_constants.CONSOLIDATED_SIGNAL_PATH}/'
-                              f'{job_id}')
-                    await managed_job_state.set_cancelling_async(
-                        job_id=job_id,
-                        callback_func=managed_job_utils.event_callback_func(
-                            job_id=job_id, task_id=None, task=None))
-                    await managed_job_state.set_cancelled_async(
-                        job_id=job_id,
-                        callback_func=managed_job_utils.event_callback_func(
-                            job_id=job_id, task_id=None, task=None))
-                    continue
+            if await self._cancel_claimed_job_if_requested(job_id):
+                continue
 
             await self.start_job(job_id, pool)
+
+    async def _cancel_claimed_job_if_requested(self, job_id: int) -> bool:
+        """Cancels a just-claimed job if a cancel arrived before it started.
+
+        A cancel that lands after the job was claimed (schedule_state
+        LAUNCHING) but before its job loop started leaves only a signal file.
+        Nothing has been launched for the job yet, so finish it here instead
+        of starting it.
+
+        Returns:
+            True if the job was cancelled and must not be started.
+        """
+        signal_path = os.path.join(jobs_constants.CONSOLIDATED_SIGNAL_PATH,
+                                   str(job_id))
+        if not os.path.exists(signal_path):
+            return False
+        status = await managed_job_state.get_status_async(job_id)
+        if status != managed_job_state.ManagedJobStatus.PENDING:
+            return False
+        logger.info(f'Job {job_id} cancelled')
+        callback_func = managed_job_utils.event_callback_func(job_id=job_id,
+                                                              task_id=None,
+                                                              task=None)
+        await managed_job_state.set_cancelling_async(
+            job_id=job_id, callback_func=callback_func)
+        # Write CANCELLED and schedule_state DONE in one transaction, like the
+        # job loop does when it finishes a job. Without DONE, the claimed row
+        # stays LAUNCHING: dependent jobs keep waiting for it, and it is only
+        # repaired by recovery after a restart.
+        await managed_job_state.finalize_job_done_async(
+            job_id, cancelling=True, callback_func=callback_func)
+        # Remove the signal file only once the cancel is recorded. If the
+        # controller dies before this point, the signal file is still there
+        # when the job is picked up again, so the cancel is not lost.
+        os.remove(signal_path)
+        return True
 
 
 async def main(controller_uuid: str):
