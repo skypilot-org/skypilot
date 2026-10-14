@@ -112,11 +112,16 @@ def get_cluster_config(
     return targets
 
 
+def _password_str(value: Any) -> str:
+    # YAML reads `password: 123456` as an int; sudo needs the text.
+    return '' if value is None else str(value)
+
+
 def prepare_hosts_info(
     cluster_name: str,
     cluster_config: Dict[str, Any],
     upload_ssh_key_func: Optional[Callable[[str, str], str]] = None
-) -> List[Dict[str, str]]:
+) -> List[Dict[str, Any]]:
     """Prepare list of hosts with resolved user, identity_file, and password.
 
     Args:
@@ -142,7 +147,7 @@ def prepare_hosts_info(
     cluster_user = cluster_config.get('user', '')
     cluster_identity_file = os.path.expanduser(
         cluster_config.get('identity_file', ''))
-    cluster_password = cluster_config.get('password', '')
+    cluster_password = _password_str(cluster_config.get('password'))
 
     # Check if cluster identity file exists
     if cluster_identity_file and not os.path.isfile(cluster_identity_file):
@@ -209,7 +214,8 @@ def prepare_hosts_info(
                 _maybe_hardcode_identity_file(
                     i, host.get('identity_file', cluster_identity_file)))
             host_identity_file = os.path.expanduser(host_identity_file)
-            host_password = host.get('password', cluster_password)
+            host_password = (_password_str(host['password'])
+                             if 'password' in host else cluster_password)
 
             if host_identity_file and not os.path.isfile(host_identity_file):
                 with ux_utils.print_exception_no_traceback():

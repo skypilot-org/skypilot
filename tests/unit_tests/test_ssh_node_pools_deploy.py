@@ -9,6 +9,7 @@ from unittest import mock
 
 import pytest
 
+from sky.ssh_node_pools import utils as ssh_utils
 from sky.ssh_node_pools.deploy import deploy
 from sky.ssh_node_pools.deploy import utils as deploy_utils
 
@@ -91,6 +92,26 @@ def test_askpass_script_returns_the_exact_password():
 
 def test_askpass_script_is_empty_without_password():
     assert deploy.create_askpass_script('') == ''
+
+
+@pytest.mark.parametrize('per_host', [False, True])
+def test_numeric_password_reaches_sudo_as_text(tmp_path, per_host):
+    """YAML reads `password: 123456` as an int; it must still work."""
+    key = tmp_path / 'key'
+    key.write_text('k')
+    config = {'user': 'u', 'identity_file': str(key)}
+    if per_host:
+        config['hosts'] = [{'ip': '10.0.0.1', 'password': 123456}]
+    else:
+        config['hosts'] = ['10.0.0.1']
+        config['password'] = 123456
+    (host,) = ssh_utils.prepare_hosts_info('p', config)
+    block = deploy.create_askpass_script(host['password'])
+    out = subprocess.run(['bash', '-c', block + '\n"$SUDO_ASKPASS"'],
+                         capture_output=True,
+                         text=True,
+                         check=True)
+    assert out.stdout == '123456\n'
 
 
 @pytest.mark.parametrize('sep', ['\n', '\r'])
