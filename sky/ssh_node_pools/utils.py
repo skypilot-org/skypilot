@@ -188,16 +188,19 @@ def prepare_hosts_info(
         else:
             # It's a dict with potential overrides
             if 'ip' not in host:
-                logger.warning(f'{colorama.Fore.RED}Warning: Host missing'
-                               f'\'ip\' field, skipping: {host}'
-                               f'{colorama.Style.RESET_ALL}')
+                # Not the dict itself: it may hold a sudo password.
+                logger.warning(
+                    f'{colorama.Fore.RED}Warning: Host {i} of '
+                    f'{cluster_name!r} has no \'ip\' field, skipping.'
+                    f'{colorama.Style.RESET_ALL}')
                 continue
 
             # Check if this is an SSH config hostname
             is_ssh_config_host = check_host_in_ssh_config(host['ip'])
             if upload_ssh_key_func is not None and is_ssh_config_host:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(use_cluster_config_msg.format(host=host))
+                    raise ValueError(
+                        use_cluster_config_msg.format(host=host['ip']))
 
             # Use host-specific values or fall back to cluster defaults
             host_user = '' if is_ssh_config_host else host.get(
