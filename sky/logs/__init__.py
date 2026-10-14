@@ -1,6 +1,6 @@
 """Sky logging agents."""
 import inspect
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 from sky import exceptions
 from sky import skypilot_config
@@ -36,8 +36,9 @@ __all__ = [
 # where it runs. A provider that takes no arguments is called without them and
 # resolves one agent for every cluster.
 LoggingAgentProvider = Callable[..., Optional[LoggingAgent]]
-_logging_agent_provider: Optional[LoggingAgentProvider] = None
-_provider_takes_placement = False
+# The provider and whether it accepts the placement keywords, published as one
+# value so a concurrent lookup never pairs a provider with another's flag.
+_logging_agent_provider: Optional[Tuple[LoggingAgentProvider, bool]] = None
 
 
 def _accepts_placement(provider: LoggingAgentProvider) -> bool:
@@ -51,10 +52,11 @@ def _accepts_placement(provider: LoggingAgentProvider) -> bool:
 def register_logging_agent_provider(
         provider: Optional[LoggingAgentProvider]) -> None:
     """Registers the process-global logging agent provider (None to clear)."""
-    global _logging_agent_provider, _provider_takes_placement
-    _provider_takes_placement = (provider is not None and
-                                 _accepts_placement(provider))
-    _logging_agent_provider = provider
+    global _logging_agent_provider
+    if provider is None:
+        _logging_agent_provider = None
+    else:
+        _logging_agent_provider = (provider, _accepts_placement(provider))
 
 
 def get_logging_agent(cloud: Optional[str] = None,
@@ -66,11 +68,11 @@ def get_logging_agent(cloud: Optional[str] = None,
             has no cluster in scope.
         region: The cluster's region; the context for Kubernetes and SSH.
     """
-    # Capture into locals so a concurrent register_logging_agent_provider(None)
-    # cannot clear the global between the check and the call.
-    provider = _logging_agent_provider
-    takes_placement = _provider_takes_placement
-    if provider is not None:
+    # Capture once so a concurrent register_logging_agent_provider cannot
+    # change the global between the check and the call.
+    registered = _logging_agent_provider
+    if registered is not None:
+        provider, takes_placement = registered
         if takes_placement:
             agent = provider(cloud=cloud, region=region)
         else:

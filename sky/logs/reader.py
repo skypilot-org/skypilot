@@ -82,14 +82,18 @@ class LogReader(abc.ABC):
                                 task_name: Optional[str] = None,
                                 cluster_name_on_cloud: Optional[str] = None,
                                 tail: int,
+                                since: Optional[float] = None,
                                 is_done: Callable[[], bool]) -> Optional[int]:
         """Streams a running managed job task's logs from the store to stdout.
 
-        Starts with the last ``tail`` lines already in the store, then prints
-        new lines as they become readable. Stops once ``is_done()`` returns
-        True and the lines the task wrote before that point have been read.
-        ``is_done`` is cheap to call on every poll and raises
-        ``asyncio.CancelledError`` when the client went away.
+        Starts with the last ``tail`` lines already in the store, or with the
+        lines written at or after ``since`` when resuming, then prints new
+        lines as they become readable. Stops once ``is_done()`` returns True
+        and the lines the task wrote before that point have been read.
+        ``is_done`` turns True when the task leaves RUNNING, including for a
+        recovery; the caller then follows the recovered attempt in a new call
+        with ``since`` set. ``is_done`` is cheap to call on every poll and
+        raises ``asyncio.CancelledError`` when the client went away.
 
         Non-abstract: the default follows nothing. A reader must return None
         without printing anything when it cannot follow this task, for example
@@ -104,13 +108,17 @@ class LogReader(abc.ABC):
             cluster_name_on_cloud: Provider-side name of the cluster running
                 the task, which identifies where its logs were routed.
             tail: Number of existing lines to print first; 0 means all.
-            is_done: Returns True once the task is no longer running.
+                Ignored when ``since`` is set.
+            since: Unix time to resume from: print the records written at or
+                after it instead of the last ``tail`` lines.
+            is_done: Returns True once the task is no longer RUNNING.
 
         Returns:
             None if this reader does not follow the task, else 0 once the
             task's logs were followed to the end.
         """
-        del job_id, task_id, task_name, cluster_name_on_cloud, tail, is_done
+        del job_id, task_id, task_name, cluster_name_on_cloud, tail, since
+        del is_done
         return None
 
 

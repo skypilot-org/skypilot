@@ -40,6 +40,11 @@ def _handle():
     return handle
 
 
+def _follow(tail=None, since=None):
+    return managed_job_utils._follow_from_log_store(1, 0, 'task', _handle(),
+                                                    tail, since)
+
+
 @pytest.fixture(autouse=True)
 def _reset_hooks():
     yield
@@ -61,8 +66,7 @@ def test_default_reader_does_not_follow():
 
 
 def test_no_reader_falls_back():
-    assert managed_job_utils._follow_from_log_store(1, 0, 'task', _handle(),
-                                                    None) is None
+    assert _follow() is None
 
 
 def test_undelivered_logs_fall_back():
@@ -70,43 +74,44 @@ def test_undelivered_logs_fall_back():
     logs.register_log_reader(reader)
     LogDeliverySource.register(
         undelivered_reason=lambda **kwargs: 'collector not ready')
-    assert managed_job_utils._follow_from_log_store(1, 0, 'task', _handle(),
-                                                    None) is None
+    assert _follow() is None
     assert not reader.calls
 
 
 def test_reader_that_cannot_follow_falls_back():
     logs.register_log_reader(_Reader(result=None))
-    assert managed_job_utils._follow_from_log_store(1, 0, 'task', _handle(),
-                                                    10) is None
+    assert _follow(tail=10) is None
 
 
-def test_reader_error_falls_back():
+def test_reader_error_falls_back_and_says_lines_may_repeat(capsys):
     logs.register_log_reader(_Reader(raises=RuntimeError('store down')))
-    assert managed_job_utils._follow_from_log_store(1, 0, 'task', _handle(),
-                                                    10) is None
+    assert _follow(tail=10) is None
+    out = capsys.readouterr().out
+    assert 'store down' in out
+    assert 'may repeat' in out
 
 
 def test_cancellation_propagates():
     logs.register_log_reader(_Reader(raises=asyncio.CancelledError()))
     with pytest.raises(asyncio.CancelledError):
-        managed_job_utils._follow_from_log_store(1, 0, 'task', _handle(), 10)
+        _follow(tail=10)
 
 
-def test_follow_passes_identity_and_tail():
+def test_follow_passes_identity_tail_and_resume_point():
     reader = _Reader()
     logs.register_log_reader(reader)
     assert managed_job_utils._follow_from_log_store(7, 1, 'task', _handle(),
-                                                    None) == 0
+                                                    None, 123.5) == 0
     call = reader.calls[0]
     assert call['job_id'] == 7
     assert call['task_id'] == 1
     assert call['task_name'] == 'task'
     assert call['cluster_name_on_cloud'] == 'train-7-abcd1234'
     assert call['tail'] == 0
+    assert call['since'] == 123.5
 
 
-def test_is_done_tracks_the_task_and_is_throttled(monkeypatch):
+def test_is_done_when_the_task_leaves_running(monkeypatch):
     seen = {}
 
     class _Capture(_Reader):
@@ -118,18 +123,15 @@ def test_is_done_tracks_the_task_and_is_throttled(monkeypatch):
     logs.register_log_reader(_Capture())
     clock = [100.0]
     monkeypatch.setattr(managed_job_utils.time, 'monotonic', lambda: clock[0])
-    managed_job_utils._follow_from_log_store(1, 0, 'task', _handle(), None)
+    _follow()
     is_done = seen['is_done']
 
     _set_task_statuses(monkeypatch, [_RUNNING])
     assert not is_done()
-    # A recovery is still the same running task.
-    _set_task_statuses(monkeypatch, [_RECOVERING])
-    clock[0] += managed_job_utils._STORE_FOLLOW_STATUS_CHECK_SECONDS
-    assert not is_done()
     # Within the throttle window the status is not re-read.
-    _set_task_statuses(monkeypatch, [_SUCCEEDED])
+    _set_task_statuses(monkeypatch, [_RECOVERING])
     assert not is_done()
+    # A recovery ends this follow: the next attempt may log elsewhere.
     clock[0] += managed_job_utils._STORE_FOLLOW_STATUS_CHECK_SECONDS
     assert is_done()
     # Once done it stays done.
@@ -137,10 +139,23 @@ def test_is_done_tracks_the_task_and_is_throttled(monkeypatch):
     assert is_done()
 
 
-def test_task_is_running_by_task_id(monkeypatch):
+def test_wait_for_task_recovery(monkeypatch):
+    monkeypatch.setattr(managed_job_utils.time, 'sleep', lambda s: None)
+    display = mock.MagicMock()
+    statuses = iter([[_RECOVERING], [_RECOVERING], [_RUNNING]])
+    monkeypatch.setattr(
+        managed_job_state, 'get_all_task_ids_names_statuses_logs',
+        lambda job_id: [(0, 't', s, None, None) for s in next(statuses)])
+    assert managed_job_utils._wait_for_task_recovery(1, 0, display)
+    display.stop.assert_called_once()
+
+    for terminal in (_SUCCEEDED, _CANCELLING):
+        _set_task_statuses(monkeypatch, [terminal])
+        assert not managed_job_utils._wait_for_task_recovery(1, 0, display)
+
+
+def test_task_status_by_task_id(monkeypatch):
     _set_task_statuses(monkeypatch, [_SUCCEEDED, _RUNNING])
-    assert not managed_job_utils._task_is_running(1, 0)
-    assert managed_job_utils._task_is_running(1, 1)
-    assert not managed_job_utils._task_is_running(1, 2)
-    _set_task_statuses(monkeypatch, [_CANCELLING])
-    assert not managed_job_utils._task_is_running(1, 0)
+    assert managed_job_utils._task_status(1, 0) == _SUCCEEDED
+    assert managed_job_utils._task_status(1, 1) == _RUNNING
+    assert managed_job_utils._task_status(1, 2) is None

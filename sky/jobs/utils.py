@@ -2306,29 +2306,56 @@ def _wait_for_persisted_task_logs(job_id: int) -> bool:
 
 # How often a log-store follow re-reads the task's status.
 _STORE_FOLLOW_STATUS_CHECK_SECONDS = 2
-# How often to check whether the controller moved past a finished task.
+# How often to check whether the controller moved past a finished task, or
+# brought a recovering task back.
 _TASK_ADVANCE_POLL_SECONDS = 1
 
 
-def _task_is_running(job_id: int, task_id: int) -> bool:
+def _task_status(job_id: int,
+                 task_id: int) -> Optional[managed_job_state.ManagedJobStatus]:
     for row_task_id, _, status, _, _ in (
             managed_job_state.get_all_task_ids_names_statuses_logs(job_id)):
         if row_task_id == task_id:
-            return (not status.is_terminal() and
-                    status != managed_job_state.ManagedJobStatus.CANCELLING)
-    return False
+            return status
+    return None
+
+
+def _wait_for_task_recovery(job_id: int, task_id: int,
+                            status_display: Any) -> bool:
+    """Waits while a task recovers; returns whether it is RUNNING again.
+
+    Returns False once the task is terminal or being cancelled.
+    """
+    status_display.update(
+        ux_utils.spinner_message('Waiting for the task to recover'))
+    status_display.start()
+    try:
+        while True:
+            context_utils.raise_if_canceled()
+            status = _task_status(job_id, task_id)
+            if status == managed_job_state.ManagedJobStatus.RUNNING:
+                return True
+            if (status is None or status.is_terminal() or
+                    status == managed_job_state.ManagedJobStatus.CANCELLING):
+                return False
+            time.sleep(_TASK_ADVANCE_POLL_SECONDS)
+    finally:
+        status_display.stop()
 
 
 def _follow_from_log_store(
         job_id: int, task_id: int, task_name: Optional[str],
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
-        tail: Optional[int]) -> Optional[int]:
+        tail: Optional[int], since: Optional[float]) -> Optional[int]:
     """Follows a running task's logs from the external log store.
 
     Returns None when the task cannot be followed from the store (no reader,
     the reader cannot follow this task, or its logs are not confirmed to reach
     the store), so the caller streams from the cluster instead. Otherwise
-    returns once the task is no longer running and its logs were read.
+    returns once the task is no longer RUNNING and its logs were read. A
+    recovery may place the task's next attempt elsewhere, with its logs in
+    another store, so the caller follows again from ``since`` once the task
+    is RUNNING again.
     """
     reader = logs.get_log_reader()
     if reader is None:
@@ -2353,7 +2380,8 @@ def _follow_from_log_store(
         if now - last_check < _STORE_FOLLOW_STATUS_CHECK_SECONDS:
             return False
         last_check = now
-        done = not _task_is_running(job_id, task_id)
+        done = (_task_status(job_id, task_id) !=
+                managed_job_state.ManagedJobStatus.RUNNING)
         return done
 
     try:
@@ -2363,10 +2391,18 @@ def _follow_from_log_store(
             task_name=task_name,
             cluster_name_on_cloud=handle.cluster_name_on_cloud,
             tail=tail or 0,
+            since=since,
             is_done=is_done)
     except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Failed to follow job {job_id} logs from the external '
-                       f'log store, streaming from the cluster instead: {e}')
+        logger.debug(f'Failed to follow job {job_id} logs from the external '
+                     f'log store: {e}')
+        # The reader may have printed part of the log already, and the
+        # cluster stream cannot resume where it stopped.
+        print(
+            f'{colorama.Fore.YELLOW}Lost the connection to the external '
+            f'log store ({e}); streaming from the cluster instead. Lines '
+            f'already shown may repeat.{colorama.Style.RESET_ALL}',
+            flush=True)
         return None
 
 
@@ -2487,6 +2523,10 @@ def _stream_logs_by_id(job_id: int, follow: bool, tail: Optional[int],
     # Whether this tail streamed any task's logs while the task ran, from
     # its cluster or from the log store.
     streamed_from_cluster = False
+    # The task to resume following from the log store after it recovered,
+    # and the time to resume at.
+    resume_task_id: Optional[int] = None
+    resume_at: Optional[float] = None
     with status_display:
         prev_msg = msg
         while (managed_job_status :=
@@ -2792,9 +2832,17 @@ def _stream_logs_by_id(job_id: int, follow: bool, tail: Optional[int],
             streamed_from_cluster = True
             status_display.stop()
             if follow and tail_offset is None and pool is None:
+                since = resume_at if resume_task_id == task_id else None
                 store_returncode = _follow_from_log_store(
-                    job_id, task_id, task_name, handle, tail)
+                    job_id, task_id, task_name, handle, tail, since)
                 if store_returncode is not None:
+                    stopped_at = time.time()
+                    if _wait_for_task_recovery(job_id, task_id, status_display):
+                        # Look the cluster up again: the recovered attempt
+                        # may run elsewhere and log to another store.
+                        resume_task_id, resume_at = task_id, stopped_at
+                        continue
+                    resume_task_id, resume_at = None, None
                     # The task finished. Wait for the controller to move on
                     # so the next round does not follow the same task again.
                     while True:

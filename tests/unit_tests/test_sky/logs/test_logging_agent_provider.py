@@ -92,6 +92,19 @@ class TestLoggingAgentProvider(unittest.TestCase):
         logs.get_logging_agent(cloud='aws', region='us-east-1')
         self.assertEqual(seen, {'cloud': 'aws', 'region': 'us-east-1'})
 
+    def test_provider_is_published_with_its_signature(self):
+        logs.register_logging_agent_provider(lambda: _FakeAgent())
+        no_arg = logs._logging_agent_provider  # pylint: disable=protected-access
+
+        def provider(*, cloud=None, region=None):
+            del cloud, region
+            return _FakeAgent()
+
+        logs.register_logging_agent_provider(provider)
+        placed = logs._logging_agent_provider  # pylint: disable=protected-access
+        self.assertFalse(no_arg[1])
+        self.assertEqual(placed, (provider, True))
+
     def test_is_configured_routes_by_placement(self):
 
         def provider(*, cloud=None, region=None):
