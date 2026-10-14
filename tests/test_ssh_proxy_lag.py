@@ -22,6 +22,7 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
 
 from sky import global_user_state
+from sky import models
 from sky.data import storage_utils
 from sky.server import server
 from sky.server import stream_utils
@@ -587,7 +588,7 @@ async def test_endpoint_provision_logs(monitor):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_users_list(monitor):
+async def test_endpoint_users_list(monitor, mock_request):
     """Test /users endpoint for blocking operations."""
     print("\n🔍 Testing: /users")
 
@@ -596,7 +597,7 @@ async def test_endpoint_users_list(monitor):
         with mock.patch('sky.global_user_state.get_all_users',
                         side_effect=create_blocking_mock([], delay=0.2)):
             from sky.users import server as users_server
-            await _run_endpoint_func(users_server.users)
+            await _run_endpoint_func(users_server.users, mock_request)
 
     result = await run_endpoint_test(test_func, monitor, num_concurrent=100)
     assert not result['blocking'], "/users should not block the event loop"
@@ -626,7 +627,7 @@ async def test_endpoint_users_service_tokens(monitor):
 
     async def test_func():
         mock_req = mock.MagicMock()
-        mock_req.state.auth_user = 'test_user'
+        mock_req.state.auth_user = models.User(id='test_user', name='test')
 
         # Mock database operations
         with mock.patch('sky.global_user_state.get_all_service_account_tokens',
