@@ -1,8 +1,10 @@
 """Unit tests for sky/ssh_node_pools/deploy/deploy.py helpers."""
 
+import os
 import subprocess
 
 from sky.ssh_node_pools.deploy import deploy
+from sky.ssh_node_pools.deploy import utils as deploy_utils
 
 
 def test_prometheus_install_cmd_contains_required_fields():
@@ -94,3 +96,72 @@ def test_tcp_forwarding_cmd_uses_askpass_for_every_sudo():
     assert cmd.count('sudo ') == cmd.count('sudo -A ')
     assert cmd.count('sudo -A ') == 3
     assert '10.0.0.1' in cmd
+
+
+def test_get_helm_runs_as_root_in_every_install_cmd():
+    """get-helm-3's own plain `sudo` cannot use askpass without a terminal."""
+    for cmd in (deploy._gpu_operator_install_cmd(''),
+                deploy._prometheus_install_cmd('')):
+        assert cmd.count('./get_helm.sh') == 1
+        assert cmd.count(deploy._GET_HELM) == 1
+        assert deploy._GET_HELM.startswith('sudo -A ')
+
+
+def test_gpu_operator_cmd_is_rerunnable_and_drops_legacy_service():
+    cmd = deploy._gpu_operator_install_cmd('')
+    assert 'helm upgrade --install gpu-operator' in cmd
+    assert 'helm install gpu-operator' not in cmd
+    assert cmd.rstrip().endswith(deploy._DELETE_LEGACY_DCGM_SERVICE)
+
+
+def _fake_run(calls, returncode):
+
+    def run(args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, returncode, 'out', 'err')
+
+    return run
+
+
+def test_run_remote_sends_script_on_stdin_not_argv(monkeypatch, tmp_path):
+    password = 'S3cret$pw'
+    key = tmp_path / 'key'
+    key.write_text('k')
+    cmd = deploy.create_askpass_script(password) + 'sudo -A true'
+    calls = []
+    monkeypatch.setattr(deploy_utils.subprocess, 'run', _fake_run(calls, 0))
+    for use_ssh_config in (False, True):
+        assert deploy_utils.run_remote('10.0.0.1',
+                                       cmd,
+                                       'ubuntu',
+                                       str(key),
+                                       use_ssh_config=use_ssh_config) == 'out'
+    for args, kwargs in calls:
+        assert not any(password in a for a in args)
+        assert kwargs['input'] == cmd
+
+
+def test_run_remote_failure_log_redacts_password(monkeypatch):
+    password = 'S3cret$pw'
+    cmd = deploy.create_askpass_script(password) + 'sudo -A false'
+    errors = []
+    monkeypatch.setattr(deploy_utils.subprocess, 'run', _fake_run([], 1))
+    monkeypatch.setattr(deploy_utils.logger, 'error', errors.append)
+    assert deploy_utils.run_remote('10.0.0.1', cmd) is None
+    assert len(errors) == 1
+    assert password not in errors[0]
+    assert '<redacted>' in errors[0] and 'sudo -A false' in errors[0]
+
+
+def test_remote_runner_runs_script_and_keeps_exit_code(tmp_path):
+    """The script runs from a deleted temp file and cannot read itself."""
+    out = subprocess.run(['bash', '-c', deploy_utils._REMOTE_RUNNER],
+                         input='echo hi; cat; exit 7\n',
+                         capture_output=True,
+                         text=True,
+                         env={
+                             **os.environ, 'TMPDIR': str(tmp_path)
+                         },
+                         check=False)
+    assert (out.returncode, out.stdout) == (7, 'hi\n')
+    assert not list(tmp_path.iterdir())

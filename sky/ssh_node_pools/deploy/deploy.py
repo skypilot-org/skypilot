@@ -448,11 +448,10 @@ def deploy_single_cluster(cluster_name,
     logger.debug('Checking TCP Forwarding Options...')
     cmd = _tcp_forwarding_cmd(askpass_block, head_node)
     result = deploy_utils.run_remote(head_node,
-                                     shlex.quote(cmd),
+                                     cmd,
                                      ssh_user,
                                      ssh_key,
-                                     use_ssh_config=head_use_ssh_config,
-                                     use_shell=True)
+                                     use_ssh_config=head_use_ssh_config)
     if result is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -910,30 +909,7 @@ def deploy_single_cluster(cluster_name,
     # Install GPU operator if a GPU was detected on any node
     if install_gpu:
         force_update_status(f'Configuring NVIDIA GPUs [{cluster_name}]')
-        cmd = f"""
-            {askpass_block}
-            curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 &&
-            chmod 700 get_helm.sh &&
-            ./get_helm.sh &&
-            helm repo add nvidia https://helm.ngc.nvidia.com/nvidia && helm repo update &&
-            kubectl create namespace gpu-operator --kubeconfig ~/.kube/config || true &&
-            sudo -A ln -s /sbin/ldconfig /sbin/ldconfig.real || true &&
-            helm install gpu-operator -n gpu-operator --create-namespace nvidia/gpu-operator \\
-            --set 'toolkit.env[0].name=CONTAINERD_CONFIG' \\
-            --set 'toolkit.env[0].value=/var/lib/rancher/k3s/agent/etc/containerd/config.toml' \\
-            --set 'toolkit.env[1].name=CONTAINERD_SOCKET' \\
-            --set 'toolkit.env[1].value=/run/k3s/containerd/containerd.sock' \\
-            --set 'toolkit.env[2].name=CONTAINERD_RUNTIME_CLASS' \\
-            --set 'toolkit.env[2].value=nvidia' \\
-            --set 'devicePlugin.env[0].name=DP_DISABLE_HEALTHCHECKS' \\
-            --set 'devicePlugin.env[0].value=all' &&
-            echo 'Waiting for GPU operator installation...' &&
-            while ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu:' || ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu.product'; do
-                echo 'Waiting for GPU operator...'
-                sleep 5
-            done
-            echo 'GPU operator installed successfully.'
-        """
+        cmd = _gpu_operator_install_cmd(askpass_block)
         result = deploy_utils.run_remote(head_node,
                                          cmd,
                                          ssh_user,
@@ -993,6 +969,16 @@ def deploy_single_cluster(cluster_name,
     return unsuccessful_workers
 
 
+# get-helm-3 copies the binary with a plain `sudo`, which ignores
+# SUDO_ASKPASS without a terminal, so run the whole script as root.
+_GET_HELM = 'sudo -A -E bash ./get_helm.sh'
+# Pools deployed before the GPU Operator's own annotated Service was relied on
+# also have this one, so every GPU was scraped twice.
+_DELETE_LEGACY_DCGM_SERVICE = (
+    'kubectl --kubeconfig ~/.kube/config delete service dcgm-exporter '
+    '-n gpu-operator --ignore-not-found')
+
+
 def _tcp_forwarding_cmd(askpass_block: str, head_node: str) -> str:
     """Command that enables AllowTcpForwarding in sshd on the head node.
 
@@ -1009,6 +995,38 @@ def _tcp_forwarding_cmd(askpass_block: str, head_node: str) -> str:
         '/etc/ssh/sshd_config && sudo -A systemctl restart sshd && '
         f'echo "Successfully enabled TCP Forwarding on head node ({head_node})."; '
         'fi')
+
+
+def _gpu_operator_install_cmd(askpass_block: str) -> str:
+    """Build the shell command that installs the GPU Operator via helm.
+
+    `helm upgrade --install` so a retry or redeploy re-runs this step instead
+    of failing on the existing release.
+    """
+    return f"""{askpass_block}
+curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 &&
+chmod 700 get_helm.sh &&
+{_GET_HELM} &&
+helm repo add nvidia https://helm.ngc.nvidia.com/nvidia && helm repo update &&
+kubectl create namespace gpu-operator --kubeconfig ~/.kube/config || true &&
+sudo -A ln -s /sbin/ldconfig /sbin/ldconfig.real || true &&
+helm upgrade --install gpu-operator -n gpu-operator --create-namespace nvidia/gpu-operator \\
+    --set 'toolkit.env[0].name=CONTAINERD_CONFIG' \\
+    --set 'toolkit.env[0].value=/var/lib/rancher/k3s/agent/etc/containerd/config.toml' \\
+    --set 'toolkit.env[1].name=CONTAINERD_SOCKET' \\
+    --set 'toolkit.env[1].value=/run/k3s/containerd/containerd.sock' \\
+    --set 'toolkit.env[2].name=CONTAINERD_RUNTIME_CLASS' \\
+    --set 'toolkit.env[2].value=nvidia' \\
+    --set 'devicePlugin.env[0].name=DP_DISABLE_HEALTHCHECKS' \\
+    --set 'devicePlugin.env[0].value=all' &&
+echo 'Waiting for GPU operator installation...' &&
+while ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu:' || ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu.product'; do
+    echo 'Waiting for GPU operator...'
+    sleep 5
+done
+echo 'GPU operator installed successfully.' &&
+{_DELETE_LEGACY_DCGM_SERVICE}
+"""
 
 
 def _prometheus_install_cmd(askpass_block: str) -> str:
@@ -1033,7 +1051,7 @@ def _prometheus_install_cmd(askpass_block: str) -> str:
 if ! command -v helm &> /dev/null; then
     curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 &&
     chmod 700 get_helm.sh &&
-    ./get_helm.sh &&
+    {_GET_HELM} &&
     rm get_helm.sh
 fi
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
@@ -1078,10 +1096,10 @@ def create_askpass_script(password):
 # Create temporary askpass script
 ASKPASS_SCRIPT=$(mktemp)
 trap 'rm -f $ASKPASS_SCRIPT' EXIT INT TERM ERR QUIT
-cat > $ASKPASS_SCRIPT << 'SKYPILOT_ASKPASS_EOF'
+cat > $ASKPASS_SCRIPT << '{deploy_utils.ASKPASS_EOF}'
 #!/bin/bash
-printf '%s\n' {shlex.quote(password)}
-SKYPILOT_ASKPASS_EOF
+printf '%s\\n' {shlex.quote(password)}
+{deploy_utils.ASKPASS_EOF}
 chmod 700 $ASKPASS_SCRIPT
 # Use askpass
 export SUDO_ASKPASS=$ASKPASS_SCRIPT
