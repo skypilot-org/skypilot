@@ -39,6 +39,11 @@ def clusters(tmp_path, monkeypatch):
     monkeypatch.setenv('HOME', str(tmp_path))
     monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, str(tmp_path))
     monkeypatch.delenv(constants.ENV_VAR_DB_CONNECTION_URI, raising=False)
+    # Another test in the same worker may leak ENV_VAR_SKYPILOT_CONFIG into
+    # os.environ. It takes priority over ENV_VAR_GLOBAL_CONFIG in
+    # reload_config(), so the live reload on the read path would load that
+    # config instead of ours and lose ws-ro. Clear it for this test.
+    monkeypatch.delenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, raising=False)
     monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, '1')
     monkeypatch.setattr(locks, 'SKY_LOCKS_DIR', str(tmp_path / 'locks'))
     config = tmp_path / 'config.yaml'
