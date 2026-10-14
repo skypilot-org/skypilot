@@ -174,6 +174,140 @@ def test_start_api_server_disabled_by_env_var():
     assert 'SKYPILOT_DISABLE_LOCAL_API_SERVER' in str(exc_info.value)
 
 
+@mock.patch('sky.server.common._start_api_server')
+@mock.patch('sky.server.common.filelock.FileLock')
+@mock.patch('sky.server.common.make_authenticated_request')
+@mock.patch('sky.server.common.is_api_server_local', return_value=True)
+@mock.patch('sky.server.common.get_server_url',
+            return_value='http://127.0.0.1:1111')
+def test_check_server_healthy_or_start_in_server_never_starts(
+        unused_url, unused_local, mock_make_request, mock_filelock,
+        mock_start_server):
+    """Inside the API server, a transient healthz failure never starts a new
+    local server.
+
+    A consolidation-mode controller runs as a child of the API server and
+    inherits IS_SKYPILOT_SERVER. When its localhost /api/health probe drops
+    transiently under load, the old code routed into _start_api_server, whose
+    _set_metrics_env_var rmtree'd the prometheus multiproc dir. Here the
+    in-server branch retries the probe briefly and surfaces an
+    ApiServerConnectionError instead; _start_api_server and the creation lock
+    are never reached (the lock is only for coordinating a real start).
+    """
+    mock_make_request.side_effect = requests.exceptions.ConnectionError()
+
+    with mock.patch.dict(os.environ, {'IS_SKYPILOT_SERVER': 'true'}), \
+            mock.patch.object(common, '_IN_SERVER_HEALTHZ_RETRY_TIMEOUT_SEC', 0):
+        with pytest.raises(exceptions.ApiServerConnectionError):
+            common.check_server_healthy_or_start_fn()
+
+    mock_start_server.assert_not_called()
+    # The creation lock is only needed to start a server.
+    mock_filelock.assert_not_called()
+
+
+@mock.patch('sky.server.common._start_api_server')
+@mock.patch('sky.server.common.filelock.FileLock')
+@mock.patch('sky.server.common.check_server_healthy')
+@mock.patch('sky.server.common.is_api_server_local', return_value=True)
+def test_check_server_healthy_or_start_in_server_retries_transient(
+        unused_local, mock_check, mock_filelock, mock_start_server):
+    """A transient healthz blip inside the API server recovers via the retry.
+
+    The first probe fails (the blip), the retry succeeds, and the call returns
+    normally -- no _start_api_server, no error surfaced to the caller, so a
+    sub-second blip does not push the jobs controller into its full launch-retry
+    backoff.
+    """
+    healthy = (ApiServerStatus.HEALTHY, mock.Mock())
+    mock_check.side_effect = [
+        exceptions.ApiServerConnectionError('http://127.0.0.1:1111'), healthy
+    ]
+
+    with mock.patch.dict(os.environ, {'IS_SKYPILOT_SERVER': 'true'}), \
+            mock.patch.object(common, '_IN_SERVER_HEALTHZ_RETRY_TIMEOUT_SEC',
+                              2.0), \
+            mock.patch.object(common, '_IN_SERVER_HEALTHZ_RETRY_INTERVAL_SEC',
+                              0.0):
+        common.check_server_healthy_or_start_fn()
+
+    assert mock_check.call_count == 2
+    mock_start_server.assert_not_called()
+    mock_filelock.assert_not_called()
+
+
+@mock.patch('sky.server.common._start_api_server')
+@mock.patch('sky.server.common.filelock.FileLock')
+@mock.patch('sky.server.common.make_authenticated_request')
+@mock.patch('sky.server.common.is_api_server_local', return_value=True)
+@mock.patch('sky.server.common.get_server_url',
+            return_value='http://127.0.0.1:1111')
+def test_check_server_healthy_or_start_non_server_still_auto_starts(
+        unused_url, unused_local, mock_make_request, mock_filelock,
+        mock_start_server):
+    """A standalone controller (IS_SKYPILOT_SERVER unset) still auto-starts a
+    local server -- the fix must not break non-consolidation mode.
+    """
+    mock_make_request.side_effect = requests.exceptions.ConnectionError()
+
+    env = {k: v for k, v in os.environ.items() if k != 'IS_SKYPILOT_SERVER'}
+    with mock.patch.dict(os.environ, env, clear=True):
+        common.check_server_healthy_or_start_fn()
+
+    mock_start_server.assert_called_once()
+    # The normal auto-start path still coordinates via the creation lock.
+    mock_filelock.assert_called_once()
+
+
+def test_check_server_healthy_or_start_in_server_preserves_metrics_dir(
+        monkeypatch, tmp_path):
+    """Regression: _set_metrics_env_var must not rmtree the prometheus
+    multiproc dir when an in-server process hits a transient healthz failure.
+
+    Exercises the REAL _start_api_server / _set_metrics_env_var (only the
+    trigger and external side effects are mocked) against a populated metrics
+    dir. With the fix, _start_api_server is never reached, so the markers
+    survive. If the in-server gate is removed, _start_api_server runs, the real
+    _set_metrics_env_var rmtree's the dir, and the markers vanish -- failing
+    this test -- which is exactly the production bug.
+    """
+    metrics_root = tmp_path / 'metrics_root'
+    metrics_dir = metrics_root / 'metrics'
+    metrics_dir.mkdir(parents=True)
+    (metrics_dir / 'gauge_liveall.db').write_text('multiproc-gauge')
+    (metrics_dir / 'histogram_liveall.db').write_text('multiproc-histogram')
+
+    monkeypatch.setattr(common.tempfile, 'gettempdir',
+                        lambda: str(metrics_root))
+    monkeypatch.setattr(common, '_IN_SERVER_HEALTHZ_RETRY_TIMEOUT_SEC', 0)
+    monkeypatch.setattr(
+        common, 'check_server_healthy',
+        mock.Mock(side_effect=exceptions.ApiServerConnectionError(
+            'http://127.0.0.1:46580')))
+    monkeypatch.setattr(common, 'is_api_server_local', lambda *a, **k: True)
+    monkeypatch.setattr(common, 'get_server_url',
+                        lambda *a, **k: 'http://127.0.0.1:46580')
+    monkeypatch.setattr(common.filelock, 'FileLock', mock.MagicMock())
+    # External side effects of a *real* _start_api_server, in case the gate is
+    # ever removed: keep them inert so the rmtree (the thing under test) is the
+    # only real side effect that could fire.
+    monkeypatch.setattr(common.common_utils, 'get_mem_size_gb', lambda: 16.0)
+    monkeypatch.setattr(common.os, 'makedirs', lambda *a, **k: None)
+    monkeypatch.setattr(
+        common.subprocess, 'Popen',
+        mock.Mock(return_value=mock.Mock(poll=mock.Mock(return_value=1))))
+    monkeypatch.setattr('builtins.open', mock.mock_open())
+
+    monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+    monkeypatch.setenv('SKY_API_SERVER_METRICS_ENABLED', 'true')
+
+    with pytest.raises(exceptions.ApiServerConnectionError):
+        common.check_server_healthy_or_start_fn()
+
+    assert (metrics_dir / 'gauge_liveall.db').exists()
+    assert (metrics_dir / 'histogram_liveall.db').exists()
+
+
 def test_local_api_server_not_disabled_by_default():
     """Without the env var, the guard is a no-op."""
     env = os.environ.copy()

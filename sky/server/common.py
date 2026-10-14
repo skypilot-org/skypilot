@@ -135,6 +135,19 @@ RETRY_COUNT_ON_TIMEOUT = 3
 # (e.g. in high contention env) and we will exit eagerly if server exit.
 WAIT_APISERVER_START_TIMEOUT_SEC = 60
 
+# When a healthz probe transiently fails *from inside the API server* (e.g. a
+# consolidation-mode jobs/serve controller probing its own parent under load),
+# the server is local and recovers in well under a second. We retry the probe
+# briefly in place rather than falling through to _start_api_server (which
+# wipes the metrics dir) or surfacing an error that would send the caller
+# (e.g. the jobs controller) into its full launch-retry backoff. Bounded by
+# wall clock so a persistent outage is not amplified: a single check_server_
+# healthy probe can itself spend RETRY_COUNT_ON_TIMEOUT * 2.5s on a slow
+# (Timeout) probe, after which the deadline is already exhausted and we
+# surface the error.
+_IN_SERVER_HEALTHZ_RETRY_TIMEOUT_SEC = 3.0
+_IN_SERVER_HEALTHZ_RETRY_INTERVAL_SEC = 0.5
+
 _LOCAL_API_SERVER_RESTART_HINT = (
     f'{colorama.Fore.YELLOW}The local SkyPilot API server is not compatible '
     'with the client. Please restart the API server with:\n'
@@ -853,6 +866,70 @@ def check_local_api_server_enabled_or_raise() -> None:
                 'sky api login -e <endpoint>')
 
 
+def is_running_in_api_server() -> bool:
+    """True if this process is running inside the API server.
+
+    The API server sets ENV_VAR_IS_SKYPILOT_SERVER ('IS_SKYPILOT_SERVER') in its
+    own environment (see _start_api_server), and every in-server child -- most
+    importantly the consolidation-mode jobs/serve controllers, which the API
+    server spawns via subprocess_utils.launch_new_process_tree and which
+    therefore inherit its env -- inherits it. A standalone jobs/serve
+    controller running on its own VM does NOT have it (the VM is not an API
+    server), nor does a fresh CLI shell.
+
+    This is the correct signal for "the API server is THIS process tree, so do
+    not attempt to start a new local one." It is deliberately NOT
+    OVERRIDE_CONSOLIDATION_MODE ('IS_SKYPILOT_JOB_CONTROLLER'): that env is
+    exported by scheduler.start_controller() inside *both* the standalone and
+    the consolidation controller, so is_jobs_consolidation_mode() (in
+    controller_utils) returns True unconditionally in every controller process.
+    Gating auto-start on it would also skip the standalone controller, which
+    *must* start a local API server on its own VM -- breaking non-consolidation
+    mode.
+    """
+    return os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None
+
+
+def _wait_for_local_server_in_api_server(
+        endpoint: str, exc: exceptions.ApiServerConnectionError) -> None:
+    """Retry a transient local healthz failure from inside the API server.
+
+    We are running inside the API server whose healthz is briefly unreachable
+    (under load the probe times out or the connection drops, but the server
+    recovers in well under a second and is still serving). Starting a new local
+    server is never correct here -- the server is this process tree, the port is
+    held, and the phantom would die at its own port guard *after*
+    _set_metrics_env_var rmtree'd the prometheus multiproc dir and truncated
+    the log. So retry the probe briefly in place; if it stays unreachable,
+    surface the connection error so the caller (e.g. the jobs controller)
+    retries the operation through its own backoff, instead of us silently
+    wiping every process's metrics.
+    """
+    deadline = time.monotonic() + _IN_SERVER_HEALTHZ_RETRY_TIMEOUT_SEC
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(_IN_SERVER_HEALTHZ_RETRY_INTERVAL_SEC, remaining))
+        # Probe a fresh status each iteration; the previous probe may have
+        # been served a stale/unhealthy response mid-blip.
+        get_api_server_status_response.cache_clear()  # type: ignore
+        try:
+            status, _ = check_server_healthy(endpoint)
+        except exceptions.ApiServerConnectionError:
+            continue  # still transient -- keep retrying until the deadline
+        # check_server_healthy raises on VERSION_MISMATCH (let it propagate,
+        # matching the non-start path) and UNHEALTHY (caught above). Mirror the
+        # original try-block for the remaining outcomes: HEALTHY succeeds,
+        # NEEDS_AUTH surfaces auth.
+        if status == ApiServerStatus.NEEDS_AUTH:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ApiServerAuthenticationError(endpoint)
+        return
+    with ux_utils.print_exception_no_traceback():
+        raise exceptions.ApiServerConnectionError(endpoint) from exc
+
+
 def _start_api_server(deploy: bool = False,
                       host: str = '127.0.0.1',
                       foreground: bool = False,
@@ -1126,6 +1203,18 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
         if not is_api_server_local(endpoint):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ApiServerConnectionError(endpoint) from exc
+        # Running inside the API server (consolidation-mode jobs/serve
+        # controllers, request handlers, daemons): the server is THIS process
+        # tree -- never start a new local one. _start_api_server would, as a
+        # side effect of _set_metrics_env_var, rmtree the prometheus multiproc
+        # dir (wiping every process's metrics files) and truncate server.log
+        # before the spawned phantom dies at its own port guard (the real
+        # server holds the port). Retry the transient healthz blip in place;
+        # surface the error if it persists. See is_running_in_api_server for
+        # why this is gated on IS_SKYPILOT_SERVER and not on consolidation mode.
+        if is_running_in_api_server():
+            _wait_for_local_server_in_api_server(endpoint, exc)
+            return
         # Fail early (before taking the creation lock) if silently starting
         # a local API server is disabled on this machine.
         check_local_api_server_enabled_or_raise()
