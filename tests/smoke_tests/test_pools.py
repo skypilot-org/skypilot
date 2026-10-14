@@ -3020,7 +3020,9 @@ def _wait_until_pool_removed(pool_name: str, timeout: int) -> str:
             f'  echo "Timeout waiting for pool {pool_name} to be removed"; '
             '  exit 1; '
             'fi; '
-            's=$(sky jobs pool status); echo "$s"; '
+            # A failed query says nothing about the pool; retry it.
+            'if ! s=$(sky jobs pool status); then sleep 10; continue; fi; '
+            'echo "$s"; '
             f'if echo "$s" | grep -E "^{pool_name} " | grep FAILED; then '
             '  exit 1; '
             'fi; '
@@ -3042,11 +3044,11 @@ def test_pool_local_file_mounts_two_hop(generic_cloud: str):
     become READY. Only discriminates on a deployed (remote) server, where
     containment is on.
 
-    On a remote server, the test also runs the blob GC past its grace period
-    and replaces the worker: the replacement launches from the same blob, so
-    the GC must keep a live pool's blob. In every mode, `pool down` must
-    complete and leave the user's own files alone (on a local server in
-    consolidation mode, the task points at them directly).
+    On a --remote-server container, the test also runs the blob GC past its
+    grace period and replaces the worker: the replacement launches from the
+    same blob, so the GC must keep a live pool's blob. In every mode,
+    `pool down` must complete and leave the user's own files alone (on a local
+    server in consolidation mode, the task points at them directly).
 
     On an API server with several replicas, the controller and its launch
     requests may run on a replica that never extracted the blob. This test
@@ -3094,10 +3096,12 @@ def test_pool_local_file_mounts_two_hop(generic_cloud: str):
                 wait_until_pool_ready(pool_name, timeout=timeout),
                 launch_job_and_check,
             ]
-            if (smoke_tests_utils.is_remote_server_test() and
+            if (smoke_tests_utils.is_docker_remote_api_server() and
                     generic_cloud == 'kubernetes'):
-                # Only a remote client uploads a blob, and the blob GC runs in
-                # the API server container.
+                # Only a remote client uploads a blob. The blob GC runs in the
+                # --remote-server container, a vanilla server with the default
+                # blob backend; a server given with --env-file has no container
+                # to run it in.
                 worker_pods = (
                     'kubectl get pods -l skypilot-cluster-name --no-headers '
                     '-o custom-columns=NAME:.metadata.name,'
