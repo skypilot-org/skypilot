@@ -40,7 +40,6 @@ def test_prometheus_install_cmd_contains_required_fields():
     # Must NOT pass --kube-context. The command runs on the pool's head node,
     # where `~/.kube/config` only has the default context k3s wrote — any
     # `ssh-<pool>` context name only exists in the client's merged kubeconfig.
-    # The sibling `_dcgm_exporter_service_cmd` correctly omits it.
     assert '--kube-context' not in cmd
 
     # Values file must be created via mktemp so concurrent pool deploys don't
