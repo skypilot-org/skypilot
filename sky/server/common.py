@@ -187,6 +187,14 @@ class ApiServerStatus(enum.Enum):
 
 @dataclasses.dataclass
 class ApiServerInfo:
+    """What `GET /api/health` told us about the server, for this caller.
+
+    Some fields describe the deployment (versions, which auth modes are on)
+    and some are resolved per caller (`user`,
+    `restrict_all_users_mutations`). Every field must have a default that
+    means "an older server did not send this", since the client talks to
+    servers that predate any field added here.
+    """
     status: ApiServerStatus
     api_version: ApiVersion = None
     version: Optional[str] = None
@@ -196,6 +204,11 @@ class ApiServerInfo:
     basic_auth_enabled: bool = False
     error: Optional[str] = None
     latest_version: Optional[str] = None
+    # Whether this caller may NOT use `--all-users`/`-u` on mutating commands
+    # (server-side `rbac.restrict_all_users_mutations`, already resolved for
+    # this caller). Defaults to False so an older server -- which omits the
+    # field -- keeps today's behaviour.
+    restrict_all_users_mutations: bool = False
 
 
 def check_and_print_upgrade_hint(api_server_info: ApiServerInfo,
@@ -673,6 +686,8 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
         commit = result.get('commit')
         user = result.get('user')
         latest_version = result.get('latest_version')
+        restrict_all_users_mutations = bool(
+            result.get('restrict_all_users_mutations'))
         # Cache basic_auth_enabled and set client user hash on the
         # client-side usage singleton.
         global basic_auth_enabled, client_user_hash
@@ -681,14 +696,16 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
             if client_user_hash is None:
                 client_user_hash = common_utils.generate_user_hash()
             usage_lib.messages.usage.client_user_hash = client_user_hash
-        server_info = ApiServerInfo(status=ApiServerStatus(server_status),
-                                    api_version=api_version,
-                                    version=version,
-                                    version_on_disk=version_on_disk,
-                                    commit=commit,
-                                    user=user,
-                                    basic_auth_enabled=basic_auth_enabled,
-                                    latest_version=latest_version)
+        server_info = ApiServerInfo(
+            status=ApiServerStatus(server_status),
+            api_version=api_version,
+            version=version,
+            version_on_disk=version_on_disk,
+            commit=commit,
+            user=user,
+            basic_auth_enabled=basic_auth_enabled,
+            latest_version=latest_version,
+            restrict_all_users_mutations=restrict_all_users_mutations)
         if api_version is None or version is None or commit is None:
             server_url = endpoint if endpoint is not None else get_server_url()
             logger.warning(f'API server response missing '
