@@ -328,3 +328,29 @@ def test_deploy_rejects_password_without_printing_it(monkeypatch, tmp_path,
         if secret is not None:
             assert secret not in str(e.value)
     single.assert_not_called()
+
+
+@pytest.mark.parametrize('is_worker', [False, True])
+def test_cleanup_runs_the_uninstall_script_the_host_has(monkeypatch, tmp_path,
+                                                        is_worker):
+    """An agent install must be removed even when the config says server."""
+    k3s_bin = tmp_path / 'bin'
+    k3s_bin.mkdir()
+    (k3s_bin / 'k3s-agent-uninstall.sh').write_text('#!/bin/sh\n')
+    (k3s_bin / 'k3s-agent-uninstall.sh').chmod(0o755)
+    stub = tmp_path / 'stub'
+    stub.mkdir()
+    (stub / 'sudo').write_text(f'#!/bin/sh\necho "$@" >> {tmp_path}/sudo.log\n')
+    (stub / 'sudo').chmod(0o755)
+    monkeypatch.setattr(deploy, '_K3S_BIN', str(k3s_bin))
+    monkeypatch.setattr(deploy, 'force_update_status', lambda *a, **k: None)
+    monkeypatch.setattr(deploy, 'success_message', lambda *a, **k: None)
+    cmds = []
+    monkeypatch.setattr(deploy_utils, 'run_remote',
+                        lambda node, cmd, *a, **k: cmds.append(cmd) or 'ok')
+    deploy.cleanup_node('10.0.0.1', 'u', 'key', '', is_worker=is_worker)
+    subprocess.run(['bash', '-c', cmds[0]],
+                   env={'PATH': f'{stub}:/usr/bin:/bin'},
+                   check=True)
+    calls = (tmp_path / 'sudo.log').read_text().splitlines()
+    assert calls[0] == f'-A {k3s_bin}/k3s-agent-uninstall.sh'

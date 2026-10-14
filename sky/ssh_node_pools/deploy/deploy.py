@@ -1119,6 +1119,9 @@ export SUDO_ASKPASS=$ASKPASS_SCRIPT
 """
 
 
+_K3S_BIN = '/usr/local/bin'
+
+
 def cleanup_node(node,
                  user,
                  ssh_key,
@@ -1128,11 +1131,14 @@ def cleanup_node(node,
     """Uninstall k3s and clean up the state on a node."""
     ntype = 'worker' if is_worker else 'head'
     force_update_status(f'Cleaning up {ntype} node ({node})...')
-    script = f'k3s{"-agent" if is_worker else ""}-uninstall.sh'
+    # Run whichever uninstall script the host has: the role in the config may
+    # not match what was installed (e.g. an HA config after a non-HA deploy).
     cmd = f"""
         {askpass_block}
         echo 'Uninstalling k3s...' &&
-        sudo -A /usr/local/bin/{script} || true &&
+        {{ for s in k3s-uninstall.sh k3s-agent-uninstall.sh; do
+            if [ -x {_K3S_BIN}/$s ]; then sudo -A {_K3S_BIN}/$s; fi
+        done; true; }} &&
         sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
     """
     result = deploy_utils.run_remote(node,
