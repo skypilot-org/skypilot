@@ -92,6 +92,14 @@ def test_askpass_script_is_empty_without_password():
     assert deploy.create_askpass_script('') == ''
 
 
+@pytest.mark.parametrize('sep', ['\n', '\r'])
+def test_askpass_script_rejects_line_breaks(sep):
+    """A line break could close the heredoc and run the rest as commands."""
+    with pytest.raises(ValueError, match='line break'):
+        deploy.create_askpass_script(
+            f'x{sep}{deploy_utils.ASKPASS_EOF}{sep}touch /tmp/pwned')
+
+
 def test_tcp_forwarding_cmd_uses_askpass_for_every_sudo():
     askpass_block = 'export SUDO_ASKPASS=/tmp/askpass'
     cmd = deploy._tcp_forwarding_cmd(askpass_block, '10.0.0.1')
@@ -115,6 +123,8 @@ def test_get_helm_runs_as_root_in_every_install_cmd():
 def test_gpu_operator_cmd_is_rerunnable_and_drops_legacy_service():
     cmd = deploy._gpu_operator_install_cmd('')
     assert 'helm upgrade --install gpu-operator' in cmd
+    # A host may already have an `nvidia` repo with another URL.
+    assert 'nvidia --force-update &&' in cmd
     assert 'helm install gpu-operator' not in cmd
     assert deploy._DELETE_LEGACY_DCGM_SERVICE in cmd
 

@@ -1007,7 +1007,7 @@ def _gpu_operator_install_cmd(askpass_block: str) -> str:
 curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 &&
 chmod 700 get_helm.sh &&
 {_GET_HELM} &&
-helm repo add nvidia https://helm.ngc.nvidia.com/nvidia && helm repo update &&
+helm repo add nvidia https://helm.ngc.nvidia.com/nvidia --force-update && helm repo update &&
 {{ kubectl create namespace gpu-operator --kubeconfig ~/.kube/config || true; }} &&
 {{ sudo -A ln -s /sbin/ldconfig /sbin/ldconfig.real || true; }} &&
 helm upgrade --install gpu-operator -n gpu-operator --create-namespace nvidia/gpu-operator \\
@@ -1091,6 +1091,9 @@ def create_askpass_script(password):
     """Create an askpass script block for sudo with password."""
     if not password:
         return ''
+    # sudo reads one line; a newline could also end the heredoc below early.
+    if '\n' in password or '\r' in password:
+        raise ValueError('The sudo password must not contain a line break.')
 
     return f"""
 # Create temporary askpass script
