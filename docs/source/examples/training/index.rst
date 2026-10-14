@@ -17,6 +17,7 @@ Training
    Halo <halo.md>
    nanochat <nanochat.md>
    NeMo <nemo.md>
+   NeMo Automodel <https://docs.nvidia.com/nemo/automodel/latest/job-launchers/skypilot>
    NeMo RL <nemorl.md>
    OpenRLHF <openrlhf.md>
    PyTorch Monarch <https://github.com/meta-pytorch/monarch/tree/main/examples/skypilot>
