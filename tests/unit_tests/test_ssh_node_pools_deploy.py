@@ -1,5 +1,6 @@
 """Unit tests for sky/ssh_node_pools/deploy/deploy.py helpers."""
 
+import json
 import os
 import subprocess
 import sys
@@ -264,3 +265,45 @@ def test_gpu_operator_cmd_ignores_legacy_service_delete_failure(tmp_path):
     out = _gpu_install(tmp_path, helm_upgrade_rc=0, kubectl_delete_rc=1)
     assert out.returncode == 0
     assert 'installed successfully' in out.stdout
+
+
+@pytest.mark.parametrize('history_password,password,expected', [
+    ('old-secret', 'new-secret', "field 'password'."),
+    (None, 'x\ny', 'Host 10.0.0.1: the sudo password'),
+])
+def test_deploy_rejects_password_without_printing_it(monkeypatch, tmp_path,
+                                                     history_password, password,
+                                                     expected):
+    key = tmp_path / 'key'
+    key.write_text('k')
+    pools = tmp_path / 'pools.yaml'
+    pools.write_text(
+        json.dumps({
+            'p': {
+                'hosts': ['10.0.0.1'],
+                'user': 'u',
+                'identity_file': str(key),
+                'password': password,
+            }
+        }))
+    if history_password is not None:
+        (tmp_path / 'ssh-p-history.yaml').write_text(
+            json.dumps({
+                'hosts': ['10.0.0.1'],
+                'user': 'u',
+                'identity_file': str(key),
+                'password': history_password,
+            }))
+    monkeypatch.setattr(deploy.constants, 'NODE_POOLS_INFO_DIR', str(tmp_path))
+    single = mock.Mock()
+    monkeypatch.setattr(deploy, 'deploy_single_cluster', single)
+    with pytest.raises(RuntimeError) as e:
+        deploy.deploy_multiple_clusters('p',
+                                        ssh_node_pools_file=str(pools),
+                                        kubeconfig_path=str(tmp_path / 'kc'),
+                                        cleanup=False)
+    assert expected in str(e.value)
+    for secret in (history_password, password):
+        if secret is not None:
+            assert secret not in str(e.value)
+    single.assert_not_called()

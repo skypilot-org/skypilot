@@ -127,6 +127,9 @@ def deploy_multiple_clusters(
                     f'{colorama.Fore.RED}Error: No valid hosts found '
                     f'for cluster {cluster_name!r}. Skipping.{RESET_ALL}')
                 continue
+            # Fail before any remote work, naming the host.
+            for host in hosts_info:
+                _check_sudo_password(host['password'], host['ip'])
 
             context_name = f'ssh-{cluster_name}'
 
@@ -151,10 +154,11 @@ def deploy_multiple_clusters(
                 for key in ['user', 'identity_file', 'password']:
                     if not cleanup and history.get(key) != cluster_config.get(
                             key):
-                        raise ValueError(
-                            f'Cluster configuration has changed for field {key!r}. '
-                            f'Previous value: {history.get(key)}, '
-                            f'Current value: {cluster_config.get(key)}')
+                        values = ('' if key == 'password' else
+                                  f' Previous value: {history.get(key)}, '
+                                  f'Current value: {cluster_config.get(key)}')
+                        raise ValueError('Cluster configuration has changed '
+                                         f'for field {key!r}.{values}')
                 history_hosts_info = ssh_utils.prepare_hosts_info(
                     cluster_name, history)
 
@@ -1087,13 +1091,19 @@ exit $HELM_RET
 """
 
 
+def _check_sudo_password(password, host=None):
+    # sudo reads one line; a newline could also end the askpass heredoc early.
+    if password and ('\n' in password or '\r' in password):
+        where = f'Host {host}: the' if host else 'The'
+        raise ValueError(
+            f'{where} sudo password must not contain a line break.')
+
+
 def create_askpass_script(password):
     """Create an askpass script block for sudo with password."""
     if not password:
         return ''
-    # sudo reads one line; a newline could also end the heredoc below early.
-    if '\n' in password or '\r' in password:
-        raise ValueError('The sudo password must not contain a line break.')
+    _check_sudo_password(password)
 
     return f"""
 # Create temporary askpass script
