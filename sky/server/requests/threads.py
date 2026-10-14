@@ -79,7 +79,7 @@ class _BoundedAdmission:
             self._active_gauge.inc()
         return count
 
-    def _release(self, _: Optional[concurrent.futures.Future] = None) -> None:
+    def _release(self) -> None:
         self.running.decrement()
         if self._active_gauge is not None:
             self._active_gauge.dec()

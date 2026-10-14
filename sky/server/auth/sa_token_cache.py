@@ -7,11 +7,11 @@ each server process within that TTL. Failed lookups are never cached.
 
 Accessed only from the server's event loop, so no lock is needed.
 """
-import collections
 import math
 import os
-import time
 from typing import Any, Dict, Optional, Tuple
+
+import cachetools
 
 from sky import global_user_state
 from sky import models
@@ -26,23 +26,22 @@ def _get_ttl_seconds() -> float:
     raw = os.environ.get(constants.ENV_VAR_SA_AUTH_CACHE_TTL_SECONDS)
     if raw is None:
         return constants.DEFAULT_SA_AUTH_CACHE_TTL_SECONDS
+    error = ValueError(
+        f'{constants.ENV_VAR_SA_AUTH_CACHE_TTL_SECONDS}={raw!r} must be a '
+        'non-negative number of seconds (0 disables the cache).')
     try:
         seconds = float(raw)
     except ValueError:
-        seconds = math.nan
+        raise error from None
     if not math.isfinite(seconds) or seconds < 0:
-        raise ValueError(
-            f'{constants.ENV_VAR_SA_AUTH_CACHE_TTL_SECONDS}={raw!r} must be a '
-            'non-negative number of seconds (0 disables the cache).')
+        raise error
     return seconds
 
 
 TTL_SECONDS = _get_ttl_seconds()
 
-_Entry = Tuple[float, TokenRow, models.User]
-
-# token hash -> (monotonic expiry, token row, user), oldest insert first.
-_entries: 'collections.OrderedDict[str, _Entry]' = collections.OrderedDict()
+_entries: 'cachetools.TTLCache[str, Tuple[TokenRow, models.User]]' = (
+    cachetools.TTLCache(maxsize=_MAX_ENTRIES, ttl=TTL_SECONDS))
 
 
 def fetch_token_and_user(
@@ -56,23 +55,12 @@ def fetch_token_and_user(
 
 
 def get(token_hash: str) -> Optional[Tuple[TokenRow, models.User]]:
-    entry = _entries.get(token_hash)
-    if entry is None:
-        return None
-    expires_at, token_row, user = entry
-    if time.monotonic() >= expires_at:
-        del _entries[token_hash]
-        return None
-    return token_row, user
+    return _entries.get(token_hash)
 
 
 def put(token_hash: str, token_row: TokenRow, user: models.User) -> None:
-    if TTL_SECONDS <= 0:
-        return
-    _entries.pop(token_hash, None)
-    while len(_entries) >= _MAX_ENTRIES:
-        _entries.popitem(last=False)
-    _entries[token_hash] = (time.monotonic() + TTL_SECONDS, token_row, user)
+    if TTL_SECONDS > 0:
+        _entries[token_hash] = (token_row, user)
 
 
 def clear() -> None:

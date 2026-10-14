@@ -214,19 +214,19 @@ def mark_auth_rejection(request: fastapi.Request,
 
 # Key in `scope['state']` holding the (user id, path, method) an RBAC layer
 # allowed, so a later RBAC layer can skip re-evaluating the same check.
-RBAC_ALLOWED_STATE_KEY = 'rbac_allowed'
+_RBAC_ALLOWED_STATE_KEY = 'rbac_allowed'
 
 
 def mark_rbac_allowed(request: fastapi.Request, user_id: str) -> None:
     """Record that `user_id` passed the RBAC check for this path and method."""
-    setattr(request.state, RBAC_ALLOWED_STATE_KEY,
+    setattr(request.state, _RBAC_ALLOWED_STATE_KEY,
             (user_id, request.url.path, request.method))
 
 
 def rbac_allowed(request: fastapi.Request, user_id: str) -> bool:
     """Whether an earlier layer recorded an RBAC allow for exactly `user_id`
     and this request's current path and method."""
-    return getattr(request.state, RBAC_ALLOWED_STATE_KEY,
+    return getattr(request.state, _RBAC_ALLOWED_STATE_KEY,
                    None) == (user_id, request.url.path, request.method)
 
 
