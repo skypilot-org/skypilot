@@ -4,6 +4,7 @@ import datetime
 import hashlib
 import json
 import os
+import shutil
 import tempfile
 import textwrap
 import time
@@ -286,16 +287,15 @@ def test_cluster_job_spec_private_workspace(generic_cloud: str):
                                      mode='w') as f:
         f.write(server_config_content)
         server_config_path = f.name
-    # The owner works in the private workspace.
-    with tempfile.NamedTemporaryFile(prefix='client_config_',
-                                     delete=False,
-                                     mode='w') as f:
+    # The owner works in the private workspace, set in a project config:
+    # a client SKYPILOT_CONFIG would be forwarded to the server and replace
+    # its config (and with it the workspace) for the request.
+    owner_dir = tempfile.mkdtemp(prefix='spec_owner_')
+    with open(os.path.join(owner_dir, '.sky.yaml'), 'w', encoding='utf-8') as f:
         f.write(f'active_workspace: {ws_name}\n')
-        client_config_path = f.name
-    as_owner = (f'export {constants.USER_ID_ENV_VAR}="{owner_hash}"; '
-                f'export {constants.USER_ENV_VAR}="{owner}"; '
-                f'export {skypilot_config.ENV_VAR_SKYPILOT_CONFIG}='
-                f'{client_config_path}; ')
+    as_owner = (f'cd {owner_dir} && '
+                f'export {constants.USER_ID_ENV_VAR}="{owner_hash}"; '
+                f'export {constants.USER_ENV_VAR}="{owner}"; ')
 
     def spec_status_as(user: str) -> str:
         """HTTP status of asking for job 1's spec, as `user`."""
@@ -340,7 +340,7 @@ def test_cluster_job_spec_private_workspace(generic_cloud: str):
     # The default `sky status -u` preamble authenticates as the ambient user.
     smoke_tests_utils.run_one_test(test, check_sky_status=False)
     os.unlink(server_config_path)
-    os.unlink(client_config_path)
+    shutil.rmtree(owner_dir, ignore_errors=True)
 
 
 def _verify_cluster_created_by_user(cluster_name: str,
