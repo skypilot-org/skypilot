@@ -86,6 +86,7 @@ from sky.server.auth import loopback
 from sky.server.auth import oauth2_proxy
 from sky.server.auth import sessions as auth_sessions
 from sky.server.blob import blob_storage as bs
+from sky.server.guard_integration import attach_guard
 from sky.server.requests import executor
 from sky.server.requests import log_provider
 from sky.server.requests import payloads
@@ -1360,6 +1361,15 @@ app.add_middleware(BearerTokenMiddleware)
 # request.state.auth_user is always set, but can be overridden by the auth
 # middleware above.
 app.add_middleware(InitializeRequestAuthUserMiddleware)
+# Optional fastapi-guard security middleware (off unless
+# SKYPILOT_GUARD_ENABLED is set). Added after the auth middlewares, so it
+# wraps them (last-added is outermost): blocked or rate-limited requests are
+# rejected before they reach the bcrypt/DB auth path, and failed logins count
+# toward the rate limit. RequestIDMiddleware and SecurityHeadersMiddleware
+# are added after it, so guard 403/429 responses still carry the request ID
+# and security headers. Like the auth middlewares' 401s, they are outside
+# CORSMiddleware.
+attach_guard(app)
 app.add_middleware(RequestIDMiddleware)
 # SecurityHeadersMiddleware is the outermost middleware that touches a
 # response, so its security headers (CSP, X-Content-Type-Options, etc.) are
