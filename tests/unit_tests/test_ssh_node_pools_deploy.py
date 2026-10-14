@@ -331,16 +331,25 @@ def test_deploy_rejects_password_without_printing_it(monkeypatch, tmp_path,
 
 
 @pytest.mark.parametrize('is_worker', [False, True])
+@pytest.mark.parametrize('installed,fails', [('k3s-agent-uninstall.sh', False),
+                                             ('k3s-uninstall.sh', False),
+                                             (None, False),
+                                             ('k3s-uninstall.sh', True)])
 def test_cleanup_runs_the_uninstall_script_the_host_has(monkeypatch, tmp_path,
-                                                        is_worker):
-    """An agent install must be removed even when the config says server."""
+                                                        is_worker, installed,
+                                                        fails):
+    """Uninstall what is installed, whatever role the config gives the host;
+    a failing uninstall fails the cleanup instead of being reported done."""
     k3s_bin = tmp_path / 'bin'
     k3s_bin.mkdir()
-    (k3s_bin / 'k3s-agent-uninstall.sh').write_text('#!/bin/sh\n')
-    (k3s_bin / 'k3s-agent-uninstall.sh').chmod(0o755)
+    if installed:
+        (k3s_bin / installed).write_text('#!/bin/sh\n')
+        (k3s_bin / installed).chmod(0o755)
     stub = tmp_path / 'stub'
     stub.mkdir()
-    (stub / 'sudo').write_text(f'#!/bin/sh\necho "$@" >> {tmp_path}/sudo.log\n')
+    (stub / 'sudo').write_text(
+        f'#!/bin/sh\necho "$@" >> {tmp_path}/sudo.log\n'
+        f'case "$2" in *uninstall.sh) exit {int(fails)};; esac\n')
     (stub / 'sudo').chmod(0o755)
     monkeypatch.setattr(deploy, '_K3S_BIN', str(k3s_bin))
     monkeypatch.setattr(deploy, 'force_update_status', lambda *a, **k: None)
@@ -349,8 +358,15 @@ def test_cleanup_runs_the_uninstall_script_the_host_has(monkeypatch, tmp_path,
     monkeypatch.setattr(deploy_utils, 'run_remote',
                         lambda node, cmd, *a, **k: cmds.append(cmd) or 'ok')
     deploy.cleanup_node('10.0.0.1', 'u', 'key', '', is_worker=is_worker)
-    subprocess.run(['bash', '-c', cmds[0]],
-                   env={'PATH': f'{stub}:/usr/bin:/bin'},
-                   check=True)
+    proc = subprocess.run(['bash', '-c', cmds[0]],
+                          env={'PATH': f'{stub}:/usr/bin:/bin'},
+                          check=False)
     calls = (tmp_path / 'sudo.log').read_text().splitlines()
-    assert calls[0] == f'-A {k3s_bin}/k3s-agent-uninstall.sh'
+    uninstalls = [c for c in calls if c.endswith('uninstall.sh')]
+    assert uninstalls == ([f'-A {k3s_bin}/{installed}'] if installed else [])
+    if fails:
+        assert proc.returncode != 0
+        assert not any(' rm ' in f' {c} ' for c in calls)
+    else:
+        assert proc.returncode == 0
+        assert calls[-1].startswith('-A rm -rf /etc/rancher')

@@ -1137,7 +1137,7 @@ def cleanup_node(node,
         {askpass_block}
         echo 'Uninstalling k3s...' &&
         {{ for s in k3s-uninstall.sh k3s-agent-uninstall.sh; do
-            if [ -x {_K3S_BIN}/$s ]; then sudo -A {_K3S_BIN}/$s; fi
+            if [ -x {_K3S_BIN}/$s ]; then sudo -A {_K3S_BIN}/$s || exit 1; fi
         done; true; }} &&
         sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
     """
