@@ -567,7 +567,36 @@ def _read_connection_count_env(env_var: str, default: int) -> int:
     return count
 
 
-def _make_asyncpg_creator(dsn: str) -> Callable[[], Any]:
+def application_name(role: str) -> str:
+    """The Postgres ``application_name`` for a connection this process opens
+    on an engine of ``role``.
+
+    It makes ``pg_stat_activity`` attribute each backend to the engine and
+    process holding it. Evaluated per connection, so a forked child reports
+    its own pid.
+    """
+    return f'sky-{role}-{os.getpid()}'
+
+
+def _conn_string_sets_application_name(conn_string: str) -> bool:
+    return 'application_name' in sqlalchemy.engine.make_url(conn_string).query
+
+
+def _install_application_name(engine: Any, role: str) -> None:
+    """Tag every connection of a sync Postgres ``engine`` with
+    ``application_name(role)``. A value in the connection string wins. No-op
+    for other dialects."""
+    if engine.dialect.name != 'postgresql':
+        return
+
+    @sqlalchemy.event.listens_for(engine, 'do_connect')
+    def _set_application_name(dialect, conn_rec, cargs, cparams):
+        del dialect, conn_rec, cargs
+        # psycopg2 receives the connection string's query params in cparams.
+        cparams.setdefault('application_name', application_name(role))
+
+
+def _make_asyncpg_creator(dsn: str, role: str) -> Callable[[], Any]:
     """Build a SQLAlchemy ``async_creator`` that hands asyncpg a libpq DSN.
 
     SQLAlchemy's asyncpg dialect normally parses the URL into kwargs and calls
@@ -593,13 +622,22 @@ def _make_asyncpg_creator(dsn: str) -> Callable[[], Any]:
     # pylint: disable=import-outside-toplevel
     import asyncpg
 
+    # asyncpg lets an explicit server_settings override the DSN's own.
+    tag_application_name = not _conn_string_sets_application_name(dsn)
+
     async def _connect() -> Any:
+        server_settings = None
+        if tag_application_name:
+            server_settings = {'application_name': application_name(role)}
         # statement_cache_size=0 disables asyncpg's per-connection
         # prepared-statement cache so the connection is safe behind a
         # transaction-mode pooler (e.g. PgBouncer), where a statement prepared
         # on one backend connection may not exist on the next. Harmless (a
         # small perf trade-off) on a direct connection, so set unconditionally.
-        return await asyncpg.connect(dsn, timeout=15, statement_cache_size=0)
+        return await asyncpg.connect(dsn,
+                                     timeout=15,
+                                     statement_cache_size=0,
+                                     server_settings=server_settings)
 
     return _connect
 
@@ -935,7 +973,8 @@ def get_engine(
                             # all connection params come from async_creator.
                             'postgresql+asyncpg://',
                             poolclass=sqlalchemy.NullPool,
-                            async_creator=_make_asyncpg_creator(conn_string)))
+                            async_creator=_make_asyncpg_creator(
+                                conn_string, role)))
                 elif pool_size == 0 or (direct and _pooler_configured()):
                     if direct and _pooler_configured():
                         role = sql_metrics.DB_STATE_DIRECT
@@ -964,6 +1003,9 @@ def get_engine(
                             pool_pre_ping=True,
                             pool_recycle=1800))
                 sql_metrics.install(_postgres_engine_cache[cache_key], role)
+                if not async_engine:
+                    _install_application_name(_postgres_engine_cache[cache_key],
+                                              role)
                 _install_idle_in_transaction_timeout(
                     _postgres_engine_cache[cache_key])
             engine = _postgres_engine_cache[cache_key]

@@ -1050,3 +1050,100 @@ class TestIdleInTransactionTimeout:
             inst.assert_called_once_with(engine)
         finally:
             db_utils._postgres_engine_cache.clear()
+
+
+class TestApplicationName:
+    """Tests for the application_name that tags each Postgres connection
+    with the engine role and pid that opened it."""
+
+    @pytest.fixture(autouse=True)
+    def postgres_env(self, monkeypatch):
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://u:p@h:5432/db')
+        monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
+        monkeypatch.delenv('SKYPILOT_DB_POOL_CONNECTION_URI', raising=False)
+        db_utils._postgres_engine_cache.clear()
+        db_utils.set_max_connections(0)
+        yield
+        db_utils._postgres_engine_cache.clear()
+
+    @staticmethod
+    def _connect_params(engine, cparams=None):
+        """The kwargs the DBAPI connect receives after the engine's
+        do_connect listeners have run."""
+        cparams = {} if cparams is None else cparams
+        engine.dialect.dispatch.do_connect(engine.dialect, None, [], cparams)
+        return cparams
+
+    def test_format(self):
+        assert db_utils.application_name('state') == f'sky-state-{os.getpid()}'
+
+    def test_sync_engine_tags_connections(self):
+        engine = sqlalchemy.create_engine('postgresql+psycopg2://u:p@h/db')
+        db_utils._install_application_name(engine, 'state')
+        assert self._connect_params(engine)['application_name'] == (
+            f'sky-state-{os.getpid()}')
+
+    def test_sync_engine_uses_pid_at_connect_time(self):
+        engine = sqlalchemy.create_engine('postgresql+psycopg2://u:p@h/db')
+        db_utils._install_application_name(engine, 'state')
+        with mock.patch('os.getpid', return_value=4242):
+            assert self._connect_params(engine)['application_name'] == (
+                'sky-state-4242')
+
+    def test_connection_string_value_wins(self):
+        engine = sqlalchemy.create_engine('postgresql+psycopg2://u:p@h/db')
+        db_utils._install_application_name(engine, 'state')
+        cparams = self._connect_params(engine, {'application_name': 'mine'})
+        assert cparams['application_name'] == 'mine'
+
+    def test_not_installed_on_sqlite(self, tmp_path):
+        engine = sqlalchemy.create_engine(f'sqlite:///{tmp_path}/x.db')
+        db_utils._install_application_name(engine, 'state')
+        assert not list(engine.dialect.dispatch.do_connect)
+
+    @pytest.mark.parametrize('kwargs,pool_size,role', [
+        ({}, 0, 'state'),
+        ({}, 2, 'state'),
+        ({
+            'no_pool': True
+        }, 2, 'state_nopool'),
+    ])
+    def test_get_engine_tags_with_role(self, kwargs, pool_size, role):
+        db_utils.set_max_connections(pool_size)
+        engine = db_utils.get_engine(None, **kwargs)
+        assert self._connect_params(engine)['application_name'] == (
+            f'sky-{role}-{os.getpid()}')
+
+    def test_get_engine_tags_direct_engine_behind_pooler(self, monkeypatch):
+        monkeypatch.setenv('SKYPILOT_DB_POOL_HOSTPORT', '127.0.0.1:6432')
+        engine = db_utils.get_engine(None, direct=True)
+        assert self._connect_params(engine)['application_name'] == (
+            f'sky-state_direct-{os.getpid()}')
+
+    def test_get_engine_installs_once_per_engine(self):
+        with mock.patch.object(db_utils, '_install_application_name') as inst:
+            engine = db_utils.get_engine(None)
+            assert db_utils.get_engine(None) is engine
+        inst.assert_called_once_with(engine, 'state')
+
+    @pytest.mark.asyncio
+    async def test_asyncpg_creator_sets_server_settings(self):
+        creator = db_utils._make_asyncpg_creator('postgresql://u:p@h/db',
+                                                 'state_async')
+        with mock.patch('asyncpg.connect',
+                        new_callable=mock.AsyncMock) as mock_connect:
+            await creator()
+        assert mock_connect.call_args.kwargs['server_settings'] == {
+            'application_name': f'sky-state_async-{os.getpid()}'
+        }
+
+    @pytest.mark.asyncio
+    async def test_asyncpg_creator_keeps_connection_string_value(self):
+        creator = db_utils._make_asyncpg_creator(
+            'postgresql://u:p@h/db?application_name=mine', 'state_async')
+        with mock.patch('asyncpg.connect',
+                        new_callable=mock.AsyncMock) as mock_connect:
+            await creator()
+        assert mock_connect.call_args.kwargs['server_settings'] is None
