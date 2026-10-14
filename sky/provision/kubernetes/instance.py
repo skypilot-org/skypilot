@@ -2724,8 +2724,14 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         # again to create the Pods back.
         # The existing Pods will be skipped in _create_resource_thread.
         num_threads = max(1, min(_NUM_THREADS, config.count))
+        # If the launch is cancelled or one create fails, wait for the creates
+        # already sent before raising. Otherwise they can land after the
+        # caller's teardown has looked for pods, and the pods are leaked.
         created_resources = subprocess_utils.run_in_parallel(
-            _create_resource_thread, list(range(config.count)), num_threads)
+            _create_resource_thread,
+            list(range(config.count)),
+            num_threads,
+            wait_for_running_on_error=True)
 
     if to_create_deployment:
         deployments = copy.deepcopy(created_resources)
