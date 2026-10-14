@@ -12,6 +12,7 @@ import pytest
 from sky import exceptions
 from sky.metrics import utils as metrics_utils
 from sky.server.requests.threads import OnDemandThreadExecutor
+from sky.server.requests.threads import PooledThreadExecutor
 
 
 def dummy_task(sleep_time=0.05):
@@ -191,4 +192,97 @@ def test_on_demand_executor_metrics(monkeypatch):
             time.sleep(0.01)
         assert _gauge_value('sky_apiserver_threads_active', name) == 0
     finally:
+        executor.shutdown()
+
+
+def _wait_running_zero(executor) -> None:
+    # The slot is released in a done callback that may run just after the
+    # waiter wakes.
+    deadline = time.time() + 5
+    while executor.running.get() != 0 and time.time() < deadline:
+        time.sleep(0.01)
+    assert executor.running.get() == 0
+
+
+def test_pooled_executor_reuses_threads():
+    executor = PooledThreadExecutor(name='pooled', max_workers=2)
+    try:
+        idents = set()
+        for _ in range(10):
+            idents.add(executor.submit(threading.get_ident).result(timeout=5))
+            _wait_running_zero(executor)
+        # A finished thread can be marked idle just after the next submit, so
+        # a second thread may start; never one per task.
+        assert len(idents) <= executor.max_workers
+    finally:
+        executor.shutdown()
+
+
+def test_pooled_executor_rejects_beyond_limit():
+    executor = PooledThreadExecutor(name='pooled', max_workers=2)
+    release_event = threading.Event()
+    try:
+        f1 = executor.submit(blocking_task, release_event)
+        f2 = executor.submit(blocking_task, release_event)
+        with pytest.raises(exceptions.ConcurrentWorkerExhaustedError):
+            executor.submit(blocking_task, release_event)
+        assert executor.running.get() == 2
+        release_event.set()
+        assert f1.result(timeout=5) is True
+        assert f2.result(timeout=5) is True
+        _wait_running_zero(executor)
+        # Slots freed by finished tasks are admitted again.
+        assert executor.submit(dummy_task, 0).result(timeout=5) is True
+    finally:
+        release_event.set()
+        executor.shutdown()
+
+
+def test_pooled_executor_exception_releases_slot():
+    executor = PooledThreadExecutor(name='pooled', max_workers=1)
+    try:
+        with pytest.raises(ValueError):
+            executor.submit(failing_task).result(timeout=5)
+        _wait_running_zero(executor)
+    finally:
+        executor.shutdown()
+
+
+def test_pooled_executor_submit_after_shutdown_releases_slot():
+    executor = PooledThreadExecutor(name='pooled', max_workers=1)
+    executor.shutdown()
+    with pytest.raises(RuntimeError):
+        executor.submit(dummy_task)
+    assert executor.running.get() == 0
+
+
+def test_pooled_executor_thread_naming():
+    executor = PooledThreadExecutor(name='pooledexec', max_workers=1)
+    try:
+        q = queue.Queue()
+        assert executor.submit(thread_name_task, q).result(timeout=5) is True
+        assert q.get(timeout=5).startswith('pooledexec')
+    finally:
+        executor.shutdown()
+
+
+def test_pooled_executor_metrics(monkeypatch):
+    monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', True)
+    name = 'pooled_metrics_test'
+    executor = PooledThreadExecutor(name=name, max_workers=1)
+    release_event = threading.Event()
+    try:
+        assert _gauge_value('sky_apiserver_threads_max', name) == 1
+        fut = executor.submit(blocking_task, release_event)
+        assert _gauge_value('sky_apiserver_threads_active', name) == 1
+        with pytest.raises(exceptions.ConcurrentWorkerExhaustedError):
+            executor.submit(blocking_task, release_event)
+        assert prometheus_client.REGISTRY.get_sample_value(
+            'sky_apiserver_threads_exhausted_total', {'name': name}) == 1
+        release_event.set()
+        assert fut.result(timeout=5) is True
+        _wait_running_zero(executor)
+        assert _gauge_value('sky_apiserver_threads_active', name) == 0
+    finally:
+        release_event.set()
         executor.shutdown()

@@ -85,6 +85,7 @@ from sky.server import websocket_utils
 from sky.server.auth import db_lookup
 from sky.server.auth import loopback
 from sky.server.auth import oauth2_proxy
+from sky.server.auth import sa_token_cache
 from sky.server.auth import sessions as auth_sessions
 from sky.server.blob import blob_storage as bs
 from sky.server.requests import executor
@@ -291,6 +292,7 @@ class RBACMiddleware(middleware_utils.ASGIMiddleware):
                 request, middleware_utils.REJECT_REASON_FORBIDDEN)
             return fastapi.responses.JSONResponse(
                 status_code=403, content={'detail': 'Forbidden'})
+        middleware_utils.mark_rbac_allowed(request, auth_user.id)
 
         return None
 
@@ -607,23 +609,28 @@ class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
 
             # Look up the token row by its sha256 hash. This is what makes
             # revocation (row deleted) and rotation (row's hash replaced)
-            # take effect at request time -- the JWT alone cannot be revoked.
+            # take effect within the `sa_token_cache` TTL -- the JWT alone
+            # cannot be revoked.
             # We match on hash rather than token_id because rotation updates
             # the row's hash but keeps the original token_id, while the new
             # JWT carries a freshly-generated token_id; only the hash is
             # consistent between the live JWT and the live DB row.
             incoming_hash = hashlib.sha256(sa_token.encode()).hexdigest()
-            # Offload the sync DB lookups to the bounded auth thread executor
-            # under a deadline, so a slow/locked DB cannot stall the request
-            # event loop (this runs on the loop for every
-            # service-account-authenticated request) nor hold executor
-            # threads for as long as the DB layer allows. The auth executor
-            # is kept separate from the request executor so long-lived
-            # streaming requests cannot starve authentication; timeouts and
-            # executor exhaustion are converted to retryable 503s below.
-            token_row = await db_lookup.call_with_deadline(
-                global_user_state.get_service_account_token_by_hash,
-                incoming_hash)
+            cached = sa_token_cache.get(incoming_hash)
+            if cached is None:
+                # Offload the sync DB lookups to the bounded auth thread
+                # executor under a deadline, so a slow/locked DB cannot stall
+                # the request event loop (this runs on the loop for every
+                # service-account-authenticated request) nor hold executor
+                # threads for as long as the DB layer allows. The auth
+                # executor is kept separate from the request executor so
+                # long-lived streaming requests cannot starve authentication;
+                # timeouts and executor exhaustion are converted to retryable
+                # 503s below.
+                token_row, user_info = await db_lookup.call_with_deadline(
+                    sa_token_cache.fetch, incoming_hash, user_id)
+            else:
+                token_row, user_info = cached
             if token_row is None:
                 logger.warning(
                     f'Service account token {token_id} not found in DB '
@@ -640,9 +647,6 @@ class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
                     request, {'detail': 'Service account token has expired'},
                     subject=user_id)
 
-            # Verify user still exists in database
-            user_info = await db_lookup.call_with_deadline(
-                global_user_state.get_user, user_id)
             if user_info is None:
                 logger.warning(
                     f'Service account user {user_id} no longer exists')
@@ -650,6 +654,8 @@ class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
                     request,
                     {'detail': 'Service account user no longer exists'},
                     subject=user_id)
+            if cached is None:
+                sa_token_cache.put(incoming_hash, token_row, user_info)
 
             # Update last used timestamp for token tracking, skipped while
             # the row's last_used_at is fresher than
@@ -664,8 +670,11 @@ class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
             # JWT's): after rotation the JWT carries a different token_id
             # than the DB row.
             last_used_at = token_row.get('last_used_at')
-            if (last_used_at is None or time.time() - last_used_at >=
+            now = time.time()
+            if (last_used_at is None or now - last_used_at >=
                     _SA_LAST_USED_UPDATE_INTERVAL_SECONDS):
+                # The row may be cached: later hits must see it as fresh.
+                token_row['last_used_at'] = int(now)
                 try:
                     await db_lookup.call_with_deadline(
                         global_user_state.

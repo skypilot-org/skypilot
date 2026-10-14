@@ -928,6 +928,14 @@ ENV_VAR_AUTH_DB_TIMEOUT_SECONDS = (
     f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_DB_TIMEOUT_SECONDS')
 DEFAULT_AUTH_DB_TIMEOUT_SECONDS = 5.0
 
+# Seconds each API server process reuses a service-account token's DB rows
+# for Bearer auth (`sky.server.auth.sa_token_cache`), which is also how long
+# revoking or rotating a token, or deleting its user, can take to apply. 0
+# disables the cache. Server-side only.
+ENV_VAR_SA_AUTH_CACHE_TTL_SECONDS = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}SA_AUTH_CACHE_TTL_SECONDS')
+DEFAULT_SA_AUTH_CACHE_TTL_SECONDS = 10.0
+
 # How long a managed-job task may sit in each of the two stall phases before
 # `sky.jobs.stall` reports it. Overridable so a deployment that disagrees with
 # the defaults can say so through its helm values instead of waiting for a
