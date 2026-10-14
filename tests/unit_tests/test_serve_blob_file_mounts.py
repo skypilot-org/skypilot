@@ -25,7 +25,6 @@ from sky import serve
 from sky.client import sdk
 from sky.serve import constants as serve_constants
 from sky.serve import replica_managers
-from sky.serve import serve_state
 from sky.server import common as server_common
 from sky.server.blob import blob_storage
 from sky.server.requests import payloads
@@ -290,54 +289,3 @@ def test_controller_template_passes_blob_id(blob_id):
     else:
         assert f'{export}{blob_id}\n' in run
         assert run.index(export) < run.index('-m sky.serve.service')
-
-
-def _replica_manager_at_version_1(blob_id):
-    manager = object.__new__(replica_managers.SkyPilotReplicaManager)
-    manager._service_name = 'pool'
-    manager.latest_version = 1
-    manager._file_mounts_blob_id = blob_id
-    return manager
-
-
-@pytest.mark.parametrize('new_task,blob_kept', [
-    ({
-        'workdir': 's3://bucket/workdir',
-        'file_mounts': {
-            '/data': 's3://bucket/data'
-        }
-    }, False),
-    ({
-        'workdir': '/blobs/b/workdir',
-        'file_mounts': {
-            '/data': 's3://bucket/data'
-        }
-    }, True),
-])
-def test_update_version_drops_blob_once_unused(new_task, blob_kept):
-    manager = _replica_manager_at_version_1(_BLOB_ID)
-    with mock.patch.object(serve_state,
-                           'get_yaml_content',
-                           return_value=yaml_utils.dump_yaml_str(new_task)), \
-            mock.patch.object(serve_state,
-                              'clear_service_file_mounts_blob_id') as clear:
-        manager.update_version(2, mock.MagicMock(), serve.UpdateMode.ROLLING)
-    assert manager.latest_version == 2
-    if blob_kept:
-        assert manager._file_mounts_blob_id == _BLOB_ID
-        clear.assert_not_called()
-    else:
-        assert manager._file_mounts_blob_id is None
-        clear.assert_called_once_with('pool')
-
-
-def test_update_version_without_blob_does_not_touch_db():
-    manager = _replica_manager_at_version_1(None)
-    new_task = {'workdir': 's3://bucket/workdir'}
-    with mock.patch.object(serve_state,
-                           'get_yaml_content',
-                           return_value=yaml_utils.dump_yaml_str(new_task)), \
-            mock.patch.object(serve_state,
-                              'clear_service_file_mounts_blob_id') as clear:
-        manager.update_version(2, mock.MagicMock(), serve.UpdateMode.ROLLING)
-    clear.assert_not_called()

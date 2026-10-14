@@ -629,20 +629,6 @@ def get_service_file_mounts_blob_id(service_name: str) -> Optional[str]:
     return result[0] if result else None
 
 
-def clear_service_file_mounts_blob_id(service_name: str) -> None:
-    """Drop a service's reference to its upload blob.
-
-    Called once no version the service can still launch needs the blob, so the
-    blob GC can reclaim it.
-    """
-    with orm.Session(_db_manager.get_engine()) as session:
-        session.execute(
-            sqlalchemy.update(services_table).where(
-                services_table.c.name == service_name).values(
-                    file_mounts_blob_id=None))
-        session.commit()
-
-
 def get_active_file_mounts_blob_ids() -> Set[str]:
     """Get the file mounts blob ids of every service still in the database.
 
