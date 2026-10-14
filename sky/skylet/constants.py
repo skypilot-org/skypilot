@@ -709,9 +709,17 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('allowed_clouds',),
     ('workspaces',),
     ('workspace_config',),
+    # The admin policy is enforced server-side and can point at an arbitrary
+    # module or URL, so a client must not be able to replace the server's one.
+    (
+        'admin_policy',),
     ('db',),
     ('daemons',),
     ('metrics',),
+    # Logging sinks are server-owned; a client must not redirect where the
+    # server ships its logs.
+    (
+        'logs',),
     # TODO(kevin,tian): Override the whole controller config once our test
     # infrastructure supports setting dynamic server side configs.
     # Tests that are affected:
