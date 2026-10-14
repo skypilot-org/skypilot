@@ -2,17 +2,24 @@
 
 import asyncio
 import concurrent.futures
+import itertools
 import os
 import sys
 import threading
-from typing import Callable, Optional, Set, TypeVar
+import time
+from typing import (Callable, Dict, FrozenSet, List, NamedTuple, Optional,
+                    Tuple, TypeVar)
+import urllib.parse
+import weakref
 
 import prometheus_client as prom
 
 from sky import exceptions
 from sky import sky_logging
 from sky.metrics import utils as metrics_utils
+from sky.server import hung_threads
 from sky.utils import atomic
+from sky.utils.db import db_utils
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -24,6 +31,180 @@ _P = ParamSpec('_P')
 _T = TypeVar('_T')
 
 logger = sky_logging.init_logger(__name__)
+
+# How often the per-process watchdog refreshes the stuck/oldest-age metrics
+# of every executor and looks for threads past their executor's threshold.
+_WATCHDOG_INTERVAL_SECONDS = 10.0
+# Thread dumps are written when the set of stuck threads changes (a new
+# thread crossed the threshold) or when an exhausted executor's slots are
+# held by a set not yet reported, never more often than the minimum interval
+# per executor. While nothing changes, a heartbeat dump repeats the picture
+# at intervals that double from the minimum up to the maximum, so a thread
+# pinned for a day costs a handful of dumps rather than one per minute.
+_DUMP_MIN_INTERVAL_SECONDS = 60.0
+_DUMP_MAX_INTERVAL_SECONDS = 3600.0
+# Full descriptions (stack + kernel view) are written for at most this many
+# threads per dump, oldest first; the rest are counted. Keeps one dump to a
+# few tens of KB even for an executor with hundreds of workers.
+_MAX_DESCRIBED_THREADS = 8
+# The ownerless-socket scan reads /proc/net/tcp and walks every readable
+# /proc/<pid>/fd; it runs at most this often per process, and only as part
+# of a dump. It is the only in-process evidence of a descriptor closed under
+# a sleeping thread (see hung_threads.scan_ownerless_sockets).
+_SCAN_INTERVAL_SECONDS = 300.0
+# A saturated executor rejects every submit. The exhaustion path starts a
+# short-lived dump thread to look at the slot holders, at most this often
+# per executor, so a storm of rejections costs the rejecting thread (often
+# the event loop) one thread start per second rather than one per reject.
+_EXHAUSTION_CHECK_INTERVAL_SECONDS = 1.0
+
+# Executors of this process, watched by the watchdog thread. Registration
+# and the watchdog's copy of the set both take _watchdog_lock: a WeakSet
+# raises RuntimeError when it changes size while being iterated.
+_executors: 'weakref.WeakSet[OnDemandThreadExecutor]' = weakref.WeakSet()
+_watchdog_lock = threading.Lock()
+_watchdog_pid: Optional[int] = None
+_scan_lock = threading.Lock()
+_last_scan: float = float('-inf')
+_db_peers: Optional['_DbPeers'] = None
+
+
+def _register(executor: 'OnDemandThreadExecutor') -> None:
+    """Add an executor to the watched set and start the per-process watchdog
+    thread the first time (again after a fork).
+
+    Building an executor must not fail because the process cannot start one
+    more thread: if the watchdog cannot be started, the executors stay
+    unwatched and the next registration tries again.
+    """
+    global _watchdog_pid
+    pid = os.getpid()
+    with _watchdog_lock:
+        _executors.add(executor)
+        if _watchdog_pid == pid:
+            return
+        try:
+            threading.Thread(target=_watchdog_loop,
+                             name='thread-executor-watchdog',
+                             daemon=True).start()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(
+                f'Thread executor watchdog could not be started: {e!r}')
+            return
+        _watchdog_pid = pid
+
+
+def _watchdog_loop() -> None:
+    """Observe every executor, forever. Nothing that happens in one tick may
+    end this thread: it is what reports a stuck process, and _register never
+    starts a second one for the same process."""
+    while True:
+        time.sleep(_WATCHDOG_INTERVAL_SECONDS)
+        try:
+            _watchdog_tick()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Thread executor watchdog tick failed: {e!r}')
+
+
+def _watchdog_tick() -> None:
+    """One pass over the executors of this process."""
+    with _watchdog_lock:
+        # Registration takes the same lock, so an executor being built on
+        # another thread cannot change the set while it is copied. An
+        # executor garbage collected on another thread at this moment can
+        # still make the copy raise; the loop tolerates that.
+        executors = list(_executors)
+    for executor in executors:
+        try:
+            executor.observe()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Executor [{executor.name}] watchdog: {e!r}')
+
+
+class _DbPeers(NamedTuple):
+    # (host, port) the ownerless-socket scan looks at, and ones it must not.
+    scan: List[Tuple[str, int]]
+    skip: List[Tuple[str, int]]
+
+
+def _state_db_peers() -> _DbPeers:
+    """Where this process reaches the state database, for the scan.
+
+    ``scan`` is the endpoint the process connects to for state-database
+    work: the pooler when one is configured, else the database itself. A
+    connection to it that no process owns any more is what a stray close
+    under a sleeping database call leaves behind, and it can hold locks.
+
+    ``skip`` is the database behind a pooler. The process opens a few
+    connections to it directly (session-level advisory locks), but a
+    sidecar pooler's server connections go to the same endpoint from
+    another process namespace of the same network namespace, so every one
+    of them would look ownerless from here: up to the pooler's pool size of
+    false positives per scan, whether the endpoint is named or picked up
+    from a direct connection open at scan time. The scan leaves it out, so
+    an orphaned direct connection is not reported when a pooler is
+    configured; the pooled path carries the request-time database calls.
+    """
+    global _db_peers
+    if _db_peers is None:
+        endpoints: Dict[bool, Tuple[str, int]] = {}
+        for direct in (False, True):
+            try:
+                # pylint: disable-next=protected-access
+                conn_string = db_utils._resolve_conn_string(direct)
+                if not conn_string:
+                    continue
+                parts = urllib.parse.urlsplit(conn_string)
+                if parts.hostname:
+                    endpoints[direct] = (parts.hostname, parts.port or 5432)
+            except Exception:  # pylint: disable=broad-except
+                continue
+        pooled = endpoints.get(False)
+        direct_endpoint = endpoints.get(True)
+        scan = [pooled] if pooled is not None else []
+        # Without a pooler both strings are the same URI: nothing to skip.
+        skip = ([direct_endpoint] if direct_endpoint is not None and
+                direct_endpoint != pooled else [])
+        _db_peers = _DbPeers(scan, skip)
+    return _db_peers
+
+
+def _maybe_scan_ownerless_sockets() -> List[str]:
+    """Run the ownerless-socket scan if none ran recently in this process."""
+    global _last_scan
+    now = time.monotonic()
+    with _scan_lock:
+        if now - _last_scan < _SCAN_INTERVAL_SECONDS:
+            return []
+        _last_scan = now
+    peers = _state_db_peers()
+    return hung_threads.scan_ownerless_sockets(peers.scan,
+                                               exclude_peers=peers.skip)
+
+
+_task_seq = itertools.count(1)
+
+
+class _Task(NamedTuple):
+    started: float
+    deadline: Optional[float]
+    name: str
+    # Process-wide unique. Thread identifiers (pthread_t) are reused as soon
+    # as a thread exits, so they cannot tell "the same threads are still
+    # stuck" from "different threads are stuck now".
+    seq: int
+
+
+class _RunningTask(NamedTuple):
+    age: float
+    thread: threading.Thread
+    task: _Task
+
+    @property
+    def over_deadline(self) -> bool:
+        # started + age is the clock reading the snapshot was taken at.
+        return (self.task.deadline is not None and
+                self.task.started + self.age > self.task.deadline)
 
 
 class OnDemandThreadExecutor(concurrent.futures.Executor):
@@ -42,18 +223,53 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
     need to support configuring the queuing behavior (exception or queueing).
     """
 
-    def __init__(self, name: str, max_workers: int):
+    def __init__(self,
+                 name: str,
+                 max_workers: int,
+                 stuck_after_seconds: Optional[float] = None):
+        """Create an executor.
+
+        Args:
+            name: Executor name, used in thread names, logs and metrics.
+            max_workers: Concurrent tasks allowed; further submits raise.
+            stuck_after_seconds: A task still running after this long is
+                reported as stuck: counted in
+                ``sky_apiserver_threads_stuck`` and described (Python stack
+                plus the syscall it sleeps in) in the log. Set it for pools
+                whose tasks have a known short bound, such as the auth
+                lookups; leave None for pools where a task may legitimately
+                run for hours (a log stream), in which case only the
+                exhaustion dump reports the oldest tasks.
+        """
         self.name: str = name
         self.max_workers: int = max_workers
+        self.stuck_after_seconds: Optional[float] = stuck_after_seconds
         self.running: atomic.AtomicInt = atomic.AtomicInt(0)
         self._shutdown: bool = False
         self._shutdown_lock: threading.Lock = threading.Lock()
-        self._threads: Set[threading.Thread] = set()
+        # Running thread -> its task (start time, deadline, name). The start
+        # time is what lets the watchdog and the exhaustion path tell a
+        # thread that is merely busy from one that never came back.
+        self._threads: Dict[threading.Thread, _Task] = {}
         self._threads_lock: threading.Lock = threading.Lock()
+        # Dump bookkeeping, guarded by _dump_lock: when the last dump was
+        # written, which stuck threads it covered, the current heartbeat
+        # interval, and which set the last exhaustion dump covered.
+        self._dump_lock: threading.Lock = threading.Lock()
+        self._last_dump: float = float('-inf')
+        self._dumped_stuck: FrozenSet[int] = frozenset()
+        self._dumped_exhausted: FrozenSet[int] = frozenset()
+        self._heartbeat_interval: float = _DUMP_MIN_INTERVAL_SECONDS
+        # When the exhaustion path last started a dump thread. Read and
+        # written without a lock: two rejects in the same instant may both
+        # start one, which the dump's own lock then reconciles.
+        self._last_exhaustion_check: float = float('-inf')
         # Cache the labeled metric children to avoid the label lookup on
         # every submit/complete.
         self._active_gauge: Optional[prom.Gauge] = None
         self._exhausted_counter: Optional[prom.Counter] = None
+        self._stuck_gauge: Optional[prom.Gauge] = None
+        self._oldest_age_gauge: Optional[prom.Gauge] = None
         if metrics_utils.METRICS_ENABLED:
             pid = os.getpid()
             self._active_gauge = (
@@ -64,10 +280,171 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
                     name=name))
             metrics_utils.SKY_APISERVER_THREADS_MAX.labels(
                 pid=pid, name=name).set(max_workers)
+            self._stuck_gauge = (
+                metrics_utils.SKY_APISERVER_THREADS_STUCK.labels(pid=pid,
+                                                                 name=name))
+            self._oldest_age_gauge = (
+                metrics_utils.SKY_APISERVER_THREADS_OLDEST_AGE_SECONDS.labels(
+                    pid=pid, name=name))
+        _register(self)
 
     def _cleanup_thread(self, thread: threading.Thread):
         with self._threads_lock:
-            self._threads.discard(thread)
+            self._threads.pop(thread, None)
+
+    def _snapshot(self) -> List[_RunningTask]:
+        """Every running task, oldest first.
+
+        Threads that ran and exited are dropped: after a fork the child
+        inherits the parent's table but none of its threads. A thread that
+        is registered but not started yet (submit() inserts it, then starts
+        it) also reports is_alive() False; it has no ident until it starts,
+        and it must stay, or its task would never be tracked.
+        """
+        now = time.monotonic()
+        items: List[_RunningTask] = []
+        with self._threads_lock:
+            dead = [
+                t for t in self._threads
+                if t.ident is not None and not t.is_alive()
+            ]
+            for t in dead:
+                del self._threads[t]
+            for thread, task in self._threads.items():
+                items.append(_RunningTask(now - task.started, thread, task))
+        items.sort(key=lambda item: item.age, reverse=True)
+        return items
+
+    @staticmethod
+    def _stuck(snapshot: List[_RunningTask]) -> List[_RunningTask]:
+        return [item for item in snapshot if item.over_deadline]
+
+    @staticmethod
+    def _keys(items: List[_RunningTask]) -> FrozenSet[int]:
+        return frozenset(item.task.seq for item in items)
+
+    def observe(self) -> Tuple[int, float]:
+        """Refresh the stuck/oldest-age metrics; dump stuck threads.
+
+        Called by the per-process watchdog every _WATCHDOG_INTERVAL_SECONDS.
+        Returns (stuck thread count, oldest running task age in seconds).
+        """
+        snapshot = self._snapshot()
+        oldest = snapshot[0].age if snapshot else 0.0
+        stuck = self._stuck(snapshot)
+        if self._stuck_gauge is not None:
+            self._stuck_gauge.set(len(stuck))
+        if self._oldest_age_gauge is not None:
+            self._oldest_age_gauge.set(oldest)
+        if stuck:
+            self._dump_if_due(
+                snapshot,
+                stuck,
+                reason=(f'{len(stuck)} thread(s) running longer than '
+                        f'{self.stuck_after_seconds:g}s'))
+        else:
+            with self._dump_lock:
+                self._dumped_stuck = frozenset()
+                self._heartbeat_interval = _DUMP_MIN_INTERVAL_SECONDS
+        return len(stuck), oldest
+
+    def _dump_if_due(self, snapshot: List[_RunningTask],
+                     stuck: List[_RunningTask], reason: str) -> bool:
+        """Watchdog path: dump when a thread newly crossed the threshold, or
+        when the heartbeat interval elapsed with the same threads stuck."""
+        now = time.monotonic()
+        keys = self._keys(stuck)
+        with self._dump_lock:
+            since_last = now - self._last_dump
+            if since_last < _DUMP_MIN_INTERVAL_SECONDS:
+                return False
+            if keys - self._dumped_stuck:
+                self._heartbeat_interval = _DUMP_MIN_INTERVAL_SECONDS
+            elif since_last < self._heartbeat_interval:
+                return False
+            else:
+                self._heartbeat_interval = min(self._heartbeat_interval * 2,
+                                               _DUMP_MAX_INTERVAL_SECONDS)
+                reason += (f' (unchanged for {since_last:.0f}s; next report '
+                           f'in {self._heartbeat_interval:.0f}s)')
+            self._last_dump = now
+            self._dumped_stuck = keys
+        self._dump(snapshot, stuck, reason)
+        return True
+
+    def _dump(self, snapshot: List[_RunningTask], describe: List[_RunningTask],
+              reason: str) -> None:
+        """Log what the longest-running threads are doing."""
+        to_describe = (describe or snapshot)[:_MAX_DESCRIBED_THREADS]
+        parts = [
+            f'Executor [{self.name}]: {reason}; {len(snapshot)} of '
+            f'{self.max_workers} workers running, describing the '
+            f'{len(to_describe)} longest-running (oldest first):'
+        ]
+        for item in to_describe:
+            parts.append(
+                hung_threads.describe(
+                    item.thread,
+                    item.age,
+                    item.task.name,
+                    deadline_seconds=self.stuck_after_seconds))
+        parts.extend(_maybe_scan_ownerless_sockets())
+        logger.warning('\n'.join(parts))
+
+    def _dump_on_exhaustion(self) -> None:
+        """Exhaustion path: describe the threads holding the slots.
+
+        Runs in its own short-lived thread so the rejected caller (often the
+        event loop) is not held for the /proc reads. A saturated executor
+        rejects every submit, so this dumps only when the threads holding
+        the slots (the stuck ones, or the oldest if the executor has no
+        threshold) differ from the last exhaustion dump, and never more than
+        once per _DUMP_MIN_INTERVAL_SECONDS; the dump thread itself is
+        started at most once per _EXHAUSTION_CHECK_INTERVAL_SECONDS. The
+        watchdog heartbeat keeps repeating an unchanged picture at its
+        backed-off interval. For an executor without a threshold the slot
+        holders are merely the oldest tasks of a busy pool; describing them
+        once per distinct set is still cheaper than the per-request error
+        the caller logs.
+
+        A process at its thread limit cannot start the dump thread. That
+        costs the dump, nothing else: the caller still gets the executor's
+        own ConcurrentWorkerExhaustedError, which is what the submit sites
+        handle.
+        """
+        now = time.monotonic()
+        if (now - self._last_dump < _DUMP_MIN_INTERVAL_SECONDS or
+                now - self._last_exhaustion_check <
+                _EXHAUSTION_CHECK_INTERVAL_SECONDS):
+            return
+        self._last_exhaustion_check = now
+
+        def _dump():
+            try:
+                snapshot = self._snapshot()
+                stuck = self._stuck(snapshot)
+                holders = stuck or snapshot[:_MAX_DESCRIBED_THREADS]
+                keys = self._keys(holders)
+                now = time.monotonic()
+                with self._dump_lock:
+                    if (now - self._last_dump < _DUMP_MIN_INTERVAL_SECONDS or
+                            keys == self._dumped_exhausted):
+                        return
+                    self._last_dump = now
+                    self._dumped_exhausted = keys
+                    self._dumped_stuck = self._keys(stuck)
+                self._dump(snapshot, stuck, 'all workers busy, submit rejected')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Executor [{self.name}] dump failed: {e!r}')
+
+        try:
+            threading.Thread(target=_dump,
+                             name=f'{self.name}-exhaustion-dump',
+                             daemon=True).start()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(
+                f'Executor [{self.name}] could not start the dump thread: '
+                f'{e!r}')
 
     def _task_wrapper(self, fn: Callable, fut: concurrent.futures.Future, /,
                       *args, **kwargs):
@@ -120,6 +497,7 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             self.running.decrement()
             if self._exhausted_counter is not None:
                 self._exhausted_counter.inc()
+            self._dump_on_exhaustion()
             raise exceptions.ConcurrentWorkerExhaustedError(
                 f'Maximum concurrent workers {self.max_workers} of threads '
                 f'executor [{self.name}] reached')
@@ -143,8 +521,13 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
                                       args=(fn, fut, *args),
                                       kwargs=kwargs,
                                       daemon=True)
+            started = time.monotonic()
+            deadline = (None if self.stuck_after_seconds is None else started +
+                        self.stuck_after_seconds)
             with self._threads_lock:
-                self._threads.add(thread)
+                self._threads[thread] = _Task(started, deadline,
+                                              _describe_task(fn),
+                                              next(_task_seq))
             try:
                 thread.start()
             except Exception as e:
@@ -169,3 +552,27 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             threads = list(self._threads)
         for t in threads:
             t.join()
+
+
+def _describe_task(fn: Callable) -> str:
+    """Short name of a submitted callable for the dumps.
+
+    ``to_thread_with_executor`` wraps everything in
+    ``functools.partial(contextvars.Context.run, func, ...)``; unwrap that so
+    the dump names the function that was actually submitted.
+    """
+    seen = 0
+    while seen < 4:
+        seen += 1
+        args = getattr(fn, 'args', None)
+        inner = getattr(fn, 'func', None)
+        if inner is None:
+            break
+        if getattr(inner, '__name__', '') == 'run' and args:
+            fn = args[0]
+            continue
+        fn = inner
+    module = getattr(fn, '__module__', None) or ''
+    name = getattr(fn, '__qualname__', None) or getattr(fn, '__name__',
+                                                        None) or repr(fn)
+    return f'{module}.{name}' if module else name
