@@ -1664,11 +1664,19 @@ class TestStreamLogsByIdJobFinishedBetweenChecks:
     print the logs the controller persists for the finished job instead.
     """
 
-    def _patch_job(self, monkeypatch, final_status, log_files):
+    def _patch_job(self,
+                   monkeypatch,
+                   final_status,
+                   log_files,
+                   submitted=True,
+                   batch=False):
         """Stubs a job that is STARTING on entry and final_status afterwards.
 
         log_files: what successive reads of the task's local log path return;
             the last one repeats.
+        submitted: whether the task began launching (False for a task with
+            no run command).
+        batch: whether the job is a batch coordinator job.
         """
         starting = managed_job_state.ManagedJobStatus.STARTING
         statuses = iter([starting])
@@ -1677,7 +1685,9 @@ class TestStreamLogsByIdJobFinishedBetweenChecks:
         mock_state.get_num_tasks.return_value = 1
         mock_state.get_status.side_effect = (
             lambda _: next(statuses, final_status))
-        mock_state.is_batch_job.return_value = False
+        mock_state.is_batch_job.return_value = batch
+        mock_state.get_submitted_task_ids.return_value = ({0} if submitted else
+                                                          set())
         mock_state.get_latest_task_id_status.side_effect = [(0, starting),
                                                             (0, final_status)]
         mock_state.get_pool_from_job_id.return_value = None
@@ -1730,6 +1740,47 @@ class TestStreamLogsByIdJobFinishedBetweenChecks:
 
         mock_state.get_all_task_ids_names_statuses_logs.assert_not_called()
         assert 'already in terminal state' not in capsys.readouterr().out
+
+    def test_task_without_run_command_does_not_wait(self, monkeypatch, capsys):
+        # A task with no run command is SUCCEEDED without launching a cluster,
+        # so it never gets a log path; waiting for one would only delay the
+        # launch's exit.
+        mock_state = self._patch_job(
+            monkeypatch,
+            managed_job_state.ManagedJobStatus.SUCCEEDED, [None],
+            submitted=False)
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=True)
+
+        mock_state.get_all_task_ids_names_statuses_logs.assert_not_called()
+        assert 'already in terminal state' not in capsys.readouterr().out
+        assert code == exceptions.JobExitCode.SUCCEEDED
+
+    def test_batch_job_does_not_wait(self, monkeypatch, capsys):
+        # A batch coordinator runs on the controller and keeps no task log.
+        mock_state = self._patch_job(
+            monkeypatch,
+            managed_job_state.ManagedJobStatus.SUCCEEDED, [None],
+            batch=True)
+
+        jobs_utils.stream_logs_by_id(5, follow=True)
+
+        mock_state.get_submitted_task_ids.assert_not_called()
+        mock_state.get_all_task_ids_names_statuses_logs.assert_not_called()
+        assert 'already in terminal state' not in capsys.readouterr().out
+
+    def test_log_never_persisted_prints_no_warning(self, monkeypatch, capsys):
+        # The log path never shows up (e.g. the download failed): the wait
+        # gives up and the tail ends as it did before, with no warning.
+        self._patch_job(monkeypatch,
+                        managed_job_state.ManagedJobStatus.SUCCEEDED, [None])
+        clock = iter(range(0, 1000, 5))
+        monkeypatch.setattr(jobs_utils.time, 'time', lambda: next(clock))
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=True)
+
+        assert 'already in terminal state' not in capsys.readouterr().out
+        assert code == exceptions.JobExitCode.SUCCEEDED
 
 
 class TestTryToGetJobEndTime:

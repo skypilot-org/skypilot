@@ -2270,7 +2270,7 @@ def _waiting_line_detail(provision_msg: Optional[str],
     return parked_reason
 
 
-def _wait_for_persisted_task_logs(job_id: int) -> None:
+def _wait_for_persisted_task_logs(job_id: int) -> bool:
     """Waits for the controller to persist the logs of a finished job's tasks.
 
     The controller marks a task SUCCEEDED (or failed) before it downloads the
@@ -2279,18 +2279,27 @@ def _wait_for_persisted_task_logs(job_id: int) -> None:
     user code has a local log path, or _PERSISTED_LOG_WAIT_TIMEOUT_SECONDS
     pass. Returns at once when a log reader is registered, as the controller
     then normally keeps no local copy and the reader serves the logs.
+
+    Returns:
+        False if no task of the job ran user code, so there are no task logs
+        to print; True otherwise.
     """
+    submitted_task_ids = managed_job_state.get_submitted_task_ids(job_id)
+    if not submitted_task_ids:
+        return False
     if logs.get_log_reader() is not None:
-        return
+        return True
     deadline = time.time() + _PERSISTED_LOG_WAIT_TIMEOUT_SECONDS
     while time.time() < deadline:
         context_utils.raise_if_canceled()
         task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
             job_id)
-        if all(log_file for _, _, task_status, log_file, _ in task_info
-               if task_status in _STATUSES_WITH_PERSISTED_LOGS):
-            return
+        if all(log_file for task_id, _, task_status, log_file, _ in task_info
+               if task_status in _STATUSES_WITH_PERSISTED_LOGS and
+               task_id in submitted_task_ids):
+            return True
         time.sleep(1)
+    return True
 
 
 def stream_logs_by_id(
@@ -2887,20 +2896,21 @@ def _stream_logs_by_id(job_id: int, follow: bool, tail: Optional[int],
         # just return.
         return '', exceptions.JobExitCode.SUCCEEDED
     if (follow and not streamed_from_cluster and
-            managed_job_status in _STATUSES_WITH_PERSISTED_LOGS):
+            managed_job_status in _STATUSES_WITH_PERSISTED_LOGS and
+            not managed_job_state.is_batch_job(job_id) and
+            _wait_for_persisted_task_logs(job_id)):
         # The job ran and finished between two of our status checks, so we
         # never saw it RUNNING and streamed nothing. A short job is RUNNING
         # only until the controller's next status check, which can come
         # sooner than ours. Print the logs the controller keeps for the
-        # finished job instead, as `sky jobs logs` does for one.
-        _wait_for_persisted_task_logs(job_id)
-        persisted_msg, _ = _stream_logs_by_id(job_id,
-                                              follow=False,
-                                              tail=tail,
-                                              tail_offset=tail_offset,
-                                              task=task)
-        if persisted_msg:
-            print(persisted_msg, flush=True)
+        # finished job instead, as `sky jobs logs` does for one. Its message
+        # for logs it cannot find is dropped: a followed tail that streamed
+        # nothing never printed one.
+        _stream_logs_by_id(job_id,
+                           follow=False,
+                           tail=tail,
+                           tail_offset=tail_offset,
+                           task=task)
     logger.info(
         ux_utils.finishing_message(f'Managed job finished: {job_id} '
                                    f'(status: {managed_job_status.value}).'))

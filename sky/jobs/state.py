@@ -1724,6 +1724,24 @@ def get_all_task_ids_names_statuses_logs(
                 for row in id_names]
 
 
+def get_submitted_task_ids(job_id: int) -> Set[int]:
+    """Ids of the job's tasks that began launching (have a submitted_at).
+
+    submitted_at is written once, by set_starting_async. A task with no run
+    command is marked SUCCEEDED without it, as it launches no cluster and so
+    has no task logs.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(spot_table.c.task_id).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.submitted_at.is_not(None),
+                ))).fetchall()
+        return {row[0] for row in rows}
+
+
 def get_num_tasks(job_id: int) -> int:
     return len(_get_all_task_ids_statuses(job_id))
 
