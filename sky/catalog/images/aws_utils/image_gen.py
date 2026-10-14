@@ -32,7 +32,7 @@ parser.add_argument('--output-csv',
                     help='The output CSV file name')
 args = parser.parse_args()
 
-# 25 regions
+# Target regions (excluding the source region, us-east-1).
 ALL_REGIONS = [
     # 'us-east-1',  # Source AMI is already in this region
     'us-east-2',
@@ -58,6 +58,7 @@ ALL_REGIONS = [
     'ap-southeast-1',
     'ap-southeast-2',
     'ap-southeast-3',
+    'ap-southeast-5',
     'ap-northeast-1',
 ]
 
