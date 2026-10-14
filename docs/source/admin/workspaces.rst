@@ -425,8 +425,8 @@ and add each user only to the workspaces they need. A user whose request does
 not name a workspace then lands in their preferred workspace, or their only
 workspace. A user in several workspaces must pick one with
 ``sky workspace use <name>``, or each such request fails as ambiguous.
-A user with no workspace of their own is refused everything. To let them still
-run read requests such as ``sky status``, but not launch, also set
+A user who is in no workspace and can read none is refused everything. To let
+them still run read requests such as ``sky status``, but not launch, also set
 ``read_access: all`` on ``default``.
 
 User management
