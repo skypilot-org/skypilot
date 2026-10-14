@@ -63,6 +63,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.slurm import utils as slurm_utils
 from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
+from sky.serve import serve_state
 from sky.serve.server import server as serve_rest
 from sky.server import clean_env as clean_env_module
 from sky.server import common
@@ -826,44 +827,45 @@ async def cleanup_upload_ids():
                     upload_ids_to_cleanup.pop((upload_id, user_hash))
 
 
+def cleanup_unreferenced_file_mounts_once():
+    """Run one pass of the blob GC: delete blobs nobody references."""
+    storage = bs.get_blob_storage()
+
+    with storage.gc_lock() as should_run:
+        if not should_run:
+            logger.debug('Another server is running blob GC, skipping')
+            return
+
+        # A blob is kept alive by an active API request (e.g. the submit
+        # request that is still running), a non-terminal managed job that
+        # was started from it, or a service/pool that launches replicas
+        # from it.
+        active_blob_ids = (requests_lib.get_active_file_mounts_blob_ids() |
+                           managed_job_state.get_active_file_mounts_blob_ids() |
+                           serve_state.get_active_file_mounts_blob_ids())
+        grace_cutoff = time.time() - bs.GC_GRACE_SECONDS
+
+        for user_id in storage.list_users():
+            try:
+                for blob_id, mtime in storage.list_blob_ids(user_id):
+                    if (blob_id not in active_blob_ids and
+                            mtime < grace_cutoff):
+                        logger.info(f'GC: removing unreferenced blob '
+                                    f'{blob_id} for user {user_id}')
+                        storage.delete_blob(user_id, blob_id)
+                storage.release_stale_uploads(user_id)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Error cleaning filemounts dir: {user_id}: '
+                             f'{common_utils.format_exception(e)}')
+
+
 async def cleanup_unreferenced_file_mounts():
     """Delete file mounts not referenced by any active request."""
-
-    # Synced cleanup for each directory, runs in asyncio.to_thread to avoid
-    # blocking the event loop.
-    def _do_cleanup():
-        storage = bs.get_blob_storage()
-
-        with storage.gc_lock() as should_run:
-            if not should_run:
-                logger.debug('Another server is running blob GC, skipping')
-                return
-
-            # A blob is kept alive by either an active API request (e.g. the
-            # submit request that is still running) or a non-terminal managed
-            # job that was started from it.
-            active_blob_ids = (
-                requests_lib.get_active_file_mounts_blob_ids() |
-                managed_job_state.get_active_file_mounts_blob_ids())
-            grace_cutoff = time.time() - bs.GC_GRACE_SECONDS
-
-            for user_id in storage.list_users():
-                try:
-                    for blob_id, mtime in storage.list_blob_ids(user_id):
-                        if (blob_id not in active_blob_ids and
-                                mtime < grace_cutoff):
-                            logger.info(f'GC: removing unreferenced blob '
-                                        f'{blob_id} for user {user_id}')
-                            storage.delete_blob(user_id, blob_id)
-                    storage.release_stale_uploads(user_id)
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.error(f'Error cleaning filemounts dir: {user_id}: '
-                                 f'{common_utils.format_exception(e)}')
-
     while True:
         await asyncio.sleep(3600)  # Run every hour
         try:
-            await asyncio.to_thread(_do_cleanup)
+            # Synced cleanup, run in a thread to avoid blocking the event loop.
+            await asyncio.to_thread(cleanup_unreferenced_file_mounts_once)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Error in cleanup_unreferenced_file_mounts: '
                          f'{common_utils.format_exception(e)}')
@@ -2436,6 +2438,51 @@ async def _reject_cluster_write_for_unauthorized(
         raise fastapi.HTTPException(status_code=403, detail=str(e)) from e
 
 
+def _check_workspace_read_permission(auth_user: models.User,
+                                     workspace: str) -> None:
+    """Checks a user may read the jobs and logs of a workspace's clusters.
+
+    Raises:
+        PermissionDeniedError: If the user cannot read the workspace.
+    """
+    try:
+        # Membership does not depend on the config, so members skip the reload.
+        workspaces_core.check_workspace_permission(auth_user, workspace)
+    except exceptions.PermissionDeniedError:
+        # Read-only visibility comes from the workspace config, which this
+        # process does not reload per request.
+        common.refresh_workspace_state_for_sync_handler()
+        workspaces_core.check_workspace_permission(
+            auth_user,
+            workspace,
+            action=workspace_constants.WORKSPACE_ACTION_READ)
+
+
+def _check_cluster_read_permission(auth_user: models.User,
+                                   cluster_name: str) -> None:
+    workspace = global_user_state.get_cluster_workspace(cluster_name)
+    if workspace is not None:
+        _check_workspace_read_permission(auth_user, workspace)
+
+
+async def _reject_cluster_read_for_unauthorized(request: fastapi.Request,
+                                                cluster_name: str) -> None:
+    """Rejects a read of a cluster's jobs or logs the user cannot see.
+
+    The read counterpart of ``_reject_cluster_write_for_unauthorized``. These
+    endpoints report a missing cluster through the request, not as an HTTP
+    error, so there is no not-found response to match and a denial is a 403.
+    """
+    auth_user = request.state.auth_user
+    if auth_user is None:
+        return
+    try:
+        await context_utils.to_thread_with_executor(
+            None, _check_cluster_read_permission, auth_user, cluster_name)
+    except exceptions.PermissionDeniedError as e:
+        raise fastapi.HTTPException(status_code=403, detail=str(e)) from e
+
+
 @app.post('/exec')
 # pylint: disable=redefined-builtin
 async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:
@@ -2567,6 +2614,8 @@ async def autostop(request: fastapi.Request,
 async def queue(request: fastapi.Request,
                 queue_body: payloads.QueueBody) -> None:
     """Gets the job queue of a cluster."""
+    await _reject_cluster_read_for_unauthorized(request,
+                                                queue_body.cluster_name)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CLUSTER_QUEUE,
@@ -2582,6 +2631,8 @@ async def queue(request: fastapi.Request,
 async def job_status(request: fastapi.Request,
                      job_status_body: payloads.JobStatusBody) -> None:
     """Gets the status of a job."""
+    await _reject_cluster_read_for_unauthorized(request,
+                                                job_status_body.cluster_name)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CLUSTER_JOB_STATUS,
@@ -2619,6 +2670,8 @@ async def logs(
     # TODO(zhwu): This should wait for the request on the cluster, e.g., async
     # launch, to finish, so that a user does not need to manually pull the
     # request status.
+    await _reject_cluster_read_for_unauthorized(request,
+                                                cluster_job_body.cluster_name)
     executor.check_request_thread_executor_available()
     request_task = await executor.prepare_request_async(
         request_id=request.state.request_id,
@@ -2646,6 +2699,8 @@ async def download_logs(
         request: fastapi.Request,
         cluster_jobs_body: payloads.ClusterJobsDownloadLogsBody) -> None:
     """Downloads the logs of a job."""
+    await _reject_cluster_read_for_unauthorized(request,
+                                                cluster_jobs_body.cluster_name)
     user_hash = download_utils.owner_user_id(request,
                                              cluster_jobs_body.user_hash)
     logs_dir_on_api_server = pathlib.Path(
@@ -2738,27 +2793,43 @@ async def download(download_body: payloads.DownloadBody,
 
 # TODO(aylei): run it asynchronously after global_user_state support async op
 @app.post('/provision_logs')
-def provision_logs(provision_logs_body: payloads.ProvisionLogsBody,
+def provision_logs(request: fastapi.Request,
+                   provision_logs_body: payloads.ProvisionLogsBody,
                    follow: bool = True,
                    tail: int = 0) -> fastapi.responses.StreamingResponse:
     """Streams the provision.log for the latest launch request of a cluster."""
     log_path = None
     cluster_name = provision_logs_body.cluster_name
     worker = provision_logs_body.worker
+    auth_user = request.state.auth_user
+
+    def _not_found_unless_readable(workspace: Optional[str],
+                                   detail: str) -> None:
+        # Answer as for a cluster with no record, so a cluster the caller
+        # cannot read cannot be told apart from one that does not exist.
+        if auth_user is None or workspace is None:
+            return
+        try:
+            _check_workspace_read_permission(auth_user, workspace)
+        except exceptions.PermissionDeniedError as e:
+            raise fastapi.HTTPException(status_code=404, detail=detail) from e
+
     # stream head node logs
     if worker is None:
+        not_recorded = ('Provision log path is not recorded for this cluster. '
+                        'Please relaunch to generate provisioning logs.')
         # Prefer clusters table first, then cluster_history as fallback.
-        log_path_str = global_user_state.get_cluster_provision_log_path(
-            cluster_name)
+        log_path_str, workspace = (
+            global_user_state.get_cluster_provision_log_info(cluster_name))
         if not log_path_str:
-            log_path_str = (
-                global_user_state.get_cluster_history_provision_log_path(
+            # The history row may be from an earlier cluster of this name, so
+            # check the workspace recorded with the log path it returns.
+            log_path_str, workspace = (
+                global_user_state.get_cluster_history_provision_log_info(
                     cluster_name))
+        _not_found_unless_readable(workspace, not_recorded)
         if not log_path_str:
-            raise fastapi.HTTPException(
-                status_code=404,
-                detail=('Provision log path is not recorded for this cluster. '
-                        'Please relaunch to generate provisioning logs.'))
+            raise fastapi.HTTPException(status_code=404, detail=not_recorded)
         log_path = pathlib.Path(log_path_str).expanduser().resolve()
         if not log_path.exists():
             raise fastapi.HTTPException(
@@ -2767,12 +2838,13 @@ def provision_logs(provision_logs_body: payloads.ProvisionLogsBody,
 
     # stream worker node logs
     else:
+        no_handle = ('Cluster handle is not recorded for this cluster. '
+                     'Please relaunch to generate provisioning logs.')
+        _not_found_unless_readable(
+            global_user_state.get_cluster_workspace(cluster_name), no_handle)
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is None:
-            raise fastapi.HTTPException(
-                status_code=404,
-                detail=('Cluster handle is not recorded for this cluster. '
-                        'Please relaunch to generate provisioning logs.'))
+            raise fastapi.HTTPException(status_code=404, detail=no_handle)
         # instance_ids includes head node
         instance_ids = handle.instance_ids
         if instance_ids is None:
@@ -2815,6 +2887,8 @@ async def hook_logs(
 
     If ``event`` is None, auto-selects whichever hook event has fired.
     """
+    await _reject_cluster_read_for_unauthorized(request,
+                                                hook_logs_body.cluster_name)
     executor.check_request_thread_executor_available()
     request_task = await executor.prepare_request_async(
         request_id=request.state.request_id,

@@ -1013,6 +1013,62 @@ def test_override_skypilot_config_with_disallowed_keys(monkeypatch, tmp_path):
                 'your administrator.')
 
 
+def test_client_cannot_override_workspace_read_access(monkeypatch, tmp_path):
+    """A client override must not make private workspaces readable."""
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+        workspaces:
+            team-b:
+                private: true
+                allowed_users: [bob]
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.safe_reload_config()
+
+    with skypilot_config.override_skypilot_config(
+        {'workspace_config': {
+            'read_access': 'all'
+        }}):
+        assert skypilot_config.get_nested(
+            ('workspace_config', 'read_access'), None) is None
+
+
+def test_client_cannot_override_admin_policy(monkeypatch, tmp_path):
+    """A client override must not replace the server's admin policy."""
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+        admin_policy: server_policy.ServerPolicy
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.safe_reload_config()
+
+    with skypilot_config.override_skypilot_config(
+        {'admin_policy': 'client_policy.ClientPolicy'}):
+        # The server's admin policy is kept; the client override is ignored.
+        assert skypilot_config.get_nested(('admin_policy',),
+                                          None) == 'server_policy.ServerPolicy'
+
+
+def test_client_cannot_override_logs(monkeypatch, tmp_path):
+    """A client override must not redirect where the server ships its logs."""
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+        logs:
+            store: gcp
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.safe_reload_config()
+
+    with skypilot_config.override_skypilot_config({'logs': {'store': 'aws'}}):
+        assert skypilot_config.get_nested(('logs', 'store'), None) == 'gcp'
+
+
 def test_hierarchical_server_config(monkeypatch, tmp_path):
     """Test that hierarchical server config is loaded correctly."""
     # prepare a clean test environment

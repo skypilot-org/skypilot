@@ -2283,9 +2283,15 @@ def pool_apply(
     pool_name: str,
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
     workers: Optional[int] = None,
+    file_mounts_blob_id: Optional[str] = None,
 ) -> None:
     """Apply a config to a pool."""
-    return impl.apply(task, workers, pool_name, mode, pool=True)
+    return impl.apply(task,
+                      workers,
+                      pool_name,
+                      mode,
+                      pool=True,
+                      file_mounts_blob_id=file_mounts_blob_id)
 
 
 @usage_lib.entrypoint
