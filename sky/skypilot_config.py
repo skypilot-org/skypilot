@@ -1003,13 +1003,17 @@ def override_skypilot_config(
     # allowed keys.
     if not override_configs:
         # The server's own `active_workspace` is typed by an admin; resolve it
-        # like a client's. Nothing else to do without overrides.
+        # like a client's. Only the active workspace changes: the config keeps
+        # what the admin wrote (the config editor shows it).
         server_workspace = get_nested(keys=('active_workspace',),
                                       default_value=None)
         if server_workspace is None:
             yield
             return
-        override_configs = {'active_workspace': server_workspace}
+        with local_active_workspace_ctx(
+                resolve_workspace_ref(server_workspace)):
+            yield
+        return
     original_config = _get_loaded_config()
     original_config_path = loaded_config_path_serialized()
     # Nested overrides keep the outermost server config.

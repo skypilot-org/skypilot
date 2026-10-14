@@ -175,6 +175,8 @@ def test_server_active_workspace_name_resolves_without_overrides():
             })):
         with skypilot_config.override_skypilot_config(None):
             assert skypilot_config.get_active_workspace() == 'team-a'
+            # The config editor still shows what the admin wrote.
+            assert skypilot_config.to_dict()['active_workspace'] == 'archive'
 
 
 def _request(user):
