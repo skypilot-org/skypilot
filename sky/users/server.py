@@ -203,7 +203,8 @@ def set_user_preferred_workspace(
         except ValueError as e:
             raise fastapi.HTTPException(status_code=409, detail=str(e)) from e
     try:
-        workspaces_core.set_user_preferred_workspace(auth_user, preferred)
+        workspaces_core.set_user_preferred_workspace(
+            auth_user, preferred, workspace_ref=body.preferred)
     except exceptions.PermissionDeniedError as e:
         raise fastapi.HTTPException(status_code=403, detail=str(e)) from e
     except ValueError as e:
@@ -291,6 +292,7 @@ def get_user_workspace(
     # set `active_workspace` globally gets honored.
     if requested is None and skypilot_config.is_active_workspace_set():
         requested = skypilot_config.get_active_workspace()
+    requested_ref = requested
     if requested is not None:
         # The client's `active_workspace` is what a person typed.
         try:
@@ -308,7 +310,7 @@ def get_user_workspace(
     }
     try:
         resolution = workspaces_core.resolve_workspace_for_user(
-            user_for_resolve, requested=requested)
+            user_for_resolve, requested=requested, requested_ref=requested_ref)
     except exceptions.WorkspaceAmbiguousError as e:
         # Per-user state, not a server fault — return 200 with a state-
         # coded `source` and a SHORT `note`. The CLI / dashboard show
@@ -332,7 +334,8 @@ def get_user_workspace(
             resolution = workspaces_core.resolve_workspace_for_user(
                 user_for_resolve,
                 requested=requested,
-                action=workspace_constants.WORKSPACE_ACTION_READ)
+                action=workspace_constants.WORKSPACE_ACTION_READ,
+                requested_ref=requested_ref)
         except (exceptions.NoWorkspaceAccessError,
                 exceptions.PermissionDeniedError):
             # No read access either, so the original message is the truth.

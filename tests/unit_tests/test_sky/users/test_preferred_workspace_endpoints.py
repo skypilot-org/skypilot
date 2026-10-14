@@ -46,7 +46,9 @@ class TestSetUsersMeWorkspace(unittest.TestCase):
                                'set_user_preferred_workspace') as set_pref:
             resp = users_server.set_user_preferred_workspace(
                 _fake_request(self.user), self._body('team-a'))
-        set_pref.assert_called_once_with(self.user, 'team-a')
+        set_pref.assert_called_once_with(self.user,
+                                         'team-a',
+                                         workspace_ref='team-a')
         self.assertEqual(resp, {'preferred': 'team-a'})
 
     def test_rejected_no_access_raises_403(self):
@@ -74,7 +76,7 @@ class TestSetUsersMeWorkspace(unittest.TestCase):
                                'set_user_preferred_workspace') as set_pref:
             resp = users_server.set_user_preferred_workspace(
                 _fake_request(self.user), self._body(None))
-        set_pref.assert_called_once_with(self.user, None)
+        set_pref.assert_called_once_with(self.user, None, workspace_ref=None)
         self.assertIsNone(resp['preferred'])
 
     def test_unauth_post_raises_401(self):
@@ -243,7 +245,9 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
                 self.auth_user),
                                                    requested='team-b')
         # Resolver MUST receive `requested='team-b'`, not None.
-        resolve_mock.assert_called_once_with(fresh, requested='team-b')
+        resolve_mock.assert_called_once_with(fresh,
+                                             requested='team-b',
+                                             requested_ref='team-b')
         self.assertEqual(resp['workspace'], 'team-b')
         self.assertEqual(resp['source'],
                          workspace_constants.WORKSPACE_SOURCE_EXPLICIT)
@@ -280,7 +284,9 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
                                return_value='server-pinned'):
             resp = users_server.get_user_workspace(_fake_request(
                 self.auth_user))
-        resolve_mock.assert_called_once_with(fresh, requested='server-pinned')
+        resolve_mock.assert_called_once_with(fresh,
+                                             requested='server-pinned',
+                                             requested_ref='server-pinned')
         self.assertEqual(resp['workspace'], 'server-pinned')
 
     def test_ambiguous_resolver_surfaces_as_state_coded_source(self):
@@ -441,8 +447,8 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
             workspace='default',
             source=workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
 
-        def _resolve(_user, requested=None, action=None):
-            del _user, requested
+        def _resolve(_user, requested=None, action=None, requested_ref=None):
+            del _user, requested, requested_ref
             if action == workspace_constants.WORKSPACE_ACTION_READ:
                 return read_pick
             raise exceptions.NoWorkspaceAccessError(
@@ -488,8 +494,8 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
             workspace='pub',
             source=workspace_constants.WORKSPACE_SOURCE_READ_ONLY)
 
-        def _resolve(_user, requested=None, action=None):
-            del _user, requested
+        def _resolve(_user, requested=None, action=None, requested_ref=None):
+            del _user, requested, requested_ref
             if action == workspace_constants.WORKSPACE_ACTION_READ:
                 return read_pick
             raise exceptions.NoWorkspaceAccessError(

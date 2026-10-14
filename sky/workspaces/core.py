@@ -1394,7 +1394,8 @@ class WorkspaceResolution:
 
 
 def set_user_preferred_workspace(user: models.User,
-                                 workspace: Optional[str]) -> None:
+                                 workspace: Optional[str],
+                                 workspace_ref: Optional[str] = None) -> None:
     """Sets (or clears with None) the user's preferred workspace.
 
     Validates that the target workspace exists AND that the user has access
@@ -1414,7 +1415,7 @@ def set_user_preferred_workspace(user: models.User,
         raise ValueError(f'Workspace {workspace!r} does not exist.')
     # Reuse the same permission check the launch path uses, so the error
     # message and the policy are consistent.
-    check_workspace_permission(user, workspace)
+    check_workspace_permission(user, workspace, workspace_ref=workspace_ref)
     global_user_state.set_user_preferred_workspace(user.id, workspace)
 
 
@@ -1437,7 +1438,8 @@ def _try_resync_new_user_grants(user: models.User) -> None:
 def resolve_workspace_for_user(
     user: models.User,
     requested: Optional[str] = None,
-    action: str = workspace_constants.WORKSPACE_ACTION_WRITE
+    action: str = workspace_constants.WORKSPACE_ACTION_WRITE,
+    requested_ref: Optional[str] = None,
 ) -> WorkspaceResolution:
     """Resolves the effective workspace for a user when none was set.
 
@@ -1475,6 +1477,8 @@ def resolve_workspace_for_user(
     Args:
         user: the user the resolution is for.
         requested: workspace explicitly named by the caller, or None.
+        requested_ref: what the user typed for `requested`, shown in a
+            denial instead of the id.
 
     Returns:
         WorkspaceResolution carrying the workspace name + source + optional
@@ -1489,13 +1493,19 @@ def resolve_workspace_for_user(
     """
     if requested is not None:
         try:
-            check_workspace_permission(user, requested, action=action)
+            check_workspace_permission(user,
+                                       requested,
+                                       action=action,
+                                       workspace_ref=requested_ref)
         except exceptions.PermissionDeniedError:
             # The denial can be a first-login grant that was never
             # materialized (see the zero-accessible branch below); re-sync
             # once and re-check before denying for real.
             _try_resync_new_user_grants(user)
-            check_workspace_permission(user, requested, action=action)
+            check_workspace_permission(user,
+                                       requested,
+                                       action=action,
+                                       workspace_ref=requested_ref)
         return WorkspaceResolution(
             workspace=requested,
             source=workspace_constants.WORKSPACE_SOURCE_EXPLICIT)

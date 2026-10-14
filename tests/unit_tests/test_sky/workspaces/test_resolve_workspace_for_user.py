@@ -676,8 +676,9 @@ class TestResyncEdgeCases(unittest.TestCase):
         denied -> re-sync -> re-check passes."""
         check_calls = []
 
-        def _check(user, workspace, action='write'):
-            del user, action  # Signature mirrors check_workspace_permission.
+        def _check(user, workspace, action='write', workspace_ref=None):
+            # Signature mirrors check_workspace_permission.
+            del user, action, workspace_ref
             check_calls.append(workspace)
             if len(check_calls) == 1:
                 raise exceptions.PermissionDeniedError('no access')

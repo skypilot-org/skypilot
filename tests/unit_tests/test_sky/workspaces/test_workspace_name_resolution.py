@@ -151,6 +151,32 @@ def test_enabled_clouds_denial_names_the_workspace_as_typed():
     assert 'ws-0123456789ab' not in str(e.value)
 
 
+def test_requested_denial_names_the_workspace_as_typed():
+    user = models.User(id='bob', name='bob')
+    with mock.patch.object(workspaces_core.permission.permission_service,
+                           'check_workspace_permission',
+                           return_value=False), \
+            mock.patch.object(workspaces_core,
+                              '_try_resync_new_user_grants'):
+        with pytest.raises(exceptions.PermissionDeniedError) as e:
+            workspaces_core.resolve_workspace_for_user(
+                user, requested='ws-0123456789ab', requested_ref='proj-a')
+    assert "'proj-a'" in str(e.value)
+    assert 'ws-0123456789ab' not in str(e.value)
+
+
+def test_server_active_workspace_name_resolves_without_overrides():
+    # An admin may type a name in the server's own config; a client that
+    # sends no overrides must still land on the id.
+    with skypilot_config.replace_skypilot_config_in_process(
+            config_utils.Config({
+                'workspaces': _REUSED,
+                'active_workspace': 'archive'
+            })):
+        with skypilot_config.override_skypilot_config(None):
+            assert skypilot_config.get_active_workspace() == 'team-a'
+
+
 def _request(user):
     request = mock.MagicMock(spec=fastapi.Request)
     request.state.auth_user = user
@@ -166,7 +192,8 @@ def test_preferred_workspace_is_stored_as_the_id(server_workspaces):
             'refresh_workspace_state_for_sync_handler'), mock.patch.object(
                 workspaces_core, 'set_user_preferred_workspace') as set_pref:
         users_server.set_user_preferred_workspace(_request(user), body)
-    set_pref.assert_called_once_with(user, 'team-a')
+    # The typed name rides along so a denial names it, not the id.
+    set_pref.assert_called_once_with(user, 'team-a', workspace_ref='archive')
 
 
 def test_requested_workspace_is_resolved_before_the_resolver(server_workspaces):
@@ -186,6 +213,7 @@ def test_requested_workspace_is_resolved_before_the_resolver(server_workspaces):
                         return_value={'team-a'}):
         users_server.get_user_workspace(_request(user), requested='archive')
     assert resolve.call_args.kwargs['requested'] == 'team-a'
+    assert resolve.call_args.kwargs['requested_ref'] == 'archive'
 
 
 def test_workspace_filter_narrows_by_name(monkeypatch):
