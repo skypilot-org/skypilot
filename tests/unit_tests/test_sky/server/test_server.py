@@ -614,7 +614,7 @@ def _mock_sleep_cancel():
         call_count += 1
         if call_count == 1:
             # First call: the sleep *before* the first cleanup iteration.
-            # Return immediately so we proceed to _do_cleanup.
+            # Return immediately so we proceed to the GC pass.
             return
         # Second call (next iteration) – break out.
         raise asyncio.CancelledError

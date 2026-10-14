@@ -827,46 +827,45 @@ async def cleanup_upload_ids():
                     upload_ids_to_cleanup.pop((upload_id, user_hash))
 
 
+def cleanup_unreferenced_file_mounts_once():
+    """Run one pass of the blob GC: delete blobs nobody references."""
+    storage = bs.get_blob_storage()
+
+    with storage.gc_lock() as should_run:
+        if not should_run:
+            logger.debug('Another server is running blob GC, skipping')
+            return
+
+        # A blob is kept alive by an active API request (e.g. the submit
+        # request that is still running), a non-terminal managed job that
+        # was started from it, or a service/pool that launches replicas
+        # from it.
+        active_blob_ids = (requests_lib.get_active_file_mounts_blob_ids() |
+                           managed_job_state.get_active_file_mounts_blob_ids() |
+                           serve_state.get_active_file_mounts_blob_ids())
+        grace_cutoff = time.time() - bs.GC_GRACE_SECONDS
+
+        for user_id in storage.list_users():
+            try:
+                for blob_id, mtime in storage.list_blob_ids(user_id):
+                    if (blob_id not in active_blob_ids and
+                            mtime < grace_cutoff):
+                        logger.info(f'GC: removing unreferenced blob '
+                                    f'{blob_id} for user {user_id}')
+                        storage.delete_blob(user_id, blob_id)
+                storage.release_stale_uploads(user_id)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Error cleaning filemounts dir: {user_id}: '
+                             f'{common_utils.format_exception(e)}')
+
+
 async def cleanup_unreferenced_file_mounts():
     """Delete file mounts not referenced by any active request."""
-
-    # Synced cleanup for each directory, runs in asyncio.to_thread to avoid
-    # blocking the event loop.
-    def _do_cleanup():
-        storage = bs.get_blob_storage()
-
-        with storage.gc_lock() as should_run:
-            if not should_run:
-                logger.debug('Another server is running blob GC, skipping')
-                return
-
-            # A blob is kept alive by an active API request (e.g. the submit
-            # request that is still running), a non-terminal managed job that
-            # was started from it, or a service/pool that launches replicas
-            # from it.
-            active_blob_ids = (
-                requests_lib.get_active_file_mounts_blob_ids() |
-                managed_job_state.get_active_file_mounts_blob_ids() |
-                serve_state.get_active_file_mounts_blob_ids())
-            grace_cutoff = time.time() - bs.GC_GRACE_SECONDS
-
-            for user_id in storage.list_users():
-                try:
-                    for blob_id, mtime in storage.list_blob_ids(user_id):
-                        if (blob_id not in active_blob_ids and
-                                mtime < grace_cutoff):
-                            logger.info(f'GC: removing unreferenced blob '
-                                        f'{blob_id} for user {user_id}')
-                            storage.delete_blob(user_id, blob_id)
-                    storage.release_stale_uploads(user_id)
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.error(f'Error cleaning filemounts dir: {user_id}: '
-                                 f'{common_utils.format_exception(e)}')
-
     while True:
         await asyncio.sleep(3600)  # Run every hour
         try:
-            await asyncio.to_thread(_do_cleanup)
+            # Synced cleanup, run in a thread to avoid blocking the event loop.
+            await asyncio.to_thread(cleanup_unreferenced_file_mounts_once)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Error in cleanup_unreferenced_file_mounts: '
                          f'{common_utils.format_exception(e)}')
