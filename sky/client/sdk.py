@@ -612,7 +612,10 @@ def _raise_exception_object_on_client(e: BaseException) -> None:
 def validate(
     dag: 'sky.Dag',
     workdir_only: bool = False,
-    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None
+    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _skip_local_paths: bool = False,
 ) -> None:
     """Validates the tasks.
 
@@ -628,6 +631,10 @@ def validate(
         admin_policy_request_options: Request options used for admin policy
             validation. This is only required when a admin policy is in use,
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
+        _skip_local_paths: Do not check the workdir and file mount sources on
+            this machine. For callers whose sources are API server paths
+            inside an upload blob; the server resolves the blob and checks
+            the paths when it runs the request.
     """
     _check_slurm_host_path_volume_api_version(dag)
     remote_api_version = versions.get_remote_api_version()
@@ -649,9 +656,10 @@ def validate(
         if omit_user_specified_yaml:
             # pylint: disable=protected-access
             task._user_specified_yaml = None
-        task.expand_and_validate_workdir()
-        if not workdir_only:
-            task.expand_and_validate_file_mounts()
+        if not _skip_local_paths:
+            task.expand_and_validate_workdir()
+            if not workdir_only:
+                task.expand_and_validate_file_mounts()
         if omit_local_disk:
             for resource in task.resources:
                 # pylint: disable=protected-access
@@ -954,7 +962,13 @@ def _launch(
                                    Optional['backends.ResourceHandle']]]:
     """Auxiliary function for launch(), refer to launch() for details."""
 
-    validate(dag, admin_policy_request_options=request_options)
+    # A caller that passes a blob (a jobs or serve controller) sends sources
+    # that are paths inside that blob on the API server. They may not exist on
+    # this host: the server extracts the blob on whichever host handles the
+    # request and checks the paths there.
+    validate(dag,
+             admin_policy_request_options=request_options,
+             _skip_local_paths=_file_mounts_blob_id is not None)
     # The flags have been applied to the task YAML and the backward
     # compatibility of admin policy has been handled. We should no longer use
     # these flags.

@@ -936,7 +936,7 @@ Finds the best execution plan for the given DAG.
 ### `sky.validate`
 
 ```python
-sky.validate(dag: 'sky.Dag', workdir_only: bool = False, admin_policy_request_options: Optional[admin_policy.RequestOptions] = None) -> None
+sky.validate(dag: 'sky.Dag', workdir_only: bool = False, admin_policy_request_options: Optional[admin_policy.RequestOptions] = None, _skip_local_paths: bool = False) -> None
 ```
 
 Validates the tasks.
@@ -953,6 +953,10 @@ Raises exceptions if the DAG is invalid.
     admin_policy_request_options: Request options used for admin policy
         validation. This is only required when a admin policy is in use,
         see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
+    _skip_local_paths: Do not check the workdir and file mount sources on
+        this machine. For callers whose sources are API server paths
+        inside an upload blob; the server resolves the blob and checks
+        the paths when it runs the request.
 
 ### `sky.reload_config`
 

@@ -2211,12 +2211,24 @@ def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
 @metrics_lib.time_me
 def get_cluster_provision_log_path(cluster_name: str) -> Optional[str]:
     """Returns provision_log_path from clusters table, if recorded."""
+    return get_cluster_provision_log_info(cluster_name)[0]
+
+
+@metrics_lib.time_me
+def get_cluster_provision_log_info(
+        cluster_name: str) -> Tuple[Optional[str], Optional[str]]:
+    """Returns (provision_log_path, workspace) from the clusters table.
+
+    The workspace is None if there is no such cluster; a stored NULL is the
+    default workspace.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         row = session.query(cluster_table).filter_by(name=cluster_name).first()
     if row is None:
-        return None
-    return getattr(row, 'provision_log_path', None)
+        return None, None
+    return (getattr(row, 'provision_log_path', None), row.workspace or
+            constants.SKYPILOT_DEFAULT_WORKSPACE)
 
 
 @metrics_lib.time_me
@@ -2236,6 +2248,26 @@ def get_cluster_history_provision_log_path(cluster_name: str) -> Optional[str]:
     historical rows by name and choose the most recent one based on
     usage_intervals.
     """
+    return get_cluster_history_provision_log_info(cluster_name)[0]
+
+
+@metrics_lib.time_me
+def get_cluster_history_provision_log_info(
+        cluster_name: str) -> Tuple[Optional[str], Optional[str]]:
+    """Returns (provision_log_path, workspace) of the same history row.
+
+    The row is the one ``get_cluster_history_provision_log_path`` reads. The
+    workspace is None if there is no row; a stored NULL (rows that predate the
+    column) is the default workspace.
+    """
+    row = _get_cluster_history_row(cluster_name)
+    if row is None:
+        return None, None
+    return (getattr(row, 'provision_log_path', None), row.workspace or
+            constants.SKYPILOT_DEFAULT_WORKSPACE)
+
+
+def _get_cluster_history_row(cluster_name: str) -> Optional[Any]:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         # Try current cluster first (fast path)
@@ -2244,7 +2276,7 @@ def get_cluster_history_provision_log_path(cluster_name: str) -> Optional[str]:
             row = session.query(cluster_history_table).filter_by(
                 cluster_hash=cluster_hash).first()
             if row is not None:
-                return getattr(row, 'provision_log_path', None)
+                return row
 
         # Fallback: search history by name and pick the latest by
         # usage_intervals
@@ -2264,9 +2296,7 @@ def get_cluster_history_provision_log_path(cluster_name: str) -> Optional[str]:
             except Exception:  # pylint: disable=broad-except
                 return -1
 
-        latest_row = max(rows,
-                         key=lambda r: latest_timestamp(r.usage_intervals))
-        return getattr(latest_row, 'provision_log_path', None)
+        return max(rows, key=lambda r: latest_timestamp(r.usage_intervals))
 
 
 @metrics_lib.time_me

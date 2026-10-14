@@ -692,10 +692,13 @@ async def test_wait_for_scheduling_timeout_full_cancel_path_ends_cancelled(
         await asyncio.wait_for(loop_task, timeout=10)
 
     assert running.cancelled.is_set()
-    manager._cleanup.assert_awaited_once_with(job_id,
-                                              pool=None,
-                                              graceful=False,
-                                              graceful_timeout=None)
+    manager._cleanup.assert_awaited_once_with(
+        job_id,
+        pool=None,
+        graceful=False,
+        graceful_timeout=None,
+        fallback_dag=job_controller.loaded_dag,
+        fallback_pool_submission=job_controller.pool_submission)
     manager._download_logs_for_cancelled_job.assert_awaited_once()
     row = _task_row(job_id, 0)
     assert row['status'] == ManagedJobStatus.CANCELLED
@@ -1364,10 +1367,13 @@ async def test_pending_graceful_user_cancel_wins_over_the_deadline(
             await asyncio.wait_for(loop_task, timeout=10)
     finally:
         cancel_loop.cancel()
-    manager._cleanup.assert_awaited_once_with(job_id,
-                                              pool=None,
-                                              graceful=True,
-                                              graceful_timeout=60)
+    manager._cleanup.assert_awaited_once_with(
+        job_id,
+        pool=None,
+        graceful=True,
+        graceful_timeout=60,
+        fallback_dag=job_controller.loaded_dag,
+        fallback_pool_submission=job_controller.pool_submission)
     row = _task_row(job_id, 0)
     assert row['status'] == ManagedJobStatus.CANCELLED
     assert row['failure_reason'] is None
