@@ -7,6 +7,7 @@ import pytest
 
 from sky import check as sky_check
 from sky import core
+from sky import exceptions
 from sky import models
 from sky import skypilot_config
 from sky.server.requests import payloads
@@ -128,6 +129,24 @@ def test_permission_error_names_the_workspace_as_typed():
             workspaces_core.check_workspace_permission(user,
                                                        'ws-0123456789ab',
                                                        workspace_ref='proj-a')
+    assert "'proj-a'" in str(e.value)
+    assert 'ws-0123456789ab' not in str(e.value)
+
+
+def test_enabled_clouds_denial_names_the_workspace_as_typed():
+    # A non-member types a private workspace's name: the denial must not
+    # reveal its id.
+    with mock.patch.object(skypilot_config,
+                           'resolve_workspace_ref',
+                           return_value='ws-0123456789ab'), \
+            mock.patch.object(workspaces_core.permission.permission_service,
+                              'check_workspace_permission',
+                              return_value=False), \
+            mock.patch.object(core.common_utils,
+                              'get_current_user',
+                              return_value=models.User(id='bob', name='bob')):
+        with pytest.raises(exceptions.PermissionDeniedError) as e:
+            core.enabled_clouds_for_request(workspace='proj-a')
     assert "'proj-a'" in str(e.value)
     assert 'ws-0123456789ab' not in str(e.value)
 

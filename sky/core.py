@@ -1732,7 +1732,8 @@ def storage_delete(name: str) -> None:
 # ===================
 @usage_lib.entrypoint
 def enabled_clouds(workspace: Optional[str] = None,
-                   expand: bool = False) -> List[str]:
+                   expand: bool = False,
+                   workspace_ref: Optional[str] = None) -> List[str]:
     if workspace is None:
         workspace = skypilot_config.get_active_workspace()
     else:
@@ -1745,7 +1746,8 @@ def enabled_clouds(workspace: Optional[str] = None,
         workspaces_core.check_workspace_permission(
             common_utils.get_current_user(),
             workspace,
-            action=workspace_constants.WORKSPACE_ACTION_READ)
+            action=workspace_constants.WORKSPACE_ACTION_READ,
+            workspace_ref=workspace_ref)
     cached_clouds = global_user_state.get_cached_enabled_clouds(
         sky_cloud.CloudCapability.COMPUTE, workspace=workspace)
     with skypilot_config.local_active_workspace_ctx(workspace):
@@ -1781,7 +1783,10 @@ def enabled_clouds_for_request(workspace: Optional[str] = None,
     """`GET /enabled_clouds`: `workspace` is typed by a user (CLI); UIs send
     the exact `workspace_id` instead."""
     if workspace_id is None and workspace is not None:
-        workspace_id = skypilot_config.resolve_workspace_ref(workspace)
+        return enabled_clouds(
+            workspace=skypilot_config.resolve_workspace_ref(workspace),
+            expand=expand,
+            workspace_ref=workspace)
     return enabled_clouds(workspace=workspace_id, expand=expand)
 
 
