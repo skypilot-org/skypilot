@@ -2,7 +2,11 @@
 
 import os
 import subprocess
+import sys
+import time
 from unittest import mock
+
+import pytest
 
 from sky.ssh_node_pools.deploy import deploy
 from sky.ssh_node_pools.deploy import utils as deploy_utils
@@ -177,6 +181,26 @@ def test_remote_runner_runs_script_and_keeps_exit_code(tmp_path):
                          check=False)
     assert (out.returncode, out.stdout) == (7, 'hi\n')
     assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.skipif(sys.platform != 'linux', reason='GNU mktemp honors TMPDIR')
+def test_remote_runner_leaves_no_file_while_receiving(tmp_path):
+    """The script file is unlinked before any of the script arrives."""
+    proc = subprocess.Popen(['bash', '-c', deploy_utils._REMOTE_RUNNER],
+                            stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE,
+                            text=True,
+                            env={
+                                **os.environ, 'TMPDIR': str(tmp_path)
+                            })
+    proc.stdin.write('echo secret\n')
+    proc.stdin.flush()
+    time.sleep(0.5)
+    assert not list(tmp_path.iterdir())
+    proc.stdin.write('exit 3\n')
+    proc.stdin.close()
+    assert proc.wait(timeout=10) == 3
+    assert proc.stdout.read() == 'secret\n'
 
 
 def test_run_remote_runs_tcp_forwarding_cmd_with_password(tmp_path):
