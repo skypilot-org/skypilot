@@ -3106,7 +3106,9 @@ def test_pool_local_file_mounts_two_hop(generic_cloud: str):
                     'kubectl get pods -l skypilot-cluster-name --no-headers '
                     '-o custom-columns=NAME:.metadata.name,'
                     'CLUSTER:.metadata.annotations.skypilot-cluster-name | '
-                    f'awk \'$2 ~ /^{pool_name}-1-/ {{print $1}}\'')
+                    # The annotation holds the cluster name as given, without
+                    # the user hash suffix of the name on the cloud.
+                    f'awk \'$2 == "{pool_name}-1" {{print $1}}\'')
                 commands += [
                     _on_remote_server(_RUN_BLOB_GC_NOW),
                     # Kill the worker so the controller launches a replacement
