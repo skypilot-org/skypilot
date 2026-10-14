@@ -841,8 +841,8 @@ def cleanup_unreferenced_file_mounts_once():
         # was started from it, or a service/pool that launches replicas
         # from it.
         active_blob_ids = (requests_lib.get_active_file_mounts_blob_ids() |
-                           managed_job_state.get_active_file_mounts_blob_ids() |
-                           serve_state.get_active_file_mounts_blob_ids())
+                           managed_job_state.get_active_file_mounts_blob_ids())
+        # TEMP twist (do not merge): the GC ignores blobs of services/pools.
         grace_cutoff = time.time() - bs.GC_GRACE_SECONDS
 
         for user_id in storage.list_users():

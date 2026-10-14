@@ -122,31 +122,18 @@ def cleanup_storage(yaml_content: str) -> bool:
             logger.error(f'  Traceback: {traceback.format_exc()}')
         failed = True
 
-    # Clean up the two-hop file mount copies staged for this service. Leave any
-    # other local source alone: in consolidation mode it points into the
-    # client's upload blob, which other requests may share, or, on a local API
-    # server, at the user's own files. Guard against `task` being unbound if
-    # from_yaml_str raised above.
+    # Clean up any files mounted from the local disk, such as two-hop file
+    # mounts. Guard against `task` being unbound if from_yaml_str raised above.
     file_mount_values = (list(
         (task.file_mounts or {}).values()) if task else [])
-    two_hop_base = os.path.abspath(
-        os.path.expanduser(
-            skylet_constants.FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH))
     for file_mount in file_mount_values:
         try:
-            if data_utils.is_cloud_store_url(file_mount):
-                continue
-            path = os.path.abspath(os.path.expanduser(file_mount))
-            if os.path.commonpath([path, two_hop_base]) != two_hop_base:
-                logger.debug(f'Not removing file mount source {file_mount}: '
-                             'not a two-hop copy.')
-                continue
-            if os.path.islink(path) or os.path.isfile(path):
-                os.remove(path)
-            elif os.path.isdir(path):
-                shutil.rmtree(path)
-            # Otherwise the copy is already gone, e.g. removed by an earlier
-            # cleanup attempt.
+            if not data_utils.is_cloud_store_url(file_mount):
+                path = os.path.expanduser(file_mount)
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Failed to clean up file mount {file_mount}: {e}')
             with ux_utils.enable_traceback():
