@@ -363,6 +363,7 @@ def deploy_single_cluster(cluster_name,
             os.remove(tunnel_log_file_path)
 
     # If --cleanup flag is set, uninstall k3s and exit
+    cleanup_failed = []
     if cleanup:
         # Pickup all nodes
         worker_nodes_to_cleanup.clear()
@@ -382,23 +383,37 @@ def deploy_single_cluster(cluster_name,
                 ))
 
         # Clean up head node
-        cleanup_node(head_node,
-                     ssh_user,
-                     ssh_key,
-                     askpass_block,
-                     use_ssh_config=head_use_ssh_config,
-                     is_worker=False)
+        if not cleanup_node(head_node,
+                            ssh_user,
+                            ssh_key,
+                            askpass_block,
+                            use_ssh_config=head_use_ssh_config,
+                            is_worker=False):
+            cleanup_failed.append(head_node)
     # Clean up worker nodes
     force_update_status(f'Cleaning up worker nodes [{cluster_name}]')
     with cf.ThreadPoolExecutor() as executor:
-        executor.map(lambda kwargs: cleanup_node(**kwargs),
-                     worker_nodes_to_cleanup)
+        worker_ok = list(
+            executor.map(lambda kwargs: cleanup_node(**kwargs),
+                         worker_nodes_to_cleanup))
+    if cleanup:
+        cleanup_failed += [
+            kwargs['node']
+            for kwargs, ok in zip(worker_nodes_to_cleanup, worker_ok)
+            if not ok
+        ]
 
     with cf.ThreadPoolExecutor() as executor:
         executor.map(lambda cmd: deploy_utils.run_command(cmd, shell=True),
                      remove_worker_cmds)
 
     if cleanup:
+        if cleanup_failed:
+            # Keep the local state so `sky ssh down` can be run again.
+            raise RuntimeError(
+                f'Failed to uninstall k3s on {", ".join(cleanup_failed)}. '
+                'Fix the host (or remove it from the pool config) and run '
+                '`sky ssh down` again.')
         # Remove the context from local kubeconfig if it exists
         if os.path.isfile(kubeconfig_path):
             logger.debug(
@@ -1149,8 +1164,9 @@ def cleanup_node(node,
     if result is None:
         logger.error(f'{colorama.Fore.RED}Failed to clean up {ntype} '
                      f'node ({node}).{RESET_ALL}')
-    else:
-        success_message(f'Node {node} cleaned up successfully.')
+        return False
+    success_message(f'Node {node} cleaned up successfully.')
+    return True
 
 
 def start_server_node(node,

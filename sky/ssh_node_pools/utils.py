@@ -57,12 +57,23 @@ def check_host_in_ssh_config(hostname: str) -> bool:
     return bool(pattern.search(proc.stdout))
 
 
+_NON_STR_SCALAR_TAGS = ('tag:yaml.org,2002:int', 'tag:yaml.org,2002:float',
+                        'tag:yaml.org,2002:bool')
+
+
 class UniqueKeySafeLoader(yaml.SafeLoader):
     """Custom YAML loader that raises an error if there are duplicate keys."""
 
     def construct_mapping(self, node, deep=False):
         mapping = set()
-        for key_node, _ in node.value:
+        for key_node, value_node in node.value:
+            # Keep a password as typed: YAML would read `012345` as the octal
+            # int 5349 and `yes` as True.
+            if (isinstance(key_node, yaml.ScalarNode) and
+                    key_node.value == 'password' and
+                    isinstance(value_node, yaml.ScalarNode) and
+                    value_node.tag in _NON_STR_SCALAR_TAGS):
+                value_node.tag = 'tag:yaml.org,2002:str'
             key = self.construct_object(key_node, deep=deep)
             if key in mapping:
                 raise yaml.constructor.ConstructorError(

@@ -370,3 +370,54 @@ def test_cleanup_runs_the_uninstall_script_the_host_has(monkeypatch, tmp_path,
     else:
         assert proc.returncode == 0
         assert calls[-1].startswith('-A rm -rf /etc/rancher')
+
+
+def test_yaml_passwords_are_kept_as_typed(tmp_path):
+    """YAML 1.1 reads 012345 as octal 5349 and yes as True."""
+    f = tmp_path / 'pools.yaml'
+    f.write_text('p:\n'
+                 '  password: 012345\n'
+                 '  hosts:\n'
+                 '  - {ip: 10.0.0.1, password: 1e5}\n'
+                 '  - {ip: 10.0.0.2, password: yes}\n'
+                 '  - {ip: 10.0.0.3, password: 123456}\n'
+                 '  - {ip: 10.0.0.4, password: }\n'
+                 '  - {ip: 10.0.0.5, password: null}\n')
+    pool = ssh_utils.load_ssh_targets(str(f))['p']
+    assert pool['password'] == '012345'
+    assert [h['password'] for h in pool['hosts']
+           ] == ['1e5', 'yes', '123456', None, None]
+
+
+def test_ssh_down_keeps_state_when_a_host_is_not_cleaned(monkeypatch, tmp_path):
+    key = tmp_path / 'key'
+    key.write_text('k')
+    pools = tmp_path / 'pools.yaml'
+    pools.write_text(
+        json.dumps({
+            'p': {
+                'hosts': ['10.0.0.1'],
+                'user': 'u',
+                'identity_file': str(key)
+            }
+        }))
+    history = tmp_path / 'ssh-p-history.yaml'
+    history.write_text(
+        json.dumps({
+            'hosts': ['10.0.0.1'],
+            'user': 'u',
+            'identity_file': str(key)
+        }))
+    monkeypatch.setattr(deploy.constants, 'NODE_POOLS_INFO_DIR', str(tmp_path))
+    monkeypatch.setattr(deploy, 'force_update_status', lambda *a, **k: None)
+    # The SSH check passes; only the uninstall command fails.
+    monkeypatch.setattr(
+        deploy_utils, 'run_remote', lambda node, cmd, *a, **k: None
+        if 'uninstall' in cmd else 'ok')
+    with pytest.raises(RuntimeError,
+                       match='Failed to uninstall k3s on 10.0.0.1'):
+        deploy.deploy_multiple_clusters('p',
+                                        ssh_node_pools_file=str(pools),
+                                        kubeconfig_path=str(tmp_path / 'kc'),
+                                        cleanup=True)
+    assert history.exists()
