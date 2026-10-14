@@ -95,13 +95,22 @@ PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws
 # divided by the total memory of an L4 will give us the fraction of the GPU.
 L4_GPU_MEMORY = 22888
 
-regions_enabled: Optional[Set[str]] = None
+# Keyed by the identity the region set was read for. A single process can serve
+# more than one identity (see the note on `_user_dfs` in aws_catalog.py), and
+# enabled regions are account-specific: an unkeyed cache gives the first
+# account's region set to every account after it, which then silently limits
+# both the AZ mapping fetched below and the catalog joined against it.
+regions_enabled: Dict[str, Set[str]] = {}
+
+# This script runs as exactly one identity per invocation, so the key it uses
+# is arbitrary as long as it is stable. Named rather than inlined so it is
+# obvious that it is NOT an identity the server would ever compute.
+_CLI_IDENTITY = 'cli-invocation'
 
 
-def get_enabled_regions() -> Set[str]:
-    # Should not be called concurrently.
-    global regions_enabled
-    if regions_enabled is None:
+def get_enabled_regions(aws_user_hash: str) -> Set[str]:
+    # Should not be called concurrently for the same identity.
+    if aws_user_hash not in regions_enabled:
         aws_client = aws.client('ec2', region_name='us-east-1')
         try:
             user_cloud_regions = aws_client.describe_regions()['Regions']
@@ -116,9 +125,9 @@ def get_enabled_regions() -> Set[str]:
                     ) from None
             else:
                 raise
-        regions_enabled = {r['RegionName'] for r in user_cloud_regions}
-        regions_enabled = regions_enabled.intersection(set(ALL_REGIONS))
-    return regions_enabled
+        enabled = {r['RegionName'] for r in user_cloud_regions}
+        regions_enabled[aws_user_hash] = enabled.intersection(set(ALL_REGIONS))
+    return regions_enabled[aws_user_hash]
 
 
 def _get_instance_types(region: str) -> 'pd.DataFrame':
@@ -541,7 +550,7 @@ def get_all_regions_images_df(regions: Set[str]) -> 'pd.DataFrame':
     return result_df
 
 
-def fetch_availability_zone_mappings() -> 'pd.DataFrame':
+def fetch_availability_zone_mappings(aws_user_hash: str) -> 'pd.DataFrame':
     """Fetch the availability zone mappings from ID to Name.
 
     Example output:
@@ -549,7 +558,7 @@ def fetch_availability_zone_mappings() -> 'pd.DataFrame':
         use1-az1          us-east-1b
         use1-az2          us-east-1a
     """
-    regions = list(get_enabled_regions())
+    regions = list(get_enabled_regions(aws_user_hash))
 
     errored_region_reasons = []
 
@@ -613,7 +622,7 @@ if __name__ == '__main__':
     parser.set_defaults(az_mappings=True)
     args, _ = parser.parse_known_args()
 
-    user_regions = get_enabled_regions()
+    user_regions = get_enabled_regions(_CLI_IDENTITY)
     if args.check_all_regions_enabled_for_account and set(
             ALL_REGIONS) - user_regions:
         raise RuntimeError('The following regions are not enabled: '
@@ -662,6 +671,6 @@ if __name__ == '__main__':
     print('AWS Images saved to aws/images.csv')
 
     if args.az_mappings:
-        az_mappings_df = fetch_availability_zone_mappings()
+        az_mappings_df = fetch_availability_zone_mappings(_CLI_IDENTITY)
         az_mappings_df.to_csv('aws/az_mappings.csv', index=False)
         print('AWS Availability Zone mapping saved to aws/az_mappings.csv')

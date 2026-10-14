@@ -73,15 +73,32 @@ _PULL_FREQUENCY_HOURS = 7
 # The main catalog dataframe.
 #   - _default_df: default non-account-specific catalog
 #     The AvailabilityZone column is a zone ID (e.g. use1-az1).
-#   - _user_df: account-specific catalog (i.e., regions that the account
-#     doesn't have enabled are dropped; AZ mapping is applied, etc.)
-#     Creating this requires AWS credentials. It is created at most once
-#     (and cached) per a process' lifetime.
+#   - _user_dfs: account-specific catalogs (i.e., regions that the account
+#     doesn't have enabled are dropped; AZ mapping is applied, etc.),
+#     keyed by the hash of the identity they were built for.
+#     Creating one requires AWS credentials. Each is cached, and rebuilt if
+#     it is evicted -- see `_MAX_CACHED_USER_DFS` below. (The single
+#     `_user_df` this replaced WAS built at most once per a process'
+#     lifetime; with an unbounded number of possible identities that is no
+#     longer a property worth keeping.)
 #     The AvailabilityZone column is a zone name (e.g. us-east-1a).
-# `_apply_az_mapping_lock` protects reading/writing `_user_df`.
+#
+#     Keyed, because a single API server process can serve more than one
+#     identity: workspaces may each carry their own `aws.profile`, and the
+#     server reuses executor processes across requests. An unkeyed cache
+#     hands the first identity's catalog to every identity after it in the
+#     same process -- dropping regions that identity *has* enabled, and
+#     replacing zone IDs with another account's zone NAMES. Zone names are
+#     account-specific, so the result is wrong rather than merely stale, and
+#     nothing raises.
+# `_apply_az_mapping_lock` protects reading/writing `_user_dfs`.
 _default_df = common.read_catalog('aws/vms.csv',
                                   pull_frequency_hours=_PULL_FREQUENCY_HOURS)
-_user_df = None
+# Bounded: each entry is a full catalog, a process can serve an unbounded
+# number of identities over its lifetime, and an evicted identity costs one
+# refetch -- which its on-disk `az_mappings-<hash>.csv` already makes cheap.
+_MAX_CACHED_USER_DFS = 8
+_user_dfs: Dict[str, 'pd.DataFrame'] = {}
 _apply_az_mapping_lock = threading.Lock()
 
 _image_df = common.read_catalog('aws/images.csv',
@@ -102,7 +119,8 @@ def _get_az_mappings(aws_user_hash: str) -> Optional['pd.DataFrame']:
             with rich_utils.safe_status(
                     ux_utils.spinner_message('AWS: Fetching availability '
                                              'zones mapping')):
-                az_mappings = fetch_aws.fetch_availability_zone_mappings()
+                az_mappings = fetch_aws.fetch_availability_zone_mappings(
+                    aws_user_hash)
         else:
             return None
         # get_catalog_path() is now a pure path getter; create the
@@ -122,34 +140,21 @@ def _get_az_mappings(aws_user_hash: str) -> Optional['pd.DataFrame']:
     return az_mappings
 
 
-@timeline.event
-def _fetch_and_apply_az_mapping(df: common.LazyDataFrame) -> 'pd.DataFrame':
-    """Maps zone IDs (use1-az1) to zone names (us-east-1x).
+def _resolve_aws_user_hash() -> str:
+    """The hash of the identity whose AZ mapping should be applied.
 
-    The upper-level functions that use the availability zone information
-    should be able to handle the case where the zone name is not correct,
-    due to the credentials not being configured.
-
-    Such mappings are account-specific and determined by AWS. We fetch the
-    mappings from AWS, which requires AWS credentials. If the user does not
-    have AWS credentials configured, we use original zone id. It is ok to
-    use the default mapping because the user will not be able to provision
-    instances with those wrong availablity zones due to the lack of
-    credentials.
-
-    The mappings will also serve to remove from 'df' the regions that are
-    not supported by the user account.
-
-    Returns:
-        A dataframe with column 'AvailabilityZone' that's correctly replaced
-        with the zone name (e.g. us-east-1a).
+    Resolved once, by the caller, so that the value used to CACHE a catalog is
+    the same value used to BUILD it. Previously this was resolved inside
+    `_fetch_and_apply_az_mapping`, where a caller had no way to know which
+    identity a returned catalog belonged to -- and the fallback below means the
+    answer is not always the active identity.
     """
     try:
         user_identity_list = aws.AWS.get_active_user_identity()
         assert user_identity_list, user_identity_list
         user_identity = user_identity_list[0]
-        aws_user_hash = hashlib.md5(user_identity.encode(),
-                                    usedforsecurity=False).hexdigest()[:8]
+        return hashlib.md5(user_identity.encode(),
+                           usedforsecurity=False).hexdigest()[:8]
     except (exceptions.CloudUserIdentityError, ImportError):
         # If failed to get user identity, or import aws dependencies, we use the
         # latest mapping file or the default mapping file.
@@ -175,7 +180,32 @@ def _fetch_and_apply_az_mapping(df: common.LazyDataFrame) -> 'pd.DataFrame':
         logger.debug(
             'Failed to get AWS user identity. Using the latest mapping '
             f'file for user {aws_user_hash!r}.')
+        return aws_user_hash
 
+
+@timeline.event
+def _fetch_and_apply_az_mapping(df: common.LazyDataFrame,
+                                aws_user_hash: str) -> 'pd.DataFrame':
+    """Maps zone IDs (use1-az1) to zone names (us-east-1x).
+
+    The upper-level functions that use the availability zone information
+    should be able to handle the case where the zone name is not correct,
+    due to the credentials not being configured.
+
+    Such mappings are account-specific and determined by AWS. We fetch the
+    mappings from AWS, which requires AWS credentials. If the user does not
+    have AWS credentials configured, we use original zone id. It is ok to
+    use the default mapping because the user will not be able to provision
+    instances with those wrong availablity zones due to the lack of
+    credentials.
+
+    The mappings will also serve to remove from 'df' the regions that are
+    not supported by the user account.
+
+    Returns:
+        A dataframe with column 'AvailabilityZone' that's correctly replaced
+        with the zone name (e.g. us-east-1a).
+    """
     az_mappings = _get_az_mappings(aws_user_hash)
     if az_mappings is None:
         # Returning the original dataframe directly, as no cloud
@@ -192,19 +222,30 @@ def _fetch_and_apply_az_mapping(df: common.LazyDataFrame) -> 'pd.DataFrame':
 
 
 def _get_df() -> 'pd.DataFrame':
-    global _user_df
+    # Resolved outside the lock: it is the cache KEY, and it is also what the
+    # fetch below is built for, so the two cannot disagree.
+    aws_user_hash = _resolve_aws_user_hash()
     with _apply_az_mapping_lock:
-        if _user_df is None:
+        if aws_user_hash not in _user_dfs:
             try:
-                _user_df = _fetch_and_apply_az_mapping(_default_df)
+                _user_dfs[aws_user_hash] = _fetch_and_apply_az_mapping(
+                    _default_df, aws_user_hash)
+                while len(_user_dfs) > _MAX_CACHED_USER_DFS:
+                    _user_dfs.pop(next(iter(_user_dfs)))
             except (RuntimeError, ImportError) as e:
                 if config.get_use_default_catalog_if_failed():
                     logger.warning('Failed to fetch availability zone mapping. '
                                    f'{common_utils.format_exception(e)}')
+                    # Not cached: this is the default catalog, not this
+                    # identity's, and caching it would keep serving the
+                    # degraded answer for the lifetime of the process, long
+                    # after the fetch would have succeeded.
                     return _default_df
                 else:
                     raise
-    return _user_df
+        # Read inside the lock: eviction can remove another thread's entry
+        # between the insert above and a read outside it.
+        return _user_dfs[aws_user_hash]
 
 
 def get_quota_code(instance_type: str, use_spot: bool) -> Optional[str]:
