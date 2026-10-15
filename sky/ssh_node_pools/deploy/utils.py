@@ -90,6 +90,7 @@ def get_effective_host_ip(hostname: str) -> str:
 ASKPASS_EOF = 'SKYPILOT_ASKPASS_EOF'
 _ASKPASS_BODY_RE = re.compile(
     rf'(<< \'{ASKPASS_EOF}\'\n).*?(\n{ASKPASS_EOF}\n)', re.DOTALL)
+_K3S_TOKEN_RE = re.compile(r'(K3S_TOKEN=)\S+')
 
 # Scripts go over stdin, not argv: they can hold the sudo password, and argv
 # is visible to every user on the host. The temp file is unlinked before the
@@ -98,9 +99,10 @@ _REMOTE_RUNNER = ('bash -c \'f=$(mktemp) && exec 3>"$f" 4<"$f" && rm -f "$f" '
                   '&& cat >&3 && exec 3>&- && exec bash /dev/fd/4\'')
 
 
-def redact_askpass(cmd: str) -> str:
-    """Return `cmd` with the askpass script body (the password) removed."""
-    return _ASKPASS_BODY_RE.sub(r'\1<redacted>\2', cmd)
+def redact_secrets(cmd: str) -> str:
+    """Return `cmd` with the sudo password and the k3s join token removed."""
+    cmd = _ASKPASS_BODY_RE.sub(r'\1<redacted>\2', cmd)
+    return _K3S_TOKEN_RE.sub(r'\1<redacted>', cmd)
 
 
 def run_remote(node,
@@ -140,7 +142,7 @@ def run_remote(node,
     if process.returncode != 0:
         if not silent:
             logger.error(f'{colorama.Fore.RED}Error executing command '
-                         f'{redact_askpass(cmd)} on {node}:'
+                         f'{redact_secrets(cmd)} on {node}:'
                          f'{colorama.Style.RESET_ALL} {process.stderr}')
         return None
     if print_output:

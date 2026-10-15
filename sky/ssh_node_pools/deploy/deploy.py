@@ -312,10 +312,6 @@ def deploy_single_cluster(cluster_name,
     num_total_nodes = 1 + len(worker_nodes)
     ha_enabled = num_total_nodes >= 3
 
-    # Token for k3s
-    # TODO (kyuds): make this configurable?
-    k3s_token = constants.K3S_TOKEN
-
     # Pre-flight checks
     logger.info(f'Checking SSH connection to head node ({head_node})...')
     result = deploy_utils.run_remote(
@@ -526,7 +522,7 @@ def deploy_single_cluster(cluster_name,
         f'Deploying SkyPilot runtime on head node ({head_node}).')
     cmd = f"""
         {askpass_block}
-        curl -sfL https://get.k3s.io | K3S_TOKEN={k3s_token} K3S_NODE_NAME={head_node} {k3s_ha_exec} sudo -E -A sh - &&
+        curl -sfL https://get.k3s.io | K3S_NODE_NAME={head_node} {k3s_ha_exec} sudo -E -A sh - &&
         mkdir -p ~/.kube &&
         sudo -A cp /etc/rancher/k3s/k3s.yaml ~/.kube/config &&
         sudo -A chown $(id -u):$(id -g) ~/.kube/config &&
@@ -578,6 +574,22 @@ def deploy_single_cluster(cluster_name,
             raise RuntimeError(f'Failed to SSH to head node ({head_node}). '
                                f'Please check the SSH configuration.')
     logger.debug(f'Master node internal IP: {master_addr}')
+
+    # No token is passed to the head install: k3s generates a random one on
+    # first start and keeps it on every later start, so pools deployed
+    # before keep theirs and their nodes stay joinable.
+    k3s_token = _read_join_token(head_node,
+                                 ssh_user,
+                                 ssh_key,
+                                 askpass_block,
+                                 use_ssh_config=head_use_ssh_config)
+    if k3s_token.endswith(f'::server:{_LEGACY_K3S_TOKEN}'):
+        logger.warning(
+            f'{colorama.Fore.YELLOW}Node Pool `{cluster_name}` still uses the '
+            f'shared k3s join token {_LEGACY_K3S_TOKEN!r} from older SkyPilot '
+            'versions, so anyone who can reach port 6443 on its head node can '
+            'join it. Rebuild the pool (`sky ssh down`, then `sky ssh up`) to '
+            f'give it a random token.{RESET_ALL}')
 
     # Step 1.5: Join additional server nodes for HA
     if ha_enabled:
@@ -1141,6 +1153,34 @@ export SUDO_ASKPASS=$ASKPASS_SCRIPT
 
 
 _K3S_BIN = '/usr/local/bin'
+_K3S_NODE_TOKEN = '/var/lib/rancher/k3s/server/node-token'
+# The join token every pool used before tokens were generated per pool.
+_LEGACY_K3S_TOKEN = 'mytoken'
+# Secure format: the CA hash lets a joining node verify the head.
+_JOIN_TOKEN_RE = re.compile(r'K10[0-9a-f]+::server:\S+')
+
+
+def _read_join_token(head_node,
+                     ssh_user,
+                     ssh_key,
+                     askpass_block,
+                     use_ssh_config=False) -> str:
+    """Read the k3s join token from the head node."""
+    cmd = f"""
+        {askpass_block}
+        sudo -A cat {_K3S_NODE_TOKEN}
+    """
+    result = deploy_utils.run_remote(head_node,
+                                     cmd,
+                                     ssh_user,
+                                     ssh_key,
+                                     use_ssh_config=use_ssh_config)
+    if result is None or not _JOIN_TOKEN_RE.fullmatch(result):
+        # Never include `result`: it may be the token.
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Failed to read the k3s join token from the '
+                               f'head node ({head_node}).')
+    return result
 
 
 def cleanup_node(node,

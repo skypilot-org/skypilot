@@ -476,3 +476,130 @@ def test_ssh_down_keeps_state_when_a_host_is_not_cleaned(monkeypatch, tmp_path):
                                         kubeconfig_path=str(tmp_path / 'kc'),
                                         cleanup=True)
     assert history.exists()
+
+
+class _StopAtKubeconfig(Exception):
+    pass
+
+
+def _deploy_until_kubeconfig(monkeypatch,
+                             tmp_path,
+                             workers,
+                             token_output,
+                             cmds=None):
+    """Run deploy_single_cluster up to the kubeconfig copy; return commands."""
+    cmds = [] if cmds is None else cmds
+
+    def run_remote(node, cmd, *args, **kwargs):
+        cmds.append((node, cmd))
+        if 'node-token' in cmd:
+            return token_output
+        if 'ip -4 route' in cmd:
+            return '10.0.0.1'
+        if 'nvidia-smi' in cmd:
+            return None
+        return 'SSH connection successful'
+
+    def run_command(cmd, **kwargs):
+        if cmd[0] == 'scp':
+            raise _StopAtKubeconfig()
+        return ''
+
+    monkeypatch.setattr(deploy.constants, 'NODE_POOLS_INFO_DIR', str(tmp_path))
+    monkeypatch.setattr(deploy, 'force_update_status', lambda *a, **k: None)
+    monkeypatch.setattr(deploy_utils, 'run_remote', run_remote)
+    monkeypatch.setattr(deploy_utils, 'run_command', run_command)
+    with pytest.raises(_StopAtKubeconfig):
+        deploy.deploy_single_cluster('p',
+                                     '10.0.0.1',
+                                     workers,
+                                     'u',
+                                     'key',
+                                     'ssh-p',
+                                     None,
+                                     False, [False] * len(workers),
+                                     str(tmp_path / 'kc'),
+                                     cleanup=False)
+    return cmds
+
+
+def _random_token():
+    return f'K10{os.urandom(32).hex()}::server:{os.urandom(16).hex()}'
+
+
+@pytest.mark.parametrize('workers', [
+    ['10.0.0.2'],
+    ['10.0.0.2', '10.0.0.3', '10.0.0.4'],
+],
+                         ids=['agent', 'ha-servers-and-agent'])
+def test_joiners_get_the_token_read_from_the_head(monkeypatch, tmp_path,
+                                                  workers):
+    token = _random_token()
+    cmds = _deploy_until_kubeconfig(monkeypatch, tmp_path, workers, token)
+    head_install = [
+        c for n, c in cmds if 'get.k3s.io' in c and 'K3S_URL' not in c
+    ]
+    joins = {n: c for n, c in cmds if 'K3S_URL' in c}
+    assert len(head_install) == 1
+    # The head generates its own token; passing one would replace it.
+    assert 'K3S_TOKEN' not in head_install[0]
+    assert sorted(joins) == workers
+    for cmd in joins.values():
+        assert f'K3S_TOKEN={token} ' in cmd
+
+
+@pytest.mark.parametrize('shared', [True, False], ids=['shared', 'random'])
+def test_warns_when_the_pool_still_uses_the_shared_token(
+        monkeypatch, tmp_path, shared):
+    secret = 'mytoken' if shared else os.urandom(16).hex()
+    warnings = []
+    monkeypatch.setattr(deploy.logger, 'warning', warnings.append)
+    # A single-host pool reads the token too, so it gets the warning.
+    _deploy_until_kubeconfig(monkeypatch, tmp_path, [],
+                             f'K10{"ab" * 32}::server:{secret}')
+    assert any('shared k3s join token' in w for w in warnings) == shared
+
+
+@pytest.mark.parametrize(
+    'output', [
+        None,
+        '',
+        'mytoken',
+        f'K10{"ab" * 32}::server:',
+        f'K10{"ab" * 32}::node:{"cd" * 16}',
+        f'noise\nK10{"ab" * 32}::server:{"cd" * 16}',
+    ],
+    ids=['none', 'empty', 'short', 'no-secret', 'node-user', 'extra-output'])
+def test_unreadable_join_token_stops_before_any_join(monkeypatch, tmp_path,
+                                                     output):
+    cmds = []
+    with pytest.raises(RuntimeError) as e:
+        _deploy_until_kubeconfig(monkeypatch, tmp_path, ['10.0.0.2'], output,
+                                 cmds)
+    assert str(e.value) == ('Failed to read the k3s join token from the head '
+                            'node (10.0.0.1).')
+    assert not any('K3S_URL' in c for _, c in cmds)
+
+
+@pytest.mark.parametrize('join', ['agent', 'server'])
+def test_failed_join_log_redacts_token_and_password(monkeypatch, tmp_path,
+                                                    join):
+    key = tmp_path / 'key'
+    key.write_text('k')
+    password = 'S3cret$pw'
+    secret = os.urandom(16).hex()
+    token = f'K10{os.urandom(32).hex()}::server:{secret}'
+    askpass = deploy.create_askpass_script(password)
+    errors = []
+    monkeypatch.setattr(deploy_utils.subprocess, 'run', _fake_run([], 1))
+    monkeypatch.setattr(deploy_utils.logger, 'error', errors.append)
+    monkeypatch.setattr(deploy.logger, 'error', errors.append)
+    if join == 'agent':
+        deploy.start_agent_node('10.0.0.2', '10.0.0.1', token, 'u', str(key),
+                                askpass)
+    else:
+        deploy.start_server_node('10.0.0.2', '10.0.0.1', token, 'u', str(key),
+                                 askpass, '--tls-san=10.0.0.1')
+    logged = '\n'.join(errors)
+    assert 'K3S_TOKEN=<redacted>' in logged
+    assert secret not in logged and password not in logged
