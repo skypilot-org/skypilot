@@ -226,6 +226,10 @@ def _update_workspaces_config(
 
             # Write the configuration back to the file
             skypilot_config.update_api_server_config_no_lock(current_config)
+            # This request may have read the workspaces before the write (e.g.
+            # a permission check); the create-time `sky check` must see them.
+            _load_workspaces.cache_clear()
+            workspaces_for_user.cache_clear()
 
             return current_workspaces
     except locks.LockTimeout as e:

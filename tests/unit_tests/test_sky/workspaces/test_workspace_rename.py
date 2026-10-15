@@ -290,3 +290,18 @@ def test_failed_check_after_create_logs_name_and_id(store, monkeypatch):
         result = core.create_workspace('proj-x', {})
     (workspace_id,) = result.keys() - {'default'}
     assert f"'proj-x' ({workspace_id})" in warning.call_args.args[0]
+
+
+def test_create_time_check_sees_the_new_workspace(store, monkeypatch):
+    # The request already read the workspaces (e.g. a permission check)
+    # before the write; the check run right after must see the new one.
+    # pylint: disable=protected-access
+    core._load_workspaces.cache_clear()
+    core._load_workspaces()
+    seen = []
+    monkeypatch.setattr(
+        core.sky_check, 'check',
+        lambda quiet, workspace: seen.append(workspace in core._load_workspaces(
+        )))
+    result = core.create_workspace('proj-y', {})
+    assert result.keys() - {'default'} and seen == [True]
