@@ -45,7 +45,7 @@ SkyPilot cuts your cloud costs & maximizes GPU availability:
 - [Remote API Server Setup]({{BASE_URL}}/reference/api-server/api-server.html.md#sky-api-server-remote): Multi-user team deployment
 - [Admin Deployment Guide]({{BASE_URL}}/reference/api-server/api-server-admin-deploy.html.md): Production deployment instructions
 - [Multi-tenancy]({{BASE_URL}}/reference/api-server/api-server.html.md#multi-tenancy): Share clusters and jobs securely
-- [Authentication]({{BASE_URL}}/reference/auth.html.md): User authentication and authorization
+- [Authentication (SSO) and RBAC]({{BASE_URL}}/reference/auth.html.md): User authentication (SSO, basic auth, service accounts) and authorization
 - [Workspaces]({{BASE_URL}}/admin/workspaces.html.md): Manage team workspaces
 
 ## Clusters
@@ -100,7 +100,7 @@ SkyPilot cuts your cloud costs & maximizes GPU availability:
 
 - [API Server Deployment]({{BASE_URL}}/reference/api-server/api-server.html.md): Deploy SkyPilot for teams
 - [Admin Deployment Guide]({{BASE_URL}}/reference/api-server/api-server-admin-deploy.html.md): Production deployment
-- [Authentication]({{BASE_URL}}/reference/auth.html.md): User authentication and authorization
+- [Authentication (SSO) and RBAC]({{BASE_URL}}/reference/auth.html.md): User authentication (SSO, basic auth, service accounts) and authorization
 - [Workspaces]({{BASE_URL}}/admin/workspaces.html.md): Manage team workspaces
 - [Cloud Permissions]({{BASE_URL}}/cloud-setup/cloud-permissions/index.html.md): Required IAM permissions
 - [Admin Policies]({{BASE_URL}}/cloud-setup/policy.html.md): Configure cloud policies

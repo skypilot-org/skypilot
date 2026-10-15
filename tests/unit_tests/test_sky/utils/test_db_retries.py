@@ -26,6 +26,44 @@ def _wrapped(cause: BaseException,
     return err
 
 
+def _asyncpg_dbapi_error(asyncpg_error: BaseException) -> BaseException:
+    """`asyncpg_error` as the asyncpg dialect raises it mid-statement.
+
+    The dialect maps PostgresError to the generic DBAPIError; the asyncpg
+    class survives only two levels down the cause chain.
+    """
+    adapter_err = _wrapped(asyncpg_error, Exception('adapter'))
+    err = sqlalchemy.exc.DBAPIError('SELECT 1', {}, adapter_err)
+    err.__cause__ = adapter_err
+    return err
+
+
+def _class_name(error: BaseException) -> str:
+    return type(error).__name__
+
+
+_ASYNCPG_ERRORS_A_RETRY_CAN_FIX = [
+    asyncpg.exceptions.AdminShutdownError('terminating connection'),
+    asyncpg.exceptions.CrashShutdownError('crash shutdown'),
+    asyncpg.exceptions.DiskFullError('could not extend file'),
+    asyncpg.exceptions.OutOfMemoryError('out of shared memory'),
+    asyncpg.exceptions.TooManyConnectionsError('too many clients'),
+    asyncpg.exceptions.ConfigurationLimitExceededError(
+        'temporary file size exceeds temp_file_limit'),
+    asyncpg.exceptions.IdleInTransactionSessionTimeoutError(
+        'idle-in-transaction timeout'),
+    asyncpg.exceptions.ReadOnlySQLTransactionError(
+        'cannot execute UPDATE in a read-only transaction'),
+]
+
+_ASYNCPG_ERRORS_A_RETRY_CANNOT_FIX = [
+    asyncpg.exceptions.QueryCanceledError('statement timeout'),
+    asyncpg.exceptions.DatabaseDroppedError('database dropped'),
+    asyncpg.exceptions.InvalidPasswordError('password failed'),
+    asyncpg.exceptions.InFailedSQLTransactionError('transaction aborted'),
+]
+
+
 class TestWithDbRetries:
 
     def test_returns_immediately_on_success(self):
@@ -221,14 +259,22 @@ class TestIsTransient:
         assert retries.is_transient(_wrapped(_make_op_error()))
 
     def test_sqlalchemy_wrapper_around_asyncpg_error(self):
-        # The asyncpg dialect maps PostgresError to the generic DBAPIError;
-        # the asyncpg class survives only two levels down the cause chain.
-        adapter_err = _wrapped(
-            asyncpg.exceptions.ProtocolViolationError('query_wait_timeout'),
-            Exception('adapter'))
-        err = sqlalchemy.exc.DBAPIError('SELECT 1', {}, adapter_err)
-        err.__cause__ = adapter_err
-        assert retries.is_transient(err)
+        assert retries.is_transient(
+            _asyncpg_dbapi_error(
+                asyncpg.exceptions.ProtocolViolationError(
+                    'query_wait_timeout')))
+
+    @pytest.mark.parametrize('asyncpg_error',
+                             _ASYNCPG_ERRORS_A_RETRY_CAN_FIX,
+                             ids=_class_name)
+    def test_asyncpg_errors_a_retry_can_fix(self, asyncpg_error):
+        assert retries.is_transient(_asyncpg_dbapi_error(asyncpg_error))
+
+    @pytest.mark.parametrize('asyncpg_error',
+                             _ASYNCPG_ERRORS_A_RETRY_CANNOT_FIX,
+                             ids=_class_name)
+    def test_asyncpg_errors_a_retry_cannot_fix(self, asyncpg_error):
+        assert not retries.is_transient(_asyncpg_dbapi_error(asyncpg_error))
 
     def test_bare_network_error_counts_only_at_top_level(self):
         assert retries.is_transient(ConnectionResetError('reset'))
