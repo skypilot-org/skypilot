@@ -101,7 +101,7 @@ def test_follow_passes_identity_tail_and_resume_point():
     reader = _Reader()
     logs.register_log_reader(reader)
     assert managed_job_utils._follow_from_log_store(7, 1, 'task', _handle(),
-                                                    None, 123.5) == 0
+                                                    None, 123.5) is not None
     call = reader.calls[0]
     assert call['job_id'] == 7
     assert call['task_id'] == 1
@@ -137,6 +137,24 @@ def test_is_done_when_the_task_leaves_running(monkeypatch):
     # Once done it stays done.
     _set_task_statuses(monkeypatch, [_RUNNING])
     assert is_done()
+
+
+def test_resumes_from_when_the_task_left_running(monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(managed_job_utils.time, 'time', lambda: clock[0])
+    monkeypatch.setattr(managed_job_utils.time, 'monotonic', lambda: clock[0])
+    _set_task_statuses(monkeypatch, [_RECOVERING])
+
+    class _SlowDrain(_Reader):
+
+        def follow_managed_job_logs(self, job_id, task_id, **kwargs):
+            assert kwargs['is_done']()
+            # The recovered attempt may start logging during the drain.
+            clock[0] += 15
+            return 0
+
+    logs.register_log_reader(_SlowDrain())
+    assert _follow() == 1000.0
 
 
 def test_wait_for_task_recovery(monkeypatch):
