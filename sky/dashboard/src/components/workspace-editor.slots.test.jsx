@@ -623,3 +623,34 @@ describe('WorkspaceEditor Refresh for an admin', () => {
     console.error.mockRestore();
   });
 });
+
+describe('WorkspaceEditor rename warning', () => {
+  beforeEach(() => {
+    mockGetWorkspaces.mockReset();
+    mockGetWorkspaces.mockImplementation(async () => ({
+      team: { private: false },
+      'ws-0123456789ab': { name: 'ml', private: false },
+    }));
+  });
+
+  const openRename = async (workspaceName) => {
+    render(<WorkspaceEditor workspaceName={workspaceName} />);
+    await screen.findByText('Apply');
+    fireEvent.click(screen.getByText('Rename'));
+    return (await screen.findByText(/Clusters and managed jobs keep running/))
+      .textContent;
+  };
+
+  test('a name that is also the id keeps working and stays taken', async () => {
+    const text = await openRename('team');
+    expect(text).toContain('"team" keep working');
+    expect(text).toContain('no other workspace can take it');
+  });
+
+  test('a generated-id workspace frees its name', async () => {
+    const text = await openRename('ws-0123456789ab');
+    expect(text).toContain('"ml" will stop working');
+    expect(text).toContain('free for other workspaces');
+    expect(text).not.toContain('ws-0123456789ab');
+  });
+});

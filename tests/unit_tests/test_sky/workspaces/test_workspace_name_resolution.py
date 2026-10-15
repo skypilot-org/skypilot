@@ -234,3 +234,103 @@ def test_workspace_filter_narrows_by_name(monkeypatch):
     assert workspaces_core.filter_workspace_ids_by_name(
         ids, 'TEAM') == ['ws-0123456789ab']
     assert workspaces_core.filter_workspace_ids_by_name(ids, 'nope') == []
+
+
+def test_check_denial_names_the_workspace_as_typed(server_workspaces):
+    with server_workspaces(_REUSED), mock.patch.object(
+            workspaces_core.permission.permission_service,
+            'check_workspace_permission',
+            return_value=False), mock.patch.object(sky_check.common_utils,
+                                                   'get_current_user',
+                                                   return_value=models.User(
+                                                       id='bob', name='bob')):
+        with pytest.raises(exceptions.PermissionDeniedError) as e:
+            sky_check.check_for_request(workspace='team-a')
+    assert "'team-a'" in str(e.value)
+    assert 'ws-0123456789ab' not in str(e.value)
+
+
+def test_ambiguous_server_active_workspace_falls_back_to_the_raw_value():
+    # Only a hand-edited config can name two workspaces alike.
+    with skypilot_config.replace_skypilot_config_in_process(
+            config_utils.Config({
+                'workspaces': {
+                    'ws-x': {
+                        'name': 'ws-y'
+                    },
+                    'ws-y': {}
+                },
+                'active_workspace': 'ws-y'
+            })):
+        with skypilot_config.override_skypilot_config(None):
+            assert skypilot_config.get_active_workspace() == 'ws-y'
+
+
+# Two named workspaces the user is a member of, and one the user lost.
+_NAMED = {
+    'ws-0123456789ab': {
+        'name': 'ml'
+    },
+    'ws-ba9876543210': {
+        'name': 'cv'
+    },
+    'ws-ffffffffffff': {
+        'name': 'old-team'
+    },
+}
+
+
+def _resolve_with_access(server_workspaces, preferred, readable):
+    user = models.User(id='bob', name='bob', preferred_workspace=preferred)
+    writable = {'ws-0123456789ab', 'ws-ba9876543210'}
+
+    def accessible(user_id, names, action):
+        del user_id
+        return set(names) & (writable if action == 'write' else readable)
+
+    with server_workspaces(_NAMED), mock.patch.object(
+            workspaces_core, '_accessible_workspace_names_for_user',
+            accessible):
+        with pytest.raises(exceptions.WorkspaceAmbiguousError) as e:
+            workspaces_core.resolve_workspace_for_user(user)
+    return e.value
+
+
+def test_ambiguous_error_lists_names(server_workspaces):
+    error = _resolve_with_access(server_workspaces, None, set())
+    assert 'ml' in str(error) and 'cv' in str(error)
+    assert 'ws-0123456789ab' not in str(error)
+    assert 'ws-ba9876543210' not in str(error)
+
+
+def test_drift_note_names_a_preferred_workspace_still_readable(
+        server_workspaces):
+    error = _resolve_with_access(server_workspaces, 'ws-ffffffffffff',
+                                 {'ws-ffffffffffff'})
+    assert error.note == "preferred 'old-team' not accessible"
+
+
+def test_drift_note_hides_a_lost_workspaces_name(server_workspaces):
+    error = _resolve_with_access(server_workspaces, 'ws-ffffffffffff', set())
+    assert 'old-team' not in error.note
+    assert 'ws-ffffffffffff' in error.note
+
+
+def test_resync_log_labels_workspaces(server_workspaces):
+    user = models.User(id='bob', name='bob')
+    calls = []
+
+    def accessible(user_id, names, action):
+        del user_id, action
+        # Nothing before the re-sync, one workspace after it.
+        calls.append(names)
+        return set() if len(calls) == 1 else {'ws-0123456789ab'} & set(names)
+
+    with server_workspaces(_NAMED), mock.patch.object(
+            workspaces_core, '_accessible_workspace_names_for_user',
+            accessible), mock.patch.object(
+                workspaces_core,
+                '_try_resync_new_user_grants'), mock.patch.object(
+                    workspaces_core.logger, 'info') as info:
+        workspaces_core.resolve_workspace_for_user(user)
+    assert "'ml' (ws-0123456789ab)" in info.call_args.args[0]

@@ -612,7 +612,9 @@ class TestCheckWorkspacePermission:
             with pytest.raises(exceptions.PermissionDeniedError,
                                match='no access'):
                 sky_check.check(workspace='restricted')
-        mock_check.assert_called_once_with(mock_user, 'restricted')
+        mock_check.assert_called_once_with(mock_user,
+                                           'restricted',
+                                           workspace_ref=None)
 
     @mock.patch('sky.check.check_capabilities', return_value={})
     @mock.patch('sky.workspaces.core.check_workspace_permission')

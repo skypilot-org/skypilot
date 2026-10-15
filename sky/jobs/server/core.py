@@ -2055,6 +2055,11 @@ def cancel(name: Optional[str] = None,
                 graceful_timeout=graceful_timeout,
             )
 
+        # The controller has no workspace names; show the name here.
+        workspace = skypilot_config.get_active_workspace()
+        workspace_name = skypilot_config.get_workspace_name(workspace)
+        stdout = stdout.replace(f'active workspace {workspace!r}',
+                                f'active workspace {workspace_name!r}')
         logger.info(stdout)
         if 'Multiple jobs found with name' in stdout:
             with ux_utils.print_exception_no_traceback():

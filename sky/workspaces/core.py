@@ -699,7 +699,8 @@ def update_workspace(
     try:
         sky_check.check(quiet=True, workspace=workspace_name)
     except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Workspace {workspace_name} configuration saved but '
+        label = skypilot_config.workspace_label(workspace_name)
+        logger.warning(f'Workspace {label} configuration saved but '
                        f'validation check failed: {e}')
         # Don't fail the update if the check fails, just warn
 
@@ -764,7 +765,8 @@ def create_workspace(workspace_name: str, config: Dict[str,
     try:
         sky_check.check(quiet=True, workspace=workspace_id)
     except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Workspace {workspace_name} configuration saved but '
+        label = skypilot_config.workspace_label(workspace_id)
+        logger.warning(f'Workspace {label} configuration saved but '
                        f'validation check failed: {e}')
         # Don't fail the update if the check fails, just warn
 
@@ -1033,7 +1035,14 @@ def check_cluster_write_permission(user: models.User,
     workspace = global_user_state.get_cluster_workspace(cluster_name)
     if workspace is None:
         return
-    check_workspace_permission(user, workspace)
+    # The user named the cluster, not its workspace, which they may not be
+    # allowed to see.
+    if not permission.permission_service.check_workspace_permission(
+            user.id, workspace,
+            action=workspace_constants.WORKSPACE_ACTION_WRITE):
+        raise exceptions.PermissionDeniedError(
+            f'User {user.name} ({user.id}) does not have permission to access '
+            f'the workspace of cluster {cluster_name!r}')
 
 
 def is_workspace_private(workspace_config: Dict[str, Any]) -> bool:
@@ -1111,11 +1120,12 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
                     continue
                 current_config = workspaces[workspace_name]
                 if not current_config.get('private', False):
+                    name = skypilot_config.get_workspace_name(
+                        workspace_name, workspaces)
                     failed.append({
                         'workspace_name': workspace_name,
-                        'error':
-                            (f'Workspace {workspace_name!r} is not private; '
-                             'allowed_users has no effect.'),
+                        'error': (f'Workspace {name!r} is not private; '
+                                  'allowed_users has no effect.'),
                     })
                     continue
                 current_allowed = list(current_config.get('allowed_users', []))
@@ -1248,9 +1258,11 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
                 continue
             current_ws_config = current_workspaces[workspace_name]
             if not current_ws_config.get('private', False):
+                name = skypilot_config.get_workspace_name(
+                    workspace_name, current_workspaces)
                 failed.append({
                     'workspace_name': workspace_name,
-                    'error': (f'Workspace {workspace_name!r} is not private; '
+                    'error': (f'Workspace {name!r} is not private; '
                               'allowed_users has no effect.'),
                 })
                 continue
@@ -1580,8 +1592,10 @@ def resolve_workspace_for_user(
         _try_resync_new_user_grants(user)
         accessible, read_only_only = _active_candidates()
         if accessible:
+            labels = ', '.join(
+                skypilot_config.workspace_label(w) for w in accessible)
             logger.info(f'Workspace access for user {user.name} ({user.id}) '
-                        f'restored by policy re-sync: {accessible}')
+                        f'restored by policy re-sync: {labels}')
 
     # Read preferred from the User dataclass: it is populated by
     # global_user_state.add_or_update_user(return_user=True), which the
@@ -1598,7 +1612,14 @@ def resolve_workspace_for_user(
         # The preference was set in the past but the user no longer has
         # access (RBAC drift). Surface this in the source note so users
         # understand why their preference wasn't honored.
-        drift_note = f'preferred {preferred!r} not accessible'
+        # Name it only if the user can still read it; otherwise the stored id,
+        # so a workspace the user lost does not reveal its current name.
+        shown = preferred
+        if _accessible_workspace_names_for_user(
+                user.id, {preferred},
+                action=workspace_constants.WORKSPACE_ACTION_READ):
+            shown = skypilot_config.get_workspace_name(preferred)
+        drift_note = f'preferred {shown!r} not accessible'
 
     if constants.SKYPILOT_DEFAULT_WORKSPACE in accessible:
         # Default-fallback: don't break legacy multi-workspace users and
@@ -1634,4 +1655,7 @@ def resolve_workspace_for_user(
             source=workspace_constants.WORKSPACE_SOURCE_READ_ONLY,
             note=drift_note)
 
-    raise exceptions.WorkspaceAmbiguousError(accessible, note=drift_note)
+    # The user is a member of each, so names are safe to show.
+    raise exceptions.WorkspaceAmbiguousError(
+        [skypilot_config.get_workspace_name(w) for w in accessible],
+        note=drift_note)

@@ -29,9 +29,12 @@ class TestCheckClusterWritePermission(unittest.TestCase):
         mock_get_ws.return_value = 'ws-b'
         mock_check.return_value = False  # not a member of ws-b
 
-        with self.assertRaises(exceptions.PermissionDeniedError):
+        with self.assertRaises(exceptions.PermissionDeniedError) as e:
             workspaces_core.check_cluster_write_permission(
                 self.user, 'other-users-cluster')
+        # The user named the cluster; its workspace may be hidden from them.
+        self.assertIn("'other-users-cluster'", str(e.exception))
+        self.assertNotIn('ws-b', str(e.exception))
 
         # The check must consult the *cluster's* workspace, not the active one.
         mock_get_ws.assert_called_once_with('other-users-cluster')

@@ -259,3 +259,32 @@ def test_private_switch_error_names_the_workspace(store, monkeypatch):
         })
     assert "Cannot change workspace 'proj-a' to private" in str(e.value)
     assert 'ws-0123456789ab' not in str(e.value)
+
+
+def test_failed_check_after_update_logs_name_and_id(store, monkeypatch):
+    _workspaces(store)['ws-0123456789ab'] = {
+        'name': 'proj-a',
+        'kubernetes': {
+            'allowed_contexts': ['ctx-a']
+        }
+    }
+    monkeypatch.setattr(core.sky_check, 'check',
+                        mock.Mock(side_effect=RuntimeError('boom')))
+    with mock.patch.object(core.logger, 'warning') as warning:
+        core.update_workspace(
+            'ws-0123456789ab', {
+                'name': 'proj-a',
+                'kubernetes': {
+                    'allowed_contexts': ['ctx-a', 'ctx-b']
+                }
+            })
+    assert "'proj-a' (ws-0123456789ab)" in warning.call_args.args[0]
+
+
+def test_failed_check_after_create_logs_name_and_id(store, monkeypatch):
+    monkeypatch.setattr(core.sky_check, 'check',
+                        mock.Mock(side_effect=RuntimeError('boom')))
+    with mock.patch.object(core.logger, 'warning') as warning:
+        result = core.create_workspace('proj-x', {})
+    (workspace_id,) = result.keys() - {'default'}
+    assert f"'proj-x' ({workspace_id})" in warning.call_args.args[0]

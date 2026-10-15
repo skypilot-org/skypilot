@@ -1260,10 +1260,11 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
             <DialogHeader className="">
               <DialogTitle>Rename Workspace</DialogTitle>
               <DialogDescription>
-                Clusters and managed jobs keep running. Configs and scripts that
-                still use the name &quot;{displayName}&quot; will stop working,
-                or reach whichever workspace takes that name next. Tell the
-                members of this workspace before renaming it.
+                Clusters and managed jobs keep running.{' '}
+                {displayName === workspaceName
+                  ? `Configs and scripts that use "${displayName}" keep working: it stays this workspace's id, and no other workspace can take it.`
+                  : `Configs and scripts that still use the name "${displayName}" will stop working, and the name becomes free for other workspaces to take.`}{' '}
+                Tell the members of this workspace before renaming it.
               </DialogDescription>
             </DialogHeader>
             <Input

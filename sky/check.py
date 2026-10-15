@@ -411,8 +411,9 @@ def check_capabilities(
                 is_full_workspace_run=(clouds is None),
             )
         except Exception as e:  # pylint: disable=broad-except
+            label = skypilot_config.workspace_label(current_workspace_name)
             logger.warning(f'Failed to persist check_results for workspace '
-                           f'{current_workspace_name!r}: {e}')
+                           f'{label}: {e}')
 
         echo(
             _summary_message(enabled_clouds, cloud2ctx2text,
@@ -491,13 +492,16 @@ def check(
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
     workspace: Optional[str] = None,
+    workspace_ref: Optional[str] = None,
 ) -> Dict[str, Dict[str, List[str]]]:
     if workspace is not None:
         # Import here to avoid circular import:
         # pylint: disable=import-outside-toplevel
         from sky.workspaces import core as workspaces_core
         workspaces_core.check_workspace_permission(
-            common_utils.get_current_user(), workspace)
+            common_utils.get_current_user(),
+            workspace,
+            workspace_ref=workspace_ref)
     capabilities_result = check_capabilities(quiet, verbose, clouds,
                                              sky_cloud.ALL_CAPABILITIES,
                                              workspace)
@@ -521,12 +525,14 @@ def check_for_request(
 
     In-process callers hold workspace ids and call `check` directly.
     """
+    workspace_ref = workspace
     if workspace is not None:
         workspace = skypilot_config.resolve_workspace_ref(workspace)
     return check(quiet=quiet,
                  verbose=verbose,
                  clouds=clouds,
-                 workspace=workspace)
+                 workspace=workspace,
+                 workspace_ref=workspace_ref)
 
 
 def get_cached_enabled_clouds_or_refresh(

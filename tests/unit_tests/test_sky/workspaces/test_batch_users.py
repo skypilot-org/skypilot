@@ -107,7 +107,8 @@ class TestBatchAddUsersToWorkspaces:
                     'private': True,
                     'allowed_users': []
                 },
-                'pub': {
+                'ws-0123456789ab': {
+                    'name': 'pub',
                     'private': False
                 },
             }
@@ -115,11 +116,14 @@ class TestBatchAddUsersToWorkspaces:
 
         mock_update_config.side_effect = fake_update
 
-        result = core.batch_add_users_to_workspaces(['p1', 'pub'], ['u1'])
+        result = core.batch_add_users_to_workspaces(['p1', 'ws-0123456789ab'],
+                                                    ['u1'])
         assert result['succeeded'] == ['p1']
         assert len(result['failed']) == 1
-        assert result['failed'][0]['workspace_name'] == 'pub'
-        assert 'not private' in result['failed'][0]['error']
+        assert result['failed'][0]['workspace_name'] == 'ws-0123456789ab'
+        # The error is read by a person: it names the workspace.
+        assert result['failed'][0]['error'].startswith(
+            "Workspace 'pub' is not private")
 
     @mock.patch(
         'sky.users.permission.permission_service.update_workspace_policy')
@@ -309,12 +313,15 @@ class TestBatchRemoveUsersFromWorkspaces:
     def test_public_workspace_is_rejected(self, mock_get_all_users,
                                           mock_update_config,
                                           mock_update_policy):
-        initial = {'pub': {'private': False}}
+        initial = {'ws-0123456789ab': {'name': 'pub', 'private': False}}
 
         with self._patch_initial_workspaces(initial):
-            result = core.batch_remove_users_from_workspaces(['pub'], ['u1'])
+            result = core.batch_remove_users_from_workspaces(
+                ['ws-0123456789ab'], ['u1'])
         assert result['succeeded'] == []
-        assert result['failed'][0]['workspace_name'] == 'pub'
+        assert result['failed'][0]['workspace_name'] == 'ws-0123456789ab'
+        assert result['failed'][0]['error'].startswith(
+            "Workspace 'pub' is not private")
         # No modifier should run because nothing validated.
         mock_update_config.assert_not_called()
 

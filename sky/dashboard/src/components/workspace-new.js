@@ -50,19 +50,15 @@ export function NewWorkspace() {
 
   const typedName = workspaceName.trim();
   const nameError = typedName ? workspaceNameError(typedName) : null;
-  // Names are unique among current names; keys are ids.
-  const takenById = Object.keys(existingWorkspaces).find(
+  // A name may not be another workspace's name or id (keys are ids).
+  const nameOwner = Object.keys(existingWorkspaces).find(
     (id) => getWorkspaceName(existingWorkspaces, id) === typedName
   );
+  const isIdOfOther =
+    nameOwner === undefined &&
+    Object.prototype.hasOwnProperty.call(existingWorkspaces, typedName);
+  const takenById = isIdOfOther ? typedName : nameOwner;
   const isWorkspaceNameTaken = Boolean(typedName) && takenById !== undefined;
-  // A renamed workspace's original name (its id) is free to reuse, but
-  // configs still typing it will reach the new workspace.
-  const formerName =
-    typedName &&
-    !isWorkspaceNameTaken &&
-    existingWorkspaces.hasOwnProperty(typedName)
-      ? getWorkspaceName(existingWorkspaces, typedName)
-      : null;
   const isFormValid = typedName && !nameError && !isWorkspaceNameTaken;
 
   if (showEditor) {
@@ -110,19 +106,15 @@ export function NewWorkspace() {
               <p className="text-sm text-red-600 mt-1">{nameError}</p>
             ) : isWorkspaceNameTaken ? (
               <p className="text-sm text-gray-500 mt-1">
-                Workspace &quot;{workspaceName}&quot; already exists.{' '}
+                {isIdOfOther
+                  ? `"${typedName}" is the id of workspace "${getWorkspaceName(existingWorkspaces, takenById)}".`
+                  : `Workspace "${typedName}" already exists.`}{' '}
                 <Link
                   href={`/workspaces/${takenById}`}
                   className="text-blue-600 hover:underline"
                 >
                   View the workspace
                 </Link>
-              </p>
-            ) : formerName ? (
-              <p className="text-sm text-amber-700 mt-1">
-                &quot;{typedName}&quot; was the original name of workspace
-                &quot;{formerName}&quot;. Configs and scripts that still use
-                &quot;{typedName}&quot; will reach this new workspace.
               </p>
             ) : (
               <p className="text-sm text-gray-500 mt-1">

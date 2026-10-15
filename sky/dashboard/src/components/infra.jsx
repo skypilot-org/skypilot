@@ -3882,7 +3882,7 @@ export function GPUs() {
               <p className="text-sm text-gray-500">
                 {selectedWorkspace === 'all'
                   ? 'No enabled clouds available.'
-                  : `No enabled clouds for workspace "${selectedWorkspace}".`}
+                  : `No enabled clouds for workspace "${workspaceName(selectedWorkspace)}".`}
               </p>
             )
           ) : (

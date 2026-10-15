@@ -1022,8 +1022,15 @@ def override_skypilot_config(
         if server_workspace is None:
             yield
             return
-        with local_active_workspace_ctx(
-                resolve_workspace_ref(server_workspace)):
+        try:
+            workspace = resolve_workspace_ref(server_workspace)
+        except ValueError as e:
+            # Only a hand-edited config can make the name ambiguous; failing
+            # every request (internal daemons included) would be worse.
+            logger.warning(f'Using active_workspace {server_workspace!r} from '
+                           f'the server config as an id: {e}')
+            workspace = server_workspace
+        with local_active_workspace_ctx(workspace):
             yield
         return
     original_config = _get_loaded_config()
