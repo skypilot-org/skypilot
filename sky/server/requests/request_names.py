@@ -29,6 +29,7 @@ class RequestName(str, enum.Enum):
     CLUSTER_START = 'start'
     CLUSTER_AUTOSTOP = 'autostop'
     CLUSTER_QUEUE = 'queue'
+    CLUSTER_JOB_SPEC = 'cluster_job_spec'
     CLUSTER_JOB_STATUS = 'job_status'
     CLUSTER_JOB_CANCEL = 'cancel'
     CLUSTER_JOB_LOGS = 'logs'

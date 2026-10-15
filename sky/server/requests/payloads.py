@@ -432,6 +432,12 @@ class QueueBody(RequestBody):
     all_users: bool = False
 
 
+class ClusterJobSpecBody(RequestBody):
+    """The request body for the cluster job spec endpoint."""
+    cluster_name: str
+    job_id: int
+
+
 class CancelBody(RequestBody):
     """The request body for the cancel endpoint."""
     cluster_name: str

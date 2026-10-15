@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 66  # managed jobs: job.wait_for_scheduling_timeout
+API_VERSION = 67  # cluster_job_spec endpoint
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):

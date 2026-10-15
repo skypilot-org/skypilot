@@ -1559,6 +1559,56 @@ def with_config(cmd: str, config_path: str) -> str:
             f'{cmd}')
 
 
+def write_api_server_config(config: Optional[Dict[str, Any]] = None) -> str:
+    """Writes the local API server's config, plus `config`, to a new file.
+
+    For keys the server ignores in a client's config, such as `logs`, which a
+    test can only set by restarting the server with them (see
+    restart_api_server_with_config). Starts from the server's default config
+    file, without its `logs`, so the restarted server keeps its other settings.
+
+    The file is not deleted when the test exits: the server reads it on every
+    request, and a test that fails under --no-terminate-on-failure skips the
+    teardown that restores the server. The caller removes it once the test
+    passes.
+
+    Returns:
+        The path of the written file.
+    """
+    path = os.path.expanduser(skypilot_config.get_user_config_path())
+    base = (skypilot_config.parse_and_validate_config_file(path)
+            if os.path.exists(path) else config_utils.Config())
+    base.pop('logs', None)
+    if config is not None:
+        base = skypilot_config.overlay_skypilot_config(
+            base, config_utils.Config(config))
+    with tempfile.NamedTemporaryFile(mode='w',
+                                     prefix='server_config_',
+                                     suffix='.yaml',
+                                     delete=False) as f:
+        # An empty config is left empty rather than dumped as '{}', so that a
+        # test can append further top-level keys to the file.
+        if base:
+            f.write(yaml_utils.dump_yaml_str(dict(base)))
+        return f.name
+
+
+def restart_api_server_with_config(config_path: str) -> str:
+    """Restarts the local API server with the config at `config_path`.
+
+    Tests using this must be marked no_remote_server, and restore the server
+    with RESTORE_API_SERVER_CONFIG in their teardown.
+    """
+    return (f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={config_path} && '
+            f'{SKY_API_RESTART}')
+
+
+# Restarts the local API server with its default config file.
+RESTORE_API_SERVER_CONFIG = (
+    f'unset {skypilot_config.ENV_VAR_GLOBAL_CONFIG} && '
+    f'{SKY_API_RESTART}')
+
+
 def _get_controller_pod_name(controller_name: str) -> str:
     return (
         'kubectl get pods -l app -o custom-columns=NAME:.metadata.name,'

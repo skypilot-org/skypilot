@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import shlex
+import shutil
 import tempfile
 import textwrap
 import time
@@ -245,6 +246,105 @@ def test_workspace_private_access_pre_login_user(generic_cloud: str):
     # user, not the pre-login user we exercise via the auth header.
     smoke_tests_utils.run_one_test(test, check_sky_status=False)
     os.unlink(server_config_path)
+
+
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+def test_cluster_job_spec_private_workspace(generic_cloud: str):
+    """A cluster job's spec is not readable outside the cluster's workspace.
+
+    The owner launches a cluster in a private workspace that only they belong
+    to. Another user, whose active workspace is the public `default`, asks for
+    the spec of its job 1 and must get a 403; the owner gets it. The same HTTP
+    request is sent as both users, so the 403 can only come from the
+    cluster-workspace check. Identities are simulated as in
+    test_workspace_private_access_pre_login_user.
+    """
+    if smoke_tests_utils.is_remote_server_test():
+        pytest.skip(
+            'This test requires a local API server it can restart with a '
+            'private-workspace config; skipped against a remote endpoint.')
+
+    suffix = uuid.uuid4().hex[:8]
+    owner = f'spec-owner-{suffix}@example.com'
+    outsider = f'spec-outsider-{suffix}@example.com'
+    ws_name = f'spec-private-ws-{suffix}'
+    base_url = smoke_tests_utils.ENDPOINT.rsplit('/api/health', 1)[0]
+    name = smoke_tests_utils.get_cluster_name()
+
+    owner_hash = hashlib.md5(
+        owner.encode(),
+        usedforsecurity=False).hexdigest()[:common_utils.USER_HASH_LENGTH]
+
+    server_config_content = textwrap.dedent(f"""\
+        rbac:
+          default_role: user
+        workspaces:
+          default: {{}}
+          {ws_name}:
+            private: true
+            allowed_users:
+              - {owner}
+    """)
+    with tempfile.NamedTemporaryFile(prefix='server_config_',
+                                     delete=False,
+                                     mode='w') as f:
+        f.write(server_config_content)
+        server_config_path = f.name
+    # The owner works in the private workspace, set in a project config:
+    # a client SKYPILOT_CONFIG would be forwarded to the server and replace
+    # its config (and with it the workspace) for the request.
+    owner_dir = tempfile.mkdtemp(prefix='spec_owner_')
+    with open(os.path.join(owner_dir, '.sky.yaml'), 'w', encoding='utf-8') as f:
+        f.write(f'active_workspace: {ws_name}\n')
+    as_owner = (f'cd {owner_dir} && '
+                f'export {constants.USER_ID_ENV_VAR}="{owner_hash}"; '
+                f'export {constants.USER_ENV_VAR}="{owner}"; ')
+
+    def spec_status_as(user: str) -> str:
+        """HTTP status of asking for job 1's spec, as `user`."""
+        body = json.dumps({'cluster_name': name, 'job_id': 1})
+        return (f'curl -sS -o /dev/null -w "%{{http_code}}" -X POST '
+                f'-H "X-Auth-Request-Email: {user}" '
+                f'-H "Content-Type: application/json" '
+                f"-d '{body}' {base_url}/cluster_job_spec")
+
+    test = smoke_tests_utils.Test(
+        'test_cluster_job_spec_private_workspace',
+        [
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}='
+            f'{server_config_path} && {smoke_tests_utils.SKY_API_RESTART}',
+            # First contact creates both users (see the pre-login test).
+            f'curl -sS -H "X-Auth-Request-Email: {owner}" '
+            f'{base_url}/users/me/workspace',
+            f'curl -sS -H "X-Auth-Request-Email: {outsider}" '
+            f'{base_url}/users/me/workspace',
+            f'{as_owner}sky check {generic_cloud}',
+            f'{as_owner}sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',
+            f'{as_owner}s=$(sky status); echo "$s"; '
+            f'echo "$s" | grep {name} | grep {ws_name}',
+            # The owner can read the spec, through the same request.
+            f'code=$({spec_status_as(owner)}); echo "owner: $code"; '
+            f'[ "$code" = "200" ]',
+            f'{as_owner}python3 -c "from sky.client import sdk; '
+            f's = sdk.stream_and_get(sdk.cluster_job_spec({name!r}, 1)); '
+            f'assert s and {name!r} in s[\'entrypoint\'], s"',
+            # The outsider cannot.
+            f'code=$({spec_status_as(outsider)}); echo "outsider: $code"; '
+            f'[ "$code" = "403" ]',
+        ],
+        teardown=(
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}='
+            f'{server_config_path}; {as_owner}sky down -y {name} || true; '
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+            f'{smoke_tests_utils.SKY_API_RESTART}'),
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    # The default `sky status -u` preamble authenticates as the ambient user.
+    smoke_tests_utils.run_one_test(test, check_sky_status=False)
+    os.unlink(server_config_path)
+    shutil.rmtree(owner_dir, ignore_errors=True)
 
 
 def _verify_cluster_created_by_user(cluster_name: str,
