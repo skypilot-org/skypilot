@@ -1232,7 +1232,7 @@ def start_server_node(node,
             curl -sfL https://get.k3s.io | K3S_NODE_NAME={node} \
                 INSTALL_K3S_EXEC='server {tls_sans} --node-label skypilot-ip={node}' \
                 K3S_URL=https://{master_addr}:6443 \
-                K3S_TOKEN={k3s_token} sudo -E -A sh -
+                K3S_TOKEN={shlex.quote(k3s_token)} sudo -E -A sh -
         """
     result = deploy_utils.run_remote(node,
                                      cmd,
@@ -1268,7 +1268,7 @@ def start_agent_node(node,
     cmd = f"""
             {askpass_block}
             curl -sfL https://get.k3s.io | K3S_NODE_NAME={node} INSTALL_K3S_EXEC='agent --node-label skypilot-ip={node}' \
-                K3S_URL=https://{master_addr}:6443 K3S_TOKEN={k3s_token} sudo -E -A sh -
+                K3S_URL=https://{master_addr}:6443 K3S_TOKEN={shlex.quote(k3s_token)} sudo -E -A sh -
         """
     result = deploy_utils.run_remote(node,
                                      cmd,

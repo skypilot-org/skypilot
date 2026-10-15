@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -603,3 +604,42 @@ def test_failed_join_log_redacts_token_and_password(monkeypatch, tmp_path,
     logged = '\n'.join(errors)
     assert 'K3S_TOKEN=<redacted>' in logged
     assert secret not in logged and password not in logged
+
+
+@pytest.mark.parametrize('join', ['agent', 'server'])
+def test_join_token_cannot_run_shell_commands(monkeypatch, tmp_path, join):
+    """A token from a hostile head stays one value; nothing in it runs."""
+    pwned = tmp_path / 'pwned'
+    token = f'K10{"ab" * 32}::server:x;touch${{IFS}}{pwned};$(touch${{IFS}}{pwned})'
+    assert deploy._JOIN_TOKEN_RE.fullmatch(token)
+    cmds = []
+    monkeypatch.setattr(deploy_utils, 'run_remote',
+                        lambda node, cmd, *a, **k: cmds.append(cmd))
+    if join == 'agent':
+        deploy.start_agent_node('10.0.0.2', '10.0.0.1', token, 'u', 'key', '')
+    else:
+        deploy.start_server_node('10.0.0.2', '10.0.0.1', token, 'u', 'key', '',
+                                 '--tls-san=10.0.0.1')
+    assignment = re.search(r'K3S_TOKEN=\S+', cmds[0]).group(0)
+    out = subprocess.run(['bash', '-c', f'{assignment} printenv K3S_TOKEN'],
+                         capture_output=True,
+                         text=True,
+                         check=True,
+                         cwd=tmp_path)
+    assert out.stdout == token + '\n'
+    assert not pwned.exists()
+
+
+def test_failed_command_stderr_is_redacted(monkeypatch):
+    secret = os.urandom(16).hex()
+    token = f'K10{os.urandom(32).hex()}::server:{secret}'
+    stderr = f'boom: K3S_TOKEN={token}\nbare {token} here'
+    errors = []
+    monkeypatch.setattr(
+        deploy_utils.subprocess, 'run',
+        lambda args, **kwargs: subprocess.CompletedProcess(args, 1, '', stderr))
+    monkeypatch.setattr(deploy_utils.logger, 'error', errors.append)
+    assert deploy_utils.run_remote('10.0.0.1', 'true') is None
+    assert len(errors) == 1
+    assert secret not in errors[0]
+    assert 'boom: K3S_TOKEN=<redacted>' in errors[0]
