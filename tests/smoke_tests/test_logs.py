@@ -19,6 +19,7 @@ import sky
 @pytest.mark.no_seeweb  # Requires GCP to be enabled
 # logs is a server-side setting: the test restarts the API server with it.
 @pytest.mark.no_remote_server
+@pytest.mark.no_dependency  # We can't restart the api server in the dependency test.
 def test_log_collection_to_gcp(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Calculate timestamp 1 hour ago in ISO format
@@ -77,6 +78,7 @@ def test_log_collection_to_gcp(generic_cloud: str):
 @pytest.mark.no_seeweb  # Requires GCP to be enabled
 # logs is a server-side setting: the test restarts the API server with it.
 @pytest.mark.no_remote_server
+@pytest.mark.no_dependency  # We can't restart the api server in the dependency test.
 def test_managed_job_logs_with_log_store(generic_cloud: str):
     """`sky jobs logs` works for running and terminal jobs with a log store.
 
