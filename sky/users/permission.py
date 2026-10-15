@@ -1356,11 +1356,13 @@ class PermissionService:
                         # add_policy returns False if the policy already
                         # exists.
                         if enforcer.add_policy(user_id, workspace_name, '*'):
+                            label = skypilot_config.workspace_label(
+                                workspace_name)
                             logger.info(
                                 f'Granting user {user_id} access to private '
-                                f'workspace {workspace_name!r} on user '
-                                'creation (matched allowed_users after the '
-                                'user record was created).')
+                                f'workspace {label} on user creation '
+                                '(matched allowed_users after the user record '
+                                'was created).')
                             added_any = True
         except locks.LockTimeout:
             logger.warning(

@@ -3234,9 +3234,9 @@ def get_cached_check_results(
     try:
         return json.loads(row.value)
     except (json.JSONDecodeError, TypeError):
-        logger.warning(
-            f'Corrupt check_results row for workspace {workspace!r}; '
-            f'returning empty dict.')
+        logger.warning(f'Corrupt check_results row for workspace '
+                       f'{skypilot_config.workspace_label(workspace)}; '
+                       f'returning empty dict.')
         return {}
 
 
@@ -3296,8 +3296,10 @@ def set_check_results(
                 try:
                     existing = json.loads(row.value)
                 except (json.JSONDecodeError, TypeError):
-                    logger.warning(f'Corrupt check_results row for workspace '
-                                   f'{workspace!r}; replacing.')
+                    logger.warning(
+                        f'Corrupt check_results row for workspace '
+                        f'{skypilot_config.workspace_label(workspace)}; '
+                        'replacing.')
                     existing = {}
             new_value = dict(existing)
             for cloud_repr, ctx_dict in results.items():

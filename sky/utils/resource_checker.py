@@ -8,6 +8,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
+from sky import skypilot_config
 from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
@@ -121,6 +122,9 @@ def _check_active_resources(resource_operations: List[Tuple[str, str]],
                 user_info = global_user_state.get_user(resource_name)
                 if user_info and user_info.name:
                     resource_name = user_info.name
+            elif resource_type == 'workspace':
+                resource_name = skypilot_config.get_workspace_name(
+                    resource_name)
             error_messages.append(
                 f'Cannot {operation} {resource_type} {resource_name!r} '
                 f'because it has {resource_error_summary}.')
@@ -394,8 +398,6 @@ def load_fresh_workspaces() -> Dict[str, Any]:
     Individual callers should rely on the default ``workspaces=None`` of
     ``check_user_role_demotion`` instead.
     """
-    # pylint: disable=import-outside-toplevel
-    from sky import skypilot_config
     skypilot_config.safe_reload_config()
     return skypilot_config.get_nested(('workspaces',), default_value={})
 
@@ -513,7 +515,9 @@ def check_user_role_demotion(
             job_list = ', '.join(res['jobs'])
             parts.append(f'{n_jobs} active managed job(s): {job_list}')
         joined = ' and '.join(parts)
-        error_lines.append(f'  - workspace {ws!r}: {joined}')
+        error_lines.append(
+            f'  - workspace {skypilot_config.get_workspace_name(ws)!r}: '
+            f'{joined}')
 
     raise ValueError(
         f'Cannot demote user {user_display!r} from admin to user: user '

@@ -243,3 +243,19 @@ def test_read_only_viewers_see_the_name(monkeypatch):
         'private': True,
         'name': 'proj-a',
     }
+
+
+def test_private_switch_error_names_the_workspace(store, monkeypatch):
+    _workspaces(store)['ws-0123456789ab'] = {'name': 'proj-a'}
+    monkeypatch.setattr(
+        core.resource_checker, 'check_users_workspaces_active_resources',
+        lambda *a, **k: ('1 active cluster(s): c1', ['bob'], {}))
+
+    with pytest.raises(ValueError) as e:
+        core.update_workspace('ws-0123456789ab', {
+            'name': 'proj-a',
+            'private': True,
+            'allowed_users': ['alice']
+        })
+    assert "Cannot change workspace 'proj-a' to private" in str(e.value)
+    assert 'ws-0123456789ab' not in str(e.value)

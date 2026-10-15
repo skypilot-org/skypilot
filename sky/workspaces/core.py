@@ -270,10 +270,13 @@ def _validate_workspace_config(workspace_name: str,
     """
     workspace_schema = schemas.get_config_schema(
     )['properties']['workspaces']['additionalProperties']
+    display_name = workspace_config.get('name') if isinstance(
+        workspace_config.get('name'),
+        str) else skypilot_config.get_workspace_name(workspace_name)
     try:
         common_utils.validate_schema(
             workspace_config, workspace_schema,
-            f'Invalid configuration for workspace {workspace_name!r}: ')
+            f'Invalid configuration for workspace {display_name!r}: ')
     except exceptions.InvalidSkyPilotConfigError as e:
         # We need to replace this exception with a ValueError because: a) it is
         # more user-friendly and b) it will not be caught by the try-except by
@@ -438,7 +441,8 @@ def _validate_workspace_config_changes_with_lock(
                                                resolver=resolver)
     except locks.LockTimeout as e:
         raise RuntimeError(
-            f'Failed to validate workspace {workspace_name!r} due to '
+            f'Failed to validate workspace '
+            f'{skypilot_config.get_workspace_name(workspace_name)!r} due to '
             'a timeout when trying to access database. Please '
             f'try again or manually remove the lock at {lock_id}. '
             f'{common_utils.format_exception(e)}') from None
@@ -483,6 +487,8 @@ def _validate_workspace_config_changes(
         ValueError: If the configuration change is not allowed due to active
         resources.
     """
+    ws_name = skypilot_config.get_workspace_name(workspace_name)
+    ws_label = skypilot_config.workspace_label(workspace_name)
     config_comparison = _compare_workspace_configs(current_config,
                                                    new_config,
                                                    resolver=resolver)
@@ -494,23 +500,22 @@ def _validate_workspace_config_changes(
         # user-access validation below (a no-op when only contexts changed).
         if config_comparison.additive_allowed_contexts:
             logger.info(
-                f'Workspace {workspace_name!r} only adds Kubernetes '
+                f'Workspace {ws_label} only adds Kubernetes '
                 'allowed_contexts; existing contexts remain allowed. Skipping '
                 'the active-resource check for this change.')
         if config_comparison.private_changed:
             if (config_comparison.private_old and
                     not config_comparison.private_new):
                 # Changed from private to public - always allow
-                logger.info(
-                    f'Workspace {workspace_name!r} changed from private to'
-                    f' public.')
+                logger.info(f'Workspace {ws_label} changed from private to'
+                            f' public.')
                 return
             elif (not config_comparison.private_old and
                   config_comparison.private_new):
                 # Changed from public to private - check that all active
                 # resources belong to the new allowed users
                 logger.info(
-                    f'Workspace {workspace_name!r} changed from public to'
+                    f'Workspace {ws_label} changed from public to'
                     f' private. Checking that all active resources belong'
                     f' to allowed users.')
 
@@ -519,7 +524,7 @@ def _validate_workspace_config_changes(
                         config_comparison.allowed_users_new, [workspace_name],
                         resources=resources))
                 if error_summary:
-                    error_msg=f'Cannot change workspace {workspace_name!r}' \
+                    error_msg=f'Cannot change workspace {ws_name!r}' \
                     f' to private '
                     if missed_users_names:
                         missed_users_list = ', '.join(missed_users_names)
@@ -538,10 +543,9 @@ def _validate_workspace_config_changes(
             if (config_comparison.allowed_users_changed and
                     config_comparison.removed_users):
                 # Check that removed users don't have active resources
-                logger.info(
-                    f'Checking that removed users'
-                    f' {config_comparison.removed_users} do not have'
-                    f' active resources in workspace {workspace_name!r}.')
+                logger.info(f'Checking that removed users'
+                            f' {config_comparison.removed_users} do not have'
+                            f' active resources in workspace {ws_label}.')
                 error_summary, missed_users_names, missed_user_dict = (
                     resource_checker.check_users_workspaces_active_resources(
                         config_comparison.allowed_users_new, [workspace_name],
@@ -562,11 +566,11 @@ def _validate_workspace_config_changes(
                     error_users_list = ', '.join(error_user_names)
                     if len(error_user_names) == 1:
                         error_msg += f'remove user {error_users_list!r} ' \
-                        f'from workspace {workspace_name!r} because the ' \
+                        f'from workspace {ws_name!r} because the ' \
                         f'user has {error_summary}'
                     else:
                         error_msg += f'remove users {error_users_list!r}' \
-                        f' from workspace {workspace_name!r} because the' \
+                        f' from workspace {ws_name!r} because the' \
                         f' users have {error_summary}'
                     error_msg += ', but not in the allowed_users list.' \
                     ' Please either add the users to allowed_users or' \
@@ -575,10 +579,9 @@ def _validate_workspace_config_changes(
     else:
         # Other configuration changes - check that workspace has no active
         # resources
-        logger.info(
-            f'Non-user-access configuration changes detected for'
-            f' workspace {workspace_name!r}. Checking that workspace has'
-            f' no active resources.')
+        logger.info(f'Non-user-access configuration changes detected for'
+                    f' workspace {ws_label}. Checking that workspace has'
+                    f' no active resources.')
         resource_checker.check_no_active_resources_for_workspaces([
             (workspace_name, 'update')
         ])
@@ -1145,7 +1148,8 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
                 })
             except Exception as e:  # pylint: disable=broad-except
                 logger.exception(
-                    f'Failed to add users to workspace {workspace_name!r}')
+                    f'Failed to add users to workspace '
+                    f'{skypilot_config.workspace_label(workspace_name)}')
                 failed.append({
                     'workspace_name': workspace_name,
                     'error': str(e),
@@ -1263,7 +1267,8 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
             })
         except Exception as e:  # pylint: disable=broad-except
             logger.exception(
-                f'Failed to validate removal from workspace {workspace_name!r}')
+                f'Failed to validate removal from workspace '
+                f'{skypilot_config.workspace_label(workspace_name)}')
             failed.append({
                 'workspace_name': workspace_name,
                 'error': str(e),
@@ -1313,7 +1318,8 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
                 succeeded.append(workspace_name)
             except Exception as e:  # pylint: disable=broad-except
                 logger.exception(
-                    f'Failed to apply removal for workspace {workspace_name!r}')
+                    f'Failed to apply removal for workspace '
+                    f'{skypilot_config.workspace_label(workspace_name)}')
                 failed.append({
                     'workspace_name': workspace_name,
                     'error': str(e),
