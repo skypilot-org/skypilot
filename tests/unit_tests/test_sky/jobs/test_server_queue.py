@@ -1288,17 +1288,18 @@ class TestDumpManagedJobQueue:
 
 
 def test_workspace_filter_matches_names_not_ids(monkeypatch):
-    """The typed filter is matched against names; the controller gets ids."""
+    """The typed filter is matched against names (and exact ids); the
+    controller gets ids."""
     from sky import backends
 
-    # 'team-a' was renamed 'archive'; a newer workspace is named 'team-a'.
+    # 'team-a' was renamed 'archive'; its id is still 'team-a'.
     workspaces = {
         'default': {},
         'team-a': {
             'name': 'archive'
         },
         'ws-0123456789ab': {
-            'name': 'team-a'
+            'name': 'research-team'
         },
     }
     captured: Dict[str, Any] = {}
@@ -1322,9 +1323,14 @@ def test_workspace_filter_matches_names_not_ids(monkeypatch):
     monkeypatch.setattr(jobs_core.managed_job_runner, 'current',
                         lambda: FakeRunner())
 
-    _unwrap(jobs_core.queue_v2)(refresh=False,
-                                all_users=True,
-                                workspace_match='team-a')
+    def narrowed(match):
+        _unwrap(jobs_core.queue_v2)(refresh=False,
+                                    all_users=True,
+                                    workspace_match=match)
+        assert captured['workspace_match'] is None
+        return sorted(captured['accessible_workspaces'])
 
-    assert captured['accessible_workspaces'] == ['ws-0123456789ab']
-    assert captured['workspace_match'] is None
+    # A name matches by substring; an id never does, only exactly.
+    assert narrowed('team') == ['ws-0123456789ab']
+    assert narrowed('team-a') == ['team-a']
+    assert narrowed('zz-no-such') == []

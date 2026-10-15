@@ -11,6 +11,7 @@ from unittest import mock
 
 from sky import exceptions
 from sky import models
+from sky.server import server
 from sky.workspaces import core as workspaces_core
 
 
@@ -70,3 +71,21 @@ class TestCheckClusterWritePermission(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestCheckClusterReadPermission(unittest.TestCase):
+    """The read gate (`server._check_cluster_read_permission`) names the
+    cluster the user typed, never its workspace's id."""
+
+    @mock.patch('sky.server.common.refresh_workspace_state_for_sync_handler')
+    @mock.patch('sky.users.permission.permission_service.'
+                'check_workspace_permission',
+                return_value=False)
+    @mock.patch('sky.global_user_state.get_cluster_workspace',
+                return_value='ws-0123456789ab')
+    def test_denial_names_the_cluster_not_its_workspace(self, *_):
+        user = models.User(id='user1', name='alice')
+        with self.assertRaises(exceptions.PermissionDeniedError) as ctx:
+            server._check_cluster_read_permission(user, 'c1')  # pylint: disable=protected-access
+        self.assertIn("'c1'", str(ctx.exception))
+        self.assertNotIn('ws-0123456789ab', str(ctx.exception))

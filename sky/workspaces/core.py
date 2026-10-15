@@ -137,13 +137,14 @@ def filter_workspace_ids_by_name(workspace_ids: Iterable[str],
 
     For a workspace filter a user typed: stored rows and the jobs controller
     only know ids, so callers narrow by id set instead of passing the text.
+    An exact id also matches: a legacy id is a renamed workspace's old name.
     """
     workspaces = _load_workspaces()
-    name_match = name_match.lower()
+    match = name_match.lower()
     return [
         workspace_id for workspace_id in workspace_ids
-        if name_match in skypilot_config.get_workspace_name(
-            workspace_id, workspaces).lower()
+        if workspace_id == name_match or match in
+        skypilot_config.get_workspace_name(workspace_id, workspaces).lower()
     ]
 
 

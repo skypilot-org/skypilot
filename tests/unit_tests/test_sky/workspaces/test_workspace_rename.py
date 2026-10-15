@@ -38,6 +38,8 @@ def store_fixture(monkeypatch):
             raise ValueError(f'{workspaces} has active resources')
 
     monkeypatch.setattr(skypilot_config, 'get_nested', get_nested)
+    # Name lookups read the loaded config directly (no copy).
+    monkeypatch.setattr(skypilot_config, '_get_loaded_config', lambda: store)
     monkeypatch.setattr(skypilot_config, 'to_dict',
                         lambda: copy.deepcopy(store))
     monkeypatch.setattr(skypilot_config, 'reload_config', lambda: None)

@@ -236,6 +236,49 @@ def test_workspace_filter_narrows_by_name(monkeypatch):
     assert workspaces_core.filter_workspace_ids_by_name(ids, 'nope') == []
 
 
+def test_workspace_filter_matches_a_legacy_id_exactly(monkeypatch):
+    # 'research' is the renamed workspace's old name, and still its id.
+    monkeypatch.setattr(
+        workspaces_core, '_load_workspaces', lambda: {
+            'research': {
+                'name': 'archive'
+            },
+            'ws-0123456789ab': {
+                'name': 'cv'
+            },
+        })
+    ids = ['default', 'research', 'ws-0123456789ab']
+    assert workspaces_core.filter_workspace_ids_by_name(
+        ids, 'research') == ['research']
+    # Ids match exactly, never as a substring.
+    assert workspaces_core.filter_workspace_ids_by_name(ids, 'resear') == []
+    assert workspaces_core.filter_workspace_ids_by_name(ids, 'ws-0') == []
+
+
+def test_ambiguous_server_active_workspace_falls_back_with_client_overrides():
+    # A client that sends other overrides still gets the server's workspace.
+    with skypilot_config.replace_skypilot_config_in_process(
+            config_utils.Config({
+                'workspaces': {
+                    'ws-x': {
+                        'name': 'ws-y'
+                    },
+                    'ws-y': {}
+                },
+                'active_workspace': 'ws-y'
+            })):
+        with skypilot_config.override_skypilot_config(
+            {'kubernetes': {
+                'pod_config': {}
+            }}):
+            assert skypilot_config.get_active_workspace() == 'ws-y'
+        # A name the user typed is still refused when ambiguous.
+        with pytest.raises(ValueError):
+            with skypilot_config.override_skypilot_config(
+                {'active_workspace': 'ws-y'}):
+                pass
+
+
 def test_check_denial_names_the_workspace_as_typed(server_workspaces):
     with server_workspaces(_REUSED), mock.patch.object(
             workspaces_core.permission.permission_service,
@@ -334,3 +377,20 @@ def test_resync_log_labels_workspaces(server_workspaces):
                     workspaces_core.logger, 'info') as info:
         workspaces_core.resolve_workspace_for_user(user)
     assert "'ml' (ws-0123456789ab)" in info.call_args.args[0]
+
+
+def test_name_lookups_do_not_copy_the_config():
+    # They run per record (tables, logs); a deep copy of the whole config
+    # per call made a 200-workspace names map take ~240 ms.
+    with skypilot_config.replace_skypilot_config_in_process(
+            config_utils.Config({'workspaces': {
+                'team-a': {
+                    'name': 'archive'
+                }
+            }})), mock.patch.object(config_utils.copy,
+                                    'deepcopy',
+                                    side_effect=AssertionError('copied')):
+        assert skypilot_config.get_workspace_name('team-a') == 'archive'
+        assert skypilot_config.workspace_label('team-a') == (
+            "'archive' (team-a)")
+        assert skypilot_config.resolve_workspace_ref('archive') == 'team-a'

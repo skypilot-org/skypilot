@@ -486,6 +486,13 @@ def get_effective_region_config(cloud: str,
         merge_dicts=merge_dicts)
 
 
+def _loaded_workspaces() -> Dict[str, Any]:
+    """The loaded `workspaces:` section, not copied (`get_nested` deep-copies
+    the whole config): name lookups run per record and only read it."""
+    workspaces = _get_loaded_config().get('workspaces')
+    return workspaces if isinstance(workspaces, dict) else {}
+
+
 def get_workspace_name(workspace_id: str,
                        workspaces: Optional[Dict[str, Any]] = None) -> str:
     """Returns the user-facing name of the workspace with this id.
@@ -497,7 +504,7 @@ def get_workspace_name(workspace_id: str,
     if workspace_id == constants.SKYPILOT_DEFAULT_WORKSPACE:
         return workspace_id
     if workspaces is None:
-        workspaces = get_nested(keys=('workspaces',), default_value={})
+        workspaces = _loaded_workspaces()
     workspace_config = workspaces.get(workspace_id)
     if isinstance(workspace_config, dict) and workspace_config.get('name'):
         return workspace_config['name']
@@ -527,7 +534,7 @@ def resolve_workspace_ref(ref: str,
     unknown one fails where it is checked today.
     """
     if workspaces is None:
-        workspaces = get_nested(keys=('workspaces',), default_value={})
+        workspaces = _loaded_workspaces()
     matches = [
         workspace_id for workspace_id in set(workspaces) |
         {constants.SKYPILOT_DEFAULT_WORKSPACE}
@@ -1005,6 +1012,22 @@ def loaded() -> bool:
     return bool(_get_loaded_config())
 
 
+def _resolve_server_active_workspace(ref: str,
+                                     workspaces: Optional[Dict[str, Any]] = None
+                                    ) -> str:
+    """Resolves the server config's own `active_workspace`.
+
+    Only a hand-edited config can make the name ambiguous; failing every
+    request (internal daemons included) would be worse, so use it as an id.
+    """
+    try:
+        return resolve_workspace_ref(ref, workspaces)
+    except ValueError as e:
+        logger.warning(f'Using active_workspace {ref!r} from the server '
+                       f'config as an id: {e}')
+        return ref
+
+
 @contextlib.contextmanager
 def override_skypilot_config(
         override_configs: Optional[Dict[str, Any]],
@@ -1022,15 +1045,8 @@ def override_skypilot_config(
         if server_workspace is None:
             yield
             return
-        try:
-            workspace = resolve_workspace_ref(server_workspace)
-        except ValueError as e:
-            # Only a hand-edited config can make the name ambiguous; failing
-            # every request (internal daemons included) would be worse.
-            logger.warning(f'Using active_workspace {server_workspace!r} from '
-                           f'the server config as an id: {e}')
-            workspace = server_workspace
-        with local_active_workspace_ctx(workspace):
+        with local_active_workspace_ctx(
+                _resolve_server_active_workspace(server_workspace)):
             yield
         return
     original_config = _get_loaded_config()
@@ -1083,7 +1099,11 @@ def override_skypilot_config(
         workspace = config.get_nested(keys=('active_workspace',),
                                       default_value=None)
         if workspace is not None:
-            workspace = resolve_workspace_ref(workspace, workspaces)
+            if override_configs.get('active_workspace') is not None:
+                workspace = resolve_workspace_ref(workspace, workspaces)
+            else:
+                workspace = _resolve_server_active_workspace(
+                    workspace, workspaces)
     if workspace is None:
         workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
     else:

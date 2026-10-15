@@ -2463,8 +2463,16 @@ def _check_workspace_read_permission(auth_user: models.User,
 def _check_cluster_read_permission(auth_user: models.User,
                                    cluster_name: str) -> None:
     workspace = global_user_state.get_cluster_workspace(cluster_name)
-    if workspace is not None:
+    if workspace is None:
+        return
+    try:
         _check_workspace_read_permission(auth_user, workspace)
+    except exceptions.PermissionDeniedError as e:
+        # The user named the cluster, not its workspace, which they may not
+        # be allowed to see.
+        raise exceptions.PermissionDeniedError(
+            f'User {auth_user.name} ({auth_user.id}) does not have permission '
+            f'to access the workspace of cluster {cluster_name!r}') from e
 
 
 async def _reject_cluster_read_for_unauthorized(request: fastapi.Request,
