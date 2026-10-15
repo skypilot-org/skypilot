@@ -1845,6 +1845,40 @@ def queue(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(67)
+@annotations.client_api
+def cluster_job_spec(
+        cluster_name: str,
+        job_id: int) -> server_common.RequestId[Optional[Dict[str, Any]]]:
+    """Gets the task YAML and entrypoint a cluster job was submitted with.
+
+    Args:
+        cluster_name: name of the cluster.
+        job_id: id of the job on the cluster.
+
+    Returns:
+        The request ID of the cluster job spec request.
+
+    Request Returns:
+        spec (Optional[Dict[str, Any]]): None if the cluster does not exist or
+            the job's spec was not recorded (e.g. it was submitted by an older
+            API server version), otherwise:
+
+            .. code-block:: python
+
+                {
+                    'task_yaml': (str) the task YAML, with secrets redacted,
+                    'entrypoint': (str) the command that submitted the job,
+                }
+    """
+    body = payloads.ClusterJobSpecBody(cluster_name=cluster_name, job_id=job_id)
+    response = server_common.make_authenticated_request(
+        'POST', '/cluster_job_spec', json=json.loads(body.model_dump_json()))
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
 @annotations.client_api
 def job_status(
     cluster_name: str,

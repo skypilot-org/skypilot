@@ -33,8 +33,6 @@ import {
   RotateCwIcon,
   ChevronDownIcon,
   ChevronRightIcon,
-  CopyIcon,
-  CheckIcon,
   Download,
 } from 'lucide-react';
 import {
@@ -56,9 +54,14 @@ import { BatchBadge } from '@/components/elements/BatchBadge';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 import { NonCapitalizedTooltip } from '@/components/utils';
-import { formatJobYaml } from '@/lib/yamlUtils';
+import { buildJobGroupHeader, formatJobYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { YamlCodeBlock } from '@/components/ui/yaml-code-block';
+import {
+  CollapsibleYaml,
+  CopyButton,
+  EntrypointCommand,
+} from '@/components/elements/EntrypointYaml';
 import dashboardCache from '@/lib/cache';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents } from '@/plugins/PluginProvider';
@@ -1240,13 +1243,8 @@ function JobDetailsContent({
   selectedNode = 'all',
   onNodesExtracted = null,
 }) {
-  const [isYamlExpanded, setIsYamlExpanded] = useState(false);
   const [expandedYamlDocs, setExpandedYamlDocs] = useState({});
   const [showFullYaml, setShowFullYaml] = useState(false);
-  const [isCopied, setIsCopied] = useState(false);
-  // The commit gets its own flag so copying it does not tick the YAML copy.
-  const [isCommitCopied, setIsCommitCopied] = useState(false);
-  const [isCommandCopied, setIsCommandCopied] = useState(false);
 
   // Auto-scroll refs
   const logsContainerRef = useRef(null);
@@ -1310,10 +1308,6 @@ function JobDetailsContent({
   const statusTooltip =
     computedStatus === jobData.status ? jobData.statusTooltip : null;
 
-  const toggleYamlExpanded = () => {
-    setIsYamlExpanded(!isYamlExpanded);
-  };
-
   const toggleYamlDocExpanded = (index) => {
     setExpandedYamlDocs((prev) => ({
       ...prev,
@@ -1321,50 +1315,22 @@ function JobDetailsContent({
     }));
   };
 
-  const copyYamlToClipboard = async () => {
-    try {
-      const yamlDocs = formatJobYaml(jobData.dag_yaml);
-      // Build JobGroup header with name and execution
-      const hasJobGroupConfig = jobData.name || jobData.execution;
-      const jobGroupHeader = hasJobGroupConfig
-        ? [
-            jobData.name ? `name: ${jobData.name}` : null,
-            jobData.execution ? `execution: ${jobData.execution}` : null,
-          ]
-            .filter(Boolean)
-            .join('\n') + '\n---\n'
-        : '';
-
-      let textToCopy = '';
-
-      if (yamlDocs.length === 1) {
-        // Single document - use the formatted content directly
-        textToCopy = jobGroupHeader + yamlDocs[0].content;
-      } else if (yamlDocs.length > 1) {
-        // Multiple documents - join them with document separators
-        textToCopy =
-          jobGroupHeader + yamlDocs.map((doc) => doc.content).join('\n---\n');
-      } else {
-        // Fallback to raw YAML if formatting fails
-        textToCopy = jobGroupHeader + jobData.dag_yaml;
-      }
-
-      await navigator.clipboard.writeText(textToCopy);
-      setIsCopied(true);
-      setTimeout(() => setIsCopied(false), 2000); // Reset after 2 seconds
-    } catch (err) {
-      console.error('Failed to copy YAML to clipboard:', err);
+  // What the YAML copy button copies: the same documents the view shows.
+  const yamlCopyText = () => {
+    const yamlDocs = formatJobYaml(jobData.dag_yaml);
+    const jobGroupHeader = buildJobGroupHeader(jobData);
+    if (yamlDocs.length === 1) {
+      // Single document - use the formatted content directly
+      return jobGroupHeader + yamlDocs[0].content;
     }
-  };
-
-  const copyCommandToClipboard = async () => {
-    try {
-      await navigator.clipboard.writeText(jobData.entrypoint);
-      setIsCommandCopied(true);
-      setTimeout(() => setIsCommandCopied(false), 2000); // Reset after 2 seconds
-    } catch (err) {
-      console.error('Failed to copy command to clipboard:', err);
+    if (yamlDocs.length > 1) {
+      // Multiple documents - join them with document separators
+      return (
+        jobGroupHeader + yamlDocs.map((doc) => doc.content).join('\n---\n')
+      );
     }
+    // Fallback to raw YAML if formatting fails
+    return jobGroupHeader + jobData.dag_yaml;
   };
 
   const logStreamArgs = useMemo(
@@ -1627,132 +1593,93 @@ function JobDetailsContent({
     );
   }
 
-  const copyButton = (copied, onClick, title) => (
-    <button
-      onClick={onClick}
-      title={title}
-      className="ml-2 inline-flex items-center align-middle text-gray-400 hover:text-gray-700 focus:outline-none"
-    >
-      {copied ? (
-        <CheckIcon className="w-3.5 h-3.5 text-green-600" />
-      ) : (
-        <CopyIcon className="w-3.5 h-3.5" />
-      )}
-    </button>
-  );
   // Collapsible SkyPilot YAML row, under the entrypoint it was launched with.
   const yamlBlock =
     jobData.dag_yaml && jobData.dag_yaml !== '{}' ? (
       <div className="mt-3">
-        <div className="flex items-center">
-          <button
-            onClick={toggleYamlExpanded}
-            aria-expanded={isYamlExpanded}
-            className="flex items-center gap-1 text-left focus:outline-none text-gray-900 hover:text-gray-700 transition-colors duration-200"
-          >
-            {isYamlExpanded ? (
-              <ChevronDownIcon className="w-4 h-4 text-gray-500" />
-            ) : (
-              <ChevronRightIcon className="w-4 h-4 text-gray-500" />
-            )}
-            <span className="text-base">SkyPilot YAML</span>
-          </button>
+        <CollapsibleYaml label="SkyPilot YAML" compact copyText={yamlCopyText}>
+          {() => (
+            <div className="mt-3">
+              {(() => {
+                const yamlDocs = formatJobYaml(jobData.dag_yaml);
+                const jobGroupHeader = buildJobGroupHeader(jobData);
 
-          {copyButton(isCopied, copyYamlToClipboard, 'Copy YAML')}
-        </div>
-
-        {isYamlExpanded && (
-          <div className="mt-3">
-            {(() => {
-              const yamlDocs = formatJobYaml(jobData.dag_yaml);
-              // Build JobGroup header with name and execution
-              const hasJobGroupConfig = jobData.name || jobData.execution;
-              const jobGroupHeader = hasJobGroupConfig
-                ? [
-                    jobData.name ? `name: ${jobData.name}` : null,
-                    jobData.execution
-                      ? `execution: ${jobData.execution}`
-                      : null,
-                  ]
-                    .filter(Boolean)
-                    .join('\n') + '\n---\n'
-                : '';
-
-              if (yamlDocs.length === 0) {
-                return <div className="text-gray-500">No YAML available</div>;
-              } else if (yamlDocs.length === 1) {
-                // Single document - show directly
-                return (
-                  <YamlCodeBlock
-                    value={jobGroupHeader + yamlDocs[0].content}
-                    readOnly
-                  />
-                );
-              } else {
-                // Multiple documents - show toggle and content
-                return (
-                  <div className="space-y-4">
-                    {/* Toggle for Full YAML vs Per-Job */}
-                    <div className="flex items-center space-x-4 pb-2 border-b border-gray-200">
-                      <button
-                        onClick={() => setShowFullYaml(false)}
-                        className={`text-sm px-2 py-1 rounded ${!showFullYaml ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:text-gray-800'}`}
-                      >
-                        By Job
-                      </button>
-                      <button
-                        onClick={() => setShowFullYaml(true)}
-                        className={`text-sm px-2 py-1 rounded ${showFullYaml ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:text-gray-800'}`}
-                      >
-                        Full YAML
-                      </button>
-                    </div>
-
-                    {showFullYaml ? (
-                      // Show full YAML with JobGroup header
-                      <YamlCodeBlock
-                        value={
-                          jobGroupHeader +
-                          yamlDocs.map((doc) => doc.content).join('\n---\n')
-                        }
-                        readOnly
-                      />
-                    ) : (
-                      // Show per-job YAMLs
-                      yamlDocs.map((doc, index) => (
-                        <div
-                          key={index}
-                          className="border-b border-gray-200 pb-4 last:border-b-0"
+                if (yamlDocs.length === 0) {
+                  return <div className="text-gray-500">No YAML available</div>;
+                } else if (yamlDocs.length === 1) {
+                  // Single document - show directly
+                  return (
+                    <YamlCodeBlock
+                      value={jobGroupHeader + yamlDocs[0].content}
+                      readOnly
+                    />
+                  );
+                } else {
+                  // Multiple documents - show toggle and content
+                  return (
+                    <div className="space-y-4">
+                      {/* Toggle for Full YAML vs Per-Job */}
+                      <div className="flex items-center space-x-4 pb-2 border-b border-gray-200">
+                        <button
+                          onClick={() => setShowFullYaml(false)}
+                          className={`text-sm px-2 py-1 rounded ${!showFullYaml ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:text-gray-800'}`}
                         >
-                          <button
-                            onClick={() => toggleYamlDocExpanded(index)}
-                            className="flex items-center justify-between w-full text-left focus:outline-none"
+                          By Job
+                        </button>
+                        <button
+                          onClick={() => setShowFullYaml(true)}
+                          className={`text-sm px-2 py-1 rounded ${showFullYaml ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:text-gray-800'}`}
+                        >
+                          Full YAML
+                        </button>
+                      </div>
+
+                      {showFullYaml ? (
+                        // Show full YAML with JobGroup header
+                        <YamlCodeBlock
+                          value={
+                            jobGroupHeader +
+                            yamlDocs.map((doc) => doc.content).join('\n---\n')
+                          }
+                          readOnly
+                        />
+                      ) : (
+                        // Show per-job YAMLs
+                        yamlDocs.map((doc, index) => (
+                          <div
+                            key={index}
+                            className="border-b border-gray-200 pb-4 last:border-b-0"
                           >
-                            <div className="flex items-center">
-                              {expandedYamlDocs[index] ? (
-                                <ChevronDownIcon className="w-4 h-4 mr-2" />
-                              ) : (
-                                <ChevronRightIcon className="w-4 h-4 mr-2" />
-                              )}
-                              <span className="text-sm font-medium text-gray-700">
-                                Job {index + 1}: {doc.preview}
-                              </span>
-                            </div>
-                          </button>
-                          {expandedYamlDocs[index] && (
-                            <div className="mt-3 ml-6">
-                              <YamlCodeBlock value={doc.content} readOnly />
-                            </div>
-                          )}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                );
-              }
-            })()}
-          </div>
-        )}
+                            <button
+                              onClick={() => toggleYamlDocExpanded(index)}
+                              className="flex items-center justify-between w-full text-left focus:outline-none"
+                            >
+                              <div className="flex items-center">
+                                {expandedYamlDocs[index] ? (
+                                  <ChevronDownIcon className="w-4 h-4 mr-2" />
+                                ) : (
+                                  <ChevronRightIcon className="w-4 h-4 mr-2" />
+                                )}
+                                <span className="text-sm font-medium text-gray-700">
+                                  Job {index + 1}: {doc.preview}
+                                </span>
+                              </div>
+                            </button>
+                            {expandedYamlDocs[index] && (
+                              <div className="mt-3 ml-6">
+                                <YamlCodeBlock value={doc.content} readOnly />
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  );
+                }
+              })()}
+            </div>
+          )}
+        </CollapsibleYaml>
       </div>
     ) : null;
 
@@ -2052,15 +1979,7 @@ function JobDetailsContent({
             >
               <span>{jobData.git_commit.slice(0, 7)}</span>
             </NonCapitalizedTooltip>
-            {copyButton(
-              isCommitCopied,
-              async () => {
-                await navigator.clipboard.writeText(jobData.git_commit);
-                setIsCommitCopied(true);
-                setTimeout(() => setIsCommitCopied(false), 2000);
-              },
-              'Copy commit'
-            )}
+            <CopyButton text={jobData.git_commit} title="Copy commit" compact />
           </span>
         )
       )}
@@ -2121,15 +2040,16 @@ function JobDetailsContent({
       <div key="Entrypoint" className="col-span-full min-w-0">
         <div className="text-sm text-gray-500">
           Entrypoint
-          {jobData.entrypoint &&
-            copyButton(isCommandCopied, copyCommandToClipboard, 'Copy command')}
+          {jobData.entrypoint && (
+            <CopyButton
+              text={jobData.entrypoint}
+              title="Copy command"
+              compact
+            />
+          )}
         </div>
         {jobData.entrypoint ? (
-          <div className="mt-1 bg-gray-50 border border-gray-200 rounded-md p-3">
-            <code className="text-sm text-gray-800 font-mono break-all">
-              {jobData.entrypoint}
-            </code>
-          </div>
+          <EntrypointCommand command={jobData.entrypoint} className="mt-1" />
         ) : (
           <div className="text-base text-gray-900 mt-1 break-words">{dash}</div>
         )}
