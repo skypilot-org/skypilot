@@ -1472,8 +1472,12 @@ def set_failed(
     logger.info(failure_reason)
 
 
-def set_pending_cancelled(job_id: int) -> bool:
-    """Set the job as cancelled, if it is PENDING and WAITING/INACTIVE.
+def set_pending_cancelled(
+        job_id: int,
+        *,
+        controller_pid: Optional[int] = None,
+        controller_pid_started_at: Optional[float] = None) -> bool:
+    """Set an unstarted PENDING job as cancelled.
 
     This may fail if the job is not PENDING, e.g. another process has changed
     its state in the meantime.
@@ -1495,11 +1499,13 @@ def set_pending_cancelled(job_id: int) -> bool:
     For a WAITING job, the schedule_state goes straight to DONE, claiming the
     job away from the scheduler: get_waiting_job_async locks the job_info row
     before claiming, so the job either becomes DONE here or is claimed there,
-    never both. For an INACTIVE job (mid-submission), the schedule_state is
-    left as INACTIVE: the in-flight submission will overwrite it to WAITING
-    regardless (scheduler_set_waiting has no state guard), so writing DONE
-    here would be undone and strand a cancelled job in WAITING. The
-    submission proceeds as today and a controller claims the job afterwards.
+    never both. An unowned LAUNCHING job with no controller identity or current
+    cluster also goes to DONE. For an INACTIVE job (mid-submission), the
+    schedule_state is left as INACTIVE: the in-flight submission will overwrite
+    it to WAITING regardless (scheduler_set_waiting has no state guard), so
+    writing DONE here would be undone and strand a cancelled job in WAITING.
+    The submission proceeds as today and a controller claims the job
+    afterwards.
 
     Cancelling an INACTIVE job only covers the task rows that exist at the
     time. They are inserted one transaction at a time, so for a multi-task
@@ -1513,23 +1519,53 @@ def set_pending_cancelled(job_id: int) -> bool:
     """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        # Claim the job away from the scheduler first: WAITING -> DONE.
+        # The scheduler atomically claims LAUNCHING with controller identity;
+        # the remaining guards keep active launches on normal cleanup.
+        allowed_owners = [
+            sqlalchemy.and_(
+                job_info_table.c.controller_pid.is_(None),
+                job_info_table.c.controller_pid_started_at.is_(None))
+        ]
+        if controller_pid is not None:
+            allowed_owners.append(
+                sqlalchemy.and_(
+                    job_info_table.c.controller_pid == controller_pid,
+                    job_info_table.c.controller_pid_started_at.
+                    is_not_distinct_from(controller_pid_started_at)))
         done_count = session.query(job_info_table).filter(
             job_info_table.c.spot_job_id == job_id,
-            job_info_table.c.schedule_state ==
-            ManagedJobScheduleState.WAITING.value).update(
-                {
-                    job_info_table.c.schedule_state:
-                        ManagedJobScheduleState.DONE.value
-                },
-                synchronize_session=False)
+            sqlalchemy.or_(
+                job_info_table.c.schedule_state ==
+                ManagedJobScheduleState.WAITING.value,
+                sqlalchemy.and_(
+                    job_info_table.c.schedule_state ==
+                    ManagedJobScheduleState.LAUNCHING.value,
+                    sqlalchemy.or_(*allowed_owners),
+                    job_info_table.c.current_cluster_name.is_(None),
+                ))).update(
+                    {
+                        job_info_table.c.schedule_state:
+                            ManagedJobScheduleState.DONE.value
+                    },
+                    synchronize_session=False)
         if done_count == 0:
-            # Not WAITING. Only proceed if the job is INACTIVE
-            # (mid-submission); see the docstring for why INACTIVE keeps its
-            # schedule_state.
+            # INACTIVE keeps its schedule state because submission is in flight.
             row = session.execute(
-                sqlalchemy.select(job_info_table.c.schedule_state).where(
-                    job_info_table.c.spot_job_id == job_id)).fetchone()
+                sqlalchemy.select(
+                    job_info_table.c.schedule_state,
+                    job_info_table.c.current_cluster_name).where(
+                        job_info_table.c.spot_job_id == job_id)).fetchone()
+            if (row is not None and
+                    row[0] == ManagedJobScheduleState.DONE.value and
+                    row[1] is None):
+                statuses = session.execute(
+                    sqlalchemy.select(
+                        spot_table.c.status, spot_table.c.submitted_at).where(
+                            spot_table.c.spot_job_id == job_id)).fetchall()
+                if statuses and all(status == ManagedJobStatus.CANCELLED.value
+                                    and submitted_at is None
+                                    for status, submitted_at in statuses):
+                    return True
             if (row is None or
                     row[0] != ManagedJobScheduleState.INACTIVE.value):
                 session.rollback()
@@ -5650,6 +5686,74 @@ def reset_jobs_for_recovery_batch(jobs: List[Dict[str, Any]]) -> List[int]:
             reset_ids.extend(row[0] for row in result)
         session.commit()
     return sorted(reset_ids)
+
+
+def fail_job_controller_initialization(job: Dict[str, Any],
+                                       failure_reason: str) -> bool:
+    """Fail a job if its controller claim is unchanged."""
+    engine = _db_manager.get_engine()
+    now = time.time()
+    with orm.Session(engine) as session:
+        result = session.execute(
+            sqlalchemy.update(job_info_table).where(
+                sqlalchemy.and_(
+                    job_info_table.c.spot_job_id == job['job_id'],
+                    job_info_table.c.controller_pid.is_not_distinct_from(
+                        job['controller_pid']),
+                    job_info_table.c.controller_pid_started_at.
+                    is_not_distinct_from(job['controller_pid_started_at']),
+                    job_info_table.c.schedule_state.is_not_distinct_from(
+                        job['schedule_state'].value),
+                )).values({
+                    job_info_table.c.schedule_state:
+                        ManagedJobScheduleState.DONE.value,
+                }))
+        if result.rowcount != 1:
+            session.rollback()
+            # A retry may follow a committed transaction whose acknowledgement
+            # was lost. Only accept the exact failure written by this claim.
+            return bool(
+                session.execute(
+                    sqlalchemy.select(spot_table.c.spot_job_id).select_from(
+                        job_info_table.join(
+                            spot_table, job_info_table.c.spot_job_id ==
+                            spot_table.c.spot_job_id)).
+                    where(
+                        sqlalchemy.and_(
+                            job_info_table.c.spot_job_id == job['job_id'],
+                            job_info_table.c.controller_pid.
+                            is_not_distinct_from(job['controller_pid']),
+                            job_info_table.c.controller_pid_started_at.
+                            is_not_distinct_from(
+                                job['controller_pid_started_at']),
+                            job_info_table.c.schedule_state ==
+                            ManagedJobScheduleState.DONE.value,
+                            spot_table.c.status ==
+                            ManagedJobStatus.FAILED_CONTROLLER.value,
+                            spot_table.c.failure_reason == failure_reason,
+                            spot_table.c.end_at.is_not(None),
+                        )).limit(1)).first())
+        failed_result = session.execute(
+            sqlalchemy.update(spot_table).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job['job_id'],
+                    spot_table.c.end_at.is_(None))).values({
+                        spot_table.c.status:
+                            ManagedJobStatus.FAILED_CONTROLLER.value,
+                        spot_table.c.failure_reason: failure_reason,
+                        spot_table.c.end_at: now,
+                        spot_table.c.recovering_from_failure: None,
+                    }))
+        if failed_result.rowcount > 0:
+            session.execute(job_events_table.insert().values(
+                spot_job_id=job['job_id'],
+                task_id=None,
+                new_status=ManagedJobStatus.FAILED_CONTROLLER.value,
+                reason=f'Job failed: {failure_reason}',
+                timestamp=datetime.datetime.now(),
+            ))
+        session.commit()
+        return True
 
 
 def reset_jobs_for_recovery() -> None:

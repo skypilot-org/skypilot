@@ -3754,6 +3754,11 @@ class TestRunJobLoopTransientDbErrors:
                 return_value=managed_job_state.ManagedJobStatus.SUCCEEDED))
         monkeypatch.setattr(managed_job_state, 'finalize_job_done_async',
                             AsyncMock())
+        monkeypatch.setattr(managed_job_state, 'reset_jobs_for_recovery_batch',
+                            MagicMock(return_value=[1]))
+        monkeypatch.setattr(managed_job_state,
+                            'fail_job_controller_initialization',
+                            MagicMock(return_value=True))
         return manager
 
     @pytest.mark.asyncio
@@ -3771,6 +3776,939 @@ class TestRunJobLoopTransientDbErrors:
         managed_job_state.finalize_job_done_async.assert_awaited_with(
             1, cancelling=False, callback_func=None)
         assert 1 not in manager.job_tasks
+
+    @pytest.mark.asyncio
+    async def test_env_load_error_finalizes_job(self, manager):
+        controller_module.file_content_utils.get_job_env_content.side_effect = (
+            RuntimeError('db pool exhausted'))
+
+        with pytest.raises(RuntimeError, match='db pool exhausted'):
+            await manager.run_job_loop(1, 'job.log')
+
+        managed_job_state.finalize_job_done_async.assert_awaited_once_with(
+            1, cancelling=False, callback_func=None)
+        assert 1 not in manager.starting
+
+    @pytest.mark.asyncio
+    async def test_log_setup_error_finalizes_job(self, manager):
+        controller_module.context.get.return_value.redirect_log.side_effect = (
+            RuntimeError('log setup failed'))
+
+        with pytest.raises(RuntimeError, match='log setup failed'):
+            await manager.run_job_loop(1, 'job.log')
+
+        managed_job_state.finalize_job_done_async.assert_awaited_once_with(
+            1, cancelling=False, callback_func=None)
+        assert 1 not in manager.starting
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures('_mock_managed_jobs_db_conn')
+    async def test_log_setup_error_reaches_done_in_real_state(
+            self, monkeypatch):
+        job_id = managed_job_state.set_job_info_without_job_id(
+            name='job',
+            workspace='default',
+            entrypoint='ep',
+            pool=None,
+            pool_hash=None,
+            user_hash='user')
+        managed_job_state.set_pending(job_id,
+                                      task_id=0,
+                                      task_name='task',
+                                      resources_str='{}',
+                                      metadata='{}')
+        managed_job_state.scheduler_set_waiting([job_id], '/tmp/dag.yaml',
+                                                '/tmp/user.yaml', '/tmp/env',
+                                                None, 100)
+
+        manager = ControllerManager('test-uuid')
+        manager.starting.add(job_id)
+        manager._cleanup = AsyncMock()
+        claimed = await managed_job_state.get_waiting_job_async(
+            manager._pid, manager._pid_started_at)
+        assert claimed is not None
+        assert claimed['job_id'] == job_id
+
+        ctx = MagicMock()
+        ctx.redirect_log.side_effect = RuntimeError('log setup failed')
+        monkeypatch.setattr(controller_module.context, 'get',
+                            MagicMock(return_value=ctx))
+
+        with pytest.raises(RuntimeError, match='log setup failed'):
+            await manager.run_job_loop(job_id, 'job.log')
+
+        assert (managed_job_state.get_status(job_id) ==
+                managed_job_state.ManagedJobStatus.FAILED_CONTROLLER)
+        assert (managed_job_state.get_job_schedule_state(job_id) ==
+                managed_job_state.ManagedJobScheduleState.DONE)
+        assert job_id not in manager.starting
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures('_mock_managed_jobs_db_conn')
+    @pytest.mark.parametrize('lost_ack', [False, True])
+    async def test_wrapper_failure_fails_claimed_job(self, monkeypatch,
+                                                     tmp_path, sleeps,
+                                                     lost_ack):
+        job_id = managed_job_state.set_job_info_without_job_id(
+            name='job',
+            workspace='default',
+            entrypoint='ep',
+            pool=None,
+            pool_hash=None,
+            user_hash='user')
+        managed_job_state.set_pending(job_id,
+                                      task_id=0,
+                                      task_name='task',
+                                      resources_str='{}',
+                                      metadata='{}')
+        managed_job_state.scheduler_set_waiting([job_id], '/tmp/dag.yaml',
+                                                '/tmp/user.yaml', '/tmp/env',
+                                                None, 100)
+        next_job_id = managed_job_state.set_job_info_without_job_id(
+            name='next-job',
+            workspace='default',
+            entrypoint='ep',
+            pool=None,
+            pool_hash=None,
+            user_hash='user')
+        managed_job_state.set_pending(next_job_id,
+                                      task_id=0,
+                                      task_name='task',
+                                      resources_str='{}',
+                                      metadata='{}')
+        managed_job_state.scheduler_set_waiting([next_job_id], '/tmp/dag.yaml',
+                                                '/tmp/user.yaml', '/tmp/env',
+                                                None, 100)
+        manager = ControllerManager('test-uuid')
+        claimed = await managed_job_state.get_waiting_job_async(
+            manager._pid, manager._pid_started_at)
+        assert claimed is not None
+        assert claimed['job_id'] == job_id
+
+        async def fail_before_ready(*args, **kwargs):
+            del args, kwargs
+            raise RuntimeError('context initialization failed')
+
+        real_fail = managed_job_state.fail_job_controller_initialization
+        attempts = 0
+
+        def flaky_fail(job, reason):
+            nonlocal attempts
+            attempts += 1
+            if lost_ack and attempts == 1:
+                assert real_fail(job, reason)
+                raise self._db_error()
+            if not lost_ack and attempts <= 6:
+                raise self._db_error()
+            return real_fail(job, reason)
+
+        monkeypatch.setattr(manager, 'run_job_loop', fail_before_ready)
+        monkeypatch.setattr(managed_job_state,
+                            'fail_job_controller_initialization', flaky_fail)
+        monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                            str(tmp_path))
+        signal_dir = tmp_path / 'signals'
+        signal_dir.mkdir()
+        signal_path = signal_dir / str(job_id)
+        signal_path.write_text('cancel')
+        monkeypatch.setattr(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                            str(signal_dir))
+
+        await manager.start_job(job_id)
+
+        assert attempts == (2 if lost_ack else 7)
+        assert len(sleeps) == (1 if lost_ack else 6)
+        assert not signal_path.exists()
+        assert (managed_job_state.get_job_schedule_state(job_id) ==
+                managed_job_state.ManagedJobScheduleState.DONE)
+        assert (managed_job_state.get_status(job_id) ==
+                managed_job_state.ManagedJobStatus.FAILED_CONTROLLER)
+        assert 'manual cleanup' in managed_job_state.get_failure_reason(job_id)
+        next_job = await managed_job_state.get_waiting_job_async(
+            manager._pid, manager._pid_started_at)
+        assert next_job is not None
+        assert next_job['job_id'] == next_job_id
+        assert job_id not in manager.starting
+        assert job_id not in manager.job_tasks
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures('_mock_managed_jobs_db_conn')
+    @pytest.mark.parametrize('failure_stage', ['read', 'restore'])
+    async def test_env_load_failure_fails_without_cleanup(
+            self, monkeypatch, tmp_path, sleeps, failure_stage):
+        job_id = managed_job_state.set_job_info_without_job_id(
+            name='job',
+            workspace='default',
+            entrypoint='ep',
+            pool=None,
+            pool_hash=None,
+            user_hash='user')
+        managed_job_state.set_pending(job_id,
+                                      task_id=0,
+                                      task_name='task',
+                                      resources_str='{}',
+                                      metadata='{}')
+        managed_job_state.scheduler_set_waiting([job_id], '/tmp/dag.yaml',
+                                                '/tmp/user.yaml', '/tmp/env',
+                                                None, 100)
+        manager = ControllerManager('test-uuid')
+        manager._cleanup = AsyncMock()
+        claimed = await managed_job_state.get_waiting_job_async(
+            manager._pid, manager._pid_started_at)
+        assert claimed is not None
+        assert claimed['job_id'] == job_id
+        if failure_stage == 'read':
+            monkeypatch.setattr(
+                controller_module.file_content_utils, 'get_job_env_content',
+                MagicMock(side_effect=RuntimeError('invalid job env')))
+        else:
+            monkeypatch.setattr(
+                controller_module.file_content_utils, 'get_job_env_content',
+                MagicMock(return_value='SKYPILOT_CONFIG=/tmp/job.yaml'))
+            monkeypatch.setattr(
+                controller_module.file_content_utils, 'restore_job_config_file',
+                MagicMock(side_effect=RuntimeError('restore failed')))
+        monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                            str(tmp_path))
+
+        await manager.start_job(job_id)
+
+        assert (managed_job_state.get_job_schedule_state(job_id) ==
+                managed_job_state.ManagedJobScheduleState.DONE)
+        assert (managed_job_state.get_status(job_id) ==
+                managed_job_state.ManagedJobStatus.FAILED_CONTROLLER)
+        assert 'manual cleanup' in managed_job_state.get_failure_reason(job_id)
+        manager._cleanup.assert_not_awaited()
+        assert not sleeps
+
+    @pytest.mark.asyncio
+    async def test_env_load_retries_past_default_budget(self, manager, sleeps,
+                                                        monkeypatch, tmp_path):
+        env_reader = MagicMock(side_effect=[self._db_error()] * 6 + [None])
+        monkeypatch.setattr(controller_module.file_content_utils,
+                            'get_job_env_content', env_reader)
+        monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                            str(tmp_path))
+
+        await manager.start_job(1)
+
+        assert env_reader.call_count == 7
+        assert len(sleeps) == 6
+        managed_job_state.finalize_job_done_async.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_config_restore_retries_past_default_budget(
+            self, manager, sleeps, monkeypatch, tmp_path):
+        restore = MagicMock(side_effect=[self._db_error()] * 6 + [None])
+        controller_module.file_content_utils.get_job_env_content.return_value = (
+            'SKYPILOT_CONFIG=/tmp/job-config.yaml')
+        monkeypatch.setattr(controller_module.file_content_utils,
+                            'restore_job_config_file', restore)
+        monkeypatch.setattr(controller_module.skypilot_config, 'reload_config',
+                            MagicMock())
+        monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                            str(tmp_path))
+
+        await manager.start_job(1)
+
+        assert restore.call_count == 7
+        assert len(sleeps) == 6
+        managed_job_state.finalize_job_done_async.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_config_reload_retries_past_default_budget(
+            self, manager, sleeps, monkeypatch, tmp_path):
+        reload_config = MagicMock(side_effect=[self._db_error()] * 6 + [None])
+        controller_module.file_content_utils.get_job_env_content.return_value = (
+            'SKYPILOT_CONFIG=/tmp/job-config.yaml')
+        monkeypatch.setattr(controller_module.file_content_utils,
+                            'restore_job_config_file', MagicMock())
+        monkeypatch.setattr(controller_module.skypilot_config, 'reload_config',
+                            reload_config)
+        monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                            str(tmp_path))
+
+        await manager.start_job(1)
+
+        assert reload_config.call_count == 7
+        assert len(sleeps) == 6
+        managed_job_state.finalize_job_done_async.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures('_mock_managed_jobs_db_conn')
+    async def test_cancel_during_wrapper_failure_reaches_failed_done(
+            self, monkeypatch, tmp_path):
+        job_id = managed_job_state.set_job_info_without_job_id(
+            name='job',
+            workspace='default',
+            entrypoint='ep',
+            pool=None,
+            pool_hash=None,
+            user_hash='user')
+        managed_job_state.set_pending(job_id,
+                                      task_id=0,
+                                      task_name='task',
+                                      resources_str='{}',
+                                      metadata='{}')
+        managed_job_state.scheduler_set_waiting([job_id], '/tmp/dag.yaml',
+                                                '/tmp/user.yaml', '/tmp/env',
+                                                None, 100)
+        manager = ControllerManager('test-uuid')
+        signal_dir = tmp_path / 'signals'
+        signal_dir.mkdir()
+        callback = AsyncMock()
+        starts = 0
+
+        async def fail_and_signal(*args, **kwargs):
+            nonlocal starts
+            del args, kwargs
+            starts += 1
+            (signal_dir / str(job_id)).write_text('', encoding='utf-8')
+            raise RuntimeError('context initialization failed')
+
+        sleep_calls = 0
+        real_sleep = asyncio.sleep
+
+        async def stop_monitor(seconds):
+            nonlocal sleep_calls
+            if seconds == 0:
+                await real_sleep(0)
+                return
+            sleep_calls += 1
+            if sleep_calls > 1:
+                raise asyncio.CancelledError()
+
+        monkeypatch.setattr(manager, 'run_job_loop', fail_and_signal)
+        monkeypatch.setattr(managed_job_utils, 'event_callback_func',
+                            MagicMock(return_value=callback))
+        monkeypatch.setattr(asyncio, 'sleep', stop_monitor)
+        monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                            str(tmp_path))
+        monkeypatch.setattr(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                            str(signal_dir))
+
+        with pytest.raises(asyncio.CancelledError):
+            await manager.monitor_loop()
+
+        assert starts == 1
+        assert (managed_job_state.get_job_schedule_state(job_id) ==
+                managed_job_state.ManagedJobScheduleState.DONE)
+        assert (managed_job_state.get_status(job_id) ==
+                managed_job_state.ManagedJobStatus.FAILED_CONTROLLER)
+        assert not (signal_dir / str(job_id)).exists()
+        callback.assert_not_awaited()
+        assert sleep_calls == 2
+
+    @pytest.mark.asyncio
+    async def test_start_job_tracks_initialization_task(self, manager,
+                                                        monkeypatch, tmp_path):
+        entered = asyncio.Event()
+        allow_lifecycle = asyncio.Event()
+        blocker = asyncio.Event()
+        signal_dir = tmp_path / 'signals'
+        signal_dir.mkdir()
+
+        async def initializing(job_id, log_file, pool, lifecycle_started):
+            del job_id, log_file, pool
+            entered.set()
+            await allow_lifecycle.wait()
+            lifecycle_started.set()
+            await blocker.wait()
+
+        monkeypatch.setattr(manager, 'run_job_loop', initializing)
+        monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                            str(tmp_path))
+        monkeypatch.setattr(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                            str(signal_dir))
+
+        start_task = asyncio.create_task(manager.start_job(2))
+        await entered.wait()
+        signal_path = signal_dir / '2'
+        signal_path.write_text('', encoding='utf-8')
+        real_sleep = asyncio.sleep
+
+        async def stop_cancel_loop(seconds):
+            del seconds
+            raise asyncio.CancelledError()
+
+        monkeypatch.setattr(asyncio, 'sleep', stop_cancel_loop)
+        with pytest.raises(asyncio.CancelledError):
+            await manager.cancel_job()
+
+        assert 2 not in manager.job_tasks
+        assert signal_path.exists()
+
+        allow_lifecycle.set()
+        await start_task
+        assert 2 in manager.job_tasks
+        assert not manager.job_tasks[2].done()
+
+        with pytest.raises(asyncio.CancelledError):
+            await manager.cancel_job()
+        await real_sleep(0)
+
+        assert manager.job_tasks[2].cancelled()
+        assert not signal_path.exists()
+        del manager.job_tasks[2]
+
+    @pytest.mark.asyncio
+    async def test_cancel_signal_waits_for_environment_setup(
+            self, manager, monkeypatch, tmp_path):
+        env_loading = asyncio.Event()
+        env_blocker = asyncio.Event()
+        running = asyncio.Event()
+        run_blocker = asyncio.Event()
+        real_to_thread = asyncio.to_thread
+        events = []
+        job_env = {}
+        signal_dir = tmp_path / 'signals'
+        signal_dir.mkdir()
+
+        async def to_thread(func, *args, **kwargs):
+            if func is controller_module.file_content_utils.get_job_env_content:
+                env_loading.set()
+                await env_blocker.wait()
+            return await real_to_thread(func, *args, **kwargs)
+
+        async def run():
+            running.set()
+            await run_blocker.wait()
+
+        async def stop_cancel_loop(seconds):
+            del seconds
+            raise asyncio.CancelledError()
+
+        def record(stage):
+            events.append((stage, dict(job_env)))
+
+        controller_module.context.get.return_value.override_envs.side_effect = (
+            job_env.update)
+        controller_module.file_content_utils.get_job_env_content.return_value = (
+            'SKYPILOT_CONFIG=/tmp/job-config.yaml\nJOB_OWNER=recovered-user')
+        monkeypatch.setattr(
+            controller_module.file_content_utils, 'restore_job_config_file',
+            MagicMock(side_effect=lambda *args, **kwargs: record('restore')))
+        monkeypatch.setattr(
+            controller_module.skypilot_config, 'reload_config',
+            MagicMock(side_effect=lambda *args, **kwargs: record('reload')))
+        controller_module.JobController.return_value.run.side_effect = run
+        manager._download_logs_for_cancelled_job.side_effect = (
+            lambda *args, **kwargs: record('download'))
+        manager._cleanup.side_effect = (
+            lambda *args, **kwargs: record('cleanup'))
+        monkeypatch.setattr(asyncio, 'to_thread', to_thread)
+        monkeypatch.setattr(asyncio, 'sleep', stop_cancel_loop)
+        monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                            str(tmp_path))
+        monkeypatch.setattr(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                            str(signal_dir))
+
+        start_task = asyncio.create_task(manager.start_job(1))
+        await env_loading.wait()
+        signal_path = signal_dir / '1'
+        signal_path.write_text('', encoding='utf-8')
+        with pytest.raises(asyncio.CancelledError):
+            await manager.cancel_job()
+
+        assert signal_path.exists()
+        env_blocker.set()
+        await start_task
+        await running.wait()
+
+        with pytest.raises(asyncio.CancelledError):
+            await manager.cancel_job()
+        task = manager.job_tasks[1]
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert [stage for stage, _ in events
+               ] == ['restore', 'reload', 'download', 'cleanup']
+        assert all(
+            env == {
+                'SKYPILOT_CONFIG': '/tmp/job-config.yaml',
+                'JOB_OWNER': 'recovered-user'
+            } for _, env in events)
+
+    @pytest.mark.asyncio
+    async def test_monitor_continues_when_job_fails_before_lifecycle_ready(
+            self, manager, monkeypatch, tmp_path):
+        blocker = asyncio.Event()
+        unrelated_task = asyncio.create_task(blocker.wait())
+        manager.job_tasks[2] = unrelated_task
+
+        async def fail_before_ready(*args, **kwargs):
+            del args, kwargs
+            raise RuntimeError('context initialization failed')
+
+        monkeypatch.setattr(manager, 'run_job_loop', fail_before_ready)
+        monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                            str(tmp_path))
+        monkeypatch.setattr(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                            str(tmp_path))
+        monkeypatch.setattr(
+            managed_job_state, 'get_waiting_job_async',
+            AsyncMock(side_effect=[{
+                'job_id': 1,
+                'pool': None
+            }, asyncio.CancelledError()]))
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(manager.monitor_loop(), timeout=1)
+
+        async def initialization_finished():
+            while (not managed_job_state.fail_job_controller_initialization.
+                   called or 1 in manager.starting):
+                await asyncio.sleep(0)
+
+        await asyncio.wait_for(initialization_finished(), timeout=1)
+        assert managed_job_state.get_waiting_job_async.await_count == 2
+        assert not unrelated_task.done()
+        assert 1 not in manager.starting
+        assert 1 not in manager.job_tasks
+        managed_job_state.fail_job_controller_initialization.assert_called_once(
+        )
+        unrelated_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await unrelated_task
+
+    @pytest.mark.asyncio
+    async def test_claimed_job_with_resources_uses_normal_cancel_path(
+            self, manager, monkeypatch, tmp_path):
+        signal_path = tmp_path / '1'
+        signal_path.write_text('', encoding='utf-8')
+        start_job = AsyncMock()
+        monkeypatch.setattr(manager, 'start_job', start_job)
+        monkeypatch.setattr(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                            str(tmp_path))
+        monkeypatch.setattr(
+            managed_job_state, 'get_waiting_job_async',
+            AsyncMock(side_effect=[{
+                'job_id': 1,
+                'pool': None
+            }, asyncio.CancelledError()]))
+        monkeypatch.setattr(managed_job_state, 'set_pending_cancelled',
+                            MagicMock(return_value=False))
+        managed_job_state.get_status_async.return_value = (
+            managed_job_state.ManagedJobStatus.PENDING)
+
+        with pytest.raises(asyncio.CancelledError):
+            await manager.monitor_loop()
+
+        async def start_dispatched():
+            while start_job.await_count == 0:
+                await asyncio.sleep(0)
+
+        await asyncio.wait_for(start_dispatched(), timeout=1)
+        start_job.assert_awaited_once_with(1, None)
+        assert signal_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_monitor_loop_claims_next_job_during_initialization(
+            self, manager, monkeypatch, tmp_path):
+        first_started = asyncio.Event()
+        second_started = asyncio.Event()
+        first_finished = asyncio.Event()
+        release_first = asyncio.Event()
+
+        async def start_job(job_id, pool):
+            del pool
+            if job_id == 1:
+                first_started.set()
+                await release_first.wait()
+                first_finished.set()
+            else:
+                second_started.set()
+
+        monkeypatch.setattr(manager, 'start_job', start_job)
+        monkeypatch.setattr(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                            str(tmp_path))
+        monkeypatch.setattr(
+            managed_job_state, 'get_waiting_job_async',
+            AsyncMock(side_effect=[{
+                'job_id': 1,
+                'pool': None
+            }, {
+                'job_id': 2,
+                'pool': None
+            }, None]))
+
+        monitor = asyncio.create_task(manager.monitor_loop())
+        try:
+            await asyncio.wait_for(first_started.wait(), timeout=1)
+            await asyncio.wait_for(second_started.wait(), timeout=1)
+        finally:
+            release_first.set()
+            monitor.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await monitor
+            await asyncio.wait_for(first_finished.wait(), timeout=1)
+
+    @pytest.mark.asyncio
+    async def test_monitor_loop_counts_initializing_job_before_next_claim(
+            self, manager, monkeypatch, tmp_path):
+        manager.starting.clear()
+        started = asyncio.Event()
+        finished = asyncio.Event()
+        release = asyncio.Event()
+
+        async def start_job(job_id, pool):
+            del pool
+            manager.starting.add(job_id)
+            started.set()
+            await release.wait()
+            finished.set()
+
+        monkeypatch.setattr(manager, 'start_job', start_job)
+        monkeypatch.setattr(controller_module.controller_utils,
+                            'LAUNCHES_PER_WORKER', 1)
+        monkeypatch.setattr(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                            str(tmp_path))
+        get_waiting = AsyncMock(side_effect=[{
+            'job_id': 1,
+            'pool': None
+        }, {
+            'job_id': 2,
+            'pool': None
+        }])
+        monkeypatch.setattr(managed_job_state, 'get_waiting_job_async',
+                            get_waiting)
+
+        monitor = asyncio.create_task(manager.monitor_loop())
+        try:
+            await asyncio.wait_for(started.wait(), timeout=1)
+            assert get_waiting.await_count == 1
+        finally:
+            release.set()
+            monitor.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await monitor
+            await asyncio.wait_for(finished.wait(), timeout=1)
+
+    @pytest.mark.asyncio
+    async def test_pending_cancel_retries_transient_db_error(
+            self, manager, monkeypatch, tmp_path, sleeps):
+        signal_path = tmp_path / '1'
+        signal_path.write_text('', encoding='utf-8')
+        callback = AsyncMock()
+        monkeypatch.setattr(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                            str(tmp_path))
+        monkeypatch.setattr(
+            managed_job_state, 'get_waiting_job_async',
+            AsyncMock(side_effect=[{
+                'job_id': 1,
+                'pool': None
+            }, asyncio.CancelledError()]))
+        monkeypatch.setattr(
+            managed_job_state, 'set_pending_cancelled',
+            MagicMock(side_effect=[self._db_error()] * 6 + [True]))
+        monkeypatch.setattr(managed_job_utils, 'event_callback_func',
+                            MagicMock(return_value=callback))
+        managed_job_state.get_status_async.return_value = (
+            managed_job_state.ManagedJobStatus.PENDING)
+
+        with pytest.raises(asyncio.CancelledError):
+            await manager.monitor_loop()
+
+        assert managed_job_state.set_pending_cancelled.call_count == 7
+        assert len(sleeps) == 6
+        assert not signal_path.exists()
+        callback.assert_awaited_once_with('CANCELLED')
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures('_mock_managed_jobs_db_conn')
+    async def test_pending_cancel_commit_lost_is_idempotent(
+            self, monkeypatch, tmp_path):
+        job_id = managed_job_state.set_job_info_without_job_id(
+            name='job',
+            workspace='default',
+            entrypoint='ep',
+            pool=None,
+            pool_hash=None,
+            user_hash='user')
+        managed_job_state.set_pending(job_id,
+                                      task_id=0,
+                                      task_name='task',
+                                      resources_str='{}',
+                                      metadata='{}')
+        managed_job_state.scheduler_set_waiting([job_id], '/tmp/dag.yaml',
+                                                '/tmp/user.yaml', '/tmp/env',
+                                                None, 100)
+        signal_path = tmp_path / str(job_id)
+        signal_path.write_text('', encoding='utf-8')
+        manager = ControllerManager('test-uuid')
+        start_job = AsyncMock()
+        callback = AsyncMock()
+        real_cancel = managed_job_state.set_pending_cancelled
+        attempts = 0
+        sleeps = 0
+
+        def commit_then_fail(*args, **kwargs):
+            nonlocal attempts
+            attempts += 1
+            result = real_cancel(*args, **kwargs)
+            if attempts == 1:
+                raise self._db_error()
+            return result
+
+        async def stop_after_retry(seconds):
+            nonlocal sleeps
+            del seconds
+            sleeps += 1
+            if sleeps > 1:
+                raise asyncio.CancelledError()
+
+        monkeypatch.setattr(manager, 'start_job', start_job)
+        monkeypatch.setattr(managed_job_state, 'set_pending_cancelled',
+                            commit_then_fail)
+        monkeypatch.setattr(managed_job_utils, 'event_callback_func',
+                            MagicMock(return_value=callback))
+        monkeypatch.setattr(asyncio, 'sleep', stop_after_retry)
+        monkeypatch.setattr(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                            str(tmp_path))
+
+        with pytest.raises(asyncio.CancelledError):
+            await manager.monitor_loop()
+
+        assert attempts == 2
+        start_job.assert_not_awaited()
+        assert not signal_path.exists()
+        assert managed_job_state.get_status(
+            job_id) == managed_job_state.ManagedJobStatus.CANCELLED
+        assert (managed_job_state.get_job_schedule_state(job_id) ==
+                managed_job_state.ManagedJobScheduleState.DONE)
+        cancelled_events = [
+            event for event in managed_job_state.get_job_events(job_id) if
+            event['new_status'] == managed_job_state.ManagedJobStatus.CANCELLED
+        ]
+        assert len(cancelled_events) == 1
+        callback.assert_awaited_once_with('CANCELLED')
+
+    @pytest.mark.asyncio
+    async def test_duplicate_job_does_not_stop_manager(self, manager,
+                                                       monkeypatch, tmp_path):
+        existing_task = asyncio.create_task(asyncio.sleep(0))
+        manager.job_tasks[1] = existing_task
+        starting = set(manager.starting)
+        monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                            str(tmp_path))
+
+        await manager.start_job(1)
+        await existing_task
+
+        assert manager.job_tasks[1] is existing_task
+        assert manager.starting == starting
+        controller_module.JobController.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancel_during_dag_load_finalizes_job(self, manager,
+                                                        monkeypatch, tmp_path):
+        loading = asyncio.Event()
+        blocker = asyncio.Event()
+
+        async def load_dag():
+            loading.set()
+            await blocker.wait()
+
+        controller_module.JobController.return_value.load_dag.side_effect = (
+            load_dag)
+        monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                            str(tmp_path))
+
+        await manager.start_job(1)
+        await loading.wait()
+        task = manager.job_tasks[1]
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        managed_job_state.set_cancelling_async.assert_awaited_once()
+        managed_job_state.finalize_job_done_async.assert_awaited_once_with(
+            1, cancelling=True, callback_func=None)
+        assert 1 not in manager.starting
+        assert 1 not in manager.job_tasks
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(('status', 'download_error', 'expected_events'), [
+        (managed_job_state.ManagedJobStatus.RUNNING, False, []),
+        (managed_job_state.ManagedJobStatus.PENDING, False, []),
+        (managed_job_state.ManagedJobStatus.RUNNING, True, []),
+    ])
+    async def test_cancel_during_env_load_requeues_without_cleanup(
+            self, manager, monkeypatch, tmp_path, status, download_error,
+            expected_events):
+        env_loading = asyncio.Event()
+        blocker = asyncio.Event()
+        real_to_thread = asyncio.to_thread
+        events = []
+
+        async def to_thread(func, *args, **kwargs):
+            if func is controller_module.file_content_utils.get_job_env_content:
+                env_loading.set()
+                await blocker.wait()
+            return await real_to_thread(func, *args, **kwargs)
+
+        def download_logs(*args, **kwargs):
+            del args, kwargs
+            events.append('download')
+            if download_error:
+                raise RuntimeError('download failed')
+
+        manager._download_logs_for_cancelled_job.side_effect = download_logs
+        manager._cleanup.side_effect = (
+            lambda *args, **kwargs: events.append('cleanup'))
+        managed_job_state.get_all_task_ids_statuses_async.return_value = [
+            (0, status)
+        ]
+        monkeypatch.setattr(asyncio, 'to_thread', to_thread)
+        monkeypatch.setattr(asyncio, 'sleep', AsyncMock())
+        monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                            str(tmp_path))
+
+        start_task = asyncio.create_task(manager.start_job(1))
+        await env_loading.wait()
+        (task,) = [
+            task for task in controller_module._background_tasks
+            if not task.done()
+        ]
+        task.cancel()
+
+        await start_task
+
+        assert events == expected_events
+        controller_module.JobController.assert_not_called()
+        managed_job_state.reset_jobs_for_recovery_batch.assert_called_once_with(
+            [{
+                'job_id': 1,
+                'controller_pid': manager._pid,
+                'controller_pid_started_at': manager._pid_started_at,
+                'schedule_state':
+                    managed_job_state.ManagedJobScheduleState.LAUNCHING,
+            }])
+        assert 1 not in manager.job_tasks
+
+    @pytest.mark.asyncio
+    async def test_completed_initialization_task_is_not_registered(
+            self, manager, monkeypatch, tmp_path):
+        finalized = asyncio.Event()
+
+        async def finalize(*args, **kwargs):
+            del args, kwargs
+            finalized.set()
+
+        managed_job_state.finalize_job_done_async.side_effect = finalize
+        monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                            str(tmp_path))
+        monkeypatch.setattr(controller_module, '_background_tasks_lock',
+                            asyncio.Lock())
+
+        async with controller_module._background_tasks_lock:
+            start_task = asyncio.create_task(manager.start_job(1))
+            await finalized.wait()
+
+        await start_task
+
+        assert 1 not in manager.starting
+        assert 1 not in manager.job_tasks
+
+    @pytest.mark.asyncio
+    async def test_repeated_cancel_does_not_interrupt_finalization(
+            self, manager, monkeypatch, tmp_path):
+        running = asyncio.Event()
+        run_blocker = asyncio.Event()
+        cleanup_started = asyncio.Event()
+        cleanup_blocker = asyncio.Event()
+        signal_dir = tmp_path / 'signals'
+        signal_dir.mkdir()
+
+        async def run():
+            running.set()
+            await run_blocker.wait()
+
+        async def cleanup(*args, **kwargs):
+            del args, kwargs
+            cleanup_started.set()
+            await cleanup_blocker.wait()
+
+        async def stop_cancel_loop(seconds):
+            del seconds
+            raise asyncio.CancelledError()
+
+        controller_module.JobController.return_value.run.side_effect = run
+        manager._cleanup.side_effect = cleanup
+        monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                            str(tmp_path))
+        monkeypatch.setattr(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                            str(signal_dir))
+        monkeypatch.setattr(asyncio, 'sleep', stop_cancel_loop)
+
+        await manager.start_job(1)
+        await running.wait()
+        task = manager.job_tasks[1]
+
+        signal_path = signal_dir / '1'
+        signal_path.write_text('', encoding='utf-8')
+        with pytest.raises(asyncio.CancelledError):
+            await manager.cancel_job()
+        await cleanup_started.wait()
+
+        signal_path.write_text('', encoding='utf-8')
+        with pytest.raises(asyncio.CancelledError):
+            await manager.cancel_job()
+        assert not signal_path.exists()
+        assert not task.done()
+
+        cleanup_blocker.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        manager._cleanup.assert_awaited_once()
+        managed_job_state.finalize_job_done_async.assert_awaited_once_with(
+            1, cancelling=True, callback_func=None)
+        assert 1 not in manager.job_tasks
+        assert 1 not in manager._stopping_jobs
+
+    @pytest.mark.asyncio
+    async def test_cancel_during_normal_finalization_is_ignored(
+            self, manager, monkeypatch, tmp_path):
+        cleanup_started = asyncio.Event()
+        cleanup_blocker = asyncio.Event()
+        signal_dir = tmp_path / 'signals'
+        signal_dir.mkdir()
+
+        async def cleanup(*args, **kwargs):
+            del args, kwargs
+            cleanup_started.set()
+            await cleanup_blocker.wait()
+
+        async def stop_cancel_loop(seconds):
+            del seconds
+            raise asyncio.CancelledError()
+
+        manager._cleanup.side_effect = cleanup
+        monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                            str(tmp_path))
+        monkeypatch.setattr(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                            str(signal_dir))
+        monkeypatch.setattr(asyncio, 'sleep', stop_cancel_loop)
+
+        await manager.start_job(1)
+        await cleanup_started.wait()
+        task = manager.job_tasks[1]
+
+        signal_path = signal_dir / '1'
+        signal_path.write_text('', encoding='utf-8')
+        with pytest.raises(asyncio.CancelledError):
+            await manager.cancel_job()
+        assert not signal_path.exists()
+        assert not task.done()
+
+        cleanup_blocker.set()
+        await task
+
+        managed_job_state.finalize_job_done_async.assert_awaited_once_with(
+            1, cancelling=False, callback_func=None)
+        assert 1 not in manager.job_tasks
+        assert 1 not in manager._stopping_jobs
 
     @pytest.mark.asyncio
     async def test_cleanup_error_caused_by_db_error_is_retried(
