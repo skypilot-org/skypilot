@@ -12,7 +12,13 @@ from sky.catalog import common
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-_df = common.read_catalog('primeintellect/vms.csv')
+# Keep in sync with the cron of update-primeintellect-catalog.yml in
+# skypilot-org/skypilot-catalog. Before the fetcher existed the catalog was a
+# static file, read once and never refreshed.
+_PULL_FREQUENCY_HOURS = 7
+
+_df = common.read_catalog('primeintellect/vms.csv',
+                          pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 
 def instance_type_exists(instance_type: str) -> bool:

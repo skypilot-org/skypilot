@@ -9,14 +9,23 @@ import uuid
 
 import requests
 
+from sky import sky_logging
 from sky.catalog import common as catalog_common
 from sky.utils import common_utils
 
+logger = sky_logging.init_logger(__name__)
+
 _df = None
 _lookup_dict = None
+_socket_lookup: Optional[Dict[Tuple[str, str], str]] = None
 
 # Base URL for Prime Intellect API (used as default if not configured).
 DEFAULT_BASE_URL = 'https://api.primeintellect.ai'
+# GPUSocket values the create-pod API accepts. Every offer has exactly one,
+# and the API requires `pod.socket`; PCIe is only the fallback when neither
+# the catalog nor the availability API can tell us the offer's real socket.
+VALID_SOCKETS = ('PCIe', 'SXM2', 'SXM3', 'SXM4', 'SXM5', 'SXM6')
+DEFAULT_SOCKET = 'PCIe'
 CREDENTIALS_PATH = '~/.prime/config.json'
 INITIAL_BACKOFF_SECONDS = 10
 MAX_BACKOFF_FACTOR = 10
@@ -144,13 +153,46 @@ def _try_request_with_backoff(
     return {}
 
 
-def get_upstream_cloud_id(instance_type: str) -> Optional[str]:
-    global _df, _lookup_dict
+def _catalog_df():
+    global _df
     if _df is None:
         _df = catalog_common.read_catalog('primeintellect/vms.csv')
-        _lookup_dict = (
-            _df.set_index('InstanceType')['UpstreamCloudId'].to_dict())
+    return _df
+
+
+def get_upstream_cloud_id(instance_type: str) -> Optional[str]:
+    global _lookup_dict
+    if _lookup_dict is None:
+        _lookup_dict = (_catalog_df().set_index('InstanceType')
+                        ['UpstreamCloudId'].to_dict())
     return _lookup_dict.get(instance_type)
+
+
+def get_catalog_socket(instance_type: str,
+                       availability_zone: str) -> Optional[str]:
+    """The offer's GPU socket from the catalog's `Socket` column, if any.
+
+    Catalogs written before the column existed return None. The lookup is by
+    (InstanceType, AvailabilityZone) first, then by InstanceType alone when
+    every row of that type agrees.
+    """
+    global _socket_lookup
+    if _socket_lookup is None:
+        _socket_lookup = {}
+        df = _catalog_df()
+        if 'Socket' in df.columns:
+            by_type: Dict[str, set] = {}
+            for itype, zone, socket in zip(df['InstanceType'],
+                                           df['AvailabilityZone'],
+                                           df['Socket']):
+                if isinstance(socket, str) and socket in VALID_SOCKETS:
+                    _socket_lookup[(itype, str(zone))] = socket
+                    by_type.setdefault(itype, set()).add(socket)
+            for itype, sockets in by_type.items():
+                if len(sockets) == 1:
+                    _socket_lookup[(itype, '')] = next(iter(sockets))
+    return (_socket_lookup.get((instance_type, availability_zone)) or
+            _socket_lookup.get((instance_type, '')))
 
 
 class PrimeIntellectAPIClient:
@@ -181,6 +223,59 @@ class PrimeIntellectAPIClient:
             'get',
             f'{self.base_url}/api/v1/pods/{instance_id}',
             headers=self.headers)
+
+    def get_offer_socket(self, cloud_id: str, gpu_type: str,
+                         availability_zone: str) -> Optional[str]:
+        """The offer's GPU socket from the availability API, or None.
+
+        Needs the key's "Availability: Read" scope. Any API error, or an
+        answer that does not pin down exactly one valid socket for this
+        cloudId, returns None so the caller can fall back.
+        """
+        params: Dict[str, Any] = {'cloud_id': cloud_id, 'gpu_type': gpu_type}
+        if availability_zone and availability_zone != 'UNSPECIFIED':
+            params['data_center_id'] = availability_zone
+        try:
+            response = _try_request_with_backoff(
+                'get',
+                f'{self.base_url}/api/v1/availability/gpus',
+                headers=self.headers,
+                data=params)
+        except (PrimeintellectAPIError, requests.RequestException) as e:
+            logger.debug(f'Prime Intellect availability lookup for socket of '
+                         f'{cloud_id!r} failed: {e}')
+            return None
+        sockets = {
+            item.get('socket')
+            for item in (response or {}).get('items') or []
+            if item.get('cloudId') == cloud_id and
+            item.get('socket') in VALID_SOCKETS
+        }
+        if len(sockets) == 1:
+            return sockets.pop()
+        logger.debug(f'Prime Intellect availability lookup for {cloud_id!r} '
+                     f'gave sockets {sorted(sockets)}; not using it.')
+        return None
+
+    def resolve_socket(self, instance_type: str, cloud_id: str, gpu_type: str,
+                       availability_zone: str) -> str:
+        """GPU socket to send for this offer.
+
+        Prime Intellect requires `pod.socket` and each offer (cloudId) has
+        one socket. Sending PCIe for an SXM offer either fails or lands on the
+        wrong hardware, so: catalog column, then availability API, then PCIe.
+        """
+        if gpu_type == 'CPU_NODE':
+            return DEFAULT_SOCKET
+        socket = get_catalog_socket(instance_type, availability_zone)
+        if socket is None:
+            socket = self.get_offer_socket(cloud_id, gpu_type,
+                                           availability_zone)
+        if socket is None:
+            logger.debug(f'No socket known for {instance_type!r} '
+                         f'({cloud_id!r}); defaulting to {DEFAULT_SOCKET}.')
+            socket = DEFAULT_SOCKET
+        return socket
 
     def launch(self,
                name: str,
@@ -251,11 +346,14 @@ class PrimeIntellectAPIClient:
             gpu_count = int(parts[0])
             gpu_type = parts[1]
 
+        socket = self.resolve_socket(instance_type, cloud_id, gpu_type,
+                                     availability_zone)
+
         payload: Dict[str, Any] = {
             'pod': {
                 'name': name,
                 'cloudId': cloud_id,
-                'socket': 'PCIe',
+                'socket': socket,
                 'gpuType': gpu_type,
                 'gpuCount': int(gpu_count),
                 'diskSize': disk_size,
