@@ -3392,7 +3392,7 @@ Example:
 ``logs``
 ~~~~~~~~
 
-External logging storage configuration (optional).
+External logging storage configuration (optional). Not applicable to client side config: set it in the API server's config. See :ref:`External Logging Storage <external-logging-storage>`.
 
 .. code-block:: yaml
 
