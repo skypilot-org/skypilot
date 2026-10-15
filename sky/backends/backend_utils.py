@@ -4103,8 +4103,8 @@ def get_clusters(
             names.
         all_users: If True, return clusters from all users. If False, only
             return clusters from the current user.
-        include_credentials: If True, include cluster ssh credentials in the
-            return value.
+        include_credentials: If True, include ssh credentials in the records of
+            the clusters the current user owns.
         _include_is_managed: Whether to force include clusters created by the
             controller.
 
@@ -4174,12 +4174,17 @@ def get_clusters(
 
     def _update_records_with_credentials(
             records: List[Optional[Dict[str, Any]]]) -> None:
-        """Add the credentials to the record.
+        """Add the credentials to the records of clusters the caller owns.
 
         This is useful for the client side to setup the ssh config of the
-        cluster.
+        cluster. The credentials carry the cluster owner's SSH private key, so
+        the records of other users' clusters get none.
         """
-        records_with_handle = _get_records_with_handle(records)
+        caller_user_hash = common_utils.get_current_user().id
+        records_with_handle = [
+            record for record in _get_records_with_handle(records)
+            if record['user_hash'] == caller_user_hash
+        ]
         if len(records_with_handle) == 0:
             return
 
