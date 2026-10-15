@@ -2058,18 +2058,22 @@ class Task:
                     config.pop(key, None)
 
         # Keep the user's resources as written unless an override changed
-        # them, so a plain submission shows the file unchanged.
+        # them, so a plain submission shows the file unchanged. Compared as
+        # plain data, not by building `Resources` from the user's YAML: that
+        # has side effects (deprecation warnings written into the user's
+        # output, catalog loads). A mismatch in form alone (e.g. `A100:1` vs
+        # `{A100: 1}`) just shows the task's own, equivalent serialization.
         effective_resources = effective.get('resources')
-        try:
-            user_resources = _resources_to_config(
-                resources_lib.Resources.from_yaml_config(
-                    config.get('resources')),
-                redact_secrets=True)
-        except Exception:  # pylint: disable=broad-except
-            user_resources = None
-        if (effective_resources is not None and
-                user_resources != effective_resources):
+        if (effective_resources is not None and _plain(
+                config.get('resources') or {}) != _plain(effective_resources)):
             config['resources'] = effective_resources
+            # The task keeps a legacy `resources.autostop.hook` as a
+            # `config.hooks` entry, which its resources no longer carry.
+            effective_hooks = (effective.get('config') or {}).get('hooks')
+            if effective_hooks and not (config.get('config') or
+                                        {}).get('hooks'):
+                config['config'] = dict(config.get('config') or {})
+                config['config']['hooks'] = effective_hooks
 
         # `--name` / `--num-nodes`.
         if self.name is not None and self.name != config.get('name'):
@@ -2289,6 +2293,18 @@ class Task:
         else:
             s += '\n  resources: default instances'
         return s
+
+
+def _plain(value: Any) -> Any:
+    """`value` with every scalar as a string, to compare YAML data by content.
+
+    `cpus: 2` and `cpus: '2'` read the same to the user.
+    """
+    if isinstance(value, dict):
+        return {str(k): _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    return None if value is None else str(value)
 
 
 def _resources_to_config(resources: Union[List['resources_lib.Resources'],

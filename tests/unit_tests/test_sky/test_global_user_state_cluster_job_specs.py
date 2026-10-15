@@ -402,3 +402,44 @@ def test_execute_records_the_spec_after_submitting_the_job():
 
     order = [c[0] for c in calls.mock_calls]
     assert order == ['add_job', 'execute_task', 'record_job_spec'], order
+
+
+def test_submitted_yaml_writes_nothing_to_the_users_output(capsys):
+    """Recording runs after "Job submitted" is printed to the user.
+
+    Rebuilding `Resources` from the user's YAML would print the
+    `autostop.hook` deprecation warning a second time, between "Job
+    submitted" and "Waiting for task resources" in the launch output.
+    """
+    config = {
+        'run': 'echo',
+        'resources': {
+            'cpus': '2+',
+            'autostop': {
+                'idle_minutes': 1,
+                'hook': 'echo bye',
+                'hook_timeout': 30
+            },
+        },
+    }
+    task = _task_from_user_yaml(config)
+    capsys.readouterr()  # Drop the warning printed when the task is loaded.
+
+    recorded = task.to_submitted_yaml_config()
+
+    captured = capsys.readouterr()
+    assert captured.out == '' and captured.err == '', captured
+    # The hook is kept, in its non-deprecated form.
+    assert recorded['config']['hooks'][0]['run'] == 'echo bye'
+    assert 'hook' not in recorded['resources']['autostop']
+
+
+def test_submitted_yaml_does_not_rebuild_resources():
+    """Building `Resources` can load catalogs and print warnings."""
+    task = _task_from_user_yaml({'resources': {'cpus': '1+'}, 'run': 'echo'})
+    task.set_resources_override({'cpus': '2'})
+    with mock.patch.object(resources_lib.Resources,
+                           'from_yaml_config') as from_yaml_config:
+        recorded = task.to_submitted_yaml_config()
+    from_yaml_config.assert_not_called()
+    assert recorded['resources']['cpus'] == '2'
