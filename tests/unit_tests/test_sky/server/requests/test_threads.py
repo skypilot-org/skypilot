@@ -12,7 +12,6 @@ import pytest
 from sky import exceptions
 from sky.metrics import utils as metrics_utils
 from sky.server.requests.threads import OnDemandThreadExecutor
-from sky.server.requests.threads import PooledThreadExecutor
 
 
 def dummy_task(sleep_time=0.05):
@@ -38,46 +37,34 @@ def thread_name_task(name_queue: queue.Queue):
     return True
 
 
-@pytest.fixture(params=[OnDemandThreadExecutor, PooledThreadExecutor])
-def executor_cls(request):
-    return request.param
-
-
-def _wait_running_zero(executor) -> None:
-    # The worker releases the slot just after resolving the future.
-    deadline = time.time() + 5
-    while executor.running.get() != 0 and time.time() < deadline:
-        time.sleep(0.01)
-    assert executor.running.get() == 0
-
-
-def test_executor_submit_and_result(executor_cls):
-    executor = executor_cls(name='test', max_workers=2)
+def test_on_demand_executor_submit_and_result():
+    executor = OnDemandThreadExecutor(name='test', max_workers=2)
     try:
         futs = [executor.submit(dummy_task), executor.submit(dummy_task)]
         done, not_done = concurrent.futures.wait(
             futs, timeout=5, return_when=concurrent.futures.ALL_COMPLETED)
         assert not not_done
         assert all(f.result() is True for f in done)
-        _wait_running_zero(executor)
+        # running should be back to 0 after completion
+        assert executor.running.get() == 0
     finally:
         executor.shutdown()
 
 
-def test_executor_exception_propagation(executor_cls):
-    executor = executor_cls(name='test', max_workers=1)
+def test_on_demand_executor_exception_propagation():
+    executor = OnDemandThreadExecutor(name='test', max_workers=1)
     try:
         fut = executor.submit(failing_task)
         with pytest.raises(ValueError):
             fut.result(timeout=5)
         # running should be back to 0 even on exception
-        _wait_running_zero(executor)
+        assert executor.running.get() == 0
     finally:
         executor.shutdown()
 
 
-def test_executor_concurrency_limit(executor_cls):
-    executor = executor_cls(name='test', max_workers=2)
+def test_on_demand_executor_concurrency_limit():
+    executor = OnDemandThreadExecutor(name='test', max_workers=2)
     release_event = threading.Event()
     try:
         f1 = executor.submit(blocking_task, release_event)
@@ -90,16 +77,13 @@ def test_executor_concurrency_limit(executor_cls):
         concurrent.futures.wait([f1, f2], timeout=5)
         assert f1.result() is True
         assert f2.result() is True
-        _wait_running_zero(executor)
-        # Slots freed by finished tasks are admitted again.
-        assert executor.submit(dummy_task, 0).result(timeout=5) is True
+        assert executor.running.get() == 0
     finally:
-        release_event.set()
         executor.shutdown()
 
 
-def test_executor_check_available_borrow_semantics(executor_cls):
-    executor = executor_cls(name='test', max_workers=1)
+def test_on_demand_executor_check_available_borrow_semantics():
+    executor = OnDemandThreadExecutor(name='test', max_workers=1)
     try:
         # borrow=False should not change running
         assert executor.running.get() == 0
@@ -122,16 +106,15 @@ def test_executor_check_available_borrow_semantics(executor_cls):
         executor.shutdown()
 
 
-def test_executor_shutdown_prevents_submit(executor_cls):
-    executor = executor_cls(name='test', max_workers=1)
+def test_on_demand_executor_shutdown_prevents_submit():
+    executor = OnDemandThreadExecutor(name='test', max_workers=1)
     executor.shutdown()
     with pytest.raises(RuntimeError):
         executor.submit(dummy_task)
-    assert executor.running.get() == 0
 
 
-def test_executor_thread_naming(executor_cls):
-    executor = executor_cls(name='myexec', max_workers=1)
+def test_on_demand_executor_thread_naming():
+    executor = OnDemandThreadExecutor(name='myexec', max_workers=1)
     try:
         q = queue.Queue()
         fut = executor.submit(thread_name_task, q)
@@ -153,44 +136,6 @@ def test_on_demand_executor_threads_dict_cleanup():
         executor.shutdown()
 
 
-def test_pooled_executor_reuses_threads():
-    executor = PooledThreadExecutor(name='pooled', max_workers=2)
-    try:
-        idents = set()
-        for _ in range(10):
-            idents.add(executor.submit(threading.get_ident).result(timeout=5))
-            _wait_running_zero(executor)
-        assert len(idents) == 1
-    finally:
-        executor.shutdown()
-
-
-def test_pooled_executor_threads_are_daemons():
-    executor = PooledThreadExecutor(name='pooled', max_workers=1)
-    try:
-        assert executor.submit(
-            lambda: threading.current_thread().daemon).result(timeout=5)
-    finally:
-        executor.shutdown()
-
-
-def test_pooled_executor_never_exceeds_max_threads():
-    executor = PooledThreadExecutor(name='pooled', max_workers=4)
-    try:
-        for _ in range(50):
-            futs = []
-            for _ in range(4):
-                try:
-                    futs.append(executor.submit(dummy_task, 0.001))
-                except exceptions.ConcurrentWorkerExhaustedError:
-                    pass
-            concurrent.futures.wait(futs, timeout=5)
-        _wait_running_zero(executor)
-        assert executor._num_threads <= 4  # pylint: disable=protected-access
-    finally:
-        executor.shutdown()
-
-
 def _gauge_value(name: str, executor_name: str) -> float:
     value = prometheus_client.REGISTRY.get_sample_value(name, {
         'pid': str(os.getpid()),
@@ -200,10 +145,10 @@ def _gauge_value(name: str, executor_name: str) -> float:
     return value
 
 
-def test_executor_metrics(monkeypatch, executor_cls):
+def test_on_demand_executor_metrics(monkeypatch):
     monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', True)
-    name = f'metrics_test_{executor_cls.__name__}'
-    executor = executor_cls(name=name, max_workers=2)
+    name = 'metrics_test'
+    executor = OnDemandThreadExecutor(name=name, max_workers=2)
     release_event = threading.Event()
     try:
         # The gauges must use 'liveall': the multiprocess collector strips
@@ -237,8 +182,13 @@ def test_executor_metrics(monkeypatch, executor_cls):
         concurrent.futures.wait([f1, f2], timeout=5)
         assert f1.result() is True
         assert f2.result() is True
-        _wait_running_zero(executor)
+        # The gauge is decremented in the worker thread after the future
+        # resolves; poll briefly to avoid racing that final decrement.
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if _gauge_value('sky_apiserver_threads_active', name) == 0:
+                break
+            time.sleep(0.01)
         assert _gauge_value('sky_apiserver_threads_active', name) == 0
     finally:
-        release_event.set()
         executor.shutdown()

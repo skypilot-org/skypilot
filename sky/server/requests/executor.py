@@ -141,10 +141,10 @@ _AUTH_THREAD_EXECUTOR_LOCK = threading.Lock()
 # authentication, and every request fails with 503 -- including requests that
 # have nothing to do with streaming. Separate pools keep that failure confined
 # to the streaming endpoints.
-_AUTH_THREAD_EXECUTOR: Optional[threads.PooledThreadExecutor] = None
+_AUTH_THREAD_EXECUTOR: Optional[threads.OnDemandThreadExecutor] = None
 
 
-def get_auth_thread_executor() -> threads.PooledThreadExecutor:
+def get_auth_thread_executor() -> threads.OnDemandThreadExecutor:
     """Lazy init and return the auth thread executor for current process.
 
     For short, latency-sensitive work on the request hot path -- primarily the
@@ -157,7 +157,7 @@ def get_auth_thread_executor() -> threads.PooledThreadExecutor:
         return _AUTH_THREAD_EXECUTOR
     with _AUTH_THREAD_EXECUTOR_LOCK:
         if _AUTH_THREAD_EXECUTOR is None:
-            _AUTH_THREAD_EXECUTOR = threads.PooledThreadExecutor(
+            _AUTH_THREAD_EXECUTOR = threads.OnDemandThreadExecutor(
                 name='auth_thread_executor', max_workers=_AUTH_THREADS_LIMIT)
         return _AUTH_THREAD_EXECUTOR
 
