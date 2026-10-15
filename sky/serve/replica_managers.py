@@ -27,6 +27,7 @@ from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve import service
 from sky.serve import spot_placer
+from sky.server import common as server_common
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -111,11 +112,18 @@ def launch_cluster(replica_id: int,
                        int, bool],
                    resources_override: Optional[Dict[str, Any]] = None,
                    retry_until_up: bool = True,
-                   max_retry: int = 3) -> None:
+                   max_retry: int = 3,
+                   file_mounts_blob_id: Optional[str] = None) -> None:
     """Launch a sky serve replica cluster.
 
     This function will not wait for the job starts running. It will return
     immediately after the job is submitted.
+
+    Args:
+        file_mounts_blob_id: The blob that the task's local workdir and file
+            mount sources point into, if any. It is passed on with the launch
+            so the API server extracts the blob on whichever host handles the
+            launch; the sources may not exist on this controller's host.
 
     Raises:
         RuntimeError: If failed to launch the cluster after max_retry retries,
@@ -139,6 +147,12 @@ def launch_cluster(replica_id: int,
             ]
             task.set_resources(type(resources)(overrided_resources))
         task.update_envs({serve_constants.REPLICA_ID_ENV_VAR: str(replica_id)})
+        # Once the task's sources are cloud URLs (e.g. after an update that
+        # went through a bucket), the blob is not needed for this launch.
+        if (file_mounts_blob_id is not None and
+                not server_common.local_file_mounts_required(
+                    task.to_yaml_config())):
+            file_mounts_blob_id = None
 
         logger.info(f'Launching replica (id: {replica_id}) cluster '
                     f'{cluster_name} with resources: {task.resources}')
@@ -168,7 +182,8 @@ def launch_cluster(replica_id: int,
             request_id = sdk.launch(task,
                                     cluster_name,
                                     retry_until_up=retry_until_up,
-                                    _is_launched_by_sky_serve_controller=True)
+                                    _is_launched_by_sky_serve_controller=True,
+                                    _file_mounts_blob_id=file_mounts_blob_id)
             logger.info(f'Replica cluster {cluster_name} launch requested '
                         f'with request_id: {request_id}.')
             replica_to_request_id[replica_id] = request_id
@@ -823,6 +838,10 @@ class SkyPilotReplicaManager(ReplicaManager):
         assert yaml_content is not None, (
             f'yaml content not found for {service_name} version {version}')
         self.yaml_content: str = yaml_content
+        # Set when the task's local sources point into the client's upload
+        # blob (consolidation mode without a cloud bucket).
+        self._file_mounts_blob_id: Optional[str] = (
+            serve_state.get_service_file_mounts_blob_id(service_name))
         task = task_lib.Task.from_yaml_str(self.yaml_content)
         self._spot_placer: Optional[spot_placer.SpotPlacer] = (
             spot_placer.SpotPlacer.from_task(spec, task))
@@ -954,6 +973,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                   self._replica_to_request_id,
                   self._replica_to_launch_cancelled, resources_override,
                   retry_until_up),
+            kwargs={'file_mounts_blob_id': self._file_mounts_blob_id},
         )
         replica_port = _get_resources_ports(self.yaml_content)
 

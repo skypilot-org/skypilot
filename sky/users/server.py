@@ -133,8 +133,14 @@ def get_user_type(user: models.User) -> str:
 # TODO(aylei): make these async once we have the global_user_state async
 # support.
 @router.get('')
-def users() -> List[Dict[str, Any]]:
-    """Gets all users."""
+def users(request: fastapi.Request) -> List[Dict[str, Any]]:
+    """Gets all users for admins, and for everyone else the members of the
+    workspaces they can read, plus themselves.
+
+    The readable workspaces are the ones that decide which clusters and jobs
+    the caller sees. A public one makes every user visible. No authenticated
+    user is treated as admin, as in `GET /users/role`.
+    """
     all_users = []
     user_list = global_user_state.get_all_users()
 
@@ -143,6 +149,18 @@ def users() -> List[Dict[str, Any]]:
         user_ids = permission.permission_service.get_users_for_role(role)
         for user_id in user_ids:
             users_to_role[user_id] = role
+
+    auth_user = request.state.auth_user
+    # The loop above has just reloaded the policy.
+    if auth_user is not None and not _is_admin(
+            permission.permission_service.roles_in_memory(auth_user.id)):
+        # The read_access settings that decide the readable workspaces may
+        # have changed on another process.
+        server_common.refresh_workspace_state_for_sync_handler()
+        visible = workspaces_core.readable_workspace_members_in_memory(
+            auth_user.id)
+        if visible is not None:
+            user_list = [user for user in user_list if user.id in visible]
 
     for user in user_list:
         # Filter out service accounts - they have IDs starting with "sa-"
@@ -859,14 +877,22 @@ def _user_lock(user_id: str) -> Generator[None, None, None]:
 @router.get('/service-account-tokens')
 def get_service_account_tokens(
         request: fastapi.Request) -> List[Dict[str, Any]]:
-    """Get service account tokens. All users can see all tokens."""
+    """Get service account tokens.
+
+    Admins see all tokens and other users the tokens they created, the same
+    rule as the single-token endpoints.
+    """
     auth_user = request.state.auth_user
     if auth_user is None:
         raise fastapi.HTTPException(status_code=401,
                                     detail='Authentication required')
 
-    # All authenticated users can see all tokens
     tokens = global_user_state.get_all_service_account_tokens()
+    if not _caller_is_admin(auth_user.id):
+        tokens = [
+            token for token in tokens
+            if token['creator_user_hash'] == auth_user.id
+        ]
 
     result = []
     for token in tokens:

@@ -557,10 +557,10 @@ export function ManagedJobs() {
     <>
       {/* Jobs section */}
       <div className="flex flex-wrap items-center gap-2 mb-1">
-        <div className="text-base">
+        <div className="flex items-center">
           <Link
             href="/jobs"
-            className="text-sky-blue hover:underline leading-none"
+            className="text-sky-blue hover:underline leading-none text-base"
           >
             Managed Jobs
           </Link>
@@ -2429,248 +2429,265 @@ export function ManagedJobsTable({
   return (
     <div className="relative">
       <div className="flex flex-col space-y-1 mb-1">
-        {/* Combined Status Filter */}
-        <div className="flex items-center justify-between text-sm mb-4">
-          <div className="flex flex-wrap items-center min-w-0">
-            <span className="mr-2 text-sm font-medium">Statuses:</span>
-            <div className="flex flex-wrap gap-2 items-center">
-              {!loading && totalNoFilter === 0 && !isInitialLoad && (
-                <span className="text-gray-500 mr-2">No jobs found</span>
-              )}
-              {/* Primary statuses: always rendered in fixed order so the bar
+        {/* Combined Status Filter. Below lg it is a grid: status chips and
+            More wrap across the full width, then the toggles with Refresh on
+            the right. At lg Refresh aligns to the last row, so it stays level
+            with the toggles when the chips wrap.
+            Narrow-only rules use max-lg: so plugin stylesheets, which load
+            later, cannot override them. */}
+        <div className="text-sm mb-4 lg:flex lg:items-end lg:justify-between max-lg:grid max-lg:grid-cols-[minmax(0,1fr)_auto] max-lg:items-start max-lg:gap-y-3">
+          <div className="lg:flex lg:flex-wrap lg:items-center lg:min-w-0 max-lg:contents">
+            <span className="mr-2 text-sm font-medium text-gray-700 max-lg:hidden">
+              Statuses:
+            </span>
+            <div className="lg:flex lg:flex-wrap lg:gap-2 lg:items-center max-lg:contents">
+              <div className="max-lg:relative max-lg:flex max-lg:flex-wrap max-lg:items-center max-lg:gap-2 max-lg:col-span-2 lg:contents">
+                {!loading && totalNoFilter === 0 && !isInitialLoad && (
+                  <span className="text-gray-500 mr-2">No jobs found</span>
+                )}
+                {/* Primary statuses: always rendered in fixed order so the bar
                   doesn't jitter when counts change. The count badge uses
                   tabular-nums + a fixed min-width so the chip width stays
                   stable as counts change between 1 and many digits. */}
-              {PRIMARY_STATUSES.map((status) => {
-                const count = statusCounts[status] ?? 0;
-                const highlighted =
-                  isStatusHighlighted(status) ||
-                  selectedStatuses.includes(status);
-                return (
-                  <button
-                    key={status}
-                    onClick={() => handleStatusClick(status)}
-                    className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${
-                      highlighted
-                        ? getBadgeStyle(status)
-                        : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-                    }`}
-                  >
-                    <span>{status}</span>
-                    <span
-                      className={`text-xs tabular-nums text-center min-w-[1.5rem] ${highlighted ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
-                    >
-                      {count}
-                    </span>
-                  </button>
-                );
-              })}
-              {/* Selected non-primary statuses surface as inline chips so the
-                  user can always see which filters are active without opening
-                  the dropdown. */}
-              {nonPrimarySelectedStatuses.map((status) => {
-                const count = statusCounts[status] ?? 0;
-                return (
-                  <button
-                    key={status}
-                    onClick={() => handleStatusClick(status)}
-                    className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${getBadgeStyle(status)}`}
-                  >
-                    <span>{status}</span>
-                    <span className="text-xs tabular-nums text-center min-w-[1.5rem] bg-white/50 px-1.5 py-0.5 rounded">
-                      {count}
-                    </span>
-                  </button>
-                );
-              })}
-              {/* More dropdown: holds the long tail of statuses
-                  (PENDING, STARTING, CANCELLED, FAILED_*, …). */}
-              {(() => {
-                // Count dropdown items currently included in the filter
-                // (either explicitly via selectedStatuses or implicitly
-                // because Active is selected). When the user is in any
-                // narrowed state, surface that count on the pill so the
-                // button itself signals filtering is active.
-                const otherIncludedCount = OTHER_STATUSES.filter((s) =>
-                  isStatusHighlighted(s)
-                ).length;
-                const otherTotalCount = otherStatusesTotalCount;
-                const isNarrowed =
-                  activeTab !== 'all' || selectedStatuses.length > 0;
-                return (
-                  <div className="relative" ref={moreMenuRef}>
+                {PRIMARY_STATUSES.map((status) => {
+                  const count = statusCounts[status] ?? 0;
+                  const highlighted =
+                    isStatusHighlighted(status) ||
+                    selectedStatuses.includes(status);
+                  return (
                     <button
-                      onClick={() => setMoreMenuOpen((v) => !v)}
-                      className={`px-3 py-0.5 rounded-full flex items-center space-x-1.5 ${
-                        isNarrowed
-                          ? 'bg-gray-200 text-gray-800'
+                      key={status}
+                      onClick={() => handleStatusClick(status)}
+                      className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${
+                        highlighted
+                          ? getBadgeStyle(status)
                           : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                       }`}
-                      aria-haspopup="true"
-                      aria-expanded={moreMenuOpen}
                     >
-                      <span>More</span>
-                      {isNarrowed ? (
-                        <span className="text-xs tabular-nums bg-white/70 px-1.5 py-0.5 rounded">
-                          <span className="inline-block text-center min-w-[1rem]">
-                            {otherIncludedCount}
-                          </span>{' '}
-                          selected
-                        </span>
-                      ) : (
-                        otherTotalCount > 0 && (
-                          <span className="text-xs tabular-nums text-center min-w-[1.5rem] inline-block bg-gray-200 px-1.5 py-0.5 rounded">
-                            {otherTotalCount}
-                          </span>
-                        )
-                      )}
-                      <ChevronDownIcon
-                        className={`w-3.5 h-3.5 transition-transform ${moreMenuOpen ? 'rotate-180' : ''}`}
-                      />
+                      <span>{status}</span>
+                      <span
+                        className={`text-xs tabular-nums text-center min-w-[1.5rem] ${highlighted ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+                      >
+                        {count}
+                      </span>
                     </button>
-                    {moreMenuOpen && (
-                      <div className="absolute left-0 z-50 mt-1 w-60 rounded-md border border-gray-200 bg-white shadow-md py-1">
-                        {OTHER_STATUSES.map((status) => {
-                          const count = statusCounts[status] ?? 0;
-                          // A status is included in the current view either
-                          // explicitly (selectedStatuses) or implicitly via
-                          // the Active/All toggle (e.g. PENDING/STARTING are
-                          // implicitly included when Active is selected).
-                          // Both cases should light up the check + label.
-                          const included = isStatusHighlighted(status);
-                          const explicit = selectedStatuses.includes(status);
-                          return (
-                            <button
-                              key={status}
-                              onClick={() => handleStatusClick(status)}
-                              className={`w-full px-3 py-1.5 flex items-center justify-between text-sm hover:bg-gray-50 ${
-                                explicit ? 'bg-gray-50' : ''
-                              }`}
-                            >
-                              <span className="flex items-center gap-2 min-w-0">
-                                <CheckIcon
-                                  className={`w-3.5 h-3.5 shrink-0 ${included ? 'text-sky-blue' : 'text-transparent'}`}
-                                />
-                                <span
-                                  className={`truncate ${included ? 'font-medium text-gray-900' : count === 0 ? 'text-gray-400' : 'text-gray-700'}`}
-                                >
-                                  {status}
-                                </span>
-                              </span>
-                              <span
-                                className={`ml-2 text-xs tabular-nums text-right min-w-[2rem] ${count === 0 ? 'text-gray-400' : 'text-gray-500'}`}
+                  );
+                })}
+                {/* Selected non-primary statuses surface as inline chips so the
+                  user can always see which filters are active without opening
+                  the dropdown. */}
+                {nonPrimarySelectedStatuses.map((status) => {
+                  const count = statusCounts[status] ?? 0;
+                  return (
+                    <button
+                      key={status}
+                      onClick={() => handleStatusClick(status)}
+                      className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${getBadgeStyle(status)}`}
+                    >
+                      <span>{status}</span>
+                      <span className="text-xs tabular-nums text-center min-w-[1.5rem] bg-white/50 px-1.5 py-0.5 rounded">
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+                {/* More dropdown: holds the long tail of statuses
+                  (PENDING, STARTING, CANCELLED, FAILED_*, …). */}
+                {(() => {
+                  // Count dropdown items currently included in the filter
+                  // (either explicitly via selectedStatuses or implicitly
+                  // because Active is selected). When the user is in any
+                  // narrowed state, surface that count on the pill so the
+                  // button itself signals filtering is active.
+                  const otherIncludedCount = OTHER_STATUSES.filter((s) =>
+                    isStatusHighlighted(s)
+                  ).length;
+                  const otherTotalCount = otherStatusesTotalCount;
+                  const isNarrowed =
+                    activeTab !== 'all' || selectedStatuses.length > 0;
+                  return (
+                    <div className="lg:relative" ref={moreMenuRef}>
+                      <button
+                        onClick={() => setMoreMenuOpen((v) => !v)}
+                        className={`px-3 py-0.5 rounded-full flex items-center space-x-1.5 ${
+                          isNarrowed
+                            ? 'bg-gray-200 text-gray-800'
+                            : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                        }`}
+                        aria-haspopup="true"
+                        aria-expanded={moreMenuOpen}
+                      >
+                        <span>More</span>
+                        {isNarrowed ? (
+                          <span className="text-xs tabular-nums bg-white/70 px-1.5 py-0.5 rounded">
+                            <span className="inline-block text-center min-w-[1rem]">
+                              {otherIncludedCount}
+                            </span>{' '}
+                            selected
+                          </span>
+                        ) : (
+                          otherTotalCount > 0 && (
+                            <span className="text-xs tabular-nums text-center min-w-[1.5rem] inline-block bg-gray-200 px-1.5 py-0.5 rounded">
+                              {otherTotalCount}
+                            </span>
+                          )
+                        )}
+                        <ChevronDownIcon
+                          className={`w-3.5 h-3.5 transition-transform ${moreMenuOpen ? 'rotate-180' : ''}`}
+                        />
+                      </button>
+                      {moreMenuOpen && (
+                        <div className="absolute left-0 z-50 mt-1 w-60 rounded-md border border-gray-200 bg-white shadow-md py-1">
+                          {OTHER_STATUSES.map((status) => {
+                            const count = statusCounts[status] ?? 0;
+                            // A status is included in the current view either
+                            // explicitly (selectedStatuses) or implicitly via
+                            // the Active/All toggle (e.g. PENDING/STARTING are
+                            // implicitly included when Active is selected).
+                            // Both cases should light up the check + label.
+                            const included = isStatusHighlighted(status);
+                            const explicit = selectedStatuses.includes(status);
+                            return (
+                              <button
+                                key={status}
+                                onClick={() => handleStatusClick(status)}
+                                className={`w-full px-3 py-1.5 flex items-center justify-between text-sm hover:bg-gray-50 ${
+                                  explicit ? 'bg-gray-50' : ''
+                                }`}
                               >
-                                {count}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-              {/* Activity toggle stays visible past the loading state.
+                                <span className="flex items-center gap-2 min-w-0">
+                                  <CheckIcon
+                                    className={`w-3.5 h-3.5 shrink-0 ${included ? 'text-sky-blue' : 'text-transparent'}`}
+                                  />
+                                  <span
+                                    className={`truncate ${included ? 'font-medium text-gray-900' : count === 0 ? 'text-gray-400' : 'text-gray-700'}`}
+                                  >
+                                    {status}
+                                  </span>
+                                </span>
+                                <span
+                                  className={`ml-2 text-xs tabular-nums text-right min-w-[2rem] ${count === 0 ? 'text-gray-400' : 'text-gray-500'}`}
+                                >
+                                  {count}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+              <div className="max-lg:flex max-lg:flex-wrap max-lg:items-center max-lg:gap-2 lg:contents">
+                {/* Activity toggle stays visible past the loading state.
                   Hiding it on totalNoFilter===0 stranded users who'd
                   narrowed Everyone with a filter that returned zero,
                   or whose Mine view was empty — they had no easy way
                   back. The toggle is harmless when the table is empty
                   and indispensable as soon as anything else changes. */}
-              {(() => {
-                const selectTab = (tab) => {
-                  React.startTransition(() => {
-                    // 'all' is the default and stays out of the URL; a group
-                    // is named rather than expanded.
-                    setView('status', tab === 'all' ? '' : tab);
-                    setCurrentPage(1);
-                  });
-                };
-                // Neither segment is highlighted while specific pills narrow
-                // the view.
-                const activityValue = activeTab;
-                return (
-                  <SegmentedToggle
-                    ariaLabel="Filter jobs by activity"
-                    options={[
-                      { value: 'active', label: 'Active' },
-                      { value: 'all', label: 'All' },
-                    ]}
-                    value={activityValue}
-                    onChange={selectTab}
-                  />
-                );
-              })()}
-              {(() => {
-                if (!currentUser) return null;
-                const explicitUserFilter = (filters || []).find(
-                  (f) => (f.property || '').toLowerCase() === 'user' && f.value
-                );
-                const isMine = explicitUserFilter
-                  ? String(explicitUserFilter.value) === currentUser.id ||
-                    String(explicitUserFilter.value) === currentUser.name
-                  : userScope === 'mine';
-                const isEveryone = !explicitUserFilter && userScope === 'all';
-                return (
-                  <SegmentedToggle
-                    ariaLabel="Filter jobs by owner"
-                    options={[
-                      { value: 'mine', label: 'My Jobs' },
-                      { value: 'all', label: 'All Jobs' },
-                    ]}
-                    value={isMine ? 'mine' : isEveryone ? 'all' : null}
-                    onChange={selectScope}
-                  />
-                );
-              })()}
-              {/* Scope hint: when filtered to the current user's jobs,
+                {(() => {
+                  const selectTab = (tab) => {
+                    React.startTransition(() => {
+                      // 'all' is the default and stays out of the URL; a group
+                      // is named rather than expanded.
+                      setView('status', tab === 'all' ? '' : tab);
+                      setCurrentPage(1);
+                    });
+                  };
+                  // Neither segment is highlighted while specific pills narrow
+                  // the view.
+                  const activityValue = activeTab;
+                  return (
+                    <SegmentedToggle
+                      ariaLabel="Filter jobs by activity"
+                      options={[
+                        { value: 'active', label: 'Active' },
+                        { value: 'all', label: 'All' },
+                      ]}
+                      value={activityValue}
+                      onChange={selectTab}
+                    />
+                  );
+                })()}
+                {(() => {
+                  if (!currentUser) return null;
+                  const explicitUserFilter = (filters || []).find(
+                    (f) =>
+                      (f.property || '').toLowerCase() === 'user' && f.value
+                  );
+                  const isMine = explicitUserFilter
+                    ? String(explicitUserFilter.value) === currentUser.id ||
+                      String(explicitUserFilter.value) === currentUser.name
+                    : userScope === 'mine';
+                  const isEveryone = !explicitUserFilter && userScope === 'all';
+                  return (
+                    <SegmentedToggle
+                      ariaLabel="Filter jobs by owner"
+                      options={[
+                        { value: 'mine', label: 'My Jobs' },
+                        { value: 'all', label: 'All Jobs' },
+                      ]}
+                      value={isMine ? 'mine' : isEveryone ? 'all' : null}
+                      onChange={selectScope}
+                    />
+                  );
+                })()}
+                {/* Scope hint: when filtered to the current user's jobs,
                   remind them and offer a one-click path to All Jobs.
                   Sits at the tail of the chip + toggle row (same flex-wrap
                   container) so it flows inline with the filter bar on
                   wide screens and wraps below on narrow ones. Suppress
                   in the empty state (the CTA already says this) and
                   when an explicit user filter has overridden the toggle. */}
-              {(() => {
-                const explicitUserFilter = (filters || []).find(
-                  (f) => (f.property || '').toLowerCase() === 'user' && f.value
-                );
-                const showHint =
-                  userScope === 'mine' &&
-                  currentUser &&
-                  !explicitUserFilter &&
-                  !isInitialLoad &&
-                  paginatedData.length > 0;
-                if (!showHint) return null;
-                return (
-                  <div
-                    className="inline-flex items-center gap-2 rounded-full border border-sky-200/70 bg-sky-50 pl-2 pr-2.5 py-0.5 text-xs shrink-0"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    <InfoIcon className="h-3 w-3 text-sky-600 shrink-0" />
-                    <span className="text-gray-700">
-                      Showing your jobs only.
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => selectScope('all')}
-                      className="font-medium text-sky-700 transition-colors hover:text-sky-800 hover:underline"
+                {(() => {
+                  const explicitUserFilter = (filters || []).find(
+                    (f) =>
+                      (f.property || '').toLowerCase() === 'user' && f.value
+                  );
+                  const showHint =
+                    userScope === 'mine' &&
+                    currentUser &&
+                    !explicitUserFilter &&
+                    !isInitialLoad &&
+                    paginatedData.length > 0;
+                  if (!showHint) return null;
+                  return (
+                    <div
+                      className="inline-flex items-center gap-2 rounded-full border border-sky-200/70 bg-sky-50 pl-2 pr-2.5 py-0.5 text-xs shrink-0"
+                      role="status"
+                      aria-live="polite"
                     >
-                      View all jobs
-                    </button>
-                  </div>
-                );
-              })()}
+                      <InfoIcon className="h-3 w-3 text-sky-600 shrink-0" />
+                      <span className="text-gray-700">
+                        Showing your jobs only.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => selectScope('all')}
+                        className="font-medium text-sky-700 transition-colors hover:text-sky-800 hover:underline"
+                      >
+                        View all jobs
+                      </button>
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0 ml-2">
+          <div className="flex items-center gap-2 shrink-0 ml-2 h-8">
             {loading && (
               <div className="flex items-center">
                 <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+                <span className="max-lg:hidden ml-2 text-gray-500 text-sm">
+                  Loading...
+                </span>
               </div>
             )}
             {!loading && lastFetchedTime && (
-              <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+              <div className="max-lg:hidden lg:flex lg:items-center">
+                <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+              </div>
             )}
             <button
               onClick={() => {
@@ -2680,10 +2697,11 @@ export function ManagedJobsTable({
                 }
               }}
               disabled={loading}
+              title="Refresh"
               className="text-sky-blue hover:text-sky-blue-bright flex items-center text-sm"
             >
-              <RotateCwIcon className="h-4 w-4 mr-1.5" />
-              <span>Refresh</span>
+              <RotateCwIcon className="h-4 w-4 md:mr-1.5" />
+              <span className="max-md:hidden">Refresh</span>
             </button>
           </div>
         </div>

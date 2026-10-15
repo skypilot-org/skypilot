@@ -257,6 +257,15 @@ class ManagedJobStatusError(Exception):
     pass
 
 
+class ManagedJobRecordMissingError(Exception):
+    """Raised when a managed job's database record no longer exists.
+
+    A job-state read or write found no row for the job, so callers should
+    stop retrying bookkeeping that can never be recorded.
+    """
+    pass
+
+
 class ResourcesMismatchError(Exception):
     """Raised when resources are mismatched."""
     pass

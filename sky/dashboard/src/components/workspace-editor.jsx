@@ -47,7 +47,7 @@ import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { statusGroups } from './jobs'; // Import statusGroups
 import yaml from 'js-yaml';
 import { CLOUD_CANONICALIZATIONS } from '@/data/connectors/constants';
-import { getUsers } from '@/data/connectors/users';
+import { getUserRole, getUsers } from '@/data/connectors/users';
 import { dashboardCache } from '@/lib/cache';
 import { apiClient } from '@/data/connectors/client';
 import { Input } from '@/components/ui/input';
@@ -445,6 +445,10 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const [success, setSuccess] = useState(null);
   const [yamlError, setYamlError] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
+  // Only admins can change a workspace's config or delete it (the server
+  // enforces this); everyone else gets a read-only view. Null until known, so
+  // the admin controls don't flash for a non-admin.
+  const [isAdmin, setIsAdmin] = useState(isNewWorkspace ? true : null);
 
   // Delete state
   const [deleteState, setDeleteState] = useState({
@@ -517,71 +521,114 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     [workspaceName]
   );
 
-  const fetchWorkspaceStats = useCallback(async () => {
-    if (isNewWorkspace) return;
+  // Stats requests are numbered; a result is dropped only once a newer one
+  // has been shown, so a slow earlier request can't overwrite newer numbers
+  // and a failed newer one doesn't discard an earlier success.
+  const statsRequestRef = useRef(0);
+  const statsShownRef = useRef(0);
+  // A result for a workspace the page no longer shows is always dropped.
+  const currentWorkspaceRef = useRef(workspaceName);
+  currentWorkspaceRef.current = workspaceName;
+  // `fresh`: drop the cached entries first, so this fetches from the server
+  // and the cache holds the new numbers for the next visit (Refresh).
+  const fetchWorkspaceStats = useCallback(
+    async ({ fresh = false } = {}) => {
+      if (isNewWorkspace) return;
 
-    setStatsLoading(true);
-    try {
-      const [clustersResponse, managedJobsResponse, enabledClouds] =
-        await Promise.all([
-          dashboardCache.get(getClusters),
-          dashboardCache.get(getManagedJobs, [
-            {
-              allUsers: true,
-              skipFinished: true,
-              // Counted by id below. Not filtered by `workspaceMatch`, which
-              // matches names: the name may not be loaded yet, and a rename
-              // must not refetch these stats.
-              fields: ['workspace', 'status'],
-            },
-          ]),
-          dashboardCache.get(getEnabledClouds, [workspaceName, true]),
-        ]);
-
-      // Filter clusters for this workspace
-      const workspaceClusters = clustersResponse.filter(
-        (cluster) => (cluster.workspace || 'default') === workspaceName
-      );
-
-      // Count running clusters
-      const runningClusters = workspaceClusters.filter(
-        (cluster) =>
-          cluster.status === 'RUNNING' || cluster.status === 'LAUNCHING'
-      );
-
-      // Map cluster names to workspace for job filtering
-      const clusterNameToWorkspace = {};
-      clustersResponse.forEach((c) => {
-        clusterNameToWorkspace[c.cluster] = c.workspace || 'default';
-      });
-
-      // Count managed jobs for this workspace
-      const jobs = managedJobsResponse.jobs || [];
-      const activeJobStatuses = new Set(statusGroups.active);
-      let managedJobsCount = 0;
-
-      jobs.forEach((job) => {
+      const request = ++statsRequestRef.current;
+      const load = (fn, args = []) => {
+        if (fresh) dashboardCache.invalidate(fn, args);
+        return dashboardCache.get(fn, args);
+      };
+      setStatsLoading(true);
+      try {
+        const [clustersResponse, managedJobsResponse, enabledClouds] =
+          await Promise.all([
+            load(getClusters),
+            load(getManagedJobs, [
+              {
+                allUsers: true,
+                skipFinished: true,
+                // Counted by id below. Not filtered by `workspaceMatch`, which
+                // matches names: the name may not be loaded yet, and a rename
+                // must not refetch these stats.
+                fields: ['workspace', 'status'],
+              },
+            ]),
+            load(getEnabledClouds, [workspaceName, true]),
+          ]);
         if (
-          job.workspace === workspaceName &&
-          activeJobStatuses.has(job.status)
+          request < statsShownRef.current ||
+          workspaceName !== currentWorkspaceRef.current
         ) {
-          managedJobsCount++;
+          return;
         }
-      });
+        statsShownRef.current = request;
 
-      setWorkspaceStats({
-        totalClusterCount: workspaceClusters.length,
-        runningClusterCount: runningClusters.length,
-        managedJobsCount: managedJobsCount,
-        clouds: Array.isArray(enabledClouds) ? enabledClouds : [],
+        // Filter clusters for this workspace
+        const workspaceClusters = clustersResponse.filter(
+          (cluster) => (cluster.workspace || 'default') === workspaceName
+        );
+
+        // Count running clusters
+        const runningClusters = workspaceClusters.filter(
+          (cluster) =>
+            cluster.status === 'RUNNING' || cluster.status === 'LAUNCHING'
+        );
+
+        // Map cluster names to workspace for job filtering
+        const clusterNameToWorkspace = {};
+        clustersResponse.forEach((c) => {
+          clusterNameToWorkspace[c.cluster] = c.workspace || 'default';
+        });
+
+        // Count managed jobs for this workspace
+        const jobs = managedJobsResponse.jobs || [];
+        const activeJobStatuses = new Set(statusGroups.active);
+        let managedJobsCount = 0;
+
+        jobs.forEach((job) => {
+          if (
+            job.workspace === workspaceName &&
+            activeJobStatuses.has(job.status)
+          ) {
+            managedJobsCount++;
+          }
+        });
+
+        setWorkspaceStats({
+          totalClusterCount: workspaceClusters.length,
+          runningClusterCount: runningClusters.length,
+          managedJobsCount: managedJobsCount,
+          clouds: Array.isArray(enabledClouds) ? enabledClouds : [],
+        });
+      } catch (err) {
+        console.error('Failed to fetch workspace stats:', err);
+        // Don't show error to user for stats, just log it
+      } finally {
+        if (request === statsRequestRef.current) setStatsLoading(false);
+      }
+    },
+    [workspaceName, isNewWorkspace]
+  );
+
+  useEffect(() => {
+    if (isNewWorkspace) return undefined;
+    let cancelled = false;
+    getUserRole()
+      .then((data) => {
+        if (!cancelled) setIsAdmin(data?.role === 'admin');
+      })
+      .catch((err) => {
+        console.error('Failed to fetch user role:', err);
+        if (!cancelled) setIsAdmin(false);
       });
-    } catch (err) {
-      console.error('Failed to fetch workspace stats:', err);
-      // Don't show error to user for stats, just log it
-    } finally {
-      setStatsLoading(false);
-    }
-  }, [workspaceName, isNewWorkspace]);
+    return () => {
+      cancelled = true;
+    };
+  }, [isNewWorkspace]);
+
+  const canEdit = isAdmin === true;
 
   useEffect(() => {
     if (!isNewWorkspace) {
@@ -801,13 +848,38 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     }
   };
 
-  const handleRefresh = async () => {
-    setLoading(true);
+  // Admins also re-check the infra and then refetch the stats it affects.
+  // That runs alongside the reload, so a slow check or role lookup never holds
+  // the page's data back. The role may still be loading, so ask for it rather
+  // than skip an admin's check.
+  const recheckInfra = async () => {
+    const admin =
+      isAdmin !== null
+        ? isAdmin
+        : await getUserRole().then(
+            (data) => data?.role === 'admin',
+            () => false
+          );
+    if (!admin) return;
     try {
       await apiClient.fetch('/check', {}, 'POST');
-      await Promise.all([fetchWorkspaceConfig(false), fetchWorkspaceStats()]);
     } catch (error) {
       console.error('Error during sky check refresh:', error);
+      return;
+    }
+    await fetchWorkspaceStats({ fresh: true });
+  };
+
+  const handleRefresh = async () => {
+    setLoading(true);
+    void recheckInfra();
+    try {
+      await Promise.all([
+        fetchWorkspaceConfig(false),
+        fetchWorkspaceStats({ fresh: true }),
+      ]);
+    } catch (error) {
+      console.error('Error refreshing workspace:', error);
     } finally {
       setLoading(false);
     }
@@ -873,7 +945,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                 </button>
               )}
 
-              {!isNewWorkspace && workspaceName !== 'default' && (
+              {!isNewWorkspace && canEdit && workspaceName !== 'default' && (
                 <button
                   onClick={() =>
                     setRenameState({
@@ -896,7 +968,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                 </button>
               )}
 
-              {!isNewWorkspace && workspaceName !== 'default' && (
+              {!isNewWorkspace && canEdit && workspaceName !== 'default' && (
                 <button
                   onClick={() =>
                     setDeleteState({ ...deleteState, showDialog: true })
@@ -1039,7 +1111,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                     <CardTitle className="text-base font-normal">
                       {isNewWorkspace
                         ? 'New Workspace YAML'
-                        : 'Edit Workspace YAML'}
+                        : canEdit
+                          ? 'Edit Workspace YAML'
+                          : 'Workspace YAML'}
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="flex-1 flex flex-col">
@@ -1051,6 +1125,11 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                         />
                       )}
                       <div className="flex-1 flex flex-col">
+                        {!isNewWorkspace && isAdmin === false && (
+                          <p className="text-sm text-gray-600 mb-3">
+                            Only admins can change this configuration.
+                          </p>
+                        )}
                         <p className="text-sm text-gray-600 mb-3">
                           Configure infra-specific settings for this workspace.
                           Leave empty to use all accessible infrastructure.
@@ -1094,19 +1173,22 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           value={yamlValue}
                           onChange={(val) => handleYamlChange(val)}
                           height="400px"
+                          disabled={!canEdit}
                         />
 
                         {/* Action buttons */}
-                        <div className="flex justify-end space-x-3 pt-3 border-gray-200">
-                          <Button
-                            onClick={() => handleSave()}
-                            disabled={saving || yamlError || loading}
-                            className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white"
-                          >
-                            <SaveIcon className="w-4 h-4 mr-1.5" />
-                            {saving ? 'Applying...' : 'Apply'}
-                          </Button>
-                        </div>
+                        {canEdit && (
+                          <div className="flex justify-end space-x-3 pt-3 border-gray-200">
+                            <Button
+                              onClick={() => handleSave()}
+                              disabled={saving || yamlError || loading}
+                              className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white"
+                            >
+                              <SaveIcon className="w-4 h-4 mr-1.5" />
+                              {saving ? 'Applying...' : 'Apply'}
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </CardContent>

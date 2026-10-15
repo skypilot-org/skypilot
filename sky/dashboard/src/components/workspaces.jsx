@@ -58,6 +58,10 @@ import { apiClient } from '@/data/connectors/client';
 import { sortData } from '@/data/utils';
 import { trackWorkspaceAction } from '@/lib/analytics';
 import {
+  anyAccessCheckAllows,
+  usePluginAccessChecks,
+} from '@/plugins/PluginProvider';
+import {
   CLOUD_CANONICALIZATIONS,
   CLUSTER_NOT_UP_ERROR,
   MANAGED_JOBS_SUMMARY_ARGS,
@@ -328,6 +332,7 @@ export function Workspaces() {
 
   const router = useRouter();
   const isMobile = useMobile();
+  const workspaceOpenChecks = usePluginAccessChecks('workspaces.detail.open');
 
   // Function to get user role with caching
   const getUserRole = async () => {
@@ -359,11 +364,19 @@ export function Workspaces() {
   };
 
   // Function to handle permission check with smooth UX
-  const checkPermissionAndAct = async (action, actionCallback) => {
+  // `allowNonAdmin`: optional async predicate that can let a non-admin through.
+  const checkPermissionAndAct = async (
+    action,
+    actionCallback,
+    allowNonAdmin = null
+  ) => {
     try {
       const roleData = await getUserRole();
 
-      if (roleData.role !== 'admin') {
+      if (
+        roleData.role !== 'admin' &&
+        !(allowNonAdmin && (await allowNonAdmin()))
+      ) {
         setPermissionDenialState({
           open: true,
           message: action,
@@ -756,11 +769,17 @@ export function Workspaces() {
     });
   };
 
+  // Admins can open any workspace's page. A plugin can let others open one
+  // (the page is then read-only apart from what the plugin adds to it).
   const handleEditWorkspace = (workspaceName) => {
     trackWorkspaceAction('edit');
-    checkPermissionAndAct('cannot edit workspace', () => {
-      router.push(`/workspaces/${workspaceName}`);
-    });
+    checkPermissionAndAct(
+      'cannot edit workspace',
+      () => {
+        router.push(`/workspaces/${workspaceName}`);
+      },
+      () => anyAccessCheckAllows(workspaceOpenChecks, { workspaceName })
+    );
   };
 
   const preStyle = {

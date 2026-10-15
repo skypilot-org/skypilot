@@ -682,14 +682,54 @@ class PermissionService:
         roles = self.get_user_roles(user_id)
         if rbac.RoleName.ADMIN.value in roles:
             return None
-        enforcer = self._ensure_enforcer()
-        writable = set()
-        for rule in enforcer.get_policy():
-            if len(rule) >= 3 and rule[2] == '*' and (rule[0] == user_id or
-                                                      rule[0] == '*'):
-                if rule[1] in workspace_names:
-                    writable.add(rule[1])
-        return writable
+        return self._writable(self._workspace_members(workspace_names), user_id)
+
+    def readable_workspace_members_in_memory(
+            self, user_id: str,
+            workspace_names: Set[str]) -> Optional[Set[str]]:
+        """Return the user plus the members of every workspace they can read.
+
+        Returns None if a readable workspace is public, as everyone is its
+        member. The readable set is the non-admin one from
+        `get_readable_workspace_names`. A workspace that is readable only
+        because of ``read_access: all`` adds its members, not everyone.
+
+        Reads this process's policy without reloading it, so the caller must
+        reload first, and must handle admins itself.
+        """
+        members = self._workspace_members(workspace_names)
+        readable = (self._writable(members, user_id) |
+                    self._read_only_visible(workspace_names))
+        result = {user_id}
+        for workspace_name in readable:
+            workspace_members = members.get(workspace_name, set())
+            if '*' in workspace_members:
+                return None
+            result |= workspace_members
+        return result
+
+    def _workspace_members(self,
+                           workspace_names: Set[str]) -> Dict[str, Set[str]]:
+        """Each requested workspace's members, from the policy in memory.
+
+        A member is a direct (user_id, workspace, '*') grant, or '*' for the
+        wildcard ('*', workspace, '*') grant of a public workspace.
+        """
+        members: Dict[str, Set[str]] = {}
+        for rule in self._ensure_enforcer().get_policy():
+            if (len(rule) >= 3 and rule[2] == '*' and
+                    rule[1] in workspace_names):
+                members.setdefault(rule[1], set()).add(rule[0])
+        return members
+
+    @staticmethod
+    def _writable(members: Dict[str, Set[str]], user_id: str) -> Set[str]:
+        """Workspaces in ``members`` that the user, or everyone, belongs to."""
+        return {
+            workspace_name
+            for workspace_name, workspace_members in members.items()
+            if user_id in workspace_members or '*' in workspace_members
+        }
 
     @staticmethod
     def _read_only_visible(workspace_names: Set[str]) -> Set[str]:
