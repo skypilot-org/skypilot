@@ -94,6 +94,25 @@ def test_active_workspace_id_is_exact(server_workspaces):
             assert skypilot_config.get_active_workspace() == 'ws-0123456789ab'
 
 
+def test_server_active_workspace_name_resolves_outside_a_request():
+    # Main-process readers (no request context) index `workspaces` by id.
+    server = config_utils.Config({
+        'workspaces': {
+            'ws-0123456789ab': {
+                'name': 'research',
+                'kubernetes': {
+                    'allowed_contexts': ['ctx-a']
+                }
+            }
+        },
+        'active_workspace': 'research'
+    })
+    with skypilot_config.replace_skypilot_config_in_process(server):
+        assert skypilot_config.get_active_workspace() == 'ws-0123456789ab'
+        assert skypilot_config.get_workspace_cloud('kubernetes').get_nested(
+            ('allowed_contexts',), None) == ['ctx-a']
+
+
 def test_server_config_active_workspace_id_does_not_beat_the_request():
     server = config_utils.Config({
         'workspaces': _REUSED,

@@ -655,6 +655,12 @@ def get_active_workspace(force_user_workspace: bool = False) -> str:
                      f'{constants.SKYPILOT_DEFAULT_WORKSPACE}')
         active_workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
     else:
+        if not _is_config_overridden():
+            # Outside a request (e.g. a handler in the main process) this is
+            # the server config's own value, which an admin may write as a
+            # name. An overridden config already holds the resolved id.
+            active_workspace = _resolve_server_active_workspace(
+                active_workspace)
         logger.debug(f'Got active workspace: {active_workspace}')
     return active_workspace
 
