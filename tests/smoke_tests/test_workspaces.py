@@ -4,9 +4,11 @@ import datetime
 import hashlib
 import json
 import os
+import shlex
 import tempfile
 import textwrap
 import time
+from typing import Any, Dict
 import uuid
 
 import boto3
@@ -15,6 +17,8 @@ from smoke_tests import smoke_tests_utils
 
 import sky
 from sky import skypilot_config
+from sky.client import sdk
+from sky.server import common as server_common
 from sky.skylet import constants
 from sky.utils import common_utils
 
@@ -791,3 +795,240 @@ def test_managed_jobs_in_non_default_workspace(generic_cloud: str):
         timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Test renaming a workspace that has running resources ----------
+# The workspace API has no SDK functions; the dashboard calls these endpoints.
+def _workspace_request(action: str, body: Dict[str, Any]) -> Any:
+    response = server_common.make_authenticated_request('POST',
+                                                        f'/workspaces/{action}',
+                                                        json=body)
+    return sdk.get(server_common.get_request_id(response))
+
+
+def _workspace_id(name: str) -> str:
+    for workspace_id, config in sdk.get(sdk.workspaces()).items():
+        if (config.get('name') or workspace_id) == name:
+            return workspace_id
+    raise ValueError(f'No workspace named {name!r}.')
+
+
+def _update_workspace(workspace: str, **changes: Any) -> None:
+    workspace_id = _workspace_id(workspace)
+    # `writable` / `read_only` are computed by the server, not stored.
+    config = {
+        key: value
+        for key, value in sdk.get(sdk.workspaces())[workspace_id].items()
+        if key not in ('writable', 'read_only')
+    }
+    _workspace_request('update', {
+        'workspace_name': workspace_id,
+        'config': {
+            **config,
+            **changes
+        }
+    })
+
+
+def _expect_refused(fn, message: str) -> None:
+    try:
+        fn()
+    except Exception as e:  # pylint: disable=broad-except
+        assert message in str(e), str(e)
+        return
+    raise AssertionError(f'Expected a refusal containing {message!r}.')
+
+
+# Deletes the named workspaces, retrying while a cancelled job still holds one.
+_DELETE_WORKSPACES = textwrap.dedent("""\
+    import sys, time
+    from sky.client import sdk
+    from sky.server import common
+    names = set(sys.argv[1:])
+    for _ in range(30):
+        ids = [i for i, c in sdk.get(sdk.workspaces()).items()
+               if (c.get('name') or i) in names]
+        if not ids:
+            break
+        for i in ids:
+            r = common.make_authenticated_request(
+                'POST', '/workspaces/delete', json={'workspace_name': i})
+            try:
+                sdk.get(common.get_request_id(r))
+            except Exception as e:  # pylint: disable=broad-except
+                print(e)
+        time.sleep(10)
+""")
+
+
+def _delete_workspaces_cmd(*names: str) -> str:
+    return f'python -c {shlex.quote(_DELETE_WORKSPACES)} {" ".join(names)}'
+
+
+def _in_any_workspace_cmd(cmd: str, *workspaces: str) -> str:
+    # Cluster and job commands act only in the active workspace, and the
+    # resource is in whichever of these exists when the test stopped.
+    return ' || '.join(f'{cmd} --config active_workspace={workspace}'
+                       for workspace in workspaces)
+
+
+# Workspace writes through the API land in the server's config; with
+# Postgres that config is stored in the database and overlays the config file
+# of every later test, so these tests run only against a config file.
+@pytest.mark.managed_jobs
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+@pytest.mark.no_postgres
+def test_workspace_rename_with_active_resources(generic_cloud: str):
+    """A workspace with a running cluster and managed job can be renamed.
+
+    Only the name changes: the resources keep running and show the new name,
+    other changes are still refused while they run, and the freed old name
+    of a generated-id workspace no longer reaches it.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    workspace = f'{name}-ws'
+    renamed = f'{name}-ws2'
+    infra = f'--infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG}'
+
+    def check_refusals():
+        _expect_refused(
+            lambda: _update_workspace(renamed, gcp={'disabled': True}),
+            'Please terminate these resources first')
+        _expect_refused(lambda: _update_workspace(renamed, name='default'),
+                        "'default' already exists")
+        _expect_refused(lambda: _update_workspace('default', name='main'),
+                        'cannot be renamed')
+
+    test = smoke_tests_utils.Test(
+        'workspace_rename_with_active_resources',
+        [
+            lambda: _workspace_request('create', {
+                'workspace_name': workspace,
+                'config': {}
+            }),
+            f'sky launch -y -d -c {name} {infra} --workspace {workspace} '
+            '"sleep 10000"',
+            f'sky jobs launch -y -d -n {name} {infra} '
+            f'--workspace {workspace} "sleep 10000"',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=600),
+            lambda: _update_workspace(workspace, name=renamed),
+            check_refusals,
+            # The resources run on, under the new name.
+            f's=$(sky status -v {name}); echo "$s"; '
+            f'echo "$s" | grep {name} | grep UP | grep {renamed}',
+            f's=$(sky jobs queue -v); echo "$s"; '
+            f'echo "$s" | grep {name} | grep RUNNING | grep {renamed}',
+            f'sky launch -y --dryrun -c {name}-dry {infra} '
+            f'--workspace {renamed} echo hi',
+            # A generated id's old name is free, so it reaches nothing now.
+            f'out=$(sky launch -y --dryrun -c {name}-dry {infra} '
+            f'--workspace {workspace} echo hi 2>&1); echo "$out"; '
+            'echo "$out" | grep "does not exist"',
+        ],
+        teardown='; '.join([
+            _in_any_workspace_cmd(f'sky down -y {name}', renamed, workspace),
+            _in_any_workspace_cmd(f'sky jobs cancel -y -n {name}', renamed,
+                                  workspace),
+            _delete_workspaces_cmd(workspace, renamed),
+        ]),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+@pytest.mark.no_postgres  # See test_workspace_rename_with_active_resources.
+def test_workspace_name_reuse_job_recovery(generic_cloud: str):
+    """A renamed workspace's old name, taken by another workspace, never
+    captures its jobs.
+
+    The job's recovery relaunches its cluster in the original workspace, and
+    a cancel scoped by the reused name misses it while the new name finds it.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    workspace = f'{name}-ws'
+    renamed = f'{name}-ws2'
+    yaml_content = textwrap.dedent("""\
+        resources:
+          job_recovery:
+            max_restarts_on_errors: 0
+            recover_on_exit_codes: [29]
+
+        run: |
+          sleep 60
+          exit 29
+        """)
+
+    def rename_and_reuse():
+        _update_workspace(workspace, name=renamed)
+        _workspace_request('create', {
+            'workspace_name': workspace,
+            'config': {}
+        })
+
+    # Relaunched at least once (the recovery count is the fourth column from
+    # the end) and still alive: a relaunch that could not resolve its
+    # workspace would fail the job instead.
+    wait_recovered = (
+        'for i in $(seq 40); do '
+        # Table rows start with the job id; debug log lines also name the job.
+        f'  s=$(sky jobs queue | grep -E "^[0-9]+ .* {name} " | head -n1); '
+        '  echo "$s"; '
+        '  n=$(echo "$s" | awk \'{print $(NF-3)}\'); '
+        '  if [ "$n" != "-" ] && [ "$n" -gt 0 ] && echo "$s" | '
+        '     grep -qE "RUNNING|RECOVERING|STARTING|PENDING"; then exit 0; fi; '
+        '  sleep 15; '
+        'done; exit 1')
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(yaml_content)
+        f.flush()
+        test = smoke_tests_utils.Test(
+            'workspace_name_reuse_job_recovery',
+            [
+                lambda: _workspace_request('create', {
+                    'workspace_name': workspace,
+                    'config': {}
+                }),
+                f'sky jobs launch -y -d -n {name} --infra {generic_cloud} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+                f'--workspace {workspace} {f.name}',
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[sky.ManagedJobStatus.RUNNING],
+                    timeout=600),
+                rename_and_reuse,
+                wait_recovered,
+                f'sky jobs queue -v | grep -E "^[0-9]+ " | grep -w {renamed}',
+                # Scoped by the reused name: another workspace, so no cancel.
+                f'sky jobs cancel -y -n {name} '
+                f'--config active_workspace={workspace} || true',
+                'sleep 10',
+                f'sky jobs queue | grep -E "^[0-9]+ .* {name} " | '
+                'grep -v CANCELL',
+                f'sky jobs cancel -y -n {name} '
+                f'--config active_workspace={renamed}',
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[sky.ManagedJobStatus.CANCELLED],
+                    timeout=300),
+            ],
+            teardown='; '.join([
+                _in_any_workspace_cmd(f'sky jobs cancel -y -n {name}', renamed,
+                                      workspace),
+                _delete_workspaces_cmd(workspace, renamed),
+            ]),
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=40 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
