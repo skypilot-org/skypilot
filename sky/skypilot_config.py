@@ -528,10 +528,11 @@ def resolve_workspace_ref(ref: str,
     """Maps a workspace a person typed (`-w`, `active_workspace`) to its id.
 
     Only for fields a person types: ids from records, URLs and stored config
-    must be used as-is, since a renamed workspace's old name can be reused by
-    another workspace. A current name wins; an unmatched ref is returned
-    unchanged, so an old name (the id) still works until it is reused and an
-    unknown one fails where it is checked today.
+    must be used as-is, since a renamed workspace's old name can be taken by
+    another workspace. A current name wins; that order only matters for a
+    config edited outside the API, since a name may not equal another
+    workspace's id. An unmatched ref is returned unchanged, so a legacy old
+    name (the id) keeps working and an unknown one fails where it is checked.
     """
     if workspaces is None:
         workspaces = _loaded_workspaces()

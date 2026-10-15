@@ -109,7 +109,8 @@ class TestEnabledCloudsWorkspacePermission:
         mock_check.assert_called_once_with(
             mock_user,
             'restricted',
-            action=workspace_constants.WORKSPACE_ACTION_READ)
+            action=workspace_constants.WORKSPACE_ACTION_READ,
+            workspace_ref=None)
 
     @mock.patch('sky.core.global_user_state.get_cached_enabled_clouds',
                 return_value=[])
