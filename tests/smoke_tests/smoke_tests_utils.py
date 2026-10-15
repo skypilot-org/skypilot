@@ -1559,14 +1559,21 @@ def with_config(cmd: str, config_path: str) -> str:
             f'{cmd}')
 
 
-def write_api_server_config(f: Any,
-                            config: Optional[Dict[str, Any]] = None) -> None:
-    """Writes the local API server's config, plus `config`, to file `f`.
+def write_api_server_config(config: Optional[Dict[str, Any]] = None) -> str:
+    """Writes the local API server's config, plus `config`, to a new file.
 
     For keys the server ignores in a client's config, such as `logs`, which a
     test can only set by restarting the server with them (see
     restart_api_server_with_config). Starts from the server's default config
     file, without its `logs`, so the restarted server keeps its other settings.
+
+    The file is not deleted when the test exits: the server reads it on every
+    request, and a test that fails under --no-terminate-on-failure skips the
+    teardown that restores the server. The caller removes it once the test
+    passes.
+
+    Returns:
+        The path of the written file.
     """
     path = os.path.expanduser(skypilot_config.get_user_config_path())
     base = (skypilot_config.parse_and_validate_config_file(path)
@@ -1575,11 +1582,15 @@ def write_api_server_config(f: Any,
     if config is not None:
         base = skypilot_config.overlay_skypilot_config(
             base, config_utils.Config(config))
-    # An empty config is left empty rather than dumped as '{}', so that a
-    # test can append further top-level keys to the file.
-    if base:
-        f.write(yaml_utils.dump_yaml_str(dict(base)))
-    f.flush()
+    with tempfile.NamedTemporaryFile(mode='w',
+                                     prefix='server_config_',
+                                     suffix='.yaml',
+                                     delete=False) as f:
+        # An empty config is left empty rather than dumped as '{}', so that a
+        # test can append further top-level keys to the file.
+        if base:
+            f.write(yaml_utils.dump_yaml_str(dict(base)))
+        return f.name
 
 
 def restart_api_server_with_config(config_path: str) -> str:

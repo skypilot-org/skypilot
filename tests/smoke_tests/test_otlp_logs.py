@@ -1,5 +1,6 @@
 """Smoke tests for SkyPilot log collection to an OTLP endpoint."""
 
+import os
 import shlex
 import tempfile
 import textwrap
@@ -152,12 +153,12 @@ def test_log_collection_to_otlp(generic_cloud: str):
     bad = f'{name}-bad'
     job = f'{name}-job'
     token = uuid.uuid4().hex
+    good_config = smoke_tests_utils.write_api_server_config()
+    bad_config = smoke_tests_utils.write_api_server_config()
     with tempfile.NamedTemporaryFile('w', suffix='.yaml') as collector_task, \
         tempfile.NamedTemporaryFile('w', suffix='.yaml') as log_task, \
         tempfile.NamedTemporaryFile('w') as good_headers, \
-        tempfile.NamedTemporaryFile('w') as bad_headers, \
-        tempfile.NamedTemporaryFile('w', suffix='.yaml') as good_config, \
-        tempfile.NamedTemporaryFile('w', suffix='.yaml') as bad_config:
+        tempfile.NamedTemporaryFile('w') as bad_headers:
         collector_task.write(_COLLECTOR_TASK)
         collector_task.flush()
         log_task.write(_LOG_TASK)
@@ -167,12 +168,10 @@ def test_log_collection_to_otlp(generic_cloud: str):
         good_headers.flush()
         bad_headers.write('Authorization: Bearer not-the-token\n')
         bad_headers.flush()
-        smoke_tests_utils.write_api_server_config(good_config)
-        smoke_tests_utils.write_api_server_config(bad_config)
         use_good_config = smoke_tests_utils.restart_api_server_with_config(
-            good_config.name)
+            good_config)
         use_bad_config = smoke_tests_utils.restart_api_server_with_config(
-            bad_config.name)
+            bad_config)
 
         def launch(cluster: str, mark: str) -> str:
             return (f'sky launch -y -c {cluster} --infra {generic_cloud} '
@@ -192,9 +191,9 @@ def test_log_collection_to_otlp(generic_cloud: str):
                  '    http://$ip:4318/v1/logs); '
                  '  [ "$code" = 401 ] && exit 0; sleep 5; '
                  'done; exit 1'),
-                _write_config_cmd(collector, good_config.name,
-                                  good_headers.name, f'{name}-case'),
-                _write_config_cmd(collector, bad_config.name, bad_headers.name,
+                _write_config_cmd(collector, good_config, good_headers.name,
+                                  f'{name}-case'),
+                _write_config_cmd(collector, bad_config, bad_headers.name,
                                   f'{name}-bad-case'),
                 # Cluster job logs, with the cluster identity and the
                 # configured attributes sent as OTLP resource attributes.
@@ -233,3 +232,5 @@ def test_log_collection_to_otlp(generic_cloud: str):
             timeout=smoke_tests_utils.LOG_STORE_CMD_TIMEOUT,
         )
         smoke_tests_utils.run_one_test(test)
+    os.unlink(good_config)
+    os.unlink(bad_config)
