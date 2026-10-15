@@ -643,3 +643,34 @@ def test_failed_command_stderr_is_redacted(monkeypatch):
     assert len(errors) == 1
     assert secret not in errors[0]
     assert 'boom: K3S_TOKEN=<redacted>' in errors[0]
+
+
+@pytest.mark.parametrize('addr', [
+    '10.0.0.1;touch${IFS}pwned;#',
+    '$(touch${IFS}pwned)',
+    '',
+    '10.0.0.1 10.0.0.2',
+],
+                         ids=['semicolon', 'subshell', 'empty', 'two'])
+def test_head_address_must_be_an_ip(monkeypatch, tmp_path, addr):
+    """The head's reported address goes into every join command."""
+    cmds = []
+    monkeypatch.setattr(deploy.constants, 'NODE_POOLS_INFO_DIR', str(tmp_path))
+    monkeypatch.setattr(deploy, 'force_update_status', lambda *a, **k: None)
+
+    def run_remote(node, cmd, *args, **kwargs):
+        cmds.append(cmd)
+        if 'ip -4 route' in cmd:
+            return addr
+        if 'node-token' in cmd:
+            return _random_token()
+        return None if 'nvidia-smi' in cmd else 'ok'
+
+    monkeypatch.setattr(deploy_utils, 'run_remote', run_remote)
+    monkeypatch.setattr(deploy_utils, 'run_command',
+                        mock.Mock(side_effect=_StopAtKubeconfig))
+    with pytest.raises(RuntimeError, match='internal IP address of the head'):
+        deploy.deploy_single_cluster('p', '10.0.0.1', ['10.0.0.2'], 'u', 'key',
+                                     'ssh-p', None, False, [False],
+                                     str(tmp_path / 'kc'), False)
+    assert not any('K3S_URL' in c for c in cmds)

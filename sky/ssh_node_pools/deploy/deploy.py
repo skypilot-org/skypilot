@@ -2,6 +2,7 @@
 # pylint: disable=line-too-long
 import base64
 import concurrent.futures as cf
+import ipaddress
 import os
 import re
 import shlex
@@ -573,6 +574,14 @@ def deploy_single_cluster(cluster_name,
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Failed to SSH to head node ({head_node}). '
                                f'Please check the SSH configuration.')
+    # The head reports this address and it goes into the join commands, so
+    # accept only an IP address.
+    try:
+        master_addr = str(ipaddress.ip_address(master_addr))
+    except ValueError:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Failed to get the internal IP address of the '
+                               f'head node ({head_node}).') from None
     logger.debug(f'Master node internal IP: {master_addr}')
 
     # No token is passed to the head install: k3s generates a random one on
