@@ -396,6 +396,18 @@ describe('WorkspaceEditor with a plugin that changes the workspace', () => {
     ).toBeInTheDocument();
   });
 
+  test('a name in the YAML is refused, not saved', async () => {
+    await renderEditor();
+    await edit((y) => `${y}  name: other\n`);
+    expect(
+      screen.getByText(
+        'Remove "name" from the YAML. To rename the workspace, use Rename workspace next to its name.'
+      )
+    ).toBeInTheDocument();
+    await apply();
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+  });
+
   test('Apply sends the config the draft started from', async () => {
     await renderEditor();
     await edit((y) => `${y}  gcp:\n    project_id: mine\n`);

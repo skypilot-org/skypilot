@@ -677,6 +677,14 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         }
         // Extract the configuration for this workspace
         const config = parsed[displayName] || {};
+        // The name is kept out of the YAML: a `name:` here would be dropped
+        // or rename without the dialog's warning.
+        if (Object.prototype.hasOwnProperty.call(config, 'name')) {
+          setYamlError(
+            'Remove "name" from the YAML. To rename the workspace, use Rename workspace next to its name.'
+          );
+          return;
+        }
         setWorkspaceConfig(config);
       } else {
         setYamlError(

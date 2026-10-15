@@ -214,6 +214,18 @@ describe('evaluateCondition on workspaces', () => {
     ).toBe(false);
   });
 
+  it('matches a renamed legacy workspace by its exact id', () => {
+    for (const operator of ['=', ':']) {
+      expect(
+        evaluateCondition(renamed, {
+          property: 'Workspace',
+          operator,
+          value: 'team-a',
+        })
+      ).toBe(true);
+    }
+  });
+
   it('falls back to the id for records without a name', () => {
     expect(
       evaluateCondition(

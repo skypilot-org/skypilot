@@ -36,12 +36,19 @@ export const evaluateCondition = (item, filter) => {
     }
   }
 
-  // Workspace filters are typed against names; `workspace` is the id.
+  // Workspace filters are typed against names; `workspace` is the id, which
+  // matches only exactly (a legacy workspace's old name), as on the server.
   if (propertyLower === 'workspace') {
     const itemValue = (item.workspace_name || item.workspace)
       ?.toString()
       .toLowerCase();
     const filterValue = value.toString().toLowerCase();
+    if (
+      (operator === '=' || operator === ':') &&
+      item.workspace?.toString().toLowerCase() === filterValue
+    ) {
+      return true;
+    }
     switch (operator) {
       case '=':
         return itemValue === filterValue;

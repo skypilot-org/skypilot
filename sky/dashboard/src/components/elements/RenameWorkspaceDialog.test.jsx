@@ -10,16 +10,20 @@ jest.mock('@/data/connectors/workspaces', () => ({
   updateWorkspace: (...args) => mockUpdateWorkspace(...args),
 }));
 const mockInvalidate = jest.fn();
+const mockInvalidateFunction = jest.fn();
 jest.mock('@/lib/cache', () => {
   const cache = {
     invalidate: (...args) => mockInvalidate(...args),
-    invalidateFunction: jest.fn(),
+    invalidateFunction: (...args) => mockInvalidateFunction(...args),
+    setPreloader: jest.fn(),
   };
   return { __esModule: true, default: cache, dashboardCache: cache };
 });
 
 import { RenameWorkspaceDialog } from '@/components/elements/RenameWorkspaceDialog';
+import { getClusters } from '@/data/connectors/clusters';
 import { getWorkspaceContexts } from '@/data/connectors/infra';
+import { getManagedJobs } from '@/data/connectors/jobs';
 
 const workspacesConfig = {
   default: {},
@@ -99,6 +103,9 @@ test('Enter renames, sending the stored config as expected_config', async () => 
   });
   // The infra page keeps its own context-to-workspace map; it must refresh.
   expect(mockInvalidate).toHaveBeenCalledWith(getWorkspaceContexts);
+  // Cluster and job rows show the name.
+  expect(mockInvalidate).toHaveBeenCalledWith(getClusters);
+  expect(mockInvalidateFunction).toHaveBeenCalledWith(getManagedJobs);
   expect(onRenamed).toHaveBeenCalledWith('ml-v2', renamed);
 });
 
