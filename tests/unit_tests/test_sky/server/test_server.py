@@ -123,27 +123,34 @@ async def test_validate():
     mock_validate_body = mock.MagicMock()
     mock_validate_body.dag = 'test_dag_yaml'
     mock_validate_body.request_options = {}
+    mock_validate_body.env_vars = {}
+    mock_request = mock.MagicMock()
+    mock_request.state.auth_user = models.User(id='alice', name='alice')
 
-    with mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
+    with mock.patch('sky.server.server.executor.override_request_env_and_config',
+                    return_value=contextlib.nullcontext()), \
+         mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
                    return_value=mock_dag), \
          mock.patch('sky.server.server.admin_policy_utils.apply',
                    return_value=(mock_dag, config_utils.Config())), \
          mock.patch.object(mock_dag, 'validate') as mock_validate:
         # Call validate endpoint
-        await server.validate(mock_validate_body)
+        await server.validate(mock_validate_body, mock_request)
         # Verify validate was called with correct args
         mock_validate.assert_called_once_with(skip_file_mounts=True,
                                               skip_workdir=True)
 
     error_msg = 'Invalid DAG'
-    with mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
+    with mock.patch('sky.server.server.executor.override_request_env_and_config',
+                    return_value=contextlib.nullcontext()), \
+         mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
                    return_value=mock_dag), \
          mock.patch('sky.server.server.admin_policy_utils.apply',
                    return_value=(mock_dag, config_utils.Config())), \
          mock.patch.object(mock_dag, 'validate',
                           side_effect=ValueError(error_msg)):
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.validate(mock_validate_body)
+            await server.validate(mock_validate_body, mock_request)
         assert exc_info.value.status_code == 400
         assert error_msg in str(exc_info.value.detail)
 
@@ -155,7 +162,9 @@ async def test_validate():
         time.sleep(0.1)
         validation_complete.set()
 
-    with mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
+    with mock.patch('sky.server.server.executor.override_request_env_and_config',
+                    return_value=contextlib.nullcontext()), \
+         mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
                    return_value=mock_dag), \
          mock.patch('sky.server.server.admin_policy_utils.apply',
                    return_value=(mock_dag, config_utils.Config())), \
@@ -163,7 +172,7 @@ async def test_validate():
                           side_effect=slow_validate):
         # Start validation in background
         validation_task = asyncio.create_task(
-            server.validate(mock_validate_body))
+            server.validate(mock_validate_body, mock_request))
 
         # Check that validation hasn't completed immediately
         assert not validation_complete.is_set()

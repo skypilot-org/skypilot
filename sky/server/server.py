@@ -1792,7 +1792,8 @@ async def list_accelerator_counts(
 
 
 @app.post('/validate')
-async def validate(validate_body: payloads.ValidateBody) -> None:
+async def validate(validate_body: payloads.ValidateBody,
+                   request: fastapi.Request) -> None:
     """Validates the user's DAG."""
     # TODO: validate if existing cluster satisfies the requested
     # resources, e.g. sky exec --gpus V100:8 existing-cluster-with-no-gpus
@@ -1807,6 +1808,20 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     context.initialize()
     ctx = context.get()
     assert ctx is not None
+    # Stamp the body as `executor.prepare_request_async` does for a scheduled
+    # request, so that the request runs as the same user, in the same workspace.
+    auth_user = request.state.auth_user
+    if auth_user is not None:
+        validate_body.env_vars[constants.USER_ID_ENV_VAR] = auth_user.id
+        validate_body.env_vars[constants.USER_ENV_VAR] = auth_user.name
+    else:
+        # The id below is stored as a user, so reject a malformed one.
+        user_id = validate_body.env_vars.get(constants.USER_ID_ENV_VAR)
+        if not common_utils.is_valid_user_hash(user_id):
+            raise exceptions.InvalidUserIdError(
+                f'Invalid user id: {user_id!r}.')
+    validate_body.client_api_version = versions.get_remote_api_version()
+    validate_body.workspace_access = workspace_access.for_current_request()
     # TODO(aylei): generalize this to all requests without a db record.
     ctx.override_envs(validate_body.env_vars)
 
@@ -1816,7 +1831,12 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         # executor adds a ~150ms penalty on the local API server because of
         # added RTTs. For now, we stick to doing the validation inline in the
         # server thread.
-        with admin_policy_utils.apply_and_use_config_in_current_request(
+        # Apply the client's config and resolve the active workspace as for a
+        # scheduled request.
+        with executor.override_request_env_and_config(
+                validate_body, request.state.request_id,
+                request_names.AdminPolicyRequestName.VALIDATE.value), \
+            admin_policy_utils.apply_and_use_config_in_current_request(
                 dag,
                 request_name=request_names.AdminPolicyRequestName.VALIDATE,
                 request_options=validate_body.get_request_options()) as dag:

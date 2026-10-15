@@ -937,7 +937,7 @@ async def test_endpoint_serve_status(monitor, mock_request,
 
 
 @pytest.mark.asyncio
-async def test_endpoint_validate(monitor):
+async def test_endpoint_validate(monitor, mock_request):
     """Test /validate endpoint for blocking operations."""
     print("\n🔍 Testing: /validate")
 
@@ -951,7 +951,7 @@ async def test_endpoint_validate(monitor):
 
             try:
                 body = payloads.ValidateBody(dag='test', env_vars={})
-                await server.validate(body)
+                await server.validate(body, mock_request)
             except:
                 pass
 
