@@ -925,6 +925,109 @@ class TestWorkspaceManagement(unittest.TestCase):
         mock_check_resources.assert_called_once_with([('test-workspace',
                                                        'update')])
 
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    def test_compare_workspace_configs_narrowed_allowed_contexts(
+            self, mock_get_users_for_role, mock_get_users):
+        """allowed_contexts-only removals carry the new contexts list."""
+        mock_get_users.return_value = []
+        mock_get_users_for_role.return_value = []
+
+        absent = object()
+
+        def k8s_config(allowed_contexts):
+            kubernetes = {}
+            if allowed_contexts is not absent:
+                kubernetes['allowed_contexts'] = allowed_contexts
+            return {'kubernetes': kubernetes}
+
+        # (current_contexts, new_contexts, expected_narrowed)
+        cases = [
+            (['ctx-a', 'ctx-b'], ['ctx-a'], ['ctx-a']),  # removal
+            (['ctx-a', 'ctx-b'], ['ctx-a', 'ctx-c'], ['ctx-a', 'ctx-c']),
+            ('all', ['ctx-a'], ['ctx-a']),  # narrow from all
+            (['ctx-a'], ['ctx-a', 'ctx-b'], None),  # append
+            (['ctx-a', 'ctx-b'], ['ctx-b', 'ctx-a'], None),  # reorder
+            (['ctx-a'], 'all', None),  # broaden to all
+            (absent, ['ctx-a'], None),  # absent -> list
+            (['ctx-a'], absent, None),  # list -> absent
+        ]
+        for current_contexts, new_contexts, expected in cases:
+            with self.subTest(current=current_contexts, new=new_contexts):
+                result = core._compare_workspace_configs(
+                    k8s_config(current_contexts), k8s_config(new_contexts))
+                self.assertEqual(result.narrowed_allowed_contexts, expected)
+
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    def test_compare_workspace_configs_narrowed_contexts_with_other_changes(
+            self, mock_get_users_for_role, mock_get_users):
+        """Dropping a context alongside another change is not narrowed."""
+        mock_get_users.return_value = []
+        mock_get_users_for_role.return_value = []
+
+        result = core._compare_workspace_configs(
+            {
+                'kubernetes': {
+                    'allowed_contexts': ['ctx-a', 'ctx-b'],
+                    'namespace': 'n1'
+                }
+            },
+            {'kubernetes': {
+                'allowed_contexts': ['ctx-a'],
+                'namespace': 'n2'
+            }})
+        self.assertIsNone(result.narrowed_allowed_contexts)
+
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_outside_contexts')
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
+    @mock.patch('sky.workspaces.core._compare_workspace_configs')
+    def test_validate_workspace_config_changes_narrowed_contexts(
+            self, mock_compare_configs, mock_check_resources,
+            mock_check_outside_contexts):
+        """Narrowed contexts only check resources on dropped contexts."""
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=False,
+            private_changed=False,
+            private_old=False,
+            private_new=False,
+            allowed_users_changed=False,
+            allowed_users_old=[],
+            allowed_users_new=[],
+            removed_users=[],
+            added_users=[],
+            narrowed_allowed_contexts=['ctx-a'])
+
+        core._validate_workspace_config_changes('test-workspace', {}, {})
+
+        mock_check_outside_contexts.assert_called_once_with(
+            'test-workspace', ['ctx-a'])
+        mock_check_resources.assert_not_called()
+
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_outside_contexts')
+    @mock.patch('sky.workspaces.core._compare_workspace_configs')
+    def test_validate_workspace_config_changes_narrowed_contexts_in_use(
+            self, mock_compare_configs, mock_check_outside_contexts):
+        """Resources on a dropped context block the update."""
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=False,
+            private_changed=False,
+            private_old=False,
+            private_new=False,
+            allowed_users_changed=False,
+            allowed_users_old=[],
+            allowed_users_new=[],
+            removed_users=[],
+            added_users=[],
+            narrowed_allowed_contexts=['ctx-a'])
+        mock_check_outside_contexts.side_effect = ValueError('in use')
+
+        with self.assertRaises(ValueError):
+            core._validate_workspace_config_changes('test-workspace', {}, {})
+
 
 class TestWorkspaceNameBackwardCompatibility(unittest.TestCase):
     """Tests that existing workspaces with non-conforming names still work."""

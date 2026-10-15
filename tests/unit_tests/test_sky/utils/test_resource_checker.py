@@ -731,3 +731,98 @@ class TestResourceChecker:
         # Should identify both unauthorized users
         assert 'bob@company.com' in missed_users
         assert 'charlie@company.com' in missed_users
+
+
+class TestCheckNoActiveResourcesOutsideContexts:
+    """Tests for check_no_active_resources_outside_contexts."""
+
+    @staticmethod
+    def _cluster(name, cloud, region):
+        launched = mock.Mock(cloud=cloud, region=region)
+        return {'name': name, 'handle': mock.Mock(launched_resources=launched)}
+
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    def test_resources_on_kept_contexts_or_other_clouds_pass(
+            self, mock_queue, mock_get_clusters):
+        mock_get_clusters.return_value = [
+            self._cluster('k8s-kept', 'Kubernetes', 'ctx-a'),
+            self._cluster('gcp-cluster', 'GCP', 'us-central1'),
+        ]
+        mock_queue.return_value = ([{
+            'job_id': 1,
+            'workspace': 'ws',
+            'cloud': 'Kubernetes',
+            'region': 'ctx-a'
+        }, {
+            'job_id': 2,
+            'workspace': 'other-ws',
+            'cloud': 'Kubernetes',
+            'region': 'ctx-b'
+        }], 0, {}, 0, [])
+
+        resource_checker.check_no_active_resources_outside_contexts(
+            'ws', ['ctx-a'])
+
+        mock_get_clusters.assert_called_once_with(exclude_managed_clusters=True,
+                                                  workspaces_filter={'ws'})
+
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    def test_resources_on_dropped_contexts_block(self, mock_queue,
+                                                 mock_get_clusters):
+        mock_get_clusters.return_value = [
+            self._cluster('k8s-kept', 'Kubernetes', 'ctx-a'),
+            self._cluster('k8s-dropped', 'Kubernetes', 'ctx-b'),
+        ]
+        mock_queue.return_value = ([{
+            'job_id': 1,
+            'workspace': 'ws',
+            'cloud': 'kubernetes',
+            'region': 'ctx-b'
+        }], 0, {}, 0, [])
+
+        with pytest.raises(ValueError) as exc_info:
+            resource_checker.check_no_active_resources_outside_contexts(
+                'ws', ['ctx-a'])
+
+        error_message = str(exc_info.value)
+        assert "Cannot update workspace 'ws'" in error_message
+        assert '1 active cluster(s): k8s-dropped' in error_message
+        assert '1 active managed job(s): 1' in error_message
+        assert 'k8s-kept' not in error_message
+
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    def test_resources_with_unknown_placement_block(self, mock_queue,
+                                                    mock_get_clusters):
+        mock_get_clusters.return_value = [{
+            'name': 'provisioning',
+            'handle': None
+        }]
+        mock_queue.return_value = ([{
+            'job_id': 7,
+            'workspace': 'ws',
+            'cloud': '-',
+            'region': '-'
+        }], 0, {}, 0, [])
+
+        with pytest.raises(ValueError) as exc_info:
+            resource_checker.check_no_active_resources_outside_contexts(
+                'ws', ['ctx-a'])
+
+        error_message = str(exc_info.value)
+        assert '1 active cluster(s): provisioning' in error_message
+        assert '1 active managed job(s): 7' in error_message
+
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    def test_jobs_controller_down_checks_clusters_only(self, mock_queue,
+                                                       mock_get_clusters):
+        mock_get_clusters.return_value = [
+            self._cluster('k8s-kept', 'Kubernetes', 'ctx-a')
+        ]
+        mock_queue.side_effect = exceptions.ClusterNotUpError('down')
+
+        resource_checker.check_no_active_resources_outside_contexts(
+            'ws', ['ctx-a'])
