@@ -4,7 +4,6 @@ from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
 import tempfile
-import textwrap
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -18,6 +17,8 @@ import sky
 @pytest.mark.no_nebius  # Requires GCP to be enabled
 @pytest.mark.no_kubernetes  # Requires GCP to be enabled
 @pytest.mark.no_seeweb  # Requires GCP to be enabled
+# logs is a server-side setting: the test restarts the API server with it.
+@pytest.mark.no_remote_server
 def test_log_collection_to_gcp(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Calculate timestamp 1 hour ago in ISO format
@@ -25,21 +26,21 @@ def test_log_collection_to_gcp(generic_cloud: str):
                     timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
     with tempfile.NamedTemporaryFile(mode='w') as base, \
         tempfile.NamedTemporaryFile(mode='w') as additional_labels:
-        base.write(
-            textwrap.dedent(f"""\
-                logs:
-                  store: gcp
-                """))
-        base.flush()
-        additional_labels.write(
-            textwrap.dedent(f"""\
-                logs:
-                  store: gcp
-                  gcp:
-                    additional_labels:
-                      skypilot_smoke_test_case: {name}-case
-                """))
-        additional_labels.flush()
+        smoke_tests_utils.write_api_server_config(base,
+                                                  {'logs': {
+                                                      'store': 'gcp'
+                                                  }})
+        smoke_tests_utils.write_api_server_config(
+            additional_labels, {
+                'logs': {
+                    'store': 'gcp',
+                    'gcp': {
+                        'additional_labels': {
+                            'skypilot_smoke_test_case': f'{name}-case'
+                        }
+                    }
+                }
+            })
         logs_cmd = 'for i in {1..10}; do echo "test output $i"; done'
         validate_logs_cmd = (
             'echo $output && echo "===Validate logs from GCP Cloud Logging===" && '
@@ -48,30 +49,27 @@ def test_log_collection_to_gcp(generic_cloud: str):
         test = smoke_tests_utils.Test(
             'log_collection_to_gcp',
             [
-                smoke_tests_utils.with_config(
-                    f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{logs_cmd}\'',
-                    base.name),
+                smoke_tests_utils.restart_api_server_with_config(base.name),
+                f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{logs_cmd}\'',
                 f'sky logs {name} 1',
                 # Wait for the logs to be available in the GCP Cloud Logging.
                 'sleep 10',
                 # Use grep instead of jq to avoid the dependency on jq.
                 (f'output=$(gcloud logging read \'labels.skypilot_cluster_name={name} AND timestamp>="{one_hour_ago}"\' --order=asc --format=json | grep \'"log":\') && '
                  f'{validate_logs_cmd}'),
-                smoke_tests_utils.with_config(
-                    f'sky jobs launch -y -n {name}-job --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{logs_cmd}\'',
-                    base.name),
+                f'sky jobs launch -y -n {name}-job --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{logs_cmd}\'',
                 'sleep 10',
                 (f'output=$(gcloud logging read \'jsonPayload.log_path:{name}-job AND timestamp>="{one_hour_ago}"\' --order=asc --format=json | grep \'"log":\') && '
                  f'{validate_logs_cmd}'),
                 f'sky down -y {name}',
-                smoke_tests_utils.with_config(
-                    f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{logs_cmd}\'',
+                smoke_tests_utils.restart_api_server_with_config(
                     additional_labels.name),
+                f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{logs_cmd}\'',
                 'sleep 10',
                 (f'output=$(gcloud logging read \'labels.skypilot_smoke_test_case={name}-case AND timestamp>="{one_hour_ago}"\' --order=asc --format=json | grep \'"log":\') && '
                  f'{validate_logs_cmd}'),
             ],
-            f'sky down -y {name}',
+            f'sky down -y {name}; {smoke_tests_utils.RESTORE_API_SERVER_CONFIG}',
             timeout=smoke_tests_utils.LOG_STORE_CMD_TIMEOUT,
         )
         smoke_tests_utils.run_one_test(test)
@@ -83,6 +81,8 @@ def test_log_collection_to_gcp(generic_cloud: str):
 @pytest.mark.no_nebius  # Requires GCP to be enabled
 @pytest.mark.no_kubernetes  # Requires GCP to be enabled
 @pytest.mark.no_seeweb  # Requires GCP to be enabled
+# logs is a server-side setting: the test restarts the API server with it.
+@pytest.mark.no_remote_server
 def test_managed_job_logs_with_log_store(generic_cloud: str):
     """`sky jobs logs` works for running and terminal jobs with a log store.
 
@@ -103,20 +103,17 @@ def test_managed_job_logs_with_log_store(generic_cloud: str):
         ' \'{for (i=1; i<=NF; i++) if ($i==n) {print $1; break}}\' | '
         'sort -un | head -1')
     with tempfile.NamedTemporaryFile(mode='w') as base:
-        base.write(
-            textwrap.dedent("""\
-            logs:
-              store: gcp
-            """))
-        base.flush()
+        smoke_tests_utils.write_api_server_config(base,
+                                                  {'logs': {
+                                                      'store': 'gcp'
+                                                  }})
         test = smoke_tests_utils.Test(
             'managed_job_logs_with_log_store',
             [
-                smoke_tests_utils.with_config(
-                    f'sky jobs launch -y -d -n {job_name} '
-                    f'--infra {generic_cloud} '
-                    f'{smoke_tests_utils.LOW_RESOURCE_ARG} \'{run_cmd}\'',
-                    base.name),
+                smoke_tests_utils.restart_api_server_with_config(base.name),
+                (f'sky jobs launch -y -d -n {job_name} '
+                 f'--infra {generic_cloud} '
+                 f'{smoke_tests_utils.LOW_RESOURCE_ARG} \'{run_cmd}\''),
                 # Running state: logs stream from the cluster.
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -136,7 +133,8 @@ def test_managed_job_logs_with_log_store(generic_cloud: str):
                 f's=$(sky jobs logs $({get_job_id_cmd}) --no-follow); '
                 f'echo "$s"; echo "$s" | grep "{marker}_1"',
             ],
-            f'sky jobs cancel -y -n {job_name}',
+            (f'sky jobs cancel -y -n {job_name}; '
+             f'{smoke_tests_utils.RESTORE_API_SERVER_CONFIG}'),
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
             timeout=smoke_tests_utils.LOG_STORE_CMD_TIMEOUT,
         )
