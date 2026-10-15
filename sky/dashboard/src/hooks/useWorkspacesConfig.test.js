@@ -1,5 +1,20 @@
+jest.mock('@/lib/cache', () => {
+  const cache = { invalidate: jest.fn(), invalidateFunction: jest.fn() };
+  return { __esModule: true, default: cache };
+});
+
+import dashboardCache from '@/lib/cache';
+import {
+  getEnabledCloudsBatch,
+  getWorkspaces,
+} from '@/data/connectors/workspaces';
+import {
+  getWorkspaceContexts,
+  getWorkspaceInfrastructure,
+} from '@/data/connectors/infra';
 import {
   getWorkspaceName,
+  invalidateWorkspaceCaches,
   workspaceNameError,
 } from '@/hooks/useWorkspacesConfig';
 
@@ -32,5 +47,21 @@ describe('workspaceNameError', () => {
     for (const name of ['', 'Proj', 'a b', '1abc', 'abc-', 'a'.repeat(64)]) {
       expect(workspaceNameError(name)).not.toBeNull();
     }
+  });
+});
+
+describe('invalidateWorkspaceCaches', () => {
+  it('drops every cached view built from the workspace list', () => {
+    invalidateWorkspaceCaches();
+    expect(dashboardCache.invalidate).toHaveBeenCalledWith(getWorkspaces);
+    expect(dashboardCache.invalidateFunction).toHaveBeenCalledWith(
+      getEnabledCloudsBatch
+    );
+    expect(dashboardCache.invalidate).toHaveBeenCalledWith(
+      getWorkspaceContexts
+    );
+    expect(dashboardCache.invalidate).toHaveBeenCalledWith(
+      getWorkspaceInfrastructure
+    );
   });
 });

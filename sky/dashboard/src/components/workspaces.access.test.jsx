@@ -72,8 +72,10 @@ jest.mock('@/plugins/PluginSlot', () => ({
   PluginSlot: () => null,
 }));
 
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { Workspaces } from '@/components/workspaces';
+import dashboardCache from '@/lib/cache';
+import { getWorkspaceContexts } from '@/data/connectors/infra';
 
 beforeEach(() => {
   mockPush.mockReset();
@@ -189,5 +191,24 @@ describe('renaming from the list', () => {
     expect(await screen.findByRole('button', { name: 'ml' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'ws' })).toBeNull();
     expect(screen.getByText('Workspace renamed to "ml".')).toBeTruthy();
+  });
+
+  test('a delete drops the cached infra contexts', async () => {
+    mockRole = 'admin';
+    await renderList();
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('Delete workspace'));
+    });
+    dashboardCache.invalidate.mockClear();
+    await act(async () => {
+      fireEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', {
+          name: 'Delete',
+        })
+      );
+    });
+    expect(dashboardCache.invalidate).toHaveBeenCalledWith(
+      getWorkspaceContexts
+    );
   });
 });

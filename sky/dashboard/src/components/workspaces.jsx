@@ -1052,7 +1052,7 @@ export function Workspaces() {
                           {isAdmin && workspace.name !== 'default' && (
                             <RenameWorkspaceButton
                               onClick={() => setRenameTarget(workspace.name)}
-                              className="ml-1 align-middle opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                              className="ml-1 align-middle opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
                             />
                           )}
                           <span className="ml-2">

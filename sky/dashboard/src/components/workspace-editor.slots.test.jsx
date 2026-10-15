@@ -2,7 +2,7 @@
 // the built-in role badges render; a plugin registered for a slot replaces the
 // badge and receives the row's context.
 import React from 'react';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 
 const mockComponents = {};
 jest.mock('@/plugins/PluginProvider', () => ({
@@ -83,6 +83,7 @@ import {
   DetailedAllowedUsers,
   WorkspaceEditor,
 } from '@/components/workspace-editor';
+import { getWorkspaceContexts } from '@/data/connectors/infra';
 
 const config = { private: true, allowed_users: ['alice', 'bob'] };
 const users = [
@@ -371,6 +372,28 @@ describe('WorkspaceEditor with a plugin that changes the workspace', () => {
     ).toBeInTheDocument();
     expect(server.ws.allowed_users).toEqual(['alice', 'bob']);
     expect(server.ws.gcp).toBeUndefined();
+  });
+
+  test('Apply drops the cached workspace views', async () => {
+    await renderEditor();
+    await edit((y) => `${y}  gcp:\n    project_id: saved\n`);
+    mockInvalidate.mockClear();
+    await apply();
+    expect(mockInvalidate).toHaveBeenCalledWith(getWorkspaceContexts);
+  });
+
+  test('a rename that lands under a draft is refused at Apply', async () => {
+    await renderEditor();
+    await edit((y) => `# note\n${y}`);
+    server = { ws: { ...server.ws, name: 'renamed' } };
+    await pluginRefresh();
+    await apply();
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        'The top-level key must stay "renamed". To rename the workspace, use Rename workspace next to its name.'
+      )
+    ).toBeInTheDocument();
   });
 
   test('Apply sends the config the draft started from', async () => {
@@ -690,5 +713,65 @@ describe('WorkspaceEditor rename', () => {
     expect(screen.getByText('Workspace renamed to "ml-v2".')).toBeTruthy();
     // The new YAML is the baseline, not a draft.
     expect(pencil()).toBeEnabled();
+  });
+
+  test('Apply after a rename expects the renamed config', async () => {
+    await renderEditor('ws-0123456789ab');
+    fireEvent.click(pencil());
+    const input = screen.getByLabelText('Name');
+    fireEvent.change(input, { target: { value: 'ml-v2' } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' });
+    });
+    const box = screen.getByLabelText('workspace yaml');
+    fireEvent.change(box, {
+      target: { value: `${box.value}  gcp:\n    project_id: x\n` },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Apply'));
+    });
+    expect(mockUpdateWorkspace).toHaveBeenLastCalledWith(
+      'ws-0123456789ab',
+      { name: 'ml-v2', private: false, gcp: { project_id: 'x' } },
+      { name: 'ml-v2', private: false }
+    );
+  });
+
+  test('changing the YAML key points at the rename pencil', async () => {
+    await renderEditor('ws-0123456789ab');
+    const box = screen.getByLabelText('workspace yaml');
+    fireEvent.change(box, {
+      target: { value: box.value.replace(/^ml:/, 'other:') },
+    });
+    expect(
+      screen.getByText(
+        'The top-level key must stay "ml" (found "other"). To rename the workspace, use Rename workspace next to its name.'
+      )
+    ).toBeInTheDocument();
+  });
+
+  test('Delete drops the cached workspace views', async () => {
+    await renderEditor('ws-0123456789ab');
+    fireEvent.click(screen.getByText('Delete'));
+    mockInvalidate.mockClear();
+    await act(async () => {
+      fireEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', {
+          name: 'Delete',
+        })
+      );
+    });
+    expect(mockInvalidate).toHaveBeenCalledWith(getWorkspaceContexts);
+  });
+});
+
+describe('WorkspaceEditor for a new workspace', () => {
+  test('creating drops the cached workspace views', async () => {
+    render(<WorkspaceEditor workspaceName="ml" isNewWorkspace />);
+    mockInvalidate.mockClear();
+    await act(async () => {
+      fireEvent.click(await screen.findByText('Apply'));
+    });
+    expect(mockInvalidate).toHaveBeenCalledWith(getWorkspaceContexts);
   });
 });
