@@ -504,6 +504,18 @@ def get_workspace_name(workspace_id: str,
     return workspace_id
 
 
+def workspace_label(workspace_id: str,
+                    workspaces: Optional[Dict[str, Any]] = None) -> str:
+    """`'name' (id)` for logs and audit records; `'id'` when they match.
+
+    Names change and ids do not, so a record carries both.
+    """
+    name = get_workspace_name(workspace_id, workspaces)
+    if name == workspace_id:
+        return repr(workspace_id)
+    return f'{name!r} ({workspace_id})'
+
+
 def resolve_workspace_ref(ref: str,
                           workspaces: Optional[Dict[str, Any]] = None) -> str:
     """Maps a workspace a person typed (`-w`, `active_workspace`) to its id.

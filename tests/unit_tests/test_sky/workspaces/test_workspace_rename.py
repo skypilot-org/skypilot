@@ -140,13 +140,44 @@ def test_name_must_be_unique_among_current_names(store):
     core.update_workspace('team-a', {'name': 'team-a'})
 
 
-def test_renamed_workspaces_old_name_is_reusable(store):
+def test_legacy_workspaces_original_name_stays_taken(store):
     _workspaces(store).update({'team-a': {}, 'team-b': {}})
     core.update_workspace('team-b', {'name': 'archive'})
 
-    # 'team-b' is now only an id, not a current name, so it is free.
-    core.update_workspace('team-a', {'name': 'team-b'})
-    assert _workspaces(store)['team-a']['name'] == 'team-b'
+    # 'team-b' is still workspace 'archive''s id, so it cannot name another.
+    with pytest.raises(ValueError, match="is the id of workspace 'archive'"):
+        core.update_workspace('team-a', {'name': 'team-b'})
+    with pytest.raises(ValueError, match="is the id of workspace 'archive'"):
+        core.create_workspace('team-b', {})
+    # The workspace itself may take its original name back.
+    core.update_workspace('team-b', {'name': 'team-b'})
+
+
+def test_generated_id_workspaces_old_name_is_reusable(store):
+    (old_id,) = core.create_workspace('proj-x', {}).keys() - {'default'}
+    core.update_workspace(old_id, {'name': 'proj-y'})
+
+    result = core.create_workspace('proj-x', {})
+
+    (new_id,) = set(result) - {old_id}
+    assert result[new_id]['name'] == 'proj-x'
+
+
+def test_new_raw_key_may_not_be_another_workspaces_name(store):
+    _workspaces(store)['ws-0123456789ab'] = {'name': 'proj-x'}
+    new_config = copy.deepcopy(store)
+    new_config['workspaces']['proj-x'] = {}
+
+    with pytest.raises(ValueError, match="already the name of workspace"):
+        core.update_config(new_config)
+
+
+def test_minted_id_never_equals_a_name(monkeypatch):
+    hexes = iter(['0123456789ab', 'aaaaaaaaaaaa'])
+    monkeypatch.setattr(core.secrets, 'token_hex', lambda n: next(hexes))
+    workspaces = {'team-a': {'name': 'ws-0123456789ab'}}
+
+    assert core._new_workspace_id(workspaces) == 'ws-aaaaaaaaaaaa'
 
 
 def test_existing_duplicate_does_not_block_unrelated_writes(store):
@@ -187,16 +218,6 @@ def test_create_mints_an_id_and_stores_the_name(store):
         core.create_workspace('proj-x', {})
     with pytest.raises(ValueError, match="'default' already exists"):
         core.create_workspace('default', {})
-
-
-def test_create_can_reuse_a_renamed_workspaces_original_name(store):
-    _workspaces(store)['team-a'] = {'name': 'archive'}
-
-    result = core.create_workspace('team-a', {})
-
-    new_ids = set(result) - {'team-a'}
-    assert len(new_ids) == 1
-    assert result[new_ids.pop()]['name'] == 'team-a'
 
 
 def test_read_only_viewers_see_the_name(monkeypatch):

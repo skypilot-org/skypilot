@@ -51,6 +51,12 @@ def test_old_name_works_until_reused():
                                                  _REUSED) == ('ws-0123456789ab')
 
 
+def test_workspace_label_carries_name_and_id():
+    assert skypilot_config.workspace_label('team-a',
+                                           _REUSED) == ("'archive' (team-a)")
+    assert skypilot_config.workspace_label('default', _REUSED) == "'default'"
+
+
 def test_unknown_ref_is_returned_unchanged():
     assert skypilot_config.resolve_workspace_ref('nope', _REUSED) == 'nope'
 

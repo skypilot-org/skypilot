@@ -226,11 +226,13 @@ def _without_access_and_name(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def _check_workspace_names_unique(old_workspaces: Dict[str, Any],
                                   new_workspaces: Dict[str, Any]) -> None:
-    """Raises if this write gives a workspace a name another one already has.
+    """Raises if this write lets one string name two workspaces.
 
-    Only workspaces whose name appeared or changed in this write are checked,
-    so a duplicate left by a hand-edited config never blocks unrelated writes
-    (e.g. membership sync).
+    A name may not equal another workspace's name or id, and a new id may not
+    equal another workspace's name, so a typed reference always resolves to
+    one workspace. Only workspaces whose name or id appeared or changed in
+    this write are checked, so a clash left by a hand-edited config never
+    blocks unrelated writes (e.g. membership sync).
     """
     default_id = constants.SKYPILOT_DEFAULT_WORKSPACE
     names = {
@@ -240,12 +242,26 @@ def _check_workspace_names_unique(old_workspaces: Dict[str, Any],
     }
     old_ids = set(old_workspaces) | {default_id}
     for workspace_id, name in names.items():
-        if (workspace_id in old_ids and skypilot_config.get_workspace_name(
-                workspace_id, old_workspaces) == name):
+        if workspace_id not in old_ids:
+            for other_id, other_name in names.items():
+                if other_id != workspace_id and other_name == workspace_id:
+                    raise ValueError(
+                        f'Workspace id {workspace_id!r} is already the name '
+                        f'of workspace {other_id!r}.')
+        elif skypilot_config.get_workspace_name(workspace_id,
+                                                old_workspaces) == name:
             continue
-        if any(other_id != workspace_id and other_name == name
-               for other_id, other_name in names.items()):
-            raise ValueError(f'Workspace {name!r} already exists.')
+        for other_id, other_name in names.items():
+            if other_id == workspace_id:
+                continue
+            if other_name == name:
+                raise ValueError(f'Workspace {name!r} already exists.')
+            if other_id == name:
+                # A legacy workspace's id is its original name: it stays
+                # taken (and keeps resolving to that workspace) after a rename.
+                raise ValueError(
+                    f'Workspace name {name!r} is the id of workspace '
+                    f'{other_name!r}; choose another name.')
 
 
 def _validate_workspace_config(workspace_name: str,
@@ -677,9 +693,13 @@ def update_workspace(
 
 
 def _new_workspace_id(workspaces: Dict[str, Any]) -> str:
+    names = {
+        skypilot_config.get_workspace_name(workspace_id, workspaces)
+        for workspace_id in workspaces
+    }
     while True:
         workspace_id = f'ws-{secrets.token_hex(6)}'
-        if workspace_id not in workspaces:
+        if workspace_id not in workspaces and workspace_id not in names:
             return workspace_id
 
 
