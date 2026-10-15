@@ -233,6 +233,9 @@ def test_workspace_filter_narrows_by_name(monkeypatch):
     # not the one whose id is 'team-a'.
     assert workspaces_core.filter_workspace_ids_by_name(
         ids, 'TEAM') == ['ws-0123456789ab']
+    # A name wins over an exact id, as for `-w`.
+    assert workspaces_core.filter_workspace_ids_by_name(
+        ids, 'team-a') == ['ws-0123456789ab']
     assert workspaces_core.filter_workspace_ids_by_name(ids, 'nope') == []
 
 

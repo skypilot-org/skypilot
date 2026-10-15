@@ -69,10 +69,6 @@ class TestCheckClusterWritePermission(unittest.TestCase):
         mock_check.assert_not_called()
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
 class TestCheckClusterReadPermission(unittest.TestCase):
     """The read gate (`server._check_cluster_read_permission`) names the
     cluster the user typed, never its workspace's id."""
@@ -89,3 +85,7 @@ class TestCheckClusterReadPermission(unittest.TestCase):
             server._check_cluster_read_permission(user, 'c1')  # pylint: disable=protected-access
         self.assertIn("'c1'", str(ctx.exception))
         self.assertNotIn('ws-0123456789ab', str(ctx.exception))
+
+
+if __name__ == '__main__':
+    unittest.main()
