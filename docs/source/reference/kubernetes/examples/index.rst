@@ -7,6 +7,7 @@ Kubernetes Examples
    :maxdepth: 1
 
    Kueue <kueue-example>
+   KAI Scheduler <kai-example>
    Use Docker in Pods <use-docker-in-pod>
    Dynamic Workload Scheduler <https://gke-ai-labs.dev/docs/tutorials/skypilot/resource-management-using-kueue/>
    Kueue with GKE DWS <https://gke-ai-labs.dev/docs/tutorials/skypilot/resource-management-using-kueue/>

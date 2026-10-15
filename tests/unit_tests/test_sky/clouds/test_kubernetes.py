@@ -2089,6 +2089,166 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
             'MIRROR_CANDIDATES="mirrors.wikimedia.org mirror.umd.edu"',
             rendered)
 
+    def _deploy_vars_with_kai(self, kai):
+        with patch('sky.skypilot_config.get_effective_kai_value',
+                   side_effect=lambda key, **kwargs: kai.get(key)):
+            return kubernetes.Kubernetes().make_deploy_resources_variables(
+                resources=self.resources,
+                cluster_name=resources_utils.ClusterName(
+                    display_name=self.cluster_name,
+                    name_on_cloud=self.cluster_name),
+                region=self.region,
+                zones=None,
+                num_nodes=2,
+                dryrun=False)
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_effective_workspace_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_kai_queue_is_resolved_for_the_template(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """A KAI queue is passed to the template."""
+        self._setup_mocks_for_pod_resource_limits_test(
+            mock_detect_network_type,
+            mock_get_image,
+            mock_get_port_mode,
+            mock_get_workspace_cloud,
+            mock_get_workspace_region_config,
+            mock_get_cloud_config_value,
+            mock_is_exec_auth,
+            mock_get_accelerator_label_keys,
+            mock_get_namespace,
+            mock_get_current_context,
+            set_pod_resource_limits_value=False)
+        deploy_vars = self._deploy_vars_with_kai({
+            'queue': 'team-queue',
+            'preemptibility': 'preemptible'
+        })
+
+        self.assertEqual(deploy_vars['k8s_kai_queue_name'], 'team-queue')
+        self.assertEqual(deploy_vars['k8s_kai_preemptibility'], 'preemptible')
+        self.assertEqual(deploy_vars['k8s_kai_scheduler_name'], 'kai-scheduler')
+        self.assertIsNone(deploy_vars['k8s_kueue_local_queue_name'])
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_effective_workspace_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_no_kai_queue_leaves_the_template_unchanged(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """Without kubernetes.kai the KAI template fields stay unset."""
+        self._setup_mocks_for_pod_resource_limits_test(
+            mock_detect_network_type,
+            mock_get_image,
+            mock_get_port_mode,
+            mock_get_workspace_cloud,
+            mock_get_workspace_region_config,
+            mock_get_cloud_config_value,
+            mock_is_exec_auth,
+            mock_get_accelerator_label_keys,
+            mock_get_namespace,
+            mock_get_current_context,
+            set_pod_resource_limits_value=False)
+        deploy_vars = self._deploy_vars_with_kai({})
+
+        self.assertIsNone(deploy_vars['k8s_kai_queue_name'])
+        self.assertIsNone(deploy_vars['k8s_kai_preemptibility'])
+
+    @patch('sky.skypilot_config.get_effective_queue_name',
+           return_value='user-queue')
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_effective_workspace_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_kai_and_kueue_queues_are_exclusive(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes, mock_get_queue_name):
+        """One cluster cannot be admitted by both KAI and Kueue."""
+        self._setup_mocks_for_pod_resource_limits_test(
+            mock_detect_network_type,
+            mock_get_image,
+            mock_get_port_mode,
+            mock_get_workspace_cloud,
+            mock_get_workspace_region_config,
+            mock_get_cloud_config_value,
+            mock_is_exec_auth,
+            mock_get_accelerator_label_keys,
+            mock_get_namespace,
+            mock_get_current_context,
+            set_pod_resource_limits_value=False)
+        with self.assertRaisesRegex(ValueError, 'both a KAI queue'):
+            self._deploy_vars_with_kai({'queue': 'team-queue'})
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_effective_workspace_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_kai_preemptibility_requires_a_queue(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """A preemptibility without a KAI queue would have no PodGroup."""
+        self._setup_mocks_for_pod_resource_limits_test(
+            mock_detect_network_type,
+            mock_get_image,
+            mock_get_port_mode,
+            mock_get_workspace_cloud,
+            mock_get_workspace_region_config,
+            mock_get_cloud_config_value,
+            mock_is_exec_auth,
+            mock_get_accelerator_label_keys,
+            mock_get_namespace,
+            mock_get_current_context,
+            set_pod_resource_limits_value=False)
+        with self.assertRaisesRegex(ValueError, 'without kubernetes.kai.queue'):
+            self._deploy_vars_with_kai({'preemptibility': 'preemptible'})
+
 
 class TestKubernetesRayTemplateAptErrorHandling(unittest.TestCase):
     """Verify error-handling invariants of the apt setup in

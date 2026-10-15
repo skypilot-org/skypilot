@@ -1440,6 +1440,24 @@ def get_effective_queue_admission_timeout(
     return int(value)
 
 
+def get_effective_kai_value(
+        key: str,
+        region: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Returns a ``kubernetes.kai.<key>`` value, or None if unset.
+
+    Resolved with the same scope precedence as :func:`get_effective_queue_name`
+    (workspace over global, context over cloud), with ``override_configs`` (a
+    task's ``config`` block) merged in at every scope.
+    """
+    return _get_effective_scoped_config_value(cloud='kubernetes',
+                                              property_keys=[('kai', key)],
+                                              region=region,
+                                              workspace=workspace,
+                                              override_configs=override_configs)
+
+
 def get_effective_namespace(
         cloud: str,
         region: Optional[str] = None,

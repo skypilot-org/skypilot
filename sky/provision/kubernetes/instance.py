@@ -21,6 +21,7 @@ from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import host_network_ports
 from sky.provision.kubernetes import host_network_probe
+from sky.provision.kubernetes import kai
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
 from sky.utils import command_runner
@@ -1044,21 +1045,6 @@ def _update_spinner_message(*, iteration: int, pods: List[Any],
     pass
 
 
-@timeline.event
-def _is_transport_error(e: Exception) -> bool:
-    """Whether ``e`` is a failure of the HTTP transport to the API server.
-
-    urllib3 transport errors propagate raw out of the kubernetes client,
-    with one exception: the client wraps ``urllib3.exceptions.SSLError``
-    into an ``ApiException`` with ``status=0`` (no HTTP response was
-    received). An ``ApiException`` with a real HTTP status is an API error
-    response, not a transport failure.
-    """
-    if isinstance(e, kubernetes.api_exception()):
-        return e.status == 0
-    return isinstance(e, kubernetes.urllib3_http_error())
-
-
 def _count_transport_error(e: Exception, first_error_time: Optional[float],
                            cluster_name: str) -> float:
     """Account a pod-poll transport error; raise once the streak persists.
@@ -1083,13 +1069,15 @@ def _count_transport_error(e: Exception, first_error_time: Optional[float],
     return first_error_time
 
 
-def _wait_for_pods_to_schedule(namespace,
-                               context,
-                               new_nodes,
-                               timeout: int,
-                               cluster_name: str,
-                               create_pods_start: datetime.datetime,
-                               admission_timeout: Optional[int] = None):
+def _wait_for_pods_to_schedule(
+        namespace,
+        context,
+        new_nodes,
+        timeout: int,
+        cluster_name: str,
+        create_pods_start: datetime.datetime,
+        admission_timeout: Optional[int] = None,
+        scheduling_callback: Optional[kai.SchedulingCallback] = None):
     """Wait for all pods to be scheduled.
 
     Wait for all pods including jump pod to be scheduled, and if it
@@ -1222,7 +1210,7 @@ def _wait_for_pods_to_schedule(namespace,
             # Treat a transport failure as a missed poll and retry within
             # the deadline above; see _POD_POLL_REQUEST_TIMEOUT for why the
             # call must be bounded rather than left to block indefinitely.
-            if not _is_transport_error(e):
+            if not kubernetes_utils.is_transport_error(e):
                 raise
             transport_error_since = _count_transport_error(
                 e, transport_error_since, cluster_name)
@@ -1307,6 +1295,9 @@ def _wait_for_pods_to_schedule(namespace,
                     LAUNCH_PROGRESS,
                     nop_if_duplicate=True,
                 )
+            if scheduling_callback is not None:
+                scheduling_callback(context, namespace, cluster_name_on_cloud,
+                                    cluster_name)
             last_gated_pod_names = gated_pod_names
             # Keep calling the per-poll spinner update while gated, as the
             # ungated loop below does. The message set above is written
@@ -1405,6 +1396,11 @@ def _wait_for_pods_to_schedule(namespace,
                               _AUTOSCALE_DETECTED_TIMEOUT_SECONDS)
         volume_wait_msg = volume_probe.probe(unscheduled_pods,
                                              hold_failures=scale_up_in_flight)
+
+        # Runs after the volume probe so volume errors are not masked.
+        if scheduling_callback is not None:
+            scheduling_callback(context, namespace, cluster_name_on_cloud,
+                                cluster_name)
 
         if volume_wait_msg is not None:
             # Name the volume being waited on. A bare spinner leaves no way to
@@ -1754,7 +1750,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             # This loop has no deadline, so the transport-error grace window
             # is what keeps a persistently unreachable API server from
             # turning into an endless silent retry loop.
-            if not _is_transport_error(e):
+            if not kubernetes_utils.is_transport_error(e):
                 raise
             transport_error_since = _count_transport_error(
                 e, transport_error_since, cluster_name)
@@ -2343,6 +2339,11 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     pod_spec['metadata'].setdefault('annotations', {}).update({
         'skypilot-cluster-name': cluster_name,
     })
+    uses_kai = provider_config.get('kai_queue') is not None
+    if uses_kai:
+        # Created before the pods so KAI schedules them as one gang.
+        kai.ensure_pod_group(context, namespace, cluster_name_on_cloud,
+                             provider_config, config.node_config, config.count)
 
     ephemeral_volumes = provider_config.get('ephemeral_volume_infos')
     if ephemeral_volumes:
@@ -2770,7 +2771,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         provision_timeout,
         cluster_name,
         create_pods_start,
-        admission_timeout=provider_config.get('queue_admission_timeout'))
+        admission_timeout=provider_config.get('queue_admission_timeout'),
+        scheduling_callback=kai.scheduling_wait_checker() if uses_kai else None)
     # Reset spinner message here because it might have hinted autoscaling
     # while waiting for pods to schedule.
     rich_utils.force_update_status(
@@ -3099,6 +3101,8 @@ def cleanup_cluster_resources(
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_control_context_from_config(provider_config)
     _delete_cluster_services(cluster_name_on_cloud, namespace, context)
+    if provider_config.get('kai_queue') is not None:
+        kai.delete_pod_group(context, namespace, cluster_name_on_cloud)
 
 
 # The probe runs as soon as ray-installation finishes in step 2 of the

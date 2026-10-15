@@ -45,6 +45,16 @@ provider:
     queue_admission_timeout: {{k8s_kueue_admission_timeout}}
     {% endif %}
 
+    {% if k8s_kai_queue_name %}
+    kai_queue: {{k8s_kai_queue_name}}
+    {% if k8s_kai_preemptibility %}
+    kai_preemptibility: {{k8s_kai_preemptibility}}
+    {% endif %}
+    {% if priority_class is not none %}
+    kai_priority_class: {{priority_class}}
+    {% endif %}
+    {% endif %}
+
     # Namespace used to host SkyPilot system components, such as fuse device
     # manager.
     skypilot_system_namespace: {{k8s_skypilot_system_namespace}}
@@ -346,7 +356,17 @@ available_node_types:
             kueue.x-k8s.io/queue-name: {{k8s_kueue_local_queue_name}}
             kueue.x-k8s.io/pod-group-name: {{cluster_name_on_cloud}}
             {% endif %}
+            {% if k8s_kai_queue_name %}
+            kai.scheduler/queue: {{k8s_kai_queue_name}}
+            {% if k8s_kai_preemptibility %}
+            kai.scheduler/preemptibility: {{k8s_kai_preemptibility}}
+            {% endif %}
+            {% endif %}
         annotations:
+          {% if k8s_kai_queue_name %}
+          pod-group-name: {{cluster_name_on_cloud}}
+          kai.scheduler/skip-podgrouper: "true"
+          {% endif %}
           {% if k8s_rdma_networks is defined and k8s_rdma_networks is not none %}
           # Multus attaches one SR-IOV VF per entry, so the list length must
           # match the VF resource count requested below.
@@ -442,6 +462,12 @@ available_node_types:
       spec:
         # serviceAccountName: skypilot-service-account
         serviceAccountName: {{k8s_service_account_name}}
+        {% if k8s_kai_queue_name %}
+        schedulerName: {{k8s_kai_scheduler_name}}
+        {% if priority_class is not none %}
+        priorityClassName: {{priority_class}}
+        {% endif %}
+        {% endif %}
         automountServiceAccountToken: {{k8s_automount_sa_token}}
         restartPolicy: {{ "Always" if high_availability else "Never" }}
         {% if preemption_hook_timeout is defined and preemption_hook_timeout %}

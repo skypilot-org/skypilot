@@ -100,6 +100,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`enable_docker <config-yaml-kubernetes-enable-docker>`: true  # or ALL / BUILD
     :ref:`kueue <config-yaml-kubernetes-kueue>`:
       :ref:`local_queue_name <config-yaml-kubernetes-kueue-local-queue-name>`: skypilot-local-queue
+    :ref:`kai <config-yaml-kubernetes-kai>`:
+      :ref:`queue <config-yaml-kubernetes-kai-queue>`: team-queue
+      :ref:`preemptibility <config-yaml-kubernetes-kai-preemptibility>`: preemptible
     :ref:`dws <config-yaml-kubernetes-dws>`:
       enabled: true
       max_run_duration: 10m
@@ -2124,6 +2127,35 @@ jobs that set
 :ref:`job.wait_for_scheduling_timeout <yaml-spec-job-wait-for-scheduling-timeout>`,
 which bounds their wait instead. Set the field explicitly to bound their wait
 as well.
+
+.. _config-yaml-kubernetes-kai:
+
+``kubernetes.kai``
+~~~~~~~~~~~~~~~~~~
+
+`KAI Scheduler <https://github.com/kai-scheduler/KAI-Scheduler>`_ configuration
+(optional). See :ref:`kubernetes-example-kai`. Cannot be combined with
+:ref:`kubernetes.kueue <config-yaml-kubernetes-kueue>`.
+
+.. _config-yaml-kubernetes-kai-queue:
+
+``kubernetes.kai.queue``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Name of the KAI ``Queue`` to submit clusters to.
+
+.. _config-yaml-kubernetes-kai-preemptibility:
+
+``kubernetes.kai.preemptibility``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``preemptible`` or ``non-preemptible`` (optional). If not set, KAI derives it
+from the priority.
+
+KAI does not gate queued pods, so
+:ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>`
+also bounds the wait in KAI's queue, except while a launch on the API server is
+paused there.
 
 .. _config-yaml-kubernetes-dws:
 
