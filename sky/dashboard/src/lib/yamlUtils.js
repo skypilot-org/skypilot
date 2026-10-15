@@ -192,3 +192,18 @@ export const formatJobYaml = (yamlString) => {
     ];
   }
 };
+
+/**
+ * The `name:` / `execution:` header shown above a managed job's (or job
+ * group's) task YAMLs, followed by a document separator; empty when the job
+ * has neither.
+ * @param {{name?: string, execution?: string}} jobData
+ * @returns {string}
+ */
+export const buildJobGroupHeader = (jobData) => {
+  const lines = [
+    jobData?.name ? `name: ${jobData.name}` : null,
+    jobData?.execution ? `execution: ${jobData.execution}` : null,
+  ].filter(Boolean);
+  return lines.length > 0 ? lines.join('\n') + '\n---\n' : '';
+};

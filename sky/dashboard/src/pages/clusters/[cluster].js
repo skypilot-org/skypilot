@@ -51,6 +51,7 @@ import { EntrypointAndYaml } from '@/components/elements/EntrypointYaml';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { TelemetrySection } from '@/components/TelemetrySection';
 import { hasAccelerator } from '@/utils/gpuUtils';
+import { isController } from '@/data/utils';
 import { trackClusterAction } from '@/lib/analytics';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import {
@@ -363,8 +364,7 @@ function ActiveTab({
   // whose YAML is generated rather than the user's.
   const clusterName = clusterData?.cluster || clusterData?.name;
   const creationYaml =
-    clusterName?.startsWith('sky-jobs-controller-') ||
-    clusterName?.startsWith('sky-serve-controller-')
+    clusterName && isController(clusterName)
       ? null
       : clusterData?.task_yaml || clusterData?.last_creation_yaml;
 

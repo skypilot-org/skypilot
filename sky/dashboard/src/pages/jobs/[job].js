@@ -54,7 +54,7 @@ import { BatchBadge } from '@/components/elements/BatchBadge';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 import { NonCapitalizedTooltip } from '@/components/utils';
-import { formatJobYaml } from '@/lib/yamlUtils';
+import { buildJobGroupHeader, formatJobYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { YamlCodeBlock } from '@/components/ui/yaml-code-block';
 import {
@@ -1318,16 +1318,7 @@ function JobDetailsContent({
   // What the YAML copy button copies: the same documents the view shows.
   const yamlCopyText = () => {
     const yamlDocs = formatJobYaml(jobData.dag_yaml);
-    // Build JobGroup header with name and execution
-    const hasJobGroupConfig = jobData.name || jobData.execution;
-    const jobGroupHeader = hasJobGroupConfig
-      ? [
-          jobData.name ? `name: ${jobData.name}` : null,
-          jobData.execution ? `execution: ${jobData.execution}` : null,
-        ]
-          .filter(Boolean)
-          .join('\n') + '\n---\n'
-      : '';
+    const jobGroupHeader = buildJobGroupHeader(jobData);
     if (yamlDocs.length === 1) {
       // Single document - use the formatted content directly
       return jobGroupHeader + yamlDocs[0].content;
@@ -1611,18 +1602,7 @@ function JobDetailsContent({
             <div className="mt-3">
               {(() => {
                 const yamlDocs = formatJobYaml(jobData.dag_yaml);
-                // Build JobGroup header with name and execution
-                const hasJobGroupConfig = jobData.name || jobData.execution;
-                const jobGroupHeader = hasJobGroupConfig
-                  ? [
-                      jobData.name ? `name: ${jobData.name}` : null,
-                      jobData.execution
-                        ? `execution: ${jobData.execution}`
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join('\n') + '\n---\n'
-                  : '';
+                const jobGroupHeader = buildJobGroupHeader(jobData);
 
                 if (yamlDocs.length === 0) {
                   return <div className="text-gray-500">No YAML available</div>;

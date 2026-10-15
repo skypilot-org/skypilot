@@ -7,6 +7,7 @@ from unittest import mock
 
 from sky import core
 from sky import global_user_state
+from sky import resources as resources_lib
 from sky import task as task_lib
 from sky.backends import cloud_vm_ray_backend
 from sky.skylet import constants
@@ -34,12 +35,13 @@ class _MinimalHandle:
     launched_resources = None
 
 
-def _add_cluster(name: str) -> str:
+def _add_cluster(name: str, is_managed: bool = False) -> str:
     global_user_state.add_or_update_cluster(
         cluster_name=name,
         cluster_handle=_MinimalHandle(),
         requested_resources=set(),
         ready=True,
+        is_managed=is_managed,
     )
     cluster_hash = global_user_state.get_cluster_hash(name)
     assert cluster_hash is not None
@@ -58,7 +60,7 @@ def test_add_and_get_spec(tmp_path, monkeypatch):
     assert spec is not None
     assert spec['task_yaml'] == 'run: echo 2\n'
     assert spec['entrypoint'] == 'sky exec c "echo 2"'
-    assert spec['submitted_at'] is not None
+    assert set(spec) == {'task_yaml', 'entrypoint'}
     # Unknown job, unknown cluster: jobs submitted before specs were recorded.
     assert global_user_state.get_cluster_job_spec('h1', 3) is None
     assert global_user_state.get_cluster_job_spec('h2', 1) is None
@@ -130,7 +132,7 @@ def _record(task, cluster_hash='h1', cluster_name='c'):
     backend = cloud_vm_ray_backend.CloudVmRayBackend()
     handle = mock.Mock(cluster_name=cluster_name)
     with mock.patch.object(global_user_state,
-                           'get_cluster_hash',
+                           'get_job_spec_cluster_hash',
                            return_value=cluster_hash), \
          mock.patch.object(global_user_state,
                            'add_cluster_job_spec') as add_spec, \
@@ -334,3 +336,69 @@ def test_submitted_yaml_keeps_local_workdir_as_written():
     recorded = task.to_submitted_yaml_config()
 
     assert recorded['workdir'] == '~/my-project'
+
+
+def test_keeps_only_the_last_job_ids_per_cluster(tmp_path, monkeypatch):
+    """A long-lived cluster running many `sky exec`s does not grow unbounded."""
+    _fresh_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(global_user_state, 'MAX_JOB_SPECS_PER_CLUSTER', 3)
+    for job_id in range(1, 6):
+        global_user_state.add_cluster_job_spec('h1', job_id, f'y{job_id}', 'c')
+    global_user_state.add_cluster_job_spec('h2', 1, 'other', 'c')
+
+    kept = [
+        job_id for job_id in range(1, 6)
+        if global_user_state.get_cluster_job_spec('h1', job_id) is not None
+    ]
+    assert kept == [3, 4, 5]
+    # Another cluster's specs are untouched.
+    assert global_user_state.get_cluster_job_spec('h2', 1) is not None
+
+
+def test_job_spec_cluster_hash_skips_controller_launched_clusters(
+        tmp_path, monkeypatch):
+    """A managed job's cluster or a pool worker is launched by a controller."""
+    _fresh_db(tmp_path, monkeypatch)
+    user_hash = _add_cluster('mine')
+    _add_cluster('my-job-1', is_managed=True)
+
+    assert global_user_state.get_job_spec_cluster_hash('mine') == user_hash
+    assert global_user_state.get_job_spec_cluster_hash('my-job-1') is None
+    assert global_user_state.get_job_spec_cluster_hash('missing') is None
+
+
+def test_backend_skips_controller_launched_clusters(tmp_path, monkeypatch):
+    """Jobs the jobs controller submits to the clusters it launched."""
+    _fresh_db(tmp_path, monkeypatch)
+    _add_cluster('my-job-1', is_managed=True)
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    with mock.patch.object(global_user_state,
+                           'add_cluster_job_spec') as add_spec:
+        backend._record_job_spec(mock.Mock(cluster_name='my-job-1'), 1,
+                                 task_lib.Task(run='echo hi'))
+    add_spec.assert_not_called()
+
+
+def test_execute_records_the_spec_after_submitting_the_job():
+    """Recording is best-effort and must not delay the job's start."""
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    task = task_lib.Task(run='echo hi')
+    handle = mock.Mock(cluster_name='c', num_ips_per_node=1)
+    handle.provision_runtime_metadata.run_started = False
+    calls = mock.Mock()
+    with mock.patch.object(backend, 'check_resources_fit_cluster',
+                           return_value=resources_lib.Resources()), \
+         mock.patch.object(cloud_vm_ray_backend.backend_utils,
+                           'get_task_resources_str', return_value='1x'), \
+         mock.patch.object(backend, '_add_job',
+                           return_value=(7, '/logs')) as add_job, \
+         mock.patch.object(backend,
+                           '_execute_task_one_node') as execute_one_node, \
+         mock.patch.object(backend, '_record_job_spec') as record_spec:
+        calls.attach_mock(add_job, 'add_job')
+        calls.attach_mock(execute_one_node, 'execute_task')
+        calls.attach_mock(record_spec, 'record_job_spec')
+        assert backend._execute(handle, task) == 7
+
+    order = [c[0] for c in calls.mock_calls]
+    assert order == ['add_job', 'execute_task', 'record_job_spec'], order

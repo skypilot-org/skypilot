@@ -1869,7 +1869,6 @@ def cluster_job_spec(
                 {
                     'task_yaml': (str) the task YAML, with secrets redacted,
                     'entrypoint': (str) the command that submitted the job,
-                    'submitted_at': (float) timestamp of submission,
                 }
     """
     body = payloads.ClusterJobSpecBody(cluster_name=cluster_name, job_id=job_id)

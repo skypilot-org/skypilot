@@ -1,4 +1,8 @@
-import { formatYaml, formatSingleYamlDocument } from '@/lib/yamlUtils';
+import {
+  buildJobGroupHeader,
+  formatYaml,
+  formatSingleYamlDocument,
+} from '@/lib/yamlUtils';
 
 // YAML as the server writes it with PyYAML: strings that are not floats in
 // YAML 1.1 (no dot) are left unquoted.
@@ -30,5 +34,19 @@ describe('formatYaml', () => {
   it('applies the same rule to multi-document YAML', () => {
     const { content } = formatSingleYamlDocument(SERVER_YAML, 0);
     expect(content).toContain('LR: 1e-3');
+  });
+});
+
+describe('buildJobGroupHeader', () => {
+  it('lists name and execution, then a document separator', () => {
+    expect(buildJobGroupHeader({ name: 'grp', execution: 'parallel' })).toBe(
+      'name: grp\nexecution: parallel\n---\n'
+    );
+    expect(buildJobGroupHeader({ name: 'grp' })).toBe('name: grp\n---\n');
+  });
+
+  it('is empty without either', () => {
+    expect(buildJobGroupHeader({})).toBe('');
+    expect(buildJobGroupHeader(null)).toBe('');
   });
 });

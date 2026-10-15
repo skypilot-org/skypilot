@@ -514,7 +514,9 @@ system_config_table = sqlalchemy.Table(
 #
 # Keyed by cluster_hash rather than name: job ids restart at 1 when a cluster
 # with the same name is relaunched after `sky down`. Rows are dropped when the
-# cluster is terminated.
+# cluster is terminated, and only the last MAX_JOB_SPECS_PER_CLUSTER job ids of
+# a cluster are kept, so a long-lived cluster that runs many `sky exec`s does
+# not grow the table without bound.
 cluster_job_spec_table = sqlalchemy.Table(
     'cluster_job_specs',
     Base.metadata,
@@ -522,8 +524,9 @@ cluster_job_spec_table = sqlalchemy.Table(
     sqlalchemy.Column('job_id', sqlalchemy.Integer, primary_key=True),
     sqlalchemy.Column('task_yaml', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('entrypoint', sqlalchemy.Text, server_default=None),
-    sqlalchemy.Column('submitted_at', sqlalchemy.Float, server_default=None),
 )
+# A task YAML is typically a few KB, so this is a few MB per cluster at most.
+MAX_JOB_SPECS_PER_CLUSTER = 1000
 
 # Renewable leases for leader election across server processes. Each row is
 # one singleton role: ``holder`` is the current leader's identity, ``epoch`` is
@@ -4468,13 +4471,33 @@ def _best_effort(func):
 
 @_best_effort
 @db_retries.retry
+def get_job_spec_cluster_hash(cluster_name: str) -> Optional[str]:
+    """The hash to record a job spec under for this cluster, if any.
+
+    None if the cluster does not exist, or if it was launched by a jobs or
+    serve controller (a managed job's cluster or a pool worker): the jobs the
+    controller submits to it are shown on the managed job page from the
+    user's YAML, and nothing reads their spec.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.query(
+            cluster_table.c.cluster_hash,
+            cluster_table.c.is_managed).filter_by(name=cluster_name).first()
+    if row is None or row.cluster_hash is None or row.is_managed:
+        return None
+    return row.cluster_hash
+
+
+@_best_effort
+@db_retries.retry
 def add_cluster_job_spec(cluster_hash: str, job_id: int,
                          task_yaml: Optional[str],
                          entrypoint: Optional[str]) -> None:
     """Records the task YAML and entrypoint a cluster job was submitted with.
 
-    Best-effort: this runs on the job submission path, after the job has been
-    added to the cluster, and must not fail the submission.
+    Drops the cluster's specs older than the last MAX_JOB_SPECS_PER_CLUSTER job
+    ids. Best-effort: it runs on the job submission path and must not fail it.
     """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
@@ -4488,7 +4511,6 @@ def add_cluster_job_spec(cluster_hash: str, job_id: int,
         values = {
             'task_yaml': task_yaml,
             'entrypoint': entrypoint,
-            'submitted_at': time.time(),
         }
         insert_stmnt = insert_func(cluster_job_spec_table).values(
             cluster_hash=cluster_hash, job_id=job_id, **values)
@@ -4500,6 +4522,13 @@ def add_cluster_job_spec(cluster_hash: str, job_id: int,
         ],
                                                             set_=values)
         session.execute(do_update_stmt)
+        # Job ids increase within a cluster_hash, so the last N ids are the
+        # newest N jobs. Uses the (cluster_hash, job_id) primary key.
+        session.execute(cluster_job_spec_table.delete().where(
+            sqlalchemy.and_(
+                cluster_job_spec_table.c.cluster_hash == cluster_hash,
+                cluster_job_spec_table.c.job_id <=
+                job_id - MAX_JOB_SPECS_PER_CLUSTER)))
         session.commit()
 
 
@@ -4520,7 +4549,6 @@ def get_cluster_job_spec(cluster_hash: str,
     return {
         'task_yaml': row.task_yaml,
         'entrypoint': row.entrypoint,
-        'submitted_at': row.submitted_at,
     }
 
 

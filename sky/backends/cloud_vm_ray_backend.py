@@ -4730,7 +4730,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         job_id, log_dir = self._add_job(handle, task_copy.name, resources_str,
                                         task.metadata_json)
-        self._record_job_spec(handle, job_id, task)
 
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
@@ -4740,6 +4739,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Case: task_lib.Task(run, num_nodes=1)
             self._execute_task_one_node(handle, task_copy, job_id, log_dir)
 
+        # After the job is submitted: recording is best-effort and nothing
+        # reads the spec before now, so it must not delay the job's start.
+        self._record_job_spec(handle, job_id, task)
         return job_id
 
     def _record_job_spec(self, handle: CloudVmRayResourceHandle, job_id: int,
@@ -4747,20 +4749,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """Records the job's task YAML and entrypoint for the dashboard.
 
         Best-effort: a failure here is logged and does not fail the job, which
-        has already been added to the cluster.
+        has already been submitted.
 
-        Skipped on the jobs/serve controllers: every managed job or service
-        submits a job to its controller, nothing reads that job's spec (the
-        managed job and service pages show the user's own YAML), and the rows
-        would pile up until the controller is torn down. A plain prefix check:
-        `Controllers.from_name` asserts on, or adopts, a name that is not the
-        current user's controller.
+        Skipped for jobs the jobs/serve controllers are involved in, as nothing
+        reads their spec (the managed job and service pages show the user's own
+        YAML) and the rows would only pile up:
+        - jobs on a controller cluster itself (every managed job or service
+          adds one). A plain prefix check: `Controllers.from_name` asserts on,
+          or adopts, a name that is not the current user's controller.
+        - jobs a controller submits to the clusters it launched (a managed
+          job's cluster, recovery relaunches, pool workers), which are recorded
+          as `is_managed`; see `get_job_spec_cluster_hash`.
         """
         if handle.cluster_name.startswith(
             (common.JOB_CONTROLLER_PREFIX, common.SKY_SERVE_CONTROLLER_PREFIX)):
             return
         try:
-            cluster_hash = global_user_state.get_cluster_hash(
+            cluster_hash = global_user_state.get_job_spec_cluster_hash(
                 handle.cluster_name)
             if cluster_hash is None:
                 return

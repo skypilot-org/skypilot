@@ -1402,9 +1402,10 @@ def cluster_job_spec(cluster_name: str,
         job_id: id of the job on the cluster.
 
     Returns:
-        A dict with 'task_yaml' (str), 'entrypoint' (str) and 'submitted_at'
-        (float), or None if the cluster does not exist or the job's spec was
-        not recorded (e.g. it was submitted by an older API server version).
+        A dict with 'task_yaml' (str) and 'entrypoint' (str), or None if the
+        cluster does not exist or the job's spec was not recorded (e.g. it was
+        submitted by an older API server version, or to a cluster launched by
+        a jobs or serve controller).
     """
     cluster_hash = global_user_state.get_cluster_hash(cluster_name)
     if cluster_hash is None:

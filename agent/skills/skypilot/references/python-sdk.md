@@ -656,7 +656,6 @@ Gets the task YAML and entrypoint a cluster job was submitted with.
             {
                 'task_yaml': (str) the task YAML, with secrets redacted,
                 'entrypoint': (str) the command that submitted the job,
-                'submitted_at': (float) timestamp of submission,
             }
 
 ### `sky.cancel`
