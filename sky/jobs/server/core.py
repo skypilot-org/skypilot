@@ -803,14 +803,14 @@ def _check_job_group_attachment(
     active_workspace = skypilot_config.get_active_workspace()
     if parent.workspace != active_workspace:
         if _client_set_workspace():
+            parent_label = workspaces_core.workspace_label_for_caller(
+                parent.workspace)
+            active_name = skypilot_config.get_workspace_name(active_workspace)
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Cannot attach to job {parent_job_id}: it is in '
-                    'workspace '
-                    f'{skypilot_config.get_workspace_name(parent.workspace)!r}'
-                    ', not the requested workspace '
-                    f'{skypilot_config.get_workspace_name(active_workspace)!r}'
-                    '.')
+                    f'workspace {parent_label!r}, not the requested '
+                    f'workspace {active_name!r}.')
         # The executor authorized the caller for the workspace the request
         # resolved to, not for this one. Switching workspaces is a launch
         # there, so it needs the same write access a `--workspace` launch
@@ -850,13 +850,13 @@ def _check_job_dependencies(depends_on: Optional[List[int]]) -> List[int]:
                 raise ValueError(f'Cannot depend on job {dependency}: no such '
                                  'managed job.')
         if row.workspace != active_workspace:
+            row_label = workspaces_core.workspace_label_for_caller(
+                row.workspace)
+            active_name = skypilot_config.get_workspace_name(active_workspace)
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Cannot depend on job {dependency}: it is in workspace '
-                    f'{skypilot_config.get_workspace_name(row.workspace)!r}, '
-                    'not '
-                    f'{skypilot_config.get_workspace_name(active_workspace)!r}'
-                    '.')
+                    f'{row_label!r}, not {active_name!r}.')
         if status.is_terminal():
             succeeded, outcome = managed_job_state.get_job_outcome(dependency)
             if not succeeded:
@@ -1775,6 +1775,10 @@ def queue_v2(
         accessible_workspaces = workspaces_core.filter_workspace_ids_by_name(
             accessible_workspaces, workspace_match)
         workspace_match = None
+        # Controllers older than MANAGED_JOBS_VERSION 12 read an empty list as
+        # no workspace filter at all.
+        if not accessible_workspaces:
+            return [], 0, {}, 0, []
 
     if handle.is_grpc_enabled_with_flag:
         try:

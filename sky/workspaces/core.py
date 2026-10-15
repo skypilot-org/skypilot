@@ -175,6 +175,22 @@ def get_readable_workspace_names() -> Optional[Set[str]]:
         common_utils.get_current_user().id, set(workspaces.keys()))
 
 
+def workspace_label_for_caller(workspace_id: str) -> str:
+    """The workspace's name if the current user can read it, else its id.
+
+    For errors that mention another workspace: its id says no more than
+    before workspaces had names; its name might.
+    """
+    try:
+        readable = get_readable_workspace_names()
+    except Exception:  # pylint: disable=broad-except
+        # Only builds an error message; must not replace the error itself.
+        return workspace_id
+    if readable is None or workspace_id in readable:
+        return skypilot_config.get_workspace_name(workspace_id)
+    return workspace_id
+
+
 def readable_workspace_members_in_memory(user_id: str) -> Optional[Set[str]]:
     """Returns the user plus the members of the workspaces they can read.
 
@@ -690,7 +706,11 @@ def update_workspace(
         """Function to update workspace inside the lock."""
         _check_expected_workspace_config(workspaces, workspace_name,
                                          expected_config)
+        old_workspaces = dict(workspaces)
         workspaces[workspace_name] = config
+        # Before the policy write, which commits at once: a refused name must
+        # leave access unchanged.
+        _check_workspace_names_unique(old_workspaces, workspaces)
         users = workspaces_utils.get_workspace_users(config)
         permission_service = permission.permission_service
         permission_service.update_workspace_policy(workspace_name, users)
@@ -759,7 +779,10 @@ def create_workspace(workspace_name: str, config: Dict[str,
     def create_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to create workspace inside the lock."""
         workspace_id = _new_workspace_id(workspaces)
+        old_workspaces = dict(workspaces)
         workspaces[workspace_id] = config
+        # Before the policy write, as in update_workspace.
+        _check_workspace_names_unique(old_workspaces, workspaces)
         # Add policy for the workspace and allowed users
         users = workspaces_utils.get_workspace_users(config)
         permission_service = permission.permission_service

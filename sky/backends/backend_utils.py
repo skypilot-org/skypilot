@@ -2301,14 +2301,15 @@ def _check_owner_identity_with_record(cluster_name: str,
     cluster_workspace = record.get('workspace',
                                    constants.SKYPILOT_DEFAULT_WORKSPACE)
     if active_workspace != cluster_workspace:
+        cluster_label = workspaces_core.workspace_label_for_caller(
+            cluster_workspace)
+        active_name = skypilot_config.get_workspace_name(active_workspace)
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterOwnerIdentityMismatchError(
                 f'{colorama.Fore.YELLOW}'
                 f'The cluster {cluster_name!r} is in workspace '
-                f'{skypilot_config.get_workspace_name(cluster_workspace)!r}, '
-                'but the active workspace is '
-                f'{skypilot_config.get_workspace_name(active_workspace)!r}.'
-                f'{colorama.Fore.RESET}')
+                f'{cluster_label!r}, but the active workspace is '
+                f'{active_name!r}.{colorama.Fore.RESET}')
 
     launched_resources = handle.launched_resources.assert_launchable()
     cloud = launched_resources.cloud

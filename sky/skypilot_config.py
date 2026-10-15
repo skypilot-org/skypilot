@@ -1093,9 +1093,11 @@ def override_skypilot_config(
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
     workspaces = get_nested(keys=('workspaces',), default_value={})
     # `active_workspace_id` is set by system callers (job recovery, the
-    # dashboard) and is exact; `active_workspace` is typed by a person.
-    workspace = config.get_nested(keys=('active_workspace_id',),
-                                  default_value=None)
+    # dashboard) and is exact; `active_workspace` is typed by a person. Only
+    # the request's own counts: one in the server config would beat every
+    # client's `-w`.
+    workspace = override_configs.get_nested(keys=('active_workspace_id',),
+                                            default_value=None)
     if workspace is None:
         workspace = config.get_nested(keys=('active_workspace',),
                                       default_value=None)

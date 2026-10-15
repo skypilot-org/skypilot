@@ -142,6 +142,34 @@ def test_name_must_be_unique_among_current_names(store):
     core.update_workspace('team-a', {'name': 'team-a'})
 
 
+def test_refused_name_leaves_access_unchanged(store):
+    _workspaces(store).update({
+        'ws-a': {
+            'name': 'alpha',
+            'private': True,
+            'allowed_users': ['alice', 'bob']
+        },
+        'ws-b': {
+            'name': 'beta'
+        },
+    })
+    service = core.permission.permission_service
+
+    with pytest.raises(ValueError, match="'beta' already exists"):
+        core.update_workspace('ws-a', {
+            'name': 'beta',
+            'private': True,
+            'allowed_users': ['alice', 'mallory']
+        })
+    with pytest.raises(ValueError, match="'beta' already exists"):
+        core.create_workspace('beta', {})
+
+    # The policy write commits at once, so it must not run for a refused save.
+    service.update_workspace_policy.assert_not_called()
+    service.add_workspace_policy.assert_not_called()
+    assert _workspaces(store)['ws-a']['allowed_users'] == ['alice', 'bob']
+
+
 def test_legacy_workspaces_original_name_stays_taken(store):
     _workspaces(store).update({'team-a': {}, 'team-b': {}})
     core.update_workspace('team-b', {'name': 'archive'})

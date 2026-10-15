@@ -1324,13 +1324,19 @@ def test_workspace_filter_matches_names_not_ids(monkeypatch):
                         lambda: FakeRunner())
 
     def narrowed(match):
-        _unwrap(jobs_core.queue_v2)(refresh=False,
-                                    all_users=True,
-                                    workspace_match=match)
+        captured.clear()
+        result = _unwrap(jobs_core.queue_v2)(refresh=False,
+                                             all_users=True,
+                                             workspace_match=match)
+        if not captured:
+            assert result == ([], 0, {}, 0, [])
+            return None
         assert captured['workspace_match'] is None
         return sorted(captured['accessible_workspaces'])
 
     # A name matches by substring; an id never does, only exactly.
     assert narrowed('team') == ['ws-0123456789ab']
     assert narrowed('team-a') == ['team-a']
-    assert narrowed('zz-no-such') == []
+    # No match never reaches the controller: old ones read an empty list as
+    # no filter and would return every job.
+    assert narrowed('zz-no-such') is None

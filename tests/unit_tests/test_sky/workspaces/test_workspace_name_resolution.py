@@ -94,6 +94,17 @@ def test_active_workspace_id_is_exact(server_workspaces):
             assert skypilot_config.get_active_workspace() == 'ws-0123456789ab'
 
 
+def test_server_config_active_workspace_id_does_not_beat_the_request():
+    server = config_utils.Config({
+        'workspaces': _REUSED,
+        'active_workspace_id': 'team-a'
+    })
+    with skypilot_config.replace_skypilot_config_in_process(server):
+        with skypilot_config.override_skypilot_config(
+            {'active_workspace': 'ws-0123456789ab'}):
+            assert skypilot_config.get_active_workspace() == 'ws-0123456789ab'
+
+
 def test_unknown_active_workspace_still_fails(server_workspaces):
     with server_workspaces(_REUSED):
         with pytest.raises(ValueError, match='nope does not exist'):
