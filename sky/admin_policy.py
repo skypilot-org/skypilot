@@ -109,8 +109,10 @@ class UserRequest:
             request_name=self.request_name.value,
             request_options=self.request_options,
             at_client_side=self.at_client_side,
-            user=(yaml_utils.dump_yaml_str(self.user.to_dict())
-                  if self.user is not None else ''),
+            user=(yaml_utils.dump_yaml_str({
+                **self.user.to_dict(),
+                'groups': self.user.groups,
+            }) if self.user is not None else ''),
             client_api_version=self.client_api_version,
             client_version=self.client_version,
         ).model_dump_json()
@@ -122,7 +124,8 @@ class UserRequest:
             user_request_body.user) if user_request_body.user != '' else None
         user = models.User(
             id=user_dict['id'],
-            name=user_dict['name']) if user_dict is not None else None
+            name=user_dict['name'],
+            groups=user_dict.get('groups')) if user_dict is not None else None
         return cls(
             task=sky.Task.from_yaml_config(
                 yaml_utils.read_yaml_all_str(user_request_body.task)[0]),
