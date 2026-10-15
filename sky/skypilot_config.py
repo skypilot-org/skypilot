@@ -654,13 +654,14 @@ def get_active_workspace(force_user_workspace: bool = False) -> str:
         logger.debug(f'No active workspace found, using default workspace: '
                      f'{constants.SKYPILOT_DEFAULT_WORKSPACE}')
         active_workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
+    elif (active_workspace != constants.SKYPILOT_DEFAULT_WORKSPACE and
+          active_workspace not in _loaded_workspaces()):
+        # Not an id: outside a request (e.g. a handler in the main process)
+        # this is the server config's own value, which an admin may write as
+        # a name. Stored ids (request overrides, job snapshots) stay exact.
+        active_workspace = _resolve_server_active_workspace(active_workspace)
+        logger.debug(f'Got active workspace: {active_workspace}')
     else:
-        if not _is_config_overridden():
-            # Outside a request (e.g. a handler in the main process) this is
-            # the server config's own value, which an admin may write as a
-            # name. An overridden config already holds the resolved id.
-            active_workspace = _resolve_server_active_workspace(
-                active_workspace)
         logger.debug(f'Got active workspace: {active_workspace}')
     return active_workspace
 

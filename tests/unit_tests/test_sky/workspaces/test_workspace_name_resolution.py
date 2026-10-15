@@ -113,6 +113,18 @@ def test_server_active_workspace_name_resolves_outside_a_request():
             ('allowed_contexts',), None) == ['ctx-a']
 
 
+def test_loaded_config_active_workspace_id_stays_exact():
+    # A consolidated jobs controller loads the job's snapshot as its config
+    # (not as an override): the stored id must not be re-read as a name.
+    snapshot = config_utils.Config({
+        'workspaces': _REUSED,
+        'active_workspace': 'team-a',
+        'active_workspace_id': 'team-a',
+    })
+    with skypilot_config.replace_skypilot_config_in_process(snapshot):
+        assert skypilot_config.get_active_workspace() == 'team-a'
+
+
 def test_server_config_active_workspace_id_does_not_beat_the_request():
     server = config_utils.Config({
         'workspaces': _REUSED,
