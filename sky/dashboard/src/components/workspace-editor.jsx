@@ -25,7 +25,6 @@ import {
   TrashIcon,
   CheckIcon,
   RotateCwIcon,
-  PencilIcon,
   User,
 } from 'lucide-react';
 import {
@@ -50,8 +49,11 @@ import { CLOUD_CANONICALIZATIONS } from '@/data/connectors/constants';
 import { getUserRole, getUsers } from '@/data/connectors/users';
 import { dashboardCache } from '@/lib/cache';
 import { apiClient } from '@/data/connectors/client';
-import { Input } from '@/components/ui/input';
-import { workspaceNameError } from '@/hooks/useWorkspacesConfig';
+import { invalidateWorkspaceCaches } from '@/hooks/useWorkspacesConfig';
+import {
+  RenameWorkspaceButton,
+  RenameWorkspaceDialog,
+} from '@/components/elements/RenameWorkspaceDialog';
 
 // Success display component
 const SuccessDisplay = ({ message }) => {
@@ -410,12 +412,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     : workspaceName === 'default'
       ? 'default'
       : storedName || workspaceName;
-  const [renameState, setRenameState] = useState({
-    open: false,
-    value: '',
-    error: null,
-    saving: false,
-  });
+  const [renameOpen, setRenameOpen] = useState(false);
+  // All workspaces as last loaded, for the rename dialog's name-taken check.
+  const [allWorkspaces, setAllWorkspaces] = useState({});
   const [workspaceConfig, setWorkspaceConfig] = useState({});
   const [originalConfig, setOriginalConfig] = useState({});
   // Server-computed read-only-visibility flag (accounts for the org-wide
@@ -490,6 +489,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
           ...storedConfig
         } = allWorkspaces[workspaceName] || {};
         const { name, ...config } = storedConfig;
+        setAllWorkspaces(allWorkspaces);
         setOriginalConfig(config);
         setStoredName(name || null);
         setIsReadOnlyVisible(readOnly === true);
@@ -671,7 +671,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         const parsedWorkspaceName = keys[0];
         if (parsedWorkspaceName !== displayName) {
           setYamlError(
-            `The top-level key must stay "${displayName}" (found "${parsedWorkspaceName}"). Use Rename to rename the workspace.`
+            `The top-level key must stay "${displayName}" (found "${parsedWorkspaceName}"). To rename the workspace, use Rename workspace next to its name.`
           );
           return;
         }
@@ -707,12 +707,13 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
       const keys = Object.keys(parsed);
       if (keys.length > 0 && keys[0] !== displayName) {
         throw new Error(
-          `The top-level key must stay "${displayName}". Use Rename to rename the workspace.`
+          `The top-level key must stay "${displayName}". To rename the workspace, use Rename workspace next to its name.`
         );
       }
 
       if (isNewWorkspace) {
         const created = await createWorkspace(workspaceName, workspaceConfig);
+        invalidateWorkspaceCaches();
         setSuccess('Workspace created successfully!');
         // The server keys the new workspace by a generated id.
         const createdId =
@@ -729,6 +730,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
           configToSave,
           force ? undefined : baseConfigRef.current
         );
+        invalidateWorkspaceCaches();
         setSuccess('Workspace updated successfully!');
         setOriginalConfig(workspaceConfig);
         serverYamlRef.current = savedYaml;
@@ -764,6 +766,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
 
     try {
       await deleteWorkspace(workspaceName);
+      invalidateWorkspaceCaches();
       setSuccess('Workspace deleted successfully!');
       setTimeout(() => {
         router.push('/workspaces');
@@ -812,40 +815,17 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     setSuccess(null);
   };
 
-  const handleRename = async () => {
-    const newName = renameState.value.trim();
-    const nameError = workspaceNameError(newName);
-    if (nameError) {
-      setRenameState((prev) => ({ ...prev, error: nameError }));
-      return;
-    }
-    setRenameState((prev) => ({ ...prev, saving: true, error: null }));
-    try {
-      // Only `name` changes, so the server allows it while clusters and
-      // jobs are running.
-      const renamed = { ...baseConfigRef.current, name: newName };
-      await updateWorkspace(workspaceName, renamed, baseConfigRef.current);
-      dashboardCache.invalidate(getWorkspaces);
-      // The server stores the config as sent, so that is the new baseline,
-      // as in handleSave. A re-read right after the write can be stale.
-      baseConfigRef.current = renamed;
-      setStoredName(newName);
-      const yamlOutput = workspaceYaml(newName, originalConfig);
-      serverYamlRef.current = yamlOutput;
-      draftYamlRef.current = yamlOutput;
-      setYamlValue(yamlOutput);
-      setRenameState({ open: false, value: '', error: null, saving: false });
-      setSuccess(`Workspace renamed to "${newName}".`);
-    } catch (err) {
-      setRenameState((prev) => ({
-        ...prev,
-        saving: false,
-        error:
-          err?.type === 'WorkspaceConfigConflictError'
-            ? 'The workspace changed since this page loaded. Refresh and try again.'
-            : err?.message || String(err),
-      }));
-    }
+  const handleRenamed = (newName, renamed) => {
+    // The server stores the config as sent, so that is the new baseline,
+    // as in handleSave. A re-read right after the write can be stale.
+    baseConfigRef.current = renamed;
+    setStoredName(newName);
+    const yamlOutput = workspaceYaml(newName, originalConfig);
+    serverYamlRef.current = yamlOutput;
+    draftYamlRef.current = yamlOutput;
+    setYamlValue(yamlOutput);
+    setRenameOpen(false);
+    setSuccess(`Workspace renamed to "${newName}".`);
   };
 
   // Admins also re-check the infra and then refetch the stats it affects.
@@ -916,6 +896,20 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
             >
               {isNewWorkspace ? 'New Workspace' : displayName}
             </Link>
+            {!isNewWorkspace && canEdit && workspaceName !== 'default' && (
+              <RenameWorkspaceButton
+                onClick={() => setRenameOpen(true)}
+                disabled={
+                  loading || hasYamlDraft || saving || deleteState.deleting
+                }
+                title={
+                  hasYamlDraft
+                    ? 'Apply or discard the YAML changes first'
+                    : 'Rename workspace'
+                }
+                className="ml-1"
+              />
+            )}
             {hasChanges && (
               <span className="ml-3 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded">
                 Unsaved changes
@@ -942,29 +936,6 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                 >
                   <RotateCwIcon className="w-4 h-4 mr-1.5" />
                   Refresh
-                </button>
-              )}
-
-              {!isNewWorkspace && canEdit && workspaceName !== 'default' && (
-                <button
-                  onClick={() =>
-                    setRenameState({
-                      open: true,
-                      value: displayName,
-                      error: null,
-                      saving: false,
-                    })
-                  }
-                  disabled={hasYamlDraft || saving || deleteState.deleting}
-                  title={
-                    hasYamlDraft
-                      ? 'Apply or discard the YAML changes first'
-                      : undefined
-                  }
-                  className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center disabled:text-gray-400"
-                >
-                  <PencilIcon className="w-4 h-4 mr-1.5" />
-                  Rename
                 </button>
               )}
 
@@ -1243,77 +1214,15 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
           </DialogContent>
         </Dialog>
 
-        <Dialog
-          open={renameState.open}
-          onOpenChange={(open) => {
-            if (!open && !renameState.saving) {
-              setRenameState({
-                open: false,
-                value: '',
-                error: null,
-                saving: false,
-              });
-            }
-          }}
-        >
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader className="">
-              <DialogTitle>Rename Workspace</DialogTitle>
-              <DialogDescription>
-                Clusters and managed jobs keep running.{' '}
-                {displayName === workspaceName
-                  ? `Configs and scripts that use "${displayName}" keep working: it stays this workspace's id, and no other workspace can take it.`
-                  : `Configs and scripts that still use the name "${displayName}" will stop working, and the name becomes free for other workspaces to take.`}{' '}
-                Tell the members of this workspace before renaming it.
-              </DialogDescription>
-            </DialogHeader>
-            <Input
-              value={renameState.value}
-              onChange={(e) =>
-                setRenameState((prev) => ({
-                  ...prev,
-                  value: e.target.value,
-                  error: null,
-                }))
-              }
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  handleRename();
-                }
-              }}
-              placeholder="New workspace name"
-              autoFocus
-            />
-            {renameState.error && (
-              <p className="text-sm text-red-600">{renameState.error}</p>
-            )}
-            <DialogFooter className="">
-              <Button
-                variant="outline"
-                onClick={() =>
-                  setRenameState({
-                    open: false,
-                    value: '',
-                    error: null,
-                    saving: false,
-                  })
-                }
-                disabled={renameState.saving}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleRename}
-                disabled={
-                  renameState.saving || renameState.value.trim() === displayName
-                }
-                className="bg-sky-600 hover:bg-sky-700 text-white"
-              >
-                {renameState.saving ? 'Renaming...' : 'Rename'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        {renameOpen && (
+          <RenameWorkspaceDialog
+            workspaceId={workspaceName}
+            config={baseConfigRef.current}
+            workspacesConfig={allWorkspaces}
+            onClose={() => setRenameOpen(false)}
+            onRenamed={handleRenamed}
+          />
+        )}
 
         <Dialog open={deleteState.showDialog} onOpenChange={handleCancelDelete}>
           <DialogContent className="sm:max-w-md">

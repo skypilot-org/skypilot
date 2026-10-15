@@ -70,14 +70,14 @@ jest.mock('@/data/connectors/jobs', () => ({
 }));
 const mockInvalidate = jest.fn();
 const mockCacheGet = jest.fn((fn, args = []) => fn(...args));
-jest.mock('@/lib/cache', () => ({
-  __esModule: true,
-  dashboardCache: {
+jest.mock('@/lib/cache', () => {
+  const cache = {
     get: (...args) => mockCacheGet(...args),
     invalidate: (...args) => mockInvalidate(...args),
     invalidateFunction: jest.fn(),
-  },
-}));
+  };
+  return { __esModule: true, default: cache, dashboardCache: cache };
+});
 
 import {
   DetailedAllowedUsers,
@@ -418,6 +418,9 @@ describe('WorkspaceEditor for a non-admin', () => {
     expect(screen.getByText('Workspace YAML')).toBeTruthy();
     expect(screen.queryByText('Apply')).toBeNull();
     expect(screen.queryByText('Delete')).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Rename workspace' })
+    ).toBeNull();
     expect(screen.getByLabelText('workspace yaml').readOnly).toBe(true);
   });
 
@@ -624,33 +627,68 @@ describe('WorkspaceEditor Refresh for an admin', () => {
   });
 });
 
-describe('WorkspaceEditor rename warning', () => {
+describe('WorkspaceEditor rename', () => {
   beforeEach(() => {
     mockGetWorkspaces.mockReset();
     mockGetWorkspaces.mockImplementation(async () => ({
+      default: {},
       team: { private: false },
       'ws-0123456789ab': { name: 'ml', private: false },
     }));
+    mockUpdateWorkspace.mockReset();
+    mockUpdateWorkspace.mockResolvedValue({});
   });
 
-  const openRename = async (workspaceName) => {
+  const pencil = () =>
+    screen.queryByRole('button', { name: 'Rename workspace' });
+
+  const renderEditor = async (workspaceName) => {
     render(<WorkspaceEditor workspaceName={workspaceName} />);
     await screen.findByText('Apply');
-    fireEvent.click(screen.getByText('Rename'));
-    return (await screen.findByText(/Clusters and managed jobs keep running/))
-      .textContent;
   };
 
-  test('a name that is also the id keeps working and stays taken', async () => {
-    const text = await openRename('team');
-    expect(text).toContain('"team" keep working');
-    expect(text).toContain('no other workspace can take it');
+  test('the pencil next to the name opens the rename dialog', async () => {
+    await renderEditor('ws-0123456789ab');
+    expect(screen.queryByText('Rename')).toBeNull();
+    fireEvent.click(pencil());
+    expect(
+      await screen.findByText(/Scripts and configs that use "ml" will stop/)
+    ).toBeInTheDocument();
   });
 
-  test('a generated-id workspace frees its name', async () => {
-    const text = await openRename('ws-0123456789ab');
-    expect(text).toContain('"ml" will stop working');
-    expect(text).toContain('free for other workspaces');
-    expect(text).not.toContain('ws-0123456789ab');
+  test('no pencil on the default workspace', async () => {
+    await renderEditor('default');
+    expect(pencil()).toBeNull();
+  });
+
+  test('the pencil is disabled while the YAML has unsaved edits', async () => {
+    await renderEditor('ws-0123456789ab');
+    expect(pencil()).toBeEnabled();
+    const box = screen.getByLabelText('workspace yaml');
+    fireEvent.change(box, { target: { value: `${box.value}# note\n` } });
+    expect(pencil()).toBeDisabled();
+    expect(pencil()).toHaveAttribute(
+      'title',
+      'Apply or discard the YAML changes first'
+    );
+  });
+
+  test('a rename moves the YAML key and its baseline to the new name', async () => {
+    await renderEditor('ws-0123456789ab');
+    fireEvent.click(pencil());
+    const input = screen.getByLabelText('Name');
+    fireEvent.change(input, { target: { value: 'ml-v2' } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' });
+    });
+    expect(mockUpdateWorkspace).toHaveBeenCalledWith(
+      'ws-0123456789ab',
+      { name: 'ml-v2', private: false },
+      { name: 'ml', private: false }
+    );
+    expect(screen.getByLabelText('workspace yaml').value).toMatch(/^ml-v2:/);
+    expect(screen.getByText('Workspace renamed to "ml-v2".')).toBeTruthy();
+    // The new YAML is the baseline, not a draft.
+    expect(pencil()).toBeEnabled();
   });
 });

@@ -6,8 +6,9 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import {
-  getWorkspaceName,
   workspaceNameError,
+  workspaceNameTaken,
+  workspaceNameTakenMessage,
 } from '@/hooks/useWorkspacesConfig';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -50,15 +51,10 @@ export function NewWorkspace() {
 
   const typedName = workspaceName.trim();
   const nameError = typedName ? workspaceNameError(typedName) : null;
-  // A name may not be another workspace's name or id (keys are ids).
-  const nameOwner = Object.keys(existingWorkspaces).find(
-    (id) => getWorkspaceName(existingWorkspaces, id) === typedName
-  );
-  const isIdOfOther =
-    nameOwner === undefined &&
-    Object.prototype.hasOwnProperty.call(existingWorkspaces, typedName);
-  const takenById = isIdOfOther ? typedName : nameOwner;
-  const isWorkspaceNameTaken = Boolean(typedName) && takenById !== undefined;
+  const taken = typedName
+    ? workspaceNameTaken(existingWorkspaces, typedName)
+    : null;
+  const isWorkspaceNameTaken = taken !== null;
   const isFormValid = typedName && !nameError && !isWorkspaceNameTaken;
 
   if (showEditor) {
@@ -106,11 +102,13 @@ export function NewWorkspace() {
               <p className="text-sm text-red-600 mt-1">{nameError}</p>
             ) : isWorkspaceNameTaken ? (
               <p className="text-sm text-gray-500 mt-1">
-                {isIdOfOther
-                  ? `"${typedName}" is the id of workspace "${getWorkspaceName(existingWorkspaces, takenById)}".`
-                  : `Workspace "${typedName}" already exists.`}{' '}
+                {workspaceNameTakenMessage(
+                  existingWorkspaces,
+                  typedName,
+                  taken
+                )}{' '}
                 <Link
-                  href={`/workspaces/${takenById}`}
+                  href={`/workspaces/${taken.id}`}
                   className="text-blue-600 hover:underline"
                 >
                   View the workspace

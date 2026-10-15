@@ -1,6 +1,13 @@
 import { useState, useEffect } from 'react';
 import dashboardCache from '@/lib/cache';
-import { getWorkspaces } from '@/data/connectors/workspaces';
+import {
+  getEnabledCloudsBatch,
+  getWorkspaces,
+} from '@/data/connectors/workspaces';
+import {
+  getWorkspaceContexts,
+  getWorkspaceInfrastructure,
+} from '@/data/connectors/infra';
 
 // Server-side default workspace name (sky.skylet.constants.SKYPILOT_DEFAULT_
 // WORKSPACE). A cluster/job with no explicit workspace lands here.
@@ -36,6 +43,27 @@ export function workspaceNameError(name) {
     );
   }
   return null;
+}
+
+/**
+ * The workspace other than `selfId` that already uses `name` as its name or
+ * id, as `{ id, byId }`, or null if the name is free. A typed reference must
+ * always resolve to exactly one workspace.
+ */
+export function workspaceNameTaken(workspacesConfig, name, selfId = null) {
+  const ids = Object.keys(workspacesConfig || {}).filter((id) => id !== selfId);
+  const byName = ids.find(
+    (id) => getWorkspaceName(workspacesConfig, id) === name
+  );
+  if (byName !== undefined) return { id: byName, byId: false };
+  return ids.includes(name) ? { id: name, byId: true } : null;
+}
+
+/** The message for a name `workspaceNameTaken` reported as taken. */
+export function workspaceNameTakenMessage(workspacesConfig, name, taken) {
+  return taken.byId
+    ? `"${name}" is the id of workspace "${getWorkspaceName(workspacesConfig, taken.id)}".`
+    : `Workspace "${name}" already exists.`;
 }
 
 /**
@@ -97,4 +125,14 @@ export function useWorkspacesConfig() {
   const workspaceName = (ws) => getWorkspaceName(workspacesConfig, ws);
 
   return { workspacesConfig, isWorkspaceWritable, workspaceName, loaded };
+}
+
+// After a workspace is created, renamed, edited or deleted: drop every cached
+// view built from the workspace list, so no page shows the old set or names
+// (the infra page keeps its own context-to-workspace map).
+export function invalidateWorkspaceCaches() {
+  dashboardCache.invalidate(getWorkspaces);
+  dashboardCache.invalidateFunction(getEnabledCloudsBatch);
+  dashboardCache.invalidate(getWorkspaceContexts);
+  dashboardCache.invalidate(getWorkspaceInfrastructure);
 }

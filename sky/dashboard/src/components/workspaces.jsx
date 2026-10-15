@@ -49,7 +49,10 @@ import {
   NonCapitalizedTooltip,
 } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
-import { getWorkspaceName } from '@/hooks/useWorkspacesConfig';
+import {
+  getWorkspaceName,
+  invalidateWorkspaceCaches,
+} from '@/hooks/useWorkspacesConfig';
 import { statusGroups } from './jobs';
 import dashboardCache from '@/lib/cache';
 import { REFRESH_INTERVALS } from '@/lib/config';
@@ -68,6 +71,11 @@ import {
 } from '@/data/connectors/constants';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
+import { getUserRole as fetchUserRole } from '@/data/connectors/users';
+import {
+  RenameWorkspaceButton,
+  RenameWorkspaceDialog,
+} from '@/components/elements/RenameWorkspaceDialog';
 import Link from 'next/link';
 
 // Workspace-aware API functions - use cached global data and filter by workspace
@@ -325,6 +333,8 @@ export function Workspaces() {
   // User role cache
   const [userRoleCache, setUserRoleCache] = useState(null);
   const [roleLoading, setRoleLoading] = useState(false);
+  // Id of the workspace being renamed, or null.
+  const [renameTarget, setRenameTarget] = useState(null);
 
   // Top-level error and success states
   const [topLevelError, setTopLevelError] = useState(null);
@@ -362,6 +372,27 @@ export function Workspaces() {
       throw error;
     }
   };
+
+  // Known up front (not only on click) so admin-only controls can render.
+  // Seeds the same cache; a failure leaves them hidden.
+  useEffect(() => {
+    let cancelled = false;
+    fetchUserRole()
+      .then((data) => {
+        if (!cancelled) {
+          setUserRoleCache({
+            role: data?.role,
+            name: data?.name,
+            timestamp: Date.now(),
+          });
+        }
+      })
+      .catch((err) => console.error('Failed to fetch user role:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const isAdmin = userRoleCache?.role === 'admin';
 
   // Function to handle permission check with smooth UX
   // `allowNonAdmin`: optional async predicate that can let a non-admin through.
@@ -735,7 +766,7 @@ export function Workspaces() {
       });
 
       // Invalidate cache to ensure fresh data is fetched (same as manual refresh)
-      dashboardCache.invalidate(getWorkspaces);
+      invalidateWorkspaceCaches();
       dashboardCache.invalidate(getClusters);
       dashboardCache.invalidateFunction(getManagedJobs);
 
@@ -1008,7 +1039,7 @@ export function Workspaces() {
                     return (
                       <TableRow
                         key={workspace.name}
-                        className="hover:bg-gray-50"
+                        className="group hover:bg-gray-50"
                       >
                         <TableCell className="">
                           <button
@@ -1018,6 +1049,12 @@ export function Workspaces() {
                           >
                             {workspace.displayName}
                           </button>
+                          {isAdmin && workspace.name !== 'default' && (
+                            <RenameWorkspaceButton
+                              onClick={() => setRenameTarget(workspace.name)}
+                              className="ml-1 align-middle opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                            />
+                          )}
                           <span className="ml-2">
                             <WorkspaceBadge
                               isPrivate={isPrivate}
@@ -1239,6 +1276,20 @@ export function Workspaces() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {renameTarget && (
+        <RenameWorkspaceDialog
+          workspaceId={renameTarget}
+          config={rawWorkspacesData?.[renameTarget]}
+          workspacesConfig={rawWorkspacesData}
+          onClose={() => setRenameTarget(null)}
+          onRenamed={(newName) => {
+            setRenameTarget(null);
+            setTopLevelSuccess(`Workspace renamed to "${newName}".`);
+            fetchData({ showLoadingIndicators: false });
+          }}
+        />
+      )}
     </div>
   );
 }
