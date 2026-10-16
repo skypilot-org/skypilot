@@ -78,22 +78,29 @@ def check_no_active_resources_outside_contexts(
     """
     allowed = set(allowed_contexts)
 
-    def _blocks(cloud: Any, region: Any) -> bool:
-        if cloud is None or str(cloud) in ('', '-'):
+    def may_use_dropped_context(cloud: Optional[str],
+                                region: Optional[str]) -> bool:
+        if cloud is None or cloud in ('', '-'):
             return True
-        if str(cloud).lower() != 'kubernetes':
+        if cloud.lower() != 'kubernetes':
             return False
         return region is None or region == '-' or region not in allowed
 
     blocking_clusters = []
     for cluster in global_user_state.get_clusters(
             exclude_managed_clusters=True, workspaces_filter={workspace_name}):
+        # The handle is None while provisioning, and LocalDockerResourceHandle
+        # has no launched_resources.
         launched = getattr(cluster.get('handle'), 'launched_resources', None)
-        if _blocks(getattr(launched, 'cloud', None),
-                   getattr(launched, 'region', None)):
+        if launched is None:
+            blocking_clusters.append(cluster['name'])
+            continue
+        cloud = str(launched.cloud) if launched.cloud is not None else None
+        if may_use_dropped_context(cloud, launched.region):
             blocking_clusters.append(cluster['name'])
 
     blocking_jobs: List[str] = []
+    seen_job_ids: Set[str] = set()
     for job in _get_active_managed_jobs(
             fields=['job_id', 'workspace', 'status', 'cloud', 'region']):
         if job.get('workspace',
@@ -105,24 +112,36 @@ def check_no_active_resources_outside_contexts(
         if status is not None and status.is_terminal():
             continue
         job_id = str(job['job_id'])
-        if job_id not in blocking_jobs and _blocks(job.get('cloud'),
-                                                   job.get('region')):
+        if job_id in seen_job_ids:
+            continue
+        if may_use_dropped_context(job.get('cloud'), job.get('region')):
+            seen_job_ids.add(job_id)
             blocking_jobs.append(job_id)
 
-    resource_errors = []
-    if blocking_clusters:
-        resource_errors.append(f'{len(blocking_clusters)} active cluster(s): '
-                               f'{", ".join(blocking_clusters)}')
-    if blocking_jobs:
-        resource_errors.append(f'{len(blocking_jobs)} active managed job(s): '
-                               f'{", ".join(blocking_jobs)}')
-    if resource_errors:
+    if blocking_clusters or blocking_jobs:
+        summary = _summarize_active_resources(blocking_clusters, blocking_jobs)
         raise ValueError(
             f'Cannot update workspace {workspace_name!r} because it has '
-            f'{" and ".join(resource_errors)} that run, or may run, on a '
-            'Kubernetes context outside the new allowed_contexts '
-            f'({", ".join(allowed_contexts)}). Please terminate these '
-            'resources first.')
+            f'{summary} that run, or may run, on a Kubernetes context '
+            f'outside the new allowed_contexts {allowed_contexts!r}. '
+            'Please terminate these resources first.')
+
+
+def _summarize_active_resources(cluster_names: List[str],
+                                job_ids: List[str]) -> str:
+    """Describe active clusters and managed jobs for an error message.
+
+    Returns e.g. '2 active cluster(s): a, b and 1 active managed job(s): 3'.
+    Empty lists are left out.
+    """
+    parts = []
+    if cluster_names:
+        parts.append(f'{len(cluster_names)} active cluster(s): '
+                     f'{", ".join(cluster_names)}')
+    if job_ids:
+        parts.append(f'{len(job_ids)} active managed job(s): '
+                     f'{", ".join(job_ids)}')
+    return ' and '.join(parts)
 
 
 def _check_active_resources(resource_operations: List[Tuple[str, str]],
@@ -162,27 +181,11 @@ def _check_active_resources(resource_operations: List[Tuple[str, str]],
             job for job in all_managed_jobs if resource_filter(job)
         ]
 
-        # Collect error messages for this resource
-        resource_errors = []
-
-        if resource_clusters:
-            active_cluster_names = [
-                cluster['name'] for cluster in resource_clusters
-            ]
-            cluster_list = ', '.join(active_cluster_names)
-            resource_errors.append(
-                f'{len(resource_clusters)} active cluster(s): {cluster_list}')
-
-        if resource_active_jobs:
-            job_names = [str(job['job_id']) for job in resource_active_jobs]
-            job_list = ', '.join(job_names)
-            resource_errors.append(
-                f'{len(resource_active_jobs)} active managed job(s): '
-                f'{job_list}')
-
         # If this resource has issues, add to overall error messages
-        if resource_errors:
-            resource_error_summary = ' and '.join(resource_errors)
+        if resource_clusters or resource_active_jobs:
+            resource_error_summary = _summarize_active_resources(
+                [cluster['name'] for cluster in resource_clusters],
+                [str(job['job_id']) for job in resource_active_jobs])
             if resource_type == 'user':
                 # resource_name is user_id
                 user_info = global_user_state.get_user(resource_name)
@@ -623,6 +626,8 @@ def _get_active_resources(
 
 def _get_active_managed_jobs(fields: List[str]) -> List[Dict[str, Any]]:
     """Get all unfinished managed jobs with the given fields."""
+    # Circular import: sky.jobs.server.core imports sky.workspaces.core,
+    # which imports this module.
     # pylint: disable=import-outside-toplevel
     from sky.jobs.server import core as managed_jobs_core
     try:

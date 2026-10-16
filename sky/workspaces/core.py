@@ -271,25 +271,26 @@ def _is_additive_contexts(current_allowed_contexts: Any,
     return False
 
 
-def _is_narrowed_contexts(current_allowed_contexts: Any,
-                          new_allowed_contexts: Any) -> bool:
-    """Return True if allowed_contexts dropped at least one context.
+def _narrowed_contexts(current_allowed_contexts: Any,
+                       new_allowed_contexts: Any) -> Optional[List[str]]:
+    """Return the new contexts if allowed_contexts dropped a context.
 
     Narrowing cases:
     - list -> list where some old context is missing from the new contexts.
     - 'all' -> list.
 
     Changes to or from an absent/None value are not narrowing, since the
-    effective contexts then come from the global config.
+    effective contexts then come from the global config. Returns None when
+    the change is not narrowing.
     """
     if not isinstance(new_allowed_contexts, list):
-        return False
+        return None
     if current_allowed_contexts == 'all':
-        return True
-    if isinstance(current_allowed_contexts, list):
-        return not set(current_allowed_contexts).issubset(
-            set(new_allowed_contexts))
-    return False
+        return list(new_allowed_contexts)
+    if (isinstance(current_allowed_contexts, list) and
+            not set(current_allowed_contexts).issubset(new_allowed_contexts)):
+        return list(new_allowed_contexts)
+    return None
 
 
 def _compare_workspace_configs(
@@ -364,10 +365,9 @@ def _compare_workspace_configs(
     additive_allowed_contexts = (only_contexts_changed and
                                  _is_additive_contexts(current_allowed_contexts,
                                                        new_allowed_contexts))
-    narrowed_allowed_contexts = None
-    if only_contexts_changed and _is_narrowed_contexts(current_allowed_contexts,
-                                                       new_allowed_contexts):
-        narrowed_allowed_contexts = list(new_allowed_contexts)
+    narrowed_allowed_contexts = (_narrowed_contexts(current_allowed_contexts,
+                                                    new_allowed_contexts)
+                                 if only_contexts_changed else None)
 
     return WorkspaceConfigComparison(
         only_user_access_changes=only_user_access_changes,

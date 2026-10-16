@@ -791,6 +791,7 @@ class TestCheckNoActiveResourcesOutsideContexts:
         assert "Cannot update workspace 'ws'" in error_message
         assert '1 active cluster(s): k8s-dropped' in error_message
         assert '1 active managed job(s): 1' in error_message
+        assert "allowed_contexts ['ctx-a']" in error_message
         assert 'k8s-kept' not in error_message
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
