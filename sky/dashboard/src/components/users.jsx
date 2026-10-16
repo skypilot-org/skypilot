@@ -70,6 +70,13 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import {
   BatchRoleDialog,
@@ -3066,11 +3073,8 @@ function ServiceAccountTokensView({
         token_name: newToken.token_name.trim(),
         expires_in_days:
           newToken.expires_in_days === '' ? null : newToken.expires_in_days,
+        role: newToken.role,
       };
-      // Without a role, the server applies `rbac.default_role`.
-      if (newToken.role) {
-        payload.role = newToken.role;
-      }
 
       const response = await apiClient.post(
         '/users/service-account-tokens',
@@ -3571,25 +3575,28 @@ function ServiceAccountTokensView({
                   />
                 </div>
                 <div className="grid gap-2">
-                  <label className="text-sm font-medium text-gray-700">
+                  <label
+                    htmlFor="create-sa-role-select"
+                    className="text-sm font-medium text-gray-700"
+                  >
                     Role
                   </label>
-                  <select
-                    className="border rounded px-3 py-2 w-full"
+                  <Select
                     value={newToken.role}
-                    onChange={(e) =>
-                      setNewToken({ ...newToken, role: e.target.value })
-                    }
+                    onValueChange={(role) => setNewToken({ ...newToken, role })}
                   >
-                    <option value="">Default</option>
-                    <option value="admin">Admin</option>
-                    <option value="user">User</option>
-                    <option value="viewer">Viewer</option>
-                  </select>
-                  <p className="text-xs text-gray-500">
-                    Default uses the server&apos;s rbac.default_role, which is
-                    admin unless configured.
-                  </p>
+                    <SelectTrigger
+                      id="create-sa-role-select"
+                      className="w-full focus:ring-0 focus:ring-offset-0"
+                    >
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="user">User</SelectItem>
+                      <SelectItem value="viewer">Viewer</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="grid gap-2">
                   <label className="text-sm font-medium text-gray-700">
@@ -3644,7 +3651,9 @@ function ServiceAccountTokensView({
                 <button
                   className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
                   onClick={handleCreateToken}
-                  disabled={creating || !newToken.token_name.trim()}
+                  disabled={
+                    creating || !newToken.token_name.trim() || !newToken.role
+                  }
                 >
                   {creating ? 'Creating...' : 'Create Token'}
                 </button>
