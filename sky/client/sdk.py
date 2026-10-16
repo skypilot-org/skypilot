@@ -2686,7 +2686,7 @@ def api_cancel(request_ids: Optional[Union[server_common.RequestId[T],
     # their own. Servers that predate that check never applied the user scope
     # to an explicit id list, so this grants nothing new there either.
     user_id = None
-    if request_ids is None and not all_users:
+    if not all_users:  # TEMP twist: old scoping, do not merge
         user_id = common_utils.get_user_hash()
 
     body = payloads.RequestCancelBody(request_ids=request_ids, user_id=user_id)
