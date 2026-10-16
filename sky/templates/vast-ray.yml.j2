@@ -14,6 +14,18 @@ provider:
   {%- if create_instance_kwargs %}
   create_instance_kwargs: {{create_instance_kwargs | tojson}}
   {%- endif %}
+  # Like RunPod, Vast runs the image itself as the instance, so the docker login
+  # config goes in the provider config rather than a `docker` section, which
+  # would make the DockerInitializer start a container inside the instance.
+  {%- if docker_login_config is not none %}
+  docker_login_config:
+    username: |-
+      {{docker_login_config.username}}
+    password: |-
+      {{docker_login_config.password | indent(6) }}
+    server: |-
+      {{docker_login_config.server}}
+  {%- endif %}
 
 auth:
   ssh_user: root
