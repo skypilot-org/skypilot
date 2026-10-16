@@ -93,14 +93,21 @@ def check_no_active_resources_outside_contexts(
                    getattr(launched, 'region', None)):
             blocking_clusters.append(cluster['name'])
 
-    blocking_jobs = []
+    blocking_jobs: List[str] = []
     for job in _get_active_managed_jobs(
-            fields=['job_id', 'workspace', 'cloud', 'region']):
+            fields=['job_id', 'workspace', 'status', 'cloud', 'region']):
         if job.get('workspace',
                    constants.SKYPILOT_DEFAULT_WORKSPACE) != workspace_name:
             continue
-        if _blocks(job.get('cloud'), job.get('region')):
-            blocking_jobs.append(str(job['job_id']))
+        # A partially finished pipeline returns all of its task rows;
+        # finished stages keep their last placement but no longer run.
+        status = job.get('status')
+        if status is not None and status.is_terminal():
+            continue
+        job_id = str(job['job_id'])
+        if job_id not in blocking_jobs and _blocks(job.get('cloud'),
+                                                   job.get('region')):
+            blocking_jobs.append(job_id)
 
     resource_errors = []
     if blocking_clusters:

@@ -6,6 +6,7 @@ import pytest
 
 from sky import exceptions
 from sky import models
+from sky.jobs import state as job_state
 from sky.utils import resource_checker
 
 
@@ -814,6 +815,56 @@ class TestCheckNoActiveResourcesOutsideContexts:
         error_message = str(exc_info.value)
         assert '1 active cluster(s): provisioning' in error_message
         assert '1 active managed job(s): 7' in error_message
+
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    def test_finished_pipeline_stages_do_not_block(self, mock_queue,
+                                                   mock_get_clusters):
+        mock_get_clusters.return_value = []
+        mock_queue.return_value = ([{
+            'job_id': 3,
+            'task_id': 0,
+            'workspace': 'ws',
+            'status': job_state.ManagedJobStatus.SUCCEEDED,
+            'cloud': 'Kubernetes',
+            'region': 'ctx-b'
+        }, {
+            'job_id': 3,
+            'task_id': 1,
+            'workspace': 'ws',
+            'status': job_state.ManagedJobStatus.RUNNING,
+            'cloud': 'Kubernetes',
+            'region': 'ctx-a'
+        }], 0, {}, 0, [])
+
+        resource_checker.check_no_active_resources_outside_contexts(
+            'ws', ['ctx-a'])
+
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    def test_pipeline_job_listed_once(self, mock_queue, mock_get_clusters):
+        mock_get_clusters.return_value = []
+        mock_queue.return_value = ([{
+            'job_id': 4,
+            'task_id': 0,
+            'workspace': 'ws',
+            'status': job_state.ManagedJobStatus.RUNNING,
+            'cloud': 'Kubernetes',
+            'region': 'ctx-b'
+        }, {
+            'job_id': 4,
+            'task_id': 1,
+            'workspace': 'ws',
+            'status': job_state.ManagedJobStatus.PENDING,
+            'cloud': '-',
+            'region': '-'
+        }], 0, {}, 0, [])
+
+        with pytest.raises(ValueError) as exc_info:
+            resource_checker.check_no_active_resources_outside_contexts(
+                'ws', ['ctx-a'])
+
+        assert '1 active managed job(s): 4 ' in str(exc_info.value)
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
     @mock.patch('sky.jobs.server.core.queue_v2')
