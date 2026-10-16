@@ -1,56 +1,119 @@
 """The health check must count live nodes, not `ray status` text.
 
 Ray 2.56.1 leaves a node under `Active:` after the GCS has marked it dead
-(measured: still listed 174s later), so the old ``(\\d+) node_`` count
-over-reported after any node loss and the cluster was set to INIT.
+(measured: still listed 174s later), so counting `ray status` lines gets node
+loss wrong in both directions while the cloud still reports every machine up.
 """
 import re
 import shlex
+import time
+from unittest import mock
 
+from sky import backends
+from sky import clouds
 from sky.backends import backend_utils
 from sky.provision import instance_setup
+from sky.utils import status_lib
 
-# Verbatim from a failing CI run: 4 node lines, 2 pods, both healthy.
-RAY_STATUS_WITH_DEAD_NODES = """\
-======== Autoscaler status: 2026-09-01 09:08:24.709885 ========
-Node status
----------------------------------------------------------------
-Active:
- 1 node_c23344ee35db31deeec37ca824c276e46d2fb1cde61c234dbc2c1016
- 1 node_a6751b484dbc8992cb3e7b9bf49c0cbbfe2dbffc98da2ccac5046670
- 1 node_e760b5bf1eb34e437e6a210e370e088c7d34f1c4e3438e782a67a268
- 1 node_4be03db65cb7c60baac5bf1804bc2b861e493e93c4a0ecac073bb615
-Pending:
- (no pending nodes)
-Recent failures:
- (no failures)
-"""
+_UP = status_lib.ClusterStatus.UP
 
 
-def _counts(output):
-    """What the health check derives from the command's output."""
-    match = backend_utils._ALIVE_NODES_PATTERN.search(output)  # pylint: disable=protected-access
-    assert match is not None, output
-    alive = int(match.group(1))
-    return min(alive, 1), max(alive - 1, 0)
+def _ray_status_text(n_active):
+    nodes = '\n'.join(f' 1 node_{i:056x}' for i in range(n_active))
+    return (f'Node status\n{"-" * 63}\nActive:\n{nodes}\nPending:\n'
+            ' (no pending nodes)\nRecent failures:\n (no failures)\n')
 
 
-def test_the_old_text_count_is_what_broke():
-    """Pin the symptom, so the reason for the new source stays legible."""
-    stale = backend_utils._LAUNCHED_LOCAL_WORKER_PATTERN.findall(  # pylint: disable=protected-access
-        RAY_STATUS_WITH_DEAD_NODES)
-    assert len(stale) == 4, 'the captured output should show 4 node lines'
+def _refresh(gcs_alive, gcs_total, ray_status_nodes):
+    """Refresh a 2-node cluster whose 2 pods are both up.
+
+    The fake head answers the GCS count and `ray status` separately, so the
+    result shows which one the health check believed.
+    """
+
+    def _run(cmd, **kwargs):
+        del kwargs
+        if 'SKY_ALIVE_NODES' in cmd:
+            return 0, f'SKY_ALIVE_NODES {gcs_alive} {gcs_total}\n', ''
+        return 0, _ray_status_text(ray_status_nodes), ''
+
+    head = mock.Mock()
+    head.run.side_effect = _run
+    handle = mock.Mock(spec=backends.CloudVmRayResourceHandle)
+    handle.cluster_name = 'test-cluster'
+    handle.cluster_name_on_cloud = 'test-cluster-1234'
+    handle.cluster_yaml = '/fake/path/cluster.yaml'
+    handle.cached_cluster_info = None
+    handle.launched_nodes = 2
+    handle.num_ips_per_node = 1
+    handle.head_ip = '10.0.0.1'
+    handle.launched_resources = mock.Mock(unsafe=True)
+    handle.launched_resources.cloud = clouds.Kubernetes()
+    handle.launched_resources.use_spot = False
+    handle.launched_resources.assert_launchable.return_value = (
+        handle.launched_resources)
+    handle.provision_runtime_metadata = mock.Mock()
+    handle.provision_runtime_metadata.has_ray = True
+    handle.get_command_runners.return_value = [head, mock.Mock()]
+    record = {
+        'handle': handle,
+        'status': _UP,
+        'cluster_hash': 'fake-hash',
+        'autostop': -1,
+        'to_down': False,
+        'launched_at': time.time() - 3600,
+    }
+    backend = mock.Mock(spec=backends.CloudVmRayBackend)
+    backend.is_definitely_autostopping.return_value = False
+    external_failure = mock.Mock()
+    external_failure.get.return_value = None
+    add_or_update = mock.Mock()
+    now = [0.0]
+
+    def _sleep(seconds):
+        now[0] += seconds
+
+    with mock.patch.object(backend_utils,
+                           '_query_cluster_status_via_cloud_api',
+                           return_value={
+                               'pod-0': (_UP, None),
+                               'pod-1': (_UP, None)
+                           }), \
+         mock.patch.object(backend_utils, 'ExternalFailureSource',
+                           external_failure), \
+         mock.patch.object(backend_utils, 'get_backend_from_handle',
+                           return_value=backend), \
+         mock.patch.object(backend_utils.global_user_state,
+                           'add_cluster_event'), \
+         mock.patch.object(backend_utils.global_user_state,
+                           'add_or_update_cluster', add_or_update), \
+         mock.patch.object(backend_utils.global_user_state,
+                           'get_cluster_from_name', return_value=record), \
+         mock.patch.object(backend_utils.time, 'sleep', side_effect=_sleep), \
+         mock.patch.object(backend_utils.time, 'monotonic',
+                           side_effect=lambda: now[0]):
+        backend_utils._update_cluster_status('test-cluster',
+                                             record,
+                                             retry_if_missing=False)
+    return add_or_update.call_args.kwargs['ready']
 
 
-def test_two_live_nodes_among_four_count_as_two():
-    """The CI case: 2 pods up, 2 long-dead nodes still listed by `ray status`."""
-    head, workers = _counts('SKY_ALIVE_NODES 2 4\n  abc True 10.0.0.1\n')
-    assert head + workers == 2
+def test_replaced_worker_with_a_dead_entry_left_is_up():
+    """A resize-down or a replaced worker: 2 live nodes, 3 listed.
+
+    The `test_resize on kubernetes` failure: counting `ray status` lines saw
+    3 of 2 and set the cluster to INIT.
+    """
+    assert _refresh(gcs_alive=2, gcs_total=3, ray_status_nodes=3) is True
 
 
-def test_a_single_node_cluster_counts_as_one():
-    head, workers = _counts('SKY_ALIVE_NODES 1 3\n')
-    assert (head, workers) == (1, 0)
+def test_worker_whose_ray_died_is_not_up():
+    """The worker's raylet died while its machine stayed up: 1 live node.
+
+    `ray status` still lists it, so counting lines saw 2 of 2 and kept the
+    cluster UP with a dead worker.
+    """
+    assert _refresh(gcs_alive=1, gcs_total=2, ray_status_nodes=2) is False
 
 
 def test_the_command_asks_the_gcs_not_ray_status():

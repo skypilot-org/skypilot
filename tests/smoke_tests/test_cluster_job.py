@@ -5562,6 +5562,12 @@ def test_resize(generic_cloud: str):
             # --- Scale down (idle) ---
             f'sky launch -y -c {name} --resize --num-nodes 2',
             f's=$(sky status {name}) && echo "$s" && echo "$s" | grep "2x"',
+            # The replaced workers stay listed in `ray status` long after
+            # they are gone; a refresh must still find the cluster UP.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=120),
             # --- Scale down rejected when job running ---
             f'sky exec {name} --num-nodes 2 -d -- sleep 300',
             'sleep 5',
