@@ -2943,7 +2943,11 @@ def _update_cluster_status(
                     if wait_for_retry():
                         continue
                     break
-                if ready_head + ready_workers == total_nodes:
+                # The cloud already reported every node up. Nodes removed by a
+                # resize stay alive in the GCS for ~30s, so `==` would set
+                # INIT after every scale-down; `>=` instead misses a worker
+                # dying within those ~30s until the next refresh.
+                if ready_head + ready_workers >= total_nodes:
                     return True
                 logger.debug(f'Refreshing status ({cluster_name!r}) attempt '
                              f'{i}: ray status not showing all nodes '

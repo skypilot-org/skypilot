@@ -6,6 +6,9 @@ loss wrong in both directions while the cloud still reports every machine up.
 """
 import re
 import shlex
+import socket
+import subprocess
+import sys
 import time
 from unittest import mock
 
@@ -107,6 +110,21 @@ def test_replaced_worker_with_a_dead_entry_left_is_up():
     assert _refresh(gcs_alive=2, gcs_total=3, ray_status_nodes=3) is True
 
 
+def test_removed_workers_not_yet_marked_dead_still_count_as_up():
+    """Right after a scale-down the GCS lists the removed workers as alive
+    for ~30s: 4 alive against 2 expected."""
+    assert _refresh(gcs_alive=4, gcs_total=4, ray_status_nodes=4) is True
+
+
+def test_a_worker_dying_while_removed_ones_linger_is_up_until_next_refresh():
+    """Accepted: 3 alive (1 of them leaving) against 2 expected reads as UP.
+
+    A count cannot tell this from the healthy case above, and that one
+    happens on every scale-down.
+    """
+    assert _refresh(gcs_alive=3, gcs_total=4, ray_status_nodes=4) is True
+
+
 def test_worker_whose_ray_died_is_not_up():
     """The worker's raylet died while its machine stayed up: 1 live node.
 
@@ -123,6 +141,40 @@ def test_the_command_asks_the_gcs_not_ray_status():
         'the count must not come from `ray status` again')
     # It is spliced into a shell command, so it has to survive the shell.
     assert shlex.split(cmd)
+
+
+def _run_probe(tmp_path, listening):
+    """Runs the probe against a local port; a fake `ray` exits 7 on import."""
+    (tmp_path / 'ray.py').write_text('raise SystemExit(7)\n')
+    with socket.socket() as server:
+        server.bind(('127.0.0.1', 0))
+        if listening:
+            server.listen()
+        port = server.getsockname()[1]
+        proc = subprocess.run(
+            [sys.executable, '-c', instance_setup._ALIVE_NODES_PY],  # pylint: disable=protected-access
+            env={
+                'RAY_ADDRESS': f'127.0.0.1:{port}',
+                'PYTHONPATH': str(tmp_path)
+            },
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False)
+    return proc.returncode, proc.stdout
+
+
+def test_no_ray_on_the_port_reports_cluster_not_found(tmp_path):
+    """The health check skips retries and hints `sky start` on this line.
+
+    Ray 2.56.1's `ray status` no longer prints it, so the probe must.
+    """
+    rc, out = _run_probe(tmp_path, listening=False)
+    assert rc == 1, out
+    assert backend_utils._RAY_CLUSTER_NOT_FOUND_MESSAGE in out  # pylint: disable=protected-access
+    rc, out = _run_probe(tmp_path, listening=True)
+    assert rc == 7, out
+    assert backend_utils._RAY_CLUSTER_NOT_FOUND_MESSAGE not in out  # pylint: disable=protected-access
 
 
 def test_the_head_wait_does_not_depend_on_a_ray_message():
