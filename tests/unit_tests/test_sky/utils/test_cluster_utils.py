@@ -342,8 +342,8 @@ class TestGeneratedConfigSetEnv:
 class TestGenerateClusterName:
     """Tests for generate_cluster_name()."""
 
-    @pytest.mark.parametrize('username',
-                             ['alice', '12345', 'build_', 'alice--'])
+    @pytest.mark.parametrize(
+        'username', ['alice', '12345', 'build_', 'alice--', '\u5f20\u4f1f'])
     def test_default_name_is_a_valid_cluster_name(self, username):
         with mock.patch.object(common_utils,
                                'get_current_user_name',
