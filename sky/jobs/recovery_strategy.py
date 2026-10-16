@@ -363,8 +363,16 @@ class StrategyExecutor:
         cleanup_cluster_on_success: bool = True,
         force_transit_to_recovering: bool = False,
         on_recovery: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
+        emergency_reattach: bool = False,
     ) -> Optional[bool]:
         """Strategy-owned monitoring loop override.
+
+        ``emergency_reattach``: the task kept its cluster through an
+        emergency and its latest job event is EMERGENCY-sourced. A strategy
+        that owns the loop must close that episode the way
+        ``JobController._monitor_one_task`` does: call
+        ``state.record_emergency_reattached_async`` once, on the first
+        status poll the job answers with a non-terminal status.
 
         # TODO(kevin): The default monitor (JobController._monitor_one_task)
         # bakes in cluster-level detection logic (skylet polling, cluster
