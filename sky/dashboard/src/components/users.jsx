@@ -2875,6 +2875,34 @@ function ServiceAccountTokensView({
     setPage(1);
   }, [debouncedSearch, serverPaginated]);
 
+  // Start the Role field on the server's `rbac.default_role`, unless a role
+  // was already picked.
+  useEffect(() => {
+    if (!showCreateDialog) return undefined;
+    let cancelled = false;
+    const fetchDefaultRole = async () => {
+      try {
+        const response = await apiClient.get('/users/default-role');
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || 'Failed to get default role');
+        }
+        const data = await response.json();
+        if (!cancelled) {
+          setNewToken((prev) =>
+            prev.role ? prev : { ...prev, role: data.role }
+          );
+        }
+      } catch (error) {
+        console.error('Failed to get default role:', error);
+      }
+    };
+    fetchDefaultRole();
+    return () => {
+      cancelled = true;
+    };
+  }, [showCreateDialog]);
+
   // Fetch tokens and related data
   const fetchTokensAndCounts = useCallback(
     async (forceRefresh = false) => {

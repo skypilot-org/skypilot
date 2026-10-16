@@ -194,6 +194,15 @@ def get_current_user_role(request: fastapi.Request):
     }
 
 
+@router.get('/default-role')
+def get_default_user_role() -> Dict[str, str]:
+    """Get the role new users and service accounts get by default."""
+    # Main-process handler: refresh config so a runtime `rbac.default_role`
+    # change is honored without a server restart.
+    skypilot_config.safe_reload_config()
+    return {'role': rbac.get_default_role()}
+
+
 @router.post('/me/workspace')
 def set_user_preferred_workspace(
     request: fastapi.Request,
