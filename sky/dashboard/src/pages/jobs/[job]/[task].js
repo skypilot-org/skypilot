@@ -466,10 +466,6 @@ function TaskDetailsContent({ taskData, taskIndex, poolsData }) {
         </span>
       )}
       {field('Recoveries', taskData.recoveries || 0)}
-      <div
-        key="divider-compute"
-        className="hidden min-[1400px]:block col-span-full border-t border-gray-100"
-      />
       {field(
         'Requested Resources',
         show(taskData.requested_resources || taskData.resources_str),
