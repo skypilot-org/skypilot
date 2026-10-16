@@ -1108,8 +1108,11 @@ Aborts a request or all requests.
 
 **Args:**
     request_ids: The request ID(s) to abort. Can be a single string or a
-        list of strings.
-    all_users: Whether to abort all requests from all users.
+        list of strings. Named requests are cancelled whoever owns them,
+        subject to the server's permission check: an admin can cancel any
+        request, other users only their own.
+    all_users: Whether to abort all requests from all users. Only used
+        when request_ids is not given.
     silent: Whether to suppress the output.
 
 **Returns:**
