@@ -451,7 +451,11 @@ def test_invalid_zone(enable_all_clouds):
 
     with pytest.raises(ValueError) as e:
         _test_resources(sky.Azure(), zone='invalid')
-    assert 'Azure does not support zones.' in str(e.value)
+    assert 'Azure requires a region when specifying a zone.' in str(e.value)
+
+    with pytest.raises(ValueError) as e:
+        _test_resources(sky.Azure(), region='eastus', zone='invalid')
+    assert 'Invalid Azure zone' in str(e.value)
 
     with pytest.raises(ValueError) as e:
         _test_resources(sky.AWS(), region='us-east-1', zone='us-east-2a')
@@ -680,7 +684,7 @@ def test_infer_cloud_from_region_or_zone(enable_all_clouds):
     # Cloud   Hint
     # -----   ----
     # AWS     Invalid zone 'us-west-2-a' Did you mean one of these: 'us-west-2a'?
-    # Azure   Azure does not support zones.
+    # Azure   Azure requires a region when specifying a zone.
     # GCP     Invalid zone 'us-west-2-a' Did you mean one of these: 'us-west2-a'?
     # IBM     Invalid zone 'us-west-2-a'
     # Lambda  Lambda Cloud does not support zones.

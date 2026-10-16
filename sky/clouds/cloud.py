@@ -257,19 +257,18 @@ class Cloud:
             A list of zones that offer the requested resources in the given
             region, in the order of price.
             (1) If there is no zone that offers the specified resources, nothing
-                is yielded. For example, Azure does not support zone, and
-                calling this method with non-existing instance_type in the given
-                region, will yield nothing, i.e. raise StopIteration.
+                is yielded. For example, calling this method with a
+                non-existing instance_type in the given region yields nothing.
                 ```
                 for zone in Azure.zones_provision_loop(region=region,
                                            instance_type='non-existing'):
                     # Will not reach here.
                 ```
-            (2) If the cloud's provisioner does not support `Zone`s, `None` will
-                be yielded.
+            (2) For regional offerings without availability zones, `None` is
+                yielded.
                 ```
                 for zone in Azure.zones_provision_loop(region=region,
-                                           instance_type='existing-instance'):
+                                           instance_type='regional-instance'):
                     assert zone is None
                 ```
             This means if something is yielded, either it's None (zones are not
