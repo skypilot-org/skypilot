@@ -1197,50 +1197,30 @@ def test_controller_and_update_requests_keep_their_workspace(
     request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
     request_names.AdminPolicyRequestName.CLUSTER_EXEC,
 ])
-@pytest.mark.parametrize('shape,moved', [('explicit', True), ('default', True),
-                                         ('cluster', False)])
-def test_existing_cluster_keeps_its_recorded_workspace(server_policy,
-                                                       policy_logs, task,
-                                                       request_name, shape,
-                                                       moved):
+@pytest.mark.parametrize('shape', ['explicit', 'default', 'cluster'])
+def test_existing_cluster_keeps_the_request_workspace(server_policy,
+                                                      policy_logs, task,
+                                                      request_name, shape):
+    # A policy never moves a request onto or off an existing cluster: one in
+    # the cluster's workspace stays there, and one that disagrees with it
+    # keeps its own, so the usual owner mismatch error still applies.
     server_policy.cluster_workspace.return_value = 'ws-w'
     ctx = (skypilot_config.override_skypilot_config({
         'active_workspace': 'ws-w'
     }) if shape == 'cluster' else _request_in(shape))
     with ctx:
+        request_ws = skypilot_config.get_active_workspace()
         with admin_policy_utils.apply_and_use_config_in_current_request(
                 task,
                 request_name=request_name,
                 request_options=_options('existing-cluster')):
-            assert skypilot_config.get_active_workspace() == 'ws-w'
+            assert skypilot_config.get_active_workspace() == request_ws
     server_policy.cluster_workspace.assert_called_once_with('existing-cluster')
+    server_policy.check.assert_not_called()
     logged = policy_logs.getvalue()
-    assert ("existing cluster 'existing-cluster' is in workspace 'ws-w'"
-            in logged)
-    if moved:
-        # Moving the request needs write access, like any routing.
-        server_policy.check.assert_called_once_with(_USER,
-                                                    'ws-w',
-                                                    action='write')
-        assert ("INFO Using workspace 'ws-w' (source: workspace of existing "
-                "cluster 'existing-cluster')." in logged)
-    else:
-        server_policy.check.assert_not_called()
-    assert 'source: admin policy' not in logged
-
-
-def test_move_to_existing_cluster_without_access_names_the_cluster(
-        server_policy, task):
-    server_policy.cluster_workspace.return_value = 'ws-w'
-    server_policy.check.side_effect = exceptions.PermissionDeniedError('denied')
-    with pytest.raises(exceptions.UserRequestRejectedByPolicy,
-                       match=("workspace 'ws-w' \\(source: workspace of "
-                              "existing cluster 'existing-cluster'\\): user "
-                              "'alice' has no write access")):
-        admin_policy_utils.apply(
-            task,
-            request_name=request_names.AdminPolicyRequestName.CLUSTER_EXEC,
-            request_options=_options('existing-cluster'))
+    assert (f"but it stays in workspace {request_ws!r}: existing cluster "
+            "'existing-cluster' is in workspace 'ws-w'" in logged)
+    assert 'Using workspace' not in logged
 
 
 def test_unknown_policy_workspace_is_rejected(server_policy, task):

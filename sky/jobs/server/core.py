@@ -958,10 +958,11 @@ def launch(
         # An attached job stays in its group's workspace, whatever the policy.
         existing_resource = None
         if parent_job_id is not None:
+            # _check_job_group_attachment above already rejected a missing one.
             parent = managed_job_state.get_job_info_row(parent_job_id)
-            assert parent is not None, parent_job_id
-            existing_resource = (f'parent job {parent_job_id}',
-                                 parent.workspace)
+            if parent is not None:
+                existing_resource = (f'parent job {parent_job_id}',
+                                     parent.workspace)
         # Always apply the policy again here, even though it might have been
         # applied in the CLI. This is to ensure that we apply the policy to the
         # final DAG and get the mutated config.

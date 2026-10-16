@@ -148,7 +148,7 @@ def use_policy_workspace(workspace: str) -> Iterator[None]:
             yield
 
 
-def _resolve_workspace_ref(ref: str) -> str:
+def _policy_workspace_id(ref: str) -> str:
     """Returns the workspace a policy's `active_workspace` value refers to.
 
     Raises:
@@ -190,7 +190,7 @@ def _route_workspace(
     request_ws = skypilot_config.get_active_workspace()
     policy_ref = mutated_config.get('active_workspace')
     try:
-        policy_ws = (_resolve_workspace_ref(policy_ref)
+        policy_ws = (_policy_workspace_id(policy_ref)
                      if policy_ref else request_ws)
     except exceptions.UserRequestRejectedByPolicy:
         if not precheck:
@@ -215,9 +215,11 @@ def _route_workspace(
             reason = 'a service keeps its workspace on update'
         elif (existing_resource is not None and
               existing_resource[1] != policy_ws):
-            resource, workspace = existing_resource
-            source = f'workspace of {resource}'
-            reason = f'{resource} is in workspace {workspace!r}'
+            # Never move a request onto or off a resource: one that already
+            # disagrees with the resource still gets the usual mismatch error.
+            resource, resource_ws = existing_resource
+            workspace = request_ws
+            reason = f'{resource} is in workspace {resource_ws!r}'
         if reason is not None:
             logger.warning(f'The admin policy set workspace {policy_ws!r} for '
                            f'request {request_name}, but it stays in '
