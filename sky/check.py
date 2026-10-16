@@ -384,8 +384,10 @@ def check_capabilities(
                 disabled_clouds_set))
 
             global_user_state.set_enabled_clouds(
-                list(enabled_clouds_for_capability), capability,
-                current_workspace_name)
+                list(enabled_clouds_for_capability),
+                capability,
+                current_workspace_name,
+                previously_enabled_clouds=list(previously_enabled_clouds_set))
             all_enabled_clouds = all_enabled_clouds.union(
                 enabled_clouds_for_capability)
 
@@ -541,6 +543,21 @@ def get_cached_enabled_clouds_or_refresh(
             # If no cloud is enabled, check() will raise SystemExit.
             # Here we catch it and raise the exception later only if
             # raise_if_no_cloud_access is set to True.
+            pass
+        cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
+            capability, active_workspace)
+    elif global_user_state.is_user_scoped_enabled_clouds_cache_missing(
+            capability, active_workspace):
+        # With Slurm submit-as-user, shared clouds keep the cached list
+        # non-empty for a user who has never run `sky check`, so check the
+        # user-scoped clouds as this user once.
+        try:
+            check_capability(capability,
+                             quiet=True,
+                             clouds=sorted(
+                                 global_user_state.USER_SCOPED_CLOUDS),
+                             workspace=active_workspace)
+        except SystemExit:
             pass
         cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
             capability, active_workspace)
