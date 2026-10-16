@@ -2945,7 +2945,7 @@ def _update_cluster_status(
                     break
                 # The cloud already reported every node up. Nodes removed by a
                 # resize stay alive in the GCS for ~30s, so `==` would set
-                # INIT after every scale-down; `>=` instead misses a worker
+                # INIT after every scale-down; `>=` instead misses a node
                 # dying within those ~30s until the next refresh.
                 if ready_head + ready_workers >= total_nodes:
                     return True

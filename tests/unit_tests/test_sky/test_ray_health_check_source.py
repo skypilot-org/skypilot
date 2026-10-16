@@ -104,8 +104,8 @@ def _refresh(gcs_alive, gcs_total, ray_status_nodes):
 def test_replaced_worker_with_a_dead_entry_left_is_up():
     """A resize-down or a replaced worker: 2 live nodes, 3 listed.
 
-    The `test_resize on kubernetes` failure: counting `ray status` lines saw
-    3 of 2 and set the cluster to INIT.
+    The `test_resize on kubernetes` failure: counting `ray status` lines
+    under `==` saw 3 of 2 and set the cluster to INIT.
     """
     assert _refresh(gcs_alive=2, gcs_total=3, ray_status_nodes=3) is True
 
