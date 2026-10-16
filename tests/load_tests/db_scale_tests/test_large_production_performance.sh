@@ -104,6 +104,13 @@ cleanup() {
                 --db-instance-identifier "$RDS_INSTANCE_ID" \
                 --skip-final-snapshot \
                 2>/dev/null || true
+            # The delete is asynchronous; the instance's subnet and parameter
+            # groups can't be deleted until it is gone, or they leak.
+            echo "Waiting for RDS instance $RDS_INSTANCE_ID to be deleted..."
+            aws rds wait db-instance-deleted \
+                --region "$RDS_REGION" \
+                --db-instance-identifier "$RDS_INSTANCE_ID" ||
+                echo "WARNING: RDS instance $RDS_INSTANCE_ID is not deleted yet; its subnet and parameter groups may leak"
         fi
 
         # Cleanup DB subnet group
@@ -111,8 +118,8 @@ cleanup() {
             echo "Cleaning up DB subnet group: $DB_SUBNET_GROUP_NAME"
             aws rds delete-db-subnet-group \
                 --region "$RDS_REGION" \
-                --db-subnet-group-name "$DB_SUBNET_GROUP_NAME" \
-                2>/dev/null || true
+                --db-subnet-group-name "$DB_SUBNET_GROUP_NAME" ||
+                echo "WARNING: could not delete DB subnet group $DB_SUBNET_GROUP_NAME"
         fi
 
         # Cleanup DB parameter group
@@ -121,8 +128,8 @@ cleanup() {
             echo "Cleaning up DB parameter group: $PARAM_GROUP_NAME"
             aws rds delete-db-parameter-group \
                 --region "$RDS_REGION" \
-                --db-parameter-group-name "$PARAM_GROUP_NAME" \
-                2>/dev/null || true
+                --db-parameter-group-name "$PARAM_GROUP_NAME" ||
+                echo "WARNING: could not delete DB parameter group $PARAM_GROUP_NAME"
         fi
     fi
 
