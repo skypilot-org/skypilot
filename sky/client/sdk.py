@@ -2520,6 +2520,13 @@ def get(request_id: server_common.RequestId[T]) -> T:
     error = request_task.get_error()
     if error is not None:
         error_obj = error['object']
+        if (isinstance(error_obj, exceptions.RequestInterruptedError) and
+                not request_task.should_retry):
+            # The server cancelled this request while shutting down and said
+            # a retry cannot help (`should_retry` is False): it will not run
+            # the request again. Raise the error as the one subclass that
+            # `rest.retry_transient_errors` does not retry.
+            error_obj = exceptions.RequestNotResumedError(str(error_obj))
         _raise_exception_object_on_client(error_obj)
     if request_task.status == requests_lib.RequestStatus.CANCELLED:
         with ux_utils.print_exception_no_traceback():

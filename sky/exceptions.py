@@ -873,6 +873,18 @@ class RequestInterruptedError(Exception):
     pass
 
 
+class RequestNotResumedError(RequestInterruptedError):
+    """Raised when a server restart cancelled a request that it will not resume.
+
+    The client cannot recover by retrying: waiting on or re-attaching to the
+    same request only returns this error again, so the original request has to
+    be re-submitted. It subclasses ``RequestInterruptedError`` so that callers
+    catching that error still catch it, but ``rest.retry_transient_errors``
+    raises it instead of retrying.
+    """
+    pass
+
+
 class SkyletInternalError(Exception):
     """Raised when a Skylet internal error occurs."""
     pass

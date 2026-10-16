@@ -173,6 +173,12 @@ def retry_transient_errors(max_retries: int = 3,
                 while consecutive_failed_count < max_retries:
                     try:
                         return func(*args, **kwargs)
+                    except exceptions.RequestNotResumedError:
+                        # The request itself was cancelled by a server restart
+                        # and will not run again. A retry would re-attach to it
+                        # and get the same error: with the replayed log counted
+                        # as progress, that never stops.
+                        raise
                     # Occurs when the server proactively interrupts the request
                     # during rolling update, we can retry immediately on the
                     # new server.
