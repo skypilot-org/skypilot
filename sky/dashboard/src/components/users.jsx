@@ -1122,6 +1122,7 @@ export function Users() {
               >
                 <option value="user">User</option>
                 <option value="admin">Admin</option>
+                <option value="viewer">Viewer</option>
               </select>
             </div>
           </div>
@@ -2554,6 +2555,7 @@ function UsersTable({
                               >
                                 <option value="admin">Admin</option>
                                 <option value="user">User</option>
+                                <option value="viewer">Viewer</option>
                               </select>
                               <button
                                 onClick={() => handleSaveEdit(user.userId)}
@@ -2821,6 +2823,7 @@ function ServiceAccountTokensView({
   const [newToken, setNewToken] = useState({
     token_name: '',
     expires_in_days: 30,
+    role: 'user',
   });
   const [rotateExpiration, setRotateExpiration] = useState('');
   const [creating, setCreating] = useState(false);
@@ -3063,6 +3066,7 @@ function ServiceAccountTokensView({
         token_name: newToken.token_name.trim(),
         expires_in_days:
           newToken.expires_in_days === '' ? null : newToken.expires_in_days,
+        role: newToken.role,
       };
 
       const response = await apiClient.post(
@@ -3073,7 +3077,7 @@ function ServiceAccountTokensView({
       if (response.ok) {
         const data = await response.json();
         setCreatedTokenInDialog(data.token);
-        setNewToken({ token_name: '', expires_in_days: 30 });
+        setNewToken({ token_name: '', expires_in_days: 30, role: 'user' });
         await fetchTokensAndCounts(true); // Force refresh after creation
       } else {
         const errorData = await response.json();
@@ -3254,6 +3258,7 @@ function ServiceAccountTokensView({
                             >
                               <option value="admin">Admin</option>
                               <option value="user">User</option>
+                              <option value="viewer">Viewer</option>
                             </select>
                             <button
                               onClick={() => handleSaveEdit(token.token_id)}
@@ -3561,6 +3566,22 @@ function ServiceAccountTokensView({
                       setNewToken({ ...newToken, token_name: e.target.value })
                     }
                   />
+                </div>
+                <div className="grid gap-2">
+                  <label className="text-sm font-medium text-gray-700">
+                    Role
+                  </label>
+                  <select
+                    className="border rounded px-3 py-2 w-full"
+                    value={newToken.role}
+                    onChange={(e) =>
+                      setNewToken({ ...newToken, role: e.target.value })
+                    }
+                  >
+                    <option value="user">User</option>
+                    <option value="admin">Admin</option>
+                    <option value="viewer">Viewer</option>
+                  </select>
                 </div>
                 <div className="grid gap-2">
                   <label className="text-sm font-medium text-gray-700">
