@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from typing import Iterator, Optional, Tuple
 from unittest import mock
@@ -15,10 +16,13 @@ import pytest
 import requests
 
 import sky
+from sky import backends
 from sky import exceptions
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.backends import backend_utils
+from sky.jobs.server import core as jobs_core
 from sky.server import versions
 from sky.server.requests import request_names
 from sky.utils import admin_policy_utils
@@ -1020,3 +1024,455 @@ def test_mutated_user_request_log_redacts_secrets(add_example_policy_paths,
     assert '<redacted>' in logged, (
         'the token should be replaced, not dropped, so the log still shows '
         'that the field was set')
+
+
+_ROUTED_WS = 'ws-a'
+_USER = models.User(id='u1', name='alice')
+
+
+class _PinWorkspacePolicy(sky.AdminPolicy):
+
+    @classmethod
+    def validate_and_mutate(cls, user_request):
+        config = user_request.skypilot_config
+        config.set_nested(('active_workspace',), _ROUTED_WS)
+        return sky.MutatedUserRequest(user_request.task, config)
+
+
+class _PinMissingWorkspacePolicy(sky.AdminPolicy):
+
+    @classmethod
+    def validate_and_mutate(cls, user_request):
+        config = user_request.skypilot_config
+        config.set_nested(('active_workspace',), 'ws-missing')
+        return sky.MutatedUserRequest(user_request.task, config)
+
+
+_LABELS = ('kubernetes', 'custom_metadata', 'labels')
+
+
+class _CountingPinPolicy(sky.AdminPolicy):
+    """Pins ws-a and counts its runs in a label; records every input."""
+    inputs = []
+
+    @classmethod
+    def validate_and_mutate(cls, user_request):
+        config = user_request.skypilot_config
+        cls.inputs.append((user_request.request_name, copy.deepcopy(config)))
+        labels = dict(config.get_nested(_LABELS, {}))
+        labels['policy-runs'] = str(int(labels.get('policy-runs', '0')) + 1)
+        config.set_nested(_LABELS, labels)
+        config.set_nested(('active_workspace',), _ROUTED_WS)
+        return sky.MutatedUserRequest(user_request.task, config)
+
+
+class _DropWorkspacePolicy(sky.AdminPolicy):
+
+    @classmethod
+    def validate_and_mutate(cls, user_request):
+        config = user_request.skypilot_config
+        config.pop('active_workspace', None)
+        return sky.MutatedUserRequest(user_request.task, config)
+
+
+@pytest.fixture
+def workspaces_config(tmp_path, monkeypatch):
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text('workspaces:\n'
+                           '  ws-a: {}\n'
+                           '  ws-w: {}\n'
+                           '  ws-x: {}\n')
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       str(config_path))
+    importlib.reload(skypilot_config)
+    yield
+    monkeypatch.delenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, raising=False)
+    importlib.reload(skypilot_config)
+
+
+@pytest.fixture
+def server_policy(workspaces_config):
+    """Installs a server policy; returns the permission and cluster mocks."""
+    policy = mock.Mock()
+    policy.cls = _PinWorkspacePolicy
+    with mock.patch('sky.utils.admin_policy_utils._get_policy_impl',
+                    side_effect=lambda _: policy.cls()), \
+            mock.patch('sky.utils.common_utils.get_current_user',
+                       return_value=_USER), \
+            mock.patch('sky.workspaces.core.check_workspace_permission'
+                      ) as check, \
+            mock.patch('sky.global_user_state.get_cluster_workspace',
+                       return_value=None) as cluster_workspace:
+        policy.check = check
+        policy.cluster_workspace = cluster_workspace
+        yield policy
+
+
+@pytest.fixture
+def policy_logs():
+    # sky loggers do not propagate to root, so caplog cannot see them.
+    emitter = logging.getLogger('sky.utils.admin_policy_utils')
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter('%(levelname)s %(message)s'))
+    emitter.addHandler(handler)
+    try:
+        yield stream
+    finally:
+        emitter.removeHandler(handler)
+
+
+@contextlib.contextmanager
+def _request_in(shape: str) -> Iterator[None]:
+    """Enters the request workspace the way the executor would."""
+    if shape == 'default':
+        # Nothing named a workspace and the resolver picked 'default'.
+        yield
+    elif shape == 'resolver':
+        # The per-user resolver picked a preferred workspace.
+        with skypilot_config.local_active_workspace_ctx('ws-x'):
+            yield
+    else:
+        # `-w ws-x`.
+        assert shape == 'explicit', shape
+        with skypilot_config.override_skypilot_config(
+            {'active_workspace': 'ws-x'}):
+            yield
+
+
+def _options(cluster_name: Optional[str]) -> sky.admin_policy.RequestOptions:
+    return sky.admin_policy.RequestOptions(cluster_name=cluster_name,
+                                           idle_minutes_to_autostop=None,
+                                           down=False,
+                                           dryrun=False)
+
+
+@pytest.mark.parametrize('shape,request_ws', [('default', 'default'),
+                                              ('resolver', 'ws-x'),
+                                              ('explicit', 'ws-x')])
+def test_server_policy_routes_user_request(server_policy, policy_logs, task,
+                                           shape, request_ws):
+    with _request_in(shape):
+        with admin_policy_utils.apply_and_use_config_in_current_request(
+                task,
+                request_name=request_names.AdminPolicyRequestName.
+                CLUSTER_LAUNCH,
+                request_options=_options('new-cluster')):
+            assert skypilot_config.get_active_workspace() == _ROUTED_WS
+            # Worker threads have no thread-local; they read the config.
+            seen = []
+            thread = threading.Thread(target=lambda: seen.append(
+                skypilot_config.get_active_workspace()))
+            thread.start()
+            thread.join()
+            assert seen == [_ROUTED_WS]
+        assert skypilot_config.get_active_workspace() == request_ws
+    server_policy.check.assert_called_once_with(_USER,
+                                                _ROUTED_WS,
+                                                action='write')
+    assert ("INFO Using workspace 'ws-a' (source: admin policy)."
+            in policy_logs.getvalue())
+
+
+@pytest.mark.parametrize('request_name', [
+    request_names.AdminPolicyRequestName.JOBS_LAUNCH_CONTROLLER,
+    request_names.AdminPolicyRequestName.SERVE_LAUNCH_CONTROLLER,
+    request_names.AdminPolicyRequestName.JOBS_LAUNCH_CLUSTER,
+    request_names.AdminPolicyRequestName.SERVE_LAUNCH_REPLICA,
+    request_names.AdminPolicyRequestName.SERVE_UPDATE,
+])
+def test_controller_and_update_requests_keep_their_workspace(
+        server_policy, policy_logs, task, request_name):
+    with skypilot_config.override_skypilot_config({'active_workspace': 'ws-w'}):
+        _, config = admin_policy_utils.apply(task, request_name=request_name)
+    assert config['active_workspace'] == 'ws-w'
+    server_policy.check.assert_not_called()
+    logged = policy_logs.getvalue()
+    assert (f"WARNING The admin policy set workspace 'ws-a' for request "
+            f"{request_name}, but it stays in workspace 'ws-w'" in logged)
+    assert 'source: admin policy' not in logged
+
+
+@pytest.mark.parametrize('request_name', [
+    request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+    request_names.AdminPolicyRequestName.CLUSTER_EXEC,
+])
+@pytest.mark.parametrize('shape,moved', [('explicit', True), ('default', True),
+                                         ('cluster', False)])
+def test_existing_cluster_keeps_its_recorded_workspace(server_policy,
+                                                       policy_logs, task,
+                                                       request_name, shape,
+                                                       moved):
+    server_policy.cluster_workspace.return_value = 'ws-w'
+    ctx = (skypilot_config.override_skypilot_config({
+        'active_workspace': 'ws-w'
+    }) if shape == 'cluster' else _request_in(shape))
+    with ctx:
+        with admin_policy_utils.apply_and_use_config_in_current_request(
+                task,
+                request_name=request_name,
+                request_options=_options('existing-cluster')):
+            assert skypilot_config.get_active_workspace() == 'ws-w'
+    server_policy.cluster_workspace.assert_called_once_with('existing-cluster')
+    logged = policy_logs.getvalue()
+    assert ("existing cluster 'existing-cluster' is in workspace 'ws-w'"
+            in logged)
+    if moved:
+        # Moving the request needs write access, like any routing.
+        server_policy.check.assert_called_once_with(_USER,
+                                                    'ws-w',
+                                                    action='write')
+        assert ("INFO Using workspace 'ws-w' (source: workspace of existing "
+                "cluster 'existing-cluster')." in logged)
+    else:
+        server_policy.check.assert_not_called()
+    assert 'source: admin policy' not in logged
+
+
+def test_move_to_existing_cluster_without_access_names_the_cluster(
+        server_policy, task):
+    server_policy.cluster_workspace.return_value = 'ws-w'
+    server_policy.check.side_effect = exceptions.PermissionDeniedError('denied')
+    with pytest.raises(exceptions.UserRequestRejectedByPolicy,
+                       match=("workspace 'ws-w' \\(source: workspace of "
+                              "existing cluster 'existing-cluster'\\): user "
+                              "'alice' has no write access")):
+        admin_policy_utils.apply(
+            task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_EXEC,
+            request_options=_options('existing-cluster'))
+
+
+def test_unknown_policy_workspace_is_rejected(server_policy, task):
+    server_policy.cls = _PinMissingWorkspacePolicy
+    with pytest.raises(exceptions.UserRequestRejectedByPolicy,
+                       match='Workspace ws-missing set by the admin policy '
+                       'does not exist'):
+        admin_policy_utils.apply(
+            task, request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH)
+    server_policy.check.assert_not_called()
+
+
+def test_routing_without_write_access_is_rejected(server_policy, task):
+    server_policy.check.side_effect = exceptions.PermissionDeniedError('denied')
+    with pytest.raises(exceptions.UserRequestRejectedByPolicy,
+                       match=("workspace 'ws-a' \\(source: admin policy\\): "
+                              "user 'alice' has no write access")):
+        with admin_policy_utils.apply_and_use_config_in_current_request(
+                task,
+                request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH
+        ):
+            pytest.fail('the request must not run')
+
+
+def test_dropped_workspace_is_normalised(server_policy, task):
+    server_policy.cls = _DropWorkspacePolicy
+    with skypilot_config.local_active_workspace_ctx('ws-x'):
+        _, config = admin_policy_utils.apply(
+            task, request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH)
+    assert config['active_workspace'] == 'ws-x'
+    server_policy.check.assert_not_called()
+
+
+def test_client_side_apply_is_unchanged(server_policy, policy_logs, task):
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            request_options=_options('existing-cluster'),
+            at_client_side=True):
+        assert skypilot_config.get_active_workspace() == _ROUTED_WS
+    server_policy.cls = _DropWorkspacePolicy
+    _, config = admin_policy_utils.apply(
+        task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+        at_client_side=True)
+    # The client sends what its policy returned; the server resolves it.
+    assert 'active_workspace' not in config
+    server_policy.check.assert_not_called()
+    server_policy.cluster_workspace.assert_not_called()
+    assert 'source: admin policy' not in policy_logs.getvalue()
+
+
+def _controller_record(cluster_name: str) -> dict:
+    handle = mock.MagicMock(spec=backends.CloudVmRayResourceHandle)
+    handle.cluster_name = cluster_name
+    handle.launched_resources = mock.MagicMock(unsafe=True)
+    handle.launched_resources.assert_launchable.return_value.cloud.\
+        get_user_identities.return_value = None
+    return {'handle': handle, 'workspace': 'default', 'owner': None}
+
+
+def _launch_managed_job(consolidation: bool,
+                        parent_job_id: Optional[int] = None) -> dict:
+    """Runs jobs launch under the installed policy; returns what it saw."""
+    task = sky.Task(name='train', run='echo hi')
+    seen = {'controller_entry_ws': [], 'controller_ws': []}
+    controller = _controller_record('sky-jobs-controller-1')
+
+    def execution_launch(*_args, cluster_name, _request_name, **_kwargs):
+        seen['controller_entry_ws'].append(
+            skypilot_config.get_active_workspace())
+        # The policy part of execution.launch, then the owner check that
+        # provisioning an existing controller runs.
+        with admin_policy_utils.apply_and_use_config_in_current_request(
+                sky.Task(name='controller', run='true'),
+                request_name=_request_name,
+                request_options=_options(cluster_name)):
+            seen['controller_ws'].append(skypilot_config.get_active_workspace())
+            # pylint: disable=protected-access
+            backend_utils._check_owner_identity_with_record(
+                cluster_name, controller)
+        return 1, controller['handle']
+
+    def consolidated_launch(*_args, **_kwargs):
+        seen['controller_ws'].append(skypilot_config.get_active_workspace())
+        return [7], None
+
+    def controller_vars(*_args, local_user_config, **_kwargs):
+        # Runs inside the launch, after the records are written.
+        seen['snapshot'] = copy.deepcopy(local_user_config)
+        seen['launch_labels'] = skypilot_config.get_nested(_LABELS, None)
+        threads = []
+        thread = threading.Thread(target=lambda: threads.append(
+            skypilot_config.get_active_workspace()))
+        thread.start()
+        thread.join()
+        seen['thread_ws'] = threads[0]
+        return {}
+
+    parent = mock.Mock(workspace='ws-w',
+                       is_job_group=True,
+                       root_job_id=None,
+                       tree_root_job_id=parent_job_id)
+    with contextlib.ExitStack() as stack:
+
+        def patch(obj, name, **kwargs):
+            return stack.enter_context(mock.patch.object(obj, name, **kwargs))
+
+        patch(jobs_core.managed_job_utils,
+              'is_consolidation_mode',
+              return_value=consolidation)
+        local_record = patch(jobs_core.managed_job_state,
+                             'set_job_info_without_job_id',
+                             return_value=7)
+        patch(jobs_core.managed_job_state, 'set_pending')
+        patch(jobs_core.managed_job_state,
+              'next_dynamic_task_index',
+              return_value=1)
+        seen['parent_rows'] = patch(jobs_core.managed_job_state,
+                                    'get_job_info_row',
+                                    return_value=parent)
+        patch(jobs_core.managed_job_state,
+              'get_status',
+              return_value=jobs_core.managed_job_state.ManagedJobStatus.RUNNING)
+        backend = mock.MagicMock(spec=backends.CloudVmRayBackend)
+        backend.set_job_info_without_job_id.return_value = [7]
+        patch(jobs_core.backend_utils,
+              'is_controller_accessible',
+              return_value=controller['handle'])
+        patch(jobs_core.backend_utils,
+              'get_backend_from_handle',
+              return_value=backend)
+        patch(jobs_core.backend_utils,
+              'get_task_resources_str',
+              return_value='')
+        patch(jobs_core.global_user_state,
+              'cluster_with_name_exists',
+              return_value=False)
+        patch(jobs_core.service_catalog_common,
+              'get_modified_catalog_file_mounts',
+              return_value={})
+        patch(jobs_core, '_upload_files_to_controller', return_value={})
+        patch(jobs_core.controller_utils,
+              'get_controller_resources',
+              return_value=task.resources)
+        patch(jobs_core.controller_utils,
+              'shared_controller_vars_to_fill',
+              side_effect=controller_vars)
+        patch(jobs_core.common_utils, 'fill_template')
+        patch(jobs_core.common,
+              'with_server_user',
+              side_effect=contextlib.nullcontext)
+        patch(sky.Task, 'from_yaml', return_value=mock.Mock())
+        patch(jobs_core,
+              '_consolidated_launch',
+              side_effect=consolidated_launch)
+        patch(jobs_core.execution, 'launch', side_effect=execution_launch)
+        jobs_core.launch(task, stream_logs=False, parent_job_id=parent_job_id)
+
+    record = (local_record
+              if consolidation else backend.set_job_info_without_job_id)
+    seen['record_ws'] = record.call_args.kwargs['workspace']
+    seen['after_ws'] = skypilot_config.get_active_workspace()
+    return seen
+
+
+@pytest.mark.parametrize('consolidation', [True, False])
+def test_jobs_launch_records_the_routed_workspace(server_policy, tmp_path,
+                                                  monkeypatch, consolidation):
+    monkeypatch.setenv('HOME', str(tmp_path))
+    seen = _launch_managed_job(consolidation)
+    assert seen['record_ws'] == _ROUTED_WS
+    assert seen['snapshot']['active_workspace'] == _ROUTED_WS
+    # Worker threads of the launch see the routed workspace too.
+    assert seen['thread_ws'] == _ROUTED_WS
+    assert seen['after_ws'] == 'default'
+
+
+def test_jobs_launch_keeps_the_controller_in_default(server_policy, policy_logs,
+                                                     tmp_path, monkeypatch):
+    """A routed jobs launch brings up and uses the controller in default.
+
+    The request itself is in default, so without the routed workspace
+    installed the controller launch's local_active_workspace_ctx('default')
+    is a no-op, the policy moves the controller launch, and the owner check
+    fails.
+    """
+    monkeypatch.setenv('HOME', str(tmp_path))
+    seen = _launch_managed_job(consolidation=False)
+    assert seen['record_ws'] == _ROUTED_WS
+    # Once to bring the controller up, once to submit to it. The nested
+    # local_active_workspace_ctx('default') took effect before the policy ran.
+    assert seen['controller_entry_ws'] == ['default', 'default']
+    assert seen['controller_ws'] == ['default', 'default']
+    assert ("WARNING The admin policy set workspace 'ws-a' for request "
+            "jobs.launch_controller, but it stays in workspace 'default'"
+            in policy_logs.getvalue())
+
+
+def test_jobs_launch_applies_the_policy_once_per_request(
+        server_policy, tmp_path, monkeypatch):
+    """Each request's policy sees the same input as without routing.
+
+    Only the workspace of the launch changes; the policy's other mutations go
+    to the controller snapshot and are not applied again.
+    """
+    monkeypatch.setenv('HOME', str(tmp_path))
+    server_policy.cls = _CountingPinPolicy
+    _CountingPinPolicy.inputs = []
+    with skypilot_config.override_skypilot_config({'active_workspace': 'ws-x'}):
+        original = skypilot_config.resolved_config()
+        seen = _launch_managed_job(consolidation=False)
+    controller_input = copy.deepcopy(original)
+    controller_input['active_workspace'] = 'default'
+    names = request_names.AdminPolicyRequestName
+    assert _CountingPinPolicy.inputs == [
+        (names.JOBS_LAUNCH, original),
+        (names.JOBS_LAUNCH_CONTROLLER, controller_input),
+        (names.JOBS_LAUNCH_CONTROLLER, controller_input),
+    ]
+    assert seen['snapshot'].get_nested(_LABELS, None) == {'policy-runs': '1'}
+    assert seen['launch_labels'] is None
+    assert seen['record_ws'] == _ROUTED_WS
+
+
+def test_attached_job_keeps_its_group_workspace(server_policy, policy_logs,
+                                                tmp_path, monkeypatch):
+    monkeypatch.setenv('HOME', str(tmp_path))
+    seen = _launch_managed_job(consolidation=True, parent_job_id=5)
+    seen['parent_rows'].assert_called_with(5)
+    assert seen['record_ws'] == 'ws-w'
+    assert seen['snapshot']['active_workspace'] == 'ws-w'
+    assert ("WARNING The admin policy set workspace 'ws-a' for request "
+            "jobs.launch, but it stays in workspace 'ws-w': parent job 5 is in "
+            "workspace 'ws-w'." in policy_logs.getvalue())

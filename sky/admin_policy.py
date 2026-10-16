@@ -204,6 +204,12 @@ class AdminPolicy(PolicyInterface):
     that it can be imported by users from the same Python environment where
     SkyPilot is running.
 
+    At server side, setting `active_workspace` in skypilot_config routes the
+    request to that workspace, if the user can write to it: a policy can route
+    a request but cannot grant access. Requests on an existing cluster or
+    service, jobs attached to a job group, and launches issued by controllers
+    keep their workspace.
+
     Users can register a subclass of AdminPolicy in the SkyPilot config file
     under the key 'admin_policy', e.g.
 

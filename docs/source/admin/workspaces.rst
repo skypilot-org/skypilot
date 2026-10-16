@@ -297,6 +297,12 @@ For team-c, since it has no workspace set, all CLI or API calls there will use t
 
    See also :ref:`config-sources-and-overrides` for various ways to set configuration.
 
+.. note::
+
+   A :ref:`server-side admin policy <server-side-admin-policy>` can route a request to another workspace by setting ``active_workspace`` in the config it returns. The request then runs in that workspace, and the user sees ``Using workspace '<name>' (source: admin policy)``. A policy cannot grant access: the request is rejected if the user cannot write to the workspace the policy picked.
+
+   A policy cannot move what already exists. A request on an existing cluster keeps the cluster's workspace, a service update keeps the service's workspace, a job attached to a job group keeps the group's workspace, and launches that the jobs or serve controllers issue keep their workspace. In these cases SkyPilot logs a warning and ignores the policy's workspace. A policy that names a workspace that does not exist rejects the request.
+
 
 Workspaces in UI
 ----------------

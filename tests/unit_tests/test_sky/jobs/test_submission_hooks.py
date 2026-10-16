@@ -115,10 +115,6 @@ def test_launch_fires_submission_hooks(consolidation, blob_id, raises, tmp_path,
 
             patch(jobs_core.copy, 'deepcopy', side_effect=copy_other)
 
-        patch(jobs_core.dag_utils,
-              'convert_entrypoint_to_dag',
-              return_value=dag)
-        patch(jobs_core.admin_policy_utils, 'apply', return_value=(dag, {}))
         patch(jobs_core.managed_job_utils,
               'is_consolidation_mode',
               return_value=consolidation)
@@ -173,6 +169,7 @@ def test_launch_fires_submission_hooks(consolidation, blob_id, raises, tmp_path,
 
         # pylint: disable=protected-access
         result = jobs_core._launch(task,
+                                   dag, {},
                                    name=None,
                                    pool=None,
                                    num_jobs=2,
