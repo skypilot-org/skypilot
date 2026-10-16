@@ -17,6 +17,7 @@ from sky import task as task_lib
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
 from sky.serve import constants as serve_constants
+from sky.setup_files import dependencies
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common
@@ -588,10 +589,12 @@ def test_get_cloud_dependencies_installation_commands_vast_only(
     commands = controller_utils._get_cloud_dependencies_installation_commands(
         controller)
 
-    # Should include Vast dependencies
+    # The Vast SDK is installed with the other cloud python packages. The
+    # provisioner needs the 1.x SDK; 0.x has no `VastAI().client`.
     combined_commands = ' '.join(commands)
-    assert 'Vast' in combined_commands
-    assert 'vastai_sdk' in combined_commands
+    assert f'"{dependencies.VAST_SDK}"' in combined_commands
+    assert 'vastai-sdk>=1.0.0' in dependencies.VAST_SDK
+    assert 'pip list | grep vastai_sdk' not in combined_commands
 
 
 @pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
