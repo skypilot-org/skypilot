@@ -2823,7 +2823,7 @@ function ServiceAccountTokensView({
   const [newToken, setNewToken] = useState({
     token_name: '',
     expires_in_days: 30,
-    role: 'user',
+    role: '',
   });
   const [rotateExpiration, setRotateExpiration] = useState('');
   const [creating, setCreating] = useState(false);
@@ -3066,8 +3066,11 @@ function ServiceAccountTokensView({
         token_name: newToken.token_name.trim(),
         expires_in_days:
           newToken.expires_in_days === '' ? null : newToken.expires_in_days,
-        role: newToken.role,
       };
+      // Without a role, the server applies `rbac.default_role`.
+      if (newToken.role) {
+        payload.role = newToken.role;
+      }
 
       const response = await apiClient.post(
         '/users/service-account-tokens',
@@ -3077,7 +3080,7 @@ function ServiceAccountTokensView({
       if (response.ok) {
         const data = await response.json();
         setCreatedTokenInDialog(data.token);
-        setNewToken({ token_name: '', expires_in_days: 30, role: 'user' });
+        setNewToken({ token_name: '', expires_in_days: 30, role: '' });
         await fetchTokensAndCounts(true); // Force refresh after creation
       } else {
         const errorData = await response.json();
@@ -3578,10 +3581,15 @@ function ServiceAccountTokensView({
                       setNewToken({ ...newToken, role: e.target.value })
                     }
                   >
-                    <option value="user">User</option>
+                    <option value="">Default</option>
                     <option value="admin">Admin</option>
+                    <option value="user">User</option>
                     <option value="viewer">Viewer</option>
                   </select>
+                  <p className="text-xs text-gray-500">
+                    Default uses the server&apos;s rbac.default_role, which is
+                    admin unless configured.
+                  </p>
                 </div>
                 <div className="grid gap-2">
                   <label className="text-sm font-medium text-gray-700">
