@@ -215,12 +215,17 @@ def _build_sky_wheel() -> pathlib.Path:
 
         wheel_dir = WHEEL_DIR / hash_of_latest_wheel
         wheel_dir.mkdir(parents=True, exist_ok=True)
-        # shutil.move will fail when the file already exists and is being
-        # moved across filesystems.
-        if not os.path.exists(
-                os.path.join(wheel_dir, os.path.basename(wheel_path))):
+        latest_wheel = wheel_dir / wheel_path.name
+        if latest_wheel.exists():
+            # Builds are reproducible, so a rebuild of unchanged source lands
+            # on the cached wheel. Refresh its mtime so build_sky_wheel() sees
+            # the cache as newer than the source and stops rebuilding.
+            latest_wheel.touch()
+        else:
+            # shutil.move will fail when the file already exists and is being
+            # moved across filesystems.
             shutil.move(str(wheel_path), wheel_dir)
-        return wheel_dir / wheel_path.name
+        return latest_wheel
 
 
 def build_sky_wheel() -> Tuple[pathlib.Path, str]:
