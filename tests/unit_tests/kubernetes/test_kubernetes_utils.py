@@ -640,6 +640,17 @@ def test_gke_label_formatter_rtx_pro_6000(accelerator):
         'nvidia-rtx-pro-6000') == 'RTX-PRO-6000'
 
 
+@pytest.mark.parametrize('accelerator', ['H100-MEGA', 'H100-MEGA-80GB'])
+def test_gke_label_formatter_h100_mega(accelerator):
+    """H100-MEGA (the GCP catalog name) is labeled nvidia-h100-mega-80gb in
+    GKE, and the label maps back to the catalog name."""
+    assert utils.GKELabelFormatter.get_label_values(accelerator) == [
+        'nvidia-h100-mega-80gb'
+    ]
+    assert utils.GKELabelFormatter.get_accelerator_from_label_value(
+        'nvidia-h100-mega-80gb') == 'H100-MEGA'
+
+
 @pytest.mark.parametrize('accelerator', ['RTX-PRO-6000', 'RTXPRO6000'])
 def test_get_accelerator_label_key_values_gke_rtx_pro_6000(accelerator):
     """Without an autoscaler, both RTX PRO 6000 names find a GKE node
