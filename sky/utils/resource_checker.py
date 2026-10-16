@@ -8,9 +8,19 @@ from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
+from sky.jobs import state as managed_job_state
 from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
+
+# Managed job statuses whose placement is not settled: the job may still
+# launch, or relaunch, on any context the workspace allows.
+_UNPLACED_JOB_STATUSES = frozenset({
+    managed_job_state.ManagedJobStatus.PENDING,
+    managed_job_state.ManagedJobStatus.DEPRECATED_SUBMITTED,
+    managed_job_state.ManagedJobStatus.STARTING,
+    managed_job_state.ManagedJobStatus.RECOVERING,
+})
 
 
 def check_no_active_resources_for_users(
@@ -65,8 +75,9 @@ def check_no_active_resources_outside_contexts(
     Used when a workspace's kubernetes.allowed_contexts is narrowed. Clusters
     and managed jobs on other clouds, or on a Kubernetes context that stays
     allowed, do not block the change. Resources whose cloud or context is not
-    known yet (e.g. clusters still provisioning, jobs not launched yet) are
-    treated as blocking, since they may end up on a dropped context.
+    settled (e.g. clusters still provisioning, jobs pending, starting or
+    recovering) are treated as blocking, since they may end up on a dropped
+    context. Finished tasks block only while their cluster still exists.
 
     Args:
         workspace_name: The workspace being updated.
@@ -101,20 +112,31 @@ def check_no_active_resources_outside_contexts(
 
     blocking_jobs: List[str] = []
     seen_job_ids: Set[str] = set()
-    for job in _get_active_managed_jobs(
-            fields=['job_id', 'workspace', 'status', 'cloud', 'region']):
+    for job in _get_active_managed_jobs(fields=[
+            'job_id', 'workspace', 'status', 'cloud', 'region',
+            'cluster_name_on_cloud'
+    ]):
         if job.get('workspace',
                    constants.SKYPILOT_DEFAULT_WORKSPACE) != workspace_name:
-            continue
-        # A partially finished pipeline returns all of its task rows;
-        # finished stages keep their last placement but no longer run.
-        status = job.get('status')
-        if status is not None and status.is_terminal():
             continue
         job_id = str(job['job_id'])
         if job_id in seen_job_ids:
             continue
-        if may_use_dropped_context(job.get('cloud'), job.get('region')):
+        status = job.get('status')
+        if status in _UNPLACED_JOB_STATUSES:
+            # The queue reports the last persisted placement, which says
+            # nothing about where the next launch or recovery lands.
+            blocks = True
+        elif (status is not None and status.is_terminal() and
+              not job.get('cluster_name_on_cloud')):
+            # A partially finished pipeline returns all of its task rows. The
+            # queue only reports a cluster name while the task's cluster
+            # exists, so this finished task no longer runs anywhere.
+            continue
+        else:
+            blocks = may_use_dropped_context(job.get('cloud'),
+                                             job.get('region'))
+        if blocks:
             seen_job_ids.add(job_id)
             blocking_jobs.append(job_id)
 

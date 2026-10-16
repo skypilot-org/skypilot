@@ -843,6 +843,58 @@ class TestCheckNoActiveResourcesOutsideContexts:
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
     @mock.patch('sky.jobs.server.core.queue_v2')
+    def test_finished_task_with_live_cluster_blocks(self, mock_queue,
+                                                    mock_get_clusters):
+        mock_get_clusters.return_value = []
+        mock_queue.return_value = ([{
+            'job_id': 5,
+            'task_id': 0,
+            'workspace': 'ws',
+            'status': job_state.ManagedJobStatus.SUCCEEDED,
+            'cloud': 'Kubernetes',
+            'region': 'ctx-b',
+            'cluster_name_on_cloud': 'task-0-5-abcd'
+        }, {
+            'job_id': 5,
+            'task_id': 1,
+            'workspace': 'ws',
+            'status': job_state.ManagedJobStatus.RUNNING,
+            'cloud': 'Kubernetes',
+            'region': 'ctx-a',
+            'cluster_name_on_cloud': 'task-1-5-abcd'
+        }], 0, {}, 0, [])
+
+        with pytest.raises(ValueError) as exc_info:
+            resource_checker.check_no_active_resources_outside_contexts(
+                'ws', ['ctx-a'])
+
+        assert '1 active managed job(s): 5 ' in str(exc_info.value)
+
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    def test_unplaced_jobs_block_despite_last_placement(self, mock_queue,
+                                                        mock_get_clusters):
+        mock_get_clusters.return_value = []
+        mock_queue.return_value = ([{
+            'job_id': job_id,
+            'workspace': 'ws',
+            'status': status,
+            'cloud': 'Kubernetes',
+            'region': 'ctx-a'
+        } for job_id, status in [
+            (6, job_state.ManagedJobStatus.RECOVERING),
+            (7, job_state.ManagedJobStatus.STARTING),
+            (8, job_state.ManagedJobStatus.PENDING),
+        ]], 0, {}, 0, [])
+
+        with pytest.raises(ValueError) as exc_info:
+            resource_checker.check_no_active_resources_outside_contexts(
+                'ws', ['ctx-a'])
+
+        assert '3 active managed job(s): 6, 7, 8 ' in str(exc_info.value)
+
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     def test_pipeline_job_listed_once(self, mock_queue, mock_get_clusters):
         mock_get_clusters.return_value = []
         mock_queue.return_value = ([{
