@@ -11,6 +11,7 @@ from sky import clouds
 from sky.adaptors.verda import Instance
 from sky.adaptors.verda import InstanceStatus
 from sky.adaptors.verda import VerdaClient
+from sky.catalog.data_fetchers import fetch_verda
 from sky.clouds import verda
 
 
@@ -315,8 +316,6 @@ class TestVerdaClientInstanceCreation:
 def test_fetch_verda_keeps_catalog_when_no_gpu_is_available(monkeypatch):
     """When every GPU type is sold out, the fetcher keeps the existing
     catalog instead of writing one without GPU rows."""
-    from sky.catalog.data_fetchers import fetch_verda
-
     cpu = {
         'instance_type': 'CPU.4V.16G',
         'cpu': {
