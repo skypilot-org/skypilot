@@ -726,4 +726,8 @@ class SSHConfigHelper:
 def generate_cluster_name():
     # TODO: change this ID formatting to something more pleasant.
     # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
-    return f'sky-{uuid.uuid4().hex[:4]}-{common_utils.get_cleaned_username()}'
+    name = f'sky-{uuid.uuid4().hex[:4]}'
+    # The cleaned username can be empty (an all-digit login) or end in '-' or
+    # '_', and a cluster name may not end in either.
+    username = common_utils.get_cleaned_username().rstrip('-_')
+    return f'{name}-{username}' if username else name

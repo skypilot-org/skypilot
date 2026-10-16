@@ -6,6 +6,7 @@ import pytest
 
 from sky.skylet import constants
 from sky.utils import cluster_utils
+from sky.utils import common_utils
 
 
 class TestConvertWindowsPathToWsl:
@@ -336,3 +337,16 @@ class TestGeneratedConfigSetEnv:
                         return_value=False):
             config = self._generate_config()
             assert 'SetEnv' not in config
+
+
+class TestGenerateClusterName:
+    """Tests for generate_cluster_name()."""
+
+    @pytest.mark.parametrize('username',
+                             ['alice', '12345', 'build_', 'alice--'])
+    def test_default_name_is_a_valid_cluster_name(self, username):
+        with mock.patch.object(common_utils,
+                               'get_current_user_name',
+                               return_value=username):
+            name = cluster_utils.generate_cluster_name()
+        common_utils.check_cluster_name_is_valid(name)
