@@ -341,9 +341,17 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
 # after any node loss -- a resize-down, a preemption, a replaced worker. Ask
 # the GCS instead, the same source task_codegen uses to size its placement
 # groups. Prints one parseable line plus a per-node dump for diagnostics.
+# Nothing listening on the port prints the "Ray cluster is not found" line
+# that `ray status` printed up to Ray 2.9.3 and the health check keys on.
 _ALIVE_NODES_PY = (
-    'import os, ray; '
-    'ray.init(address=os.environ["RAY_ADDRESS"], log_to_driver=False); '
+    'import os, socket, sys; '
+    'a = os.environ["RAY_ADDRESS"]; h, p = a.rsplit(":", 1); '
+    's = socket.socket(); s.settimeout(5); '
+    's.connect_ex((h, int(p))) == 0 or '
+    'sys.exit(print("Ray cluster is not found at", a) or 1); '
+    's.close(); '
+    'import ray; '
+    'ray.init(address=a, log_to_driver=False); '
     'ns = ray.nodes(); '
     'print("SKY_ALIVE_NODES", sum(1 for n in ns if n["Alive"]), len(ns)); '
     '[print(" ", n["NodeID"][:16], n["Alive"], n.get("NodeManagerAddress")) '
