@@ -504,6 +504,30 @@ system_config_table = sqlalchemy.Table(
     sqlalchemy.Column('updated_at', sqlalchemy.Integer),
 )
 
+# The task YAML and entrypoint command of each job submitted to a cluster
+# (`sky launch` / `sky exec`), for showing a job's spec on the dashboard.
+#
+# Kept on the API server rather than in the cluster's skylet job table so that
+# reading one job's spec does not go through the cluster (the skylet's job
+# queue returns every job's row at once), and so that adding it needs no change
+# to the skylet's schema, which older skylet versions write to positionally.
+#
+# Keyed by cluster_hash rather than name: job ids restart at 1 when a cluster
+# with the same name is relaunched after `sky down`. Rows are dropped when the
+# cluster is terminated, and only the last MAX_JOB_SPECS_PER_CLUSTER job ids of
+# a cluster are kept, so a long-lived cluster that runs many `sky exec`s does
+# not grow the table without bound.
+cluster_job_spec_table = sqlalchemy.Table(
+    'cluster_job_specs',
+    Base.metadata,
+    sqlalchemy.Column('cluster_hash', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('job_id', sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column('task_yaml', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('entrypoint', sqlalchemy.Text, server_default=None),
+)
+# A task YAML is typically a few KB, so this is a few MB per cluster at most.
+MAX_JOB_SPECS_PER_CLUSTER = 1000
+
 # Renewable leases for leader election across server processes. Each row is
 # one singleton role: ``holder`` is the current leader's identity, ``epoch`` is
 # a monotonic fencing token bumped on every change of holder, and
@@ -1978,6 +2002,9 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
 
         if terminate:
             session.query(cluster_table).filter_by(name=cluster_name).delete()
+            if cluster_hash is not None:
+                session.query(cluster_job_spec_table).filter_by(
+                    cluster_hash=cluster_hash).delete()
         else:
             handle = get_handle_from_cluster_name(cluster_name)
             if handle is None:
@@ -2187,12 +2214,24 @@ def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
 @metrics_lib.time_me
 def get_cluster_provision_log_path(cluster_name: str) -> Optional[str]:
     """Returns provision_log_path from clusters table, if recorded."""
+    return get_cluster_provision_log_info(cluster_name)[0]
+
+
+@metrics_lib.time_me
+def get_cluster_provision_log_info(
+        cluster_name: str) -> Tuple[Optional[str], Optional[str]]:
+    """Returns (provision_log_path, workspace) from the clusters table.
+
+    The workspace is None if there is no such cluster; a stored NULL is the
+    default workspace.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         row = session.query(cluster_table).filter_by(name=cluster_name).first()
     if row is None:
-        return None
-    return getattr(row, 'provision_log_path', None)
+        return None, None
+    return (getattr(row, 'provision_log_path', None), row.workspace or
+            constants.SKYPILOT_DEFAULT_WORKSPACE)
 
 
 @metrics_lib.time_me
@@ -2212,6 +2251,26 @@ def get_cluster_history_provision_log_path(cluster_name: str) -> Optional[str]:
     historical rows by name and choose the most recent one based on
     usage_intervals.
     """
+    return get_cluster_history_provision_log_info(cluster_name)[0]
+
+
+@metrics_lib.time_me
+def get_cluster_history_provision_log_info(
+        cluster_name: str) -> Tuple[Optional[str], Optional[str]]:
+    """Returns (provision_log_path, workspace) of the same history row.
+
+    The row is the one ``get_cluster_history_provision_log_path`` reads. The
+    workspace is None if there is no row; a stored NULL (rows that predate the
+    column) is the default workspace.
+    """
+    row = _get_cluster_history_row(cluster_name)
+    if row is None:
+        return None, None
+    return (getattr(row, 'provision_log_path', None), row.workspace or
+            constants.SKYPILOT_DEFAULT_WORKSPACE)
+
+
+def _get_cluster_history_row(cluster_name: str) -> Optional[Any]:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         # Try current cluster first (fast path)
@@ -2220,7 +2279,7 @@ def get_cluster_history_provision_log_path(cluster_name: str) -> Optional[str]:
             row = session.query(cluster_history_table).filter_by(
                 cluster_hash=cluster_hash).first()
             if row is not None:
-                return getattr(row, 'provision_log_path', None)
+                return row
 
         # Fallback: search history by name and pick the latest by
         # usage_intervals
@@ -2240,9 +2299,7 @@ def get_cluster_history_provision_log_path(cluster_name: str) -> Optional[str]:
             except Exception:  # pylint: disable=broad-except
                 return -1
 
-        latest_row = max(rows,
-                         key=lambda r: latest_timestamp(r.usage_intervals))
-        return getattr(latest_row, 'provision_log_path', None)
+        return max(rows, key=lambda r: latest_timestamp(r.usage_intervals))
 
 
 @metrics_lib.time_me
@@ -4410,6 +4467,89 @@ def _best_effort(func):
             return None
 
     return wrapper
+
+
+@_best_effort
+@db_retries.retry
+def get_job_spec_cluster_hash(cluster_name: str) -> Optional[str]:
+    """The hash to record a job spec under for this cluster, if any.
+
+    None if the cluster does not exist, or if it was launched by a jobs or
+    serve controller (a managed job's cluster or a pool worker): the jobs the
+    controller submits to it are shown on the managed job page from the
+    user's YAML, and nothing reads their spec.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.query(
+            cluster_table.c.cluster_hash,
+            cluster_table.c.is_managed).filter_by(name=cluster_name).first()
+    if row is None or row.cluster_hash is None or row.is_managed:
+        return None
+    return row.cluster_hash
+
+
+@_best_effort
+@db_retries.retry
+def add_cluster_job_spec(cluster_hash: str, job_id: int,
+                         task_yaml: Optional[str],
+                         entrypoint: Optional[str]) -> None:
+    """Records the task YAML and entrypoint a cluster job was submitted with.
+
+    Drops the cluster's specs older than the last MAX_JOB_SPECS_PER_CLUSTER job
+    ids. Best-effort: it runs on the job submission path and must not fail it.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
+            insert_func = sqlite.insert
+        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
+             ):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+        values = {
+            'task_yaml': task_yaml,
+            'entrypoint': entrypoint,
+        }
+        insert_stmnt = insert_func(cluster_job_spec_table).values(
+            cluster_hash=cluster_hash, job_id=job_id, **values)
+        # A job id is only reused within a cluster_hash if the skylet's job
+        # table was lost, in which case the newest submission is the right one.
+        do_update_stmt = insert_stmnt.on_conflict_do_update(index_elements=[
+            cluster_job_spec_table.c.cluster_hash,
+            cluster_job_spec_table.c.job_id
+        ],
+                                                            set_=values)
+        session.execute(do_update_stmt)
+        # Job ids increase within a cluster_hash, so the last N ids are the
+        # newest N jobs. Uses the (cluster_hash, job_id) primary key.
+        session.execute(cluster_job_spec_table.delete().where(
+            sqlalchemy.and_(
+                cluster_job_spec_table.c.cluster_hash == cluster_hash,
+                cluster_job_spec_table.c.job_id <=
+                job_id - MAX_JOB_SPECS_PER_CLUSTER)))
+        session.commit()
+
+
+@db_retries.retry
+def get_cluster_job_spec(cluster_hash: str,
+                         job_id: int) -> Optional[Dict[str, Any]]:
+    """Returns the task YAML and entrypoint of a cluster job, if recorded.
+
+    None for jobs submitted before the spec was recorded (e.g. by an older API
+    server version).
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.query(cluster_job_spec_table).filter_by(
+            cluster_hash=cluster_hash, job_id=job_id).first()
+    if row is None:
+        return None
+    return {
+        'task_yaml': row.task_yaml,
+        'entrypoint': row.entrypoint,
+    }
 
 
 @_best_effort

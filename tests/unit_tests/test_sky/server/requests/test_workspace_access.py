@@ -142,6 +142,7 @@ _EXPECTED: Dict[Tuple[str, str], str] = {
     ('POST', '/logs'): READ,
     ('POST', '/optimize'): READ,
     ('POST', '/queue'): READ,
+    ('POST', '/cluster_job_spec'): READ,
     ('POST', '/realtime_kubernetes_gpu_availability'): READ,
     ('GET', '/recipes'): READ,
     ('POST', '/recipes/get'): READ,

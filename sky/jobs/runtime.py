@@ -352,6 +352,17 @@ def is_registered() -> bool:
     return bool(_runtimes)
 
 
+def observes_recovery() -> bool:
+    """Whether any registered runtime implements ``get_recovery_status``.
+
+    Cheap synchronous check like ``is_registered``. When it is False, every
+    ``get_recovery_status`` dispatch returns None, so callers can skip the
+    dispatch and the work of preparing its ``previous`` cursor.
+    """
+    return any(
+        getattr(r, 'get_recovery_status', None) is not None for r in _runtimes)
+
+
 def _is_runtime_candidate(handle) -> bool:
     """Skip Ray-backed handles before evaluating runtime ownership."""
     if handle is None:

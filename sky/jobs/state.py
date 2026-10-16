@@ -1724,6 +1724,24 @@ def get_all_task_ids_names_statuses_logs(
                 for row in id_names]
 
 
+def get_submitted_task_ids(job_id: int) -> Set[int]:
+    """Ids of the job's tasks that began launching (have a submitted_at).
+
+    submitted_at is written once, by set_starting_async. A task with no run
+    command is marked SUCCEEDED without it, as it launches no cluster and so
+    has no task logs.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(spot_table.c.task_id).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.submitted_at.is_not(None),
+                ))).fetchall()
+        return {row[0] for row in rows}
+
+
 def get_num_tasks(job_id: int) -> int:
     return len(_get_all_task_ids_statuses(job_id))
 
@@ -3744,6 +3762,128 @@ async def get_all_task_ids_statuses_async(
         return [(row[0], ManagedJobStatus(row[1])) for row in result.fetchall()]
 
 
+@db_retries.retry_async
+async def get_unfinished_task_deadline_rows_async(
+        job_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
+    """The not-yet-ended tasks of ``job_ids``, in one query.
+
+    Returns:
+        {job_id: [{'task_id', 'status', 'submitted_at', 'start_at',
+        'specs'}, ...]} for the tasks whose ``end_at`` is still NULL, in
+        task_id order. ``specs`` is the parsed task specs dict ({} if not
+        written yet). Jobs with no unfinished task are absent.
+    """
+    if not job_ids:
+        return {}
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.select(
+                spot_table.c.spot_job_id,
+                spot_table.c.task_id,
+                spot_table.c.status,
+                spot_table.c.submitted_at,
+                spot_table.c.start_at,
+                spot_table.c.specs,
+            ).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id.in_(job_ids),
+                    spot_table.c.end_at.is_(None),
+                )).order_by(spot_table.c.spot_job_id.asc(),
+                            spot_table.c.task_id.asc()))
+        rows = result.fetchall()
+    rows_by_job: Dict[int, List[Dict[str, Any]]] = collections.defaultdict(list)
+    for (job_id, task_id, status, submitted_at, start_at, specs) in rows:
+        parsed_specs: Dict[str, Any] = {}
+        if specs:
+            try:
+                loaded = json.loads(specs)
+                if isinstance(loaded, dict):
+                    parsed_specs = loaded
+            except (TypeError, ValueError):
+                logger.debug(f'Unparsable specs for job {job_id} task '
+                             f'{task_id}: {specs!r}')
+        rows_by_job[job_id].append({
+            'task_id': task_id,
+            'status': ManagedJobStatus(status),
+            'submitted_at': submitted_at,
+            'start_at': start_at,
+            'specs': parsed_specs,
+        })
+    return dict(rows_by_job)
+
+
+class DeadlineKind(enum.Enum):
+    """A managed-job time limit; see _deadline_exceeded_clause."""
+    # job.wait_for_scheduling_timeout: from submitted_at, until start_at.
+    WAIT_FOR_SCHEDULING_TIMEOUT = 'wait_for_scheduling_timeout'
+
+
+def _deadline_exceeded_clause(kind: DeadlineKind, limit_seconds: float,
+                              now: float) -> 'sqlalchemy.ColumnElement':
+    """SQL predicate: ``kind``'s deadline has passed at ``now``."""
+    if kind == DeadlineKind.WAIT_FOR_SCHEDULING_TIMEOUT:
+        return sqlalchemy.and_(
+            spot_table.c.start_at.is_(None),
+            spot_table.c.submitted_at.is_not(None),
+            spot_table.c.submitted_at <= now - limit_seconds,
+        )
+    raise ValueError(f'Unknown deadline kind: {kind!r}')
+
+
+async def set_deadline_exceeded_async(job_id: int, task_id: int,
+                                      kind: DeadlineKind, limit_seconds: float,
+                                      now: float, failure_reason: str,
+                                      event_reason: str) -> bool:
+    """Record that a task exceeded one of its deadlines, if it still has.
+
+    The deadline is re-checked in the same UPDATE, against the row's current
+    values, so a task that started (or a job that started cancelling) after
+    the caller read its row is left alone. In one transaction, sets the
+    task's ``failure_reason`` and appends a CANCELLING job event.
+
+    Args:
+        job_id: The managed job.
+        task_id: The task whose deadline was exceeded.
+        kind: Which deadline; selects the clock it is measured against.
+        limit_seconds: The deadline, in seconds.
+        now: The time the deadline was evaluated at, as epoch seconds.
+        failure_reason: Written to the task's failure_reason.
+        event_reason: The reason of the CANCELLING job event.
+
+    Returns:
+        True if the reason was recorded (the caller should go on to cancel
+        the job). False if the deadline no longer holds, the task already
+        ended, or the job is already being cancelled (nothing to do).
+    """
+    other_task = spot_table.alias('other_task')
+    job_is_cancelling = sqlalchemy.exists().where(
+        sqlalchemy.and_(
+            other_task.c.spot_job_id == job_id,
+            other_task.c.status == ManagedJobStatus.CANCELLING.value,
+        ))
+
+    async def _op(session: sql_async.AsyncSession) -> bool:
+        result = await session.execute(
+            sqlalchemy.update(spot_table).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id,
+                    spot_table.c.end_at.is_(None),
+                    _deadline_exceeded_clause(kind, limit_seconds, now),
+                    sqlalchemy.not_(job_is_cancelling),
+                )).values({spot_table.c.failure_reason: failure_reason}))
+        if result.rowcount != 1:
+            await session.rollback()
+            return False
+        await _insert_job_event(session, job_id, None,
+                                ManagedJobStatus.CANCELLING, event_reason)
+        await session.commit()
+        return True
+
+    return await _retry_session(_op)
+
+
 async def set_starting_async(job_id: int,
                              task_id: int,
                              run_timestamp: str,
@@ -4290,7 +4430,7 @@ async def observe_runtime_async(
     *,
     callback_func: AsyncCallbackType,
     infra: Optional[Dict[str, Optional[str]]] = None,
-) -> None:
+) -> Optional[managed_job_runtime.RuntimeCursor]:
     """Persist a monitoring observation, including its placement.
 
     A running observation whose nodes differ from the cursor merges them into
@@ -4298,6 +4438,10 @@ async def observe_runtime_async(
     region and zone recorded with them. callback_func receives RECOVERING,
     STARTED or RECOVERED after commit for each transition this observation
     caused.
+
+    Returns the task's cursor as persisted after this observation, whether
+    or not the observation changed it: what get_runtime_cursor_async would
+    now return. None when the task has no cursor.
     """
     engine = await _db_manager.get_async_engine()
     for _ in range(20):
@@ -4311,7 +4455,9 @@ async def observe_runtime_async(
                                              provisioning=False,
                                              now=time.time())
             if plan is None:
-                return
+                # Also the outcome when a retry finds this observation already
+                # committed, so the row read here is the persisted cursor.
+                return _runtime_cursor_from_metadata(row['metadata'])
             result = await session.execute(
                 _runtime_observation_update(job_id, task_id, row, plan))
             if result.rowcount != 1:
@@ -4325,7 +4471,7 @@ async def observe_runtime_async(
             await session.commit()
         for callback in plan.callbacks:
             await callback_func(callback)
-        return
+        return _runtime_cursor_from_metadata(plan.values['metadata'])
     raise RuntimeError('Concurrent runtime recovery updates did not settle')
 
 
@@ -4585,7 +4731,10 @@ async def get_emergency_recovery_budget_async(
                     job_info_table.c.spot_job_id == job_id))
         row = result.fetchone()
         if row is None:
-            return 0, None
+            # Not a fresh budget: a job with no record cannot have attempts
+            # recorded for it, so the bookkeeping must stop, not start at 1.
+            raise exceptions.ManagedJobRecordMissingError(
+                f'Managed job {job_id} has no job_info record.')
         return (row[0] or 0), row[1]
 
 
@@ -4598,16 +4747,22 @@ async def record_emergency_recovery_attempt_async(job_id: int,
     Writes absolute values rather than incrementing, so that re-running the
     emergency bookkeeping after a transient failure cannot double-spend the
     retry budget.
+
+    Raises ManagedJobRecordMissingError when the write matched no row: the
+    job has no record, so nothing can be recorded for it.
     """
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
-        await session.execute(
+        result = await session.execute(
             sqlalchemy.update(job_info_table).where(
                 job_info_table.c.spot_job_id == job_id).values({
                     job_info_table.c.emergency_recovery_count: attempt_count,
                     job_info_table.c.last_emergency_recovery_at: attempt_time,
                 }))
         await session.commit()
+        if result.rowcount == 0:
+            raise exceptions.ManagedJobRecordMissingError(
+                f'Managed job {job_id} has no job_info record.')
 
 
 @db_retries.retry_async

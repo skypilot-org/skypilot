@@ -1,5 +1,6 @@
 """Smoke tests for SkyPilot log collection to an OTLP endpoint."""
 
+import os
 import shlex
 import tempfile
 import textwrap
@@ -114,7 +115,11 @@ def _ip_cmd(cluster: str) -> str:
 
 def _write_config_cmd(collector: str, config_path: str, headers_path: str,
                       case: str) -> str:
-    """Writes a logs.store=otlp config pointing at the collector's IP."""
+    """Appends a logs.store=otlp config pointing at the collector's IP.
+
+    `config_path` holds the API server's config, written by
+    write_api_server_config, which has no `logs` key to clash with.
+    """
     config = textwrap.dedent(f"""\
         logs:
           store: otlp
@@ -126,7 +131,7 @@ def _write_config_cmd(collector: str, config_path: str, headers_path: str,
         """)
     return (f'ip={_ip_cmd(collector)} && '
             f'[ -n "$ip" ] && '
-            f'cat > {config_path} <<EOF\n{config}EOF')
+            f'cat >> {config_path} <<EOF\n{config}EOF')
 
 
 @pytest.mark.no_vast  # Requires AWS
@@ -134,8 +139,10 @@ def _write_config_cmd(collector: str, config_path: str, headers_path: str,
 @pytest.mark.no_fluidstack  # Requires AWS to be enabled
 @pytest.mark.no_nebius  # Requires AWS to be enabled
 @pytest.mark.no_seeweb  # Requires AWS to be enabled
-# logs.otlp.headers_file is a path on the API server.
+# logs is a server-side setting: the test restarts the API server with it.
+# logs.otlp.headers_file is also a path on the API server.
 @pytest.mark.no_remote_server
+@pytest.mark.no_dependency  # We can't restart the api server in the dependency test.
 def test_log_collection_to_otlp(generic_cloud: str):
     """Forwards cluster and managed job logs to a real OTLP collector.
 
@@ -147,12 +154,12 @@ def test_log_collection_to_otlp(generic_cloud: str):
     bad = f'{name}-bad'
     job = f'{name}-job'
     token = uuid.uuid4().hex
+    good_config = smoke_tests_utils.write_api_server_config()
+    bad_config = smoke_tests_utils.write_api_server_config()
     with tempfile.NamedTemporaryFile('w', suffix='.yaml') as collector_task, \
         tempfile.NamedTemporaryFile('w', suffix='.yaml') as log_task, \
         tempfile.NamedTemporaryFile('w') as good_headers, \
-        tempfile.NamedTemporaryFile('w') as bad_headers, \
-        tempfile.NamedTemporaryFile('w', suffix='.yaml') as good_config, \
-        tempfile.NamedTemporaryFile('w', suffix='.yaml') as bad_config:
+        tempfile.NamedTemporaryFile('w') as bad_headers:
         collector_task.write(_COLLECTOR_TASK)
         collector_task.flush()
         log_task.write(_LOG_TASK)
@@ -162,12 +169,15 @@ def test_log_collection_to_otlp(generic_cloud: str):
         good_headers.flush()
         bad_headers.write('Authorization: Bearer not-the-token\n')
         bad_headers.flush()
+        use_good_config = smoke_tests_utils.restart_api_server_with_config(
+            good_config)
+        use_bad_config = smoke_tests_utils.restart_api_server_with_config(
+            bad_config)
 
-        def launch(cluster: str, config_path: str, mark: str) -> str:
-            return smoke_tests_utils.with_config(
-                f'sky launch -y -c {cluster} --infra {generic_cloud} '
-                f'{smoke_tests_utils.LOW_RESOURCE_ARG} --env MARK={mark} '
-                f'{log_task.name}', config_path)
+        def launch(cluster: str, mark: str) -> str:
+            return (f'sky launch -y -c {cluster} --infra {generic_cloud} '
+                    f'{smoke_tests_utils.LOW_RESOURCE_ARG} --env MARK={mark} '
+                    f'{log_task.name}')
 
         test = smoke_tests_utils.Test(
             'log_collection_to_otlp',
@@ -182,13 +192,14 @@ def test_log_collection_to_otlp(generic_cloud: str):
                  '    http://$ip:4318/v1/logs); '
                  '  [ "$code" = 401 ] && exit 0; sleep 5; '
                  'done; exit 1'),
-                _write_config_cmd(collector, good_config.name,
-                                  good_headers.name, f'{name}-case'),
-                _write_config_cmd(collector, bad_config.name, bad_headers.name,
+                _write_config_cmd(collector, good_config, good_headers.name,
+                                  f'{name}-case'),
+                _write_config_cmd(collector, bad_config, bad_headers.name,
                                   f'{name}-bad-case'),
                 # Cluster job logs, with the cluster identity and the
                 # configured attributes sent as OTLP resource attributes.
-                launch(name, good_config.name, 'good'),
+                use_good_config,
+                launch(name, 'good'),
                 _wait_in_collector_cmd(
                     collector,
                     _expected_markers('good') + [
@@ -202,14 +213,14 @@ def test_log_collection_to_otlp(generic_cloud: str):
                 _absent_in_collector_cmd(collector, 'otlp-marker-good-huge'),
                 # Managed job logs. The job cluster is launched by the jobs
                 # controller, which must pick up the delivered headers file.
-                smoke_tests_utils.with_config(
-                    f'sky jobs launch -y -n {job} --infra {generic_cloud} '
-                    f'{smoke_tests_utils.LOW_RESOURCE_ARG} --env MARK=job '
-                    f'{log_task.name}', good_config.name),
+                (f'sky jobs launch -y -n {job} --infra {generic_cloud} '
+                 f'{smoke_tests_utils.LOW_RESOURCE_ARG} --env MARK=job '
+                 f'{log_task.name}'),
                 _wait_in_collector_cmd(collector, _expected_markers('job')),
                 # A rejected credential: the job still succeeds (sky launch
                 # exits 0), fluent-bit reports the 401, and nothing arrives.
-                launch(bad, bad_config.name, 'bad'),
+                use_bad_config,
+                launch(bad, 'bad'),
                 (f'for i in $(seq 1 24); do '
                  f'  ssh {bad} "grep -q \'HTTP status=401\' /tmp/fluentbit.log"'
                  f'  && exit 0; sleep 5; '
@@ -217,7 +228,10 @@ def test_log_collection_to_otlp(generic_cloud: str):
                 _absent_in_collector_cmd(collector, 'otlp-marker-bad-'),
             ],
             (f'sky jobs cancel -y -n {job}; '
-             f'sky down -y {name} {bad} {collector}'),
+             f'sky down -y {name} {bad} {collector}; '
+             f'{smoke_tests_utils.RESTORE_API_SERVER_CONFIG}'),
             timeout=smoke_tests_utils.LOG_STORE_CMD_TIMEOUT,
         )
         smoke_tests_utils.run_one_test(test)
+    os.unlink(good_config)
+    os.unlink(bad_config)

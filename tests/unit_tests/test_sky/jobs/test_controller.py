@@ -942,6 +942,138 @@ class TestTaskCleanup:
 
         assert seen_threads and loop_thread not in seen_threads
 
+    @pytest.mark.asyncio
+    async def test_record_gone_falls_back_to_the_loaded_dag(
+            self, cleanup_patches):
+        """With the job's record gone, the stored YAML cannot be read; the
+        cluster named by the DAG loaded at controller start is still torn
+        down instead of leaked."""
+        task = self._make_task()
+        task.metadata = {}
+        dag = MagicMock()
+        dag.tasks = [task]
+
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag',
+                   side_effect=RuntimeError('DAG YAML content is unavailable')):
+            await manager._cleanup(job_id=1, fallback_dag=dag)
+
+        cleanup_patches['terminate'].assert_called_once()
+        assert cleanup_patches['terminate'].call_args.args[0] == 'test-cluster'
+
+    @pytest.mark.asyncio
+    async def test_record_gone_pool_job_cancels_the_known_submission(
+            self, cleanup_patches):
+        """A pool job's worker and pool-side job ID live in the missing
+        record too; the controller's in-memory copy stands in for them."""
+        task = self._make_task()
+        task.metadata = {}
+        dag = MagicMock()
+        dag.tasks = [task]
+
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag',
+                   side_effect=RuntimeError('DAG YAML content is unavailable')), \
+             patch('sky.jobs.state.get_pool_submit_info',
+                   return_value=(None, None)), \
+             patch('sky.core.cancel') as cancel:
+            await manager._cleanup(job_id=1,
+                                   pool='p',
+                                   fallback_dag=dag,
+                                   fallback_pool_submission=('worker-1', 7))
+
+        cancel.assert_called_once()
+        assert cancel.call_args.kwargs['cluster_name'] == 'worker-1'
+        assert cancel.call_args.kwargs['job_ids'] == [7]
+
+    @pytest.mark.asyncio
+    async def test_record_gone_pool_job_unknown_submission_is_a_failure(
+            self, cleanup_patches):
+        """With neither the record nor an in-memory submission, cleanup
+        must not report a pool-side job it could not find as cancelled."""
+        task = self._make_task()
+        task.metadata = {}
+        dag = MagicMock()
+        dag.tasks = [task]
+
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag',
+                   side_effect=RuntimeError('DAG YAML content is unavailable')), \
+             patch('sky.jobs.state.get_pool_submit_info',
+                   return_value=(None, None)), \
+             patch('sky.core.cancel') as cancel:
+            with pytest.raises(RuntimeError, match='pool submission'):
+                await manager._cleanup(job_id=1, pool='p', fallback_dag=dag)
+
+        cancel.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_record_gone_without_fallback_still_raises(
+            self, cleanup_patches):
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag',
+                   side_effect=RuntimeError('DAG YAML content is unavailable')):
+            with pytest.raises(RuntimeError):
+                await manager._cleanup(job_id=1)
+
+        cleanup_patches['terminate'].assert_not_called()
+
+
+class TestPoolSubmissionKeptInMemory:
+    """A resumed pool task's executor carries the persisted submission, so
+    cleanup can still cancel it if the job's record goes away."""
+
+    @pytest.mark.asyncio
+    async def test_resume_copies_the_submission_into_the_executor(
+            self, monkeypatch):
+        jc = JobController.__new__(JobController)
+        jc._job_id = 1
+        jc._dag = MagicMock()
+        jc._pool = 'p'
+        jc._backend = MagicMock()
+        jc._backend.run_timestamp = 'sky-2026-01-01-00-00-00-000000'
+        jc.starting = set()
+        jc.starting_lock = asyncio.Lock()
+        jc.starting_signal = MagicMock()
+        task = MagicMock()
+        task.name = 'task0'
+        task.metadata = {}
+        task.run = 'echo hi'
+        task.envs = {constants.TASK_ID_ENV_VAR: 'tid'}
+        task.resources = None
+        executor = MagicMock()
+        executor.cluster_name = None
+        executor.job_id_on_pool_cluster = None
+        executor.on_resume = AsyncMock()
+        executor.monitor_task = AsyncMock(return_value=None)
+        jc._monitor_one_task = AsyncMock(return_value=True)
+
+        mjs = 'sky.jobs.controller.managed_job_state'
+        monkeypatch.setattr(
+            f'{mjs}.get_job_status_with_task_id_async',
+            AsyncMock(return_value=managed_job_state.ManagedJobStatus.RUNNING))
+        monkeypatch.setattr(f'{mjs}.get_pool_submit_info_async',
+                            AsyncMock(return_value=('worker-1', 7)))
+        monkeypatch.setattr(f'{mjs}.get_file_mounts_blob_id',
+                            lambda job_id: None)
+        monkeypatch.setattr('sky.jobs.controller._add_k8s_annotations',
+                            lambda task, job_id: None)
+        monkeypatch.setattr(
+            'sky.jobs.controller.recovery_strategy.StrategyExecutor.make',
+            MagicMock(return_value=executor))
+        monkeypatch.setattr(
+            'sky.jobs.controller.managed_job_utils.event_callback_func',
+            MagicMock(return_value=AsyncMock()))
+        monkeypatch.setattr(
+            'sky.jobs.controller.usage_lib.messages.usage.update_task_id',
+            lambda *args, **kwargs: None)
+
+        assert await jc._run_one_task(0, task) is True
+
+        assert executor.cluster_name == 'worker-1'
+        assert executor.job_id_on_pool_cluster == 7
+        assert jc.pool_submission == ('worker-1', 7)
+
 
 class TestDownloadLogsForCancelledJob:
     """Tests for ControllerManager._download_logs_for_cancelled_job.
@@ -2017,6 +2149,8 @@ class TestTransientJobStatusRecoveryWindow:
                           'get_handle_from_cluster_name', return_value=MagicMock()), \
              patch.object(controller_module.managed_job_runtime,
                           'is_registered', return_value=True), \
+             patch.object(controller_module.managed_job_runtime,
+                          'observes_recovery', return_value=True), \
              patch.object(managed_job_state, 'get_runtime_cursor_async',
                           new=AsyncMock(return_value=None)), \
              patch.object(controller_module.managed_job_runtime,
@@ -2096,6 +2230,8 @@ class TestTransientJobStatusRecoveryWindow:
                           'get_handle_from_cluster_name', return_value=MagicMock()), \
              patch.object(controller_module.managed_job_runtime,
                           'is_registered', return_value=True), \
+             patch.object(controller_module.managed_job_runtime,
+                          'observes_recovery', return_value=True), \
              patch.object(managed_job_state, 'get_runtime_cursor_async',
                           new=AsyncMock(return_value=None)), \
              patch.object(controller_module.managed_job_runtime,
@@ -2192,6 +2328,9 @@ class TestTransientJobStatusRecoveryWindow:
                           new=AsyncMock(return_value=None)), \
              patch.object(controller_module.managed_job_runtime,
                           'is_registered', return_value=runtime_registered), \
+             patch.object(controller_module.managed_job_runtime,
+                          'observes_recovery',
+                          return_value=runtime_registered), \
              patch.object(managed_job_state, 'get_runtime_cursor_async',
                           new=AsyncMock(return_value=None)), \
              patch.object(controller_module.managed_job_runtime,
@@ -2460,6 +2599,200 @@ class TestTransientJobStatusRecoveryWindow:
                     status_logger=managed_job_utils.JobStatusLogger(),
                     callback_func=MagicMock(),
                     force_transit_to_recovering=forced)
+
+
+class TestRuntimeCursorReads:
+    """Tests for when the monitor loop reads the runtime cursor.
+
+    The cursor, the task's last persisted runtime observation, is only needed
+    as ``previous`` for ``get_recovery_status``. Reading it is one database
+    round trip per poll per job, so the loop skips it when no registered
+    runtime implements ``get_recovery_status``, and otherwise reads it once
+    and then keeps it in step with its own writes.
+    """
+
+    class _StopLoop(BaseException):
+        """Ends the loop from inside a mocked call. A BaseException, so the
+        loop's broad ``except Exception`` around the dispatch does not turn it
+        into a transient runtime error."""
+
+    def _instance(self):
+        instance = MagicMock()
+        instance._job_id = 1
+        instance._pool = None
+        instance._update_live_log_links = AsyncMock(return_value=True)
+        instance._cleanup_cluster = AsyncMock()
+        return instance
+
+    async def _run(self, instance, executor=None):
+        task = MagicMock()
+        task.num_nodes = 1
+        with pytest.raises(self._StopLoop):
+            await JobController._monitor_one_task_impl(
+                instance,
+                task_id=0,
+                task=task,
+                cluster_name='cluster',
+                executor=executor if executor is not None else MagicMock(),
+                status_logger=managed_job_utils.JobStatusLogger(),
+                callback_func=AsyncMock())
+
+    @pytest.mark.asyncio
+    async def test_no_runtime_observes_recovery_skips_cursor_and_dispatch(self):
+        """With a runtime registered that does not implement
+        get_recovery_status, the loop polls the job as usual and neither reads
+        the cursor nor dispatches."""
+        polls = 0
+
+        async def fake_get_job_status(*args, **kwargs):
+            nonlocal polls
+            polls += 1
+            if polls > 3:
+                raise self._StopLoop()
+            return job_lib.JobStatus.RUNNING, None
+
+        handle = MagicMock()
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection', new=AsyncMock()), \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name',
+                          return_value=handle) as get_handle, \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=True), \
+             patch.object(controller_module.managed_job_runtime,
+                          'observes_recovery', return_value=False), \
+             patch.object(managed_job_state, 'get_runtime_cursor_async',
+                          new=AsyncMock()) as read_cursor, \
+             patch.object(controller_module.managed_job_runtime,
+                          'get_recovery_status') as dispatch, \
+             patch.object(managed_job_utils, 'get_job_status',
+                          new=AsyncMock(side_effect=fake_get_job_status)
+                         ) as get_job_status, \
+             patch.object(controller_module.asyncio, 'sleep', new=AsyncMock()):
+            await self._run(self._instance())
+        read_cursor.assert_not_awaited()
+        dispatch.assert_not_called()
+        # The runtime's handle is still fetched for the ordinary status poll.
+        assert get_handle.call_count == 4
+        assert all(call.kwargs['handle'] is handle
+                   for call in get_job_status.await_args_list)
+
+    @pytest.mark.asyncio
+    async def test_cursor_read_once_and_kept_in_step_with_own_writes(self):
+        """The cursor is read once when the loop starts. After that, it is
+        the cursor each observation reports as persisted."""
+        runtime = controller_module.managed_job_runtime
+        cursor_a = runtime.RuntimeCursor('allocation', 1)
+        cursor_b = runtime.RuntimeCursor('allocation', 2)
+        observation = runtime.RuntimeObservation(
+            runtime_id='allocation',
+            restart_count=2,
+            job_status=job_lib.JobStatus.RUNNING)
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection', new=AsyncMock()), \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name',
+                          return_value=MagicMock()), \
+             patch.object(runtime, 'is_registered', return_value=True), \
+             patch.object(runtime, 'observes_recovery', return_value=True), \
+             patch.object(managed_job_state, 'get_runtime_cursor_async',
+                          new=AsyncMock(return_value=cursor_a)) as read_cursor, \
+             patch.object(runtime, 'get_recovery_status',
+                          side_effect=[observation, observation, observation,
+                                       self._StopLoop()]) as dispatch, \
+             patch.object(managed_job_state, 'observe_runtime_async',
+                          new=AsyncMock(return_value=cursor_b)), \
+             patch.object(managed_job_utils, 'get_job_status',
+                          new=AsyncMock()) as ordinary_probe, \
+             patch.object(controller_module.asyncio, 'sleep', new=AsyncMock()):
+            await self._run(self._instance())
+        assert read_cursor.await_count == 1
+        assert [call.kwargs['previous'] for call in dispatch.call_args_list
+               ] == [cursor_a, cursor_b, cursor_b, cursor_b]
+        ordinary_probe.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_cursor_read_again_when_no_cursor_comes_back(self):
+        """An observation that reports no cursor (a wrapper around
+        observe_runtime_async that drops its return value) leaves the loop
+        without one it can trust, so the next poll reads it from the
+        database, as before this cache existed."""
+        runtime = controller_module.managed_job_runtime
+        cursor_a = runtime.RuntimeCursor('allocation', 1)
+        cursor_b = runtime.RuntimeCursor('allocation', 2)
+        observation = runtime.RuntimeObservation(
+            runtime_id='allocation',
+            restart_count=2,
+            job_status=job_lib.JobStatus.RUNNING)
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection', new=AsyncMock()), \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name',
+                          return_value=MagicMock()), \
+             patch.object(runtime, 'is_registered', return_value=True), \
+             patch.object(runtime, 'observes_recovery', return_value=True), \
+             patch.object(managed_job_state, 'get_runtime_cursor_async',
+                          new=AsyncMock(side_effect=[cursor_a, cursor_b])
+                         ) as read_cursor, \
+             patch.object(runtime, 'get_recovery_status',
+                          side_effect=[observation, observation,
+                                       self._StopLoop()]) as dispatch, \
+             patch.object(managed_job_state, 'observe_runtime_async',
+                          new=AsyncMock(side_effect=[None, cursor_b])), \
+             patch.object(managed_job_utils, 'get_job_status',
+                          new=AsyncMock()), \
+             patch.object(controller_module.asyncio, 'sleep', new=AsyncMock()):
+            await self._run(self._instance())
+        assert read_cursor.await_count == 2
+        assert [call.kwargs['previous'] for call in dispatch.call_args_list
+               ] == [cursor_a, cursor_b, cursor_b]
+
+    @pytest.mark.asyncio
+    async def test_cursor_read_again_after_recovery(self):
+        """A relaunch may persist observations of its own, so after a recovery
+        the cursor is read from the database again."""
+        runtime = controller_module.managed_job_runtime
+        cursor_a = runtime.RuntimeCursor('allocation-a', 1)
+        cursor_b = runtime.RuntimeCursor('allocation-b', 0)
+        relaunch = runtime.RuntimeObservation(runtime_id='allocation-a',
+                                              restart_count=1,
+                                              job_status=None,
+                                              reason='allocation lost',
+                                              should_relaunch=True)
+        handle = MagicMock()
+        handle.launched_resources.need_cleanup_after_preemption_or_failure.\
+            return_value = False
+        executor = MagicMock()
+        executor.recover = AsyncMock(return_value=1000.0)
+        with patch.object(controller_module.backend_utils,
+                          'async_check_network_connection', new=AsyncMock()), \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name',
+                          return_value=handle), \
+             patch.object(controller_module.global_user_state,
+                          'get_cluster_events', return_value=[]), \
+             patch.object(controller_module.ExternalFailureSource,
+                          'is_registered', return_value=False), \
+             patch.object(runtime, 'is_registered', return_value=True), \
+             patch.object(runtime, 'observes_recovery', return_value=True), \
+             patch.object(runtime, 'on_before_recovery'), \
+             patch.object(managed_job_state, 'get_runtime_cursor_async',
+                          new=AsyncMock(side_effect=[cursor_a, cursor_b])
+                         ) as read_cursor, \
+             patch.object(runtime, 'get_recovery_status',
+                          side_effect=[relaunch, self._StopLoop()]) as dispatch, \
+             patch.object(managed_job_state, 'observe_runtime_async',
+                          new=AsyncMock(return_value=cursor_a)), \
+             patch.object(managed_job_state, 'set_recovering_async',
+                          new=AsyncMock()), \
+             patch.object(managed_job_state, 'set_recovered_async',
+                          new=AsyncMock()), \
+             patch.object(controller_module.asyncio, 'sleep', new=AsyncMock()):
+            await self._run(self._instance(), executor)
+        executor.recover.assert_awaited_once()
+        assert read_cursor.await_count == 2
+        assert [call.kwargs['previous'] for call in dispatch.call_args_list
+               ] == [cursor_a, cursor_b]
 
 
 class TestStatusCheckGapJitter:

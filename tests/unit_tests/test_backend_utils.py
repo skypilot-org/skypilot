@@ -8,6 +8,7 @@ from sky import backends
 from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
+from sky import models
 from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.exceptions import ClusterNotUpError
@@ -368,6 +369,70 @@ def test_get_clusters_launch_refresh(monkeypatch):
 
     assert len(
         backend_utils.get_clusters(refresh=common.StatusRefreshMode.FORCE)) == 2
+
+
+def test_get_clusters_credentials_only_for_caller_clusters(
+        monkeypatch, tmp_path):
+    key_paths = {}
+    for user_hash in ('alice', 'bob'):
+        key_path = tmp_path / f'{user_hash}-key'
+        key_path.write_text(f'{user_hash}-private-key')
+        key_paths[user_hash] = str(key_path)
+
+    def _mock_cluster(user_hash):
+        handle = mock.MagicMock()
+        handle.cluster_name_on_cloud = f'{user_hash}-cluster-cloud'
+        handle.launched_nodes = 1
+        handle.launched_resources = None
+        handle.ssh_private_key = key_paths[user_hash]
+        return {
+            'name': f'{user_hash}-cluster',
+            'launched_at': '0',
+            'handle': handle,
+            'last_use': 'sky launch',
+            'status': status_lib.ClusterStatus.UP,
+            'autostop': 0,
+            'to_down': False,
+            'cluster_hash': '00000',
+            'cluster_ever_up': True,
+            'status_updated_at': 0,
+            'user_hash': user_hash,
+            'user_name': user_hash,
+            'workspace': 'default',
+            'is_managed': False,
+        }
+
+    def ssh_credentials_from_handles(handles):
+        return [{
+            'ssh_user': 'sky',
+            'ssh_private_key': handle.ssh_private_key
+        } for handle in handles]
+
+    monkeypatch.setattr(
+        'sky.global_user_state.get_clusters',
+        lambda *args, **kwargs: [_mock_cluster('alice'),
+                                 _mock_cluster('bob')])
+    monkeypatch.setattr(
+        'sky.utils.resources_utils.get_readable_resources_repr',
+        lambda handle, simplified_only: ('', None)
+        if simplified_only else ('', ''))
+    monkeypatch.setattr(
+        'sky.backends.backend_utils.ssh_credentials_from_handles',
+        ssh_credentials_from_handles)
+    monkeypatch.setattr('sky.utils.common_utils.get_current_user',
+                        lambda: models.User(id='alice', name='alice'))
+
+    records = backend_utils.get_clusters(refresh=common.StatusRefreshMode.NONE,
+                                         all_users=True,
+                                         include_credentials=True)
+
+    records_by_name = {record['name']: record for record in records}
+    assert records_by_name['alice-cluster']['credentials'] == {
+        'ssh_user': 'sky',
+        'ssh_private_key': key_paths['alice'],
+        'ssh_private_key_content': 'alice-private-key',
+    }
+    assert 'credentials' not in records_by_name['bob-cluster']
 
 
 def test_kubeconfig_upload_with_kubernetes_exclusion():

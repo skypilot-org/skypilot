@@ -1180,6 +1180,26 @@ def _task_config_schema():
     }
 
 
+def get_task_job_schema():
+    """Schema for the task's `job:` section: managed-job lifecycle settings."""
+    return {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'wait_for_scheduling_timeout': {
+                'anyOf': [{
+                    'type': 'string',
+                    'pattern': constants.TIME_PATTERN_SECONDS,
+                }, {
+                    'type': 'integer',
+                    'minimum': 1,
+                }],
+            },
+        },
+    }
+
+
 def get_task_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -1213,6 +1233,7 @@ def get_task_schema():
             'num_nodes': {
                 'type': 'integer',
             },
+            'job': get_task_job_schema(),
             # resources config is validated separately using RESOURCES_SCHEMA
             'resources': {
                 'type': 'object',
@@ -2961,6 +2982,25 @@ def get_config_schema():
             },
             'install_conda': {
                 'type': 'boolean',
+            },
+            # Wall-clock bound (seconds) for a single provisioning-phase
+            # remote command: setup commands, ray start, skylet start. A
+            # non-positive value disables the bound. See
+            # skypilot-org/skypilot#10167 for why an unbounded command can
+            # wedge `sky launch` forever.
+            'setup_command_timeout': {
+                'type': 'integer',
+            },
+            # Wall-clock bound (seconds) applied to each remote operation of
+            # an internal file mount -- the mkdir and the rsync of
+            # ~/.sky/.runtime_files are bounded separately, so a single mount
+            # can take up to twice this value.
+            'file_mount_timeout': {
+                'type': 'integer',
+            },
+            'health_check_timeout': {
+                'type': 'number',
+                'minimum': 0,
             },
         }
     }

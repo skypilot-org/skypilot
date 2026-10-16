@@ -2114,7 +2114,8 @@ srun() {{
         script = self._run_and_capture_script(cluster_name, config)
 
         mock_validate_files.assert_called_once()
-        assert 'mapfile -t SKY_NODES' in script
+        assert ('mapfile -t SKY_NODES < <(scontrol show hostnames '
+                '"$(squeue -h --jobs "$SLURM_JOB_ID" -o %N)")') in script
         assert '-w "${SKY_NODES[0]}"' in script
         assert '-w "${SKY_NODES[1]}"' in script
         assert f'--container-image={generation_dir}/rank0.sqsh' in script
@@ -2225,21 +2226,21 @@ srun() {{
         config = self._make_non_container_config(cpus=2)
         script = self._run_and_capture_script('test-keeper', config)
 
-        keeper_idx = script.index(
-            '( while true; do srun --overlap --jobid=$SLURM_JOB_ID '
-            '--nodes=1 --ntasks=1 --job-name=sky-skylet-keeper '
-            '--nodelist=$SKY_HEAD_NODE')
+        keeper_idx = script.index('( while true; do SKY_HEAD_NODE=')
         anchor_idx = script.rindex('sleep infinity\n')
         # The keeper is backgrounded before the allocation-lifetime anchor.
         assert keeper_idx < anchor_idx
         keeper_line = script[keeper_idx:script.index('\n', keeper_idx)]
+        assert ('srun --overlap --jobid=$SLURM_JOB_ID --nodes=1 --ntasks=1 '
+                '--job-name=sky-skylet-keeper --nodelist=$SKY_HEAD_NODE'
+               ) in keeper_line
         # Outer retry loop: the batch script restarts the step itself.
         assert keeper_line.endswith('sleep 5; done ) &')
         # Head node is resolved in-script from the allocation.
-        head_idx = script.index(
-            'SKY_HEAD_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" '
-            '| head -n1)')
-        assert head_idx < keeper_idx
+        # The head node is resolved inside the retry loop, like get_job_nodes().
+        assert ('SKY_HEAD_NODE=$(scontrol show hostnames '
+                '"$(squeue -h --jobs "$SLURM_JOB_ID" -o %N)" | head -n1); '
+                '[ -n "$SKY_HEAD_NODE" ] && srun') in keeper_line
         # The loop runs the start spec from the runtime dir, foreground.
         assert constants.SKYLET_START_FILE in keeper_line
         assert 'while true; do' in keeper_line
@@ -2295,13 +2296,13 @@ srun() {{
         )
         script = self._run_and_capture_script('test-keeper-ctr', config)
 
-        keeper_idx = script.index(
-            '( while true; do srun --overlap --jobid=$SLURM_JOB_ID '
-            '--nodes=1 --ntasks=1 --job-name=sky-skylet-keeper '
-            '--nodelist=$SKY_HEAD_NODE')
+        keeper_idx = script.index('( while true; do SKY_HEAD_NODE=')
         anchor_idx = script.rindex('\nwait -n "${CONTAINER_PIDS[@]}"\n')
         assert keeper_idx < anchor_idx
         keeper_line = script[keeper_idx:script.index('\n', keeper_idx)]
+        assert ('srun --overlap --jobid=$SLURM_JOB_ID --nodes=1 --ntasks=1 '
+                '--job-name=sky-skylet-keeper --nodelist=$SKY_HEAD_NODE'
+               ) in keeper_line
         # The keeper never attaches the container: Slurm CLIs are host-only.
         assert '--container-name' not in keeper_line
         assert '--container-remap-root' not in keeper_line
