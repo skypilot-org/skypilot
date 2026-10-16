@@ -159,7 +159,7 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
     if not smoke_tests_utils.server_side_is_consolidation_mode():
         controller_related_test_cmds = [
             'echo "==== Test jobs controller cluster user ===="',
-            f's=$(sky status -u) && echo "$s" && echo "$s" | grep sky-jobs-controller- | grep -v {user_1_name} | grep -v {user_2_name}',
+            f's=$(sky status -u) && echo "$s" && echo "$s" | grep "^sky-jobs-controller-" | grep -v {user_1_name} | grep -v {user_2_name}',
             'echo "==== Test controller down blocked by other users ===="',
             *set_user(user_1, user_1_name, [
                 f'sky jobs launch -n {name}-3 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y -d sleep 1000',
@@ -174,10 +174,17 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
                     ],
                     timeout=60),
             ]),
-            *set_user(user_2, user_2_name, [
-                f'controller=$(sky status -u | grep sky-jobs-controller- | awk \'{{print $1}}\') && echo "$controller" && echo delete | sky down "$controller" && exit 1 || true',
-                f'sky jobs cancel -y -n {name}-3',
-            ]),
+            *set_user(
+                user_2,
+                user_2_name,
+                [
+                    # Match only the table row: debug log lines can also name the
+                    # controller. sky down must refuse because of user1's job.
+                    f'controller=$(sky status -u | awk \'/^sky-jobs-controller-/ {{print $1; exit}}\') && [ -n "$controller" ] && echo "$controller" && '
+                    f's=$(echo delete | sky down "$controller" 2>&1) && exit 1; '
+                    f'echo "$s" && echo "$s" | grep "In-progress managed jobs found"',
+                    f'sky jobs cancel -y -n {name}-3',
+                ]),
         ]
 
     test = smoke_tests_utils.Test(
